@@ -8,7 +8,7 @@ instant can come up. Times are seconds on a 30-second grid, so ties are common.
 A pass here follows repo's committer: `busy` without the lock; `throttled` within the
 interval of this author's last commit; `index-busy` while git's index lock is held; else
 it commits what is unsaved, or is `clean`. The push part runs on every pass that took the
-lock, and a push is skipped inside `push_backoff` of the last failed one.
+lock, and a push is skipped inside `push_backoff_s` of the last failed one.
 
 `judge(world)` checks the session-end bound as the settle steps state it: each edit a
 session made before its `gone` is committed by `gone` + interval + 6 minutes, unless a
@@ -145,7 +145,7 @@ def run_pass(w, pid, settle_pass):
 class Ops:
     """The settle steps' ops over the world: its clock, its passes, its counter and lock."""
 
-    def __init__(self, world, name, settle_pass=True):
+    def __init__(self, world, name, *, settle_pass=True):
         self.w, self.name, self.settle_pass = world, name, settle_pass
         self.pid = None
         self.raised = None
@@ -254,7 +254,7 @@ def _remote(w, rng):
 
 def _hand_pass(w, rng):
     yield _q(rng, 0, 60)
-    yield from run_pass(w, 0, False)
+    yield from run_pass(w, 0, settle_pass=False)
 
 
 def _ext_lock(w, rng, longest):

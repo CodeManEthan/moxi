@@ -510,7 +510,7 @@ def s_cold_refused(rig, mp):
 
     def old(frame):
         answer = real(frame)
-        for key in ("cache_kind", "age_seconds", "cache_reason"):
+        for key in ("cache_kind", "age_s", "cache_reason"):
             answer.pop(key, None)
         return answer
 

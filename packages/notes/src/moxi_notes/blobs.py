@@ -6,7 +6,7 @@ from git's object store with `git cat-file` and the ids on stdin. So no path is 
 from a diff header, and a commit, a range and a snapshot use one reader.
 
 Every function takes `git`, a callable that runs git in the repo being judged:
-`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both
+`git(*args, stdin_data=None, timeout_s=..., binary=True)` returning a finished process. Both
 `HookContext.git` and `PrepareContext.git` have that shape, so a git hook piece reads the
 index git is committing and a prepare step reads the snapshot's.
 
@@ -75,11 +75,11 @@ def parse_raw(data: bytes) -> list[Entry]:
     return out
 
 
-def run(git, *args: str, input: bytes | None = None) -> bytes:
+def run(git, *args: str, stdin_data: bytes | None = None) -> bytes:
     """`git <args>`'s stdout; `GitError` when it fails, runs past `TIMEOUT` or can't
     start."""
     try:
-        done = git(*args, input=input, timeout=TIMEOUT, binary=True)
+        done = git(*args, stdin_data=stdin_data, timeout_s=TIMEOUT, binary=True)
     except subprocess.TimeoutExpired:
         raise GitError(f"git {args[0]} ran past {int(TIMEOUT)} s") from None
     except OSError as exc:
@@ -99,7 +99,7 @@ def sizes(git, ids) -> dict[str, int]:
         return {}
     out: dict[str, int] = {}
     data = run(git, "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-               input=("\n".join(ids) + "\n").encode("ascii"))
+               stdin_data=("\n".join(ids) + "\n").encode("ascii"))
     for line in data.decode("ascii", "replace").splitlines():
         parts = line.split()
         if len(parts) == 2 and parts[1] == "missing":
@@ -117,7 +117,7 @@ def contents(git, ids) -> dict[str, bytes]:
     ids = list(dict.fromkeys(ids))
     if not ids:
         return {}
-    data = run(git, "cat-file", "--batch", input=("\n".join(ids) + "\n").encode("ascii"))
+    data = run(git, "cat-file", "--batch", stdin_data=("\n".join(ids) + "\n").encode("ascii"))
     out: dict[str, bytes] = {}
     at = 0
     for _ in ids:

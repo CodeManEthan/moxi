@@ -3,8 +3,8 @@
 The model is Wilson's economic order quantity. Restarting a session costs a cache write of
 its settled context; carrying on costs a cache read of the whole context on every call,
 and the context grows each call. All costs are in units of the base input price, so no
-dollar figure enters anywhere. For one population's measured parameters `S` (the settled
-context), `P` (the prefix a fresh session reads from cache), `g` (the growth per
+dollar figure enters anywhere. For one population's measured parameters `s` (the settled
+context), `p` (the prefix a fresh session reads from cache), `g` (the growth per
 call), the model's write multiplier `w` (its own cache-write price over its input price,
 weighed by the row's measured 1-hour share of writes) and its read multiplier `r` (its
 cache-read price over its input price), both from the model table:
@@ -165,20 +165,20 @@ def measured_write_multiplier(model: Any, row: Mapping[str, Any], *, table: Any
     return write_multiplier(table.lookup(model), _number(row.get("write_share_1h")))
 
 
-def restart_cost(S: float, P: float, w: float, r: float) -> float:
+def restart_cost(s: float, p: float, w: float, r: float) -> float:
     """W = w(S - P) + rP: what one restart costs, in base-input-price tokens."""
-    return w * (S - P) + r * P
+    return w * (s - p) + r * p
 
 
-def optimum_calls(W: float, r: float, g: float) -> float:
+def optimum_calls(restart: float, r: float, g: float) -> float:
     """N* = sqrt(2W / (rg)): the restart interval, in calls, that costs least."""
-    return math.sqrt(2.0 * W / (r * g))
+    return math.sqrt(2.0 * restart / (r * g))
 
 
-def mark_exact(S: float, P: float, g: float, w: float, r: float, mark: str) -> float:
+def mark_exact(s: float, p: float, g: float, w: float, r: float, mark: str) -> float:
     """C(mark) as a real number of context tokens."""
-    W = restart_cost(S, P, w, r)
-    return S + g * MARK_MULTIPLES[mark] * optimum_calls(W, r, g)
+    restart = restart_cost(s, p, w, r)
+    return s + g * MARK_MULTIPLES[mark] * optimum_calls(restart, r, g)
 
 
 # --- model ids --------------------------------------------------------------------------
@@ -381,16 +381,16 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     w, why = measured_write_multiplier(base, row, table=table)
     if why is not None:
         return Threshold(base, mark, population, None, why, fallback=fallback)
-    S, P, g = _number(row.get("S")), _number(row.get("P")), _number(row.get("g"))
-    if S is None or P is None or g is None or w is None:
+    s, p, g = _number(row.get("S")), _number(row.get("P")), _number(row.get("g"))
+    if s is None or p is None or g is None or w is None:
         return Threshold(base, mark, population, None,
                          f"the measured {population} row for {base} is incomplete",
                          fallback=fallback)
-    if g <= 0 or r <= 0 or restart_cost(S, P, w, r) <= 0:
+    if g <= 0 or r <= 0 or restart_cost(s, p, w, r) <= 0:
         return Threshold(base, mark, population, None,
                          f"the measured {population} row for {base} gives no restart "
                          "point", fallback=fallback)
-    exact = mark_exact(S, P, g, w, r, mark)
+    exact = mark_exact(s, p, g, w, r, mark)
     return Threshold(base, mark, population, math.ceil(exact), None, exact, fallback)
 
 

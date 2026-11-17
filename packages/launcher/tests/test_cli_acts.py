@@ -36,7 +36,7 @@ def no_turns(monkeypatch):
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds, so no verb asks a real tmux
     server."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available",
                         lambda name: name not in ("slots", "cache") and real(name))
@@ -67,7 +67,7 @@ def calls(monkeypatch, module, name: str, answer) -> list:
 
 def launched(conn, *, request_id="r1", session_id=SID, target_="slot", values=None,
              at=None) -> None:
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target=target_,
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target=target_,
                  cwd="/work", values={"model": "opus", **(values or {})}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
                  slot="3" if target_ == "slot" else None, at=at)
@@ -76,7 +76,7 @@ def launched(conn, *, request_id="r1", session_id=SID, target_="slot", values=No
 def ended_run(conn, outcome, *, kind="relaunch", mode="self", request_id="r1", word=None,
               detail=None, at=None) -> store.Run:
     run_ = store.insert_run(conn, kind=kind, mode=mode, request_id=request_id,
-                            session_id=SID, actor="ann", state="acting", job="proc:1@1.0",
+                            session_id=SID, by="ann", state="acting", job="proc:1@1.0",
                             slot="3", at=at)
     store.end_run(conn, run_.run_id, outcome, word=word, detail=detail, at=at)
     return store.get_run(conn, run_.run_id)
@@ -84,16 +84,16 @@ def ended_run(conn, outcome, *, kind="relaunch", mode="self", request_id="r1", w
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def too_new() -> None:
     store.path().parent.mkdir(parents=True, exist_ok=True)
-    raw = sqlite3.connect(store.path())
-    raw.execute("PRAGMA user_version = 99")
-    raw.close()
+    conn = sqlite3.connect(store.path())
+    conn.execute("PRAGMA user_version = 99")
+    conn.close()
 
 
 # -- parsing --------------------------------------------------------------------------------
@@ -123,8 +123,8 @@ PARSES = [
     (["keep-warm", "release", "build-7"], {"action": "release", "name": "build-7"}),
     (["keep-warm", "holds"], {"action": "holds", "json": False}),
     (["keep-warm", "holds", "--json"], {"action": "holds", "json": True}),
-    (["state"], {"verb": "state", "session_id": None, "json": False}),
-    (["state", SID, "--json"], {"session_id": SID, "json": True}),
+    (["show"], {"verb": "show", "session_id": None, "json": False}),
+    (["show", SID, "--json"], {"session_id": SID, "json": True}),
     (["log", "--table", "runs"], {"verb": "log", "table": "runs"}),
     (["log"], {"table": "launches"}),
 ]
@@ -165,7 +165,7 @@ REFUSED = [
     ["keep-warm", "open", "x"],
     ["keep-warm", "hold", "x", "--json"],
     ["keep-warm", "holds", "x"],
-    ["state", SID, OTHER],
+    ["show", SID, OTHER],
     ["log", "--table", "nope"],
 ]
 
@@ -192,7 +192,7 @@ REFUSALS = [
      codes.ERROR, "comms-failed"),
     (target.NotLaunched(), codes.REFUSED, "not-launched"),
     (target.Unclaimed("r1"), codes.REFUSED, "unclaimed"),
-    (target.Changed("r1", "1@1.0", "2@2.0", False), codes.REFUSED, "changed"),
+    (target.Changed("r1", "1@1.0", "2@2.0", reclaim_pending=False), codes.REFUSED, "changed"),
     (target.NoTurns(), codes.REFUSED, "no-turns"),
     (target.TurnsFailed(OSError("no socket")), codes.ERROR, "turns-failed"),
     (targets.SlotsBusy("slot", "slots is locked", "try again"), codes.TEMPFAIL, "try-again"),
@@ -338,7 +338,7 @@ def test_relaunch_director_without_comms_is_refused(monkeypatch, capsys):
 def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
     launched(conn)
     run_ = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                            session_id=SID, actor="ann", job="slots:relaunch-x", slot="3")
+                            session_id=SID, by="ann", job="slots:relaunch-x", slot="3")
     store.add_run_event(conn, run_.run_id, "wait", {"word": "turn", "detail": "a turn is open"},
                         at="2026-10-31T10:00:00.000000Z")
     store.add_run_event(conn, run_.run_id, "wait",
@@ -646,7 +646,7 @@ def test_keep_warm_on_a_launch_that_is_off_is_refused(monkeypatch, capsys):
 
 def test_state_of_a_quiet_launch_is_ok(conn, capsys):
     launched(conn)
-    status, out, err = run(["state", SID], capsys)
+    status, out, err = run(["show", SID], capsys)
     assert (status, err) == (codes.OK, "")
     lines = out.splitlines()
     assert lines[0] == f"session {SID} (launch r1): ok"
@@ -656,10 +656,10 @@ def test_state_of_a_quiet_launch_is_ok(conn, capsys):
 def test_state_of_a_failed_run_is_red_and_still_exits_0(conn, capsys):
     launched(conn)
     ended_run(conn, "relaunch-failed", mode="director", word="no-pane", detail="gone")
-    status, out, _ = run(["state", SID], capsys)
+    status, out, _ = run(["show", SID], capsys)
     assert status == codes.OK
     assert out.splitlines()[0].startswith(f"session {SID} (launch r1): red, failed since ")
-    status, out, _ = run(["state", SID, "--json"], capsys)
+    status, out, _ = run(["show", SID, "--json"], capsys)
     data = json.loads(out)
     assert status == codes.OK and data["outcome"] == "failed" and data["red"] is True
     assert data["why"] == "no-pane: gone"
@@ -667,20 +667,20 @@ def test_state_of_a_failed_run_is_red_and_still_exits_0(conn, capsys):
 
 def test_state_json_of_a_quiet_launch_says_ok(conn, capsys):
     launched(conn)
-    status, out, _ = run(["state", SID, "--json"], capsys)
+    status, out, _ = run(["show", SID, "--json"], capsys)
     data = json.loads(out)
     assert status == codes.OK and data["outcome"] == "ok" and data["red"] is False
 
 
 def test_state_with_no_session_named_asks_for_this_ones(monkeypatch, capsys):
     seen = calls(monkeypatch, state, "show", result(codes.OK, "session x: ok", outcome="ok"))
-    assert run(["state"], capsys)[:2] == (codes.OK, "session x: ok\n")
+    assert run(["show"], capsys)[:2] == (codes.OK, "session x: ok\n")
     assert seen == [((None,), {})]
 
 
 @pytest.mark.parametrize("argv, short", [
-    (["state", OTHER], "not-launched"),
-    (["state"], "no-turns"),
+    (["show", OTHER], "not-launched"),
+    (["show"], "no-turns"),
 ])
 def test_state_refusals(argv, short, conn, capsys):
     launched(conn)
@@ -768,7 +768,7 @@ def test_the_store_reads_only_its_tables(conn):
 
 def test_every_act_has_a_handler_and_help():
     parser = cli.build_parser()
-    acts = {"relaunch", "exit-session", "exits", "sessions", "resume", "keep-warm", "state"}
+    acts = {"relaunch", "exit-session", "exits", "sessions", "resume", "keep-warm", "show"}
     assert acts <= set(cli.VERBS)
     choices = next(a for a in parser._actions if a.dest == "verb").choices
     for act in acts:
@@ -778,7 +778,7 @@ def test_every_act_has_a_handler_and_help():
 
 @pytest.mark.parametrize("argv, code, err", [
     (["exits"], codes.OK, "no exits\n"),
-    (["state", SID], codes.REFUSED, "[not-launched]"),
+    (["show", SID], codes.REFUSED, "[not-launched]"),
 ])
 def test_the_acts_reach_this_cli_through_the_cores_command(argv, code, err, tmp_path):
     moxi = shutil.which("moxi", path=str(Path(sys.executable).parent))

@@ -21,9 +21,9 @@ from moxi import files, paths
 from moxi_tunnel import locks
 with ExitStack() as stack:
     if "core" in sys.argv[1:]:
-        stack.enter_context(files.lock(paths.core_lock(), timeout=10))
+        stack.enter_context(files.lock(paths.core_lock(), timeout_s=10))
     if "tunnel" in sys.argv[1:]:
-        stack.enter_context(files.lock(locks.lock_path(), timeout=10))
+        stack.enter_context(files.lock(locks.lock_path(), timeout_s=10))
     print("held", flush=True)
     sys.stdin.readline()
 """
@@ -47,7 +47,7 @@ def test_held_takes_the_core_lock_before_tunnel_lock():
     with locks.held(core=True, timeout=1):
         assert locks.holds_core() and locks.holds_tunnel()
         # The core's own nested take yields to this hold, as config.set's does.
-        with files.lock(paths.core_lock(), nested=True, timeout=0):
+        with files.lock(paths.core_lock(), nested=True, timeout_s=0):
             pass
     with locks.held(timeout=1):
         assert locks.holds_tunnel() and not locks.holds_core()

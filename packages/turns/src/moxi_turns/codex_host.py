@@ -279,7 +279,7 @@ class _Life:
         _thread.interrupt_main(signal.SIGTERM)
 
 
-def _log_to(window: bool) -> None:
+def _log_to(*, window: bool) -> None:
     fmt = f"{PROG}[%(process)d] %(asctime)s %(levelname)s %(name)s %(message)s"
     if not window:
         logging.basicConfig(stream=sys.stderr, level=logging.INFO, format=fmt)
@@ -289,9 +289,9 @@ def _log_to(window: bool) -> None:
     from .doctor import MODULE
 
     try:
-        folder = Layout(MODULE).state_dir()
-        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-        logging.basicConfig(filename=str(folder / LOG_FILE), level=logging.INFO,
+        state_dir = Layout(MODULE).state_dir()
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        logging.basicConfig(filename=str(state_dir / LOG_FILE), level=logging.INFO,
                             format=fmt)
     except OSError:
         # No log is better than one written over the window.
@@ -309,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PROG}: {exc}", file=sys.stderr, flush=True)
         return moxi_exit.USAGE
 
-    _log_to(kwargs["window"])
+    _log_to(window=kwargs["window"])
     life = _Life()
     life.install()
     if kwargs["window"] and hasattr(signal, "SIGTSTP"):

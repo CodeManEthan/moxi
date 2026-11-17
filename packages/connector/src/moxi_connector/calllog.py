@@ -117,11 +117,11 @@ class CallLog:
     `directory` defaults to `calls_dir()`; `clock` gives seconds since the epoch and
     names the day file a row goes to."""
 
-    def __init__(self, directory: str | os.PathLike | None = None, *,
+    def __init__(self, log_dir: str | os.PathLike | None = None, *,
                  clock: Callable[[], float] = time.time):
         from moxi import files
 
-        self.dir = Path(directory) if directory is not None else calls_dir()
+        self.dir = Path(log_dir) if log_dir is not None else calls_dir()
         self._clock = clock
         self.window = files.Collapse(COLLAPSE_AFTER, DAY_CAP, clock=clock)
         self._made = False
@@ -231,13 +231,13 @@ def is_day(text: str) -> bool:
 
 
 def read_rows(*, days: int = 1, now: float | None = None,
-              directory: str | os.PathLike | None = None) -> Iterator[dict[str, Any]]:
+              log_dir: str | os.PathLike | None = None) -> Iterator[dict[str, Any]]:
     """The rows of today's file and the `days - 1` days before it, oldest first. A line
     that isn't a JSON object is skipped."""
     when = _utc(time.time() if now is None else now).date()
-    folder = Path(directory) if directory is not None else calls_dir()
+    day_dir = Path(log_dir) if log_dir is not None else calls_dir()
     for back in range(max(days, 1) - 1, -1, -1):
-        path = folder / f"{(when - _dt.timedelta(days=back)).isoformat()}.jsonl"
+        path = day_dir / f"{(when - _dt.timedelta(days=back)).isoformat()}.jsonl"
         try:
             handle = path.open("rb")
         except OSError:
@@ -253,11 +253,11 @@ def read_rows(*, days: int = 1, now: float | None = None,
 
 
 def last(kinds: Iterable[str], *, days: int = 2, now: float | None = None,
-         directory: str | os.PathLike | None = None) -> dict[str, Any] | None:
+         log_dir: str | os.PathLike | None = None) -> dict[str, Any] | None:
     """The latest row of one of `kinds` in `days` days, or None."""
     wanted = frozenset(kinds)
     found = None
-    for row in read_rows(days=days, now=now, directory=directory):
+    for row in read_rows(days=days, now=now, log_dir=log_dir):
         if row.get("kind") in wanted:
             found = row
     return found

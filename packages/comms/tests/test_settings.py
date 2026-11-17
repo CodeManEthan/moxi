@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -24,7 +25,7 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
 def test_the_retired_keys_are_declared():
     retired = {k.name for k in config.schema().keys.values() if k.retired}
     assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused",
-                       "provision.slots"}
+                       "provision.slots", "connector.wait_default", "connector.wait_max"}
     assert not retired & {k.name for k in config.schema().live()}
 
 
@@ -136,7 +137,7 @@ def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     assert cfg.credentials.store == str(tmp_path / "store")
 
 
-def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
+def test_a_given_env_is_read_instead_of_the_process(tmp_path):
     env = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
     write_config(env, "[threads]\nreply_cap = 5\n")
     assert config.config_path(env) == tmp_path / "cfg" / "comms" / "config.toml"
@@ -188,6 +189,18 @@ def test_a_retired_key_says_what_to_do():
     write_config(None, '[claude]\nchannel = "plugin"\n')
     with pytest.raises(config.ConfigError, match="turns' plugin delivers"):
         config.load()
+
+
+@pytest.mark.parametrize("text, old, new", [
+    ("[connector]\nwait_default = 20\n", "connector.wait_default", "connector.wait_default_s"),
+    ("[connector]\nwait_max = 60\n", "connector.wait_max", "connector.wait_max_s"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(text, old, new):
+    write_config(None, text)
+    with pytest.raises(config.ConfigError) as caught:
+        config.load()
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
 
 
 def test_the_retired_provision_slots_key_says_to_remove_it():
@@ -244,13 +257,13 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     assert tokens.TokenStore().root == paths.tokens_dir()
     write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
     assert tokens.TokenStore().root == tmp_path / "a"
-    monkeypatch.setenv(tokens.STORE_ENV_VAR, str(tmp_path / "b"))
+    monkeypatch.setenv(tokens.TOKEN_STORE_ENV, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
     assert tokens.TokenStore(tmp_path / "c").root == tmp_path / "c"
     # A caller's injected env names the override, never the roots.
     assert tokens.TokenStore(env={"MOXI_COMMS_TOKEN_STORE": str(tmp_path / "d")}).root \
         == tmp_path / "d"
-    monkeypatch.delenv(tokens.STORE_ENV_VAR)
+    monkeypatch.delenv(tokens.TOKEN_STORE_ENV)
     assert tokens.TokenStore(env={"MOXI_COMMS_PROJECT": "p"}).root == tmp_path / "a"
 
 
@@ -321,7 +334,7 @@ def test_a_named_file_is_read_in_place(tmp_path, monkeypatch):
     assert config.load().block is False
 
 
-def test_a_named_relative_file_is_read_from_the_working_directory(tmp_path, monkeypatch):
+def test_a_named_relative_file_is_read_from_the_working_dir(tmp_path, monkeypatch):
     (tmp_path / "launch.toml").write_text("block = true\n")
     monkeypatch.chdir(tmp_path)
     assert config.load_file("launch.toml").source == str(tmp_path / "launch.toml")
@@ -406,7 +419,7 @@ def test_the_text_entry_refuses_every_row_its_roster_refuses(text, words):
     assert loaded.value.problem.endswith(caught.value.problem)
 
 
-def test_the_text_entry_reads_no_environment(monkeypatch):
+def test_the_text_entry_reads_no_env(monkeypatch):
     write_config(None, 'backend = "local"\n')
     monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
     with pytest.raises(config.ConfigError):
@@ -512,7 +525,7 @@ def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, 
         if value is None:
             moxi_config.add_item("comms", argv[0], argv[-1], by="ui")
         else:
-            moxi_config.set("comms", argv[0], value, by="ui")
+            moxi_config.set_value("comms", argv[0], value, by="ui")
     assert caught.value.file == str(path) and caught.value.key == key
     assert path.read_text() == "block = true\n"
 
@@ -552,3 +565,34 @@ def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, 
     assert capsys.readouterr().err == ""
     assert config.check_text(path.read_text()) is None
     assert "pager" in path.read_text() and "block" not in path.read_text()
+
+
+# -- page fields: how the settings page shows each key --------------------------------------
+
+#: The unit each key with one carries.
+UNITS = {"local.retain_days": "days", "connector.wait_default_s": "seconds",
+         "connector.wait_max_s": "seconds", "replay.messages": "messages",
+         "replay.hours": "hours"}
+
+
+def show_json(capsys) -> dict:
+    from moxi import cli
+
+    capsys.readouterr()
+    assert cli.main(["config", "comms", "show", "--json"]) == 0
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+
+
+def test_the_schema_passes_the_cores_check_with_its_page_fields():
+    moxi_config.Schema.from_resource("moxi_comms", "settings.toml")
+
+
+def test_show_json_gives_every_key_a_label_and_none_first(capsys):
+    keys = show_json(capsys)
+    assert all(key["label"] for key in keys.values())
+    assert keys["mcp.port"]["label"] == "Port for agents' tools"
+    assert keys["connector.wait_default_s"]["label"] == "A connector call waits, by default"
+    assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == UNITS
+    for key in keys.values():
+        assert key["common"] is False and key["group"] is None and key["hurts"] is None
+        assert key["choices"] is None and key["terminal"] is None and key["elsewhere"] is None

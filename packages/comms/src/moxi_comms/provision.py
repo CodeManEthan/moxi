@@ -32,6 +32,7 @@ from pathlib import Path
 from moxi.store import transaction
 
 from . import directory
+from .constants import MOCK_BACKEND_ENV
 from .config import ProvisionConfig
 from .scoping import GLOBAL, is_auto_name
 
@@ -246,8 +247,8 @@ def first_start(store, *, operator=None):
             found = readiness(db_path,
                               operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
                               store=store)
-        except TokenStoreError as e:
-            raise RuntimeError(f"moxi-comms-daemon: {e}") from None
+        except TokenStoreError as exc:
+            raise RuntimeError(f"moxi-comms-daemon: {exc}") from None
         if found.state == COMPLETE:
             return
         if found.state == LOST:
@@ -311,8 +312,8 @@ def setup():
     returned as its line, so the install fails with it. Returns 0 when done."""
     try:
         return main([])
-    except SystemExit as e:
-        return e.code
+    except SystemExit as exc:
+        return exc.code
 
 
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
@@ -354,7 +355,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     ap.add_argument("--writer", default="provisioner", help="the declared directory writer")
     ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")
     ap.add_argument("--store", help=f"token store directory, local backend only (default: "
-                                    f"${tokens.STORE_ENV_VAR} or the STATE path)")
+                                    f"${tokens.TOKEN_STORE_ENV} or the STATE path)")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
     if args.retired_slots is not None:
@@ -363,7 +364,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if args.backend_store:
-        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
+        os.environ[MOCK_BACKEND_ENV] = args.backend_store
 
     backend = backend_name(args.backend)
     _, want_operator = configured()
@@ -375,16 +376,16 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
 
     try:
         record = open_record(args.backend, role="provisioner")
-    except RecordError as e:
-        raise SystemExit(str(e)) from None
+    except RecordError as exc:
+        raise SystemExit(str(exc)) from None
     except upgrade_0_2.DaemonLive:
         # The upgrade's usual order: the 0.2 daemon still runs until the unit step, so
         # its files can't move yet. Nothing is written; the daemon's start moves them and
         # then provisions what is missing.
         print(SETUP_WAITS)
         return 0
-    except StoreRefused as e:
-        raise SystemExit(f"moxi-comms-provision: {e}") from None
+    except StoreRefused as exc:
+        raise SystemExit(f"moxi-comms-provision: {exc}") from None
     # The local backend mints its own tokens and they have no other home, so provision
     # is their writer. Built HERE because this is the caller that knows which backend it
     # opened, and skipped on the mock, which keeps its tokens in its own record.
@@ -395,9 +396,9 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
                            operator=(args.operator_id or "operator",
                                      args.operator_name or want_operator),
                            store=store)
-    except (RecordError, ProvisionError) as e:
+    except (RecordError, ProvisionError) as exc:
         # A refusal mid-converge is one line, not a traceback; what converged before it stands, the run stopped AT the refusal.
-        raise SystemExit(f"moxi-comms-provision: {e}") from None
+        raise SystemExit(f"moxi-comms-provision: {exc}") from None
     finally:
         close = getattr(record, "close", None)
         if close:

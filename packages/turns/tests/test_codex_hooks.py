@@ -8,6 +8,8 @@ import shlex
 import sys
 import time
 
+import pytest
+
 from fake_harness import FakeHarness
 from moxi_turns import codex_hooks, listeners
 from moxi_turns.client import Session
@@ -88,7 +90,7 @@ def test_stop_blocks_only_after_the_ping_prints_the_reason(monkeypatch, turns_en
     harness = HookHarness()
     endpoint = Endpoint(harness, session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: "reply before stopping")
     harness.start_turn()
     try:
@@ -155,15 +157,23 @@ def test_hook_commands_carry_the_endpoints_event_budget():
     )
     commands = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "-c"]
     joined = "\n".join(commands)
-    assert "--wait-seconds 5 Stop" in joined
-    assert "--wait-seconds 7 SessionStart" in joined
-    assert "--wait-seconds 7 UserPromptSubmit" in joined
-    assert "--wait-seconds 7 PostCompact" in joined
-    assert "--wait-seconds 3 Interrupt" in joined
+    assert "--wait-s 5 Stop" in joined
+    assert "--wait-s 7 SessionStart" in joined
+    assert "--wait-s 7 UserPromptSubmit" in joined
+    assert "--wait-s 7 PostCompact" in joined
+    assert "--wait-s 3 Interrupt" in joined
     assert shlex.split(codex_hooks.command(
         ["ping"], "/run/hooks.sock", codex_hooks.EVENTS[0], 5,
-    )) == ["ping", "--socket", "/run/hooks.sock", "--wait-seconds", "5",
+    )) == ["ping", "--socket", "/run/hooks.sock", "--wait-s", "5",
            "SessionStart"]
+
+
+def test_the_ping_refuses_the_old_wait_flags(capsys):
+    for old in ("--wait-seconds", "--wait"):
+        with pytest.raises(SystemExit) as exc:
+            codex_hooks.main(["--socket", "/run/hooks.sock", "Stop", old, "5"])
+        assert exc.value.code == 2
+        assert f"unrecognized arguments: {old}" in capsys.readouterr().err
 
 
 def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_env):
@@ -180,17 +190,17 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: (time.sleep(3.05), "hold in budget")[1])
     harness.start_turn()
     try:
         output = _ping(monkeypatch, server.socket_path, "SessionStart",
-                       {"session_id": "thread-1"}, "--wait-seconds", "5")
+                       {"session_id": "thread-1"}, "--wait-s", "5")
         assert json.loads(output)["hookSpecificOutput"]["additionalContext"] == \
             "late but in budget"
         output = _ping(monkeypatch, server.socket_path, "Stop", {
             "session_id": "thread-1", "turn_id": harness.open_turn,
-        }, "--wait-seconds", "5")
+        }, "--wait-s", "5")
         assert json.loads(output)["reason"] == "hold in budget"
     finally:
         hold.close()
@@ -212,15 +222,15 @@ def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: (time.sleep(0.2), "too late")[1])
     harness.start_turn()
     try:
         assert _ping(monkeypatch, server.socket_path, "SessionStart",
-                     {"session_id": "thread-1"}, "--wait-seconds", "0.1") == ""
+                     {"session_id": "thread-1"}, "--wait-s", "0.1") == ""
         assert _ping(monkeypatch, server.socket_path, "Stop", {
             "session_id": "thread-1", "turn_id": harness.open_turn,
-        }, "--wait-seconds", "0.1") == ""
+        }, "--wait-s", "0.1") == ""
         assert endpoint.facts().turn_open and harness.settled == []
         assert harness.ending == [harness.open_turn]   # no block came: unblocked
     finally:
@@ -238,7 +248,7 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
     events = []
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     watcher = threading.Thread(target=lambda: events.extend(session.watch()), daemon=True)
     watcher.start()
     time.sleep(0.2)

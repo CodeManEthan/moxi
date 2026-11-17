@@ -1,9 +1,90 @@
 # Changelog
 
+## 0.1.10 (unreleased)
+
+- `moxi.doctor.Row` gains `needs`, given by keyword: on an `off` row given because a
+  module or an extra is not installed, it names that part, a module (`projects`) or
+  `<module>[<extra>]` (`ui[gateway]`). `Row` refuses it on a row that is not `off`, and a
+  value in neither form; `moxi.doctor.is_needs_value` says whether a value is in the form.
+  A module that sets it needs `moxi>=0.1.10`: an older `Row` refuses the keyword.
+- `moxi doctor --json` writes `needs` on a row that carries it and leaves the key out of
+  every other row. The plain report is unchanged.
+- A daemon's `HEALTH` row keeps the `needs` of the row its target returned.
+- An extension's `off` row, an optional link to a module that is not installed, needs that
+  module.
+- The catalogue gains `memory` (`moxi-memory`), marked unreleased, so `moxi install memory`
+  and `moxi modules --available` know it by name. Its version is 6.
+
+## 0.1.9 (unreleased)
+
+- A settings key may carry page fields, which say how a settings page shows it: `label`,
+  `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal` and
+  `elsewhere`. They change nothing a key is or how it is read. The schema reader checks
+  each, refuses them on a retired key, and refuses a schema that marks more than seven
+  keys `common`. A module that fills them needs `moxi>=0.1.9`: an older core refuses its
+  schema for the unknown fields. `moxi.config` names them in `PAGE_FIELDS` and the cap in
+  `COMMON_MAX`; `moxi.config.Key` takes them by keyword only.
+- `moxi config <module> show --json` carries each key's page fields: strings or null,
+  `common` and `pick` as bools, `choices` as `{value, words}` rows in the enum's order,
+  `hurts` and `terminal` as tables or null.
+- `moxi config set` and `moxi config unset` take `--json`: the command prints one object,
+  `{changed, problem, fix, units}`, and nothing else on stdout, with a refusal's problem
+  and fix apart and the lines applying the module's units said in `units`. The exit codes
+  are unchanged. `problem` is the bare predicate (`is not a setting of demo`) when the
+  refusal is about the value of the key being set, and otherwise the whole sentence naming
+  what it is about: the config file (locked, not valid TOML), another key in it, the
+  module, or the module's settings schema.
+- A change refused because the module's settings schema cannot be read raises the
+  schema's own `SchemaError`, naming the key at fault, in place of a `ConfigError` that
+  named only the schema's file. The exit code is still 3.
+- The core's own keys carry their page fields.
+
+## 0.1.8 (unreleased)
+
+- `moxi.proc.run` takes `output`, a file path: the child's stdout and stderr both go
+  straight to that file, created 0600 or appended to, so a long run's output is not held
+  in memory.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi.config`: `set` is now `set_value`; `moxi.place`:
+  `FOLDER_NOTE` is now `DIR_NOTE`; `moxi.place.Harness`: `folder` is now `harness_dir`.
+- Doctor CPU samples now store `cpu_s`. Samples with the older `cpu_seconds` field are
+  not read.
+- The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
+  modules --available` know it by name. Its version is 3.
+- `moxi modules --available --refresh` fetches the catalogue a released core shipped,
+  not main's: it lists the `moxi-v<version>` tags and, from the highest down, at most
+  three, takes the first whose version PyPI has. No released version keeps the shipped
+  copy, as a missing file did. `moxi.catalogue.URL` is gone; `TAGS_URL`, `INDEX_URL`
+  and `FILE_URL` name the three reads.
+- A catalogue entry may say `unreleased = true`; `moxi install NAME` then refuses with
+  "not on PyPI yet; install it from a checkout with --from" unless `--from` gives its
+  source. `moxi.catalogue.Entry` gains `unreleased`.
+- Every catalogue entry says `unreleased = true`, since no module has a released version
+  yet; a core release after a module's first release drops its mark. The catalogue's
+  version is 5.
+- The terminal record's set holds `OPENCODE_CONFIG_DIR`, so a page check can compare
+  OpenCode's home.
+
 ## 0.1.7 (2026-11-08)
 
-- The catalogue lists all seventeen first-party modules, so `moxi install <module>` and
-  `moxi modules --available` know each by name. Its version is 3.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi.cli.shortcut_text`: `windows` is now `is_windows`;
+  `moxi.config.Key`: `type` is now `value_type`; `moxi.files`: `CLAIM_VARIABLE` is now
+  `LOCK_FD_ENV`; `moxi.files.edit_toml`: `timeout` is now `timeout_s`;
+  `moxi.files.lock`: `timeout` is now `timeout_s`; `moxi.ipc.Client`: `timeout` is now
+  `timeout_s`; `moxi.ipc.Client.call`: `timeout` is now `timeout_s`; `moxi.ipc.connect`:
+  `timeout` is now `timeout_s`; `moxi.ipc.serve`: `write_deadline` is now
+  `write_timeout_s`; `moxi.ipc.Server`: `write_deadline` is now `write_timeout_s`;
+  `moxi.names`: `is_skill_folder` is now `is_skill_dir`; `moxi.paths`: `ANCHOR_HOME` is
+  now `ANCHOR_HOME_ENV`; `moxi.paths`: `DEVICE` is now `DEVICE_ENV`; `moxi.paths`:
+  `HOME` is now `HOME_ENV`; `moxi.place`: `folders` is now `harness_dirs`;
+  `moxi.place.plan`: `git_seconds` is now `git_s`; `moxi.proc`: `environ` is now
+  `process_env`; `moxi.proc.run`: `input` is now `stdin_data`; `moxi.proc.run`:
+  `timeout` is now `timeout_s`; `moxi.store.connect`: `timeout` is now `timeout_s`;
+  `moxi.terminal`: `MARK` is now `STARTED_BY_ENV`; `moxi.terminal.read`: `retry` is now
+  `retry_s`; `moxi.units.stop`: `record` is now `stopped`.
+- The catalogue lists all sixteen first-party modules, so `moxi install <module>` and
+  `moxi modules --available` know each by name. Its version is 2.
 - The README says what the core needs (psutil, and its own copies of tomlkit and
   packaging), that macOS and Windows are untested, every command `moxi help` lists, and
   where `moxi install` writes outside Moxi's own folders: skills and agent files for

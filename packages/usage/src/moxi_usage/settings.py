@@ -36,7 +36,7 @@ directory holding a `projects/` tree, and `id`, which names its lane (`archive:<
 
 `bounds(settings)`, which `check` runs first, refuses the whole-number values that would
 destroy state or switch a feature off without a word: the day and minute keys below 1,
-`limits.codex_pull_after` below 0, and a `ceiling.warn_tokens` at or above a set
+`limits.codex_pull_after_s` below 0, and a `ceiling.warn_tokens` at or above a set
 `ceiling.hard_tokens`.
 
 The worker ceiling's roots must be absolute paths and each `ceiling.allow_commands` entry
@@ -149,7 +149,7 @@ MINIMA: Mapping[str, tuple[int, str]] = {
     "limits.history_days": (1, "0 would delete every limits reading on the next prune, "
                             "and the readings cannot be rebuilt"),
     "limits.projection_minutes": (1, "0 would turn the burn-rate projection off"),
-    "limits.codex_pull_after": (0, "a reading cannot be stale before it is taken"),
+    "limits.codex_pull_after_s": (0, "a reading cannot be stale before it is taken"),
     "restart_point.days": (1, "0 would write an empty measure over a good one, and every "
                            "mark would go unavailable"),
     "marks.max_age_days": (1, "0 would delete live sessions' fired marks, so they would be "

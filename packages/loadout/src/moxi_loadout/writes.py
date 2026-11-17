@@ -46,9 +46,9 @@ class _Unchanged(Exception):
     """Raised out of the edit block when nothing changed, so nothing is written."""
 
 
-def edit(change: Callable, *, folder: str | os.PathLike | None = None,
+def edit(change: Callable, *, loadout_dir: str | os.PathLike | None = None,
          timeout: float | None = LOCK_TIMEOUT):
-    """Run `change(doc, manifest)` in one `edit_toml` block on the manifest in `folder`
+    """Run `change(doc, manifest)` in one `edit_toml` block on the manifest in `loadout_dir`
     (the configured folder when None) and return what it returns.
 
     `doc` is the tomlkit document to change, given plain Python values; `manifest` the
@@ -60,13 +60,13 @@ def edit(change: Callable, *, folder: str | os.PathLike | None = None,
 
     from moxi_loadout import stores
 
-    path = stores.manifest_path(folder)
-    _make_folder(path.parent)
+    path = stores.manifest_path(loadout_dir)
+    _make_loadout_dir(path.parent)
     lock = stores.manifest_lock()
     result = None
     entered = False
     try:
-        with edit_toml(path, timeout=timeout, lock=lock) as doc:
+        with edit_toml(path, timeout_s=timeout, lock=lock) as doc:
             entered = True
             before = parse(doc.as_string(), path=path)
             result = change(doc, before)
@@ -84,7 +84,7 @@ def edit(change: Callable, *, folder: str | os.PathLike | None = None,
 
 
 def add(kind: str, name: str, *, project: str | None = None,
-        folder: str | os.PathLike | None = None) -> bool:
+        loadout_dir: str | os.PathLike | None = None) -> bool:
     """List `kind` `name` in the user section, or in project section `project` (made when
     missing). False when it is listed there already."""
     _check_item(kind, name)
@@ -107,11 +107,11 @@ def add(kind: str, name: str, *, project: str | None = None,
         table[key].append(name)
         return True
 
-    return edit(change, folder=folder)
+    return edit(change, loadout_dir=loadout_dir)
 
 
 def remove(kind: str, name: str, *, project: str | None = None,
-           folder: str | os.PathLike | None = None) -> bool:
+           loadout_dir: str | os.PathLike | None = None) -> bool:
     """Take `kind` `name` out of the user section's list, or project section `project`'s.
     False when that section doesn't list it. The item's own table is kept."""
     _check_item(kind, name)
@@ -125,20 +125,20 @@ def remove(kind: str, name: str, *, project: str | None = None,
             table[key].remove(name)
         return True
 
-    return edit(change, folder=folder)
+    return edit(change, loadout_dir=loadout_dir)
 
 
-def disable(ident: str | Id, *, user: bool = False, project: str | None = None,
-            folder: str | os.PathLike | None = None) -> list[str]:
+def disable(ident: str | Id, *, user_only: bool = False, project: str | None = None,
+            loadout_dir: str | os.PathLike | None = None) -> list[str]:
     """Write id `ident` (`<kind>:<name>@<harness>`) into `disabled` in every section that
-    lists the item, or only the user section (`user`) or project section `project`.
+    lists the item, or only the user section (`user_only`) or project section `project`.
     Returns the sections changed, each as `Section.label()` names it; a section where the
     id is already in force is left alone."""
     ident = _id(ident)
 
     def change(doc, manifest: Manifest) -> list[str]:
         changed = []
-        for section in _sections(manifest, ident, user, project):
+        for section in _sections(manifest, ident, user_only=user_only, project=project):
             if section.is_disabled(ident.kind, ident.name, ident.harness):
                 continue
             table = _section_table(doc, manifest, None if section.is_user else section.name,
@@ -150,11 +150,11 @@ def disable(ident: str | Id, *, user: bool = False, project: str | None = None,
             changed.append(section.label())
         return changed
 
-    return edit(change, folder=folder) or []
+    return edit(change, loadout_dir=loadout_dir) or []
 
 
-def enable(ident: str | Id, *, user: bool = False, project: str | None = None,
-           folder: str | os.PathLike | None = None) -> list[str]:
+def enable(ident: str | Id, *, user_only: bool = False, project: str | None = None,
+           loadout_dir: str | os.PathLike | None = None) -> list[str]:
     """Take id `ident` out of `disabled` in every section that lists the item, or only the
     one named. With harness `*` every id of that item goes. An item switched off for every
     harness (`...@*`) can't be enabled for one: that is refused, naming the id to enable.
@@ -163,7 +163,7 @@ def enable(ident: str | Id, *, user: bool = False, project: str | None = None,
 
     def change(doc, manifest: Manifest) -> list[str]:
         changed = []
-        sections = _sections(manifest, ident, user, project)
+        sections = _sections(manifest, ident, user_only=user_only, project=project)
         for section in sections:
             if ident.harness != EVERY and Id(ident.kind, ident.name, EVERY) in section.disabled:
                 raise ManifestError(manifest.path, [
@@ -181,10 +181,10 @@ def enable(ident: str | Id, *, user: bool = False, project: str | None = None,
                 changed.append(section.label())
         return changed
 
-    return edit(change, folder=folder) or []
+    return edit(change, loadout_dir=loadout_dir) or []
 
 
-def set_mode(mode: str, *, folder: str | os.PathLike | None = None) -> bool:
+def set_mode(mode: str, *, loadout_dir: str | os.PathLike | None = None) -> bool:
     """Write `[global] mode`. False when it is that mode already."""
     if mode not in MODES:
         raise ManifestError(None, [f"global mode {mode!r}: use one of {', '.join(MODES)}"])
@@ -198,11 +198,11 @@ def set_mode(mode: str, *, folder: str | os.PathLike | None = None) -> bool:
             doc[GLOBAL] = {"mode": mode}
         return True
 
-    return edit(change, folder=folder)
+    return edit(change, loadout_dir=loadout_dir)
 
 
 def adopt(skills: Mapping[str, Iterable[str]], *,
-          folder: str | os.PathLike | None = None) -> bool:
+          loadout_dir: str | os.PathLike | None = None) -> bool:
     """List each module skill `<module>/<skill>` in `skills` in the user section, with the
     harnesses it was taken for, all in one write.
 
@@ -250,15 +250,15 @@ def adopt(skills: Mapping[str, Iterable[str]], *,
                     changed = True
         return changed
 
-    return edit(change, folder=folder)
+    return edit(change, loadout_dir=loadout_dir)
 
 
 # -- helpers -------------------------------------------------------------------------------
 
-def _make_folder(folder: Path) -> None:
+def _make_loadout_dir(loadout_dir: Path) -> None:
     """Make the loadout folder with the ordinary mode; `atomic_write` would make a
     missing one private, and the folder is the user's, often a clone."""
-    os.makedirs(folder, exist_ok=True)
+    os.makedirs(loadout_dir, exist_ok=True)
 
 
 def _check_item(kind: str, name: str) -> None:
@@ -287,13 +287,13 @@ def _matches(text: str, ident: Id) -> bool:
     return ident.harness == EVERY or other.harness == ident.harness
 
 
-def _sections(manifest: Manifest, ident: Id, user: bool, project: str | None):
+def _sections(manifest: Manifest, ident: Id, *, user_only: bool, project: str | None):
     """The sections `disable` and `enable` write: the one named, else every section that
     lists the item. A named section that doesn't list it, or no section at all, is
     refused."""
     what = f"{ident.kind} {ident.name}"
-    if user or project is not None:
-        section = manifest.section(None if user else project)
+    if user_only or project is not None:
+        section = manifest.section(None if user_only else project)
         if section is None:
             raise ManifestError(manifest.path, [f"no section [{PROJECT}.{project}]"])
         if not section.lists_item(ident.kind, ident.name):

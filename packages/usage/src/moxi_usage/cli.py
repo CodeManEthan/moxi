@@ -58,7 +58,7 @@ request of that session and agent is in range, and 2 for an argument it can't us
 
 `index` runs the token index's pass (`moxi_usage.index`), prints what it did in one line,
 then the index's `status` report, lane by lane (with `--json`, both). It exits 75 when
-another pass holds the index past `index.wait_seconds` (at once with `--no-wait`), 3 when
+another pass holds the index past `index.wait_s` (at once with `--no-wait`), 3 when
 the index's schema can't move (`--rebuild --force` drops offline archive lanes' rows to
 let it), and with `--check` 1 when the stored claims differ from the `claimed` view,
 naming the keys.
@@ -322,7 +322,7 @@ def limits_lines(result: Any) -> list[str]:
         rows = result.of(harness)
         cells = [f"{harness:<7}"] + [_cell(row, result.now) for row in rows]
         line = "   ".join(cells)
-        ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]
+        ages = [row.age_s for row in rows if row.age_s is not UNKNOWN]
         if ages:
             line += f"   as of {format_age(max(ages))} ago"
         lines.append(line)

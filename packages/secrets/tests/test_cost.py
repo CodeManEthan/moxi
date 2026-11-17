@@ -30,6 +30,7 @@ import time
 
 import corpus
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_secrets import engine, fallback, redact, scan
 
@@ -278,7 +279,7 @@ def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch):
     scan_mod.run_gitleaks(engine.Text(text), (set_name,), None, counter)
     forget_counting()
     mb = size_mb(text)
-    budget = SLACK * (GITLEAKS_BUDGET[0] * mb + GITLEAKS_BUDGET[1] * counter.count)
+    budget = SLACK * timed_slack() * (GITLEAKS_BUDGET[0] * mb + GITLEAKS_BUDGET[1] * counter.count)
     hits = []
     took = best_of(2, lambda: hits.append(scan(text, (set_name,))))
     re2_hits[(name, set_name)] = {(h.rule, h.start, h.end) for h in hits[-1]}
@@ -302,7 +303,7 @@ def test_the_fallback_returns_by_its_deadline_and_never_clean(name, re2_hits,
     unscanned = {h.set for h in hits if h.rule == "unscanned"}
     print(f"\nfallback {name}: {took:.3f} s, deadline {wait:.2f} s, "
           f"unscanned {sorted(unscanned)}, {len(hits)} hits")
-    assert took <= wait + SLACK * KILL_TIME
+    assert took <= wait + SLACK * timed_slack() * KILL_TIME
     for set_name in sets:
         if set_name in unscanned:
             continue
@@ -359,10 +360,10 @@ def test_private_names_hold_the_budget(eng_name, names_config):
         mb = size_mb(text)
         if eng_name == "re2":
             base, per_entry, per_candidate = NAMES_BUDGET
-            budget = SLACK * (base * mb + per_entry * mb * held + per_candidate * counter.count)
+            budget = SLACK * timed_slack() * (base * mb + per_entry * mb * held + per_candidate * counter.count)
         else:
             per_entry, per_candidate = NAMES_FALLBACK_BUDGET
-            budget = SLACK * (per_entry * mb * len(entries) + per_candidate * counter.count)
+            budget = SLACK * timed_slack() * (per_entry * mb * len(entries) + per_candidate * counter.count)
         took = best_of(2, lambda: names_mod.spans(engine.Text(text), listed, eng))
         print(f"\n{eng_name} private names {label}: {took:.3f} s, {counter.count} "
               f"candidates, {held} entries held, budget {budget:.3f} s")
@@ -412,7 +413,7 @@ def test_personal_data_holds_the_budget(eng_name, monkeypatch):
         candidates = personal_candidates(text, eng, monkeypatch)
         monkeypatch.setattr(engine, "_active", eng)
         mb = size_mb(text)
-        budget = SLACK * (PERSONAL_BUDGET[0] * mb + PERSONAL_BUDGET[1] * candidates)
+        budget = SLACK * timed_slack() * (PERSONAL_BUDGET[0] * mb + PERSONAL_BUDGET[1] * candidates)
         took = best_of(2, lambda: personal_mod.spans(engine.Text(text)))
         print(f"\n{eng_name} personal data {label}: {took:.3f} s, {candidates} "
               f"candidates, budget {budget:.3f} s")
@@ -450,7 +451,7 @@ print(json.dumps({"import": imported, "first": first}))
 """
 
 
-def child_times(text, hide_re2=False):
+def child_times(text, *, hide_re2=False):
     code = _CHILD
     if hide_re2:
         code = "import sys; sys.modules['re2'] = None\n" + code
@@ -467,12 +468,12 @@ def test_the_import_and_the_first_scan_hold_their_budgets():
     first = min(r["first"] for r in runs)
     print(f"\nimport {imported * 1000:.1f} ms, first 4 KB credentials scan "
           f"{first * 1000:.1f} ms")
-    assert imported <= SLACK * 0.010
-    assert first <= SLACK * 0.010
+    assert imported <= SLACK * timed_slack() * 0.010
+    assert first <= SLACK * timed_slack() * 0.010
     runs = [child_times(text, hide_re2=True) for _ in range(5)]
     first = min(r["first"] for r in runs)
     print(f"first 4 KB fallback scan, the child's start included: {first * 1000:.1f} ms")
-    assert first <= SLACK * 0.050
+    assert first <= SLACK * timed_slack() * 0.050
 
 
 @pytest.mark.parametrize("set_name", ["credentials", "broad", "private-names",
@@ -489,4 +490,4 @@ def test_a_warm_short_text_holds_its_budget(set_name, names_config, monkeypatch)
     n = 500
     took = best_of(3, lambda: [scan(text, (set_name,)) for _ in range(n)]) / n
     print(f"\nwarm short text, {set_name}: {took * 1e6:.0f} us")
-    assert took <= SLACK * 100e-6
+    assert took <= SLACK * timed_slack() * 100e-6

@@ -166,12 +166,12 @@ def test_bodies_keeps_its_bare_namespace_form():
     these bytes."""
     from types import SimpleNamespace
 
-    class Ctx:
-        class record:
-            max_content_length = 2000
+    class Record:
+        max_content_length = 2000
 
     args = SimpleNamespace(text="hi")
-    assert cli._bodies(args, Ctx(), ["lead"], None) == ["::to lead\nhi"]
+    ctx = SimpleNamespace(record=Record())
+    assert cli._bodies(args, ctx, ["lead"], None) == ["::to lead\nhi"]
 
 
 # ------------------------------------------------ the sent index and `owed`
@@ -646,9 +646,9 @@ class DigestsOnly:
 
 @pytest.fixture
 def unit():
-    """A shim with no daemon but one that opens digests: the `owed` query answered by
-    `Answers`, a clock 5 minutes past T0, reviewer declaring lead its director,
-    registration high-water 100."""
+    """A shim with no daemon but one that opens digests, standing for a bound shim (so
+    `offline` is False): the `owed` query answered by `Answers`, a clock 5 minutes past
+    T0, reviewer declaring lead its director, registration high-water 100."""
     from moxi_comms.adapters.claude_shim import ClaudeShim
     answers = Answers()
     clock = lambda: T0 + 300                                     # noqa: E731
@@ -656,6 +656,7 @@ def unit():
                       owed_query=answers, session_id="sess-a")
     shim.identity = R
     shim._client = DigestsOnly()
+    shim.offline = False
     shim.ledger.hwm = "100"
     shim.answers = answers
     yield shim

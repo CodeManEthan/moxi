@@ -22,7 +22,7 @@ import sys
 from collections.abc import Mapping
 
 #: The variable. Its value names the program that set it; only its presence is read.
-NAME = "MOXI_STARTED_BY"
+STARTED_BY_ENV = "MOXI_STARTED_BY"
 
 #: The mark's value in the environment this process started with; None when it had none.
 #: Read once, by `note()`, before this process sets the mark itself.
@@ -44,11 +44,11 @@ def note() -> None:
     if _noted:
         return
     _noted = True
-    started_by = os.environ.get(NAME)
+    started_by = os.environ.get(STARTED_BY_ENV)
     tool_marks = present(os.environ, TOOL_MARKS)
     program = _program()
     if started_by is None:
-        os.environ[NAME] = program
+        os.environ[STARTED_BY_ENV] = program
 
 
 def marked(env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -57,10 +57,10 @@ def marked(env: Mapping[str, str] | None = None) -> dict[str, str]:
     same whatever their case, any spelling of the name counts as the mark."""
     child = dict(os.environ if env is None else env)
     if sys.platform == "win32":
-        if not any(name.upper() == NAME for name in child):
-            child[NAME] = program
+        if not any(name.upper() == STARTED_BY_ENV for name in child):
+            child[STARTED_BY_ENV] = program
     else:
-        child.setdefault(NAME, program)
+        child.setdefault(STARTED_BY_ENV, program)
     return child
 
 

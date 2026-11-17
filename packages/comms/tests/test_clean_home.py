@@ -7,8 +7,9 @@ a temp HOME, and runs everything from that install. The index supplies only the
 third-party requirements: each workspace package is installed from the wheel this tree
 built, never from what is published, and the test checks the venv holds exactly those
 wheels at this tree's versions. Everything runs with an environment built from nothing:
-HOME and every XDG root in the temp home, TMPDIR there too, no `MOXI_COMMS_*`, so
-nothing in the developer's shell can pick the backend or a root.
+HOME and every XDG root in the temp home, TMPDIR there too, Python's bytecode cache
+there too (`PYTHONPYCACHEPREFIX`), no `MOXI_COMMS_*`, so nothing in the developer's shell
+can pick the backend or a root.
 
 Part one is the documented install and nothing else. `moxi comms doctor` runs first and must
 say the `local` backend by default, with no slots yet.
@@ -72,9 +73,9 @@ def _normal(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _project(directory: Path) -> dict:
-    with (directory / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]
+def _project(project_dir: Path) -> dict:
+    with (project_dir / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)["project"]
 
 
 def workspace_members() -> dict[str, Path]:
@@ -297,10 +298,10 @@ def installed(fence, uv_env):
     home.mkdir()
     dist = base / "dist"
     wheels = {}
-    for name, directory in REQUIRED.items():
+    for name, source_dir in REQUIRED.items():
         out = dist / name
         build = subprocess.run([UV, "build", "--wheel", "--out-dir", str(out),
-                                str(directory)],
+                                str(source_dir)],
                                capture_output=True, text=True, timeout=300, env=uv_env)
         assert build.returncode == 0, build.stderr
         [wheels[name]] = out.glob("*.whl")
@@ -340,6 +341,9 @@ def installed(fence, uv_env):
         "XDG_STATE_HOME": str(home / ".local" / "state"),
         "XDG_CACHE_HOME": str(home / ".cache"),
         "XDG_RUNTIME_DIR": str(home / "run"),
+        # A Python whose stdlib has no .pyc would write them beside the stdlib, outside
+        # the home; the prefix puts every bytecode write in the home.
+        "PYTHONPYCACHEPREFIX": str(home / ".cache" / "pycache"),
         "CLEAN_HOME_AUDIT": str(base / "audit.tsv"),
     }
     (home / "tmp").mkdir()
@@ -355,9 +359,9 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
     procs = []
     stub_pids = []
 
-    def start(*argv, environ=None):
+    def start(*argv, spawn_env=None):
         argv = [str(venv / "bin" / argv[0]) if "/" not in argv[0] else argv[0], *argv[1:]]
-        proc = subprocess.Popen(argv, env=environ or env, cwd=home,
+        proc = subprocess.Popen(argv, env=spawn_env or env, cwd=home,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True)
         procs.append(proc)
@@ -433,7 +437,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         #    start provisioned, read from the directory.
         def launch(name):
             records = home / "opencode-records" / name
-            proc = OnPty([str(venv / "bin" / "moxi-comms-opencode"), name, "--notice-hold", "0"],
+            proc = OnPty([str(venv / "bin" / "moxi-comms-opencode"), name, "--notice-hold-s", "0"],
                          {**env, "FAKE_OPENCODE_DIR": str(records),
                           "FAKE_OPENCODE_AUTO": "0", "FAKE_OPENCODE_WINDOW": "",
                           "FAKE_OPENCODE_CONFIG": DEBUG_CONFIG}, home)

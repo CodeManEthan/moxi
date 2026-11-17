@@ -31,7 +31,7 @@ def pragma(conn: sqlite3.Connection, name: str):
 
 def test_connect_creates_a_wal_store_with_the_house_pragmas(tmp_path):
     path = tmp_path / "s" / "record.db"
-    conn = store.connect(path, timeout=2.5)
+    conn = store.connect(path, timeout_s=2.5)
     try:
         assert path.is_file()
         assert pragma(conn, "journal_mode") == "wal"
@@ -64,7 +64,7 @@ def test_a_store_that_is_not_private_gets_an_ordinary_parent(tmp_path):
 
 
 @POSIX
-def test_each_directory_connect_makes_is_0700_from_the_outermost(tmp_path):
+def test_each_dir_connect_makes_is_0700_from_the_outermost(tmp_path):
     old = os.umask(0o022)
     try:
         path = tmp_path / "a" / "b" / "c" / "record.db"
@@ -77,7 +77,7 @@ def test_each_directory_connect_makes_is_0700_from_the_outermost(tmp_path):
 
 
 @POSIX
-def test_a_store_in_an_existing_shared_directory_leaves_the_directory_as_it_is(tmp_path):
+def test_a_store_in_an_existing_shared_dir_leaves_the_dir_as_it_is(tmp_path):
     shared = tmp_path / "shared"
     shared.mkdir()
     shared.chmod(0o775)
@@ -88,7 +88,7 @@ def test_a_store_in_an_existing_shared_directory_leaves_the_directory_as_it_is(t
 
 
 @POSIX
-def test_a_store_through_a_linked_directory_follows_the_link_and_changes_neither(tmp_path):
+def test_a_store_through_a_linked_dir_follows_the_link_and_changes_neither(tmp_path):
     real = tmp_path / "elsewhere"
     real.mkdir()
     real.chmod(0o755)
@@ -101,7 +101,7 @@ def test_a_store_through_a_linked_directory_follows_the_link_and_changes_neither
 
 
 @POSIX
-def test_a_store_in_a_directory_another_user_owns_but_lets_us_write_opens(tmp_path):
+def test_a_store_in_a_dir_another_user_owns_but_lets_us_write_opens(tmp_path):
     import tempfile
     import uuid
 
@@ -143,7 +143,7 @@ def test_a_store_in_a_directory_another_user_owns_but_lets_us_write_opens(tmp_pa
 
 
 @POSIX
-def test_a_directory_made_by_another_process_between_the_check_and_the_mkdir_is_left(
+def test_a_dir_made_by_another_process_between_the_check_and_the_mkdir_is_left(
         tmp_path, monkeypatch):
     target = tmp_path / "raced"
     real_mkdir = os.mkdir
@@ -184,7 +184,7 @@ def test_on_windows_a_new_store_file_grants_only_this_user(tmp_path):
 
 
 @WINDOWS
-def test_on_windows_each_directory_connect_makes_grants_only_this_user(tmp_path):
+def test_on_windows_each_dir_connect_makes_grants_only_this_user(tmp_path):
     from moxi import _win
 
     path = tmp_path / "a" / "b" / "record.db"
@@ -218,7 +218,7 @@ def test_the_wal_and_shm_take_the_store_files_mode(tmp_path):
 
 
 @WINDOWS
-def test_on_windows_the_wal_and_shm_in_a_directory_connect_makes_grant_only_this_user(
+def test_on_windows_the_wal_and_shm_in_a_dir_connect_makes_grant_only_this_user(
         tmp_path):
     from moxi import _win
 
@@ -233,7 +233,7 @@ def test_on_windows_the_wal_and_shm_in_a_directory_connect_makes_grant_only_this
 
 
 @WINDOWS
-def test_on_windows_the_wal_and_shm_in_a_shared_directory_take_its_list(tmp_path):
+def test_on_windows_the_wal_and_shm_in_a_shared_dir_take_its_list(tmp_path):
     # A residual the store does not change: SQLite makes these two files itself, with
     # the list their directory passes down.
     from moxi import _win
@@ -270,10 +270,10 @@ def test_the_in_memory_name_is_refused_and_makes_nothing(work, monkeypatch, name
 
 def test_an_existing_store_is_opened_as_it_is(tmp_path, caplog):
     path = tmp_path / "old.db"
-    plain = sqlite3.connect(path)
-    plain.execute("CREATE TABLE t (x)")
-    plain.commit()
-    plain.close()
+    raw_conn = sqlite3.connect(path)
+    raw_conn.execute("CREATE TABLE t (x)")
+    raw_conn.commit()
+    raw_conn.close()
     before = path.read_bytes()
     with caplog.at_level(logging.WARNING, logger="moxi.store"):
         conn = store.connect(path, create=False)
@@ -350,9 +350,9 @@ def test_transaction_commits_the_block(tmp_path):
         assert same is conn
         conn.execute("INSERT INTO t VALUES (1)")
     conn.close()
-    other = store.connect(path)
-    assert other.execute("SELECT x FROM t").fetchall() == [(1,)]
-    other.close()
+    verify_conn = store.connect(path)
+    assert verify_conn.execute("SELECT x FROM t").fetchall() == [(1,)]
+    verify_conn.close()
 
 
 def test_transaction_rolls_back_and_raises_again(tmp_path):
@@ -370,13 +370,13 @@ def test_transaction_rolls_back_and_raises_again(tmp_path):
 def test_transaction_holds_the_write_lock_from_its_start(tmp_path):
     path = tmp_path / "s.db"
     conn = store.connect(path)
-    other = store.connect(path, timeout=0)
+    blocking_conn = store.connect(path, timeout_s=0)
     try:
         with store.transaction(conn):
             with pytest.raises(sqlite3.OperationalError, match="locked"):
-                other.execute("BEGIN IMMEDIATE")
+                blocking_conn.execute("BEGIN IMMEDIATE")
     finally:
-        other.close()
+        blocking_conn.close()
         conn.close()
 
 
@@ -390,22 +390,22 @@ def test_a_block_that_ends_its_own_transaction_is_an_error(tmp_path):
 
 def test_a_commit_that_fails_rolls_back_and_leaves_the_connection_usable(tmp_path):
     path = tmp_path / "s.db"
-    conn = store.connect(path, timeout=0.05)
+    conn = store.connect(path, timeout_s=0.05)
     conn.execute("PRAGMA journal_mode = DELETE")
     conn.execute("CREATE TABLE t (x)")
     # A reader in a transaction keeps its shared lock, so a delete-journal COMMIT, which
     # needs the exclusive lock, is busy past the timeout.
-    reader = sqlite3.connect(path, isolation_level=None)
-    reader.execute("BEGIN")
-    reader.execute("SELECT count(*) FROM t").fetchone()
+    reader_conn = sqlite3.connect(path, isolation_level=None)
+    reader_conn.execute("BEGIN")
+    reader_conn.execute("SELECT count(*) FROM t").fetchone()
     try:
         with pytest.raises(sqlite3.OperationalError, match="locked"):
             with store.transaction(conn):
                 conn.execute("INSERT INTO t VALUES (1)")
         assert not conn.in_transaction
     finally:
-        reader.execute("ROLLBACK")
-        reader.close()
+        reader_conn.execute("ROLLBACK")
+        reader_conn.close()
     with store.transaction(conn):
         conn.execute("INSERT INTO t VALUES (2)")
     assert conn.execute("SELECT x FROM t").fetchall() == [(2,)]
@@ -504,7 +504,7 @@ MIGRATOR = textwrap.dedent("""
             time.sleep(0.05)
         return run
 
-    conn = store.connect(sys.argv[1], timeout=30)
+    conn = store.connect(sys.argv[1], timeout_s=30)
     print(store.migrate(conn, ["CREATE TABLE ran (n INTEGER)"] + [step(n) for n in range(1, 6)]))
     conn.close()
 """)

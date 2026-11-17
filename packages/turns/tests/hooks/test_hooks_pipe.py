@@ -238,7 +238,7 @@ def test_a_consumer_keeps_its_own_exit_code_over_the_kit():
     assert err == ""
 
 
-def test_the_package_needs_nothing_on_the_path_or_in_the_environment():
+def test_the_package_needs_nothing_on_the_path_or_in_the_env():
     """Law 1 as a process: nothing here reads the environment, so nothing here needs one."""
     code, out, err = drive(HOOK, json.dumps({"cwd": "/x"}), env={})
     assert code == 0

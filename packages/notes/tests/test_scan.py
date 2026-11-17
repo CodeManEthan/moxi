@@ -149,14 +149,14 @@ def test_under_redact_without_the_filter_every_file_with_a_finding_is_left_out()
 
 def test_a_file_over_max_mb_is_left_out_with_no_line():
     root = notes_repo()
-    configure(max_mb=1)
+    configure(max_mib=1)
     write(root, "big.md", "x" * (2 * 1024 * 1024))
     code, found, _ = scan_json()
     assert code == 1
     [one] = found["left_out"]
     assert one["path"] == "big.md"
     assert one["findings"][0]["rule"] == "notes/too-large"
-    assert one["findings"][0]["line"] is None and "max_mb" in one["findings"][0]["note"]
+    assert one["findings"][0]["line"] is None and "max_mib" in one["findings"][0]["note"]
 
 
 def test_a_malformed_allowlist_is_named_and_every_file_with_a_hit_is_left_out():

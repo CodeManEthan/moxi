@@ -1,8 +1,8 @@
 """Recycle against fakes of turns, slots and cache: the timer's subscription, the expiry
 ask's reads in order and every verdict (quiet, blocked, failed, unconfirmed, cleared,
 compacted), the background shells a clear stops after an idle hour, a repeated block as
-one run, the crossing handler in both modes, a pending compact taken up by a run's end,
-and the limit compact's job."""
+one run, the crossing handler in both modes and reached through usage's crossing group, a
+pending compact taken up by a run's end, and the limit compact's job."""
 
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ def ran(new_session_id=None, shells=None):
     return Result("ran", new_session_id=new_session_id, shells=shells)
 
 
-def shells(stopped=(), left=(), complete=True):
+def shells(stopped=(), left=(), *, complete=True):
     return SimpleNamespace(stopped=tuple(stopped), complete=complete,
                            left=tuple(SimpleNamespace(id=i, why=w) for i, w in left))
 
 
-def facts(turn_open=False, number=4, draft=False, stale=False):
+def facts(*, turn_open=False, number=4, draft=False, stale=False):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=draft,
                            stale=stale)
 
@@ -132,20 +132,20 @@ class FakeCache:
 
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id, options))
-        return SimpleNamespace(kind=self.kind, age_seconds=self.age, ttl_seconds=3600)
+        return SimpleNamespace(kind=self.kind, age_s=self.age, ttl_s=3600)
 
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
              harness="claude", target="slot", relaunch_of=None, env=None, base_env=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness=harness, target=target,
+    store.insert(conn, request_id=request_id, by="ann", harness=harness, target=target,
                  base_env=base_env,
                  cwd="/work", values={"model": "opus", "recycle_on_expiry": "clear",
                                       **(values or {})},
@@ -264,7 +264,7 @@ def test_shells_all_stopped_leave_no_word(conn):
     assert got.runs[0].word is None and "s1" in got.runs[0].detail
 
 
-def test_a_codex_session_reads_its_cache_with_the_codex_sessions_directory(conn):
+def test_a_codex_session_reads_its_cache_with_the_codex_sessions_dir(conn):
     launched(conn, request_id="c1", harness="codex", target="terminal", session_id=NEW,
              values={"recycle_on_expiry": "compact"}, env={"CODEX_HOME": "/home/x/.cx"})
     store.learn_session(conn, "c1", NEW, "sender")
@@ -287,22 +287,22 @@ class RootedCache(FakeCache):
     """A cache that also says where Claude writes transcripts, by cache's rule."""
 
     @staticmethod
-    def projects_root(environ):
-        home = environ.get("HOME", "/home/me")
-        return environ.get("CLAUDE_CONFIG_DIR", f"{home}/.claude").replace("~", home) \
+    def projects_root(env):
+        home = env.get("HOME", "/users/me")
+        return env.get("CLAUDE_CONFIG_DIR", f"{home}/.claude").replace("~", home) \
             + "/projects"
 
 
 def test_a_claude_launch_with_its_own_config_dir_reads_its_cache_under_it(tmp_path):
-    connection = store.connect(tmp_path / "rooted.db")
+    conn = store.connect(tmp_path / "rooted.db")
     try:
-        launched(connection, base_env={"HOME": "/home/ann", "CLAUDE_CONFIG_DIR": "~/.seat",
+        launched(conn, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",
                                        "CLAUDE_CODE_OAUTH_TOKEN": None})
         cache = RootedCache()
-        ask(connection, cache=cache)
-        assert cache.reads == [("claude", SID, {"projects_root": "/home/ann/.seat/projects"})]
+        ask(conn, cache=cache)
+        assert cache.reads == [("claude", SID, {"projects_root": "/users/ann/.seat/projects"})]
     finally:
-        connection.close()
+        conn.close()
 
 
 def test_a_claude_launch_without_its_own_config_dir_reads_caches_own_root(conn):
@@ -368,7 +368,7 @@ def test_a_shell_entry_holds_nothing(conn):
 
 def test_an_open_run_whose_job_lives_ends_quietly_and_writes_nothing(conn):
     store.insert_run(conn, kind="exit", mode="verb", request_id="r1", session_id=SID,
-                     actor="ann", state="acting", job=f"proc:{me()}",
+                     by="ann", state="acting", job=f"proc:{me()}",
                      at="2020-01-01T00:00:00.000000Z")
     got = ask(conn)
     assert (got.verdict.outcome, got.verdict.word) == (None, "run-open")
@@ -377,7 +377,7 @@ def test_an_open_run_whose_job_lives_ends_quietly_and_writes_nothing(conn):
 
 def test_a_stale_open_run_is_ended_job_gone_and_the_ask_goes_on(conn):
     stale = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                             session_id=SID, actor="launcher", state="acting",
+                             session_id=SID, by="launcher", state="acting",
                              job="proc:999999999@1.0", at="2020-01-01T00:00:00.000000Z")
     got = ask(conn)
     assert got.verdict.outcome == "cleared"
@@ -605,9 +605,57 @@ def test_a_compact_job_that_does_not_start_ends_its_run_failed(conn, script):
     assert (run.state, run.outcome, run.word) == ("ended", "failed", "not-started")
 
 
+def test_the_crossing_handler_is_found_through_usage_s_entry_point_group():
+    found = [e for e in modules.extensions("moxi.usage.crossings") if e.module == "launcher"]
+    assert [e.target for e in found] == ["moxi_launcher.recycle:on_crossing"]
+    assert found[0].load() is recycle.on_crossing
+
+
+@pytest.fixture
+def usage_group(tmp_path, monkeypatch):
+    """usage's crossing group read afresh, over a launch log in its default place under
+    a home of the test's own, holding launch r1 claimed by this process."""
+    mark = pytest.importorskip("moxi_usage.mark", reason="usage is not installed")
+    monkeypatch.delenv("MOXI_LAUNCHER_HOME", raising=False)
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    assert store.path().is_relative_to(tmp_path)
+    conn = store.connect()
+    launched(conn)
+    mark.reset()
+    yield SimpleNamespace(mark=mark, conn=conn)
+    mark.reset()
+    conn.close()
+
+
+def through_usage(group, at):
+    crossing = group.mark.Crossing("claude", SID, "1x", 900, 800, "opus", at)
+    return group.mark.run_handlers(crossing, wait=5.0)
+
+
+def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
+    limit(usage_group.conn, "relaunch")
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
+    assert len(told) == 1
+
+
+def test_a_compact_crossing_reaches_the_launcher_through_usage_s_group_and_is_recorded(
+        usage_group, script, monkeypatch):
+    limit(usage_group.conn, "compact")
+    spawn = Spawned()
+    monkeypatch.setattr(proc, "spawn", spawn)
+    assert recycle.COMPACT_LINE in through_usage(usage_group, 1761904800.0)
+    [run] = store.runs(usage_group.conn, request_id="r1")
+    assert (run.kind, run.mode, run.state) == ("compact", "limit", "armed")
+    assert run.crossing_key == f"{SID}|1x|1761904800.0"
+    [(argv, _)] = spawn.calls
+    assert argv == ["/venv/bin/moxi-launcher-job", "compact", run.run_id]
+
+
 def open_run(conn, kind="relaunch", mode="self"):
     return store.insert_run(conn, kind=kind, mode=mode, request_id="r1", session_id=SID,
-                            actor="ann", job="slots:relaunch-x")
+                            by="ann", job="slots:relaunch-x")
 
 
 def test_a_compact_crossing_that_meets_an_open_run_leaves_a_pending_compact(conn, script):
@@ -655,7 +703,7 @@ def test_an_insert_that_pends_writes_the_pending_compact_and_no_run(conn):
     run = open_run(conn)
     with pytest.raises(store.RunOpen) as caught:
         store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
-                         session_id=SID, actor=store.LAUNCHER, crossing_key="k", pend=True)
+                         session_id=SID, by=store.LAUNCHER, crossing_key="k", pend=True)
     assert caught.value.run.run_id == run.run_id
     assert store.pending_compact(conn, "r1")[0] == "k"
     assert [r.run_id for r in store.runs(conn, request_id="r1")] == [run.run_id]
@@ -745,11 +793,11 @@ def test_a_dropped_run_takes_the_pending_compact_too(conn, started):
 
 def test_a_stale_run_ended_by_an_insert_leaves_the_pending_compact(conn, started):
     open_run_ = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                                 session_id=SID, actor="launcher", job="proc:999999999@1.0",
+                                 session_id=SID, by="launcher", job="proc:999999999@1.0",
                                  at="2020-01-01T00:00:00.000000Z")
     store.pend_compact(conn, "r1", f"{SID}|1x|t")
     store.insert_run(conn, kind="exit", mode="verb", request_id="r1", session_id=SID,
-                     actor="ann", gone=lambda j: True)
+                     by="ann", gone=lambda j: True)
     assert store.get_run(conn, open_run_.run_id).outcome == "error"
     assert started == [] and store.pending_compact(conn, "r1") is not None
 
@@ -758,28 +806,28 @@ def test_the_crossing_handler_gives_up_on_a_locked_store_within_its_bound(conn, 
                                                                          monkeypatch):
     limit(conn, "compact")
     monkeypatch.setattr(store, "path", lambda env=None: tmp_path / "launcher.db")
-    locker = store.connect(tmp_path / "launcher.db")
-    locker.execute("BEGIN IMMEDIATE")
+    lock_conn = store.connect(tmp_path / "launcher.db")
+    lock_conn.execute("BEGIN IMMEDIATE")
     try:
         began = time.monotonic()
         assert recycle.on_crossing(crossing()) is None
         assert time.monotonic() - began < 0.5
     finally:
-        locker.execute("ROLLBACK")
-        locker.close()
+        lock_conn.execute("ROLLBACK")
+        lock_conn.close()
 
 
 def test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked(conn, tmp_path,
                                                                     monkeypatch):
     limit(conn, "relaunch")
     monkeypatch.setattr(store, "path", lambda env=None: tmp_path / "launcher.db")
-    locker = store.connect(tmp_path / "launcher.db")
-    locker.execute("BEGIN IMMEDIATE")
+    lock_conn = store.connect(tmp_path / "launcher.db")
+    lock_conn.execute("BEGIN IMMEDIATE")
     try:
         assert recycle.on_crossing(crossing()) == recycle.RELAUNCH_LINE
     finally:
-        locker.execute("ROLLBACK")
-        locker.close()
+        lock_conn.execute("ROLLBACK")
+        lock_conn.close()
 
 
 def test_the_crossing_handler_without_a_launch_log_is_none(monkeypatch, tmp_path):
@@ -806,7 +854,7 @@ class Clock:
 
 def compact_run(conn, job_=None):
     return store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
-                            session_id=SID, actor="launcher", crossing_key=f"{SID}|1x|t",
+                            session_id=SID, by="launcher", crossing_key=f"{SID}|1x|t",
                             job=job_, slot="3", pane_id="%9")
 
 
@@ -882,13 +930,13 @@ def test_a_compact_ended_under_its_job_does_not_act(conn):
 
 def test_a_compact_inside_its_long_wait_is_not_stale(conn):
     run = store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
-                           session_id=SID, actor="launcher", job=f"proc:{me()}",
+                           session_id=SID, by="launcher", job=f"proc:{me()}",
                            at="2020-01-01T00:00:00.000000Z")
     assert not store.run_stale(store.get_run(conn, run.run_id),
                                lambda j: job.gone(j))
     with pytest.raises(store.RunOpen):
         store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                         session_id=SID, actor="ann", gone=lambda j: job.gone(j))
+                         session_id=SID, by="ann", gone=lambda j: job.gone(j))
 
 
 # -- the job's command line and the chain ------------------------------------------------

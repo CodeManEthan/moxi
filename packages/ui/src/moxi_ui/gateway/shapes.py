@@ -16,10 +16,11 @@ whether the phone's acts are mounted or not.
 
 **Redaction.** On the gateway, each 2xx JSON body from a route, each stream event and each
 of the shell's own declared answers is walked against its declared shape at every depth,
-and exactly the marked values change: `redact` becomes `null`, and `path` becomes a handle,
+and exactly the marked values change: `redact` becomes `null`, `path` becomes a handle,
 `@h/<12 hex>/<name>`, the hex an HMAC-SHA-256 of the path under the gateway's key and the
-name the path's last segment, cut to 255 bytes. Nothing unmarked changes. A handle is for
-display only: nothing maps one back to its path.
+name the path's last segment, cut to 255 bytes, and `scrub` keeps its text with each host
+path in it cut to its last folder name (`scrub` says which paths it finds). Nothing
+unmarked changes. A handle is for display only: nothing maps one back to its path.
 """
 
 from __future__ import annotations
@@ -37,13 +38,17 @@ from moxi_ui.loopback.api import Out, Table
 
 __all__ = [
     "BODY_LIMIT", "BadBody", "acts_of", "canonical", "check_body", "gateway_problem",
-    "handle", "out_data", "redact", "redact_value", "refusals", "route_of", "shape_data", "table",
+    "handle", "out_data", "redact", "redact_value", "refusals", "route_of", "scrub", "shape_data",
+    "table",
 ]
 
 #: The largest 2xx JSON body the gateway reads to redact; a larger one is a 502.
 BODY_LIMIT = 1024 * 1024
 _NAME_BYTES = 255
 _SEGMENTS = re.compile(r"[/\\]")
+#: A host path in a text `scrub` takes: `/` or `~` at the start of a word or after `:` or
+#: `=`, to the next whitespace.
+_HOST_PATH = re.compile(r"(?<![^\s:=])[/~]\S*")
 
 
 # --- the export checks ----------------------------------------------------------------
@@ -169,6 +174,31 @@ def handle(path: str, key: bytes) -> str:
     return f"@h/{digest[:12]}/{cut}"
 
 
+def scrub(text: str) -> str:
+    """`text` with each host path in it cut to its last folder name, the rest as it is.
+
+    A path starts with `/` or `~` at the start of the text, after whitespace, or after `:`
+    or `=` (`run:/srv/x` sends `run:x`), and runs to the next whitespace. So a path with a
+    space in it is cut at the space, and the part after the space is sent as it is. A path
+    glued to other text (`"/srv/x"`, `(/srv/x)`), a relative path, a variable (`$HOME/x`)
+    and a drive-letter path are sent as they are.
+    A trailing `/` is dropped first. A leading `~` or `~user` names a home, not a folder,
+    so `~user/x` sends `x`, a home alone sends `~`, and the root sends `/`.
+    """
+    return _HOST_PATH.sub(_last_name, text)
+
+
+def _last_name(found: re.Match[str]) -> str:
+    path = found.group()
+    parts = path.split("/")
+    if path.startswith("~"):
+        parts = parts[1:]
+    names = [part for part in parts if part]
+    if names:
+        return names[-1]
+    return "~" if path.startswith("~") else "/"
+
+
 def redact_value(value: Any, out: Mapping[str, Any] | None, key: bytes) -> Any:
     """`value` with every value its shape `out` (export data) marks changed."""
     if out is None or value is None:
@@ -178,6 +208,8 @@ def redact_value(value: Any, out: Mapping[str, Any] | None, key: bytes) -> Any:
         return None
     if mark == "path":
         return handle(value, key) if isinstance(value, str) else value
+    if mark == "scrub":
+        return scrub(value) if isinstance(value, str) else value
     items = out.get("items")
     if out.get("type") == "list" and isinstance(value, list) and isinstance(items, Mapping):
         return [redact_value(item, items, key) for item in value]

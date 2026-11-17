@@ -212,7 +212,7 @@ def test_the_read_changes_nothing(rig):
 # --------------------------------------------------------------------------- who may ask
 
 def test_any_socket_caller_may_ask_and_every_caller_gets_the_same_answer(rig):
-    """The caller rule: as for `record_message`, `session` and `owner`, any process that
+    """The caller rule: as for the `message`, `session` and `owner` reads, any process that
     can open the daemon's 0600 socket. A connection holding no binding and one holding
     a module's own binding (as such a program may) get the same answer."""
     rig.shim(**PLANNER)

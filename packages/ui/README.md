@@ -43,15 +43,79 @@ every logon. While the gateway is on, the shell also starts at login. The shell 
 each module's page server on the first request for its page.
 
 **Settings** (`moxi config ui`): `port` (8460), `idle_s` (900), `theme.mode` (`system`,
-`light` or `dark`), and the gateway's `gateway.enabled` (off) and `gateway.port` (8461).
+`light` or `dark`), `theme.palette` (`plain` or `midnight-neon`), and the gateway's
+`gateway.enabled` (off) and `gateway.port` (8461).
 A change to `port` takes effect once `moxi install ui` rewrites the unit.
+
+**Environment.** ui reads one variable of its own, `MOXI_UI_LOCKED_SETTINGS`, from the
+shell's environment: the settings its pages may not change for that run. Its value is a
+list of full keys, `<module>.<key>` (`ui.gateway.port`, `moxi.<key>` for the core's),
+separated by commas or spaces. An entry locks the key it names and every key under it, so
+`ui.gateway` locks both gateway keys and a module's name alone locks all of its settings.
+A key above a locked one is refused too, since writing a table would replace the entry it
+holds; the other entries of that table can still be changed.
+The Settings page shows a locked field read-only with `Locked for this run of the shell.`,
+and the shell answers a write to one with a 422 before any command runs. Unset or empty,
+it locks nothing. It guards the shell's pages only: `moxi config set` in a terminal and an
+edit of the file still change the key, and the variable holds no value for it.
+
+## The Settings page
+
+Settings, at the right of the top line, opens `/m/ui/settings`: every installed module's
+settings and the core's, one module at a time, read and written only through `moxi
+config`.
+
+- **The list.** The core (`moxi`), ui, then every other module with settings, A to Z. Beside
+  each, how many of its settings are changed from the default; under the list, the total,
+  which opens every changed setting in one view.
+- **A module's settings.** Each setting by its plain label and its dotted key, a control by
+  its type, and a dim line where it needs one. A module's schema can mark a few settings to
+  show first; the rest wait behind `More`. A changed setting says its default, with `Reset`
+  where the file holds it. The foot names the module's config file.
+- **Save.** Nothing is written until Save, which writes the shown module's changes, each
+  as its own `moxi config set` or `unset`, and says what was saved and when each change
+  applies. A change that can hurt is asked about first. A setting changed since the page
+  read it is not overwritten: the page says so, and Save again writes yours. Leaving with
+  changes not saved asks first.
+- **Find**, above the list, searches every module's settings by name, key, description
+  and value, and each result can be changed where it is.
+- **ui's Phone group**, while the gateway extra is installed: whether phones can reach the
+  gateway, its port, the paired phones with `Revoke`, `Pair a phone` and the audit log.
+  Phone access itself is turned on and off at the terminal, with `moxi ui gateway enable`
+  and `disable`; no page changes it.
+
+A module's schema decides how its settings look on the page with page fields (`label`,
+`line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal`, `elsewhere`;
+the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/settings.md)
+says what each does on the page, what a save does, and the page's routes. The page is not
+on the phone.
+
+## A module on Home
+
+Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A
+module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
+and an `order`; a row component reports its line with a `moxi-home-row` event and Home
+draws it. A main piece that opens a panel at the window's right edge sends
+`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/home.md)
+has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
+side panel's event.
+
+## The row of a list
+
+`<moxi-ui-row>` is the two-line row a list page draws: a name, where it is and a fact at
+the right end, with any act of line one after it; under them a leading phrase, a time,
+what was last said and the row's acts;
+and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
+places it with attributes and bundles nothing. It draws nothing for an attribute that is
+unset, and a row opens by its lines only when it carries `toggles`.
+[docs/row.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/row.md)
+has every attribute, the slots and the `moxi-row-toggle` event.
 
 ## Confirmed acts in a page
 
-An act the user should confirm a second time, such as stopping a service or removing a
-project, is a confirmed act: it runs at most once, and only after the user says yes on a
-sheet the shell draws. The page declares it in its route table with `confirmed=True` and
-the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md), "Confirmed acts",
+An act the user should confirm a second time, such as stopping a service, is a confirmed
+act: it runs at most once, and only after the user says yes on a sheet the shell draws. The page declares it in its route table with `confirmed=True` and
+the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md), "Confirmed acts",
 has the route's whole shape. For example:
 
 ```python
@@ -100,12 +164,42 @@ if (outcome.outcome === "accepted") {
 - The shell passes `Idempotency-Key` on to the page server with the other headers it
   forwards, and nothing more.
 
+## A page that holds changes
+
+A page that keeps changes until a Save, as Settings does, holds the shell while it has
+some, so nothing moves off it without the page's say. Both calls are in `/m/ui/client.js`:
+
+```js
+import { holdLeave, setAddress } from "/m/ui/client.js";
+
+const release = holdLeave((go) => {
+  // Ask in the page's own words; call go() to leave.
+});
+// ...release() once no change is left, and in disconnectedCallback.
+setAddress("ui", "settings/ui/more");  // the page's own address, in place
+```
+
+- `holdLeave(ask)` gives the function that releases the hold. While held, every move off
+  the page (a link in the shell, `navigate()`, Back and Forward) calls `ask(go)` and does
+  nothing else; `go()` releases the hold and makes the move. The shell's own redraw on a
+  modules or session event waits for the release, and a load of another document gets the
+  browser's prompt. One page holds at a time: a second `holdLeave` replaces the first.
+- `setAddress(module, route)` writes the page's own address in place of the current
+  history entry, so Back leaves the page, and the shell neither draws the page again nor
+  asks it. It throws a `TypeError` when `module`'s panel isn't the one shown, or the route
+  leaves `/m/<module>/`.
+
 ## The gateway: the UI on your phone
 
 The gateway is a second listener of the shell, reached from a phone through the tunnel
 module's `ui/gateway` target. A phone pairs by scanning a QR code the desktop shows and
 registering a passkey, then signs in with the passkey. It reaches only the routes a module
 marks `gateway=True`, with marked fields redacted, and every request is in an audit log.
+A text that may name a path, such as a check's name, reaches the phone with each path
+that starts a word, or follows `:` or `=`, with `/` or `~` cut to its last folder name, up
+to the next space; a path in another form is sent as it is
+([docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md)
+has the rule).
 
 To set it up, outside Moxi: a Tailscale account, Tailscale on the computer and the phone,
 MagicDNS and HTTPS certificates on the tailnet, and on Linux `sudo tailscale set
@@ -114,10 +208,11 @@ Cloudflare is the other provider. Then:
 
 ```sh
 moxi install ui --with gateway,tunnel
-moxi ui gateway on
+moxi ui gateway enable
 ```
 
-and scan the QR code in the desktop's Gateway section. No domain, no key to type.
+then open Settings, pick `ui`, press `Pair a phone` in its Phone group and scan the QR
+code. No domain, no key to type.
 
 | `moxi ui gateway` | what it does |
 |---|---|
@@ -149,7 +244,7 @@ with your last logout. Turn on lingering for your user (`loginctl enable-linger`
 remove the tunnel entry before you log out.
 
 The gateway needs moxi-tunnel 0.2 or later. `moxi install ui --with tunnel` counts the extra
-installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway on` and
+installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway enable` and
 `moxi doctor ui` name the command that raises it.
 
 `moxi doctor ui` shows three gateway rows: `gateway` (its address, endpoint, devices and
@@ -180,7 +275,7 @@ too, and names the step: install or update moxi-ui.
 The shell starts each module's page server on the first request for its page, as
 `python -P -m moxi_ui.loopback.serve <module>`, and reads every module's route table with
 `python -P -m moxi_ui.loopback.export <module>...`. Both run on loopback, ui's
-page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md) has the request check, how a page
+page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md) has the request check, how a page
 is declared, and the runner's rules.
 
 ## Testing a module's pages
@@ -192,6 +287,12 @@ beside it. Its `ui_*` fixtures start a real shell over the installed modules
 components. The browser fixtures need the `testing` extra and a browser:
 `pip install 'moxi-ui[testing]'`, then `playwright install chromium`. The plugin's
 docstring lists every fixture.
+
+A test of a module's phone face uses `moxi_ui.testing.phone`: `gateway_shell(home, site)`
+starts a shell in gateway mode with its tunnel address written, a `PhoneBridge` reaches its
+gateway at `https://gw.moxi.test/`, and `pair_page(context, shell)` pairs a browser context
+through the bridge and gives its page. Without a browser, `bridge.pair(shell)` gives a
+`PhoneSession` for the gateway's routes. The module's docstring has an example.
 
 A page module whose UI is optional:
 
@@ -211,4 +312,4 @@ and `psutil`, which the shell uses to watch its page servers.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/LICENSE).

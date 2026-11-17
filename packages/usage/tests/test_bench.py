@@ -12,6 +12,8 @@ The first pass over it is made once too; each test starts from a copy of that in
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import json
 import os
 import random
@@ -26,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from moxi_dev.check import cpu_count
+from moxi_dev.testing import timed_slack
 
 from moxi_sessions import api as sessions
 from moxi_usage import index, limits, reports, store
@@ -108,7 +112,7 @@ def _claude_requests(t: ClaudeTranscript, n: int, rnd: random.Random, ids: Itera
         if m % 4 == 0:
             t.user("Look at the module and say what is left.")
         req = t.request(request_id=request_id, message_id=message_id, model=model,
-                        usage_block=usage(input=rnd.randint(1, 20),
+                        usage_block=usage(input_tokens=rnd.randint(1, 20),
                                           cache_read=rnd.randint(5_000, 150_000),
                                           cache_write=rnd.randint(0, 4_000),
                                           output=rnd.randint(20, 2_000)))
@@ -235,7 +239,7 @@ def build(root: Path, now: float) -> Corpus:
             r.user("Fix the failing test.")
             for _ in range(rnd.randint(1, 8)):
                 five = rnd.uniform(0, 100)
-                spent = token_usage(input=rnd.randint(2_000, 120_000),
+                spent = token_usage(input_tokens=rnd.randint(2_000, 120_000),
                                     cached=rnd.randint(0, 1_900),
                                     output=rnd.randint(20, 3_000))
                 windows = rate_limits(primary=(five, 300, r.clock + 2 * HOUR),
@@ -354,7 +358,7 @@ def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(be
     print(f"\npass with nothing changed over {FILES} sources: {taken:.0f} ms; files "
           f"opened: claude {opened[str(bench.claude)]}, codex {opened[str(bench.codex)]}")
     assert opened[str(bench.claude)] == 0
-    assert taken < 600
+    assert taken < 600 * timed_slack()
 
 
 @pytest.mark.timed
@@ -377,7 +381,7 @@ def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
         conn.close()
     print(f"\n30-day daily over {requests} claimed requests: {taken:.0f} ms through "
           f"report(); {bare:.0f} ms on an open connection, {utc:.0f} ms in UTC")
-    assert taken < 300
+    assert taken < 300 * timed_slack()
 
 
 @pytest.mark.timed
@@ -393,7 +397,7 @@ def test_a_30_day_terms_takes_under_300_ms_by_any_key(bench, by):
     assert first.rows and all(row["groups"] for row in first.rows)
     taken = median_ms(terms, 7)
     print(f"\n30-day terms by {by}: {taken:.0f} ms through report(), {len(first.rows)} rows")
-    assert taken < 300
+    assert taken < 300 * timed_slack()
 
 
 @pytest.mark.timed
@@ -408,7 +412,7 @@ def test_terms_over_all_time_by_model_takes_under_1_5_s(bench):
     taken = median_ms(terms, 5)
     print(f"\nterms by model over all time, {first.total['requests']} claimed requests: "
           f"{taken:.0f} ms through report()")
-    assert taken < 1500
+    assert taken < 1500 * timed_slack()
 
 
 @pytest.mark.timed
@@ -425,7 +429,7 @@ def test_the_requests_of_an_agent_of_6000_requests_take_under_150_ms(bench):
     taken = median_ms(requests, 7)
     print(f"\nrequests of one agent, {len(first.rows)} rows, {first.total['turns']} turns, "
           f"{len(first.total['marks'])} compactions: {taken:.0f} ms through report()")
-    assert taken < 150
+    assert taken < 150 * timed_slack()
 
 
 @pytest.mark.timed
@@ -444,7 +448,7 @@ def test_the_status_over_the_corpus_takes_under_1_s(bench):
         conn.close()
     print(f"\nstatus over {FILES} files: {first * 1000:.0f} ms through report(); "
           f"{bare:.0f} ms on an open connection, of which the duplicates {dup:.0f} ms")
-    assert first < 1 and bare < 1000
+    assert first < 1 * timed_slack() and bare < 1000 * timed_slack()
 
 
 @pytest.mark.timed
@@ -482,15 +486,22 @@ def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
     print(f"\nclaim step after a pass that read {result.read} files: {taken:.1f} ms over "
           f"{keys} keys in {len(spent)} transactions (slowest {max(spent)[0] * 1000:.1f} "
           f"ms); the whole pass {whole * 1000:.0f} ms")
-    assert taken < 50
+    assert taken < 50 * timed_slack()
 
 
 @pytest.mark.timed
-@pytest.mark.skipif((os.cpu_count() or 1) < 4, reason="a rebuild's target needs 4 cores")
-def test_a_rebuild_on_4_workers_takes_under_half_of_one_workers(bench, monkeypatch):
-    """Under half, not a quarter: the workers only read, and this process writes every
-    row and runs the claim over every key alone, which takes more than a quarter of a
-    one-worker rebuild whatever the workers do."""
+def test_a_rebuild_on_4_workers_takes_under_two_over_the_cores_of_one_workers(bench,
+                                                                              monkeypatch):
+    """A 4-worker rebuild takes under `2 / min(cores, 4)` of a one-worker one, `cores`
+    being half the CPUs this process may run on: a machine's CPUs are hyperthread pairs,
+    so half of them are its cores. At 8 CPUs or more that is under half, not a quarter:
+    the workers only read, and this process writes every row and runs the claim over
+    every key alone, which takes more than a quarter of a one-worker rebuild whatever the
+    workers do. On 4 CPUs it is under one worker's time. Under 2 cores it skips. A
+    ratio of two times of one run, so no timed slack."""
+    cores = cpu_count() // 2
+    if cores < 2:
+        pytest.skip(f"a rebuild's target needs 2 cores; this machine has {cores}")
     parent: dict[str, float] = {}
 
     def timing(name):
@@ -526,7 +537,7 @@ def test_a_rebuild_on_4_workers_takes_under_half_of_one_workers(bench, monkeypat
         print(f"\nrebuild on {workers} worker(s): {taken[workers]:.1f} s; in this "
               f"process: {parts}", end="")
     print(f"\nratio 4/1: {taken[4] / taken[1]:.2f}")
-    assert taken[4] < taken[1] / 2
+    assert taken[4] < taken[1] * 2 / min(cores, 4)
 
 
 def to_version_1() -> None:
@@ -583,7 +594,124 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     assert any(row.harness == "codex" and row.state == "fresh" for row in got.rows)
     taken = median_ms(lambda: limits.limits(now=bench.now, pull=False), 7)
     print(f"\nlimits() with no pull: {taken:.1f} ms (the first call {first:.1f} ms)")
-    assert taken < 100
+    assert taken < 100 * timed_slack()
+
+
+# --- the page's reads ----------------------------------------------------------------------
+#
+# Each is timed through the page server's own app as a browser asks it, in a new process
+# over the test's homes, so nothing is kept: no catalog of the sessions module, no price
+# table, no module loaded on first use. The sessions module names the sessions from the
+# corpus's roots, as it does in a page server's process. The same process then waits out
+# the catalog's reuse of its gather and reads again, so the roots are listed again while
+# the heads read before are kept, as a later answer finds them.
+
+#: Runs of each read, each in a process of its own; a bound holds the median run.
+READ_RUNS = 3
+#: How long the sessions module's catalog reuses a gather, in seconds.
+GATHER_REUSE_S = 2.0
+#: The bounds, in ms: about four times the slowest of ten runs on a quiet machine (the
+#: opening reads 790 ms with nothing kept and 680 ms after the reuse, the sessions 470
+#: and 430 ms), so that they hold on a loaded one.
+OPENING_COLD_MS = 3_000
+OPENING_LAPSED_MS = 3_000
+SESSIONS_COLD_MS = 1_800
+SESSIONS_LAPSED_MS = 1_800
+
+
+def opening_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The reads the page sends as it opens at its own address with no filter set, on an
+    install with projects: the limits, the status and Cost's 90 days; then, once the
+    status has answered, the last 30 days' chart, projects, models and terms, the closed
+    Sessions row's dearest session, and today's two dearest for Cost. All are sent at
+    once here, which asks more of the server than the page does. Prices is left out: the
+    page asks it only once the terms have answered, and it reads no index."""
+    day = today.isoformat()
+    month = {"since": (today - dt.timedelta(days=29)).isoformat(), "until": day}
+    return [("/api/limits", {}), ("/api/status", {}),
+            ("/api/daily", {"since": (today - dt.timedelta(days=89)).isoformat(),
+                            "until": day}),
+            ("/api/daily", {"by": "day", **month}), ("/api/projects", month),
+            ("/api/models", month), ("/api/terms", {"by": "model", **month}),
+            ("/api/sessions", {**month, "top": "1"}),
+            ("/api/sessions", {"since": day, "until": day, "top": "2"})]
+
+
+def sessions_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The first list of the Sessions section, opened over the last 30 days: the ten
+    dearest."""
+    return [("/api/sessions", {"since": (today - dt.timedelta(days=29)).isoformat(),
+                               "until": today.isoformat(), "top": "10"})]
+
+
+def _named(answer: dict) -> None:
+    """Every session the answer sends was found by the sessions module."""
+    assert answer["rows"] and all(row["known"] for row in answer["rows"]), answer["rows"]
+
+
+def time_reads(which: str) -> None:
+    """Run in a new process: send `which` reads together, once with nothing kept and
+    again once the gather's reuse has lapsed, check the answers, and print the two times
+    in ms as JSON."""
+    from test_page import ask, served
+
+    reads = {"opening": opening_reads, "sessions": sessions_reads}[which](dt.date.today())
+    app = served()
+
+    async def all_of_them():
+        return await asyncio.gather(*(ask(app, path, query) for path, query in reads))
+
+    def once() -> float:
+        start = time.perf_counter()
+        answers = asyncio.run(all_of_them())
+        taken = (time.perf_counter() - start) * 1000
+        assert [status for status, _ in answers] == [200] * len(reads), answers
+        for (path, query), (_, body) in zip(reads, answers):
+            if path == "/api/sessions" and query["top"] != "2":
+                _named(body)
+                assert len(body["rows"]) == int(query["top"]) < body["count"]
+        return taken
+
+    cold = once()
+    time.sleep(GATHER_REUSE_S + 0.5)
+    print(json.dumps({"cold": cold, "lapsed": once()}))
+
+
+def _in_new_processes(which: str, cwd: Path) -> tuple[list[float], list[float]]:
+    cold, lapsed = [], []
+    code = (f"import sys; sys.path.insert(0, {str(Path(__file__).parent)!r}); "
+            f"import test_bench; test_bench.time_reads({which!r})")
+    for _ in range(READ_RUNS):
+        done = subprocess.run([sys.executable, "-c", code], cwd=cwd, env=dict(os.environ),
+                              capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        taken = json.loads(done.stdout.strip().splitlines()[-1])
+        cold.append(taken["cold"])
+        lapsed.append(taken["lapsed"])
+    return cold, lapsed
+
+
+def _runs(taken: list[float]) -> str:
+    return f"median {statistics.median(taken):.0f} ms (" + ", ".join(
+        f"{ms:.0f}" for ms in taken) + ")"
+
+
+@pytest.mark.timed
+def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("opening", tmp_path)
+    print(f"\nthe page's {len(opening_reads(dt.date.today()))} opening reads sent together:"
+          f" nothing kept {_runs(cold)}; after the gather's reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < OPENING_COLD_MS * timed_slack()
+    assert statistics.median(lapsed) < OPENING_LAPSED_MS * timed_slack()
+
+
+@pytest.mark.timed
+def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("sessions", tmp_path)
+    print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after the "
+          f"gather's reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < SESSIONS_COLD_MS * timed_slack()
+    assert statistics.median(lapsed) < SESSIONS_LAPSED_MS * timed_slack()
 
 
 #: turns' guard loader, which is the one importer of usage's guard declarations.
@@ -620,7 +748,7 @@ def import_ms(module: str, cwd: Path, *, before: str = "", times: int = 15) -> f
 def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path):
     taken = import_ms(module, tmp_path)
     print(f"\nimport {module}: {taken:.1f} ms over a bare interpreter")
-    assert taken < budget
+    assert taken < budget * timed_slack()
 
 
 @pytest.mark.timed
@@ -629,7 +757,7 @@ def test_importing_the_guard_declarations_beside_turns_loader_takes_under_10_ms(
     taken = import_ms("moxi_usage.guards", tmp_path, before=f"{TURNS_GUARDS}, moxi.modules")
     print(f"\nimport moxi_usage.guards: {taken:.1f} ms over an interpreter that holds "
           f"turns' guard loader and the core's modules (the loader alone {turns:.1f} ms)")
-    assert taken < 10.0
+    assert taken < 10.0 * timed_slack()
 
 
 # --- the hook path: the warn-at listener and the worker ceiling's judge -----------------
@@ -703,7 +831,7 @@ class LongSession:
                 t.user("Look at the module and say what is left.")
             context = first + (last - first) * m // max(1, n - 1)
             req = t.request(model=HOOK_MODEL,
-                            usage_block=usage(input=3, cache_read=context - 1_003,
+                            usage_block=usage(input_tokens=3, cache_read=context - 1_003,
                                               cache_write=1_000, output=400))
             call = req.tool_use("Read", {"file_path": f"/work/project/src/m{m % 50}.py"})
             t.tool_result(call, tail if m == n - 1 else HOOK_RESULT)
@@ -749,7 +877,7 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
     from moxi_usage import mark, thresholds
 
     below = LongSession(last=90_000)
-    marked = {mark.WARN_AT: "1x", mark.CROSSING_AT: "1.5x"}
+    marked = {mark.WARN_AT_ENV: "1x", mark.CROSSING_AT_ENV: "1.5x"}
     main, agent = below.event(env=marked), below.event(env=marked, agent_id=HOOK_AGENT)
     assert mark.on_tool(main) is None and mark.on_tool(agent) is None
     armed = per_call_ms(lambda: mark.on_tool(main))
@@ -776,7 +904,7 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
           f"{agents:.3f} ms; floor {floor:.3f} ms below, {fired_floor:.4f} ms fired. "
           f"Of a call: last_request {read:.3f} ms, the thresholds' stamp {stamp:.3f} ms, "
           f"the selection {select:.4f} ms")
-    assert max(armed, fired, agents, floor, fired_floor) < 1.0
+    assert max(armed, fired, agents, floor, fired_floor) < 1.0 * timed_slack()
 
 
 #: A large tool result: on a heavy user's machine about one in 160 is over 100 KB.
@@ -789,14 +917,14 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(
 
     large = CODE * (LARGE_RESULT_KB * 1024 // len(CODE))
     s = LongSession(last=90_000, tail=large)
-    main = s.event(env={mark.WARN_AT: "1x"})
+    main = s.event(env={mark.WARN_AT_ENV: "1x"})
     assert mark.on_tool(main) is None
     taken = per_call_ms(lambda: mark.on_tool(main))
     source = sessions.Source("claude", str(s.t.path), HOOK_SESSION)
     read = per_call_ms(lambda: sessions.last_request(source))
     print(f"\nwarn-at listener after a {len(large) // 1024} KB tool result: {taken:.3f} ms "
           f"a call, of which last_request {read:.3f} ms")
-    assert taken < 1.0
+    assert taken < 1.0 * timed_slack()
 
 
 @pytest.mark.timed
@@ -804,7 +932,7 @@ def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds
     from moxi_usage import mark
 
     s = LongSession(last=160_000, agent_base=20_000, agent_last=20_000)
-    unstamped, stamped_off = s.event(env={}), s.event(env={mark.WARN_AT: "off"})
+    unstamped, stamped_off = s.event(env={}), s.event(env={mark.WARN_AT_ENV: "off"})
     agent = s.event(env={}, agent_id=HOOK_AGENT)
     for e in (unstamped, stamped_off, agent):
         assert mark.on_tool(e) is None
@@ -817,7 +945,7 @@ def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds
     assert mark._sessions == {}
     print("\nwarn-at listener with both purposes off, per call: " + ", ".join(
         f"{name} {ms * 1000:.1f} us" for name, ms in times.items()))
-    assert max(times.values()) < 0.01
+    assert max(times.values()) < 0.01 * timed_slack()
 
 
 @pytest.mark.timed
@@ -849,5 +977,5 @@ def test_the_ceiling_judge_takes_under_2_ms_a_call_below_the_band_and_past_the_h
           f"{under:.3f} ms a call below the band, {returns:.4f} ms for a return tool; "
           f"past the hard mark {denied:.3f} ms a refused call, {allowed:.3f} ms a "
           f"hand-off write the allowlist lets through")
-    assert under < 2.0
-    assert max(denied, allowed) < 2.0          # BUDGETS' hook_ms
+    assert under < 2.0 * timed_slack()
+    assert max(denied, allowed) < 2.0 * timed_slack()          # BUDGETS' hook_ms

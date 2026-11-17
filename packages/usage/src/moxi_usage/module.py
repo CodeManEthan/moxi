@@ -1,6 +1,9 @@
 """The announcement of Moxi's usage module, which moxi.modules reads."""
 
-INTERFACES = frozenset({1})
+#: Interface 2 is interface 1 plus `report`'s `work_dir` filter, the `projects` report by
+#: folder, `saving` on a `terms` total and `opened` on a limits row. A caller that needs
+#: any of those asks for 2; one written against 1 still loads.
+INTERFACES = frozenset({1, 2})
 API = "moxi_usage.api"
 CLI = "moxi_usage.cli:main"
 SUMMARY = ("How much of each plan window is used, how full a session's context is, and "
@@ -10,7 +13,8 @@ OPTIONAL = {
              "worker ceiling",
     "projects": "the token index records each session's project, so the projects report "
                 "and --project keep one project across worktrees and harnesses",
-    "ui": "the usage page, with its limits and cost blocks, in the browser UI shell",
+    "ui": "the usage page, with its limits and cost blocks and its row on Home, in the "
+          "browser UI shell",
 }
 GATED = {}
 #: The launcher stamps these per launch; usage reads them in the session's listener.
@@ -29,7 +33,7 @@ SESSION_ENV = {
 SETTINGS = "settings.toml"
 #: The install question: the worker ceiling's switch, asked as "usage: <text>? [y/N]".
 QUESTIONS = {
-    "ceiling.on": "the worker ceiling (warn a subagent, then refuse its tools except to "
+    "ceiling.enabled": "the worker ceiling (warn a subagent, then refuse its tools except to "
                   "hand off, once its context grows past ceiling.warn_tokens and "
                   "ceiling.hard_tokens)",
 }
@@ -37,15 +41,20 @@ SETUP = None
 SEGMENT = None
 #: usage's page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_usage.page:PAGE"
-#: What usage offers the browser UI shell: its panel, and two blocks for the home view.
+#: What usage offers the browser UI shell: its panel, two blocks for the modules view, and
+#: its row on Home, which reads `/api/summary`.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Usage", "contract": 1, "place": "page",
+             "group": "daily", "order": 30,
              "doc": "Tokens and cost by day, session, project and model, with the limits"},
     "limits": {"script": "limits.js", "title": "Limits", "contract": 1, "place": "block",
                "home": True,
                "doc": "Each plan window: how much is used, when it resets and when it fills"},
     "cost": {"script": "cost.js", "title": "Cost", "contract": 1, "place": "block",
              "home": True, "doc": "Cost and tokens today and over the last 7 days"},
+    "row": {"script": "row.js", "title": "Usage", "contract": 1, "place": "block",
+            "home": True, "home_as": "row", "order": 300,
+            "doc": "How full the plan windows are and today's cost, on one line"},
 }
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1

@@ -298,7 +298,7 @@ def measurable_sessions(count=20, *, entrypoint="cli", first=0):
         for k in range(1, 7):
             t.user("go")
             t.assistant("ok", request_id=f"req_{n}_{k}",
-                        usage=usage(input=2, cache_read=1000 * k, cache_write=1000,
+                        usage=usage(input_tokens=2, cache_read=1000 * k, cache_write=1000,
                                     output=11))
         t.write()
 
@@ -392,18 +392,18 @@ def test_the_marks_row_sweeps_old_files_and_counts():
 
     from moxi_usage import mark
 
-    directory = mark.state_dir()
-    directory.mkdir(parents=True)
+    marks_dir = mark.state_dir()
+    marks_dir.mkdir(parents=True)
     for name, age in (("claude-old.json", 8), ("claude-old.json.lock", 8),
                       ("claude-new.json", 1)):
-        (directory / name).write_text('{"schema": 1}')
-        os.utime(directory / name, (NOW - age * 86400, NOW - age * 86400))
+        (marks_dir / name).write_text('{"schema": 1}')
+        os.utime(marks_dir / name, (NOW - age * 86400, NOW - age * 86400))
     found = row("marks")
     assert found.state == "ok"
     assert found.detail == ("1 session with fired marks kept; deleted 1 fired-mark file "
                             "older than 7 days and the ceiling markers of 0 agents older "
                             "than 7 days")
-    assert sorted(p.name for p in directory.iterdir()) == ["claude-new.json"]
+    assert sorted(p.name for p in marks_dir.iterdir()) == ["claude-new.json"]
 
 
 def test_the_marks_row_with_nothing_kept_is_ok():

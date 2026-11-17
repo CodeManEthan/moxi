@@ -11,6 +11,7 @@ import unicodedata
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_secrets import PrivateNames, SetUnavailable, _folds, engine, private_names, redact
 from moxi_secrets import names as names_mod
@@ -90,7 +91,7 @@ def test_separator_heavy_entries_run_in_linear_time(eng, entry):
     text = " " * 320_000 + "b"
     started = time.perf_counter()
     hits(text, [entry, "a b"], eng=eng)
-    assert time.perf_counter() - started < 3.0
+    assert time.perf_counter() - started < 3.0 * timed_slack()
 
 
 def test_the_case_folds_agree_on_both_engines():

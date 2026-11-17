@@ -1,9 +1,10 @@
 // The UI module's own build steps, run by tools/web/build.mjs before anything is bundled:
 //
 // - theme.css, from tokens.json: every token as `--moxi-<name>` on `:root`, each colour
-//   written once as `light-dark(<the light set's value>, <the dark set's value>)`;
+//   written as `light-dark(<the light set's value>, <the dark set's value>)` of the
+//   default theme, then each other theme's colours under `:root[data-theme-name="<name>"]`;
 // - manifest.json, the gateway's web app manifest, which it serves at
-//   /manifest.webmanifest, its colours the light set's background;
+//   /manifest.webmanifest, its colours the default theme's light background;
 // - tools/web/client.d.ts, the types of /m/ui/client.js, from src/client.ts by tsc's
 //   declaration output. Every page's tsc resolves the client's URL to that file;
 // - offline.js, the offline page's script, and sw.js, the gateway's worker, with the
@@ -33,29 +34,57 @@ function family(names, where) {
   }).join(", ");
 }
 
+/** `value` as a table (an object that is no list), or a refusal naming `what`. */
+function table(value, what) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`tokens.json: ${what}`);
+  return value;
+}
+
 /**
- * The colour sets tokens.json names in `$sets`, as `{light, dark}`: each set's name. There
- * are exactly two, one shown in light mode and one in dark; theme.css writes each colour as
- * a `light-dark()` pair of the two.
+ * The themes tokens.json names in `$themes`, in its order, each as `{light, dark}`: the
+ * name of the set it shows in each mode. The first is the default theme. Every set in
+ * `$sets` belongs to exactly one theme, in the mode the set names.
  */
-export function sets(tokens) {
-  const table = tokens.$sets;
-  if (table === null || typeof table !== "object" || Array.isArray(table)) {
-    throw new Error("tokens.json: $sets names the colour sets");
-  }
-  const names = Object.keys(table);
-  const byMode = {};
-  for (const name of names) {
+export function themes(tokens) {
+  const sets = table(tokens.$sets, "$sets names the colour sets");
+  for (const [name, set] of Object.entries(sets)) {
     if (!NAME.test(name)) throw new Error(`tokens.json: $sets: ${name} is not a set name`);
-    const mode = table[name]?.mode;
-    if (mode !== "light" && mode !== "dark") throw new Error(`tokens.json: $sets: ${name}'s mode is light or dark`);
-    if (byMode[mode] !== undefined) throw new Error(`tokens.json: $sets: ${byMode[mode]} and ${name} are both ${mode}`);
-    byMode[mode] = name;
+    if (set?.mode !== "light" && set?.mode !== "dark") {
+      throw new Error(`tokens.json: $sets: ${name}'s mode is light or dark`);
+    }
   }
-  if (names.length !== 2 || !byMode.light || !byMode.dark) {
-    throw new Error("tokens.json: $sets holds exactly two sets, one light and one dark");
+  const named = table(tokens.$themes, "$themes names the themes");
+  if (Object.keys(named).length === 0) throw new Error("tokens.json: $themes names at least one theme");
+  const owner = {};
+  const out = {};
+  for (const [theme, pair] of Object.entries(named)) {
+    if (!NAME.test(theme)) throw new Error(`tokens.json: $themes: ${theme} is not a theme name`);
+    const where = `tokens.json: $themes: ${theme}`;
+    table(pair, `$themes: ${theme} names one light set and one dark set`);
+    if (Object.keys(pair).sort().join() !== "dark,light") {
+      throw new Error(`${where} names one light set and one dark set`);
+    }
+    for (const mode of ["light", "dark"]) {
+      const set = pair[mode];
+      if (typeof set !== "string" || !Object.hasOwn(sets, set)) {
+        throw new Error(`${where}: its ${mode} set ${JSON.stringify(set)} is not a set in $sets`);
+      }
+      if (sets[set].mode !== mode) throw new Error(`${where}: ${set} is a ${sets[set].mode} set, not a ${mode} one`);
+      if (owner[set] !== undefined) throw new Error(`tokens.json: $themes: ${set} is in ${owner[set]} and ${theme}`);
+      owner[set] = theme;
+    }
+    out[theme] = { light: pair.light, dark: pair.dark };
   }
-  return { light: byMode.light, dark: byMode.dark };
+  for (const name of Object.keys(sets)) {
+    if (owner[name] === undefined) throw new Error(`tokens.json: $sets: ${name} is in no theme`);
+  }
+  return out;
+}
+
+/** The default theme: `$themes`' first, as `{name, light, dark}`. */
+export function defaultTheme(tokens) {
+  const [[name, pair]] = Object.entries(themes(tokens));
+  return { name, ...pair };
 }
 
 /** A colour token's value in each set, checked: every set named, each #rrggbb, no other. */
@@ -78,12 +107,13 @@ function colours(name, token, names) {
   return values;
 }
 
-/** The CSS value of one token, checked against its type. */
-function value(name, token, pair) {
+/** The CSS value of one token for the theme `pair`, checked against its type; `sets` is
+ * every set's name. */
+function value(name, token, pair, sets) {
   const where = `tokens.json: ${name}`;
   switch (token.$type) {
     case "color": {
-      const values = colours(name, token, [pair.light, pair.dark]);
+      const values = colours(name, token, sets);
       return `light-dark(${values[pair.light]}, ${values[pair.dark]})`;
     }
     case "dimension":
@@ -101,22 +131,34 @@ function value(name, token, pair) {
   }
 }
 
-/** theme.css's text from the parsed tokens.json. */
+/** theme.css's text from the parsed tokens.json: the default theme and every other token
+ * on `:root`, then each other theme's colours where the root names it. */
 export function themeCss(tokens) {
-  const pair = sets(tokens);
+  const [[first, pair], ...others] = Object.entries(themes(tokens));
+  const sets = Object.keys(tokens.$sets);
+  const named = (name, theme) => `${name}: light ${theme.light}, dark ${theme.dark}.`;
   const lines = [
     "/* The shared theme, written by `npm run build` from packages/ui/web/tokens.json.",
-    `   Light: ${pair.light}. Dark: ${pair.dark}. */`,
-    ":root {",
-    "  color-scheme: light dark;",
+    `   The default theme, ${named(first, pair)}`,
+    ...others.map(([name, theme]) => `   ${named(name, theme)}`),
   ];
+  lines[lines.length - 1] += " */";
+  lines.push(":root {", "  color-scheme: light dark;");
+  const colourNames = [];
   for (const [name, token] of Object.entries(tokens)) {
     if (name.startsWith("$")) continue;
     if (!NAME.test(name)) throw new Error(`tokens.json: ${name} is not a token name`);
-    lines.push(`  --moxi-${name}: ${value(name, token, pair)};`);
+    lines.push(`  --moxi-${name}: ${value(name, token, pair, sets)};`);
+    if (token.$type === "color") colourNames.push(name);
   }
   lines.push("}", ':root[data-theme="light"] { color-scheme: light; }',
-             ':root[data-theme="dark"] { color-scheme: dark; }', "");
+             ':root[data-theme="dark"] { color-scheme: dark; }');
+  for (const [theme, its] of others) {
+    lines.push(`:root[data-theme-name="${theme}"] {`);
+    for (const name of colourNames) lines.push(`  --moxi-${name}: ${value(name, tokens[name], its, sets)};`);
+    lines.push("}");
+  }
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -124,10 +166,10 @@ export function themeCss(tokens) {
 export const ICON_SIZES = [192, 512];
 
 /** manifest.json's text: the installed app's name, where it starts, its colours (the
- * light set's background: a manifest holds one colour) and its icons. Each icon fills its
+ * default theme's light background: a manifest holds one colour) and its icons. Each icon fills its
  * square and keeps its mark in the middle, so the phone may crop it to any shape. */
 export function manifest(tokens) {
-  const background = tokens.bg?.$extensions?.moxi?.sets?.[sets(tokens).light];
+  const background = tokens.bg?.$extensions?.moxi?.sets?.[defaultTheme(tokens).light];
   if (!COLOR.test(background ?? "")) throw new Error("tokens.json: bg is the manifest's colour and must be #rrggbb");
   const value = {
     name: "Moxi",

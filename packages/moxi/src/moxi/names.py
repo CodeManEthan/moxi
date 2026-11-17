@@ -12,7 +12,7 @@ Every module lives in the one repository, so `repo` spells the same for each. Th
 itself is `moxi` as a distribution, an import package and a prefix, lives in that same
 repository, and is not a module.
 
-Every skill Moxi ships, each subfolder `is_skill_folder` counts in a module's `SKILLS`
+Every skill Moxi ships, each subfolder `is_skill_dir` counts in a module's `SKILLS`
 folder, is named `moxi-<name>` (`is_skill_name`), and its `SKILL.md` `name:` is that
 folder name. The prefix keeps a shipped skill from taking the name of a user's own.
 """
@@ -43,7 +43,7 @@ VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", 
 
 #: Why the core keeps each name of `RESERVED`, one reason per name, as `reserved_why`
 #: gives it. `test` is kept because `MOXI_TEST_` is the prefix of the variables
-#: moxi-dev's test tiers read (moxi-dev's `contract.DEV_ENV_PREFIX`): a module named
+#: moxi-dev's test tiers read (moxi-dev's `contract.TEST_PREFIX_ENV`): a module named
 #: `test` would have that prefix for its own variables, and the two would collide.
 #: `anchor` is kept because a module of that name would have the home variable
 #: `MOXI_ANCHOR_HOME`, which is the test kits' own stand-in for the account's folder
@@ -98,7 +98,7 @@ def check_module_name(name: object) -> str:
     return name  # type: ignore[return-value]
 
 
-def is_skill_folder(name: str) -> bool:
+def is_skill_dir(name: str) -> bool:
     """True when a subfolder named `name` of a module's `SKILLS` folder is a skill: any
     name but one that starts with `.` and `__pycache__`."""
     return not name.startswith(".") and name != "__pycache__"
@@ -146,5 +146,5 @@ def env_prefix(name: str) -> str:
 
 __all__ = ["HARNESS", "OWNER", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
            "SKILL_NAME_MAX", "is_module_name", "is_reserved", "reserved_why",
-           "check_module_name", "is_skill_folder", "is_skill_name", "check_skill_name",
+           "check_module_name", "is_skill_dir", "is_skill_name", "check_skill_name",
            "distribution", "import_name", "repo", "env_prefix"]

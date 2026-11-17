@@ -8,15 +8,16 @@ import time
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_loadout import doctor, install
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    return loadout_dir
 
 
 def by_name(rows) -> dict:
@@ -35,8 +36,8 @@ def test_a_clean_install_reads_ok(lo):
     assert rows["codex"].state == "ok"
 
 
-def test_no_manifest_yet_is_ok(folder):
-    kit.configure(folder)
+def test_no_manifest_yet_is_ok(loadout_dir):
+    kit.configure(loadout_dir)
     rows = by_name(doctor.rows())
     assert rows["manifest"].state == "ok" and "yet" in rows["manifest"].detail
     assert "no [global] mode" in rows["global"].detail
@@ -101,8 +102,8 @@ def test_a_hook_program_that_does_not_resolve_warns(lo):
 def test_a_hook_command_the_shell_runs_does_not_warn(lo, command):
     script = os.path.join(os.environ["HOME"], "bin", "guard.sh")
     os.makedirs(os.path.dirname(script))
-    with open(script, "w") as f:
-        f.write("#!/bin/sh\n")
+    with open(script, "w") as fh:
+        fh.write("#!/bin/sh\n")
     os.chmod(script, 0o755)
     kit.manifest(lo, '[user]\nhooks = ["guard"]\n[hook.guard]\nevent = "PreToolUse"\n'
                      f'command = "{command}"\n')
@@ -126,8 +127,8 @@ def test_a_generated_file_no_agent_uses_warns(lo):
     assert install.install().code == 0
     assert "generated" not in by_name(doctor.rows())
     generated = stores.generated_dir() / "codex" / "helper.toml"
-    with open(generated, "a", encoding="utf-8") as f:
-        f.write("# my edit\n")
+    with open(generated, "a", encoding="utf-8") as fh:
+        fh.write("# my edit\n")
     kit.manifest(lo, '[user]\n')
     assert install.install().code == 0
     row = by_name(doctor.rows())["generated"]
@@ -181,7 +182,7 @@ def test_the_doctor_gives_git_short_calls(lo, monkeypatch):
 
     def run(argv, **kwargs):
         if os.path.basename(str(argv[0])) == "git":
-            seen.append(kwargs["timeout"])
+            seen.append(kwargs["timeout_s"])
         return real(argv, **kwargs)
 
     monkeypatch.setattr(proc, "run", run)
@@ -203,7 +204,7 @@ def test_the_rows_finish_inside_the_doctors_time_while_git_hangs(lo, tmp_path, m
     start = time.monotonic()
     rows = by_name(doctor.rows())
     took = time.monotonic() - start
-    assert took < 8, took
+    assert took < 8 * timed_slack(), took
     assert rows["would-commit"].state == "warn"
 
 
@@ -224,7 +225,7 @@ def test_an_occupant_with_git_hanging_still_finishes_inside_the_doctors_time(
     start = time.monotonic()
     rows = by_name(doctor.rows())
     took = time.monotonic() - start
-    assert took < 8, took
+    assert took < 8 * timed_slack(), took
     row = rows["harness claude"]
     assert row.state == "warn" and "blocked" in row.detail
     assert "git did not answer in time" in row.detail

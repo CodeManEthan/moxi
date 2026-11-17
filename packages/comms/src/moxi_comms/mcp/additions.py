@@ -22,13 +22,12 @@ start carries no token, and gets no entry.
 
 from __future__ import annotations
 
+from ..constants import SHELL_REACH_ENV, TOKEN_ENV, URL_ENV
+
 #: The session's token for comms' tools, minted per launch by the wrapper.
-TOKEN_ENV = "MOXI_COMMS_MCP_TOKEN"
 #: The address of comms' tools for this session, as the daemon answered it.
-URL_ENV = "MOXI_COMMS_MCP_URL"
 #: `off` when the session's shell can't reach comms (a Codex sandbox with its network
 #: off), so its tools are its one way to send.
-SHELL_REACH_ENV = "MOXI_COMMS_SHELL_REACH"
 #: What `MOXI_COMMS_SHELL_REACH` holds when the shell can't reach comms.
 SHELL_REACH_OFF = "off"
 #: The variables a wrapper stamps for comms' tools, and scrubs from what it inherits.
@@ -37,7 +36,7 @@ STAMPS = (TOKEN_ENV, URL_ENV, SHELL_REACH_ENV)
 #: The server's name in a launch, which harnesses put in each tool's name.
 SERVER = "comms"
 #: The six tools, as the endpoint names them.
-TOOLS = ("send", "reply", "agents", "whoami", "history", "delete")
+TOOLS = ("send", "reply", "agents", "whoami", "history", "remove")
 #: Claude's permission rule for each tool.
 CLAUDE_RULES = tuple(f"mcp__{SERVER}__{tool}" for tool in TOOLS)
 

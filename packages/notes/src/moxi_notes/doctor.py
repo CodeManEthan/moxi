@@ -10,7 +10,7 @@ them:
   that notes' setup has never run in this home (a plain wheel install, say), since setup
   is what makes it; `warn` when it is no git repo, or inside one but not its top:
   snapshots and the gates are off until it is one.
-- snapshot: a trigger is on (`snapshot.auto` or the timer) and the saved spec equals the
+- snapshot: a trigger is on (`snapshot.session_end` or the timer) and the saved spec equals the
   one notes' config gives. `off` when both triggers are off; `warn` when the saved spec
   differs or none is saved.
 - gates: both git hook pieces registered and enabled in the notes repo; `fail` otherwise.
@@ -96,11 +96,11 @@ def _snapshot(places) -> Row:
     from . import spec
 
     s = places.settings
-    auto, timer = s["snapshot.auto"], s["snapshot.timer"]
+    auto, timer = s["snapshot.session_end"], s["snapshot.timer"]
     if not auto and not timer:
-        return Row(MODULE, "snapshot", "off", "snapshot.auto and snapshot.timer are both "
+        return Row(MODULE, "snapshot", "off", "snapshot.session_end and snapshot.timer are both "
                    "off, so only moxi notes snapshot commits the notes",
-                   "moxi config set notes snapshot.auto true")
+                   "moxi config set notes snapshot.session_end true")
     try:
         saved = saved_spec(places.root, spec.NAME)
     except SpecError as exc:
@@ -115,7 +115,7 @@ def _snapshot(places) -> Row:
     on = " and ".join(x for x, y in (("after agent turns", auto), ("on the timer", timer))
                       if y)
     push = s["snapshot.push"]
-    return Row(MODULE, "snapshot", "ok", f"{on}, at most every {s['snapshot.interval']} "
+    return Row(MODULE, "snapshot", "ok", f"{on}, at most every {s['snapshot.interval_minutes']} "
                f"min, " + (f"pushed to {push}" if push else "not pushed")
                + "; the saved spec equals the config")
 

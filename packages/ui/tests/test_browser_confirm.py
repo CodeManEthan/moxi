@@ -79,7 +79,8 @@ def test_the_sheet_shows_the_act_and_a_double_click_posts_once(ui_shell, ui_page
     ui_page.evaluate("""() => document.addEventListener("securitypolicyviolation", (event) => {
       console.error(`policy: ${event.violatedDirective}`);
     })""")
-    ui_page.locator("#moxi-menu a[data-module=fixture]").click()
+    ui_page.locator("#moxi-pages-button").click()
+    ui_page.locator("#moxi-pages a[data-module=fixture]").click()
     panel = ui_page.locator("#moxi-panel > moxi-fixture-page")
     posts = _posts(ui_page)
     runs = len(_lines(ui_shell, "keys"))
@@ -201,7 +202,7 @@ def test_a_page_server_that_fails_to_start_or_dies_and_a_shell_that_is_gone(
             shell.kill("fixture")
         assert _confirmed(page, {"by": 1}) == {"outcome": "refused", "code": 502, "text": NOT_SENT}
     finally:
-        fixture_kit.fail_start(shell, on=False)
+        fixture_kit.fail_start(shell, enabled=False)
     # The shell itself gone: no answer at all.
     shell.stop()
     assert _confirmed(page, {"by": 1}) == {"outcome": "unknown", "text": MAY_HAVE_ACTED}

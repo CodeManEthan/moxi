@@ -32,10 +32,10 @@ def catalogue(*lines: tuple[str, str]) -> str:
         for name, dist in lines)
 
 
-def member(root: Path, directory: str, name: str, version: str = "0.1.0", *,
+def member(root: Path, member_dir: str, name: str, version: str = "0.1.0", *,
            extra: str = "", module: str | None = None) -> Path:
     """A member that passes the release step; `extra` goes in its [project] table."""
-    package = root / "packages" / directory
+    package = root / "packages" / member_dir
     release_files(package, version)
     text = f'[project]\nname = "{name}"\nversion = "{version}"\n{METADATA}{extra}'
     if module:
@@ -241,7 +241,31 @@ def test_a_relative_readme_link_fails_and_names_the_absolute_one(ws):
     assert problems(ws) == [
         "packages/alpha: README.md:3: links to LICENSE by a relative path, which leads "
         "nowhere on PyPI; link to "
-        "https://github.com/example/moxi/blob/main/packages/alpha/LICENSE instead"]
+        "https://github.com/example/moxi/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE "
+        "instead"]
+
+
+def test_a_link_into_the_repo_names_this_versions_release_tag(ws):
+    base = "https://github.com/example/moxi"
+    (ws / "packages/alpha/README.md").write_text(
+        f"# alpha\n\n[ok]({base}/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE), "
+        f"[tree]({base}/tree/main/packages), [other](https://example.com/blob/main/x)\n"
+        f"[old]({base}/blob/main/packages/alpha/LICENSE)\n"
+        f"[label]: {base}/blob/moxi-alpha-v0.1.9/CONTRIBUTING.md\n")
+    assert problems(ws) == [
+        f"packages/alpha: README.md:4: links to {base}/blob/main/packages/alpha/LICENSE, at "
+        f"main rather than this version's release tag; link to "
+        f"{base}/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE instead",
+        f"packages/alpha: README.md:5: links to {base}/blob/moxi-alpha-v0.1.9/"
+        f"CONTRIBUTING.md, at moxi-alpha-v0.1.9 rather than this version's release tag; "
+        f"link to {base}/blob/moxi-alpha-v0.2.0/CONTRIBUTING.md instead"]
+
+
+def test_the_heading_reader_and_the_scheme_are_publishings():
+    from moxi_publishing import tags
+
+    assert release.tags is tags
+    assert release._first_version_heading("## Unreleased\n\n## 1.2 (2026-01-01)\n") == "1.2"
 
 
 def test_a_missing_readme_file_fails(ws):
@@ -279,3 +303,59 @@ def test_each_problem_names_member_field_and_fix(ws):
     assert (problem.member, problem.field, problem.said) == (
         "packages/alpha", "CHANGELOG.md", "missing")
     assert problem.fix.startswith("add one")
+
+
+def test_the_cores_spelling_of_its_release_tags_is_publishings():
+    from moxi import catalogue
+    from moxi_publishing import tags
+
+    assert catalogue.TAG_PREFIX == tags.tag_name(tags.CORE, "")
+
+
+# -- the not-ready and ready lists ----------------------------------------------------------
+
+def lists(root: Path, not_ready: list[str], ready: list[str] | None) -> None:
+    text = (root / "pyproject.toml").read_text()
+    text += f"\n[tool.moxi-publishing]\nnot-ready = {not_ready!r}\n".replace("'", '"')
+    if ready is not None:
+        text += f"ready = {ready!r}\n".replace("'", '"')
+    (root / "pyproject.toml").write_text(text)
+
+
+def test_every_member_on_one_list_passes(ws):
+    lists(ws, ["moxi", "moxi-alpha"], ["moxi-beta"])
+    assert problems(ws) == []
+
+
+def test_a_member_on_neither_list_fails_once_a_ready_list_is_kept(ws):
+    lists(ws, ["moxi", "moxi-alpha"], [])
+    assert problems(ws) == [
+        "pyproject.toml: [tool.moxi-publishing]: moxi-beta is on neither "
+        "[tool.moxi-publishing] not-ready nor ready; put moxi-beta on not-ready, or on "
+        "ready once it is confirmed"]
+
+
+def test_a_member_on_both_lists_fails(ws):
+    lists(ws, ["moxi", "moxi-alpha", "Moxi_Beta"], ["moxi-beta"])
+    assert [p.split(": ", 2)[2] for p in problems(ws)] == [
+        "moxi-beta is on both [tool.moxi-publishing] not-ready and ready; put moxi-beta "
+        "on not-ready, or on ready once it is confirmed"]
+
+
+def test_without_a_ready_list_only_not_ready_counts(ws):
+    lists(ws, ["moxi"], None)
+    assert problems(ws) == []
+
+
+def test_a_list_that_is_no_list_of_names_fails(ws):
+    lists(ws, ["moxi"], None)
+    with (ws / "pyproject.toml").open("a") as fh:
+        fh.write("ready = \"moxi-alpha\"\n")
+    (found,) = problems(ws)
+    assert "[tool.moxi-publishing]: can't be read" in found
+    assert "ready is not a list of names" in found
+
+
+def test_the_repo_s_own_lists_name_every_member_once():
+    root = Path(__file__).resolve().parents[3]
+    assert release.readiness_problems(root) == []

@@ -1,7 +1,10 @@
 """The desktop's gateway routes, under `/m/ui/`, with the desktop session's cookie and key;
 the gateway never reaches them.
 
-    POST /m/ui/api/gateway/pair      mint a pairing code; answers the pairing URL
+    GET  /m/ui/api/gateway/state     whether the gateway is installed, its switch, whether
+                                     it serves, its address and why it doesn't serve
+    POST /m/ui/api/gateway/pair      mint a pairing code; answers the pairing URL and when
+                                     the code ends
     GET  /m/ui/api/gateway/devices   the paired devices
     POST /m/ui/api/gateway/revoke    {"id"}: delete a device and end its sessions at once
     GET  /m/ui/api/gateway/log       the audit log's last rows and each device's sign-ins
@@ -12,6 +15,7 @@ The handlers reach the shell they serve through `moxi_ui.page.current()`.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from moxi_ui.loopback.api import Field, Out, Refused, Route
@@ -19,8 +23,8 @@ from moxi_ui.loopback.api import Field, Out, Refused, Route
 from . import audit, pairing
 from .devices import Device, Devices
 
-__all__ = ["DEVICES_SHAPE", "DEVICE_ROW", "LOG_SHAPE", "ROUTES", "device_row", "devices", "log",
-           "pair", "revoke"]
+__all__ = ["DEVICES_SHAPE", "DEVICE_ROW", "LOG_SHAPE", "ROUTES", "STATE_SHAPE", "device_row",
+           "devices", "log", "pair", "revoke", "state", "state_of"]
 
 _HERE = "moxi_ui.gateway.desk"
 
@@ -41,6 +45,48 @@ LOG_SHAPE = {
 }
 
 
+#: The gateway as the desk's settings show it. `exposure` is tunnel's word for who can
+#: reach the address (`internet` or `tailnet`).
+STATE_SHAPE = {
+    "installed": Out("bool"), "switch": Out("bool"), "on": Out("bool"),
+    "host": Out("string", nullable=True), "port": Out("int", nullable=True),
+    "exposure": Out("string", nullable=True), "reads_only": Out("bool"),
+    "problem": Out("string", nullable=True),
+}
+
+_EXPOSURES = ("internet", "tailnet")
+
+
+def state_of(gateway: Any) -> dict[str, Any]:
+    """The gateway's state from what the shell's `Gateway` holds, with no read of its own.
+
+    `installed` is false when the shell runs no `Gateway` (every other field is then false
+    or null), else whether the `gateway` extra is installed. `host`, `port` and `exposure`
+    are the address's when one is read; a record that can't be read is no address.
+    `reads_only` is true unless the phone's acts are mounted. `problem` is set only while
+    the switch is on and the gateway doesn't serve: the first of the moved runtime
+    directory, the hold's problem and the tunnel's reason, which can all be unset."""
+    if gateway is None:
+        return {"installed": False, "switch": False, "on": False, "host": None, "port": None,
+                "exposure": None, "reads_only": False, "problem": None}
+    address = None if gateway.refused else gateway.address
+    host = getattr(address, "host", None)
+    port = getattr(address, "port", None)
+    exposure = getattr(address, "exposure", None)
+    on = bool(gateway.on)
+    problem = None
+    if gateway.switch and not on:
+        problem = gateway.moved or gateway.problem or gateway.tunnel_reason
+    return {
+        "installed": bool(gateway.installed), "switch": bool(gateway.switch), "on": on,
+        "host": host if isinstance(host, str) else None,
+        "port": port if isinstance(port, int) and not isinstance(port, bool) else None,
+        "exposure": exposure if exposure in _EXPOSURES else None,
+        "reads_only": not gateway.mount.mounted,
+        "problem": problem if isinstance(problem, str) else None,
+    }
+
+
 def device_row(device: Device) -> dict[str, Any]:
     return {"id": device.id, "name": device.name, "created": device.created,
             "used": device.used, "passkey": device.passkey, "stale": device.stale,
@@ -58,20 +104,27 @@ def _devices(shell: Any) -> Devices:
     return phone.devices if phone is not None else Devices.of(shell.layout.state_dir())
 
 
+async def state(call: Any) -> dict[str, Any]:
+    """The gateway's state, as the shell's `Gateway` last read it."""
+    return state_of(getattr(_shell(), "gateway", None))
+
+
 async def pair(call: Any) -> dict[str, Any]:
-    """Mint a pairing code at the gateway's address and answer its URL. Refused while the
-    gateway has no address, or takes no hold because this shell's environment moves its
-    runtime directory."""
+    """Mint a pairing code at the gateway's address and answer its URL, and `until`, when
+    the code ends (epoch seconds). Refused while the gateway has no address, or takes no
+    hold because this shell's environment moves its runtime directory."""
     gateway = getattr(_shell(), "gateway", None)
     if gateway is None:
         raise Refused("this shell runs no gateway")
     if gateway.moved:
         raise Refused(gateway.moved)
+    minted = time.time()
     try:
-        url = await asyncio.to_thread(pairing.mint, gateway.runtime_dir, gateway.address)
-    except pairing.NoAddress as err:
-        raise Refused(str(err)) from None
-    return {"url": url}
+        url = await asyncio.to_thread(pairing.mint, gateway.runtime_dir, gateway.address,
+                                      clock=lambda: minted)
+    except pairing.NoAddress as exc:
+        raise Refused(str(exc)) from None
+    return {"url": url, "until": minted + pairing.PAIR_TTL}
 
 
 async def devices(call: Any) -> dict[str, Any]:
@@ -109,7 +162,9 @@ async def log(call: Any) -> dict[str, Any]:
 
 #: The routes, joined to the shell's page.
 ROUTES = (
-    Route("/api/gateway/pair", "act", f"{_HERE}:pair", returns={"url": Out("string")}),
+    Route("/api/gateway/state", "read", f"{_HERE}:state", returns=STATE_SHAPE),
+    Route("/api/gateway/pair", "act", f"{_HERE}:pair",
+          returns={"url": Out("string"), "until": Out("float")}),
     Route("/api/gateway/devices", "read", f"{_HERE}:devices", returns=DEVICES_SHAPE),
     Route("/api/gateway/revoke", "act", f"{_HERE}:revoke",
           body={"id": Field("string", max=64)}, returns={"ok": Out("bool")}),

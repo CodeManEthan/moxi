@@ -124,7 +124,7 @@ def ready(config_file):
     class Handler(BaseHTTPRequestHandler):
         status = 200
 
-        def do_GET(self):  # noqa: N802 - http.server's name
+        def do_GET(self):  # noqa: N802 -- http.server's name
             body = json.dumps({"status": Handler.status, "readyConnections": 4}).encode()
             self.send_response(Handler.status if self.path == "/ready" else 404)
             self.send_header("Content-Length", str(len(body)))

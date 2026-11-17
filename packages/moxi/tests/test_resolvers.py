@@ -2,7 +2,7 @@
 are given, and only names of the set the core records.
 
 The resolvers: every `Layout` method, `paths.core()`, `paths.core_lock`, `paths.home`,
-`paths._expanduser`, `place.folders` and `paths.which`. Each runs over a mapping that
+`paths._expanduser`, `place.harness_dirs` and `paths.which`. Each runs over a mapping that
 notes every name read, on Linux and macOS and on Windows (the core's Windows branch, with
 the shell's folders made up), and under a process environment poisoned in every name the
 set holds, so a direct read of the process shows as a wrong answer.
@@ -105,7 +105,7 @@ def resolve(env) -> dict[str, object]:
     except LookupError as exc:
         found["home"] = repr(exc)
     found["expanduser"] = paths._expanduser("~/x", os.environ if env is None else env)
-    found["folders"] = place.folders(env)
+    found["folders"] = place.harness_dirs(env)
     found["which"] = paths.which("tool", env)
     return found
 
@@ -125,11 +125,11 @@ def platform(request, monkeypatch, tmp_path):
 def place_world(values: Mapping[str, str], row: str, base: Path) -> None:
     """A program `tool` on the mapping's PATH, and a core settings file where the mapping
     places it, holding a harness row named `row`."""
-    for folder in filter(None, (values.get("PATH") or "").split(os.pathsep)):
-        Path(folder).mkdir(parents=True, exist_ok=True)
+    for path_dir in filter(None, (values.get("PATH") or "").split(os.pathsep)):
+        Path(path_dir).mkdir(parents=True, exist_ok=True)
         for name in ("tool", "tool.EXE"):
-            (Path(folder) / name).write_text("#!/bin/sh\n")
-            (Path(folder) / name).chmod(0o755)
+            (Path(path_dir) / name).write_text("#!/bin/sh\n")
+            (Path(path_dir) / name).chmod(0o755)
     try:
         config = paths.core().config_file(values)
     except LookupError:

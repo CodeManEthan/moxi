@@ -112,7 +112,7 @@ def test_the_pairing_url_is_new_each_time_and_names_the_port_unless_443():
 
 
 def test_minting_with_no_address_refuses_naming_gateway_on(tmp_path):
-    with pytest.raises(pairing.NoAddress, match="moxi ui gateway on"):
+    with pytest.raises(pairing.NoAddress, match="moxi ui gateway enable"):
         pairing.mint(tmp_path, None)
     assert not (tmp_path / pairing.PAIR_DIR).exists()
 
@@ -243,7 +243,7 @@ def test_an_assertion_with_a_wrong_origin_rp_id_or_no_user_verification_is_refus
 def test_a_stale_device_signs_in_to_nothing(phone):
     authenticator = Authenticator()
     phone.pair(authenticator, keep=False)
-    phone.access.stale(KEPT)
+    phone.access.mark_stale(KEPT)
     assert phone.sign_in(authenticator).status == 403
     assert phone.audit.codes()[-1] == "stale"
     assert Devices.of(phone.state_dir).all()[0].stale

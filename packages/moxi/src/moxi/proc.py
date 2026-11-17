@@ -1,8 +1,9 @@
 """Starting and watching other processes the same way on Linux, macOS and Windows.
 
 - `run` runs a command to its end with a deadline. Its stdin is closed or fed (secrets
-  travel on stdin, never in argv or the environment), and on timeout the whole tree it
-  started is killed, not only the first process.
+  travel on stdin, never in argv or the environment), its output is captured, left alone
+  or written to a file, and on timeout the whole tree it started is killed, not only the
+  first process.
 - `spawn` starts a long-lived child that cannot outlive its parent: it holds a lifeline,
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
@@ -11,7 +12,7 @@
   which lifeline it holds, without reading stdin.
 - `identity` and `alive` name a process by its pid and start time, so a pid the system
   has given to another process since never matches.
-- `environ` reads another process's environment as it was started, where the system
+- `process_env` reads another process's environment as it was started, where the system
   lets one: Linux and macOS. `cmdline` reads its command line, on Windows too.
 - `status` says how a detached child this process started ended.
 - `parent` reads another process's parent pid, with the standard library only.
@@ -57,14 +58,19 @@ Argv = Sequence[str | os.PathLike]
 
 # -- run ---------------------------------------------------------------------------------
 
-def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
+def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         env: Mapping[str, str] | None = None, cwd: str | os.PathLike | None = None,
-        capture: bool = True) -> subprocess.CompletedProcess:
-    """Run `argv` to its end, or kill everything it started once `timeout` seconds pass.
+        capture: bool = True,
+        output: str | os.PathLike | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` to its end, or kill everything it started once `timeout_s` seconds pass.
 
-    stdin is closed (`/dev/null`), or a pipe fed `input` and then closed. With `capture`
+    stdin is closed (`/dev/null`), or a pipe fed `stdin_data` and then closed. With `capture`
     stdout and stderr are collected; without it they are this process's own. Output is
-    `str` when `input` is a `str` and `bytes` otherwise. `env` is the child's whole
+    `str` when `stdin_data` is a `str` and `bytes` otherwise. With `output`, a file path,
+    stdout and stderr both go straight to that file instead, whatever `capture` says, so
+    nothing of a long run's output is held in memory: the file is created 0600 with its
+    folder, or appended to when it is there, and the result's stdout and stderr are None,
+    as is what a timeout carries. `env` is the child's whole
     environment, used as given (None: this process's), less `MOXI_LIFELINE_FD`: the child
     holds no lifeline, so it must not see a value meant for this process, whether it came
     from this process's environment or from `env`. The start mark, `MOXI_STARTED_BY`, is
@@ -79,17 +85,23 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
 
     On timeout `subprocess.TimeoutExpired` is raised, carrying what was captured.
     """
-    text = isinstance(input, str)
+    text = isinstance(stdin_data, str)
     pipe = subprocess.PIPE if capture else None
     options: dict = {}
     if _WINDOWS:
         options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         options["start_new_session"] = True
-    proc = subprocess.Popen(
-        _argv(argv), stdin=subprocess.DEVNULL if input is None else subprocess.PIPE,
-        stdout=pipe, stderr=pipe, env=_lifeline_env(env, None), cwd=cwd, text=text,
-        encoding="utf-8" if text else None, **options)
+    out_fd = None if output is None else _output_file(output)
+    try:
+        proc = subprocess.Popen(
+            _argv(argv), stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
+            stdout=pipe if out_fd is None else out_fd,
+            stderr=pipe if out_fd is None else out_fd, env=_lifeline_env(env, None),
+            cwd=cwd, text=text, encoding="utf-8" if text else None, **options)
+    finally:
+        if out_fd is not None:
+            os.close(out_fd)  # the child holds its own copy
     job = None
     try:
         if _WINDOWS:
@@ -98,10 +110,10 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
             job = _win.Job()
             job.assign(proc.pid)
         try:
-            out, err = proc.communicate(input, timeout=timeout)
+            out, err = proc.communicate(stdin_data, timeout=timeout_s)
         except subprocess.TimeoutExpired:
             out, err = _end_tree(proc, job)
-            raise subprocess.TimeoutExpired(proc.args, timeout, output=out,
+            raise subprocess.TimeoutExpired(proc.args, timeout_s, output=out,
                                             stderr=err) from None
     except BaseException:
         if proc.returncode is None:
@@ -111,6 +123,19 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
         if job is not None:
             job.close()
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _output_file(output: str | os.PathLike) -> int:
+    """Open `output` for a child's stdout and stderr: appended to, created 0600 with its
+    folder when it is not there."""
+    from pathlib import Path
+
+    from . import files
+
+    path = Path(output)
+    files._make_dirs(path.parent)
+    return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0),
+                   0o600)
 
 
 def _end_tree(proc: subprocess.Popen, job) -> tuple:
@@ -432,17 +457,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 
 def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
-    if output is None:
-        out = os.open(os.devnull, os.O_WRONLY)
-    else:
-        from pathlib import Path
-
-        from . import files
-
-        path = Path(output)
-        files._make_dirs(path.parent)
-        out = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                      | getattr(os, "O_BINARY", 0), 0o600)
+    out = os.open(os.devnull, os.O_WRONLY) if output is None else _output_file(output)
     try:
         common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                       env=_lifeline_env(env, None), cwd=cwd)
@@ -521,15 +536,15 @@ def status(pid: int) -> int | None:
     """
     if isinstance(pid, int) and not isinstance(pid, bool):
         with _detached_guard:
-            for at, (kept, code) in enumerate(_codes):
+            for position, (kept, code) in enumerate(_codes):
                 if kept == pid:
-                    del _codes[at]
+                    del _codes[position]
                     return code
-            for at, child in enumerate(_detached):
+            for position, child in enumerate(_detached):
                 if child.pid == pid:
                     code = child.poll()
                     if code is not None:
-                        del _detached[at]
+                        del _detached[position]
                     return code
     raise LookupError(f"process {pid!r} is not a detached child of this process whose "
                       f"status is still unread")
@@ -728,7 +743,7 @@ def alive(proc: ProcId) -> bool:
 
 # -- environment and command line ---------------------------------------------------------
 
-def environ(pid: int) -> dict[str, str] | None:
+def process_env(pid: int) -> dict[str, str] | None:
     """The environment process `pid` was started with, or None when it can't be read.
 
     Linux reads `/proc/<pid>/environ`. macOS asks the kernel for the process's arguments
@@ -743,7 +758,7 @@ def environ(pid: int) -> dict[str, str] | None:
     if not _a_pid(pid) or _WINDOWS:
         return None
     try:
-        return _environ(pid)
+        return _env(pid)
     except OSError:
         return None
 
@@ -770,13 +785,13 @@ def _a_pid(pid) -> bool:
     return not isinstance(pid, bool) and isinstance(pid, int) and pid > 0
 
 
-def _environ(pid: int) -> dict[str, str]:
-    """`environ`'s read on every system, Windows through psutil, raising instead of
+def _env(pid: int) -> dict[str, str]:
+    """`process_env`'s read on every system, Windows through psutil, raising instead of
     answering None: `ProcessLookupError` when there is no such process (gone, or ended
     and not yet reaped), `PermissionError` when the system refuses it, any other `OSError`
     for a read that failed."""
     if sys.platform.startswith("linux"):
-        return _linux_read_environ(pid, "/proc")
+        return _linux_read_env(pid, "/proc")
     if sys.platform == "darwin":
         return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
     if _WINDOWS:
@@ -785,7 +800,7 @@ def _environ(pid: int) -> dict[str, str]:
 
 
 def _cmdline(pid: int) -> list[str]:
-    """`cmdline`'s read, raising as `_environ` does."""
+    """`cmdline`'s read, raising as `_env` does."""
     if sys.platform.startswith("linux"):
         return _linux_cmdline(pid, "/proc")
     if sys.platform == "darwin":
@@ -795,14 +810,14 @@ def _cmdline(pid: int) -> list[str]:
     raise OSError(f"no reader of another process's command line on {sys.platform}")
 
 
-def _linux_environ(pid: int, root: str = "/proc") -> dict[str, str] | None:
+def _linux_env(pid: int, root: str = "/proc") -> dict[str, str] | None:
     try:
-        return _linux_read_environ(pid, root)
+        return _linux_read_env(pid, root)
     except OSError:
         return None
 
 
-def _linux_read_environ(pid: int, root: str) -> dict[str, str]:
+def _linux_read_env(pid: int, root: str) -> dict[str, str]:
     raw = _linux_file(pid, root, "environ")
     # A zombie reads as an empty environment; it has ended, so it is gone.
     if not raw and _linux_ended(pid, root):
@@ -825,15 +840,15 @@ def _linux_cmdline(pid: int, root: str = "/proc") -> list[str]:
 
 def _linux_file(pid: int, root: str, name: str) -> bytes:
     try:
-        with open(os.path.join(root, str(pid), name), "rb") as f:
-            return f.read()
+        with open(os.path.join(root, str(pid), name), "rb") as fh:
+            return fh.read()
     except FileNotFoundError:
         raise ProcessLookupError(f"process {pid} is gone") from None
     except ProcessLookupError:
         raise
-    except OSError as error:
+    except OSError as exc:
         # A read of a process that ended while it was open fails with ESRCH.
-        if error.errno == _ESRCH:
+        if exc.errno == _ESRCH:
             raise ProcessLookupError(f"process {pid} is gone") from None
         raise
 
@@ -844,8 +859,8 @@ _ESRCH = 3
 def _linux_ended(pid: int, root: str) -> bool:
     """Whether `pid` has ended (a zombie, or gone) by its `stat` file's state."""
     try:
-        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
-            stat = f.read()
+        with open(os.path.join(root, str(pid), "stat"), "rb") as fh:
+            stat = fh.read()
     except OSError:
         return True
     # The state follows the command name, which is in parentheses and may hold any byte.
@@ -854,7 +869,7 @@ def _linux_ended(pid: int, root: str) -> bool:
 
 
 def _psutil_read(pid: int, what: str):
-    """psutil's `Process(pid).<what>()`, its errors as `_environ` raises them."""
+    """psutil's `Process(pid).<what>()`, its errors as `_env` raises them."""
     import psutil
 
     try:
@@ -863,20 +878,20 @@ def _psutil_read(pid: int, what: str):
         raise ProcessLookupError(f"process {pid} is gone") from None
     except psutil.AccessDenied:
         raise PermissionError(f"the system refuses reading process {pid}") from None
-    except psutil.Error as error:
-        raise OSError(f"process {pid} can't be read: {error}") from None
+    except psutil.Error as exc:
+        raise OSError(f"process {pid} can't be read: {exc}") from None
 
 
 def _mac_procargs(pid: int) -> bytes:
-    """The kernel's `KERN_PROCARGS2` answer for `pid`, raising as `_environ` does."""
+    """The kernel's `KERN_PROCARGS2` answer for `pid`, raising as `_env` does."""
     import ctypes
     import ctypes.util
 
     try:
         libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
         sysctl = libc.sysctl
-    except (OSError, AttributeError) as error:
-        raise OSError(f"sysctl can't be called: {error}") from None
+    except (OSError, AttributeError) as exc:
+        raise OSError(f"sysctl can't be called: {exc}") from None
     sysctl.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
                        ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
     sysctl.restype = ctypes.c_int
@@ -910,7 +925,7 @@ def _exists(pid: int) -> bool:
     return True
 
 
-def _mac_environ(pid: int) -> dict[str, str] | None:
+def _mac_env(pid: int) -> dict[str, str] | None:
     try:
         return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
     except OSError:
@@ -950,33 +965,33 @@ def _procargs2_parts(raw: bytes) -> tuple[list[str], list[bytes]]:
     argc = int.from_bytes(raw[:width], sys.byteorder, signed=True)
     if argc < 0:
         raise short
-    at = raw.find(b"\0", width)
-    if at < 0:
+    position = raw.find(b"\0", width)
+    if position < 0:
         raise short
     # The path is padded with NULs to a pointer-size boundary from its start; only that
     # padding is skipped, so an empty argv[0] after it is still read as an argument. Fewer
     # NULs than that rule asks for means another layout: then every NUL is padding.
     nuls = 0
-    while at + nuls < len(raw) and raw[at + nuls] == 0:
+    while position + nuls < len(raw) and raw[position + nuls] == 0:
         nuls += 1
-    padded = width + _round_up(at + 1 - width, _POINTER)
-    at = padded if at + nuls >= padded else at + nuls
+    padded = width + _round_up(position + 1 - width, _POINTER)
+    position = padded if position + nuls >= padded else position + nuls
     args = []
     for _ in range(argc):
-        end = raw.find(b"\0", at)
+        end = raw.find(b"\0", position)
         if end < 0:
             raise short
-        args.append(raw[at:end].decode("utf-8", "replace"))
-        at = end + 1
+        args.append(raw[position:end].decode("utf-8", "replace"))
+        position = end + 1
     entries = []
-    while at < len(raw):
-        end = raw.find(b"\0", at)
+    while position < len(raw):
+        end = raw.find(b"\0", position)
         if end < 0:
             end = len(raw)
-        if end == at:
+        if end == position:
             break  # the empty string that ends the environment
-        entries.append(raw[at:end])
-        at = end + 1
+        entries.append(raw[position:end])
+        position = end + 1
     return args, entries
 
 
@@ -1017,8 +1032,8 @@ def parent(pid: int) -> int | None:
 
 def _linux_parent(pid: int, root: str = "/proc") -> int | None:
     try:
-        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
-            stat = f.read()
+        with open(os.path.join(root, str(pid), "stat"), "rb") as fh:
+            stat = fh.read()
     except OSError:
         return None
     # The command name is in parentheses and may hold spaces and parentheses, so the
@@ -1066,8 +1081,8 @@ def _kinfo_parent(raw: bytes, pid: int) -> int | None:
     if len(raw) != _KINFO_PROC_SIZE:
         return None
 
-    def field(at: int) -> int:
-        return int.from_bytes(raw[at:at + 4], sys.byteorder, signed=True)
+    def field(position: int) -> int:
+        return int.from_bytes(raw[position:position + 4], sys.byteorder, signed=True)
 
     if field(_KINFO_PID_AT) != pid:
         return None
@@ -1134,4 +1149,4 @@ def _pairs(entries) -> dict[str, str]:
 
 
 __all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline",
-           "lifeline_kind", "identity", "alive", "environ", "cmdline", "status", "parent"]
+           "lifeline_kind", "identity", "alive", "process_env", "cmdline", "status", "parent"]

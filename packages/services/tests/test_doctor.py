@@ -52,7 +52,7 @@ def test_a_busy_store_warns(fake, monkeypatch):
 def test_each_user_row_is_its_verdict(fake):
     add(**written("web", enabled=True))
     add(**written("api", enabled=True))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     found = by_name(doctor.rows())
     assert found["store"].state == "ok" and "2 rows" in found["store"].detail
     assert found["services/web"].state == "ok"
@@ -64,7 +64,7 @@ def test_each_user_row_is_its_verdict(fake):
 
 def test_a_failing_health_check_fails_the_row(fake):
     add(**written("web", enabled=True, health=[PY, "-c", "print('503'); exit(1)"]))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     row = by_name(doctor.rows())["services/web"]
     assert (row.state, row.detail) == ("fail", "health check failed: 503")
 
@@ -98,7 +98,7 @@ def test_wedged_health_commands_run_at_once_each_under_its_limit(fake, monkeypat
     names = [f"d{i}" for i in range(12)]
     for name in names:
         add(**written(name, enabled=True, health=[PY, "-c", "import time; time.sleep(60)"]))
-        fake.written[name] = Unit("daemon", True, active=True)
+        fake.written[name] = Unit("daemon", enabled=True, active=True)
     began = time.monotonic()
     found = by_name(doctor.rows())
     took = time.monotonic() - began

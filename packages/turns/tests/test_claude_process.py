@@ -30,8 +30,8 @@ def _alive(pid: int) -> bool:
     except ProcessLookupError:
         return False
     try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
     except OSError:
         return False
 
@@ -81,7 +81,7 @@ def test_first_line_then_hello_once_the_runner_sends_the_id(spawn):
     assert s.session_id == "s-p" and s.pid == os.getpid()
 
 
-def test_sigterm_ends_it_with_lost_and_removes_its_directory(spawn):
+def test_sigterm_ends_it_with_lost_and_removes_its_dir(spawn):
     p = spawn()
     first = _first(p)
     sock = first["mod_sock"]

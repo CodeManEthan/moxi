@@ -62,20 +62,20 @@ def no_exec(monkeypatch):
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(dir=directory, plan=plan,
-                           calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(dir=slots_dir, plan=plan,
+                           calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 def request(work: Path, *, rid: str = "r1", sid: str | None = SID,
@@ -186,19 +186,19 @@ def test_a_relaunch_header_and_its_stamp():
     got = claude.compose(
         {"harness": "claude", "cwd": "/work", "handoff": "/h/one.md"},
         ctx(handoff_text="where it stands", relaunched=True,
-            extra_stamps={common.RELAUNCH: "run1"}))
+            extra_stamps={common.RELAUNCH_ENV: "run1"}))
     assert got.prompt == "Handoff from launcher, relaunched by ann: /h/one.md\n\n" \
                          "where it stands"
-    assert got.env[common.RELAUNCH] == "run1"
+    assert got.env[common.RELAUNCH_ENV] == "run1"
     assert first.on_argv(got.argv)
 
 
 def test_the_first_turn_text_of_a_relaunch(tmp_path):
     handoff = tmp_path / "h.md"
     handoff.write_text("state\n")
-    assert first.text(actor="ann", handoff=handoff, relaunched=True) == \
+    assert first.text(by="ann", handoff=handoff, relaunched=True) == \
         f"Handoff from launcher, relaunched by ann: {handoff}\n\nstate"
-    assert first.text(actor="ann", handoff=handoff).startswith(
+    assert first.text(by="ann", handoff=handoff).startswith(
         "Handoff from launcher, launched by ann: ")
 
 
@@ -265,7 +265,7 @@ def test_the_recorded_base_holds_each_recorded_name_set_and_no_credential():
              "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x",
              "CLAUDE_CODE_OAUTH_TOKEN": "tok", "AWS_SECRET_ACCESS_KEY": "sec",
              "OPENAI_API_KEY": "key", "ARMED": "1", "TERM": "xterm", "TMPDIR": "/t"}
-    base = common.base_env(child, windows=False)
+    base = common.base_env(child, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",
                     "MOXI_HOME": "/m", "MOXI_COMMS_STATE_HOME": "/cs",
                     "CLAUDE_CONFIG_DIR": "/c", "CLAUDE_CODE_USE_BEDROCK": "1",
@@ -293,7 +293,7 @@ WINDOWS_CHILD = {
 
 
 def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
-    base = common.base_env(WINDOWS_CHILD, windows=True)
+    base = common.base_env(WINDOWS_CHILD, is_windows=True)
     assert {k for k, v in base.items() if v is not None} == set(WINDOWS_CHILD) - {
         "API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST", "SESSIONNAME"}
     assert base["CLAUDE_CODE_OAUTH_TOKEN"] is None and "API_KEY" not in base
@@ -304,12 +304,12 @@ def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
 def test_a_row_with_no_base_takes_the_short_list_and_tmpdir_from_the_job():
     job = {"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C",
            "CLAUDE_CONFIG_DIR": "/c", "SYSTEMROOT": "C:\\Windows", "ARMED": "1"}
-    assert common.short_env(job, windows=False) == {
+    assert common.short_env(job, is_windows=False) == {
         "HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}
 
 
 def test_on_windows_a_row_with_no_base_takes_the_start_names_from_the_job():
-    short = common.short_env(WINDOWS_CHILD, windows=True)
+    short = common.short_env(WINDOWS_CHILD, is_windows=True)
     assert short["SystemRoot"] == "C:\\Windows" and short["ComSpec"].endswith("cmd.exe")
     assert short["Path"] == "C:\\Windows\\system32" and short["TEMP"] == "C:\\Temp"
     assert not {"API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST",
@@ -317,7 +317,7 @@ def test_on_windows_a_row_with_no_base_takes_the_start_names_from_the_job():
 
 
 def test_elsewhere_the_base_leaves_the_windows_names_out():
-    base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, windows=False)
+    base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": None}
 
 
@@ -354,7 +354,10 @@ def test_a_replay_composes_the_argv_a_fresh_launch_of_its_values_does(work, harn
     new = row("r2")
     assert (new.relaunch_of, new.resume_of, new.session_id) == ("r1", None,
                                                                replayed.session_id)
-    assert new.values == {**row("r1").values}
+    # A replay keeps the rows' values, and not the record of what the request gave.
+    first = row("r1").values
+    assert first["sources"]["model"] == "typed" and first["filled"] == []
+    assert new.values == {k: v for k, v in first.items() if k not in ("sources", "filled")}
 
 
 def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no_exec,
@@ -392,11 +395,31 @@ def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no
     assert "s3cr3t-value" not in new.base_env_json and "API_TOKEN" not in new.env_json
 
 
+def test_a_replay_writes_its_row_where_the_callers_env_puts_the_store(
+        work, harness, no_exec, tmp_path):
+    api.launch(request(work))
+    caller = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"),
+               env=caller)
+    # The child's environment is built from the row's recorded base, which names the
+    # first store; the new row still goes where the caller's environment says.
+    conn = store.connect(env=caller, create=False)
+    try:
+        assert store.get(conn, "r2") is not None
+    finally:
+        conn.close()
+    conn = store.connect(create=False)
+    try:
+        assert store.get(conn, "r2") is None
+    finally:
+        conn.close()
+
+
 def test_a_replayed_terminal_launch_carries_the_start_mark(work, harness, no_exec,
                                                            monkeypatch):
     from moxi import terminal
 
-    mark = terminal.MARK
+    mark = terminal.STARTED_BY_ENV
     api.launch(request(work))
     assert mark not in row("r1").base_env
     # The replaying shell's own mark is not carried over; the target adds its own.
@@ -523,14 +546,14 @@ def test_an_option_the_install_no_longer_offers_is_not_replayed(work, harness, n
     assert "recycle_on_expiry clear is not applied: recycle_on_expiry needs turns" in \
         got.warnings
     env = no_exec[-1]["env"]
-    assert common.KEEP_WARM not in env and common.RECYCLE_ON_EXPIRY not in env
+    assert common.KEEP_WARM_ENV not in env and common.RECYCLE_ON_EXPIRY_ENV not in env
 
 
 def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 
 
-def test_a_scratch_replay_keeps_the_rows_directory(harness, tmp_path, no_exec):
+def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec):
     api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
                              session_id=SID, actor="ann"))
     where = row("r1").cwd
@@ -569,11 +592,11 @@ def test_a_self_relaunch_carries_its_handoff_alone(work, harness, no_exec, tmp_p
     assert opening == (f"Handoff from launcher, relaunched by planner: {handoff}\n\n"
                        "where the work stands")
     assert BRIEF not in opening
-    assert no_exec[-1]["env"][common.RELAUNCH] == "run1"
+    assert no_exec[-1]["env"][common.RELAUNCH_ENV] == "run1"
     new = row("r2")
     assert new.handoff_path == str(handoff) and new.brief is None
     assert new.posture == f"relaunched (handoff: {handoff})"
-    assert new.env[common.RELAUNCH] == "run1"
+    assert new.env[common.RELAUNCH_ENV] == "run1"
     prompt = Path(common.prompt_path(targets.runs_dir(), "r2")).read_text()
     assert f"start posture: relaunched (handoff: {handoff})" in prompt
 
@@ -581,7 +604,7 @@ def test_a_self_relaunch_carries_its_handoff_alone(work, harness, no_exec, tmp_p
 def test_a_relaunch_with_no_handoff_has_no_relaunch_stamp(work, harness, no_exec):
     api.launch(request(work))
     api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", run="run1"))
-    assert common.RELAUNCH not in no_exec[-1]["env"]
+    assert common.RELAUNCH_ENV not in no_exec[-1]["env"]
 
 
 def test_a_resume_keeps_the_session_id_and_is_found_by_it(work, harness, no_exec):

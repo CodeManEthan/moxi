@@ -37,7 +37,7 @@ moxi services add NAME --unit REF (--enable | --disable) [--timer] [--health "CM
 moxi services remove ID
 moxi services start|stop|restart ID...
 moxi services enable|disable ID...
-moxi services watch [ID...] [--every SECONDS] [--json]
+moxi services watch [ID...] [--every-s SECONDS] [--json]
 ```
 
 A command you add starts off unless you give `--enable`. `stop` stops a daemon until the
@@ -159,4 +159,4 @@ under projects, and the `ui` extra (`moxi-ui`, the browser UI shell) adds the pa
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/services/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-services-v0.1.2/packages/services/LICENSE).

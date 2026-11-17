@@ -52,6 +52,7 @@ export const VIEW = css`
   .line { padding-left: 11px; font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
   .line.result { color: var(--moxi-text-dim); }
   .line.result[data-error="true"] { color: var(--moxi-error); }
+  .word { font-weight: 600; }
   .line.request, .line.note { color: var(--moxi-text-dim); }
   .rule { display: flex; align-items: center; gap: var(--moxi-gap); color: var(--moxi-text-dim);
           font-size: var(--moxi-font-size-sm); }

@@ -107,6 +107,17 @@ test("a topic event replaces the value after a good read, and reads again otherw
   assert.equal(reads.length, before + 1);
 });
 
+test("a held value shows until the feed's own read answers", async () => {
+  const held = { ...REPORT, rows: [] };
+  const { feed } = feedOf([{ status: 200, data: REPORT }]);
+  assert.equal(feed.hold(held), feed);
+  assert.equal(feed.value, held);
+  assert.equal(feed.loading, true);
+  await feed.refresh();
+  assert.equal(feed.loading, false);
+  assert.deepEqual(feed.value.rows, REPORT.rows);
+});
+
 test("a closed feed drops answers and events", async () => {
   const { feed, changes } = feedOf([{ status: 200, data: REPORT }]);
   const running = feed.refresh();

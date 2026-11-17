@@ -69,7 +69,7 @@ def test_one_row_and_a_row_being_removed_are_named_as_such():
 
 @pytest.mark.parametrize("make", ["too_new", "garbage", "busy"])
 def test_a_read_that_fails_raises(make, store_path, monkeypatch, request):
-    holder = None
+    conn = None
     if make == "too_new":
         request.getfixturevalue("too_new")
     elif make == "garbage":
@@ -78,16 +78,16 @@ def test_a_read_that_fails_raises(make, store_path, monkeypatch, request):
     else:
         add(**written("web", project="portfolio"))
         monkeypatch.setattr(store, "TIMEOUT", 0.05)
-        holder = sqlite3.connect(store_path, isolation_level=None)
-        holder.execute("PRAGMA locking_mode = EXCLUSIVE")
-        holder.execute("BEGIN EXCLUSIVE")
+        conn = sqlite3.connect(store_path, isolation_level=None)
+        conn.execute("PRAGMA locking_mode = EXCLUSIVE")
+        conn.execute("BEGIN EXCLUSIVE")
     try:
         with pytest.raises(Unreadable):
             projects_link.refuse_remove(Project("portfolio"))
     finally:
-        if holder is not None:
-            holder.execute("ROLLBACK")
-            holder.close()
+        if conn is not None:
+            conn.execute("ROLLBACK")
+            conn.close()
 
 
 # --- through projects' own loader -------------------------------------------------------

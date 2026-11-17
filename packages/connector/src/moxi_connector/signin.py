@@ -59,7 +59,7 @@ class Mount:
 class SignIn(Protocol):
     def mount(self, origin: Origin) -> Mount: ...
 
-    async def stopping(self, switch_on: bool) -> None: ...
+    async def stopping(self, *, switch_on: bool) -> None: ...
 
 
 async def unauthorized(origin: Origin, send) -> None:
@@ -81,7 +81,7 @@ class Closed:
             return refuse
         return Mount(routes={}, guard=guard)
 
-    async def stopping(self, switch_on: bool) -> None:
+    async def stopping(self, *, switch_on: bool) -> None:
         return None
 
 

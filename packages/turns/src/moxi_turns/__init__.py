@@ -8,7 +8,7 @@ out of the harness. This package is turns' whole public API, the announcement's
     import moxi_turns as turns
 
     s = turns.find(session_id="…")   # or find(pid=…); turns.sessions() lists live ones
-    s = turns.wait_ready(session_id="…", timeout=30)   # or pid=: found, and its Ready seen
+    s = turns.wait_ready(session_id="…", timeout_s=30)   # or pid=: found, and its Ready seen
     s.harness                        # "claude" | "codex" | "opencode"
     s.pid, s.endpoint_pid            # the harness process; the process serving the endpoint
     s.capabilities                   # frozenset of CAPABILITIES' names the session offers
@@ -16,17 +16,17 @@ out of the harness. This package is turns' whole public API, the announcement's
     f = s.facts()    # Facts(session_id, turn_number, turn_open, turn, agents, draft, at,
                      #       stale, ready); turn: OpenTurn | None
     a = s.agents()   # Agents(entries, complete, at)
-    e = s.environ(names)   # {name: value | None}: the session's own environment, read
+    e = s.env(names)   # {name: value | None}: the session's own environment, read
                            # from its endpoint (capability environ; at most 64 names)
 
     d = s.deliver(text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
                   refuse_agents=False, ref=None)
     d = s.steer(text, *, ref=None)
     d.id, d.ref              # id None until a hand-in whose answer never came is found
-    d.wait_started(timeout)  # Started | Refused | Lost
-    d.wait_ended(timeout)    # Ended | Refused | Lost
+    d.wait_started(timeout_s)  # Started | Refused | Lost
+    d.wait_ended(timeout_s)    # Ended | Refused | Lost
 
-    r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout=None,
+    r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout_s=None,
                   stop_shells=False)              # Ran(new_session_id, shells) | Refused | Failed
     w = s.watch()             # w.facts, then iterate Ready | TurnStarted | TurnSteered |
                               # TurnEnded, and one Gone; w.close()
@@ -94,6 +94,7 @@ _WHERE = {
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
     **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
+    "COMMANDS_ENV": "config",
 }
 
 __all__ = [
@@ -105,7 +106,7 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
+    "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
 ]
 
 

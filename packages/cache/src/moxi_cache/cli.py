@@ -29,6 +29,13 @@ load, in this environment, and reads the records and the timer log; it starts no
 process is learning into it, the Claude projects root, whether a watcher is keeping
 clock records, the watcher's unit and its state, and the timer's subscriptions with the
 refused ones. It exits 1 when something there stops reads.
+
+doctor's watcher line leads with how the watcher stands by `records.watching`, the rule
+cache's page shows it by, when the watcher has written its reading: running and listed
+(with no record, that no live Claude Code session has one), running but not listing
+Claude's sessions since a time, or stopped at a time; then how the records stand. With no
+reading, a watcher older than the reading's file, the line judges by the records alone,
+and says no watcher is running when there is none.
 """
 
 from __future__ import annotations
@@ -143,19 +150,19 @@ def _duration(seconds: float) -> str:
 
 def line(session: str, clock: Clock) -> str:
     """One session's read, in words."""
-    if clock.kind in (WARM, COLD) and clock.age_seconds is not None \
-            and clock.ttl_seconds is not None:
+    if clock.kind in (WARM, COLD) and clock.age_s is not None \
+            and clock.ttl_s is not None:
         source = f", from the {clock.ttl_source}" if clock.ttl_source else ""
         key = f", {clock.key}" if clock.key else ""
-        return (f"{session}: {clock.kind}, last request {_duration(clock.age_seconds)} ago, "
-                f"lifetime {_duration(clock.ttl_seconds)}{source}{key}")
+        return (f"{session}: {clock.kind}, last request {_duration(clock.age_s)} ago, "
+                f"lifetime {_duration(clock.ttl_s)}{source}{key}")
     words = f"{session}: {clock.kind}"
     if clock.code:
         words += f" [{clock.code}]"
     if clock.reason:
         words += f": {clock.reason}"
-    if clock.age_seconds is not None:
-        words += f" (last request {_duration(clock.age_seconds)} ago)"
+    if clock.age_s is not None:
+        words += f" (last request {_duration(clock.age_s)} ago)"
     return words
 
 
@@ -169,8 +176,8 @@ def _segment(args) -> int:
 
     try:
         found = render.load_segment(SEGMENT).segment(args.session)
-    except render.Refused as e:
-        print(f"moxi cache segment: the render was refused: {e}", file=sys.stderr)
+    except render.Refused as exc:
+        print(f"moxi cache segment: the render was refused: {exc}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(None if found is None else found.as_dict()))
@@ -185,8 +192,8 @@ def _config_entries() -> tuple[object, str | None]:
     """The user's subscription tables, and the config's error when it cannot be read."""
     try:
         return current()[_timer.CONFIG_KEY], None
-    except ConfigError as e:
-        return [], str(e)
+    except ConfigError as exc:
+        return [], str(exc)
 
 
 def _clock_time(t: float | None, now: float) -> str:
@@ -208,14 +215,14 @@ def timers_view(now: float | None = None) -> dict:
     logged = _timer.read_log(_timer.log_path())
     sessions = []
     for record in api.clock_records():
-        environ = None
+        env = None
         if any(s.requires_env for s in loaded.subscriptions):
-            environ = _timer.proc_environ(record["pid"])
+            env = _timer.read_process_env(record["pid"])
         asks = []
         for sub in loaded.subscriptions:
             mine = [e for e in logged if e.get("subscriber") == sub.name
                     and e.get("session") == record["session"]]
-            asks.append(_timer.plan(sub, record, now, environ, mine))
+            asks.append(_timer.plan(sub, record, now, env, mine))
         age = (now - record["last_request"]) if record["last_request"] is not None else None
         sessions.append({"session": record["session"], "pid": record["pid"],
                          "kind": record["kind"], "age": age, "ttl": record["ttl"],
@@ -299,19 +306,19 @@ def _doctor() -> int:
         settings = current()
         print(f"  config: {settings.file} "
               f"({'read' if settings.file.exists() else 'absent: every key at its default'})")
-    except ConfigError as e:
+    except ConfigError as exc:
         bad = True
-        print(f"  config: cannot be read: {e}")
+        print(f"  config: cannot be read: {exc}")
 
     loaded = None
     try:
         loaded = table.load_table()
         print(f"  lifetime table: {len(loaded.of(table.SHIPPED))} shipped rows, "
               f"{len(loaded.of(table.USER))} of yours")
-    except table.TableError as e:
+    except table.TableError as exc:
         bad = True
         print(f"  lifetime table: does not load, so every Codex and OpenCode read is "
-              f"unknown: {e}")
+              f"unknown: {exc}")
 
     store = api.open_store(learn=False)
     state = store.describe(loaded)
@@ -337,9 +344,9 @@ def _doctor() -> int:
 
     try:
         print(f"  claude projects root: {api.projects_root(None)}")
-    except ConfigError as e:
+    except ConfigError as exc:
         bad = True
-        print(f"  claude projects root: sessions' config cannot be read: {e}")
+        print(f"  claude projects root: sessions' config cannot be read: {exc}")
 
     print("  watcher: " + _watcher_line())
     print("  unit: " + _unit_line())
@@ -394,31 +401,68 @@ def _timer_lines() -> list[str]:
     return out
 
 
+def _when(t: float, now: float) -> str:
+    """A local time to the second, with its date when that is not today's."""
+    when = time.localtime(t)
+    if time.strftime("%Y-%m-%d", when) != time.strftime("%Y-%m-%d", time.localtime(now)):
+        return time.strftime("%Y-%m-%d %H:%M:%S", when)
+    return time.strftime("%H:%M:%S", when)
+
+
 def _watcher_line(now: float | None = None) -> str:
-    """How the watcher's records stand: none, fresh, or standing still. Each record is
-    judged stale by its own `stale_after`, as the segment judges it."""
-    directory = records.record_dir()
+    """How the watcher stands and how its records stand. Each record is judged stale by
+    its own `stale_after`, as the segment judges it. With the watcher's reading the line
+    leads with `records.watching`'s outcome; without one it judges by the records alone."""
+    records_dir = records.record_dir()
     found = []
     try:
-        for path in directory.iterdir():
+        for path in records_dir.iterdir():
             if path.suffix == ".json":
                 record = records.load(path)
                 if record is not None:
                     found.append(record)
     except OSError:
         pass
-    if not found:
-        return (f"no clock records under {directory}: no watcher is running, so there is "
-                "no status line segment and no timer")
     now = time.time() if now is None else now
+    reading = records.reading()
+    if reading is None:
+        if not found:
+            return (f"no clock records under {records_dir}: no watcher is running, so there "
+                    "is no status line segment and no timer")
+        return _records_words(found, records_dir, now, stopped=None)
+    state = records.watching(reading, found, now)
+    if state.outcome == records.FRESH:
+        lead = None
+    elif state.outcome == records.NOT_READING:
+        lead = ("the watcher is running but "
+                + (f"has not listed Claude's sessions since {_when(state.at, now)}"
+                   if state.at is not None else "has never listed Claude's sessions")
+                + "; its log says why")
+    else:
+        lead = f"the watcher stopped at {_when(state.last, now)}"
+    if not found:
+        if lead is None:
+            return "the watcher is running; no live Claude Code session, so no clock record"
+        return f"{lead}; no clock records under {records_dir}"
+    words = _records_words(found, records_dir, now, stopped=state.outcome == records.STOPPED)
+    return words if lead is None else f"{lead}; {words}"
+
+
+def _records_words(found: list[dict], records_dir, now: float, *, stopped: bool | None) -> str:
+    """How the records stand. `stopped` is whether the watcher stopped, by its reading,
+    which the line has led with; None with no reading, when every judged record standing
+    still is what says it stopped."""
     newest = max(r["seen_at"] for r in found)
-    words = f"{len(found)} clock record(s) under {directory}, newest seen {now - newest:.0f}s ago"
+    words = f"{len(found)} clock record(s) under {records_dir}, newest seen {now - newest:.0f}s ago"
     judged = [(r, records.thresholds(r)) for r in found]
     older = sum(1 for _, t in judged if t is None)
     stale = sum(1 for r, t in judged if t is not None and now - r["seen_at"] > t[1])
+    every = stale and stale == len(found) - older
     notes = []
-    if stale and stale == len(found) - older:
+    if every and stopped is None:
         notes.append("the watcher has stopped, so the segment shows dim and no timer runs")
+    elif every and stopped:
+        notes.append("their segment shows dim and no timer runs")
     elif stale:
         notes.append(f"{stale} of them not rewritten within their own stale_after, so "
                      "their segment shows dim")

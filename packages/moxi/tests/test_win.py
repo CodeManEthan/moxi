@@ -33,7 +33,7 @@ def icacls(path) -> str:
 
 
 @WINDOWS
-def test_private_dir_makes_a_directory_only_this_user_can_use(tmp_path):
+def test_private_dir_makes_a_dir_only_this_user_can_use(tmp_path):
     target = tmp_path / "a" / "b"
     assert _win.private_dir(target) is None
     assert target.is_dir()
@@ -55,7 +55,7 @@ def test_each_missing_parent_of_a_private_dir_is_private_too(tmp_path):
 
 
 @WINDOWS
-def test_the_directories_made_on_the_way_to_a_file_are_private(tmp_path):
+def test_the_dirs_made_on_the_way_to_a_file_are_private(tmp_path):
     before = icacls(tmp_path)
     files.atomic_write(tmp_path / "a" / "b" / "f", "x")
     for each in (tmp_path / "a", tmp_path / "a" / "b"):
@@ -75,7 +75,7 @@ def test_what_is_made_inside_a_private_dir_is_private_too(tmp_path):
 
 
 @WINDOWS
-def test_an_existing_open_directory_of_ours_is_made_private(tmp_path):
+def test_an_existing_open_dir_of_ours_is_made_private(tmp_path):
     target = tmp_path / "open"
     target.mkdir()
     assert not _win._only_user(target, user())

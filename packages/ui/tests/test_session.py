@@ -73,7 +73,7 @@ def test_sign_in_needs_only_a_ticket(shell):
                         r"Max-Age=7776000", cookie)
     key = answer.json()["key"]
     session_id = cookie.split(";")[0].split("=", 1)[1]
-    assert shell.store.find([session_id], key, need_key=True) is not None
+    assert shell.store.use([session_id], key, need_key=True) is not None
     # The ticket is spent.
     again = shell.send("POST", "/m/ui/api/signin", headers=ACT, body=body)
     assert again.status == 403
@@ -242,7 +242,7 @@ def test_tickets_expire_and_are_swept(tmp_path):
 def _owned(tmp_path, uid, *, client=CLIENT, server=SERVER, six=False):
     rows = connection_rows(client, server, uid)
     root = record_proc(tmp_path / "proc", **({"tcp6": rows} if six else {"tcp": rows}))
-    return OwnerCheck(True, os.getuid(), str(root))
+    return OwnerCheck(enabled=True, uid=os.getuid(), root=str(root))
 
 
 def test_socket_owner_reads_the_client_row(tmp_path):
@@ -263,7 +263,7 @@ def test_a_ticket_redeemed_over_another_users_socket_is_refused_and_kept(tmp_pat
     for uid, expected in ((os.getuid() + 1, 403), (None, 403), (os.getuid(), 200)):
         if uid is None:
             root = record_proc(tmp_path / "empty")
-            owner = OwnerCheck(True, os.getuid(), str(root))
+            owner = OwnerCheck(enabled=True, uid=os.getuid(), root=str(root))
         else:
             owner = _owned(tmp_path / str(uid), uid, client=client, server=server, six=six)
         shell = Harness(tmp_path / f"state-{uid}", owner=owner, names=("127.0.0.1", "localhost"))
@@ -351,13 +351,13 @@ def test_sessions_last_across_shells_of_one_epoch_only(tmp_path):
     first = open_store(tmp_path, "epoch-1")
     session_id, key = first.mint()
     again = open_store(tmp_path, "epoch-1")
-    assert again.find([session_id], key, need_key=True) is not None
+    assert again.use([session_id], key, need_key=True) is not None
     later = open_store(tmp_path, "epoch-2")
-    assert later.find([session_id], key, need_key=True) is None
+    assert later.use([session_id], key, need_key=True) is None
     record = json.loads((tmp_path / "sessions.json").read_bytes())
     assert record["epoch"] == "epoch-2" and record["sessions"] == {}
     # A session copied in from the earlier epoch's file is refused too.
-    assert open_store(tmp_path, "epoch-1").find([session_id], key, need_key=True) is None
+    assert open_store(tmp_path, "epoch-1").use([session_id], key, need_key=True) is None
 
 
 def test_a_shell_with_no_epoch_neither_reads_nor_writes_the_file(tmp_path):
@@ -365,9 +365,9 @@ def test_a_shell_with_no_epoch_neither_reads_nor_writes_the_file(tmp_path):
     session_id, key = stored.mint()
     before = (tmp_path / "sessions.json").read_bytes()
     memory = open_store(tmp_path, None)
-    assert memory.find([session_id], key, need_key=True) is None
+    assert memory.use([session_id], key, need_key=True) is None
     mine, my_key = memory.mint()
-    assert memory.find([mine], my_key, need_key=True) is not None
+    assert memory.use([mine], my_key, need_key=True) is not None
     memory.clear()
     assert (tmp_path / "sessions.json").read_bytes() == before
     open_store(tmp_path / "fresh", None).mint()
@@ -379,15 +379,15 @@ def test_idle_and_absolute_expiry(tmp_path):
     store = open_store(tmp_path, None, clock=clock)
     idle_id, idle_key = store.mint()
     clock.now += IDLE - 1
-    assert store.find([idle_id], idle_key, need_key=True) is not None
+    assert store.use([idle_id], idle_key, need_key=True) is not None
     clock.now += IDLE
-    assert store.find([idle_id], idle_key, need_key=True) is None
+    assert store.use([idle_id], idle_key, need_key=True) is None
     used_id, used_key = store.mint()
     for _ in range(int(MAX_AGE // (24 * 3600)) - 1):
         clock.now += 24 * 3600
-        assert store.find([used_id], used_key, need_key=True) is not None
+        assert store.use([used_id], used_key, need_key=True) is not None
     clock.now += 24 * 3600
-    assert store.find([used_id], used_key, need_key=True) is None
+    assert store.use([used_id], used_key, need_key=True) is None
 
 
 def test_the_oldest_is_evicted_past_the_limit(tmp_path):
@@ -398,8 +398,8 @@ def test_the_oldest_is_evicted_past_the_limit(tmp_path):
         clock.now += 1
         made.append(store.mint())
     assert store.live() == LIMIT
-    assert store.find([made[0][0]], need_key=False) is None
-    assert all(store.find([sid], need_key=False) for sid, _ in made[1:])
+    assert store.use([made[0][0]], need_key=False) is None
+    assert all(store.use([sid], need_key=False) for sid, _ in made[1:])
 
 
 def test_last_used_is_written_at_most_once_an_hour(tmp_path):
@@ -409,10 +409,10 @@ def test_last_used_is_written_at_most_once_an_hour(tmp_path):
     path = tmp_path / "sessions.json"
     written = path.read_bytes()
     clock.now += 600
-    store.find([session_id], need_key=False)
+    store.use([session_id], need_key=False)
     assert path.read_bytes() == written
     clock.now += 3000
-    store.find([session_id], need_key=False)
+    store.use([session_id], need_key=False)
     assert path.read_bytes() != written
 
 
@@ -460,7 +460,7 @@ def test_signout_while_no_shell_runs_keeps_the_epoch(tmp_path):
     store = open_store(tmp_path, "e")
     session_id, _ = store.mint()
     assert clear_stored(tmp_path) is True
-    assert open_store(tmp_path, "e").find([session_id], need_key=False) is None
+    assert open_store(tmp_path, "e").use([session_id], need_key=False) is None
     assert json.loads((tmp_path / "sessions.json").read_bytes())["epoch"] == "e"
     assert clear_stored(tmp_path / "none") is False
 

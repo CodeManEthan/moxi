@@ -35,7 +35,7 @@ request: one hour or five minutes, the shorter when a request wrote both. A requ
 only read the cache wrote no tier, so when the clock request names none the same backward
 read goes on past it, within the same byte limit, to the first request that does. A read
 that reaches the start or the limit with no tiered request uses config
-`claude.ttl_seconds`, and the `Clock` says which it used (`ttl_source`).
+`claude.ttl_s`, and the `Clock` says which it used (`ttl_source`).
 """
 
 from __future__ import annotations
@@ -154,8 +154,8 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
 
         try:
             root = Path(sessions_projects_root(None))
-        except ConfigError as e:
-            return unknown(_clock.CONFIG_ERROR, f"sessions' config could not be read ({e})")
+        except ConfigError as exc:
+            return unknown(_clock.CONFIG_ERROR, f"sessions' config could not be read ({exc})")
     located = find(HARNESS, session_id, root=root)
     if not located.found:
         readable = located.probes[0].outcome == transcripts.MISS
@@ -167,9 +167,9 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
                                          "request")
     try:
         found = last_request(located.hits[0].source.path)
-    except OSError as e:
+    except OSError as exc:
         return unknown(_clock.UNREADABLE,
-                       f"the transcript could not be read ({e.strerror or e})")
+                       f"the transcript could not be read ({exc.strerror or exc})")
     if found.outcome == "none":
         return Clock(FRESH)              # read whole, and no request in it
     if found.outcome == "limit":
@@ -192,11 +192,11 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
         from .settings import current
 
         try:
-            ttl, source = current()["claude.ttl_seconds"], TTL_CONFIG
-        except ConfigError as e:
-            return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({e})")
+            ttl, source = current()["claude.ttl_s"], TTL_CONFIG
+        except ConfigError as exc:
+            return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({exc})")
     age = max(0.0, now - found.ts)
-    return Clock(COLD if age >= ttl else WARM, age_seconds=age, ttl_seconds=ttl,
+    return Clock(COLD if age >= ttl else WARM, age_s=age, ttl_s=ttl,
                  ttl_source=source)
 
 

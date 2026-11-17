@@ -10,6 +10,7 @@ import threading
 import pytest
 from moxi import modules
 from moxi_dev.testing import wait_for
+from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -40,7 +41,7 @@ def _servers_row(page, module="fixture"):
     return page.locator(f"#moxi-panel moxi-ui-servers li[data-module={module}]")
 
 
-def _hide(page, hidden=True):
+def _hide(page, *, hidden=True):
     """Make the tab report itself hidden (or shown again), as switching tabs would."""
     page.evaluate("""(hidden) => {
       Object.defineProperty(document, "visibilityState", {configurable: true,
@@ -56,8 +57,8 @@ def _in_thread(fn):
     def run():
         try:
             out["value"] = fn()
-        except BaseException as err:  # handed back to the test
-            out["error"] = err
+        except BaseException as exc:  # handed back to the test
+            out["error"] = exc
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
@@ -74,6 +75,7 @@ def _in_thread(fn):
 
 def test_a_fixture_act_changes_its_topic_and_its_components_show_it(ui_shell, ui_page):
     n = _count(ui_shell)
+    ui_page.goto("/m/ui/modules")
     block = ui_page.locator("#home moxi-fixture-block").get_by_test_id("count")
     expect(block).to_have_text(f"Count: {n}")
     ui_page.goto("/m/fixture/")
@@ -120,7 +122,7 @@ def test_seven_tabs_share_one_stream_and_closing_the_leader_hands_it_on(ui_shell
     rest = [page for page in pages if page is not leader]
     # The sync API hands over the context's request events only inside a call to it.
     wait_for(lambda: rest[0].evaluate("true") and len(pushes) > before
-             and _streams(ui_shell) == 1, 5,
+             and _streams(ui_shell) == 1, WAIT_S,
              what=lambda: f"another tab to open the one stream: {len(pushes) - before} new "
                           f"push requests, {_streams(ui_shell)} streams at the shell")
     successor = pushes[-1].frame.page
@@ -171,7 +173,7 @@ def test_the_stream_closes_after_10_s_with_no_visible_tab_and_reopens_when_one_i
     wait_for(closed, 5, interval=0.1, what="the stream to close with no tab shown")
     # Acts while no stream is open; showing a tab reopens it with the current value.
     ui_shell.session().post("/m/fixture/api/add", {"by": 5})
-    _hide(second, False)
+    _hide(second, hidden=False)
     wait_for(lambda: _streams(ui_shell) == 1, 5, what="the stream to reopen")
     for page in (first, second):
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 5}")
@@ -203,8 +205,9 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
         ui_shells, fixture_site, ui_contexts):
     shell = ui_shells(site=[fixture_site])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
-    # The home's fixture block subscribes to a fixture topic, which starts its server.
+    # The modules view's fixture block subscribes to a fixture topic, which starts its server.
     expect(row.locator(".state")).to_have_text("running")
     expect(row).to_have_class("ok")
     expect(row).to_contain_text(re.compile(r"pid \d+, version 0\.1\.0, over (a private socket|TCP)"))
@@ -218,22 +221,23 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     shell.kill("fixture")
     # One failed start is no warning of its own: the row says not running, why, and when
     # it tries again. Its tone is the warning of the crash a moment before.
-    expect(row).to_contain_text("The last start failed", timeout=10_000)
+    expect(row).to_contain_text("The last start failed")
     expect(row.locator(".state")).to_have_text("not running")
     expect(row).to_have_class("warn")
     expect(row).to_contain_text("The next request after 10 s tries again.")
     expect(row).to_contain_text("last exited with code 3")
     expect(row).to_contain_text("log: ")
-    fixture_kit.fail_start(shell, False)
+    fixture_kit.fail_start(shell, enabled=False)
 
 
 def test_the_servers_block_says_when_no_page_server_has_run(ui_shells, fixture_site, ui_contexts):
-    # Every module with a page has a page server, which the home starts when it places
+    # Every module with a page has a page server, which the shell starts when it places
     # one of its components, so the shell leaves out the fixture and every other one.
     paged = [found.name for found in modules.scan()
              if found.ok and found.page and found.name != "ui"]
     shell = ui_shells(site=[fixture_site], leave_out=["fixture", *paged])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     block = page.locator("#moxi-panel moxi-ui-servers")
     expect(block).to_contain_text("No page server has run since the shell started.")
 
@@ -267,6 +271,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
     shell = ui_shells(site=[fixture_site], failed_for=SHORT_WINDOW)
     fixture_kit.fail_start(shell)
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
     session = shell.session()
     # The row shows each failed start only for the short window, between samples of the
@@ -280,7 +285,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
             return shell.server("fixture")["failed_in_row"] >= n
 
         wait_for(failed_again, 5, interval=0.1, what=f"failed start {n}")
-    expect(row).to_contain_text("the last 3 starts failed", timeout=5_000)
+    expect(row).to_contain_text("the last 3 starts failed")
     expect(row).to_have_class("fail")
     expect(row).to_contain_text("log: ")
 
@@ -290,6 +295,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     site = fixture_kit.install(tmp_path_factory.mktemp("drain-site"))
     shell = ui_shells(site=[site])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
     expect(row.locator(".state")).to_have_text("running")
     old = shell.wait_server("fixture", "running")
@@ -310,7 +316,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     assert shell.server("fixture")["state"] == "draining"
     # A new request waits for the drain; the open one finishes on the old server.
     waiting = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/summary"))
-    fixture_kit.hold(shell, False)
+    fixture_kit.hold(shell, enabled=False)
     status, data = held()
     assert status == 200 and data["pid"] == old["pid"]
     status, data = waiting()

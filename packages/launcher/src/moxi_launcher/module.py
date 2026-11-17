@@ -9,8 +9,9 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 
 #: The API module: `launch`, `check` and `preview`. Interface 1 is `launch_kind` and
 #: `launch_kinds`: the launch kind (`scratch`, `seat`, `project` or `one-off`) of a
-#: session the launcher started, read from the launch log by session id.
-INTERFACES = frozenset({1})
+#: session the launcher started, read from the launch log by session id. Interface 2 adds
+#: `running`: the launches running now, read from the launch log and the process table.
+INTERFACES = frozenset({1, 2})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"
@@ -38,11 +39,14 @@ OPTIONAL = {
              "directory (or its notes_dir), where the handoff pointer looks and a "
              "relaunch's handoff must be. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
-             "expires, and recycle_on_expiry clears or compacts an idle session once it "
-             "has. Without it those rows aren't offered.",
+             "expires, as Keep warm on a running session's row does from the press on, "
+             "and recycle_on_expiry clears or compacts an idle session once it has. "
+             "Without it those rows and Keep warm aren't offered.",
     "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
              "recycle_at_limit with limit_at relaunches or compacts a session past its "
              "mark. Without it those rows aren't offered.",
+    "sessions": "The latest thing said in each running session, on Home's Sessions row. "
+                "Without it a row shows when it was launched.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
@@ -52,11 +56,12 @@ INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "comms stamp: the session's comms name, the handoff key of a "
                        "session the launcher did not start",
     "MOXI_LAUNCHER_REQUEST": "launcher stamp: the request id of the launch that started "
-                             "this session",
+                             "this session, read by cache's timer",
     "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "
                               "comes in its first turn",
     "MOXI_LAUNCHER_KEEP_WARM": "launcher stamp: the launch keeps its session warm, read by "
-                               "cache's timer",
+                               "a cache watcher started before the timer asked by "
+                               "MOXI_LAUNCHER_REQUEST",
     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears or compacts its "
                                        "session once its cache expires, read by cache's "
                                        "timer",
@@ -72,12 +77,23 @@ SEGMENT = None
 #: The launcher's page, served by loopback's page server once the UI shell asks for it.
 #: Only that server and loopback's export import it.
 PAGE = "moxi_launcher.page:PAGE"
-#: What the launcher offers the browser UI shell: its panel, a block for the shell's home
-#: with each launched session's state, and one session's state that any host may place.
+#: What the launcher offers the browser UI shell: its panel, the piece for Home's main spot
+#: that starts a session, Home's Sessions row with the launches running now, a block for
+#: the modules view with each launched session's state, and one session's state that any
+#: host may place.
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
+             "group": "daily", "order": 10,
              "doc": "Launch, resume and watch sessions"},
+    "prompt": {"script": "prompt.js", "title": "Launch", "contract": 1, "place": "block",
+               "home": True, "home_as": "main", "order": 10,
+               "doc": "Start a session: what it should do, where and with which model"},
+    "running": {"script": "running.js", "title": "Sessions", "contract": 1, "place": "block",
+                "home": True, "home_as": "row", "order": 100,
+                "doc": "The sessions running now: how many, and opened, the first four",
+                "attributes": {"open": {"type": "bool",
+                                        "doc": "set by Home while the row is shown opened"}}},
     "sessions": {"script": "sessions.js", "title": "Sessions", "contract": 1,
                  "place": "block", "home": True,
                  "doc": "Each launched session's recycle and keep-warm state"},

@@ -320,7 +320,7 @@ class Tailscale:
             raise Refused(missing.reason, missing.fix)
         timeout = self._timeout()
         try:
-            return proc.run([exe, *args], timeout=timeout)
+            return proc.run([exe, *args], timeout_s=timeout)
         except subprocess.TimeoutExpired:
             raise ReadError(f"tailscale did not answer in {timeout:g} s "
                             f"(tailscale {' '.join(args)})", "tailscale status",

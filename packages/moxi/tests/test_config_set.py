@@ -145,7 +145,7 @@ def refused(call, *args, **kwargs) -> ConfigError:
                                            ("true", True), ("No", False), ("off", False),
                                            ("0", False), (True, True), (False, False)])
 def test_a_bool_is_read_from_its_words(demo, given, stored):
-    config.set("demo", "block", given, by="cli")
+    config.set_value("demo", "block", given, by="cli")
     assert read(demo)["block"] is stored
 
 
@@ -158,7 +158,7 @@ def test_a_bool_is_read_from_its_words(demo, given, stored):
     ("local.root", "", ""),
 ])
 def test_each_scalar_type_is_coerced(demo, key, given, stored):
-    config.set("demo", key, given, by="cli")
+    config.set_value("demo", key, given, by="cli")
     group, _, leaf = key.rpartition(".")
     table = read(demo)[group] if group else read(demo)
     assert table[leaf] == stored and type(table[leaf]) is type(stored)
@@ -172,34 +172,34 @@ def test_each_scalar_type_is_coerced(demo, key, given, stored):
     ("local.root", "relative/path", "absolute path"),
 ])
 def test_a_bad_value_is_refused_with_its_fix_and_writes_nothing(demo, key, given, words):
-    exc = refused(config.set, "demo", key, given, by="cli")
+    exc = refused(config.set_value, "demo", key, given, by="cli")
     assert exc.key == key and words in exc.fix and exc.exit_code == 2
     assert not demo.exists()
 
 
 def test_a_list_and_a_table_are_set_whole(demo):
-    config.set("demo", "tags", ["a", 2, {"x": 1}], by="cli")
-    config.set("demo", "codex.defaults", {"sandbox": "read-only"}, by="cli")
+    config.set_value("demo", "tags", ["a", 2, {"x": 1}], by="cli")
+    config.set_value("demo", "codex.defaults", {"sandbox": "read-only"}, by="cli")
     assert read(demo)["tags"] == ["a", 2, {"x": 1}]
     assert read(demo)["codex"]["defaults"] == {"sandbox": "read-only"}
-    assert refused(config.set, "demo", "tags", "a", by="cli").exit_code == 2
-    assert refused(config.set, "demo", "codex.defaults", [1], by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "tags", "a", by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "codex.defaults", [1], by="cli").exit_code == 2
 
 
 def test_a_typed_list_checks_every_item(demo):
-    config.set("demo", "private_names", ["a", 2024], by="cli")
+    config.set_value("demo", "private_names", ["a", 2024], by="cli")
     assert read(demo)["private_names"] == ["a", "2024"]
-    config.set("demo", "ports", ["80", 443], by="cli")
+    config.set_value("demo", "ports", ["80", 443], by="cli")
     assert read(demo)["ports"] == [80, 443]
-    exc = refused(config.set, "demo", "ports", [80, "http"], by="cli")
+    exc = refused(config.set_value, "demo", "ports", [80, "http"], by="cli")
     assert "'http'" in exc.problem and "an int" in exc.fix
     assert read(demo)["ports"] == [80, 443]
 
 
 def test_a_typed_table_coerces_each_entry(demo):
-    config.set("demo", "limits", {"cpu": "2", "fds": 64}, by="cli")
+    config.set_value("demo", "limits", {"cpu": "2", "fds": 64}, by="cli")
     assert read(demo)["limits"] == {"cpu": 2, "fds": 64}
-    assert refused(config.set, "demo", "limits", {"cpu": "lots"}, by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "limits", {"cpu": "lots"}, by="cli").exit_code == 2
 
 
 # -- add_item and remove_item -------------------------------------------------------------
@@ -226,7 +226,7 @@ def test_an_item_already_held_is_not_added_again(demo):
 
 
 def test_remove_takes_every_equal_item_and_refuses_one_not_held(demo):
-    config.set("demo", "tags", ["a", "b", "a"], by="cli")
+    config.set_value("demo", "tags", ["a", "b", "a"], by="cli")
     config.remove_item("demo", "tags", "a", by="cli")
     assert read(demo)["tags"] == ["b"]
     exc = refused(config.remove_item, "demo", "tags", "zzz", by="cli")
@@ -240,7 +240,7 @@ def test_remove_from_a_list_at_its_default_writes_the_rest(demo):
 
 def test_add_and_remove_take_only_a_list(demo):
     assert "not a list" in refused(config.add_item, "demo", "name", "x", by="cli").problem
-    assert "not a list" in refused(config.remove_item, "demo", "rows.a", True,
+    assert "not a list" in refused(config.remove_item, "demo", "rows.a", item=True,
                                    by="cli").problem
 
 
@@ -255,7 +255,7 @@ def test_add_keeps_the_lists_comments(demo):
 # -- unset ---------------------------------------------------------------------------------
 
 def test_unset_removes_the_key_so_it_reads_its_default(demo):
-    config.set("demo", "local.retain_days", 7, by="cli")
+    config.set_value("demo", "local.retain_days", 7, by="cli")
     assert settings()["local.retain_days"] == 7
     assert config.unset("demo", "local.retain_days", by="cli") == []
     assert "retain_days" not in demo.read_text()
@@ -266,7 +266,7 @@ def test_unset_removes_the_key_so_it_reads_its_default(demo):
 def test_unset_of_a_key_the_file_lacks_changes_nothing(demo, capsys):
     assert config.unset("demo", "block", by="cli") == []
     assert not demo.parent.exists()
-    config.set("demo", "name", "x", by="cli")
+    config.set_value("demo", "name", "x", by="cli")
     before, stamp = demo.read_text(), os.stat(demo).st_mtime_ns
     assert config.unset("demo", "block", by="cli") == []
     assert config.unset("demo", "local.retain_days", by="cli") == []
@@ -281,22 +281,22 @@ def test_unset_of_a_key_the_file_lacks_changes_nothing(demo, capsys):
 # -- the key, the module, the file ---------------------------------------------------------
 
 def test_an_unknown_key_is_refused_with_the_nearest_one(demo):
-    exc = refused(config.set, "demo", "local.retain_dayz", 1, by="cli")
+    exc = refused(config.set_value, "demo", "local.retain_dayz", 1, by="cli")
     assert exc.exit_code == 2 and "not a setting of demo" in exc.problem
     assert "local.retain_days" in exc.fix
-    exc = refused(config.set, "demo", "qqqqqqqq", 1, by="cli")
+    exc = refused(config.set_value, "demo", "qqqqqqqq", 1, by="cli")
     assert "moxi config demo" in exc.fix
 
 
 def test_a_retired_key_says_what_to_do_now(demo):
-    exc = refused(config.set, "demo", "old", 1, by="cli")
+    exc = refused(config.set_value, "demo", "old", 1, by="cli")
     assert exc.problem == "is retired" and exc.fix == "use backend instead"
 
 
 @pytest.mark.parametrize("module, words", [("nothere", "moxi install nothere"),
                                            ("bare", "nothing to set")])
 def test_an_absent_module_or_one_without_settings_refuses_with_exit_3(demo, module, words):
-    exc = refused(config.set, module, "x", 1, by="cli")
+    exc = refused(config.set_value, module, "x", 1, by="cli")
     assert exc.exit_code == 3 and words in exc.fix
 
 
@@ -306,7 +306,7 @@ def test_a_schema_whose_override_is_misspelled_refuses_with_exit_3(demo, site, c
                                                                     argv):
     site.write("moxi_demo/settings.toml",
                SCHEMA.replace('env = "MOXI_DEMO_BACKEND"', 'env = "OTHER_BACKEND"'))
-    exc = refused(config.set, "demo", "block", True, by="cli")
+    exc = refused(config.set_value, "demo", "block", value=True, by="cli")
     assert exc.exit_code == 3 and "OTHER_BACKEND" in exc.problem
     code, _, err = run(capsys, "config", *argv)
     assert code == 3 and "OTHER_BACKEND" in err
@@ -314,15 +314,15 @@ def test_a_schema_whose_override_is_misspelled_refuses_with_exit_3(demo, site, c
 
 
 def test_set_returns_no_applied_units_and_needs_a_by(demo):
-    assert config.set("demo", "block", True, by="ui") == []
-    assert refused(config.set, "demo", "block", True, by="").exit_code == 2
+    assert config.set_value("demo", "block", value=True, by="ui") == []
+    assert refused(config.set_value, "demo", "block", value=True, by="").exit_code == 2
 
 
 def test_set_keeps_comments_and_order(demo):
     demo.parent.mkdir(parents=True)
     demo.write_text(COMMENTED)
-    config.set("demo", "local.retain_days", 7, by="cli")
-    config.set("demo", "name", "x", by="cli")
+    config.set_value("demo", "local.retain_days", 7, by="cli")
+    config.set_value("demo", "name", "x", by="cli")
     assert demo.read_text() == COMMENTED.replace("retain_days = 30", "retain_days = 7") \
         .replace("# keep sending\n", '# keep sending\nname = "x"\n')
 
@@ -330,21 +330,21 @@ def test_set_keeps_comments_and_order(demo):
 def test_a_change_never_writes_a_file_the_reader_refuses(demo):
     demo.parent.mkdir(parents=True)
     demo.write_text("block = true\nstray = 1\n")
-    exc = refused(config.set, "demo", "block", False, by="cli")
+    exc = refused(config.set_value, "demo", "block", value=False, by="cli")
     assert exc.key == "stray"
     assert demo.read_text() == "block = true\nstray = 1\n"
     demo.write_text("block = \n")
-    exc = refused(config.set, "demo", "block", False, by="cli")
+    exc = refused(config.set_value, "demo", "block", value=False, by="cli")
     assert "not valid TOML" in exc.problem
     assert config.history("demo") == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_a_new_file_is_0600_and_an_existing_files_mode_is_kept(demo):
-    config.set("demo", "block", True, by="cli")
+    config.set_value("demo", "block", value=True, by="cli")
     assert stat.S_IMODE(os.stat(demo).st_mode) == 0o600
     os.chmod(demo, 0o644)
-    config.set("demo", "block", False, by="cli")
+    config.set_value("demo", "block", value=False, by="cli")
     assert stat.S_IMODE(os.stat(demo).st_mode) == 0o644
 
 
@@ -364,7 +364,7 @@ def test_a_lock_held_past_the_wait_refuses_with_exit_75(demo, monkeypatch):
                             stdout=subprocess.PIPE, text=True)
     try:
         assert proc.stdout.readline().strip() == "held"
-        exc = refused(config.set, "demo", "block", True, by="cli")
+        exc = refused(config.set_value, "demo", "block", value=True, by="cli")
     finally:
         proc.kill()
         proc.wait()
@@ -375,7 +375,7 @@ def test_a_lock_held_past_the_wait_refuses_with_exit_75(demo, monkeypatch):
 # -- the history ---------------------------------------------------------------------------
 
 def test_every_change_is_recorded_without_its_value(demo, tmp_path):
-    config.set("demo", "private_names", ["secret-name"], by="ui")
+    config.set_value("demo", "private_names", ["secret-name"], by="ui")
     config.add_item("demo", "private_names", "other-secret", by="moxi install")
     config.remove_item("demo", "private_names", "secret-name", by="cli")
     config.unset("demo", "private_names", by="cli")
@@ -394,8 +394,8 @@ def test_every_change_is_recorded_without_its_value(demo, tmp_path):
 
 def test_history_filters_by_key_and_keeps_the_tail(demo):
     for n in range(5):
-        config.set("demo", "local.retain_days", n, by="cli")
-    config.set("demo", "block", True, by="cli")
+        config.set_value("demo", "local.retain_days", n, by="cli")
+    config.set_value("demo", "block", value=True, by="cli")
     assert len(config.history("demo", "local.retain_days")) == 5
     assert [r["key"] for r in config.history("demo", tail=2)] == ["local.retain_days",
                                                                   "block"]
@@ -412,7 +412,7 @@ def test_every_unset_state_of_a_switch_reads_false(demo):
     demo.write_text("[rows]\nother = true\n")
     assert settings()["rows.backup"] is False             # no entry
     assert settings()["rows.other"] is True
-    config.set("demo", "rows.backup", "yes", by="cli")
+    config.set_value("demo", "rows.backup", "yes", by="cli")
     assert read(demo)["rows"]["backup"] is True           # stored as a bool
     assert settings()["rows.backup"] is True
     assert settings().source("rows.backup") == "file"
@@ -424,12 +424,12 @@ def test_every_unset_state_of_a_switch_reads_false(demo):
 
 
 def test_a_switch_takes_only_a_bool(demo):
-    assert "true or false" in refused(config.set, "demo", "rows.backup", "3",
+    assert "true or false" in refused(config.set_value, "demo", "rows.backup", "3",
                                       by="cli").fix
-    exc = refused(config.set, "demo", "rows", {"a": True, "b": "yes please"}, by="cli")
+    exc = refused(config.set_value, "demo", "rows", {"a": True, "b": "yes please"}, by="cli")
     assert exc.exit_code == 2
-    assert refused(config.set, "demo", "rows", {"Bad": True}, by="cli").exit_code == 2
-    config.set("demo", "rows", {"a": True, "b": "no"}, by="cli")
+    assert refused(config.set_value, "demo", "rows", {"Bad": True}, by="cli").exit_code == 2
+    config.set_value("demo", "rows", {"a": True, "b": "no"}, by="cli")
     assert read(demo)["rows"] == {"a": True, "b": False}
 
 
@@ -443,9 +443,9 @@ def test_a_hand_written_non_bool_entry_or_non_table_fails_the_check(demo, text):
 
 
 def test_only_a_switch_tables_entries_are_keys(demo):
-    assert refused(config.set, "demo", "limits.cpu", 1, by="cli").exit_code == 2
-    assert refused(config.set, "demo", "rows.Backup", True, by="cli").exit_code == 2
-    assert refused(config.set, "demo", "rows.a.b", True, by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "limits.cpu", 1, by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "rows.Backup", value=True, by="cli").exit_code == 2
+    assert refused(config.set_value, "demo", "rows.a.b", value=True, by="cli").exit_code == 2
     with pytest.raises(KeyError):
         settings()["limits.cpu"]
 
@@ -464,7 +464,7 @@ def test_a_schema_declaring_a_key_under_a_switch_table_is_refused():
 def test_what_makes_a_switch_table(change, switch):
     spec = {"type": "table", "items": "bool", "default": {}, "doc": "d", "read": "use",
             **change}
-    key = config.Key(name="rows", type=spec["type"], default=spec["default"], doc="d",
+    key = config.Key(name="rows", value_type=spec["type"], default=spec["default"], doc="d",
                      read=spec["read"], items=spec["items"])
     assert config.is_switch_table(key) is switch
 
@@ -491,7 +491,7 @@ def test_bad_items_or_needs_are_refused(extra, words):
 
 
 def test_a_key_is_a_plain_read_only_record():
-    key = config.Key(name="a", type="int", default=1, doc="d", read="use")
+    key = config.Key(name="a", value_type="int", default=1, doc="d", read="use")
     assert key == config.Key("a", "int", 1, "d", "use")
     assert hash(key) == hash(config.Key("a", "int", 1, "d", "use"))
     assert (key.values, key.env, key.retired, key.needs, key.items) == (None,) * 5
@@ -631,6 +631,102 @@ def test_config_set_refusals_and_their_exits(demo, capsys, argv, code, words):
     assert got == code and words in err and out == ""
 
 
+def change_json(capsys, *argv):
+    """`moxi config <argv> --json`: its exit and the one object stdout holds."""
+    code, out, _ = run(capsys, "config", *argv, "--json")
+    assert out.endswith("\n") and out.count("\n") == 1
+    return code, json.loads(out)
+
+
+def test_config_set_json_prints_one_object_for_a_saved_value(demo, capsys):
+    assert change_json(capsys, "set", "demo", "local.retain_days", "7", "--by", "ui") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+    assert read(demo)["local"]["retain_days"] == 7
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+    assert change_json(capsys, "unset", "demo", "local.retain_days") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+
+
+def test_config_unset_json_of_a_key_the_file_lacks_is_unchanged(demo, capsys):
+    assert change_json(capsys, "unset", "demo", "block") == (
+        0, {"changed": False, "problem": None, "fix": None, "units": []})
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False
+
+
+@pytest.mark.parametrize("argv, code, problem, fix", [
+    (("set", "demo", "block", "maybe"), 2, "cannot be 'maybe', which is not a bool",
+     "give true or false (yes/no, on/off and 1/0 also do)"),
+    (("set", "demo", "local.retain_dayz", "1"), 2, "is not a setting of demo",
+     "did you mean 'local.retain_days'?"),
+    (("unset", "nothere", "x"), 3, "nothere: no distribution in this environment declares "
+     "the Moxi module 'nothere' (moxi-nothere is not installed)",
+     "install it: moxi install nothere"),
+])
+def test_config_set_json_gives_a_refusals_problem_and_fix_apart(demo, capsys, argv, code,
+                                                                problem, fix):
+    got, out = change_json(capsys, *argv)
+    assert got == code
+    assert out["changed"] is False and out["fix"] == fix and out["units"] == []
+    assert out["problem"] == problem
+
+
+def test_config_set_json_gives_the_modules_own_refusal(checked, capsys):
+    code, out = change_json(capsys, "set", "demo", "name", "kept")
+    assert (code, out) == (2, {"changed": False, "problem": "is a name kept back",
+                               "fix": "pick another name", "units": []})
+    code, out = change_json(capsys, "set", "demo", "name", "boom")
+    assert (code, out["problem"]) == (2, "demo refuses the file: boom in the file")
+    assert not checked.exists()
+
+
+def test_config_set_json_on_a_locked_file_exits_75(demo, monkeypatch, capsys):
+    monkeypatch.setattr(config, "LOCK_TIMEOUT", 0.2)
+    lock = demo.with_name("config.toml.lock")
+    proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "held"
+        code, out = change_json(capsys, "set", "demo", "block", "true")
+    finally:
+        proc.kill()
+        proc.wait()
+    assert code == 75 and out["changed"] is False
+    assert out["problem"] == f"{demo}: key 'block': is locked by pid {proc.pid}"
+    assert out["fix"] == "try again once it is free"
+
+
+def test_config_set_json_names_a_config_file_that_is_not_toml(demo, capsys):
+    demo.parent.mkdir(parents=True)
+    demo.write_text("block = \n")
+    for argv in (("set", "demo", "block", "true"), ("unset", "demo", "block")):
+        code, out = change_json(capsys, *argv)
+        assert code == 2 and out["changed"] is False
+        assert out["problem"].startswith(f"{demo}: is not valid TOML (")
+        assert out["fix"] == "correct the file's TOML syntax"
+    assert demo.read_text() == "block = \n"
+
+
+def test_config_set_json_names_the_schema_when_another_key_is_malformed(demo, site, capsys):
+    site.write("moxi_demo/settings.toml", SCHEMA.replace(
+        'doc = "A display name."', 'doc = "A display name."\nunit = "words"'))
+    code, out = change_json(capsys, "set", "demo", "block", "true")
+    assert (code, out) == (3, {
+        "changed": False,
+        "problem": "demo's settings schema cannot be read: moxi_demo/settings.toml: "
+                   "key 'name': has unit but is a string",
+        "fix": "remove unit; only an int or a float has a unit", "units": []})
+    assert not demo.exists()
+
+
+def test_config_set_json_keeps_a_bad_value_of_the_key_itself_bare(demo, capsys):
+    demo.parent.mkdir(parents=True)
+    demo.write_text("block = true\n")
+    code, out = change_json(capsys, "set", "demo", "local.retain_days", "seven")
+    assert (code, out["problem"]) == (2, "cannot be 'seven', which is not an int")
+
+
 def test_config_show_says_who_last_set_each_key(demo, capsys):
     run(capsys, "config", "set", "demo", "block", "true", "--by", "ui")
     run(capsys, "config", "set", "demo", "rows.backup", "on")
@@ -659,16 +755,16 @@ def test_config_help_names_set_and_unset(capsys):
 
 
 def test_the_history_file_holds_json_lines(demo, tmp_path):
-    config.set("demo", "block", True, by="cli")
+    config.set_value("demo", "block", value=True, by="cli")
     path = next((tmp_path / "core").rglob(config.HISTORY))
     assert json.loads(path.read_text().splitlines()[0])["key"] == "block"
 
 
 def test_an_untyped_list_tells_one_from_true(demo):
-    config.set("demo", "tags", [True], by="cli")
+    config.set_value("demo", "tags", [True], by="cli")
     config.add_item("demo", "tags", 1, by="cli")
     assert read(demo)["tags"] == [True, 1]
-    config.remove_item("demo", "tags", True, by="cli")
+    config.remove_item("demo", "tags", item=True, by="cli")
     assert read(demo)["tags"] == [1]
 
 
@@ -724,21 +820,21 @@ def test_a_module_with_no_check_sets_as_before(demo):
     from moxi import modules
 
     assert modules.load("demo").config_check is None
-    config.set("demo", "name", "boom", by="cli")
+    config.set_value("demo", "name", "boom", by="cli")
     assert read(demo)["name"] == "boom"
 
 
 def test_the_check_is_given_the_whole_new_text_before_it_is_written(checked):
     checked.parent.mkdir(parents=True)
     checked.write_text(COMMENTED)
-    assert config.set("demo", "name", "fine", by="cli") == []
+    assert config.set_value("demo", "name", "fine", by="cli") == []
     (text, on_disk), = calls()
     assert on_disk == COMMENTED
     assert text == checked.read_text() and 'name = "fine"' in text
 
 
 @pytest.mark.parametrize("change", [
-    lambda: config.set("demo", "name", "boom", by="cli"),
+    lambda: config.set_value("demo", "name", "boom", by="cli"),
     lambda: config.add_item("demo", "tags", "boom", by="cli"),
 ])
 def test_a_refusing_check_leaves_the_file_unchanged(checked, change):
@@ -751,12 +847,12 @@ def test_a_refusing_check_leaves_the_file_unchanged(checked, change):
 
 
 def test_a_new_file_the_check_refuses_is_never_made(checked):
-    refused(config.set, "demo", "name", "boom", by="cli")
+    refused(config.set_value, "demo", "name", "boom", by="cli")
     assert not checked.exists()
 
 
 @pytest.mark.parametrize("op, key, args", [
-    ("set", "block", (True,)),
+    ("set_value", "block", (True,)),
     ("unset", "block", ()),
     ("add_item", "tags", ("y",)),
     ("remove_item", "tags", ("x",)),
@@ -775,19 +871,19 @@ def test_another_exception_names_the_key_changed_and_its_first_line(checked, op,
 
 
 def test_an_exception_with_no_text_is_named_by_its_type(checked):
-    exc = refused(config.set, "demo", "name", "quiet", by="cli")
+    exc = refused(config.set_value, "demo", "name", "quiet", by="cli")
     assert exc.problem == "demo refuses the file: RuntimeError"
 
 
 def test_a_config_error_from_the_check_keeps_its_key_and_reason(checked):
-    exc = refused(config.set, "demo", "name", "kept", by="cli")
+    exc = refused(config.set_value, "demo", "name", "kept", by="cli")
     assert (exc.key, exc.problem, exc.fix) == ("name", "is a name kept back",
                                                "pick another name")
     assert exc.file == str(checked)
 
 
 def test_a_check_s_error_names_the_config_file_never_another_path(checked):
-    exc = refused(config.set, "demo", "name", "elsewhere", by="cli")
+    exc = refused(config.set_value, "demo", "name", "elsewhere", by="cli")
     assert (exc.file, exc.key, exc.problem) == (str(checked), "name", "is elsewhere")
     assert "/elsewhere" not in str(exc)
 
@@ -795,14 +891,14 @@ def test_a_check_s_error_names_the_config_file_never_another_path(checked):
 def test_the_check_runs_after_the_readers_check(checked):
     checked.parent.mkdir(parents=True)
     checked.write_text("stray = 1\n")
-    exc = refused(config.set, "demo", "name", "boom", by="cli")
+    exc = refused(config.set_value, "demo", "name", "boom", by="cli")
     assert exc.key == "stray"
     assert calls() == []
 
 
 def test_a_check_that_cannot_be_imported_refuses_with_exit_3(demo, site):
     site.module("demo", SETTINGS="'settings.toml'", CONFIG_CHECK="'moxi_demo.gone:check'")
-    exc = refused(config.set, "demo", "name", "x", by="cli")
+    exc = refused(config.set_value, "demo", "name", "x", by="cli")
     assert exc.exit_code == 3 and "moxi_demo.gone:check" in exc.problem
     assert not demo.exists()
 
@@ -810,7 +906,7 @@ def test_a_check_that_cannot_be_imported_refuses_with_exit_3(demo, site):
 @pytest.mark.parametrize("argv", [("set", "demo", "name", "x"),
                                   ("unset", "demo", "name"),
                                   ("demo", "check")])
-def test_a_bad_environment_variable_never_refuses_a_change_or_the_check(checked, capsys,
+def test_a_bad_env_variable_never_refuses_a_change_or_the_check(checked, capsys,
                                                                          monkeypatch, argv):
     checked.parent.mkdir(parents=True)
     checked.write_text('backend = "local"\nname = "y"\n')

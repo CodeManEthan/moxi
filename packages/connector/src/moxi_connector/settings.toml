@@ -5,19 +5,24 @@
 type = "bool"
 default = false
 doc = "The daemon's switch: on, the public MCP door runs and its socket unit holds the port."
+label = "The public door"
 read = "use"
+terminal = { on = "moxi connector enable", off = "moxi connector disable" }
 
 [port]
 type = "int"
 default = 8452
 doc = "The loopback port the door listens on, and the port tunnel's connector/mcp forwards to."
 read = "start"
+label = "Port"
 
 [public_url]
 type = "string"
 default = ""
 doc = "The public origin (https://<name>[:<port>], no path) when no tunnel gives one. Empty reads tunnel's connector/mcp."
 read = "use"
+label = "Public address"
+line = "The public origin, https://name:port with no path, when no tunnel gives one."
 
 [redirect_uris]
 type = "list"
@@ -25,9 +30,14 @@ items = "str"
 default = ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"]
 doc = "The callbacks a client may register for its sign-in codes."
 read = "start"
+label = "Sign-in callbacks"
+line = "The callbacks a client may register for its sign-in codes."
 
 [refresh_days]
 type = "int"
 default = 30
 doc = "How many days a sign-in lasts after its last refresh."
 read = "start"
+label = "A sign-in lasts for"
+line = "After its last refresh."
+unit = "days"

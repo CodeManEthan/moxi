@@ -3,7 +3,7 @@ writes one.
 
     t = ClaudeTranscript(projects_root)
     t.user("read the notes")
-    req = t.request(usage=usage(input=3, cache_read=900, output=40))
+    req = t.request(usage=usage(input_tokens=3, cache_read=900, output=40))
     req.thinking("which file?")
     call = req.tool_use("Read", {"file_path": "/work/project/notes.md"})
     t.tool_result(call, "the notes")
@@ -43,7 +43,7 @@ START = 1793354400.0
 MODEL = "claude-model-x"
 
 
-def usage(*, input: int = 2, cache_read: int = 10, cache_write: int = 0,
+def usage(*, input_tokens: int = 2, cache_read: int = 10, cache_write: int = 0,
           cache_write_1h: int = 0, output: int = 100, thinking: int | None = None,
           service_tier: str | None = "standard", speed: str | None = "standard",
           breakdown: bool = True) -> dict:
@@ -52,7 +52,7 @@ def usage(*, input: int = 2, cache_read: int = 10, cache_write: int = 0,
     the `cache_creation` object that splits it. `thinking` adds
     `output_tokens_details.thinking_tokens`. A None tier or speed is left out."""
     block: dict[str, Any] = {
-        "input_tokens": input,
+        "input_tokens": input_tokens,
         "cache_creation_input_tokens": cache_write,
         "cache_read_input_tokens": cache_read,
         "output_tokens": output,
@@ -259,7 +259,7 @@ class ClaudeTranscript:
         """A line Claude Code makes up itself: model `<synthetic>`, zero usage, no
         request id and no requested model."""
         handle = self.request(request_id=None, model="<synthetic>", requested_model=None,
-                              usage_block=usage(input=0, cache_read=0, output=0,
+                              usage_block=usage(input_tokens=0, cache_read=0, output=0,
                                                 service_tier=None, speed=None,
                                                 breakdown=False))
         handle.text(text)
@@ -313,13 +313,13 @@ class ClaudeTranscript:
         `agent-<id>.meta.json` holds the labels given (a None one is left out); `sidecar`
         False writes none, and a string writes that text as the sidecar (one that will not
         parse, say). Writing this transcript writes its subagents too."""
-        directory = self.path.parent / self.path.stem / "subagents"
+        subagents_dir = self.path.parent / self.path.stem / "subagents"
         if workflow is not None:
-            directory = directory / "workflows" / workflow
+            subagents_dir = subagents_dir / "workflows" / workflow
         child = ClaudeTranscript(
             self.root, session_id=self.session_id, project=self.project, cwd=self.cwd,
             version=self.version, entrypoint=self.entrypoint, start=self.clock,
-            step=self.step, path=directory / f"agent-{agent_id}.jsonl", agent_id=agent_id)
+            step=self.step, path=subagents_dir / f"agent-{agent_id}.jsonl", agent_id=agent_id)
         if sidecar is True:
             labels = {"agentType": agent_type, "description": description,
                       "toolUseId": tool_use_id, "spawnDepth": spawn_depth,
@@ -369,8 +369,8 @@ class ClaudeTranscript:
         new = self.lines[self._written:]
         data = "" if self._terminated else "\n"
         data += "\n".join(new) + ("\n" if terminated and new else "")
-        with self.path.open("ab") as handle:
-            handle.write(data.encode("utf-8"))
+        with self.path.open("ab") as fh:
+            fh.write(data.encode("utf-8"))
         self._written = len(self.lines)
         self._terminated = terminated or not new
         return self.path

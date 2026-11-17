@@ -61,7 +61,8 @@ def workspace(tmp_path, monkeypatch, uv_env):
     root.mkdir()
     (root / "pyproject.toml").write_text(
         '[tool.uv.workspace]\nmembers = ["packages/low", "packages/high"]\n'
-        '[tool.uv.sources]\nlow = { workspace = true }\n')
+        '[tool.uv.sources]\nlow = { workspace = true }\n'
+        '[tool.ruff.lint]\nselect = ["N", "A", "FBT"]\nignore = ["N818"]\n')
     (root / ".gitignore").write_text(".moxi-dev/\n.venv/\n__pycache__/\n.pytest_cache/\n")
     package(root, "low", "[]")
     package(root, "high", '["low"]')
@@ -86,8 +87,9 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     (workspace / "packages/low/tests/test_more.py").write_text(UNDER_WORKERS)
     assert check.main([]) == 0
     line = last_line(capsys)
-    assert ("packages: low, high | lock pass | tags pass | release pass | stamps none | "
-            "web none | sync pass | lint none | low pass") in line, line
+    assert ("packages: low, high | lock pass | tags pass | refs pass | names pass | ruff pass | "
+            "release pass | stamps none | web none | sync pass | lint none | low pass") \
+        in line, line
     assert ", high pass " in line and line.endswith("exit 0")
     assert check.venv_program(workspace / ".moxi-dev/env-3.12", "python").exists()
     assert not (workspace / ".venv").exists()
@@ -101,8 +103,9 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     git(workspace, "commit", "-q", "-m", "break high")
     assert check.main(["--base", "mark"]) == 1
     line = last_line(capsys)
-    assert ("packages: high | lock pass | tags pass | release pass | stamps none | "
-            "web none | sync pass | lint none | high fail ") in line, line
+    assert ("packages: high | lock pass | tags pass | refs pass | names pass | ruff pass | "
+            "release pass | stamps none | web none | sync pass | lint none | high fail ") \
+        in line, line
     assert line.endswith("exit 1")
 
 
@@ -111,6 +114,7 @@ def test_a_stale_lock_fails_the_check(workspace, capsys):
         (workspace / "packages/low/pyproject.toml").read_text()
         .replace("dependencies = []", 'dependencies = ["iniconfig"]'))
     assert check.main(["--full"]) == 1
-    assert ("lock fail | tags not run | release not run | stamps not run | web not run | "
-            "sync not run") in (
+    assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
+            "release not run | "
+            "stamps not run | web not run | sync not run") in (
         last_line(capsys))

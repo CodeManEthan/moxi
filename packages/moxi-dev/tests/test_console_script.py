@@ -14,7 +14,7 @@ from moxi_dev import testing
 from moxi_dev.testing import console_script
 
 
-def test_the_scripts_directory_lookup_finds_it(tmp_path, monkeypatch):
+def test_the_scripts_dir_lookup_finds_it(tmp_path, monkeypatch):
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: tmp_path)
     path = console_script(tmp_path, "moxi-demo-relay")
     assert moxi.paths.script("moxi-demo-relay") == path

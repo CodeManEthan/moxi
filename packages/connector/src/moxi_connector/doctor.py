@@ -147,10 +147,10 @@ def take(*, ask: Callable[..., object] | None = None,
             answer = got if isinstance(got, dict) else None
             if answer is None:
                 error = "the control socket answered something other than a status"
-        except ipc.IpcError as e:
-            error = str(e) or type(e).__name__
-        except OSError as e:
-            error = str(e)
+        except ipc.IpcError as exc:
+            error = str(exc) or type(exc).__name__
+        except OSError as exc:
+            error = str(exc)
     rows = [r for r in _safe_rows(days=2)]
     last_check = next((r for r in reversed(rows) if r.get("kind") == "check"), None)
     last_call = next((r for r in reversed(rows) if r.get("kind") == "request"), None)
@@ -185,7 +185,7 @@ def build(snap: Snapshot) -> list[Row]:
     """The rows for `snap`."""
     if not snap.switch:
         rows = [Row(MODULE, "switch", "off", "the connector is off",
-                    "moxi connector on")]
+                    "moxi connector enable")]
         if getattr(snap.address, "state", None) == "on":
             rows.append(Row(MODULE, "address", "warn", ADDRESS_FORWARDS,
                             f"moxi tunnel remove {TARGET}"))

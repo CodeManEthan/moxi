@@ -4,34 +4,70 @@ The reads answer from the launcher's own calls: the catalog (`catalog.offered`'s
 the UI shell's form reads them), the presets file checked (`presets.check`), the launch
 form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
-past-sessions list (`resume.sessions`) and a session's state (`state.state`, or
-`state.of_launch` for every live launch). Each holds `busy("read")` for its own length
-only.
+past-sessions list (`resume.sessions`), a session's state (`state.state`, or
+`state.of_launch` for every live launch), the places the page server's own actor last
+launched in (`store.places`), where a launch may run now (slots' `list_slots`, joined
+with the launch log) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
-and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
+and start time its row recorded, or, with no pid, on the endpoint that claimed it
+(`live.alive` and `live.live`, which this module imports and offers under its own name). That
 costs one store read and one look at a process per row, and asks turns nothing, so the
 `sessions` topic can gather it every few seconds; the past-sessions list, which asks turns
 about each entry, is read only when the page asks for it. A live launch whose state can't
 be read (a keep-warm launch's cache read failing, say) is marked `unreadable` in its own
 entry, naming only the exception's class, and the other entries still stand.
 
-**The stream** carries two topics, `sessions` (every live launch's state) and `launches`
-(the newest page of the launch log), each built by a `Snapshot` of its own, which
-publishes only when its value changed. One poller feeds both: an asyncio task the stream
-route starts on its first call, living for the rest of the process. Every `TICK` seconds
-it reads the launch log's data version, and asks both topics for a rebuild when it moved,
-or when `REGATHER` seconds have passed without one: a session's process ending writes
-nothing to the log, nor does a spawning row turning stale. The poller is not a request, a
-stream or a busy hold, so it never delays the server's idle exit. It survives every
-exception: a failure is logged once per class and the next tick reads again.
+**The stream** carries three topics, `sessions` (every live launch's state), `launches`
+(the newest page of the launch log) and `running` (the launches running now, as Home's
+Sessions row reads them), each built by a `Snapshot` of its own, which publishes only
+when its value changed. One poller feeds all three: an asyncio task started by the first
+call of the stream route or of `/api/running`, living for the rest of the process. Every
+`TICK` seconds it reads the launch log's data version, and asks each topic for a rebuild
+when it moved, or when `REGATHER` seconds have passed without one: a session's process
+ending writes nothing to the log, nor does a spawning row turning stale. The poller is not
+a request, a stream or a busy hold, so it never delays the server's idle exit. It survives
+every exception: a failure is logged once per class and the next tick reads again.
+
+**The launches running now** (`/api/running` and the topic `running`) are `api.running`'s,
+each with where it runs, its folder sent as the last segment of its directory and never
+as a path. Over each the feed lays the facts its joiner kept for that request id and
+session (`joiner`): its cache, what it waits on, whether keep-warm covers it, and its
+session's latest message. A launch with none kept has `cache`, `waits` and `activity`
+null and `covered` false. The read costs one look at the launch log and one at a process
+per launch, as the `sessions` topic does, and asks no other module: the joiner reads the
+other modules on a task of its own, started with the poller, which the poller never
+awaits, and its pass asks the topic for a rebuild when it ends. The first call of
+`/api/running` waits for the first pass, for at most `FIRST_JOIN_WAIT_S` seconds, so a
+page server that has just started answers with the joined facts when that pass is quick.
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
-lays them for `resolve`, so the form and the launch can't disagree. A brief or standing
+lays them for `resolve`, so the form and the launch can't disagree. Beside the rows it names the command a
+launch of that harness composes in each place it may run (`presets.mode_of`), which is
+what a row's `modes` are matched with. A brief or standing
 instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
 text is not sent. A preset that can't be laid for the harness is answered with no rows and
 the resolver's refusal.
+
+**The session name** is read from `/api/name`, which renders the name template for the
+project, seat, model and comms name the form holds now, as a launch that sets no `name`
+is named. With `template` it renders that text, unsaved, and answers the save check's
+refusal, or what saving it writes: a launcher setting's key and value, `name.template`,
+or with `keep=project` the whole `name.templates` table with the project's entry set.
+No route here writes it: the page saves through the UI shell's own settings route, the
+one place a setting locked for a run of the shell is refused.
+
+**What an earlier launch was asked for** is read from the sources a launch records
+(`request_of`): the values its own request gave, apart from what its preset and the
+defaults gave, in the shape a launch request has. `/api/last` hands the newest launch's
+back for the form to start filled with, without the rows a launch never takes from an
+earlier one (the place, the first turn, where it runs, the name). `/api/recents` lists
+the newest three launches that asked for different requests, and `/api/recent` resolves
+one's request with where the page would run it now, as `/api/preview` does but with no
+ticket, so what the page shows of a recent is what running it again runs. The launches
+are those of the seat the query names, else of its project, else of its folder, and a
+project's or a folder's never include a seat's.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
@@ -56,7 +92,7 @@ copy instead, with `--leave-out ROW` for each row left out: the page never runs 
 it would take the server's place.
 
 `/api/launch` takes the request and its ticket. A ticket not issued for exactly this
-request is refused `bad-ticket`, an old one `expired`. It compares the rows with the layers
+request, its `filled` included, is refused `bad-ticket`, an old one `expired`. It compares the rows with the layers
 again, as the presets file is now, and writes the request file
 (`STATE/runs/<request id>.request.json`, 0600, made only if it is not there) and spawns
 `moxi-launcher-job launch <request id>` detached, then answers 202 with the status path
@@ -77,6 +113,16 @@ with the status path holding that id. What the resume meets later (a run opened 
 slot slots won't give, another resume of the session starting first) the job records as it
 records a launch's refusal.
 
+`/api/keep-warm` is the press of `Keep warm` on Home's Sessions row (`keep_warm`). It finds
+the launch's session as the joiner does, slots never asked, and reads now, through one
+`waits.Reads` whose deadline is `joiner.JOIN_BUDGET_S` from the press, what a join pass
+reads of that launch. A session keep-warm's next ask would already nudge is answered not
+refused, with nothing written. Else it reads the ask's steps as if cover had just been set
+(`keepwarm.reading` with `pressed`) and answers the first that does not pass as a refusal;
+when every one passes it writes the cover (`keepwarm.cover_on`), the one event a press
+writes, and wakes the joiner for a pass. It sends nothing to the session and starts no
+job: cache's timer's next ask sends the first nudge.
+
 A handler cuts each answer to its route's declared keys, and turns any failure it did not
 expect into `state` `error` with a fixed `detail` naming only the exception's class, so no
 message text, which may hold a path, reaches the browser. The class and its traceback are
@@ -94,6 +140,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -111,10 +158,11 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, presets, relaunch, settings, slots, state, store, target,
-               targets)
+from . import (api, catalog, first, job, joiner, keepwarm, names, presets, recycle, relaunch,
+               settings, slots, state, store, target, targets, waits)
 from . import resume as resuming
 from .compose import common
+from .live import alive, live
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
 
@@ -136,13 +184,19 @@ WITHHELD = ("brief", "instructions")
 #: saved screen, which the detail's text can't mark as a path.
 EVENT_CUT = ("text", "pane_id", "capture")
 #: The stream's topics.
-TOPICS = ("sessions", "launches")
+TOPICS = ("sessions", "launches", "running")
+#: The facts of a running launch that are read beyond the launch log, each as it is when
+#: none was read.
+UNJOINED = {"cache": None, "waits": None, "covered": False, "coverable": None,
+            "activity": None}
 #: Seconds between the poller's reads of the launch log's data version, which moves at
 #: every write to the log.
 TICK = 1.0
 #: Seconds after which the poller gathers both topics again though the log has not moved:
 #: a session's process ending, or a run's job going, writes nothing to it.
 REGATHER = 5.0
+#: Seconds the first call of `/api/running` waits for the feed's first join pass to end.
+FIRST_JOIN_WAIT_S = 3.0
 
 log = logging.getLogger("moxi.launcher.page")
 
@@ -227,7 +281,8 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
 
 
 def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> dict[str, Any]:
-    """One catalog row as the UI shell's form reads it, for a `harness` launch."""
+    """One catalog row as the UI shell's form reads it, for a `harness` launch. A row
+    whose catalog entry has no `label` is called by its name, the underscores as spaces."""
     why = row.unoffered(available, harness)
     values, notes = _offered_values(row, available, harness)
     default, items = _value_of(row, row.default)
@@ -242,6 +297,11 @@ def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> d
         "requires": row.requires if isinstance(row.requires, str) else None,
         "needs_absent": why is not None,
         "note": why[0] if why is not None else ("; ".join(notes) or None),
+        "group": row.group, "sub": row.sub,
+        "label": row.label or row.name.replace("_", " ").capitalize(),
+        "danger": list(row.danger), "carry": row.carry, "modes": list(row.modes),
+        "shown": why is None and all(available(module) for module in row.shown_with),
+        "typed": row.typed_with is None or available(row.typed_with),
     }
 
 
@@ -259,8 +319,8 @@ def read_catalog(call: Any) -> dict[str, Any]:
             available = _available()
             harnesses = [{"name": harness, "fields": fields(harness, available)}
                          for harness in catalog.HARNESSES]
-        except Exception as err:
-            return _failed(err, "reading the catalog failed", harnesses=[])
+        except Exception as exc:
+            return _failed(exc, "reading the catalog failed", harnesses=[])
         return _up(harnesses=harnesses)
 
 
@@ -294,13 +354,13 @@ def read_presets(call: Any) -> dict[str, Any]:
         try:
             try:
                 found = presets.read()
-            except ConfigError as err:
-                return _up(presets=[], problems=[_file_problem(err)])
+            except ConfigError as exc:
+                return _up(presets=[], problems=[_file_problem(exc)])
             problems = presets.check(available=_available(), presets=found)
             return _up(presets=[_preset(p) for p in found.all()],
                        problems=[p.as_json() for p in problems])
-        except Exception as err:
-            return _failed(err, "reading the presets failed", presets=[], problems=[])
+        except Exception as exc:
+            return _failed(exc, "reading the presets failed", presets=[], problems=[])
 
 
 # -- /api/form ------------------------------------------------------------------------------
@@ -335,21 +395,43 @@ def _form_harness(request: presets.Request, asked: str | None) -> str:
         return _shipped_harness()
 
 
+def modes(harness: str, identity: str | None,
+          available: Callable[[str], bool]) -> list[dict[str, Any]]:
+    """The command a `harness` launch composes in each place the `target` row names, in
+    the row's order, as the resolver decides it (`presets.mode_of`); null where the
+    resolver refuses such a launch. `identity` counts only with comms installed, since
+    the resolver drops it without."""
+    name = identity if identity and available("comms") else None
+    out = []
+    for where in catalog.launcher()["target"].values or ():
+        try:
+            mode: str | None = presets.mode_of(harness, str(where), identity=name,
+                                               available=available)[0]
+        except catalog.Refused:
+            mode = None
+        out.append({"target": str(where), "mode": mode})
+    return out
+
+
 def form(seat: str | None = None, project_preset: str | None = None,
-         harness: str | None = None) -> dict[str, Any]:
+         harness: str | None = None, identity: str | None = None) -> dict[str, Any]:
     """`/api/form`'s answer: the harness the form is drawn for (`harness`, else the one the
     layers give) and each of its rows as the shipped defaults, `[defaults]` and the one
     preset named lay them. A request the resolver refuses (both presets named, a preset
     unknown or not laid for `harness`, a presets file that can't be read) is answered
     with no rows and its refusal. The `harness` row holds the layers' harness, which is
-    `harness` only when none is asked or the layers name the one asked."""
+    `harness` only when none is asked or the layers name the one asked. `modes` is for
+    the harness the form is drawn for, under the comms name `identity`."""
     request = presets.Request(seat=seat or None, project_preset=project_preset or None)
+    available = _available()
     try:
-        laid = presets.layered(request, harness=harness, available=_available())
-    except REFUSALS as error:
-        return _up(harness=_form_harness(request, harness), rows=[],
-                   refused=_refusal(error))
-    return _up(harness=laid.harness, rows=form_rows(laid), refused=None)
+        laid = presets.layered(request, harness=harness, available=available)
+    except REFUSALS as exc:
+        drawn = _form_harness(request, harness)
+        return _up(harness=drawn, rows=[], modes=modes(drawn, identity, available),
+                   refused=_refusal(exc))
+    return _up(harness=laid.harness, rows=form_rows(laid),
+               modes=modes(laid.harness, identity, available), refused=None)
 
 
 def read_form(call: Any) -> dict[str, Any]:
@@ -357,10 +439,11 @@ def read_form(call: Any) -> dict[str, Any]:
     query = call.query
     with call.busy("read"):
         try:
-            return form(query.get("seat"), query.get("project_preset"), query.get("harness"))
-        except Exception as err:
-            return _failed(err, "reading the launch form failed",
-                           harness=_shipped_harness(), rows=[], refused=None)
+            return form(query.get("seat"), query.get("project_preset"), query.get("harness"),
+                        query.get("identity"))
+        except Exception as exc:
+            return _failed(exc, "reading the launch form failed",
+                           harness=_shipped_harness(), rows=[], modes=[], refused=None)
 
 
 # -- the launch log -------------------------------------------------------------------------
@@ -371,8 +454,8 @@ def _store() -> Iterator[sqlite3.Connection | None]:
     """The launch log, or None when it was never made; nothing is made to say so."""
     try:
         conn = store.connect(create=False)
-    except core_store.StoreError as err:
-        if isinstance(err, core_store.StoreTooNew):
+    except core_store.StoreError as exc:
+        if isinstance(exc, core_store.StoreTooNew):
             raise
         yield None
         return
@@ -423,28 +506,34 @@ def refusal(detail: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _requested(conn: sqlite3.Connection, request_id: str
-               ) -> tuple[list[store.LaunchRow], dict[str, Any] | None]:
+               ) -> tuple[list[store.LaunchRow], dict[str, Any] | None, str | None]:
+    """One launch's row, or the refusal met before it was written, and for a failed row
+    the newest sentence its events recorded for the failure."""
     row = store.get(conn, request_id)
+    events = store.events(conn, request_id)
     if row is not None:
-        return [row], None
-    refused = [e for e in store.events(conn, request_id) if e.kind == store.LAUNCH_REFUSED]
-    return [], refusal(refused[-1].detail) if refused else None
+        said = [e.detail.get("why") for e in events] if row.state == "failed" else []
+        why = [text for text in said if isinstance(text, str) and text]
+        return [row], None, why[-1] if why else None
+    refused = [e for e in events if e.kind == store.LAUNCH_REFUSED]
+    return [], refusal(refused[-1].detail) if refused else None, None
 
 
 def launches(*, limit: int = LIMIT, before: str | None = None,
              request: str | None = None) -> dict[str, Any]:
     """The launch log page the route and the `launches` topic send: newest first, or the
     one launch `request` names, with the refusal of a page launch refused before its row
-    was written."""
+    was written, or the sentence recorded for why it failed."""
     rows: list[store.LaunchRow] = []
-    refused = None
+    refused = why = None
     with _store() as conn:
         if conn is not None and request is not None:
-            rows, refused = _requested(conn, request)
+            rows, refused, why = _requested(conn, request)
         elif conn is not None:
             rows = store.log(conn, limit=limit, before=before)
     after, now = store.stale_after_s(), datetime.now(timezone.utc)
-    return _up(launches=[launch_row(row, after, now) for row in rows], refused=refused)
+    return _up(launches=[launch_row(row, after, now) for row in rows], refused=refused,
+               why=why)
 
 
 def read_launches(call: Any) -> dict[str, Any]:
@@ -455,8 +544,9 @@ def read_launches(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return launches(limit=limit, before=before, request=query.get("request"))
-        except Exception as err:
-            return _failed(err, "reading the launch log failed", launches=[], refused=None)
+        except Exception as exc:
+            return _failed(exc, "reading the launch log failed", launches=[], refused=None,
+                           why=None)
 
 
 # -- /api/runs ------------------------------------------------------------------------------
@@ -492,37 +582,208 @@ def read_runs(call: Any) -> dict[str, Any]:
                     found = store.runs(conn, request_id=query.get("request"), limit=limit,
                                        before=before)
                 return _up(runs=[run_entry(conn, run) for run in found])
-        except Exception as err:
-            return _failed(err, "reading the runs failed", runs=[])
+        except Exception as exc:
+            return _failed(exc, "reading the runs failed", runs=[])
+
+
+# -- /api/places ----------------------------------------------------------------------------
+
+#: The optional module whose keys a launch names with its `project` row.
+PROJECTS = "projects"
+
+
+def _home() -> str:
+    """The user's home folder as the page server sees it, which is what `~` in a launch's
+    folder stands for."""
+    return os.path.expanduser("~")
+
+
+def places() -> dict[str, Any]:
+    """`/api/places`' answer: who the page server launches as, the places that actor last
+    launched in, newest first, whether a launch here may name a project, and the home
+    folder, so the page can write a place under it with `~`."""
+    actor = first.actor()
+    with _store() as conn:
+        found = [] if conn is None else store.places(conn, actor)
+    return _up(projects=_available()(PROJECTS), actor=actor, home=_home(),
+               places=[place._asdict() for place in found])
+
+
+def read_places(call: Any) -> dict[str, Any]:
+    """`GET /api/places`: where this user last launched."""
+    with call.busy("read"):
+        try:
+            return places()
+        except Exception as exc:
+            return _failed(exc, "reading the places failed", projects=False,
+                           actor=first.actor(), home=_home(), places=[])
+
+
+# -- /api/targets ---------------------------------------------------------------------------
+
+#: The choice a launch starts with where no slot can be used: the command to copy.
+NO_SLOTS = {"target": "terminal", "slot": None}
+
+
+def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
+    """The launch that occupies `slot`: the request id slots keeps for its last start,
+    when the launch log holds that launch."""
+    meta = slot.last.meta if slot.state == "occupied" and slot.last is not None else None
+    request_id = meta.get("request_id") if isinstance(meta, Mapping) else None
+    if conn is None or not isinstance(request_id, str):
+        return None
+    row = store.get(conn, request_id)
+    return None if row is None else {"request_id": request_id, "label": names.shown(row)}
+
+
+def _usable_slots() -> Any:
+    """slots' API where slots is installed, loads and can run here, else None."""
+    api = slots.api() if _available()(slots.MODULE) else None
+    return api if api is not None and api.supported().ok else None
+
+
+def _slots_there() -> bool:
+    """Whether slots can be used here, asked after a read of where a launch may run
+    raised; false when that can't be told either."""
+    try:
+        return _usable_slots() is not None
+    except Exception:
+        return False
+
+
+def targets_now() -> dict[str, Any]:
+    """`/api/targets`' answer. Where slots is installed, loads and can run, each
+    registered slot in number order, and a default that names the lowest launchable one,
+    or none when a launch would take a new slot. Where it is not, or the slots can't be
+    read, no slot and the terminal as the default, with `unread` true only for slots
+    that are there and could not be read. Headless is never the default."""
+    none = _up(slots=[], new_slot=False, unread=False, default=dict(NO_SLOTS))
+    api = _usable_slots()
+    if api is None:
+        return none
+    listing = api.list_slots()
+    if not listing.ok:
+        return {**none, "unread": True}
+    listed = sorted(listing.slots, key=lambda slot: slot.number)
+    with _store() as conn:
+        rows = [{"number": slot.number, "state": slot.state, "launchable": slot.launchable,
+                 "holder": slot.hold.holder if slot.hold else None,
+                 "until": slot.hold.until if slot.hold else None,
+                 "taken_by": _taken_by(conn, slot)} for slot in listed]
+    free = next((slot.number for slot in listed if slot.launchable), None)
+    return _up(slots=rows, new_slot=True, unread=False,
+               default={"target": "slot", "slot": free})
+
+
+def read_targets(call: Any) -> dict[str, Any]:
+    """`GET /api/targets`: where a launch may run now."""
+    with call.busy("read"):
+        try:
+            return targets_now()
+        except Exception as exc:
+            return _failed(exc, "reading where a launch may run failed", slots=[],
+                           new_slot=False, unread=_slots_there(), default=dict(NO_SLOTS))
+
+
+# -- /api/name ------------------------------------------------------------------------------
+
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_text(text: str) -> str:
+    # A JSON string's escapes are all TOML basic-string escapes.
+    return json.dumps(text, ensure_ascii=False)
+
+
+def spelled_table(table: Mapping[str, str]) -> str:
+    """A table of strings as the command line takes one: one TOML inline table."""
+    parts = [f"{key if _BARE_KEY.fullmatch(key) else _toml_text(key)} = {_toml_text(value)}"
+             for key, value in table.items()]
+    return "{" + ", ".join(parts) + "}"
+
+
+def _unnamed(**answer: Any) -> dict[str, Any]:
+    return {"name": None, "template": names.DEFAULT, "from": names.GLOBAL, "project": None,
+            "refused": None, "save": None, **answer}
+
+
+def _keep_checked(query: Mapping[str, Any]) -> None:
+    if "keep" in query and "template" not in query:
+        raise lb.Refused("keep is asked with template, the text to keep")
+    if query.get("keep") == names.PROJECT and not query.get("project"):
+        raise lb.Refused("keep=project is asked with project, the key the template is kept "
+                         "for")
+
+
+def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/name`'s answer: the name a launch would take now, from the template of its
+    project, else the one for every launch. Its project is `project`, else the one a
+    launch in the folder `cwd` finds (`presets.dir_place`, which also expands `~`).
+    `seat`, else `agent`, fills `<agent>`; the project's key, else the name of that
+    folder, fills `<project>`; `identity` and `scope` fill nothing without comms. The
+    answer's `project` is the key of the project whose template it rendered, null for
+    the one for every launch. With `template`, that text is rendered in the stored
+    template's place and checked: refused, the answer holds the refusal and no name;
+    else `save` holds what saving it writes, for `project` when `keep` is `project`.
+    Settings or projects that can't be read are answered as a refusal. A `keep` with no
+    `template`, or for a project with no `project`, is refused (422)."""
+    _keep_checked(query)
+    project = query.get("project") or None
+    keep, editing = query.get("keep"), "template" in query
+    available = _available()
+    comms = available("comms")
+    key, dir_name = project, ""
+    try:
+        current = settings.current()
+        if project is None and query.get("cwd"):
+            cwd, key = presets.dir_place(query["cwd"], available=available)
+            dir_name = names.dir_name(cwd)
+    except REFUSALS as exc:
+        return _up(**_unnamed(refused=_refusal(exc)))
+    pieces = names.Pieces(
+        project=key or dir_name,
+        agent=query.get("seat") or query.get("agent") or "",
+        model=query.get("model") or "",
+        identity=(query.get("identity") or "") if comms else "",
+        scope=(query.get("scope") or "") if comms else "")
+    refused = save = None
+    if editing:
+        template = query["template"]
+        source = names.PROJECT if keep == names.PROJECT else names.GLOBAL
+        refused = names.refusal(template)
+        if refused is not None:
+            return _up(**_unnamed(template=template, refused=_refusal(refused),
+                                  project=key if source == names.PROJECT else None,
+                                  **{"from": source}))
+        save = {"key": names.TEMPLATE, "value": template}
+        if source == names.PROJECT:
+            table = {**(current[names.TEMPLATES] or {}), str(project): template}
+            save = {"key": names.TEMPLATES, "value": spelled_table(table)}
+    else:
+        picked = names.chosen(current, key)
+        template, source = picked.template, picked.source
+    owner = key if source == names.PROJECT else None
+    taken: frozenset[str] = frozenset()
+    if "<instance>" in template:
+        with _store() as conn:
+            taken = frozenset() if conn is None else names.taken(conn)
+    name = names.render(template, pieces, now=names.now(), taken=taken)
+    return _up(name=name, template=template, project=owner, refused=None, save=save,
+               **{"from": source})
+
+
+def read_name(call: Any) -> dict[str, Any]:
+    """`GET /api/name`: the session name a launch would take, or a template being edited
+    would give it."""
+    _keep_checked(call.query)
+    with call.busy("read"):
+        try:
+            return name_now(call.query)
+        except Exception as exc:
+            return _failed(exc, "reading the session name failed", **_unnamed())
 
 
 # -- live launches and their state ------------------------------------------------------------
-
-
-def alive(row: store.LaunchRow) -> bool:
-    """Whether the process of the launch `row` runs now: `moxi.proc.alive` on the pid and
-    start time it recorded (with no start time, whether any process has that pid), or,
-    for a row that recorded no pid, on the endpoint that claimed it. An endpoint that
-    can't be read is not alive."""
-    if row.pid:
-        if row.pid_started is None:
-            return proc.identity(row.pid) is not None
-        return proc.alive(proc.ProcId(row.pid, row.pid_started))
-    parsed = store.parse_endpoint(row.endpoint) if row.endpoint else None
-    return parsed is not None and not store.endpoint_gone(row.endpoint or "")
-
-
-def live(conn: sqlite3.Connection) -> list[store.LaunchRow]:
-    """The live launches, newest first: each not `failed` whose process runs now, with
-    `newest_session_id` the id it was last known by. One store read and one look at a
-    process per row; turns is not asked."""
-    found = []
-    for row in store.running(conn):
-        if alive(row):
-            known = store.session_ids(conn, row.request_id)
-            found.append(replace(row, newest_session_id=known[-1][0] if known
-                                 else row.session_id))
-    return found
 
 
 def _readable(found: state.SessionState) -> dict[str, Any]:
@@ -547,8 +808,8 @@ def live_states(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     for row in live(conn):
         try:
             found.append(_readable(state.of_launch(conn, row, slots_api=api)))
-        except Exception as err:
-            found.append(unreadable(row, err))
+        except Exception as exc:
+            found.append(unreadable(row, exc))
     return found
 
 
@@ -566,8 +827,8 @@ def session_state(session: str | None) -> dict[str, Any]:
             if conn is None:
                 raise target.NotLaunched()
             got = state.state(session, conn=conn, slots_api=slots.api())
-        except target.NotLaunched as err:
-            return _up(sessions=[], refused=_refused(err))
+        except target.NotLaunched as exc:
+            return _up(sessions=[], refused=_refused(exc))
         return _up(sessions=[_readable(got)], refused=None)
 
 
@@ -577,8 +838,8 @@ def read_state(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return session_state(call.query.get("session"))
-        except Exception as err:
-            return _failed(err, "reading the state failed", sessions=[], refused=None)
+        except Exception as exc:
+            return _failed(exc, "reading the state failed", sessions=[], refused=None)
 
 
 def read_sessions(call: Any) -> dict[str, Any]:
@@ -591,8 +852,8 @@ def read_sessions(call: Any) -> dict[str, Any]:
                 found = [] if conn is None else past_sessions(
                     limit=limit, before=before, conn=conn).data["sessions"]
             return _up(sessions=found)
-        except Exception as err:
-            return _failed(err, "reading the past sessions failed", sessions=[])
+        except Exception as exc:
+            return _failed(exc, "reading the past sessions failed", sessions=[])
 
 
 # -- /api/events and its poller -------------------------------------------------------------
@@ -603,8 +864,8 @@ def gather_sessions() -> dict[str, Any]:
     try:
         with _store() as conn:
             found = [] if conn is None else live_states(conn)
-    except Exception as err:
-        return _failed(err, "gathering the live launches' state failed", sessions=[])
+    except Exception as exc:
+        return _failed(exc, "gathering the live launches' state failed", sessions=[])
     return _up(sessions=found)
 
 
@@ -612,9 +873,39 @@ def gather_launches() -> dict[str, Any]:
     """The `launches` topic's value: the newest page of the launch log. Never raises."""
     try:
         found = launches(limit=LIMIT)
-    except Exception as err:
-        return _failed(err, "gathering the launch log failed", launches=[])
+    except Exception as exc:
+        return _failed(exc, "gathering the launch log failed", launches=[])
     return {key: found[key] for key in ("state", "detail", "launches")}
+
+
+def running_entry(found: api.Running) -> dict[str, Any]:
+    """A launch running now as `/api/running` sends it, with nothing joined: its folder
+    is the last segment of its directory, and the directory itself is not sent."""
+    return {"request_id": found.request_id, "harness": found.harness,
+            "session_id": found.session_id, "name": found.name, "identity": found.identity,
+            "where": {"target": found.target, "slot": found.slot,
+                      "project_key": found.project_key,
+                      "folder": os.path.basename(os.path.normpath(found.cwd))},
+            "started_at": found.created_at, **UNJOINED}
+
+
+def gather_running(joined: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """The `running` topic's value, which `/api/running` answers too: every launch running
+    now, newest first, with the facts `joined` holds for its request id laid over it,
+    unless they hold a `session_id` other than the launch's. Never raises."""
+    try:
+        found = api.running()
+    except Exception as exc:
+        return _failed(exc, "gathering the running launches failed", count=0, sessions=[])
+    kept = joined or {}
+    entries = []
+    for launch in found:
+        facts = kept.get(launch.request_id) or {}
+        if facts.get("session_id", launch.session_id) != launch.session_id:
+            facts = {}
+        entries.append({**running_entry(launch),
+                        **{key: facts[key] for key in UNJOINED if key in facts}})
+    return _up(count=len(entries), sessions=entries)
 
 
 class _Version:
@@ -632,14 +923,14 @@ class _Version:
         is a count kept per connection."""
         try:
             if self.conn is None:
-                self.conn = core_store.connect(store.path(), create=False, timeout=1.0,
+                self.conn = core_store.connect(store.path(), create=False, timeout_s=1.0,
                                                check_same_thread=False)
                 self.opened += 1
             return self.opened, self.conn.execute("PRAGMA data_version").fetchone()[0]
-        except Exception as err:
-            if not isinstance(err, core_store.StoreError) or isinstance(
-                    err, core_store.StoreTooNew):
-                _log_once(err, "reading the launch log's data version failed")
+        except Exception as exc:
+            if not isinstance(exc, core_store.StoreError) or isinstance(
+                    exc, core_store.StoreTooNew):
+                _log_once(exc, "reading the launch log's data version failed")
             self.close()
             return None
 
@@ -651,15 +942,30 @@ class _Version:
 
 
 class _Feed:
-    """The two topics, a Snapshot for each, and the poller, on one event loop."""
+    """The three topics, a Snapshot for each, the poller and the joiner, on one event loop.
+
+    The joiner (`joiner.Joiner`) keeps, by request id, the facts of a running launch read
+    beyond the launch log (the keys of `UNJOINED`), which `gather_running` lays over that
+    launch's entry. Its task runs one pass at a time, off the poller, which never awaits
+    it: a pass when the set of running launches and their session ids changed, or when a
+    press of `Keep warm` wakes it (`wake`), else `joiner.JOIN_EVERY` seconds after the last
+    pass ended. Each pass asks the `running`
+    topic for a rebuild once its facts are kept; `joined_once` is set at the first."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
         self.topics = lb.Topics(*TOPICS)
+        self.joiner = joiner.Joiner()
         self.snapshots = (lb.Snapshot(gather_sessions, self.topics, "sessions"),
-                          lb.Snapshot(gather_launches, self.topics, "launches"))
+                          lb.Snapshot(gather_launches, self.topics, "launches"),
+                          lb.Snapshot(self.running, self.topics, "running"))
         self.version = _Version()
+        self.joined_once = asyncio.Event()
+        self._wake = asyncio.Event()
+        self._keys: frozenset[tuple[str, str | None]] | None = None
+        self._first_wait: asyncio.Task[Any] | None = None
         self.task = loop.create_task(self._poll(), name="launcher state poller")
+        self.join_task = loop.create_task(self._join(), name="launcher joiner")
 
     async def _poll(self) -> None:
         seen: object = _NEVER
@@ -670,15 +976,58 @@ class _Feed:
                 now = time.monotonic()
                 if version != seen or now >= due:
                     seen, due = version, now + REGATHER
-                    await self.changed()
-            except Exception as err:
-                _log_once(err, "the state poller failed")
+                    await self.on_changed()
+            except Exception as exc:
+                _log_once(exc, "the state poller failed")
             await asyncio.sleep(TICK)
 
-    async def changed(self) -> None:
-        """Ask each topic for one rebuild; a gather that raises is logged and the other
-        still runs."""
-        done = await asyncio.gather(*(s.changed() for s in self.snapshots),
+    async def _join(self) -> None:
+        while True:
+            try:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._wake.wait(), joiner.JOIN_EVERY)
+                self._wake.clear()
+                await self.joiner.run(self._published)
+            except Exception as exc:
+                _log_once(exc, "a join pass failed")
+
+    async def _published(self) -> None:
+        await self.snapshots[2].on_changed()
+        self.joined_once.set()
+
+    async def first_join(self) -> None:
+        """At the first call, wait for the first join pass to be published, for at most
+        `FIRST_JOIN_WAIT_S` seconds; calls made while that wait runs share it, and later
+        calls return at once."""
+        if self._first_wait is None:
+            self._first_wait = self.loop.create_task(self._wait_first())
+        await asyncio.shield(self._first_wait)
+
+    async def _wait_first(self) -> None:
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self.joined_once.wait(), FIRST_JOIN_WAIT_S)
+
+    def running(self) -> dict[str, Any]:
+        """The `running` topic's value, with the facts the joiner keeps laid over it. A
+        change in the set of running launches and their session ids wakes the joiner."""
+        value = gather_running(self.joiner.joined())
+        keys = frozenset((entry["request_id"], entry["session_id"])
+                         for entry in value["sessions"])
+        if keys != self._keys:
+            self._keys = keys
+            self.wake()
+        return value
+
+    def wake(self) -> None:
+        """Ask the joiner for a pass now, from any thread. A pass running goes on to its end,
+        and the next starts after it, so one pass runs at a time."""
+        with suppress(RuntimeError):    # the loop has closed
+            self.loop.call_soon_threadsafe(self._wake.set)
+
+    async def on_changed(self) -> None:
+        """Ask each topic for one rebuild; a gather that raises is logged and the others
+        still run."""
+        done = await asyncio.gather(*(s.on_changed() for s in self.snapshots),
                                     return_exceptions=True)
         for result in done:
             if isinstance(result, Exception):
@@ -700,9 +1049,20 @@ def _feed() -> _Feed:
 
 
 async def events(call: Any) -> Any:
-    """`GET /api/events`: the stream over the `sessions` and `launches` topics. The first
-    call starts the poller."""
+    """`GET /api/events`: the stream over the `sessions`, `launches` and `running` topics.
+    Its first call, or the first of `/api/running`, starts the poller."""
     return call.stream(_feed().topics)
+
+
+async def read_running(call: Any) -> dict[str, Any]:
+    """`GET /api/running`: the launches running now, with the facts the feed keeps. It
+    starts the feed as the stream route does, so a reader that never opens the stream,
+    the phone, keeps it running. The feed's first call waits for its first join pass, for
+    at most `FIRST_JOIN_WAIT_S` seconds; no later call waits."""
+    feed = _feed()
+    with call.busy("read"):
+        await feed.first_join()
+        return await aio.offload(feed.running)
 
 
 # -- the ticket -----------------------------------------------------------------------------
@@ -731,12 +1091,13 @@ def page_key(env: Mapping[str, str] | None = None) -> bytes:
 
 def canonical(body: Mapping[str, Any], request_id: str, expires: int) -> bytes:
     """The request a ticket is issued for, as the bytes it signs: the preset, the values,
-    the rows left out (sorted) and `off_posture` as the page sent them, the request id and
-    the expiry."""
+    the rows left out and the rows filled in (each sorted) and `off_posture` as the page
+    sent them, the request id and the expiry."""
     asked = {"seat": body.get("seat"), "project_preset": body.get("project_preset"),
              "values": body.get("values") or {},
              "leave_out": sorted(body.get("leave_out") or []),
              "off_posture": bool(body.get("off_posture", False)),
+             "filled": sorted(body.get("filled") or []),
              "request_id": request_id, "expires": expires}
     return json.dumps(asked, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode()
@@ -883,7 +1244,8 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     taken out of the layers before the preset is laid, and stays left out when a layer
     names it. A typed row of a group (`_GROUPS`) makes every other value of that group in
     `body` typed too, so the resolver refuses two. The harness is typed only when it is
-    not the layers'. Raises a refusal."""
+    not the layers'. Of the rows `body` names in `filled`, those that are typed are the
+    request's `filled`. Raises a refusal."""
     seat = body.get("seat") or None
     project_preset = body.get("project_preset") or None
     values = dict(body.get("values") or {})
@@ -937,9 +1299,11 @@ def launch_request(body: Mapping[str, Any], request_id: str):
 
     extra = typed.pop(catalog.EXTRA, ())
     off_posture = bool(body.get("off_posture", False))
+    filled = tuple(name for name in dict.fromkeys(body.get("filled") or ())
+                   if name in typed or (name == catalog.EXTRA and extra))
     request = api.LaunchRequest(seat=seat, project_preset=project_preset, typed=typed,
                                 extra=tuple(extra), off_posture=off_posture,
-                                left_out=left_out, request_id=request_id)
+                                left_out=left_out, filled=filled, request_id=request_id)
     command = ["moxi", "launcher", "run"]
     if seat:
         command += ["--seat", seat]
@@ -953,6 +1317,185 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     for name in left_out:
         command += ["--leave-out", name]
     return request, command + (["--", *extra] if extra else [])
+
+
+# -- what an earlier launch was asked for ---------------------------------------------------
+
+#: The sources of a value the launch's own request gave: typed, or filled in from an
+#: earlier launch.
+GIVEN = (presets.TYPED, api.LAST)
+#: The rows that say where a launch runs, which a launch made again never takes from the
+#: earlier one.
+_WHERE_IT_RAN = ("target", "slot")
+_PLACE_ROWS = ("cwd", "project", "scratch")
+_BRIEF_ROWS = ("brief", "brief_file")
+
+
+def _a_row(name: str) -> bool:
+    return name in catalog.launcher() or any(name in catalog.load(h)
+                                             for h in catalog.HARNESSES)
+
+
+def request_of(row: store.LaunchRow, available: Callable[[str], bool]) -> dict[str, Any]:
+    """The request the launch `row` was made with, read from the sources it recorded:
+    `seat`, `project_preset`, `values`, `leave_out` and `off_posture` as a body of
+    `/api/preview` holds them, and `not_offered`. It holds only what that launch's own
+    request gave, never a value the launch got from its preset, `[defaults]` or a
+    shipped default.
+
+    `values` has each row whose source is typed or filled in, spelled as the form
+    spells it, but: `target` and `slot` are never there; the place is `cwd` alone, the
+    folder the launch ran in, when the request named the place or no layer did (the
+    launch then started in its caller's directory), and absent when the preset or
+    `[defaults]` named it; the brief is `brief` alone, the text the launch read,
+    whichever spelling gave it. A row this install no longer offers for the launch's
+    harness is named in `not_offered` instead. `leave_out` has each row the request
+    left out, and each one it set to nothing (a list emptied, a switch with an optional
+    value set off, a text emptied). A brief row is there only when `brief` is not in
+    `values`, and both are there when the launch left one out and read no brief, so a
+    preset's brief is not given again to a launch that read none. `row` must be a
+    launch that recorded its sources."""
+    stored = row.values
+    sources: Mapping[str, str] = stored["sources"]
+    offered = catalog.offered(row.harness, available)
+    values: dict[str, Any] = {}
+    leave_out: list[str] = []
+    not_offered: list[str] = []
+    for name, source in sources.items():
+        if name in (*_WHERE_IT_RAN, *_PLACE_ROWS, *_BRIEF_ROWS):
+            continue
+        if source == presets.LEFT_OUT:
+            if _a_row(name):
+                leave_out.append(name)
+            continue
+        if source not in GIVEN:
+            continue
+        if name not in offered:
+            not_offered.append(name)
+            continue
+        value, items = _value_of(offered[name], stored.get(name))
+        if items is not None:
+            values[name] = items
+        elif value is not None:
+            values[name] = value
+        else:
+            leave_out.append(name)
+    if sources.get("cwd") in (*GIVEN, presets.SHIPPED, presets.LEFT_OUT):
+        values["cwd"] = row.cwd
+    if any(sources.get(name) in GIVEN for name in _BRIEF_ROWS) and row.brief:
+        values["brief"] = row.brief
+    left = [name for name in _BRIEF_ROWS if sources.get(name) == presets.LEFT_OUT
+            or (sources.get(name) in GIVEN and not row.brief)]
+    if left and not row.brief:
+        # The launch read no first turn: neither spelling may give one again.
+        left = list(_BRIEF_ROWS)
+    leave_out += [name for name in left if name not in values and _a_row(name)]
+    seat = row.preset_name if row.preset_kind == "seat" else None
+    project_preset = row.preset_name if row.preset_kind == "project" else None
+    return {"seat": seat, "project_preset": project_preset, "values": values,
+            "leave_out": leave_out, "off_posture": bool(stored.get("off_posture", False)),
+            "not_offered": not_offered}
+
+
+def body_of(handed: Mapping[str, Any]) -> dict[str, Any]:
+    """What `request_of` handed back as a body of `/api/preview`: a preset only when the
+    launch named one, and no `not_offered`."""
+    body = {key: handed[key] for key in ("values", "leave_out", "off_posture")}
+    for key in ("seat", "project_preset"):
+        if handed[key]:
+            body[key] = handed[key]
+    return body
+
+
+def handed_rows(values: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A request's `values` as rows: a list in `items`, any other value in `value`."""
+    return [{"name": name, "value": None if isinstance(value, list) else value,
+             "items": value if isinstance(value, list) else None}
+            for name, value in values.items()]
+
+
+# -- whose launch -----------------------------------------------------------------------------
+
+#: The keys a read of earlier launches is asked by; the first given decides.
+WHOSE = ("seat", "project", "cwd")
+
+
+def whose(query: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Which launches `query` asks about: `(key, value)` for the first of `seat`,
+    `project` and `cwd` it gives, a folder made absolute; None when it gives none."""
+    for key in WHOSE:
+        value = query.get(key)
+        if value:
+            return key, _norm_dir(value) if key == "cwd" else value
+    return None
+
+
+def _norm_dir(text: str) -> str:
+    return os.path.normpath(os.path.expanduser(text))
+
+
+def _is_of(row: store.LaunchRow, key: str, value: str) -> bool:
+    seat = row.preset_kind == "seat"
+    if key == "seat":
+        return seat and row.preset_name == value
+    if key == "project":
+        return not seat and row.project_key == value
+    return not seat and _norm_dir(row.cwd) == value
+
+
+def made_again(row: store.LaunchRow, by: str) -> bool:
+    """Whether `row` is a launch the page offers to make again: one `by` made
+    (`store.launched_by`: not failed, no relaunch or resume, not in a scratch folder)
+    that recorded where its values came from. A launch made by an older launcher did
+    not, so what its request gave can't be told from what its preset gave."""
+    return store.launched_by(row, by) and isinstance(row.values.get("sources"), dict)
+
+
+def launches_of(conn: sqlite3.Connection | None, key: str,
+                value: str) -> list[store.LaunchRow]:
+    """The launches of a seat (`key` `seat`: its preset, wherever it ran), a project
+    (`project`: its key, and no seat named) or a folder (`cwd`: it ran there, and no
+    seat named) that `made_again` counts, newest first, among the newest
+    `store.PLACES_SCAN` rows of the log."""
+    if conn is None:
+        return []
+    actor = first.actor()
+    return [row for row in store.log(conn, limit=store.PLACES_SCAN)
+            if made_again(row, actor) and _is_of(row, key, value)]
+
+
+# -- /api/last ------------------------------------------------------------------------------
+
+
+def last(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/last`'s answer: for the newest launch of the seat, project or folder asked
+    for, when it was made, its harness, and each value its own request gave
+    (`request_of`) for a row that may be filled from an earlier launch (`carry`). No
+    such launch, or no key asked, is answered with no values."""
+    none = _up(at=None, harness=None, values=[])
+    key = whose(query)
+    if key is None:
+        return none
+    with _store() as conn:
+        found = launches_of(conn, *key)
+    if not found:
+        return none
+    row = found[0]
+    values = request_of(row, _available())["values"]
+    kept = {name: value for name, value in values.items()
+            if getattr(catalog.row(row.harness, name), "carry", False)}
+    return _up(at=row.created_at, harness=row.harness, values=handed_rows(kept))
+
+
+def read_last(call: Any) -> dict[str, Any]:
+    """`GET /api/last`: what the newest launch of a seat, a project or a folder was
+    asked for, to fill a new launch there."""
+    with call.busy("read"):
+        try:
+            return last(call.query)
+        except Exception as exc:
+            return _failed(exc, "reading the last launch failed", at=None, harness=None,
+                           values=[])
 
 
 def _command(words: list[str]) -> str:
@@ -982,15 +1525,37 @@ def on_path(composition: Any) -> dict[str, Any] | None:
     """The refusal of a launch whose command is not found on the PATH the launch job
     would start it with, the page server's, naming that PATH; None when it is found. The
     check is the target's own, as `launch` makes it."""
-    env = common.environment(os.environ, composition, modules.session_env())
+    env = common.child_env(os.environ, composition, modules.session_env())
     try:
         targets.get(composition.target).prepare(composition, env)
-    except targets.NoCommand as error:
-        return {"code": error.code, "row": None,
-                "problem": NOT_ON_PATH.format(command=error.command,
+    except targets.NoCommand as exc:
+        return {"code": exc.code, "row": None,
+                "problem": NOT_ON_PATH.format(command=exc.command,
                                               path=env.get("PATH", os.defpath)),
                 "hint": NOT_ON_PATH_HINT}
     return None
+
+
+def _previewing(body: Mapping[str, Any], request_id: str):
+    """The page's `body` as a launch under `request_id`: the request and its command's
+    words, its resolved values, its composition, and the refusals `api.check` finds.
+    Raises a refusal the request, the resolver or the composer meets."""
+    request, words = launch_request(body, request_id)
+    resolved = job.placed(request)
+    composition = api.preview(request)
+    checked = [_refusal(found) for found in api.check(request)]
+    return request, words, resolved, composition, checked
+
+
+def _refusals(checked: list[dict[str, Any]], composition: Any) -> list[dict[str, Any]]:
+    """`checked`, then the PATH's refusal of a launch that is not in a terminal, each
+    once."""
+    terminal = composition.target == "terminal"
+    refused: list[dict[str, Any]] = []
+    for found in [*checked, None if terminal else on_path(composition)]:
+        if found is not None and found not in refused:
+            refused.append(found)
+    return refused
 
 
 def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
@@ -1000,17 +1565,11 @@ def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     copy instead."""
     request_id = str(uuid.uuid4())
     try:
-        request, words = launch_request(body, request_id)
-        job.placed(request)
-        composition = api.preview(request)
-        checked = [_refusal(found) for found in api.check(request)]
-    except REFUSALS as error:
-        return _previewed(refused=[_refusal(error)])
+        request, words, _, composition, checked = _previewing(body, request_id)
+    except REFUSALS as exc:
+        return _previewed(refused=[_refusal(exc)])
     terminal = composition.target == "terminal"
-    refused: list[dict[str, Any]] = []
-    for found in [*checked, None if terminal else on_path(composition)]:
-        if found is not None and found not in refused:
-            refused.append(found)
+    refused = _refusals(checked, composition)
     issued, expires_at = (None, None) if refused or terminal else ticket(body, request_id)
     return _previewed(
         refused=refused, harness=composition.harness, mode=composition.mode,
@@ -1035,8 +1594,142 @@ def preview(call: Any) -> dict[str, Any]:
     with call.busy("preview"):
         try:
             return previewed(call.body)
-        except Exception as err:
-            return _previewed(refused=[_unexpected(err, "previewing a launch failed")])
+        except Exception as exc:
+            return _previewed(refused=[_unexpected(exc, "previewing a launch failed")])
+
+
+# -- /api/recents and /api/recent ---------------------------------------------------------
+
+#: How many earlier launches `/api/recents` lists.
+RECENTS_MAX = 3
+#: The longest `head` of a recent, in characters.
+HEAD_MAX = 26
+#: Why `/api/recent` can't run a launch again that is no recent.
+NO_RECENT = ("launch {} is not one of your launches that can be run again: it failed, was "
+             "a relaunch, a resume or a scratch launch, or was made by an older launcher")
+NO_RECENT_HINT = "run again one of the launches the page lists"
+
+
+def head(row: store.LaunchRow) -> str:
+    """What a recent is called: the first whole words of its brief within `HEAD_MAX`
+    characters (a longer first word cut there), else its model and effort, else its
+    harness."""
+    words = (row.brief or "").split()
+    if words:
+        said = words[0][:HEAD_MAX]
+        for word in words[1:]:
+            if len(said) + 1 + len(word) > HEAD_MAX:
+                break
+            said += " " + word
+        return said
+    named = (spelled(row.values.get(name)) for name in ("model", "effort"))
+    return " · ".join(name for name in named if name) or row.harness
+
+
+def recents(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recents`' answer: the launches of the seat, project or folder asked for that
+    can be run again, newest first, a launch whose `request_of` equals a newer one's left
+    out, at most `RECENTS_MAX`; none when no key is asked."""
+    key = whose(query)
+    if key is None:
+        return _up(recents=[])
+    with _store() as conn:
+        found = launches_of(conn, *key)
+    available = _available()
+    listed: list[dict[str, Any]] = []
+    asked: list[dict[str, Any]] = []
+    for row in found:
+        handed = request_of(row, available)
+        if handed in asked:
+            continue
+        asked.append(handed)
+        listed.append({"request_id": row.request_id, "at": row.created_at, "head": head(row),
+                       "target": row.target, "slot": row.slot})
+        if len(listed) == RECENTS_MAX:
+            break
+    return _up(recents=listed)
+
+
+def read_recents(call: Any) -> dict[str, Any]:
+    """`GET /api/recents`: the launches of a seat, a project or a folder that can be run
+    again."""
+    with call.busy("read"):
+        try:
+            return recents(call.query)
+        except Exception as exc:
+            return _failed(exc, "reading the recent launches failed", recents=[])
+
+
+def _not_again(refused: dict[str, Any]) -> dict[str, Any]:
+    return _up(request=None, shows=None, refused=refused)
+
+
+def danger(harness: str, values: Mapping[str, object]) -> list[str]:
+    """The rows of a `harness` launch whose value is one of the row's `danger` values."""
+    named = []
+    for name, value in values.items():
+        row = catalog.row(harness, name)
+        if row is not None and spelled(value) in row.danger:
+            named.append(name)
+    return named
+
+
+def recent(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recent`'s answer for the launch `request`: its `request_of` with the
+    query's `target`, and its `slot` (left out when none is given), resolved as
+    `/api/preview` resolves a body, with no ticket. `shows` is what that resolution
+    runs; `request.off_posture` is true exactly when a posture row of it is off its
+    default, each named in `shows.off_posture`. A launch that is no recent of this user
+    (`made_again`), and a request the launcher refuses now, is answered `refused`."""
+    request_id = query["request"]
+    with _store() as conn:
+        row = None if conn is None else store.get(conn, request_id)
+    if row is None or not made_again(row, first.actor()):
+        return _not_again({"code": "no-recent", "row": None,
+                           "problem": NO_RECENT.format(request_id), "hint": NO_RECENT_HINT})
+    available = _available()
+    handed = request_of(row, available)
+    values = {**handed["values"], "target": query["target"]}
+    leave_out = list(handed["leave_out"])
+    if query.get("slot"):
+        values["slot"] = query["slot"]
+    else:
+        leave_out.append("slot")
+    asked = {**handed, "values": values, "leave_out": leave_out}
+    try:
+        # Resolved with the posture allowed, to name the rows off it.
+        request, _, resolved, composition, checked = _previewing(
+            body_of({**asked, "off_posture": True}), str(uuid.uuid4()))
+        defaults = presets.layered(request, available=available).defaults
+    except REFUSALS as exc:
+        return _not_again(_refusal(exc))
+    refused = _refusals(checked, composition)
+    if refused:
+        return _not_again(refused[0])
+    off = presets.off_posture_rows(resolved.harness, resolved.values, resolved.sources,
+                                   defaults)
+    return _up(
+        request={"seat": handed["seat"], "project_preset": handed["project_preset"],
+                 "values": handed_rows(values), "leave_out": leave_out,
+                 "off_posture": bool(off)},
+        shows={"harness": resolved.harness, "model": spelled(resolved.values.get("model")),
+               "effort": spelled(resolved.values.get("effort")),
+               "prompt": composition.brief or None, "cwd": resolved.cwd,
+               "project_key": resolved.project_key, "off_posture": off,
+               "danger": danger(resolved.harness, resolved.values),
+               "not_offered": handed["not_offered"]},
+        refused=None)
+
+
+def read_recent(call: Any) -> dict[str, Any]:
+    """`GET /api/recent`: an earlier launch's request, resolved as running it again now
+    would resolve it, or why it can't run again."""
+    with call.busy("read"):
+        try:
+            return recent(call.query)
+        except Exception as exc:
+            return _failed(exc, "reading a recent launch failed", request=None, shows=None,
+                           refused=None)
 
 
 # -- /api/launch ----------------------------------------------------------------------------
@@ -1062,7 +1755,7 @@ def _known(request_id: str) -> bool:
     with _store() as conn:
         if conn is None:
             return False
-        rows, refused = _requested(conn, request_id)
+        rows, refused, _ = _requested(conn, request_id)
         return bool(rows) or refused is not None
 
 
@@ -1082,8 +1775,8 @@ def launched(body: Mapping[str, Any]) -> Any:
     try:
         request, words = launch_request(body, request_id)
         resolved = job.placed(request)
-    except REFUSALS as error:
-        return {"refused": _refusal(error), "command": None}
+    except REFUSALS as exc:
+        return {"refused": _refusal(exc), "command": None}
     if resolved.target == "terminal":
         return {"refused": {"code": "terminal", "row": "target",
                             "problem": "a launch in a terminal is not run by the page",
@@ -1093,7 +1786,7 @@ def launched(body: Mapping[str, Any]) -> Any:
         "act": "launch", "request_id": request_id, "seat": request.seat,
         "project_preset": request.project_preset, "typed": dict(request.typed),
         "extra": list(request.extra), "left_out": list(request.left_out),
-        "off_posture": request.off_posture})
+        "filled": list(request.filled), "off_posture": request.off_posture})
 
 
 def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
@@ -1109,11 +1802,11 @@ def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
         raise lb.Conflict(used.format(request_id))
     try:
         _start_job(request_id)
-    except Exception as err:
+    except Exception as exc:
         path.unlink(missing_ok=True)
-        _log_once(err, "the launch job did not start")
+        _log_once(exc, "the launch job did not start")
         return {"refused": {"code": targets.SPAWN_FAILED, "row": None,
-                            "problem": f"the launch job did not start ({type(err).__name__})",
+                            "problem": f"the launch job did not start ({type(exc).__name__})",
                             "hint": "try again; the page server's log has the details"},
                 "command": None}
     return lb.Accepted(STATUS.format(request_id))
@@ -1127,8 +1820,8 @@ def launch(call: Any) -> Any:
             return launched(call.body)
         except (lb.Conflict, lb.Refused):
             raise
-        except Exception as err:
-            return {"refused": _unexpected(err, "a launch from the page failed"),
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a launch from the page failed"),
                     "command": None}
 
 
@@ -1149,7 +1842,7 @@ def resumable(session: str) -> store.LaunchRow:
         refused = resuming.static_refusal(row, newest)
         if refused is None:
             live, unread = resuming.liveness(row, newest, first.turns_api(quiet=True))
-            refused = resuming.live_refusal(row, newest, live, unread)
+            refused = resuming.live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
         relaunch._no_open_run(conn, row, slots.api())
@@ -1164,8 +1857,8 @@ def resumed(body: Mapping[str, Any]) -> Any:
     slot = str(body.get("slot") or "").strip() or None
     try:
         row = resumable(session)
-    except REFUSALS as error:
-        return {"refused": _refusal(error), "command": None}
+    except REFUSALS as exc:
+        return {"refused": _refusal(exc), "command": None}
     if row.target != "slot":
         if slot is not None:
             return {"refused": {"code": "bad-value", "row": "slot",
@@ -1188,16 +1881,218 @@ def resume(call: Any) -> Any:
             return resumed(call.body)
         except (lb.Conflict, lb.Refused):
             raise
-        except Exception as err:
-            return {"refused": _unexpected(err, "a resume from the page failed"),
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
-           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
-           "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
-           "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
-           "launched", "launches", "live", "live_states", "on_path", "page_key", "preview",
-           "previewed", "read_catalog", "read_form", "read_launches", "read_presets",
-           "read_runs", "read_sessions", "read_state", "refusal", "resumable", "resume",
-           "resumed", "run_entry", "session_state", "spelled", "ticket", "tokens",
-           "unreadable", "verify"]
+
+# -- /api/keep-warm -------------------------------------------------------------------------
+
+#: The hint of an `unreadable` refusal.
+TRY_AGAIN = "try again"
+
+_pressing = threading.Lock()
+
+
+def _no(code: str, problem: str, hint: str = "") -> dict[str, Any]:
+    return {"refused": {"code": code, "row": None, "problem": problem, "hint": hint}}
+
+
+def press(request_id: str) -> dict[str, Any]:
+    """What `/api/keep-warm` answers for the launch `request_id`: `{"refused": None}` when
+    the session is covered after the press (by this press, or already), else the refusal
+    of the first step that does not pass. One press at a time, so a second press sees the
+    first's cover."""
+    deadline = time.monotonic() + joiner.JOIN_BUDGET_S
+    with _pressing, _store() as conn:
+        row = None if conn is None else store.get(conn, request_id)
+        if row is None:
+            return _no("not-launched", f"no launch has the request id {request_id}")
+        known = store.session_ids(conn, request_id)
+        sid = known[-1][0] if known else row.session_id
+        if sid is None:
+            return _no("no-session", f"launch {request_id} has no session id yet")
+        turns = first.turns_api(quiet=True)
+        try:
+            found = target.find(sid, conn=conn, turns=turns, slot=False)
+        except catalog.Refused as exc:
+            return {"refused": _refused(exc)}
+        try:
+            if not found.live or found.session is None:
+                return _no("not-live", f"the session of launch {request_id} is not live")
+            reads = waits.Reads(deadline=deadline, comms=joiner.comms_api(), turns=turns)
+            answer = _cover(conn, found, found.session_id or sid, reads)
+        finally:
+            found.close()
+    return answer or {"refused": None}
+
+
+def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
+           reads: waits.Reads) -> dict[str, Any] | None:
+    """Read the launch as a join pass does, through `reads`, then cover it and wake the
+    joiner: None when it is covered (written now, or already), else the refusal."""
+    row, session = found.row, found.session
+    cache = joiner.cache_api()
+    try:
+        now = time.time()
+        clock = None if cache is None else reads.call(
+            recycle.cache_read, cache, row, sid, dict(os.environ), now=now)
+        facts = reads.call(session.facts)
+        closed = getattr(facts, "turn_open", None) is False
+        listed, joined, live_agents = None, None, ()
+        if closed:
+            try:
+                listed = reads.call(session.agents)
+            except waits.Late:
+                raise
+            except Exception:  # noqa: BLE001  (an unread list counts no subagent)
+                listed = None
+        current = reads.call(settings.current)
+        records = () if cache is None else reads.call(cache.clock_records)
+        tick_s = None if cache is None else reads.call(joiner.cache_tick_s)
+        if closed:
+            nudges = reads.call(keepwarm.run_of_nudges, conn, row.request_id,
+                                getattr(facts, "session_id", None) or sid,
+                                getattr(facts, "turn_number", None))
+            live_agents = reads.call(keepwarm.signal_now, conn, row, listed, nudges).agents
+            # The join is the last read, so one the deadline cuts short keeps what it found.
+            if not live_agents and reads.comms is not None:
+                joined = waits.directed(reads, sid)
+    except waits.Late:
+        return _no("unreadable", "the session was not read within "
+                                 f"{joiner.JOIN_BUDGET_S:g} s", TRY_AGAIN)
+    except Exception as exc:
+        _log_once(exc, "reading a session for keep-warm failed")
+        return _no("unreadable", f"the session could not be read ({type(exc).__name__})",
+                   TRY_AGAIN)
+    if cache is not None and tick_s is None:
+        return _no("unreadable", "cache's watcher tick could not be read", TRY_AGAIN)
+    readings = (conn, row, sid, clock, facts, listed, current, records)
+    options = {"gone": joiner.proc_gone, "now": now, "tick_s": tick_s, "directed": joined}
+    if keepwarm.would_nudge(*readings, **options):
+        return None
+    got = keepwarm.reading(*readings, **options, pressed=True)
+    names = joined.names if joined is not None else ()
+    refused = _press_refused(conn, row, sid, got, clock, facts, listed, joined, tick_s,
+                             current, at_work=bool(live_agents or names))
+    if refused is not None:
+        return refused
+    fact = ({"kind": "subagents", "count": len(live_agents)} if live_agents
+            else {"kind": "agents", "count": len(names)})
+    keepwarm.cover_on(conn, row, getattr(facts, "session_id", None) or sid,
+                      turn_number=getattr(facts, "turn_number", None), waits=fact)
+    feed = _current
+    if feed is not None:
+        feed.wake()
+    return None
+
+
+def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
+                   got: keepwarm.Reading, clock: Any, facts: Any, listed: Any | None,
+                   joined: waits.Directed | None, tick_s: float | None,
+                   current: Mapping[str, Any], *, at_work: bool) -> dict[str, Any] | None:
+    """The refusal of the first step a press does not pass, in the order of the ask's
+    steps (`got`, the reading with `pressed`), or None when every one passes. `current`
+    is the launcher's settings."""
+    step = got.step
+    if step == 2:
+        return _no("run-open", f"a run is open on launch {row.request_id}",
+                   "another act is running on this session")
+    if step == 3:
+        return _no("no-timer", "cache's watcher does not ask keep-warm about this session",
+                   "moxi doctor's row keep-warm.timer says why and what cures it; cache "
+                   "does not time a Codex or a headless session")
+    kind = getattr(clock, "kind", None)
+    if kind != "warm":
+        return _no("cold", f"the session's cache is {kind or 'unknown'}",
+                   "nothing is sent to a session whose cache is cold")
+    ttl, age = getattr(clock, "ttl_s", None), getattr(clock, "age_s", None)
+    if step == 4:
+        margin = keepwarm.ASK_EVERY_S + (tick_s or 0.0)
+        if not isinstance(ttl, (int, float)) or ttl <= keepwarm.SHUT_S + margin:
+            return _no("no-window", "the session's cache lifetime leaves no ask certain "
+                                    "before it goes cold")
+        aged = (f"the session's cache is {age:.0f} s old, of a lifetime of {ttl:.0f} s"
+                if isinstance(age, (int, float)) else "the session's cache has no age")
+        return _no("too-late", aged, "the cold time is too near for a nudge to be sent")
+    if step == 5:
+        return _no("busy", "the session's own turn is open", "it is working, not waiting")
+    if not at_work:
+        unread = _unread(listed, joined)
+        if not unread:
+            return _no("not-waiting", "no subagent of the session and no agent it directs "
+                                      "is at work")
+        return _no("unreadable", f"nobody was found at work, but {'; '.join(unread)}",
+                   TRY_AGAIN)
+    if step == 7:
+        key = keepwarm.CAPS[got.case]
+        try:
+            int(current[key])
+        except (KeyError, TypeError, ValueError):
+            return _no("capped", f"keep-warm's cap setting {key} could not be read, so a "
+                                 "press has no nudge to send to this session")
+        return _no("capped", "keep-warm's cap of nudges in a row leaves a press none to send "
+                             "to this session")
+    if step == 8:
+        boxed = ("there is text typed in the session's prompt box"
+                 if getattr(facts, "draft", None) is True
+                 else "the session's prompt box could not be read")
+        return _no("draft", boxed, "clear the text typed in the session")
+    if step == 9:
+        run = _last_ask(conn, row.request_id)
+        ended = "" if run is None else f" {run.outcome}, {run.word}"
+        return _no("ask-failed", f"keep-warm's last ask since the session's last request "
+                                 f"ended{ended}",
+                   f"a press does not change it; moxi launcher show {sid} has the run")
+    return None
+
+
+def _unread(listed: Any | None, joined: waits.Directed | None) -> list[str]:
+    """Each list a finding of nobody at work rests on that was not read whole, in words."""
+    parts = []
+    if listed is None:
+        parts.append("turns could not list its subagents")
+    elif getattr(listed, "complete", True) is False:
+        parts.append("turns' list of its subagents is incomplete")
+    if joined is not None and joined.raised:
+        parts.append("comms or turns could not be read for the agents it directs")
+    if joined is not None and joined.late:
+        parts.append("the agents it directs were not read within "
+                     f"{joiner.JOIN_BUDGET_S:g} s")
+    if joined is not None and joined.unlisted:
+        parts.append("turns could not list a directed agent's subagents")
+    return parts
+
+
+def _last_ask(conn: sqlite3.Connection, request_id: str) -> store.Run | None:
+    """The launch's newest keep-warm run but one ended `blocked` at the cap, which a press
+    passes over."""
+    for run in store.runs(conn, request_id=request_id):
+        if run.kind == keepwarm.KIND and not (run.outcome == "blocked"
+                                              and run.word == "capped"):
+            return run
+    return None
+
+
+def keep_warm(call: Any) -> dict[str, Any]:
+    """`POST /api/keep-warm`: keep-warm cover for a running launch's session, set when a
+    press would make keep-warm's next ask nudge it. Not the gateway's."""
+    with call.busy("keep-warm"):
+        try:
+            return press(call.body["request_id"])
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a keep-warm press failed")}
+
+
+__all__ = ["EVENT_CUT", "FIRST_JOIN_WAIT_S", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
+           "NO_SLOTS", "PROJECTS", "RECENTS_MAX", "REFUSALS", "REGATHER",
+           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNJOINED", "UNREADABLE", "USED", "WHOSE",
+           "WITHHELD", "alive", "body_of", "canonical", "danger", "events", "field", "fields", "form", "form_rows",
+           "gather_launches", "gather_running", "gather_sessions", "handed_rows", "head", "last", "launch", "launch_request", "launch_row",
+           "launched", "launches", "launches_of", "live", "live_states", "made_again", "modes", "name_now", "on_path", "page_key",
+           "places", "preview", "previewed", "read_catalog", "read_form", "read_last", "read_launches",
+           "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_running", "read_runs", "read_sessions", "read_state",
+           "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry", "running_entry",
+           "TRY_AGAIN", "keep_warm", "press",
+           "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
+           "verify", "whose"]

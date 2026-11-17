@@ -1,7 +1,8 @@
 """Keep-warm against fakes of turns, slots and cache: the timer's subscription, the ask's
-reads in order and at each window edge, both cases and their texts, the run of nudges
-across turn numbers and a clear's new session id, the cap, agents dropped for the rest of
-a run, every delivery verdict, and the named holds across a launch chain."""
+reads in order and at each window edge, both cases and their texts, the signal's order and
+whether it rests on lists read whole, the run of nudges across turn numbers and a clear's
+new session id, the cap, agents dropped for the rest of a run, every delivery verdict, and
+the named holds across a launch chain."""
 
 from __future__ import annotations
 
@@ -12,7 +13,8 @@ import pytest
 from moxi import exit as codes
 from moxi import modules, paths, proc
 
-from moxi_launcher import api, cachetimers, job, keepwarm, recycle, relaunch, store, target
+from moxi_launcher import (api, cachetimers, job, keepwarm, recycle, relaunch, store, target,
+                           waits)
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -20,7 +22,8 @@ OTHER = "11111111-2222-4333-8444-555555555555"
 SETTINGS = {"relaunch.person_s": 120, "records.keep_days": 90,
             "keep_warm.subagent_cap": 3, "keep_warm.director_cap": 10,
             "keep_warm.subagent_texts": ["check", "decide", "last"],
-            "keep_warm.director_texts": ["reply warm", "recheck holds"]}
+            "keep_warm.director_texts": ["reply warm", "recheck holds"],
+            "keep_warm.directing_texts": ["directing", "directing again"]}
 #: An age inside the window of a one-hour cache.
 IN = 3000.0
 
@@ -45,12 +48,12 @@ class FakeDelivery:
         return self.value
 
 
-def agent(id, kind="subagent", state="running", final=False, description=None):
-    return SimpleNamespace(id=id, kind=kind, state=state, final=final,
+def agent(agent_id, kind="subagent", state="running", *, final=False, description=None):
+    return SimpleNamespace(id=agent_id, kind=kind, state=state, final=final,
                            description=description)
 
 
-def facts(turn_open=False, number=4, session_id=SID):
+def facts(*, turn_open=False, number=4, session_id=SID):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=False,
                            stale=False, session_id=session_id)
 
@@ -114,20 +117,20 @@ class FakeCache:
 
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id, options))
-        return SimpleNamespace(kind=self.kind, age_seconds=self.age, ttl_seconds=self.ttl)
+        return SimpleNamespace(kind=self.kind, age_s=self.age, ttl_s=self.ttl)
 
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
              relaunch_of=None, resume_of=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus", "keep_warm": "on", **(values or {})},
                  argv=["claude"], env={}, posture="operator", session_id=session_id,
                  slot="3", relaunch_of=relaunch_of, resume_of=resume_of)
@@ -153,7 +156,7 @@ def events(conn, run_id):
 def nudged(conn, *, session_id=SID, number=4, agents=(), request_id="r1"):
     """A `nudged` run as an ask leaves it: the turn it opened is `number + 1`."""
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id=request_id,
-                           session_id=session_id, actor="launcher", state="acting",
+                           session_id=session_id, by="launcher", state="acting",
                            turn_number=number, job=f"proc:{me()}")
     store.add_run_event(conn, run.run_id, "nudge", {"agents": list(agents)})
     store.end_run(conn, run.run_id, "nudged", word="subagents", turn_number=number + 1)
@@ -164,15 +167,29 @@ def nudged(conn, *, session_id=SID, number=4, agents=(), request_id="r1"):
 
 
 def keep_warm_sub():
-    [sub] = [t for t in cachetimers.TIMERS if t["name"] == "launcher.keep-warm"]
+    [sub] = [t for t in cachetimers.TIMERS if t["name"] == cachetimers.KEEP_WARM]
     return sub
 
 
-def test_the_subscription_asks_in_the_window_before_expiry_for_the_stamped_session():
+def test_the_subscription_asks_in_the_window_before_expiry_for_every_launched_session():
+    assert cachetimers.KEEP_WARM == "launcher.keep-warm"
     assert keep_warm_sub() == {
         "name": "launcher.keep-warm", "at": -900, "until": -360, "every": 120,
-        "requires_env": {"MOXI_LAUNCHER_KEEP_WARM": "on"},
+        "requires_env": {"MOXI_LAUNCHER_REQUEST": "*"},
         "run": ["moxi-launcher-job", "keep-warm", "{session}"]}
+
+
+@pytest.mark.skipif(not modules.available("cache"), reason="cache is not installed")
+def test_cache_s_timer_asks_by_the_request_stamp_alone():
+    """cache's `asking` runs its timer's own check and `env_met` over the installed
+    subscriptions, this one among them."""
+    found = modules.load("cache", interface=1)
+    assert found.ok
+    if found.api.asking({}) is None:
+        pytest.skip("a process's environment can't be read on this system")
+    assert cachetimers.KEEP_WARM in found.api.asking({"MOXI_LAUNCHER_REQUEST": "r-1"})
+    for env in ({"MOXI_LAUNCHER_KEEP_WARM": "on"}, {"MOXI_LAUNCHER_REQUEST": ""}, {}):
+        assert cachetimers.KEEP_WARM not in found.api.asking(env)
 
 
 def test_the_job_takes_the_keep_warm_kind_and_runs_the_ask(monkeypatch, capsys):
@@ -277,6 +294,61 @@ def test_agents_turns_cannot_list_leave_the_director_case(conn):
     assert got.verdict.word == "director"
 
 
+# -- the signal, from values -------------------------------------------------------------
+
+
+def listing(*entries, complete=True):
+    return SimpleNamespace(complete=complete, entries=list(entries))
+
+
+AT_WORK = waits.Directed(("coder@proj-a", "critic@proj-a"))
+
+
+def test_live_subagents_come_before_holds_and_holds_before_directed_agents():
+    by_agents, _ = keepwarm.signal_of(listing(agent("a1")), (), (), ["h"], directed=AT_WORK)
+    assert by_agents.case == keepwarm.SUBAGENTS and by_agents.directed == ()
+    by_hold, _ = keepwarm.signal_of(listing(), (), (), ["h"], directed=AT_WORK)
+    assert (by_hold.case, by_hold.holds, by_hold.directed) == (keepwarm.DIRECTOR, ("h",), ())
+    by_directed, _ = keepwarm.signal_of(listing(), (), (), [], directed=AT_WORK)
+    assert by_directed.case == keepwarm.DIRECTOR and by_directed.holds == ()
+    assert by_directed.directed == ("coder@proj-a", "critic@proj-a")
+    nobody, _ = keepwarm.signal_of(listing(), (), (), [], directed=waits.Directed())
+    assert nobody.case is None and nobody.directed == ()
+
+
+def test_the_signal_is_sure_only_on_lists_read_whole():
+    def sure(listed, directed=None):
+        return keepwarm.signal_of(listed, (), (), [], directed=directed)[0].sure
+
+    assert sure(listing()) and sure(listing(), waits.Directed())
+    assert not sure(None) and not sure(listing(complete=False))
+    for short in (waits.Directed(raised=True), waits.Directed(late=True),
+                  waits.Directed(unlisted=True)):
+        assert not sure(listing(), short)
+    assert sure(listing(), AT_WORK)
+
+
+def test_a_directed_agent_not_at_work_is_no_signal_even_on_a_list_not_read_whole():
+    signal, _ = keepwarm.signal_of(listing(), (), (), [],
+                                   directed=waits.Directed(raised=True))
+    assert signal.case is None and not signal.sure
+
+
+def test_the_directing_texts_go_in_order_naming_the_agents_and_no_hold():
+    signal, _ = keepwarm.signal_of(listing(), (), (), [], directed=AT_WORK)
+    for count, body in ((0, "directing"), (1, "directing again"), (5, "directing again")):
+        assert keepwarm.nudge_text(signal, count, SETTINGS).splitlines() == [
+            "Keep-warm from launcher", body, "- coder@proj-a", "- critic@proj-a"]
+
+
+def test_the_shipped_directing_text_is_one_line_for_every_nudge():
+    from moxi_launcher import settings
+
+    shipped = settings.current()[keepwarm.DIRECTING_TEXTS]
+    assert shipped == ["Keep-warm: agents you direct are still working. Reply warm unless "
+                       "you are mid-work."]
+
+
 # -- the ask: the window and the reads before it -----------------------------------------
 
 
@@ -358,7 +430,7 @@ def test_a_turn_started_after_the_insert_drops_the_run(conn):
 
 def test_another_open_run_makes_the_ask_lose(conn):
     exit_run = store.insert_run(conn, kind="exit", mode="verb", request_id="r1",
-                                session_id=SID, actor="ann", state="acting",
+                                session_id=SID, by="ann", state="acting",
                                 job=f"proc:{me()}")
     got = ask(conn)
     assert (got.verdict.outcome, got.verdict.word) == (None, "run-open")
@@ -368,7 +440,7 @@ def test_another_open_run_makes_the_ask_lose(conn):
 
 def test_a_stale_open_run_is_ended_job_gone_and_the_ask_goes_on(conn):
     stale = store.insert_run(conn, kind="clear", mode="expiry", request_id="r1",
-                             session_id=SID, actor="launcher", state="acting",
+                             session_id=SID, by="launcher", state="acting",
                              job="proc:999999999@1.0", at="2020-01-01T00:00:00.000000Z")
     got = ask(conn)
     assert got.verdict.outcome == "nudged"

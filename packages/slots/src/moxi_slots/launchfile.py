@@ -83,15 +83,17 @@ def read_pane(pane_id: str) -> PaneState:
                           "\t#{window_id}\t#{pane_pid}")
     if not result.ok:
         if tmux.no_server(result.err):
-            return PaneState(False)
+            return PaneState(exists=False)
         raise TmuxError(f"tmux display-message failed (exit {result.code}): "
                              f"{result.err.strip() or 'no message'}")
     parts = result.out.rstrip("\n").split("\t")
     if len(parts) != 6 or parts[0] != pane_id:
-        return PaneState(False)
+        return PaneState(exists=False)
     status, pid = parts[2].strip(), parts[5].strip()
-    return PaneState(True, parts[1] == "1", int(status) if status.lstrip("-").isdigit()
-                     else None, parts[3], parts[4], int(pid) if pid.isdigit() else None)
+    return PaneState(exists=True, dead=parts[1] == "1",
+                     dead_status=int(status) if status.lstrip("-").isdigit() else None,
+                     session=parts[3], window_id=parts[4],
+                     pid=int(pid) if pid.isdigit() else None)
 
 
 def check(argv: Sequence[str], env: Mapping[str, str],
@@ -128,7 +130,7 @@ def trampoline() -> str:
         raise TmuxError(f"{exc}; reinstall slots (`moxi install slots`)") from None
 
 
-def directory() -> Path:
+def launch_dir() -> Path:
     """The runtime `launch/` directory, made 0700 when absent."""
     from moxi import files
 
@@ -140,7 +142,7 @@ def write(argv: list[str], env: dict[str, str], cwd: str) -> Path:
     it under the module lock."""
     from moxi import files
 
-    path = directory() / f"{secrets.token_hex(16)}.launch"
+    path = launch_dir() / f"{secrets.token_hex(16)}.launch"
     files.atomic_write(path, json.dumps({"argv": argv, "env": env, "cwd": cwd}),
                        mode=0o600)
     return path
@@ -268,4 +270,4 @@ def wait(path: Path, pane_id: str, *, bound: float = BOUND,
 
 
 __all__ = ["BOUND", "POLL", "STALE", "SCRIPT", "Verdict", "PaneState", "read_pane",
-           "check", "trampoline", "directory", "write", "remove", "sweep", "wait"]
+           "check", "trampoline", "launch_dir", "write", "remove", "sweep", "wait"]

@@ -49,7 +49,7 @@ class Hit:
 
     __slots__ = ("set", "rule", "description", "start", "end", "line", "fingerprint")
 
-    def __init__(self, set, rule, description, start, end, line, fingerprint):  # noqa: A002
+    def __init__(self, set, rule, description, start, end, line, fingerprint):  # noqa: A002 -- set is the stored field name
         for name, value in zip(self.__slots__,
                                (set, rule, description, start, end, line, fingerprint)):
             object.__setattr__(self, name, value)
@@ -249,8 +249,8 @@ def load_sets() -> Sets:
     """sets.json, read once per process."""
     global _sets
     if _sets is None:
-        with open(sets_path(), "rb") as handle:
-            _sets = Sets(json.loads(handle.read()))
+        with open(sets_path(), "rb") as fh:
+            _sets = Sets(json.loads(fh.read()))
     return _sets
 
 
@@ -718,7 +718,7 @@ def describe() -> list:
                        if r["source"] == "gitleaks")
         source = (f"gitleaks {pin['tag']} ({upstream} rules) and "
                   f"{len(rules) - upstream} local rules")
-        out.append(SetInfo(name, rules, source, pin, sets.dropped[name], True))
+        out.append(SetInfo(name, rules, source, pin, sets.dropped[name], available=True))
     from . import names as _names
     from . import personal
 

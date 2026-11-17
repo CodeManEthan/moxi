@@ -20,12 +20,12 @@ def skill_md(name: str) -> str:
 
 
 @pytest.fixture
-def demo(site, folder):
+def demo(site, loadout_dir):
     """A module `demo` shipping skills moxi-demo and moxi-other, and the loadout folder."""
     package = site.module("demo", SKILLS="'skills'", files={
         "skills/moxi-demo/SKILL.md": skill_md("moxi-demo"),
         "skills/moxi-other/SKILL.md": skill_md("moxi-other")})
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     return site.root / package / "skills"
 
 
@@ -56,21 +56,21 @@ def ledger_bytes() -> bytes | None:
     return path.read_bytes() if path.exists() else None
 
 
-def test_a_yes_at_the_modules_question_is_taken_over_in_the_same_run(demo, folder):
+def test_a_yes_at_the_modules_question_is_taken_over_in_the_same_run(demo, loadout_dir):
     module_install(demo, ("moxi-demo", "claude"), ("moxi-demo", "codex"))
     said, say = lines()
     listener.on_install("demo", found(), say=say)
     for target in (kit.claude() / "moxi-demo", kit.codex_skills() / "moxi-demo"):
         assert kit.owner_of(target) == "loadout"
     assert not kit.handed("demo")[str(kit.claude() / "moxi-demo")].get("seeded")
-    manifest = load(folder)
+    manifest = load(loadout_dir)
     assert manifest.user.names("skill") == ("demo/moxi-demo",)
     assert sorted(manifest.harnesses("skill", "demo/moxi-demo")) == ["claude", "codex"]
     assert "loadout: took over demo/moxi-demo for claude" in said
     # No ledger write and no install lock: the next install records the hand-over.
     assert ledger_bytes() is None
     assert not (stores.state_dir() / stores.INSTALL_LOCK).exists()
-    assert sorted(os.listdir(folder)) == ["loadout.toml"]
+    assert sorted(os.listdir(loadout_dir)) == ["loadout.toml"]
     assert install.install().code == 0
     from moxi_loadout import ledger
 
@@ -78,7 +78,7 @@ def test_a_yes_at_the_modules_question_is_taken_over_in_the_same_run(demo, folde
     assert {r["seeded"] for r in records.values()} == {False}
 
 
-def test_a_disabled_skill_the_module_places_again_is_removed_in_that_run(demo, folder):
+def test_a_disabled_skill_the_module_places_again_is_removed_in_that_run(demo, loadout_dir):
     module_install(demo, ("moxi-demo", "claude"), ("moxi-demo", "codex"))
     assert install.install().code == 0
     writes.disable("skill:demo/moxi-demo@codex")
@@ -113,7 +113,7 @@ def place_at_dest(skills, dest, name="moxi-other"):
     place.apply([step], say=lambda line: None)
 
 
-def test_a_placement_the_module_made_with_dest_stays_the_modules(demo, folder, tmp_path):
+def test_a_placement_the_module_made_with_dest_stays_the_modules(demo, loadout_dir, tmp_path):
     dest = tmp_path / "demo-data" / "moxi-other"
     place_at_dest(demo, dest)
     module_install(demo)
@@ -123,7 +123,7 @@ def test_a_placement_the_module_made_with_dest_stays_the_modules(demo, folder, t
     assert kit.owner_of(dest) == "demo"
     assert str(dest) not in kit.handed("demo")
     assert said == ["loadout: took over demo/moxi-demo for claude"]
-    assert load(folder).user.names("skill") == ("demo/moxi-demo",)
+    assert load(loadout_dir).user.names("skill") == ("demo/moxi-demo",)
     # loadout's own install and the module's uninstall leave it too.
     assert install.install().code == 0
     listener.on_uninstall("demo", say=say)
@@ -131,36 +131,36 @@ def test_a_placement_the_module_made_with_dest_stays_the_modules(demo, folder, t
     assert (dest / "SKILL.md").is_file()
 
 
-def test_a_module_install_with_nothing_disabled_removes_nothing(demo, folder):
+def test_a_module_install_with_nothing_disabled_removes_nothing(demo, loadout_dir):
     module_install(demo)
     assert install.install().code == 0
     core_before = kit.core_ledger()
-    manifest_before = (folder / "loadout.toml").read_bytes()
+    manifest_before = (loadout_dir / "loadout.toml").read_bytes()
     said, say = lines()
     listener.on_install("demo", found(), say=say)
     assert said == []
     assert kit.core_ledger() == core_before
-    assert (folder / "loadout.toml").read_bytes() == manifest_before
+    assert (loadout_dir / "loadout.toml").read_bytes() == manifest_before
 
 
-def test_loadouts_own_install_and_uninstall_change_nothing(demo, folder):
+def test_loadouts_own_install_and_uninstall_change_nothing(demo, loadout_dir):
     module_install(demo)
     assert install.install().code == 0
     core_before = kit.core_ledger()
-    manifest_before = (folder / "loadout.toml").read_bytes()
+    manifest_before = (loadout_dir / "loadout.toml").read_bytes()
     said, say = lines()
     listener.on_install("loadout", None, say=say)
     listener.on_uninstall("loadout", say=say)
     assert said == []
     assert kit.core_ledger() == core_before
-    assert (folder / "loadout.toml").read_bytes() == manifest_before
+    assert (loadout_dir / "loadout.toml").read_bytes() == manifest_before
 
 
-def test_a_listener_that_fails_leaves_the_placement_for_the_next_install(demo, folder,
+def test_a_listener_that_fails_leaves_the_placement_for_the_next_install(demo, loadout_dir,
                                                                           monkeypatch):
     from moxi import place
 
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          'disabled = ["skill:demo/moxi-demo@claude"]\n')
     module_install(demo)
     target = kit.claude() / "moxi-demo"
@@ -174,9 +174,9 @@ def test_a_listener_that_fails_leaves_the_placement_for_the_next_install(demo, f
     assert not os.path.lexists(target)
 
 
-def test_an_interrupted_skills_step_is_ended_by_the_next_install(demo, folder):
+def test_an_interrupted_skills_step_is_ended_by_the_next_install(demo, loadout_dir):
     # The module placed a disabled skill and the listener never ran.
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          'disabled = ["skill:demo/moxi-demo@*"]\n')
     module_install(demo)
     out = install.install()
@@ -187,25 +187,25 @@ def test_an_interrupted_skills_step_is_ended_by_the_next_install(demo, folder):
     assert ledger.read()["placed"] == {}
 
 
-def test_a_module_uninstall_removes_its_skills_seeded_or_not(demo, folder):
+def test_a_module_uninstall_removes_its_skills_seeded_or_not(demo, loadout_dir):
     from moxi import place
     from moxi.place import Item
 
     module_install(demo)
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo", "demo/moxi-other"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo", "demo/moxi-other"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n'
                          '[skill."demo/moxi-other"]\nharnesses = ["claude"]\n')
     assert install.install().code == 0
     other = kit.claude() / "moxi-other"
     assert kit.handed("demo")[str(other)]["seeded"] is True
-    manifest_before = (folder / "loadout.toml").read_bytes()
+    manifest_before = (loadout_dir / "loadout.toml").read_bytes()
     said, say = lines()
     listener.on_uninstall("demo", say=say)
     assert not os.path.lexists(kit.claude() / "moxi-demo")
     assert not os.path.lexists(other)
     assert place.status("loadout") == []
     assert "loadout: removed moxi-other for claude (demo is being uninstalled)" in said
-    assert (folder / "loadout.toml").read_bytes() == manifest_before
+    assert (loadout_dir / "loadout.toml").read_bytes() == manifest_before
     # The seeded hand-over has lapsed: a reinstall plans the skill as the module's own
     # add, and its question counts it.
     assert kit.handed("demo")[str(other)]["seeded"] is True
@@ -214,14 +214,14 @@ def test_a_module_uninstall_removes_its_skills_seeded_or_not(demo, folder):
 
 
 def test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install(demo, site,
-                                                                          folder,
+                                                                          loadout_dir,
                                                                           monkeypatch):
     import shutil
 
     import moxi.modules
     from moxi import place
 
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
     assert install.install().code == 0
     target = kit.claude() / "moxi-demo"
@@ -252,7 +252,7 @@ def test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install(demo,
     assert install.status().code == 0
 
 
-def test_a_module_uninstall_with_a_lost_ledger_still_finds_its_skills(demo, folder):
+def test_a_module_uninstall_with_a_lost_ledger_still_finds_its_skills(demo, loadout_dir):
     module_install(demo)
     assert install.install().code == 0
     stores.ledger_path().unlink()
@@ -260,17 +260,17 @@ def test_a_module_uninstall_with_a_lost_ledger_still_finds_its_skills(demo, fold
     assert not os.path.lexists(kit.claude() / "moxi-demo")
 
 
-def test_the_uninstall_listener_leaves_the_users_own_skill_of_that_name(demo, folder):
-    kit.skill(folder / "skills", "moxi-demo")
-    kit.manifest(folder, '[user]\nskills = ["moxi-demo"]\n[skill.moxi-demo]\n'
+def test_the_uninstall_listener_leaves_the_users_own_skill_of_that_name(demo, loadout_dir):
+    kit.skill(loadout_dir / "skills", "moxi-demo")
+    kit.manifest(loadout_dir, '[user]\nskills = ["moxi-demo"]\n[skill.moxi-demo]\n'
                          'harnesses = ["claude"]\n')
     assert install.install().code == 0
     listener.on_uninstall("demo", say=lambda line: None)
-    assert os.readlink(kit.claude() / "moxi-demo") == str(folder / "skills" / "moxi-demo")
+    assert os.readlink(kit.claude() / "moxi-demo") == str(loadout_dir / "skills" / "moxi-demo")
 
 
 def test_the_listener_adopts_while_a_cli_install_waits_and_neither_times_out(demo, site,
-                                                                             folder):
+                                                                             loadout_dir):
     from moxi import files, paths
 
     module_install(demo)

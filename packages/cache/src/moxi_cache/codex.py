@@ -17,7 +17,7 @@ deny-list.
   empty). A key that refers to history kept elsewhere (`history_base`, `forked_from_id`,
   ...) is not on that list, and neither is any key not seen.
 * **Reading it.** Backwards through sessions' `records_back` in 64 KB blocks, to the
-  earliest record the verdict needs, and line 1 (`head=True`), with a 64 MB limit. The
+  earliest record the verdict needs, and line 1 (`read_head=True`), with a 64 MB limit. The
   read asks for every kind of record, because the evidence rule must see every line. A
   `malformed` record, or an `other` record sessions' lists do not recognise, is `unknown`.
   The one exception is a last line with no newline that does not decode: Codex is writing
@@ -176,8 +176,8 @@ def read(thread_id, *, cache_source, turned, new_session, now, drift=MISSING,
     catch."""
     try:
         table = _table.load_table()
-    except _table.TableError as e:
-        return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({e})")
+    except _table.TableError as exc:
+        return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({exc})")
     if not thread_id:
         if new_session:
             return Clock(FRESH)          # no thread yet: the launcher's own attempt starts it
@@ -204,12 +204,12 @@ def read(thread_id, *, cache_source, turned, new_session, now, drift=MISSING,
         return Clock(COLD, reason=COMPRESSED, code=_clock.COMPRESSED)
     limit = _clock.CLOCK_SCAN_LIMIT if limit is None else limit
     try:
-        with records_back(hits[0].source, head=True, block=_clock.CLOCK_BLOCK,
+        with records_back(hits[0].source, read_head=True, block=_clock.CLOCK_BLOCK,
                           limit=limit) as back:
             return _read_open(back, thread_id, table=table, turned=turned, now=now,
                               drift=drift, bound_at=bound_at, judged=judged)
-    except OSError as e:
-        cause = e.__cause__ if isinstance(e.__cause__, OSError) else e
+    except OSError as exc:
+        cause = exc.__cause__ if isinstance(exc.__cause__, OSError) else exc
         return unknown(_clock.UNREADABLE,
                        f"the rollout could not be read ({cause.strerror or cause})")
 
@@ -386,7 +386,7 @@ def _text(value):
     return value if isinstance(value, str) and value else None
 
 
-def _pair_at(lines: list, index: int, meta, whole: bool) -> tuple:
+def _pair_at(lines: list, index: int, meta, *, whole: bool) -> tuple:
     """The (provider, model) the record at `lines[index]` used, by the last-pair rule: the
     model of its own turn's `turn_context`, the provider of the latest settings line at
     or before it, else line 1's. A half that cannot be read is None; so is line 1's
@@ -408,7 +408,7 @@ def _pair_at(lines: list, index: int, meta, whole: bool) -> tuple:
     return _text(provider), _text(model)
 
 
-def _next_pair(lines: list, meta, whole: bool) -> tuple:
+def _next_pair(lines: list, meta, *, whole: bool) -> tuple:
     """The pair the thread's next request will use: the model of the latest
     `turn_context` or settings line, the provider of the latest settings line, else line
     1's."""
@@ -432,7 +432,7 @@ def _next_pair(lines: list, meta, whole: bool) -> tuple:
 def _last_pair_measured(newest_first: list, meta, thread_id, table) -> bool:
     lines = list(reversed(newest_first))
     index = next(i for i in range(len(lines) - 1, -1, -1) if _own(lines[i], thread_id))
-    provider, model = _pair_at(lines, index, meta, False)
+    provider, model = _pair_at(lines, index, meta, whole=False)
     if provider is None or model is None:
         return False
     row = table.lookup(HARNESS, provider, model)
@@ -444,14 +444,14 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
     lines = scan.lines
     index = next(i for i in range(len(lines) - 1, -1, -1) if lines[i] is record)
     whole = scan.reached_start
-    next_provider, next_model = _next_pair(lines, scan.meta, whole)
+    next_provider, next_model = _next_pair(lines, scan.meta, whole=whole)
     if next_provider is None or next_model is None:
         return unknown(_clock.NO_PAIR, NO_PAIR)
     if table.is_free(HARNESS, next_provider, next_model):
         return Clock(NO_CACHE, reason=free_reason(next_provider, next_model),
                      key=f"{HARNESS} {pair_text(next_provider, next_model)} (free)",
                      code=_clock.FREE)
-    last_provider, last_model = _pair_at(lines, index, scan.meta, whole)
+    last_provider, last_model = _pair_at(lines, index, scan.meta, whole=whole)
     if last_provider is None or last_model is None:
         return unknown(_clock.NO_PAIR, NO_PAIR)
     ts = _ts(record)
@@ -462,12 +462,12 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
         return unknown(_clock.FUTURE_STAMP, skew)
     age = max(0.0, now - ts)
     if (last_provider, last_model) != (next_provider, next_model):
-        return Clock(COLD, age_seconds=age, reason=CHANGED, code=_clock.CHANGED)
+        return Clock(COLD, age_s=age, reason=CHANGED, code=_clock.CHANGED)
     row = table.lookup(HARNESS, last_provider, last_model)
     key = f"{HARNESS} {pair_text(last_provider, last_model)}"
     if row is None:
         # A model with no lifetime row has no clock to count by.
-        return Clock(NO_CACHE, age_seconds=age, reason=no_row(last_provider, last_model),
+        return Clock(NO_CACHE, age_s=age, reason=no_row(last_provider, last_model),
                      code=_clock.NO_ROW)
     if row.free:
         return Clock(NO_CACHE, reason=free_reason(last_provider, last_model),
@@ -508,7 +508,7 @@ def _measured_key(key, row, lifetime, lowered_at) -> str:
 
 def _verdict(age, lifetime, *, key, basis, provider, model, lowered_from=None) -> Clock:
     kind = COLD if age >= lifetime else WARM
-    return Clock(kind, age_seconds=age, ttl_seconds=lifetime, key=key, basis=basis,
+    return Clock(kind, age_s=age, ttl_s=lifetime, key=key, basis=basis,
                  provider=provider, model=model, lowered_from=lowered_from)
 
 
@@ -606,9 +606,9 @@ def _observe(lines, meta, thread_id, s, r, *, row, pair, bound_at, whole):
     rec, prev_rec, start = lines[r], lines[prev], lines[s]
     if None in (_ts(rec), _ts(prev_rec), _ts(start)):
         return None
-    if _pair_at(lines, r, meta, whole) != tuple(pair):
+    if _pair_at(lines, r, meta, whole=whole) != tuple(pair):
         return None
-    if _pair_at(lines, prev, meta, whole) != tuple(pair):
+    if _pair_at(lines, prev, meta, whole=whole) != tuple(pair):
         return None
     prev_turn = _turn(prev_rec)
     prev_start = None

@@ -1,8 +1,8 @@
 """The worker ceiling: turns' guard that stops a subagent whose context has grown too far.
 
 turns calls `judge(call)` before each tool call of a subagent, in the session's endpoint,
-when the guard `usage.ceiling` is on: by usage's switch `ceiling.on` or by turns'
-`guards.on`. It answers None (let the call run), `Allow(line)` (run it and add one line
+when the guard `usage.ceiling` is on: by usage's switch `ceiling.enabled` or by turns'
+`guards.run`. It answers None (let the call run), `Allow(line)` (run it and add one line
 for the model) or `Deny(reason)`, turns' own answers.
 
 **The rule.** The ceiling acts only when it is on and both `ceiling.warn_tokens` and
@@ -43,7 +43,7 @@ import os
 #: The guard's id, its name in usage's `GUARDS`, and its switch in usage's settings.
 GUARD_ID = "usage.ceiling"
 NAME = "ceiling"
-SWITCH = "ceiling.on"
+SWITCH = "ceiling.enabled"
 #: The markers' directory under usage's state directory.
 STATE_DIR = "ceiling"
 #: The marker kinds.
@@ -63,13 +63,13 @@ class Rules:
     __slots__ = ("on", "warn", "hard", "return_tools", "warning_text", "deny_text",
                  "handoff_roots", "work_roots", "allow_commands", "max_age_days")
 
-    def __init__(self, *, on: bool = False, warn: int = 0, hard: int = 0,
+    def __init__(self, *, enabled: bool = False, warn: int = 0, hard: int = 0,
                  return_tools: tuple[str, ...] = (), warning_text: str = "",
                  deny_text: str = "", handoff_roots: tuple[str, ...] = (),
                  work_roots: tuple[str, ...] = (),
                  allow_commands: tuple[tuple[str, ...], ...] = (),
                  max_age_days: float = 7.0):
-        self.on = on
+        self.on = enabled
         self.warn = warn
         self.hard = hard
         self.return_tools = return_tools
@@ -113,7 +113,7 @@ def rules_of(settings, *, file=None) -> Rules:
                               'write each as the words a command starts with, such as '
                               '["make", "report"]')
         commands.append(tuple(value))
-    return Rules(on=bool(settings[SWITCH]), warn=int(settings["ceiling.warn_tokens"]),
+    return Rules(enabled=bool(settings[SWITCH]), warn=int(settings["ceiling.warn_tokens"]),
                  hard=int(settings["ceiling.hard_tokens"]),
                  return_tools=tuple(settings["ceiling.return_tools"]),
                  warning_text=settings["ceiling.warning_text"],

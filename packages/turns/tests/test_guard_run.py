@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ from moxi_turns.claude_endpoint import ClaudeHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.guards import (Allow, Deny, Found, Guard, Loaded, On, Problem, Prompt,
                                ToolCall, regex_problem)
-from moxi_turns.guards.run import (GUARD_WORKERS, STILL_JUDGING, Answer, GuardRunner,
+from moxi_turns.guards.run import (GUARD_WORKERS, STILL_JUDGING, Answer, Entry, GuardRunner,
                                    break_deny, break_line, decide, entry_for, load_line)
 from moxi_turns.listeners import Registry
 
@@ -53,7 +54,7 @@ def leg_entry(d: dict, harness: str, max_wait: int) -> dict | None:
     out = {k: d[k] for k in ("id", "who", "match", "match_flags", "judge", "deny", "wants",
                              "on_error")}
     return {**out, "calls": d["calls"][harness],
-            "deadline_ms": min(d["deadline_ms"], max_wait)}
+            "deadline_ms": min(d["deadline_ms"], max_wait), "step": "call"}
 
 
 # -- the shared cases --------------------------------------------------------------------
@@ -147,9 +148,9 @@ class Rig:
             clear=lambda key: self.records.append(("clear", key)))
         self.runner.reload()
 
-    def call(self, *, tool="Bash", agent=None, input=None, prompts=()) -> ToolCall:
+    def call(self, *, tool="Bash", agent=None, tool_input=None, prompts=()) -> ToolCall:
         return ToolCall("claude", "s-1", agent, tool, "tu-1",
-                        {"command": "x"} if input is None else input, "/w", None,
+                        {"command": "x"} if tool_input is None else tool_input, "/w", None,
                         {"HOME": "/h"}, tuple(prompts))
 
     def ask(self, *ids: str, **kw) -> Answer:
@@ -258,7 +259,7 @@ def test_a_break_lets_the_call_through_with_the_agents_line_and_a_record(rig, fn
     assert [(b.id, b.why, b.denied) for b in got.breaks] == [("t.b", why, False)]
     assert r.written() == [("record", f"guard t.b could not check a Bash call on claude "
                             f"({why}); the call ran unchecked", "guard:t.b",
-                            "moxi config set turns guards.on --remove /g/t.py")]
+                            "moxi config set turns guards.run --remove /g/t.py")]
 
 
 def test_on_error_deny_refuses_with_the_guard_and_the_reason(rig):
@@ -367,7 +368,7 @@ def test_records_reach_the_doctor(turns_env):
         assert str(path).startswith(os.environ["MOXI_TURNS_STATE_HOME"])
         records = json.loads(path.read_text())
         assert "it raised Boom: broken" in records["guard:t.real"]["text"]
-        assert records["guard:t.real"]["fix"] == "moxi config set turns guards.on --remove /g/t.py"
+        assert records["guard:t.real"]["fix"] == "moxi config set turns guards.run --remove /g/t.py"
         state["fail"] = False
         runner.ask(ToolCall("claude", "s", None, "Bash", input={"command": "x"}), ["t.real"])
         assert runner.flush(5)
@@ -505,7 +506,7 @@ def test_the_table_comes_from_turns_config_and_custom_files(turns_env, tmp_path)
                   "def j(call):\n    return Deny('judged ' + call.input['command'])\n"
                   "GUARDS = (Guard(name='j', calls={'claude': ('Bash',), 'codex': ('Bash',)},"
                   " judge=':j', deadline_ms=900),)\n")
-    write_config(turns_env, f'[guards]\non = ["{toml}", "{py}"]\nmax_wait_ms = 250\n')
+    write_config(turns_env, f'[guards]\nrun = ["{toml}", "{py}"]\nmax_wait_ms = 250\n')
     runner = GuardRunner("claude", env=dict(os.environ))
     try:
         table = runner.reload()
@@ -545,17 +546,18 @@ def leg_rig(turns_env, rig):
         w.close()
 
 
-def test_the_hello_carries_claudes_table_and_the_leg_is_3(leg_rig):
+def test_the_hello_carries_claudes_table_and_the_leg_is_4(leg_rig):
     ep, runner, r = leg_rig(judged("a", lambda c: None, match={"command": "rm"}),
                             data_only("b", "no", calls=("Agent",)))
-    assert leg.LEG == 3 and runner.first["leg"] == 3
+    assert leg.LEG == 4 and runner.first["leg"] == 4
     assert leg.PATH_GUARD == "/ask/guard" and leg.PATH_GUARD in leg.PATHS
     assert runner.first["guards"] == [
         {"id": "t.a", "calls": ["Bash"], "who": "any", "match": {"command": "rm"},
          "match_flags": "", "judge": True, "deny": "", "wants": [], "on_error": "allow",
-         "deadline_ms": 500},
+         "deadline_ms": 500, "step": "call"},
         {"id": "t.b", "calls": ["Agent"], "who": "any", "match": None, "match_flags": "",
-         "judge": False, "deny": "no", "wants": [], "on_error": "allow", "deadline_ms": 500}]
+         "judge": False, "deny": "no", "wants": [], "on_error": "allow", "deadline_ms": 500,
+         "step": "call"}]
 
 
 def test_each_ready_sends_the_table_again_and_names_a_load_failure_once(leg_rig):
@@ -609,7 +611,7 @@ def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
     (7, "/work"),
     (["/x"], "/work"),
 ], ids=["absolute", "root", "none", "empty", "relative", "dot-relative", "number", "list"])
-def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_directory(
+def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir(
         leg_rig, given, want):
     seen = {}
 
@@ -666,3 +668,86 @@ def test_an_ask_holds_its_request_thread_no_longer_than_its_deadline(leg_rig, ri
     again = runner.post(leg.PATH_GUARD, body)       # every thread hung: at once
     assert time.monotonic() - t0 < 0.2
     assert again["broken"] == [break_line("t.h", STILL_JUDGING)]
+
+
+# -- the ask step ------------------------------------------------------------------------
+
+def test_the_ask_step_judges_only_its_own_entries_and_never_approves(rig):
+    seen = []
+
+    def at_ask(call):
+        seen.append(call)
+        return Allow("never shown")
+
+    r = rig(judged("ask", at_ask, step="ask"), judged("call", lambda c: Deny("call only")))
+    call = replace(r.call(), permission_mode="bypassPermissions")
+    answer = r.runner.ask(call, ["t.ask", "t.call"], "ask")
+    assert answer == Answer(None, (), (), ())
+    assert seen[0].permission_mode == "bypassPermissions"
+    # An Allow at the ask step is logged once per guard, and nothing else.
+    r.runner.ask(call, ["t.ask"], "ask")
+    assert r.runner._allowed_at_ask == {"t.ask"}
+    # At the call step, the ask entry is skipped.
+    assert r.runner.ask(r.call(), ["t.ask", "t.call"]).deny == "call only"
+    assert len(seen) == 2
+
+
+def test_the_ask_step_refuses_with_a_deny_or_a_data_only_guard(rig):
+    r = rig(judged("j", lambda c: Deny("refused in bypass"), step="ask"))
+    assert r.runner.ask(r.call(), ["t.j"], "ask").to_leg() == {
+        "deny": "refused in bypass", "lines": [], "broken": []}
+    d = Found("t.d", Guard(name="d", calls={"claude": ("*",)}, deny="no asks", step="ask"),
+              "py", path="/g/t.py")
+    r = rig(d)
+    assert r.runner.ask(r.call(), ["t.d"], "ask").deny == "no asks"
+
+
+def test_a_break_at_the_ask_step_leaves_the_ask_or_refuses_by_on_error(rig):
+    def boom(call):
+        raise RuntimeError("no")
+
+    r = rig(judged("soft", boom, step="ask"), judged("hard", boom, step="ask",
+                                                      on_error="deny"))
+    soft = r.runner.ask(r.call(), ["t.soft"], "ask")
+    assert soft.deny is None and soft.broken == () and soft.lines == ()
+    assert soft.breaks[0].id == "t.soft"
+    hard = r.runner.ask(r.call(), ["t.hard"], "ask")
+    assert hard.deny == break_deny("t.hard", "it raised RuntimeError: no")
+    assert r.runner.flush()
+    texts = [rec[1] for rec in r.records if rec[0] == "record"]
+    assert any("was left to the person" in t for t in texts)
+
+
+def test_decide_matches_by_step():
+    entries = [Entry.of("t.c", {"calls": ["Bash"], "judge": False, "deny": "c"}),
+               Entry.of("t.a", {"calls": ["Bash"], "judge": False, "deny": "a",
+                                "step": "ask"})]
+    assert decide(entries, "Bash", None, {}).deny == "c"
+    assert decide(entries, "Bash", None, {}, "ask").deny == "a"
+    assert entries[1].to_leg()["step"] == "ask"
+
+
+def test_ask_guard_at_the_ask_step_carries_the_mode_and_the_record_path(leg_rig):
+    seen = {}
+
+    def judge(call):
+        seen["call"] = call
+        return Deny("not in bypass")
+
+    ep, runner, r = leg_rig(judged("a", judge, step="ask"))
+    answer = runner.post(leg.PATH_GUARD, {
+        "call": {"tool": "Bash", "input": {"command": "cd t && rm -rf *"}, "agentId": "a-1",
+                 "cwd": "/work/t", "permission_mode": "bypassPermissions",
+                 "transcript_path": "/t/s.jsonl"},
+        "guards": ["t.a"], "step": "ask"})
+    assert answer == {"ok": True, "deny": "not in bypass", "lines": [], "broken": []}
+    c = seen["call"]
+    assert (c.permission_mode, c.record_path, c.cwd, c.agent_id) == (
+        "bypassPermissions", "/t/s.jsonl", "/work/t", "a-1")
+    # The same guard is not asked at the call step.
+    assert runner.post(leg.PATH_GUARD, {"call": {"tool": "Bash", "input": {}},
+                                        "guards": ["t.a"]}) == {
+        "ok": True, "lines": [], "broken": []}
+    status, _ = post(runner.mod_sock, leg.PATH_GUARD, {"call": {"tool": "Bash"},
+                                                        "guards": [], "step": "later"})
+    assert status == 400

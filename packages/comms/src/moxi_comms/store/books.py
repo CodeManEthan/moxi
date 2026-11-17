@@ -257,7 +257,7 @@ class Books:
         except (TypeError, ValueError):
             return None
 
-    def routed(self, message_id) -> None:
+    def on_routed(self, message_id) -> None:
         """A message was routed: the high mark rises to it, and never falls."""
         mid = int(message_id)
         with self._lock, self._write() as conn:

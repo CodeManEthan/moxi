@@ -130,19 +130,28 @@ def with_header(label: str, text: str) -> bytes:
 
 
 def state(path: str | os.PathLike) -> str | None:
-    """A generated file's state: None when it is missing or carries no header (not
-    loadout's), `ok` when the header's hash matches, `modified` when it doesn't."""
+    """A generated file's state: None when it is missing, `ok` when its header's hash
+    matches the rest, `modified` otherwise: edited, carrying no header (made or rewritten
+    by hand, since loadout always writes one), or unreadable. Only a file loadout can show
+    it wrote reads `ok`."""
     try:
         data = Path(path).read_bytes()
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError:
+        return "modified"
+    return state_of(data)
+
+
+def state_of(data: bytes) -> str:
+    """`state` of a generated file's bytes, `data`: `ok` or `modified`."""
     lead = b""
     if data.startswith(b"---\n"):
         lead, data = b"---\n", data[4:]
     first, _, rest = data.partition(b"\n")
     match = _HEADER_RE.fullmatch(first.decode("utf-8", "replace") + "\n")
     if match is None:
-        return None
+        return "modified"
     digest = hashlib.sha256(lead + rest).hexdigest()
     return "ok" if digest == match.group(1) else "modified"
 
@@ -180,4 +189,4 @@ def _first_line(exc) -> str:
 
 
 __all__ = ["SUFFIX", "SOURCE_SUFFIX", "CONVERTERS", "FrontmatterError", "read", "codex",
-           "opencode", "with_header", "state"]
+           "opencode", "with_header", "state", "state_of"]

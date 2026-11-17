@@ -32,7 +32,7 @@ CODEX_ROWS = {"model", "sandbox", "approval", "profile", "search", "add_dir", "c
               "cwd", "update_check", "skip_git_check", "trust_cwd"}
 LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "director",
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
-                 "posture", "target", "slot", "extra_flags", "notes_dir", "warn_at",
+                 "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at"}
 
 
@@ -175,25 +175,25 @@ def test_a_row_spells_its_value_in_a_mode(harness, name, mode, value, tokens):
     assert catalog.load(harness)[name].tokens(mode, value) == tokens
 
 
-def test_the_trust_override_names_the_launch_directory_as_a_toml_key():
+def test_the_trust_override_names_the_launch_dir_as_a_toml_key():
     # codex -c splits its key at every dot, so the directory goes as the key of an
     # inline table, the value of the one-part key `projects`.
     row = catalog.load("codex")["trust_cwd"]
-    assert row.tokens("interactive", True, cwd="/home/me/my.repo") == [
-        "-c", 'projects={"/home/me/my.repo"={trust_level="trusted"}}']
-    assert row.tokens("host", True, cwd='/a"b') == [
+    assert row.tokens("interactive", value=True, cwd="/users/me/my.repo") == [
+        "-c", 'projects={"/users/me/my.repo"={trust_level="trusted"}}']
+    assert row.tokens("host", value=True, cwd='/a"b') == [
         "--option", 'projects."/a\\"b".trust_level="trusted"']
-    assert row.tokens("exec", True, cwd="/{value}") == [
+    assert row.tokens("exec", value=True, cwd="/{value}") == [
         "-c", 'projects={"/{value}"={trust_level="trusted"}}']
-    word = row.tokens("exec", True, cwd='/a"b.c d')[1]
+    word = row.tokens("exec", value=True, cwd='/a"b.c d')[1]
     key, _, value = word.partition("=")
     assert key == "projects"
     assert tomllib.loads(f"v = {value}")["v"] == {'/a"b.c d': {"trust_level": "trusted"}}
     # TOML wants DEL escaped in a string, which a JSON string leaves bare.
-    word = row.tokens("host", True, cwd="/a\x7fb.c")[1]
+    word = row.tokens("host", value=True, cwd="/a\x7fb.c")[1]
     assert tomllib.loads(word)["projects"] == {"/a\x7fb.c": {"trust_level": "trusted"}}
     with pytest.raises(ValueError, match="directory"):
-        row.tokens("exec", True)
+        row.tokens("exec", value=True)
 
 
 def test_a_mode_that_does_not_take_the_row_has_no_tokens():
@@ -220,7 +220,7 @@ def test_check_types_and_enum_values():
         claude["tools"].check("Bash")
     with pytest.raises(BadValue, match="item 2"):
         claude["tools"].check(["Bash", 3])
-    assert claude["remote_control"].check(True) is True
+    assert claude["remote_control"].check(value=True) is True
     assert claude["remote_control"].check("phone") == "phone"
     with pytest.raises(BadValue, match="or true"):
         claude["remote_control"].check(3)
@@ -283,7 +283,7 @@ def test_an_unset_row_is_neither_applied_nor_refused():
     assert dict(fit.applied) == {} and fit.not_applied == ()
 
 
-def test_launcher_rows_are_left_to_the_caller_but_codex_cwd_takes_the_launch_directory():
+def test_launcher_rows_are_left_to_the_caller_but_codex_cwd_takes_the_launch_dir():
     fit = catalog.fit("codex", "host", {"cwd": "/work", "brief": "go", "target": "slot"},
                       chosen={"cwd", "brief", "target"})
     assert dict(fit.applied) == {"cwd": "/work"}
@@ -323,7 +323,7 @@ def test_an_optional_value_row_takes_a_value_or_none():
     assert named.values["remote_control"] == "phone"
 
 
-def test_a_typed_relative_path_is_read_against_this_directory(tmp_path, monkeypatch):
+def test_a_typed_relative_path_is_read_against_this_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     parsed = catalog.parse(["--cwd", "sub", "--add-dir", "../x"], "codex",
                            available=everything)
@@ -763,7 +763,7 @@ def help_text(flags) -> str:
 class FakeHarness:
     """`read` for `diff`: a help text per command, and a version."""
 
-    def __init__(self, helps: dict, version: str = "9.9.9", missing: bool = False,
+    def __init__(self, helps: dict, version: str = "9.9.9", *, missing: bool = False,
                  fails: bool = False):
         self.helps, self.version, self.missing, self.fails = helps, version, missing, fails
         self.calls: list = []

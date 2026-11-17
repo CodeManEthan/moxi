@@ -32,13 +32,13 @@ KINDS = {
 '''
 
 
-def fake_git(directory, body: str) -> str:
+def fake_git(bin_dir, body: str) -> str:
     """A `git` script holding `body`. Returns PATH with its directory first."""
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / "git"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "git"
     script.write_text("#!/bin/sh\n" + body + "\n")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    return os.pathsep.join([str(directory), "/usr/bin", "/bin"])
+    return os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ def test_a_git_mint_makes_the_root_with_its_parents_runs_git_init_then_adds_the_
 
 
 @posix_only
-def test_a_git_mint_onto_an_empty_directory(tmp_path, git_ok):
+def test_a_git_mint_onto_an_empty_dir(tmp_path, git_ok):
     root = tmp_path / "empty"
     root.mkdir()
     added = acts.add("e", root=str(root), create=True)
@@ -96,7 +96,7 @@ def test_git_missing_refuses_and_makes_nothing(tmp_path, no_git, capsys):
 
 
 @pytest.mark.parametrize("kind", ["project", "topic"])
-def test_a_non_empty_directory_refuses_and_is_left_alone(tmp_path, site, git_ok, kind):
+def test_a_non_empty_dir_refuses_and_is_left_alone(tmp_path, site, git_ok, kind):
     site.contribution("notes", KINDS)
     root = tmp_path / "full"
     root.mkdir()
@@ -116,7 +116,7 @@ def test_a_file_where_the_root_goes_refuses(tmp_path, git_ok):
 
 
 @posix_only
-def test_a_failing_git_leaves_the_directory_it_made_and_no_row(tmp_path, monkeypatch,
+def test_a_failing_git_leaves_the_dir_it_made_and_no_row(tmp_path, monkeypatch,
                                                                 capsys):
     monkeypatch.setenv("PATH", fake_git(tmp_path / "bin",
                                         'echo "fatal: no space" >&2\nexit 128'))
@@ -164,7 +164,7 @@ def test_the_verb_gives_git_init_its_own_longer_bound(tmp_path, monkeypatch, cap
 
 
 @posix_only
-def test_a_row_lost_after_a_git_mint_leaves_the_directory_and_names_the_add(
+def test_a_row_lost_after_a_git_mint_leaves_the_dir_and_names_the_add(
         tmp_path, git_ok, monkeypatch, capsys):
     mint = acts._mint
 
@@ -210,7 +210,7 @@ def test_a_taken_key_or_root_refuses_before_anything_is_made(tmp_path, golden_co
 
 # --- the dir and refuse mints ------------------------------------------------------------
 
-def test_a_dir_mint_makes_only_the_directory_with_git_off_path(tmp_path, site, no_git):
+def test_a_dir_mint_makes_only_the_dir_with_git_off_path(tmp_path, site, no_git):
     site.contribution("notes", KINDS)
     root = tmp_path / "notes" / "t1"
     added = acts.add("t1", root=str(root), kind="topic", create=True)
@@ -238,7 +238,7 @@ def test_a_two_element_kind_mints_with_git(tmp_path, site, git_ok):
     assert (tmp_path / "rp" / ".git").is_dir()
 
 
-def test_a_dir_mint_onto_a_non_empty_directory_refuses(tmp_path, site, no_git):
+def test_a_dir_mint_onto_a_non_empty_dir_refuses(tmp_path, site, no_git):
     site.contribution("notes", KINDS)
     root = tmp_path / "t"
     root.mkdir()
@@ -273,12 +273,12 @@ def test_a_mkdir_that_fails_leaves_no_row_and_nothing_made(tmp_path, no_git, sit
     assert api.list_projects() == []
 
 
-def test_a_mkdir_that_fails_part_way_names_the_topmost_directory_left(
+def test_a_mkdir_that_fails_part_way_names_the_topmost_dir_left(
         tmp_path, no_git, site, monkeypatch):
     site.contribution("notes", KINDS)
     root = tmp_path / "top" / "mid" / "t"
 
-    def part_way(path, exist_ok=False):
+    def part_way(path, *, exist_ok=False):
         os.mkdir(tmp_path / "top")
         raise PermissionError(13, "Permission denied")
 
@@ -291,7 +291,7 @@ def test_a_mkdir_that_fails_part_way_names_the_topmost_directory_left(
     assert api.list_projects() == []
 
 
-def test_a_row_lost_after_a_dir_mint_leaves_the_directory(tmp_path, site, no_git,
+def test_a_row_lost_after_a_dir_mint_leaves_the_dir(tmp_path, site, no_git,
                                                           monkeypatch):
     site.contribution("notes", KINDS)
     mint = acts._mint

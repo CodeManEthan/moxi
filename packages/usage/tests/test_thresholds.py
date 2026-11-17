@@ -63,19 +63,19 @@ def test_the_exact_equations_on_the_measured_rows(model, mark):
     assert found.available and found.reason is None and found.fallback is None
     assert found.tokens == EXACT[model][mark]
     row = PARAMS["models"][model]["main"]
-    S, P, g, w, r = row["S"], row["P"], row["g"], 2.0, READS[model]
-    n_star = math.sqrt(2 * (w * (S - P) + r * P) / (r * g))
+    s, p, g, w, r = row["S"], row["P"], row["g"], 2.0, READS[model]
+    n_star = math.sqrt(2 * (w * (s - p) + r * p) / (r * g))
     k = {"1x": 1.0, "1.5x": 1.5 + math.sqrt(1.25), "2x": 2 + math.sqrt(3)}[mark]
-    assert found.exact == pytest.approx(S + g * k * n_star, abs=1e-6)
+    assert found.exact == pytest.approx(s + g * k * n_star, abs=1e-6)
 
 
 @pytest.mark.parametrize("model", sorted(EXACT))
 def test_the_rounded_coefficients_sit_a_few_tokens_under_the_exact_ones(model):
     row = PARAMS["models"][model]["main"]
-    S, P, g, r = row["S"], row["P"], row["g"], READS[model]
-    n_star = thresholds.optimum_calls(thresholds.restart_cost(S, P, 2.0, r), r, g)
+    s, p, g, r = row["S"], row["P"], row["g"], READS[model]
+    n_star = thresholds.optimum_calls(thresholds.restart_cost(s, p, 2.0, r), r, g)
     for mark, k in (("1x", 1.0), ("1.5x", 2.618), ("2x", 3.732)):
-        assert round(S + g * k * n_star) == ROUNDED[model][mark]
+        assert round(s + g * k * n_star) == ROUNDED[model][mark]
     for mark in thresholds.MARKS:
         assert 0 <= EXACT[model][mark] - ROUNDED[model][mark] <= 7
 

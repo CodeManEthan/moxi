@@ -63,9 +63,9 @@ def needs_claude_with_turns(work: Path, env: dict[str, str]) -> None:
     try:
         added = compose.launch_additions(cwd=str(work), env=env,
                                          session_id=str(uuid.uuid4()))
-    except Exception as error:  # noqa: BLE001  (the fence's refusal, however turns words it)
-        if "endpoint.json" in str(error) or isinstance(error, PermissionError):
-            pytest.skip(f"{CLAUDE_WITH_TURNS}: {error}")
+    except Exception as exc:  # noqa: BLE001  (the fence's refusal, however turns words it)
+        if "endpoint.json" in str(exc) or isinstance(exc, PermissionError):
+            pytest.skip(f"{CLAUDE_WITH_TURNS}: {exc}")
         raise
     refused = [note for note in added.notes if "endpoint.json" in note]
     if refused:
@@ -74,8 +74,9 @@ def needs_claude_with_turns(work: Path, env: dict[str, str]) -> None:
 
 def slot_settings() -> None:
     """A slot launch answers Claude's folder-trust screen, as part 1's live tests do."""
-    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
-    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", value=True,
+                     by="launcher live test")
+    config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
 
 
 def history(socket: str, pane_id: str, env: dict[str, str]) -> str:
@@ -189,7 +190,7 @@ def claude_in_slot(work: Path, env: dict[str, str], brief: str, *, extra=(), **t
                **typed},
         extra=(*CLAUDE_OWN, *extra), cwd=str(work),
         off_posture=bool(typed.get("allowed_tools")))
-    result = api.launch(request, environ=env)
+    result = api.launch(request, env=env)
     return result, launch_row(result.request_id)
 
 
@@ -221,7 +222,7 @@ def test_an_ended_claude_slot_session_resumes_in_its_slot_with_what_it_said(
                     if e["request_id"] == row.request_id]
         assert (listed["live"], listed["resumable"]) == (False, True), listed
 
-        got = resume.resume(row.session_id, turns=None, environ=live_env)
+        got = resume.resume(row.session_id, turns=None, caller_env=live_env)
         assert got.exit_code == 0, got.lines
         new = launch_row(got.data["request_id"])
         assert (new.resume_of, new.session_id, new.slot) == (
@@ -241,7 +242,7 @@ def test_an_ended_claude_slot_session_resumes_in_its_slot_with_what_it_said(
 
         before = launches()
         with pytest.raises(resume.Refused) as refused:
-            resume.resume(row.session_id, turns=None, environ=live_env)
+            resume.resume(row.session_id, turns=None, caller_env=live_env)
         assert refused.value.code == "live", refused.value.problem
         assert launches() == before
     finally:
@@ -271,8 +272,8 @@ def test_a_self_relaunch_of_claude_in_a_slot_comes_back_with_its_handoff_alone(
     needs_claude_with_turns(work, live_env)
     tag = secrets.token_hex(3).upper()
     exported, passed = f"LIVE_ARMED_{tag}", f"LIVE_PASSED_{tag}"
-    config.set("launcher", "relaunch.pass_env", [passed], by="launcher live test")
-    config.set("launcher", "relaunch.person_s", 5, by="launcher live test")
+    config.set_value("launcher", "relaunch.pass_env", [passed], by="launcher live test")
+    config.set_value("launcher", "relaunch.person_s", 5, by="launcher live test")
     handoff = tmp_path / "handoff.md"
     brief, answer = arming_brief(handoff, exported, passed)
     result, row = claude_in_slot(work, live_env, brief, **BASH_ALLOWED)
@@ -295,9 +296,9 @@ def test_a_self_relaunch_of_claude_in_a_slot_comes_back_with_its_handoff_alone(
                  timeout=ANSWER_S, interval=0.5,
                  what=lambda: f"{answer} from the handoff; saw "
                               f"{pane_text(own_slots, new.pane_id, live_env)[-2000:]}")
-        env = proc.environ(new.pid) or {}
-        assert env.get(common.REQUEST) == new.request_id
-        assert env.get(common.RELAUNCH) == run.run_id
+        env = proc.process_env(new.pid) or {}
+        assert env.get(common.REQUEST_ENV) == new.request_id
+        assert env.get(common.RELAUNCH_ENV) == run.run_id
         assert exported not in env and env.get(passed) == "1", sorted(env)
     finally:
         kill_panes(own_slots, live_env, row.pane_id if row else None,
@@ -315,7 +316,7 @@ def test_a_relaunch_armed_while_a_client_types_waits_and_says_person(live_env, w
     shows it waiting on `person`, and nothing is exited meanwhile."""
     needs_claude_with_turns(work, live_env)
     tag = secrets.token_hex(3).upper()
-    config.set("launcher", "relaunch.person_s", 30, by="launcher live test")
+    config.set_value("launcher", "relaunch.person_s", 30, by="launcher live test")
     handoff = tmp_path / "handoff.md"
     brief, _ = arming_brief(handoff, f"LIVE_ARMED_{tag}", f"LIVE_PASSED_{tag}")
     result, row = claude_in_slot(work, live_env, brief, **BASH_ALLOWED)
@@ -364,8 +365,8 @@ class Cache:
         self.kind, self.age, self.ttl = kind, age, ttl
 
     def read(self, harness, session_id, **options):
-        return types.SimpleNamespace(kind=self.kind, age_seconds=self.age,
-                                     ttl_seconds=self.ttl)
+        return types.SimpleNamespace(kind=self.kind, age_s=self.age,
+                                     ttl_s=self.ttl)
 
 
 def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
@@ -384,8 +385,8 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
     tag = secrets.token_hex(3).upper()
     shell_var, director_var, passed = (f"LIVE_SESSION_{tag}", f"LIVE_DIRECTOR_{tag}",
                                        f"LIVE_DPASSED_{tag}")
-    config.set("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
-    config.set("launcher", "relaunch.director_pass_env", [passed],
+    config.set_value("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
+    config.set_value("launcher", "relaunch.director_pass_env", [passed],
                by="launcher live test")
     ask, answer = words()
     brief = (f"Run the shell command `export {shell_var}=1` with your Bash tool, then: "
@@ -401,7 +402,7 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
         director_env = {**live_env, director_var: "1", passed: "1"}
-        done = relaunch.call_director(row.session_id, environ=director_env,
+        done = relaunch.call_director(row.session_id, caller_env=director_env,
                                       comms=DirectorComms(comms, "boss"),
                                       cache=Cache("cold", 4000.0), follow=False)
         assert done.exit_code == 0, done.lines
@@ -422,9 +423,9 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
         assert new.handoff_path is None
         wait_for(lambda: launch_row(new.request_id).pid, timeout=60, interval=0.5,
                  what="the new launch's process")
-        env = proc.environ(launch_row(new.request_id).pid) or {}
-        assert env.get(common.REQUEST) == new.request_id
-        assert common.RELAUNCH not in env
+        env = proc.process_env(launch_row(new.request_id).pid) or {}
+        assert env.get(common.REQUEST_ENV) == new.request_id
+        assert common.RELAUNCH_ENV not in env
         assert env.get(passed) == "1", sorted(env)
         assert director_var not in env and shell_var not in env, sorted(env)
     finally:
@@ -441,7 +442,7 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
     turns and answers Claude's exit dialog through slots: the verdict is `exited`, the
     exit log holds it, the pane is dead, and the background shell is gone."""
     needs_claude_with_turns(work, live_env)
-    config.set("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
+    config.set_value("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
     seconds = 900 + secrets.randbelow(90000)
     ask, answer = words()
     brief = (f"Start the shell command `sleep {seconds}` in the background with your Bash "
@@ -454,7 +455,7 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
                  what=lambda: f"{answer} and {marker}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        done = exits.exit_session(row.session_id, environ=live_env)
+        done = exits.exit_session(row.session_id, caller_env=live_env)
         assert (done.exit_code, done.data["outcome"]) == (0, "exited"), done.lines
         assert pane_dead(own_slots, row.pane_id, live_env)
         wait_for(lambda: not processes_running(marker), timeout=30, interval=0.5,
@@ -484,7 +485,7 @@ def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
     turns' command and Claude's answer to it. A clear stops the background shells, where
     turns can; a compact never does."""
     needs_claude_with_turns(work, live_env)
-    config.set("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
+    config.set_value("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
     seconds = 900 + secrets.randbelow(90000)
     ask, answer = words()
     brief = (f"Start the shell command `sleep {seconds}` in the background with your Bash "
@@ -500,7 +501,7 @@ def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
         verdict = recycle.ask_expiry(row.session_id, cache=Cache("cold", 4000.0),
-                                     environ=live_env)
+                                     caller_env=live_env)
         done = "cleared" if command == "clear" else "compacted"
         assert verdict.outcome == done, verdict
         [run] = [r for r in runs_of(row.request_id) if r.mode == "expiry"]
@@ -549,7 +550,7 @@ def test_a_keep_warm_nudge_while_a_subagent_runs(live_env, work, own_slots):
 
         def nudged() -> keepwarm.Verdict | None:
             verdict = keepwarm.ask(row.session_id, cache=Cache("warm", 3000.0),
-                                   environ=live_env)
+                                   caller_env=live_env)
             seen.append((verdict.outcome, verdict.word))
             return verdict if verdict.outcome is not None else None
         verdict = wait_for(nudged, timeout=SUBAGENT_S - 60, interval=3.0,
@@ -581,4 +582,3 @@ def test_a_compact_at_the_limit(live_env, work, own_slots):
 def test_on_macos_a_keep_warm_ask_and_an_expiry_ask_fire(live_env, work):
     needs_claude_with_turns(work, live_env)
     pytest.skip("as on Linux, a Claude session's cache lifetime can't be shortened")
-

@@ -1,12 +1,20 @@
 """projects' page: the routes its page server answers, declared as data.
 
-    GET  /api/projects       every project, by key; only those of `kind` when it is given
+    GET  /api/projects       every project, by key, with whether its root is a directory
+                             now; only those of `kind` when it is given; this server's
+                             home folder, and whether notes is installed
     GET  /api/project        one project, by `key` (matched ignoring case)
+    GET  /api/folder         what is at `path` as typed (`~` taken as this server's
+                             home): whether it is a directory and a git repository, the
+                             project it is in and how, and the key its last segment
+                             would make, and whether that key is taken
     GET  /api/kinds          the kinds a project may have, and every contribution or kind
                              that can't be used, with why
     GET  /api/where          the store file this server reads and writes, the git it
                              would run for a create (or none), and the line a write
                              would be refused with now (or none)
+    GET  /api/remove-check   what a remove of `key` would be refused with now, each
+                             holder with its sentence, without removing
     GET  /api/remove-status  what the remove request `job` came to: removed, or refused
                              with each sentence
     POST /api/add            `moxi projects add KEY [--root DIR] [--create] [--kind KIND]
@@ -15,8 +23,8 @@
                              [--lead NAME | --no-lead] [--notes-root DIR | --no-notes-root]`
     POST /api/agents-add     `moxi projects agents add KEY NAME`
     POST /api/agents-remove  `moxi projects agents remove KEY NAME`
-    POST /api/remove         `moxi projects remove KEY`, confirmed (202, with the status
-                             link)
+    POST /api/remove         `moxi projects remove KEY`, keyed by the `job` the page
+                             mints per press, answered at once with the outcome
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before it makes anything.** Each handler calls the act the verb calls
@@ -58,7 +66,7 @@ STATUS_ROUTE = "/api/remove-status"
 NAME_MAX = 256
 #: The longest path a request takes.
 PATH_MAX = 4096
-#: An idempotency key's length, which a status read's `job` never passes.
+#: The longest `job` a remove or a status read takes.
 JOB_MAX = 64
 
 _TEXT = lb.Out("string")
@@ -69,10 +77,9 @@ _MAYBE_PATH = lb.Out("string", mark="path", nullable=True)
 _SAYS = lb.Out("string", mark="redact")
 _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _NAMES = lb.Out("list", items=_TEXT)
+_MAYBE_BOOL = lb.Out("bool", nullable=True)
 
-#: One project, as the read API's `Project` gives it: `agents` is the lead first, then
-#: the associated set; `created` UTC, ISO 8601 with `Z`.
-PROJECT = lb.Out("table", items={
+_PROJECT_FIELDS = {
     "key": _TEXT,
     "root": _PATH,
     "kind": _TEXT,
@@ -81,7 +88,14 @@ PROJECT = lb.Out("table", items={
     "agents": _NAMES,
     "notes_root": _MAYBE_PATH,
     "created": _TEXT,
-})
+}
+#: One project, as the read API's `Project` gives it: `agents` is the lead first, then
+#: the associated set; `created` UTC, ISO 8601 with `Z`.
+PROJECT = lb.Out("table", items=_PROJECT_FIELDS)
+#: One project in the list: a `PROJECT` and `exists`, true when its root is a directory
+#: now, false when nothing is there or it is not a directory, null when this server
+#: can't say (the `stat` failed another way, or did not answer within the list's bound).
+LISTED = lb.Out("table", items={**_PROJECT_FIELDS, "exists": _MAYBE_BOOL})
 
 #: One kind: `module` is `projects` for a built-in one; `mint` is how a create makes its
 #: root, `git`, `dir` or `refuse` (the page hides create for `refuse`).
@@ -89,9 +103,33 @@ KIND = lb.Out("table", items={"name": _TEXT, "doc": _TEXT, "module": _TEXT, "min
 #: A contribution that won't load, or a kind that is blocked, and why.
 BROKEN = lb.Out("table", items={"module": _TEXT, "reason": _SAYS})
 
-PROJECTS = {"projects": lb.Out("list", items=PROJECT)}
+#: The list: every project, `home`, this server's home folder (null when nothing places
+#: one), under which a root is written `~/...`, and `notes_installed`, whether notes is
+#: installed, without which no notes root is stored.
+PROJECTS = {"projects": lb.Out("list", items=LISTED), "home": _MAYBE_PATH,
+            "notes_installed": lb.Out("bool")}
 ONE = {"project": PROJECT}
 KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BROKEN)}
+#: What the Add panel says under its folder field, for the `path` typed. `path` is that
+#: path with a leading `~` taken as this server's home, made normal; null, with every
+#: other field, for a relative path, `~user`, or a `~` path while nothing places the
+#: home. `exists`: whether it is a directory now; `has_git`: whether `<path>/.git` exists,
+#: null when `exists` is false; each null when its `stat` did not answer within the
+#: bound. `project`: the key of the project the path is in, or null; `how` the path
+#: stands to it: `root` (its root), `inside` (under its root) or `worktree` (matched
+#: through a linked git worktree's main tree). `key`: the path's last segment when it is a
+#: valid key, else null; `taken`: whether a project already has that key, ignoring case.
+#: `project`, `how` and `taken` are null when the store can't be read; `project` and
+#: `how` are null too when the path's own `stat` did not answer.
+AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "has_git": _MAYBE_BOOL,
+          "project": _MAYBE, "how": _MAYBE, "key": _MAYBE, "taken": _MAYBE_BOOL}
+#: What a remove of `key` would meet now, without removing: `key` as stored, and one row
+#: per refusal. `module` is `projects` for the associated agents (its `sentence` names
+#: them), else the contribution's module, with its sentence, which carries its own fix;
+#: `fix` is set only for a contribution that won't load, raises or answers out of shape,
+#: whose `sentence` is the reason. Empty when nothing would refuse it.
+REMOVE_CHECK = {"key": _TEXT, "refusals": lb.Out("list", items=lb.Out("table", items={
+    "module": _TEXT, "sentence": _SAYS, "fix": _MAYBE_SAYS}))}
 #: `store` is the store file; `git` the git a create would run, null when there is none
 #: on this server's PATH; `note` the line an add, a set or a remove would be refused with
 #: now, since this server would write elsewhere than the user's terminal or can't tell,
@@ -103,7 +141,8 @@ WRITTEN = {"project": PROJECT, "notes": lb.Out("list", items=_SAYS)}
 #: An add: a write, and `warnings`, what the add went ahead without (a contribution
 #: skipped since it won't load, with the fix); empty when it went without nothing.
 ADDED = {**WRITTEN, "warnings": lb.Out("list", items=_SAYS)}
-#: A remove request: `state` is `removed` or `refused`; `key` the project's key as
+#: A remove's outcome, as `/api/remove` and `/api/remove-status` answer it: `job` the
+#: press it was kept under; `state` is `removed` or `refused`; `key` the project's key as
 #: stored (as asked when there was none); `project` the key the request was kept under.
 #: A refused one has its `reason`, `fix`, `sentences` (each contribution's, named by its
 #: module, or the reason alone) and the `exit_code` the verb exits with; a removed one has
@@ -131,6 +170,9 @@ ADD_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE
 SET_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE_NAME,
             "no_lead": _FLAG, "notes_root": _MAYBE_DIR, "no_notes_root": _FLAG}
 AGENT_BODY = {"key": _KEY, "name": _NAME}
+#: A remove: the project's key, and `job`, which the page mints for each press of its
+#: remove button (32 hexadecimal characters; the handler refuses any other).
+REMOVE_BODY = {"key": _KEY, "job": lb.Field("string", max=JOB_MAX)}
 
 
 def _target(name: str) -> str:
@@ -152,8 +194,12 @@ PAGE = lb.Page(
                  query={"kind": _MAYBE_NAME}, returns=PROJECTS),
         lb.Route("/api/project", "read", _target("project"), query={"key": _KEY},
                  returns=ONE),
+        lb.Route("/api/folder", "read", _target("at_path"),
+                 query={"path": lb.Field("string", max=PATH_MAX)}, returns=AT_PATH),
         lb.Route("/api/kinds", "read", _target("kinds"), returns=KINDS),
         lb.Route("/api/where", "read", _target("where"), returns=WHERE),
+        lb.Route("/api/remove-check", "read", _target("remove_check"), query={"key": _KEY},
+                 returns=REMOVE_CHECK),
         lb.Route(STATUS_ROUTE, "read", _target("remove_status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS),
         lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns=ADDED),
@@ -162,11 +208,11 @@ PAGE = lb.Page(
                  returns=ONE),
         lb.Route("/api/agents-remove", "act", _target("agents_remove"), body=AGENT_BODY,
                  returns=ONE),
-        lb.Route("/api/remove", "act", _target("remove"), body={"key": _KEY}, returns={},
-                 confirmed=True, status=STATUS_ROUTE),
+        lb.Route("/api/remove", "act", _target("remove"), body=REMOVE_BODY,
+                 returns=STATUS),
     ),
 )
 
-__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "ONE",
-           "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE",
-           "WRITTEN"]
+__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "AT_PATH", "BROKEN", "BUDGET", "KIND", "KINDS",
+           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "REMOVE_BODY", "REMOVE_CHECK",
+           "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]

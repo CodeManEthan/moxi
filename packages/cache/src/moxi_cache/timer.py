@@ -43,13 +43,24 @@ an upgrade that changes them is read when the watcher restarts.
 each live session whose record has a last request and a lifetime, the timer compares the
 session's age with each subscription. On the first tick at or past `at`, then each
 `every` after the last ask, until `until`, it checks `requires_env` against the
-environment the session's process started with (`moxi.proc.environ`) and starts `run`
+environment the session's process started with (`moxi.proc.process_env`) and starts `run`
 detached. On Linux and macOS that is a session of its own (`setsid`), stdin and stdout on
 `/dev/null`, stderr where the watcher's goes. On Windows it is `moxi.proc.spawn`'s detached
 child, a process outside any job the watcher runs in, with no console, and its stdout and
 stderr go to a file of its own (below). It does not wait. The started process outlives the
 watcher: a stop or restart of the watcher's unit ends the watcher only (`KillMode=process`,
 see `service`), and the asks it started keep running.
+
+**What it says it asks.** `Timer.asking(session, pid)` gives the sorted names of the loaded
+subscriptions whose `requires_env` the session's process meets (one without `requires_env`
+is met), or None before the timer's first `reload`. The watcher writes it into each clock
+record as `asks` (`records`). The environment is read only while a loaded subscription has
+a `requires_env`, so an install with none reads no process. A read is kept per `(session,
+pid)` while the session stays in the live list, since it is the environment the process
+started with, and the tick's `requires_env` check uses the same kept read. A read that
+gives None is not kept and is made again at the next tick. So the cost is one environment
+read per live session per watcher life, and one per tick for a session whose environment
+can't be read (another user's process, or any process on Windows).
 
 A process's environment can't be read on Windows (`env_checkable` says so), so there a
 subscription with `requires_env` never asks: the requirement counts as not met, as it
@@ -250,8 +261,8 @@ def module_argv0_resolver(scripts: Iterable[str],
                            f"scripts ({', '.join(sorted(own)) or 'it declares none'})")
         try:
             path = str(find(argv0))
-        except FileNotFoundError as e:
-            raise _Refused(str(e)) from None
+        except FileNotFoundError as exc:
+            raise _Refused(str(exc)) from None
         if not _executable(path):
             raise _Refused(f"run[0] {argv0} resolves to {path}, which is not an "
                            "executable file")
@@ -301,8 +312,8 @@ def check(raw, *, source: str, resolve: Callable[[str], str]) -> Subscription | 
                 or not all(isinstance(a, str) and "\0" not in a for a in run):
             raise _Refused("run is not a list of strings with run[0] the program")
         argv0 = resolve(run[0])
-    except _Refused as e:
-        return Refusal(name, source, str(e))
+    except _Refused as exc:
+        return Refusal(name, source, str(exc))
     return Subscription(name=name, source=source, at=at, run=tuple(run), argv0=argv0,
                         until=until, every=every, requires_env=tuple(sorted(pairs)))
 
@@ -328,13 +339,13 @@ def from_modules(entry_points: Iterable | None = None,
     if entry_points is None:
         entry_points = metadata.entry_points(group=GROUP)
     out: list[Subscription | Refusal] = []
-    for ep in sorted(entry_points, key=lambda e: (e.name, e.value)):
+    for ep in sorted(entry_points, key=lambda entry: (entry.name, entry.value)):
         source = f"module {ep.name}"
         try:
             target = ep.load()
-        except Exception as e:                                    # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 -- any plugin load failure becomes a refusal
             out.append(Refusal(None, source, f"entry point {ep.value} does not load "
-                                             f"({type(e).__name__}: {e})"))
+                                             f"({type(exc).__name__}: {exc})"))
             continue
         timers = getattr(target, ATTRIBUTE, None)
         if not isinstance(timers, (tuple, list)):
@@ -386,10 +397,10 @@ def load(config_entries, *, modules: Iterable[Subscription | Refusal] | None = N
 
 # --- the process's environment -----------------------------------------------------------
 
-def proc_environ(pid: int) -> dict[str, str] | None:
+def read_process_env(pid: int) -> dict[str, str] | None:
     """A process's environment as it was started, or None when it cannot be read: always
-    on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""
-    return _proc.environ(pid)
+    on Windows, and for a process that is gone or another user's (`moxi.proc.process_env`)."""
+    return _proc.process_env(pid)
 
 
 def env_checkable() -> bool:
@@ -402,26 +413,26 @@ def env_checkable() -> bool:
     return sys.platform.startswith("linux") or sys.platform == "darwin"
 
 
-def env_met(sub: Subscription, environ: Mapping[str, str] | None) -> bool:
+def env_met(sub: Subscription, env: Mapping[str, str] | None) -> bool:
     """Whether a process's environment carries what `requires_env` asks."""
     if not sub.requires_env:
         return True
-    if environ is None:
+    if env is None:
         return False
     for var, want in sub.requires_env:
-        have = environ.get(var)
+        have = env.get(var)
         if have is None or (want == ANY and have == "") or (want != ANY and have != want):
             return False
     return True
 
 
-def missing_env(sub: Subscription, environ: Mapping[str, str] | None) -> list[str]:
+def missing_env(sub: Subscription, env: Mapping[str, str] | None) -> list[str]:
     """The `requires_env` entries a process's environment does not meet, in words."""
-    if environ is None:
+    if env is None:
         return ["the process's environment cannot be read"]
     out = []
     for var, want in sub.requires_env:
-        have = environ.get(var)
+        have = env.get(var)
         if have is None or (want == ANY and have == "") or (want != ANY and have != want):
             out.append(f"{var}={want}" if want != ANY else f"{var} set")
     return out
@@ -496,8 +507,8 @@ class Detached:
 
     def poll(self) -> int | None:
         """None while the process runs, else its exit status. Raises `LookupError` when
-        `moxi.proc` no longer holds it (its code was dropped past `moxi.proc`'s bound,
-        which a reap at every tick never reaches)."""
+        `moxi.proc` holds no code for it: `status` already returned it, or the code was
+        dropped past `moxi.proc`'s bound, which a reap at every tick never reaches."""
         return _proc.status(self.pid)
 
 
@@ -542,7 +553,7 @@ class Timer:
     def __init__(self, *, config_entries: Callable[[], object] | None = None,
                  modules: Callable[[], Iterable[Subscription | Refusal]]
                  | Iterable[Subscription | Refusal] | None = None,
-                 environ: Callable[[int], Mapping[str, str] | None] = proc_environ,
+                 process_env: Callable[[int], Mapping[str, str] | None] = read_process_env,
                  spawn: Callable[[list[str]], subprocess.Popen | Detached] = spawn,
                  log_file: Path | None = None, now: Callable[[], float] = time.time):
         self.config_entries = config_entries or (lambda: [])
@@ -552,7 +563,7 @@ class Timer:
             fixed = list(modules)
             modules = lambda: fixed                               # noqa: E731
         self.modules = modules
-        self.environ = environ
+        self.process_env = process_env
         self.spawn = spawn
         self.log_file = log_path() if log_file is None else Path(log_file)
         self.asks_dir = self.log_file.parent / ASKS_DIR
@@ -560,6 +571,10 @@ class Timer:
         self.loaded = Loaded()
         self._loaded_once = False
         self.tracks: dict[tuple[str, str], Track] = {}
+        #: The environments read, kept by `(session, pid)` while the session is live.
+        self.environs: dict[tuple[str, int], Mapping[str, str]] = {}
+        #: The `(session, pid)` whose read gave None since the last tick ended.
+        self._unread: set[tuple[str, int]] = set()
         self.pending: list[Pending] = []
         self.asked = 0
 
@@ -586,18 +601,55 @@ class Timer:
                  f", {len(self.loaded.refused)} refused" if self.loaded.refused else "")
         return self.loaded
 
+    # -- what it asks ------------------------------------------------------------------------
+
+    def asking(self, session: str, pid: int) -> tuple[str, ...] | None:
+        """The sorted names of the loaded subscriptions this session's process meets
+        `requires_env` for, a subscription without one included; None before the first
+        `reload`. The environment is read only when a loaded subscription has a
+        `requires_env` (the module doc's "What it says it asks")."""
+        if not self._loaded_once:
+            return None
+        subs = self.loaded.subscriptions
+        env = (self._process_env(session, pid) if any(s.requires_env for s in subs)
+                   else None)
+        return tuple(sorted(s.name for s in subs if env_met(s, env)))
+
+    def _process_env(self, session: str, pid: int) -> Mapping[str, str] | None:
+        """The process's environment, kept by `(session, pid)`. A None read is not kept,
+        and is not made twice before the tick ends."""
+        key = (session, pid)
+        if key in self.environs:
+            return self.environs[key]
+        if key in self._unread:
+            return None
+        env = self.process_env(pid)
+        if env is None:
+            self._unread.add(key)
+        else:
+            self.environs[key] = env
+        return env
+
     # -- the tick ---------------------------------------------------------------------------
 
     def tick(self, live: Mapping[str, Mapping] | None, now: float | None = None) -> list[dict]:
         """One tick over the watcher's records of the live sessions (`live`, keyed by
         session id), or None when the watcher could not read the live list. Returns the
         asks it started."""
+        try:
+            return self._tick(live, now)
+        finally:
+            self._unread.clear()
+
+    def _tick(self, live: Mapping[str, Mapping] | None, now: float | None) -> list[dict]:
         now = self.now() if now is None else now
         self.reap(now)
         loaded = self.reload()
         if live is None:
             return []
         self.tracks = {k: v for k, v in self.tracks.items() if k[1] in live}
+        self.environs = {k: v for k, v in self.environs.items()
+                         if k[0] in live and live[k[0]].get("pid") == k[1]}
         started = []
         for session, record in live.items():
             clock = _clock(record)
@@ -607,7 +659,6 @@ class Timer:
                 continue
             last_request, ttl = clock
             rel = now - last_request - ttl
-            environ = None
             for sub in loaded.subscriptions:
                 key = (sub.name, session)
                 track = self.tracks.get(key)
@@ -619,11 +670,8 @@ class Timer:
                 pid = record.get("pid")
                 if not isinstance(pid, int) or isinstance(pid, bool):
                     continue
-                if sub.requires_env:
-                    if environ is None:
-                        environ = self.environ(pid)
-                    if not env_met(sub, environ):
-                        continue
+                if sub.requires_env and not env_met(sub, self._process_env(session, pid)):
+                    continue
                 if track is None:
                     track = self.tracks[key] = Track(last_request)
                 track.asked_at = now
@@ -645,8 +693,8 @@ class Timer:
             self.trim_outputs()
         try:
             proc = self.spawn(argv) if output is None else self.spawn(argv, output=output)
-        except OSError as e:
-            entry["error"] = f"could not start {sub.argv0}: {e.strerror or e}"
+        except OSError as exc:
+            entry["error"] = f"could not start {sub.argv0}: {exc.strerror or exc}"
             if output is not None:
                 _remove(output)  # the start may have made it before it failed
             self._write(entry)
@@ -686,8 +734,8 @@ class Timer:
         except FileNotFoundError:
             entry["output"] = None
             return
-        except OSError as e:
-            log.warning("timer: cannot read %s: %s", path, e)
+        except OSError as exc:
+            log.warning("timer: cannot read %s: %s", path, exc)
             return
         if size == 0:
             if _remove(path):
@@ -699,9 +747,9 @@ class Timer:
                     fh.seek(-ASK_OUTPUT_LIMIT, os.SEEK_END)
                     tail = fh.read()
                 atomic_write(path, tail)
-            except OSError as e:
+            except OSError as exc:
                 log.warning("timer: cannot cut %s to its last %d bytes: %s", path,
-                            ASK_OUTPUT_LIMIT, e)
+                            ASK_OUTPUT_LIMIT, exc)
 
     def trim_outputs(self) -> None:
         """Delete the oldest Windows ask files past the newest `ASK_FILES_KEPT - 1`, so
@@ -732,8 +780,8 @@ class Timer:
     def _write(self, entry: dict) -> None:
         try:
             append_log(self.log_file, entry)
-        except OSError as e:
-            log.warning("timer: cannot write %s: %s", self.log_file, e)
+        except OSError as exc:
+            log.warning("timer: cannot write %s: %s", self.log_file, exc)
 
 
 def _remove(path: Path) -> bool:
@@ -742,15 +790,15 @@ def _remove(path: Path) -> bool:
         os.unlink(path)
     except FileNotFoundError:
         return True
-    except OSError as e:
-        log.info("timer: cannot delete %s yet: %s", path, e)
+    except OSError as exc:
+        log.info("timer: cannot delete %s yet: %s", path, exc)
         return False
     return True
 
 
 # --- what `moxi cache timers` shows -----------------------------------------------------------
 
-def plan(sub: Subscription, record: Mapping, now: float, environ, asks: list[dict]) -> dict:
+def plan(sub: Subscription, record: Mapping, now: float, env, asks: list[dict]) -> dict:
     """When a subscription next asks about one session, from the record, the process's
     environment and the logged asks. A display, as the records are: the watcher's own
     memory decides. `asks` are the log's lines for this subscriber and session."""
@@ -768,9 +816,9 @@ def plan(sub: Subscription, record: Mapping, now: float, environ, asks: list[dic
                 and isinstance(a.get("at"), (int, float))]
     last = max((a["at"] for a in on_clock), default=None)
     out["last_ask"] = last
-    if sub.requires_env and not env_met(sub, environ):
+    if sub.requires_env and not env_met(sub, env):
         out["state"] = "env-not-met"
-        out["missing_env"] = missing_env(sub, environ)
+        out["missing_env"] = missing_env(sub, env)
         return out
     if closes is not None and now >= closes:
         out["state"] = "closed"
@@ -791,7 +839,7 @@ def plan(sub: Subscription, record: Mapping, now: float, environ, asks: list[dic
 
 __all__ = ["GROUP", "ATTRIBUTE", "CONFIG_KEY", "CONFIG", "FIELDS", "LOG_NAME", "LOG_LIMIT",
            "Subscription", "Refusal", "Loaded", "Timer", "Track", "check", "from_config",
-           "from_modules", "combine", "load", "proc_environ", "env_checkable", "env_met",
+           "from_modules", "combine", "load", "read_process_env", "env_checkable", "env_met",
            "missing_env", "Detached", "ASKS_DIR", "ASK_OUTPUT_LIMIT", "ASK_FILES_KEPT",
            "append_log", "read_log", "log_path", "spawn", "due", "plan",
            "resolve_config_argv0", "module_argv0_resolver"]

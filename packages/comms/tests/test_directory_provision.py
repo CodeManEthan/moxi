@@ -45,7 +45,7 @@ def test_provisioning_creates_one_room_without_agent_webhooks():
 
 @pytest.mark.parametrize("room, kind", [("#conference", "conference"),
                                         ("#notices", "notices")])
-def test_a_new_directory_refuses_a_freed_room_row(room, kind):
+def test_a_new_dir_refuses_a_freed_room_row(room, kind):
     """The schema's CHECK names the one room provision makes, for a new file."""
     import sqlite3
 

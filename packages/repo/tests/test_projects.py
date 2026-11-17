@@ -71,16 +71,16 @@ class Projects:
         import moxi.store
 
         self.mp.setattr(moxi.store, "connect",
-                        functools.partial(moxi.store.connect, timeout=0.05))
-        holder = sqlite3.connect(self.store, isolation_level=None)
+                        functools.partial(moxi.store.connect, timeout_s=0.05))
+        holder_conn = sqlite3.connect(self.store, isolation_level=None)
         try:
-            holder.execute("PRAGMA locking_mode = EXCLUSIVE")
-            holder.execute("BEGIN EXCLUSIVE")
-            holder.execute("SELECT count(*) FROM projects").fetchone()
+            holder_conn.execute("PRAGMA locking_mode = EXCLUSIVE")
+            holder_conn.execute("BEGIN EXCLUSIVE")
+            holder_conn.execute("SELECT count(*) FROM projects").fetchone()
             yield
         finally:
-            holder.execute("ROLLBACK")
-            holder.close()
+            holder_conn.execute("ROLLBACK")
+            holder_conn.close()
 
     def error(self, key: str = "alpha"):
         """The error projects' own `get` raises on the store as it stands."""

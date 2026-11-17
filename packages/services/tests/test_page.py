@@ -98,7 +98,7 @@ def a_daemon(name: str = "web", **extra) -> None:
 
 
 def a_timer(name: str = "nightly", **extra) -> None:
-    out = acts.add_written(name, [PY], timer=True, every="1h", **extra)
+    out = acts.add_written(name, [PY], is_timer=True, every="1h", **extra)
     assert out.ok, out
 
 
@@ -135,7 +135,7 @@ def test_rows_carries_the_last_health_result_and_runs_no_check(monkeypatch):
                         lambda argv: ran.append(argv) or ("ok", "fine"))
     assert read("/api/rows")["rows"][0]["checked"] is None
     assert ran == []
-    pagehandlers.gather(health=True)
+    pagehandlers.gather(check_health=True)
     assert ran == [(PY, "-c", "pass")]
     assert read("/api/rows")["rows"][0]["checked"] == {"state": "ok", "line": "fine"}
     assert len(ran) == 1
@@ -571,7 +571,7 @@ def test_add_refuses_fields_out_of_shape_before_any_job(body, says):
 def test_add_adopts_a_unit_with_its_on_or_off(fake):
     from fake_units import Unit
 
-    fake.foreign["backup.service"] = Unit("daemon", True, True)
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     found = ended(accepted(post("/api/add", {"name": "backup", "kind": "daemon",
                                              "unit": "backup.service", "enable": True})))
     assert (found["state"], found["id"]) == ("done", "services/backup"), found
@@ -581,7 +581,7 @@ def test_add_adopts_a_unit_with_its_on_or_off(fake):
 def test_an_adoption_without_its_on_or_off_ends_refused_saying_what_is_read_now(fake):
     from fake_units import Unit
 
-    fake.foreign["backup.service"] = Unit("daemon", True, True)
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     found = ended(accepted(post("/api/add", {"name": "backup", "kind": "daemon",
                                              "unit": "backup.service"})))
     assert (found["state"], found["code"]) == ("refused", 2)

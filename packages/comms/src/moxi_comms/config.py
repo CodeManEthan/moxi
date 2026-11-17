@@ -34,9 +34,9 @@ line of doc and, for a few, the one variable that overrides it for one process:
     port    = 8450                          # on 127.0.0.1, always
 
     [connector]                             # comms' tools in the Claude apps
-    identity     = "claude-app"             # the name they send and receive as
-    wait_default = 45                       # send_and_wait's wait, in seconds
-    wait_max     = 90                       # the longest wait a call may ask for
+    identity       = "claude-app"           # the name they send and receive as
+    wait_default_s = 45                     # send_and_wait's wait, in seconds
+    wait_max_s     = 90                     # the longest wait a call may ask for
 
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
@@ -200,7 +200,7 @@ class McpConfig:
     port: int = _default("mcp.port")
 
 
-#: The longest `[connector] wait_max` may be, in seconds: Cloudflare ends an origin's
+#: The longest `[connector] wait_max_s` may be, in seconds: Cloudflare ends an origin's
 #: answer at 100 s, and a JSON reply sends nothing until the wait is over.
 CONNECTOR_WAIT_CEILING = 99
 
@@ -211,8 +211,8 @@ class ConnectorConfig:
     `send_and_wait` waits. Read by comms' provider when the connector starts it."""
 
     identity: str = _default("connector.identity")
-    wait_default: int = _default("connector.wait_default")
-    wait_max: int = _default("connector.wait_max")
+    wait_default_s: int = _default("connector.wait_default_s")
+    wait_max_s: int = _default("connector.wait_max_s")
 
 
 @dataclass
@@ -257,8 +257,8 @@ def _stamp(path: Path) -> tuple | None:
         st = path.stat()
     except FileNotFoundError:
         return None
-    except OSError as e:
-        return ("error", str(e))
+    except OSError as exc:
+        return ("error", str(exc))
     return (st.st_size, st.st_mtime_ns, st.st_ino)
 
 
@@ -281,11 +281,11 @@ def _check_file(path: Path) -> None:
         error = None
         try:
             refuse_secrets(path, tomllib.loads(path.read_text()))
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
-            error = ConfigError(path, None, f"is not readable TOML ({e})",
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            error = ConfigError(path, None, f"is not readable TOML ({exc})",
                                 "correct the file's TOML syntax")
-        except ConfigError as e:
-            error = e
+        except ConfigError as exc:
+            error = exc
         with _checked_lock:
             _checked[path] = (stamp, error)
     if error is not None:
@@ -298,20 +298,20 @@ def load(env=None) -> CommsConfig:
 
     A one-shot reader (a verb, an adapter at start) calls this. A process that runs all
     day reads through `Config`, which keeps the last good settings."""
-    environ = env if env is not None else os.environ
-    return _read(config_path(environ), environ)
+    config_env = env if env is not None else os.environ
+    return _read(config_path(config_env), config_env)
 
 
-def _read(path: Path, environ) -> CommsConfig:
+def _read(path: Path, env) -> CommsConfig:
     """Read the comms config file `path` with every check: the token refusal, the
     schema's and comms' own."""
     _check_file(path)
     try:
-        settings = _moxi_config.load(MODULE, schema(), env=environ, path=path)
+        settings = _moxi_config.load(MODULE, schema(), env=env, path=path)
     except ConfigError:
         raise
-    except _moxi_config.ConfigError as e:
-        raise ConfigError(e.file, e.key, e.problem, e.fix) from None
+    except _moxi_config.ConfigError as exc:
+        raise ConfigError(exc.file, exc.key, exc.problem, exc.fix) from None
     return _typed(settings, path)
 
 
@@ -324,16 +324,16 @@ def check_text(text: str) -> None:
     Raises `ConfigError`, naming no file."""
     try:
         raw = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise ConfigError(None, None, f"is not readable TOML ({e})",
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(None, None, f"is not readable TOML ({exc})",
                           "correct the file's TOML syntax") from None
     refuse_secrets(None, raw)
     try:
         settings = _moxi_config.check_text(MODULE, schema(), text)
     except ConfigError:
         raise
-    except _moxi_config.ConfigError as e:
-        raise ConfigError(e.file, e.key, e.problem, e.fix) from None
+    except _moxi_config.ConfigError as exc:
+        raise ConfigError(exc.file, exc.key, exc.problem, exc.fix) from None
     _check_rosters(_typed(settings, None))
 
 
@@ -351,10 +351,10 @@ def _check_rosters(typed: CommsConfig) -> None:
     try:
         codex_roster.from_table(typed.codex, _TEXT, check=True)
         opencode_roster.from_table(typed.opencode, _TEXT, check=True)
-    except ConfigError as e:
-        if e.file is not None or e.key is not None:
+    except ConfigError as exc:
+        if exc.file is not None or exc.key is not None:
             raise
-        raise ConfigError(None, None, e.problem.removeprefix(f"{_TEXT}: "),
+        raise ConfigError(None, None, exc.problem.removeprefix(f"{_TEXT}: "),
                           "correct the roster table or row it names") from None
 
 
@@ -487,16 +487,16 @@ def _connector(bad, v, operator: str) -> ConnectorConfig:
     if identity == operator:
         raise bad("connector.identity", f"is {identity!r}, the operator's own name",
                   "name an identity of the tools' own; they never send as the operator")
-    wait_max, wait_default = v["connector.wait_max"], v["connector.wait_default"]
+    wait_max, wait_default = v["connector.wait_max_s"], v["connector.wait_default_s"]
     if not 1 <= wait_max <= CONNECTOR_WAIT_CEILING:
-        raise bad("connector.wait_max", f"is {wait_max}",
+        raise bad("connector.wait_max_s", f"is {wait_max}",
                   f"set it to a whole number of seconds from 1 to "
                   f"{CONNECTOR_WAIT_CEILING}")
     if not 1 <= wait_default <= wait_max:
-        raise bad("connector.wait_default", f"is {wait_default}",
-                  f"set it to a whole number of seconds from 1 to wait_max ({wait_max})")
-    return ConnectorConfig(identity=identity, wait_default=wait_default,
-                           wait_max=wait_max)
+        raise bad("connector.wait_default_s", f"is {wait_default}",
+                  f"set it to a whole number of seconds from 1 to wait_max_s ({wait_max})")
+    return ConnectorConfig(identity=identity, wait_default_s=wait_default,
+                           wait_max_s=wait_max)
 
 
 def _chain(bad, chain) -> tuple:

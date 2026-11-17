@@ -41,16 +41,20 @@ def test_opencode_conversion_keeps_the_description_and_adds_its_keys():
 
 
 @pytest.mark.parametrize("text", ["plain toml = 1\n", "---\ndescription: x\n---\nbody\n"])
-def test_the_header_reads_ok_until_the_file_is_edited(tmp_path, text):
+def test_the_header_reads_ok_and_nothing_else_does(tmp_path, text):
     path = tmp_path / "f"
     path.write_bytes(convert.with_header("/src/a.md", text))
     assert convert.state(path) == "ok"
     assert path.read_text().startswith("---\n# generated" if text.startswith("---") else "#")
-    with open(path, "a", encoding="utf-8") as f:
-        f.write("more\n")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("more\n")
     assert convert.state(path) == "modified"
     path.write_text(text)
+    assert convert.state(path) == "modified"  # no header: made or rewritten by hand
+    path.unlink()
     assert convert.state(path) is None
+    path.mkdir()
+    assert convert.state(path) == "modified"  # can't be read as a file
 
 
 @pytest.mark.parametrize("text, why", [("no frontmatter\n", "has no frontmatter"),
@@ -66,12 +70,12 @@ def test_frontmatter_that_does_not_read_is_refused(tmp_path, text, why):
 # -- the verbs -----------------------------------------------------------------------------
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.skill(folder / "skills", "other")
-    kit.manifest(folder, "# my loadout\n[user]\nskills = [\"other\"]\n")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.skill(loadout_dir / "skills", "other")
+    kit.manifest(loadout_dir, "# my loadout\n[user]\nskills = [\"other\"]\n")
+    return loadout_dir
 
 
 def test_add_writes_the_manifest_then_installs_only_that_item(lo, capsys):

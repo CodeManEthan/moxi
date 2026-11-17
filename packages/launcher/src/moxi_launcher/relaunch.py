@@ -107,13 +107,13 @@ class Result:
 
 
 def arm_self(handoff: str, *, dry_run: bool = False,
-             environ: Mapping[str, str] | None = None, pid: int | None = None,
+             caller_env: Mapping[str, str] | None = None, pid: int | None = None,
              turns: Any | None = None, slots_api: Any | None = None,
              settings: Mapping[str, Any] | None = None,
              conn: sqlite3.Connection | None = None) -> Result:
     """Arm a relaunch of the session this process runs in, with `handoff` as the new
     session's first turn. Raises a refusal with nothing written."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
         found = target.caller(pid=pid, conn=c, turns=turns, slots_api=slots_api)
@@ -132,7 +132,7 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             run_id = store.new_run_id()
             run = store.insert_run(
                 c, kind="relaunch", mode="self", request_id=row.request_id, session_id=sid,
-                actor=first.actor(env), handoff_path=str(path), slot=row.slot,
+                by=first.actor(env), handoff_path=str(path), slot=row.slot,
                 pane_id=row.pane_id, turn_number=number,
                 job=f"slots:{job.job_name('relaunch', run_id)}",
                 gone=lambda j: job.gone(j, slots_api=api), run_id=run_id)
@@ -159,8 +159,8 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
     hint = "write the handoff, then arm the relaunch again"
     try:
         info = path.stat()
-    except OSError as error:
-        raise Refused("handoff", f"the handoff {path} can't be read: {error.strerror or error}",
+    except OSError as exc:
+        raise Refused("handoff", f"the handoff {path} can't be read: {exc.strerror or exc}",
                       hint) from None
     if not stat.S_ISREG(info.st_mode):
         raise Refused("handoff", f"the handoff {path} is not a regular file", hint)
@@ -171,21 +171,21 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                                  f"{HANDOFF_CAP} a relaunch carries",
                       "shorten it to the state of the work and its next step")
     try:
-        with open(path, "rb") as handle:
-            handle.read(1)
-    except OSError as error:
+        with open(path, "rb") as fh:
+            fh.read(1)
+    except OSError as exc:
         raise Refused("handoff", f"the handoff {path} can't be read: "
-                                 f"{error.strerror or error}", hint) from None
+                                 f"{exc.strerror or exc}", hint) from None
     seen = store.seen_at(conn, row.request_id, session_id) if session_id else None
     if seen is not None and info.st_mtime <= store.parse_time(seen).timestamp():
         raise Refused("handoff", f"the handoff {path} was last written before this session "
                                  f"began ({seen}): it is stale",
                       "write this session's handoff, then arm the relaunch again")
     if modules.available("notes"):
-        folder = Path(handoffs.folder_of_row(row, create=False)).resolve()
-        if path.resolve().parent != folder:
+        handoff_dir = Path(handoffs.handoff_dir_of_row(row, create=False)).resolve()
+        if path.resolve().parent != handoff_dir:
             raise Refused("handoff", f"the handoff {path} is not in this launch's handoff "
-                                     f"folder, {folder}",
+                                     f"folder, {handoff_dir}",
                           "write it there (moxi launcher handoff dir prints the folder)")
     return path
 
@@ -196,8 +196,8 @@ def _no_live_agents(session: Any) -> int | None:
     try:
         agents = session.agents()
         facts = session.facts()
-    except Exception as error:
-        raise target.TurnsFailed(error) from error
+    except Exception as exc:
+        raise target.TurnsFailed(exc) from exc
     if not agents.complete:
         raise Refused("subagents", "the session's agent list could not be read whole, so a "
                                    "live subagent can't be ruled out",
@@ -214,7 +214,7 @@ def _no_live_agents(session: Any) -> int | None:
 
 
 def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
-                  environ: Mapping[str, str] | None = None, turns: Any | None = None,
+                  caller_env: Mapping[str, str] | None = None, turns: Any | None = None,
                   slots_api: Any | None = None, comms: Any = LOOK, cache: Any = LOOK,
                   settings: Mapping[str, Any] | None = None,
                   conn: sqlite3.Connection | None = None,
@@ -222,7 +222,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                   sleep: Callable[[float], None] = time.sleep) -> Result:
     """Relaunch the session `which` (a session id or a bound comms name) as one of its
     directors. Raises a refusal with nothing written; a hold now is a result, exit 75."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     if comms is LOOK:
         from . import presets
@@ -265,7 +265,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
             run_id = store.new_run_id()
             run = store.insert_run(
                 c, kind="relaunch", mode="director", request_id=row.request_id,
-                session_id=sid, actor=caller, slot=row.slot, pane_id=row.pane_id,
+                session_id=sid, by=caller, slot=row.slot, pane_id=row.pane_id,
                 turn_number=reading.turn_number,
                 job=f"slots:{job.job_name('relaunch', run_id)}",
                 gone=lambda j: job.gone(j, slots_api=api), run_id=run_id)
@@ -299,10 +299,10 @@ def _session_of(conn: sqlite3.Connection, which: str, comms: Any) -> str:
         return which
     try:
         sid = comms.session_of(which)
-    except Exception as error:  # noqa: BLE001  (comms can't answer: a refusal, not a trace)
-        offline = type(error).__name__ == "DaemonOffline"
+    except Exception as exc:  # noqa: BLE001  (comms can't answer: a refusal, not a trace)
+        offline = type(exc).__name__ == "DaemonOffline"
         raise Refused("comms-offline" if offline else "comms-failed",
-                      f"comms could not say which session {which} is bound to: {error}",
+                      f"comms could not say which session {which} is bound to: {exc}",
                       "start comms' daemon" if offline else "check moxi doctor",
                       exits.TEMPFAIL if offline else exits.ERROR) from None
     if not sid:
@@ -467,7 +467,7 @@ def _refuse_live(row: store.LaunchRow, session_id: str, turns: Any) -> None:
 
 
 def from_record(run_id: str, *, follow: bool = True,
-                environ: Mapping[str, str] | None = None, slots_api: Any | None = None,
+                caller_env: Mapping[str, str] | None = None, slots_api: Any | None = None,
                 turns: Any = LOOK, settings: Mapping[str, Any] | None = None,
                 conn: sqlite3.Connection | None = None,
                 clock: Callable[[], float] = time.monotonic,
@@ -475,12 +475,12 @@ def from_record(run_id: str, *, follow: bool = True,
     """Launch the session of a run that exited it and did not relaunch it, again, from
     the run's record, as the job `repair-<run>`. Raises a refusal with nothing written.
 
-    A run still open whose job is gone is judged as ended `error`, word `job-gone`, the
+    A run still open whose job is gone is judged as ended `exc`, word `job-gone`, the
     end the repair's own insert writes for it. A run's session that is live after all (a
     refused exit, or a watch that broke while the session ran) is refused `live`, and one
     whose liveness can't be read `liveness-unread`: a repair never starts a second copy
     of the seat. `turns` stands in for turns' API (None: not installed)."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
         run = store.get_run(c, run_id)
@@ -522,12 +522,12 @@ def from_record(run_id: str, *, follow: bool = True,
         recorded = root.slot or row.slot
         try:
             choice = job.choose_slot(api, recorded, root.run_id, chain)
-        except api.TryAgain as error:
+        except api.TryAgain as exc:
             raise Refused("slots-busy", f"slots did not answer about slot {recorded}: "
-                                        f"{error}", "try again in a moment",
+                                        f"{exc}", "try again in a moment",
                           exits.TEMPFAIL) from None
-        except api.SlotsError as error:
-            raise Refused("slots-failed", f"slots could not show slot {recorded}: {error}",
+        except api.SlotsError as exc:
+            raise Refused("slots-failed", f"slots could not show slot {recorded}: {exc}",
                           "moxi slots list shows the slots", exits.ERROR) from None
         if choice.chain:
             raise Refused("occupied-by-chain", f"{choice.why}: the seat already runs there",
@@ -535,7 +535,7 @@ def from_record(run_id: str, *, follow: bool = True,
         repair_id = store.new_run_id()
         repair = store.insert_run(
             c, kind="relaunch", mode="repair", request_id=run.request_id,
-            session_id=run.session_id, actor=first.actor(env),
+            session_id=run.session_id, by=first.actor(env),
             handoff_path=root.handoff_path, slot=recorded, pane_id=root.pane_id,
             repair_of=run.run_id, job=f"slots:{job.job_name('repair', repair_id)}",
             gone=lambda j: job.gone(j, slots_api=api), run_id=repair_id)
@@ -576,8 +576,8 @@ def offered(found: target.Target, slots_api: Any | None = None) -> Any:
                       "resume it instead")
     try:
         offers = "exit" in found.session.capabilities
-    except Exception as error:
-        raise target.TurnsFailed(error) from error
+    except Exception as exc:
+        raise target.TurnsFailed(exc) from exc
     if not offers:
         raise Refused("no-exit", f"the {row.harness} session does not offer exit through "
                                  "turns", "relaunch needs a harness turns can exit")
@@ -608,10 +608,10 @@ def start_job(conn: sqlite3.Connection, run: store.Run, kind: str, api: Any,
         cwd = Layout(store.MODULE).state_dir(env)
         started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),
                               cwd=str(cwd))
-    except FileNotFoundError as error:
-        why = str(error)
-    except api.SlotsError as error:
-        why = f"slots did not start it: {str(error) or type(error).__name__}"
+    except FileNotFoundError as exc:
+        why = str(exc)
+    except api.SlotsError as exc:
+        why = f"slots did not start it: {str(exc) or type(exc).__name__}"
     else:
         if started.exec in ("started", "unconfirmed"):
             return None
@@ -631,15 +631,15 @@ def _store(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
         yield conn
         return
     try:
-        opened = store.connect(create=False)
+        store_conn = store.connect(create=False)
     except core_store.StoreTooNew:
         raise
     except core_store.StoreError:
         raise target.NotLaunched() from None
     try:
-        yield opened
+        yield store_conn
     finally:
-        opened.close()
+        store_conn.close()
 
 
 def _settings() -> Mapping[str, Any]:

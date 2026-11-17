@@ -81,7 +81,7 @@ def test_without_projects_project_is_skipped_naming_the_install(tree, monkeypatc
     assert "moxi install projects" in dict(one.skipped)["project"]
 
 
-def test_project_is_the_project_whose_notes_folder_holds_the_file(tree):
+def test_project_is_the_project_whose_notes_dir_holds_the_file(tree):
     add_project("alpha", home() / "code" / "alpha", "--notes-root", str(root() / "alpha"))
     add_project("beta", home() / "code" / "beta",
                 "--notes-root", str(root() / "alpha" / "plans"))
@@ -92,11 +92,11 @@ def test_project_is_the_project_whose_notes_folder_holds_the_file(tree):
     assert dict(journal.skipped)["project"] == "in no project's notes folder"
 
 
-def test_two_projects_on_one_folder_skip_it():
-    folders = [("/n/alpha", "alpha"), ("/n/alpha", "beta"), ("/n", "gamma")]
-    assert backfill.infer_project("/n/alpha/x.md", folders)[0] is None
-    assert "2 projects" in backfill.infer_project("/n/alpha/x.md", folders)[1]
-    assert backfill.infer_project("/n/y.md", folders) == ("gamma", "")
+def test_two_projects_on_one_dir_skip_it():
+    project_dirs = [("/n/alpha", "alpha"), ("/n/alpha", "beta"), ("/n", "gamma")]
+    assert backfill.infer_project("/n/alpha/x.md", project_dirs)[0] is None
+    assert "2 projects" in backfill.infer_project("/n/alpha/x.md", project_dirs)[1]
+    assert backfill.infer_project("/n/y.md", project_dirs) == ("gamma", "")
 
 
 def test_a_header_it_can_not_read_and_a_tie_are_refused(tree):
@@ -181,7 +181,7 @@ def test_apply_never_writes_through_a_symlink(tree, tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
-def test_apply_never_writes_outside_the_root_through_a_linked_folder(tree, tmp_path):
+def test_apply_never_writes_outside_the_root_through_a_linked_dir(tree, tmp_path):
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (outside / "one.md").write_text("# outside\n")

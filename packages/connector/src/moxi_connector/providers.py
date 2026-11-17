@@ -80,10 +80,10 @@ def load() -> list[Loaded]:
             continue
         try:
             value = _import(ext.target)
-        except Exception as e:  # noqa: BLE001 - a broken provider is a row, not a crash
+        except Exception as exc:  # noqa: BLE001 - a broken provider is a row, not a crash
             log.exception("the provider %s couldn't be imported", ext.name)
             out.append(Loaded(ext.name, ext.distribution, None, "refused",
-                              f"{ext.target} couldn't be imported: {type(e).__name__}"))
+                              f"{ext.target} couldn't be imported: {type(exc).__name__}"))
             continue
         if not isinstance(value, Provider):
             out.append(Loaded(ext.name, ext.distribution, None, "refused",
@@ -118,8 +118,8 @@ class Registry:
             except TimeoutError:
                 entry.state, entry.why = "failed", f"its start took longer than {wait:g} s"
                 log.error("the provider %s didn't start within %g s", entry.module, wait)
-            except Exception as e:  # noqa: BLE001 - a provider's fault stays its own
-                entry.state, entry.why = "failed", f"its start failed: {type(e).__name__}"
+            except Exception as exc:  # noqa: BLE001 - a provider's fault stays its own
+                entry.state, entry.why = "failed", f"its start failed: {type(exc).__name__}"
                 log.exception("the provider %s failed to start", entry.module)
             else:
                 entry.state = "started"
@@ -185,9 +185,9 @@ class Registry:
                     row = StatusRow(*row)
                     level = row.level if row.level in LEVELS else "fail"
                     rows.append(StatusRow(f"{entry.module} {row.name}", level, str(row.text)))
-            except Exception as e:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 rows.append(StatusRow(entry.module, "fail",
-                                      f"its status failed: {type(e).__name__}"))
+                                      f"its status failed: {type(exc).__name__}"))
         return rows
 
 

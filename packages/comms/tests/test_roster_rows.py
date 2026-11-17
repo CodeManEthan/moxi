@@ -2,8 +2,9 @@
 which prints it.
 
 The join runs over stubs of `roster`, `session` and `owner` first, which hold the rules
-(one row per address, the merge, the sort, what an offline daemon and an error each
-end), then once over a rig daemon, and the verb's JSON is held to the read's rows.
+(one row per address, the merge, the sort, each live row's cache fact, the roster handed
+back, what an offline daemon and an error each end), then over a rig daemon, and the
+verb's JSON is held to the read's rows.
 """
 
 from __future__ import annotations
@@ -11,13 +12,15 @@ from __future__ import annotations
 import dataclasses
 import io
 import json
+import math
+import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import wait_until
+from conftest import cache_absent, wait_until
 
 from moxi import exit as moxi_exit
-from moxi_comms import api, cli
+from moxi_comms import api, cache, cli
 from moxi_comms.client import VersionMismatch
 
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
@@ -44,8 +47,10 @@ class Daemon:
     """`roster`, `session` and `owner` as stubs: what each answers, what each raises, and
     every call made, with its deadline."""
 
-    def __init__(self, bound=(), standing=(), sessions=None, owners=None, fail=None):
+    def __init__(self, bound=(), standing=(), sessions=None, owners=None, fail=None,
+                 waiting=()):
         self.bound, self.standing = tuple(bound), tuple(standing)
+        self.waiting = tuple(waiting)
         self.sessions = sessions or {}
         self.owners = owners or {}
         self.fail = fail or {}
@@ -56,16 +61,17 @@ class Daemon:
         if key in self.fail:
             raise self.fail[key]
 
-    def roster(self, *, deadline):
-        self._called("roster", deadline)
-        return api.Roster(bound=self.bound, standing=self.standing)
+    def roster(self, *, timeout_s):
+        self._called("roster", timeout_s)
+        return api.Roster(bound=self.bound, standing=self.standing, waiting=self.waiting)
 
-    def session(self, identity, *, deadline):
-        self._called(("session", identity), deadline)
-        return self.sessions.get(identity, {"bound": False})
+    def session(self, identity, *, timeout_s):
+        self._called(("session", identity), timeout_s)
+        answer = self.sessions.get(identity, {"bound": False})
+        return answer() if callable(answer) else answer
 
-    def owner(self, session_id, *, deadline):
-        self._called(("owner", session_id), deadline)
+    def owner(self, session_id, *, timeout_s):
+        self._called(("owner", session_id), timeout_s)
         return api.Owner(session_id=session_id, identity=None,
                          awaiting=tuple(self.owners.get(session_id, ())))
 
@@ -111,7 +117,7 @@ def test_one_row_per_address_live_first_then_by_name(monkeypatch):
 
 def test_the_deadline_reaches_every_call(monkeypatch):
     daemon = two_live().install(monkeypatch)
-    api.roster_rows(deadline=2)
+    api.roster_rows(timeout_s=2)
     assert len(daemon.calls) == 5 and {d for _, d in daemon.calls} == {2}
     daemon.calls.clear()
     api.roster_rows()
@@ -158,6 +164,95 @@ def test_no_names_is_no_rows(monkeypatch):
     assert api.roster_rows() == ()
 
 
+# --------------------------------------------------------------------------- the roster
+
+def test_with_roster_hands_back_the_roster_from_the_one_agents_call(monkeypatch):
+    waiting = (api.Waiting(PLAN, 2, 100.0), api.Waiting("curator@proj-a", 1, 50.0))
+    daemon = two_live(waiting=waiting).install(monkeypatch)
+    rows, found = api.roster_rows(with_roster=True)
+    assert [call for call, _ in daemon.calls].count("roster") == 1
+    assert found.waiting == waiting and [a.qualified for a in found.bound] == [PLAN, LEAD]
+    assert rows == api.roster_rows()
+
+
+# --------------------------------------------------------------------------- the cache fact
+
+TTL = 300.0
+
+
+def read_as(kind, *, age=None, ttl=TTL, turned_at=None):
+    """A bound `session()` answer whose cache reads `kind`. With `turned_at`, `age_s` is
+    worked out at each call from the real clock, as the daemon's read is."""
+    def answer():
+        return {**held(SID_LEAD), "cache_kind": kind, "cache_ttl": ttl,
+                "age_s": age if turned_at is None else time.time() - turned_at}
+    return answer
+
+
+def turned_at():
+    # A whole second plus a quarter, so `turned_at + TTL` lies a quarter second from the
+    # nearest rounding boundary and a read's latency can't move it across.
+    return math.floor(time.time()) - 40 + 0.25
+
+
+def lead_row(monkeypatch, answer):
+    Daemon(bound=[agent(LEAD)], sessions={LEAD: answer}).install(monkeypatch)
+    (row,) = api.roster_rows()
+    return row
+
+
+@pytest.mark.parametrize("kind", [cache.WARM, cache.COLD])
+def test_a_warm_or_cold_read_gives_until_in_whole_seconds(monkeypatch, kind):
+    at = turned_at()
+    row = lead_row(monkeypatch, read_as(kind, turned_at=at))
+    assert row.cache == api.CacheFact(kind=kind, until=float(round(at + TTL)))
+    assert isinstance(row.cache.until, float) and row.cache.until.is_integer()
+
+
+def test_a_cold_read_gives_the_time_it_went_cold(monkeypatch):
+    at = turned_at() - 2 * TTL
+    row = lead_row(monkeypatch, read_as(cache.COLD, turned_at=at))
+    assert row.cache.kind == cache.COLD and row.cache.until < time.time()
+    assert row.cache.until == float(round(at + TTL))
+
+
+def test_two_reads_a_second_apart_give_the_same_until(monkeypatch):
+    at = turned_at()
+    first = lead_row(monkeypatch, read_as(cache.WARM, turned_at=at)).cache
+    time.sleep(1.0)
+    assert lead_row(monkeypatch, read_as(cache.WARM, turned_at=at)).cache == first
+
+
+@pytest.mark.parametrize("answer", [
+    read_as(cache.FRESH, age=0.0), read_as(cache.UNKNOWN, age=None, ttl=None),
+    read_as(cache.NO_CACHE, age=None, ttl=None), read_as(cache.WARM, age=None),
+    read_as(cache.WARM, age=10.0, ttl=None), read_as(cache.COLD, age=10.0, ttl=None),
+    read_as(cache.WARM, age=True), read_as(cache.WARM, age="10"),
+    read_as(cache.WARM, age=float("nan")), read_as(cache.WARM, age=10.0, ttl=float("inf")),
+    read_as(cache.WARM, age=10 ** 400), read_as("hot", age=10.0),
+    lambda: {**held(SID_LEAD)},
+], ids=["fresh", "unknown", "no-cache", "no-age", "warm-no-lifetime", "cold-no-lifetime",
+        "bool-age", "string-age", "nan-age", "infinite-lifetime", "overflowing-age",
+        "another-kind", "no-read"])
+def test_any_other_read_gives_no_cache_fact(monkeypatch, answer):
+    row = lead_row(monkeypatch, answer)
+    assert row.live and row.session_id == SID_LEAD and row.cache is None
+
+
+def test_a_standing_row_and_an_unbound_answer_have_no_cache_fact(monkeypatch):
+    Daemon(bound=[agent(LEAD)], standing=[standing("herald")],
+           sessions={LEAD: {"bound": False, "cache_kind": "warm", "age_s": 1.0,
+                            "cache_ttl": TTL}}).install(monkeypatch)
+    lead, herald = api.roster_rows()
+    assert lead.cache is None and herald.cache is None
+
+
+def test_a_name_with_no_session_id_keeps_its_cache_fact(monkeypatch):
+    answer = {**read_as(cache.WARM, age=10.0)(), "session_id": None}
+    row = lead_row(monkeypatch, answer)
+    assert row.session_id is None and row.cache is not None
+
+
 # --------------------------------------------------------------------------- failures
 
 # PLAN is the first name read, so a call that followed the failure would show here.
@@ -178,11 +273,17 @@ def test_an_error_on_the_roster_raises(monkeypatch):
 
 @pytest.mark.parametrize("step", [("session", LEAD), ("owner", SID_LEAD)])
 def test_an_error_on_one_name_empties_only_that_rows_session_fields(monkeypatch, step):
-    two_live(fail={step: api.DaemonError("no")}).install(monkeypatch)
+    daemon = two_live(fail={step: api.DaemonError("no")})
+    warm = read_as(cache.WARM, age=10.0)
+    daemon.sessions = {LEAD: {**warm(), "session_id": SID_LEAD},
+                       PLAN: {**warm(), "session_id": SID_PLAN, "bound_at": 2000.0}}
+    daemon.install(monkeypatch)
     lead, plan = api.roster_rows()
     assert (lead.live, lead.adapter, lead.directors) == (True, "claude-shim", ("boss",))
-    assert (lead.session_id, lead.bound_at, lead.awaiting) == (None, None, ())
+    assert (lead.session_id, lead.bound_at, lead.awaiting, lead.cache) == (
+        None, None, (), None)
     assert (plan.session_id, plan.bound_at) == (SID_PLAN, 2000.0)
+    assert plan.cache is not None
 
 
 # --------------------------------------------------------------------------- over a rig
@@ -204,6 +305,34 @@ def test_the_rows_over_a_rig_daemon(rig):
     assert rows["herald"].kind == "agent" and rows["herald"].session_id is None
 
 
+def reads_warm(monkeypatch, age_s, ttl_s):
+    """The daemon's cache read answering `warm` at `age_s` with lifetime `ttl_s`."""
+    monkeypatch.setattr(cache, "clock_state",
+                        lambda adapter, session_id, **kw: cache.Clock(
+                            cache.WARM, age_s=age_s, ttl_s=ttl_s))
+
+
+def test_the_cache_fact_over_a_rig_daemon(rig, monkeypatch):
+    reads_warm(monkeypatch, 20.0, TTL)
+    rig.shim(**REVIEWER)
+    assert wait_until(lambda: R in rig.daemon.bindings)
+    before = time.time()
+    (row,) = [row for row in api.roster_rows() if row.live]
+    assert row.cache.kind == cache.WARM and row.cache.until.is_integer()
+    assert before - 20.0 + TTL - 1 <= row.cache.until <= time.time() - 20.0 + TTL + 1
+
+
+def test_with_cache_absent_every_row_has_no_cache_fact(rig, monkeypatch):
+    cache_absent(monkeypatch)
+    rig.shim(**REVIEWER)
+    rig.shim(**PLANNER)
+    assert wait_until(lambda: {P, R} <= set(rig.daemon.bindings))
+    rows = api.roster_rows()
+    assert [row.qualified for row in rows if row.live] == [P, R]
+    assert all(row.cache is None for row in rows)
+    assert api.session(R)["cache_kind"] == cache.NO_CACHE
+
+
 # --------------------------------------------------------------------------- the verb
 
 def agents_json(**kw):
@@ -222,22 +351,30 @@ def test_agents_json_prints_the_reads_rows(rig):
     assert got == {"ok": True, "rows": json.loads(json.dumps(want))}
     assert got["rows"][0]["qualified"] == R and list(got["rows"][0]) == list(
         api.RosterRow.__dataclass_fields__)
+    assert "cache" in got["rows"][0]
 
 
 def test_agents_json_prints_exactly_what_roster_rows_returns(monkeypatch):
     rows = (api.RosterRow(qualified=LEAD, name="lead", scope="proj-a", live=True,
                           kind=None, module=None, tier="chosen", adapter="codex",
                           directors=("boss",), session_id=SID_LEAD, bound_at=12.5,
-                          awaiting=(PLAN,)),)
+                          awaiting=(PLAN,),
+                          cache=api.CacheFact(kind="warm", until=1300.0)),
+            api.RosterRow(qualified="herald", name="herald", scope="global", live=False,
+                          kind="agent", module=None, tier=None, adapter=None))
     asked = []
     monkeypatch.setattr(api, "roster_rows", lambda **kw: asked.append(kw) or rows)
     assert agents_json() == (moxi_exit.OK, {"ok": True, "rows": [{
         "qualified": LEAD, "name": "lead", "scope": "proj-a", "live": True, "kind": None,
         "module": None, "tier": "chosen", "adapter": "codex", "directors": ["boss"],
-        "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN]}]})
-    assert asked == [{"deadline": api.READ_DEADLINE}]
+        "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN],
+        "cache": {"kind": "warm", "until": 1300.0}}, {
+        "qualified": "herald", "name": "herald", "scope": "global", "live": False,
+        "kind": "agent", "module": None, "tier": None, "adapter": None, "directors": [],
+        "session_id": None, "bound_at": None, "awaiting": [], "cache": None}]})
+    assert asked == [{"timeout_s": api.READ_DEADLINE}]
     agents_json(deadline=3)
-    assert asked[-1] == {"deadline": 3}
+    assert asked[-1] == {"timeout_s": 3}
 
 
 @pytest.mark.parametrize(("error", "code", "word"), [

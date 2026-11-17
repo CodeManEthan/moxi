@@ -96,7 +96,7 @@ SCREEN_MISMATCH = "screen-mismatch"
 
 #: The setting that turns each screen on, by the name slots declares it under.
 SCREENS = {
-    "claude": (("startup.trust_dialog", "CLAUDE_TRUST_FOLDER"),
+    "claude": (("startup.trust_dialog", "CLAUDE_TRUST_DIR"),
                ("startup.dev_channels_dialog", "CLAUDE_DEV_CHANNELS")),
 }
 
@@ -172,8 +172,8 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             return done("bound")
         try:
             seen = api.read_screen(slot, screens=shown)
-        except failures as error:  # slots unreadable: the ready wait decides
-            return _stopped(conn, request_id, error, done)
+        except failures as exc:  # slots unreadable: the ready wait decides
+            return _stopped(conn, request_id, exc, done)
         if seen.dead:
             return done("failed", reason=EXITED, why=_exited(api, slot))
         name, screen = _named(seen.screen, enabled)
@@ -187,9 +187,9 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             # is read from the clock again after it. A watch can so run up to 5 s past
             # `startup.wait_s`, which is accepted.
             try:
-                answer = api.answer_screen(slot, screen, wait=wait)
-            except failures as error:
-                return _stopped(conn, request_id, error, done)
+                answer = api.answer_screen(slot, screen, wait_s=wait)
+            except failures as exc:
+                return _stopped(conn, request_id, exc, done)
             outcome, why = answer.outcome, answer.why or ""
             capture = str(answer.capture) if answer.capture else None
             unsettled = outcome == MISMATCH and _not_settled(why)
@@ -211,8 +211,8 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
                 # A failure only if the screen is still showing: read once more.
                 try:
                     again = api.read_screen(slot, screens=shown)
-                except failures as error:
-                    return _stopped(conn, request_id, error, done)
+                except failures as exc:
+                    return _stopped(conn, request_id, exc, done)
                 if again.dead:
                     return done("failed", reason=EXITED, why=_exited(api, slot))
                 if _named(again.screen, enabled)[0] == name:
@@ -307,8 +307,8 @@ def setup(*, ask: Callable[[str], bool] | None = None, out: TextIO | None = None
 
     try:
         current = settings.current()
-    except config.ConfigError as error:
-        print(f"moxi launcher: the startup questions were not asked: {error}", file=out)
+    except config.ConfigError as exc:
+        print(f"moxi launcher: the startup questions were not asked: {exc}", file=out)
         return 1
     if ask is None and sys.stdin is not None and sys.stdin.isatty():
         ask = _ask
@@ -322,9 +322,9 @@ def setup(*, ask: Callable[[str], bool] | None = None, out: TextIO | None = None
             continue
         answer = bool(ask(f"launcher: {question} [y/N] "))
         try:
-            config.set(MODULE, key, answer, by="moxi install")
-        except config.ConfigError as error:
-            print(f"moxi launcher: {key} was not set: {error}", file=out)
+            config.set_value(MODULE, key, answer, by="moxi install")
+        except config.ConfigError as exc:
+            print(f"moxi launcher: {key} was not set: {exc}", file=out)
             return 1
         if not answer:
             print(f"    left off; turn it on later with: {turn_on}", file=out)

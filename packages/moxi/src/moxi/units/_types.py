@@ -231,7 +231,7 @@ class DeclarationError(Exception):
 
 @dataclass(frozen=True)
 class Stopped:
-    """One backend unit that `stop(..., record=...)` stopped, so `resume` can start it
+    """One backend unit that `stop(..., stopped=...)` stopped, so `resume` can start it
     again. `unit` is the backend's exact id; `marked` whether it carried the module's mark.
     `token` is issued by `stop` in this process; `resume` acts only on an entry whose
     token is still outstanding."""

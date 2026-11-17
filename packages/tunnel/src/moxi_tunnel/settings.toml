@@ -6,33 +6,45 @@ type = "path"
 default = ""
 doc = "The tailscale CLI to run. Empty looks on PATH, then in the platform's usual place."
 read = "use"
+label = "Tailscale CLI"
+line = "Not set: found on PATH, then in the platform's usual place."
 
 [cloudflare.enabled]
 type = "bool"
 default = false
 doc = "The cloudflared daemon's switch. Tunnel sets it: on exactly while a Cloudflare target is recorded."
 read = "use"
+label = "The cloudflared daemon"
+line = "Tunnel sets it: on exactly while a Cloudflare target is recorded."
+terminal = { on = "moxi tunnel add <target> --provider cloudflare", off = "moxi tunnel remove <target>" }
 
 [cloudflare.tunnel_id]
 type = "string"
 default = ""
 doc = "The id (a UUID) of the Cloudflare named tunnel you created for this box."
 read = "use"
+label = "Cloudflare tunnel id"
+line = "The id, a UUID, of the named tunnel you created for this box."
 
 [cloudflare.credentials]
 type = "path"
 default = ""
 doc = "The tunnel's credentials JSON. Tunnel passes its path to cloudflared and never reads or copies it."
 read = "use"
+label = "Cloudflare credentials"
+line = "The tunnel's credentials JSON. Tunnel hands cloudflared its path and never reads or copies it."
 
 [cloudflare.metrics_port]
 type = "int"
 default = 20241
 doc = "The loopback port cloudflared serves its metrics and /ready check on."
 read = "use"
+label = "Cloudflare metrics port"
 
 [cloudflare.binary]
 type = "path"
 default = ""
 doc = "The cloudflared binary to run. Empty looks on PATH."
 read = "use"
+label = "cloudflared binary"
+line = "Not set: found on PATH."

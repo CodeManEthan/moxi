@@ -13,7 +13,7 @@ from pathlib import Path
 import moxi.paths
 import moxi.proc
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import timed_slack, wait_for
 from moxi_turns import SessionEvent
 
 from moxi_notes import listener, listeners
@@ -81,12 +81,12 @@ def test_the_processs_own_override_is_not_the_sessions(alpha, monkeypatch):
     assert listener.start(event) == expected(alpha)
 
 
-def test_no_notes_directory_gives_no_line():
+def test_no_notes_dir_gives_no_line():
     event = begin({"PWD": str(home())}, source="startup")
     assert listener.start(event) is None
 
 
-def test_the_folder_is_the_events_cwd_then_pwd_then_the_process(alpha, monkeypatch):
+def test_the_dir_is_the_events_cwd_then_pwd_then_the_process(alpha, monkeypatch):
     beta = repo(home() / "code" / "beta")
     beta_line = f"Notes directory: {home() / 'notes' / 'code' / 'beta'}"
     assert listener.start(begin({"PWD": str(beta)}, cwd=str(alpha))) == expected(alpha)
@@ -119,7 +119,7 @@ print(json.dumps([time.perf_counter() - t0, line]))
 
 @pytest.mark.timed
 def test_the_start_line_costs_under_its_budget_at_the_95th_percentile(alpha):
-    budget = {"win32": 0.150}.get(sys.platform, 0.050)
+    budget = {"win32": 0.150}.get(sys.platform, 0.050) * timed_slack()
     costs = []
     for _ in range(20):
         done = subprocess.run([sys.executable, "-c", START_COST, str(alpha)],
@@ -192,7 +192,7 @@ def test_nothing_fires_with_auto_off_or_without_a_git_repo(spawned):
     listener.fire(gone())
     assert spawned == []
     repo(root)
-    configure(snapshot__auto=False)
+    configure(snapshot__session_end=False)
     listener.fire(gone())
     listener.fire(turn())
     assert spawned == []

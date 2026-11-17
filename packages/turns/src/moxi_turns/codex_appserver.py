@@ -173,21 +173,21 @@ class CodexLimits:
     via: str
 
 
-def codex_rate_limits(*, timeout: float = PULL_S) -> CodexLimits | None:
+def codex_rate_limits(*, timeout_s: float = PULL_S) -> CodexLimits | None:
     """The account's Codex rate limits now, or None, with the reason logged.
 
     First a live Codex host that offers `usage`, newest first: its `usage.codex_limits`
     reads them on the host's own app-server. Else, when `codex` is on `PATH`, an
     app-server of its own on a private socket: `initialize`, `account/rateLimits/read`,
     and it is stopped again. Neither starts a thread, so no message is sent. A host that
-    errs or does not answer passes to the next way while time is left; past `timeout`
+    errs or does not answer passes to the next way while time is left; past `timeout_s`
     seconds, None."""
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout_s
     reading = _from_hosts(deadline)
     if reading is not None:
         return reading
     if time.monotonic() >= deadline:
-        log.info("no Codex rate limits within %g s", timeout)
+        log.info("no Codex rate limits within %g s", timeout_s)
         return None
     binary = shutil.which(BINARY)
     if binary is None:
@@ -218,7 +218,7 @@ def _from_hosts(deadline: float) -> CodexLimits | None:
             if remaining <= 0:
                 return None
             try:
-                answer = session.codex_limits(timeout=remaining)
+                answer = session.codex_limits(timeout_s=remaining)
             except Exception as exc:  # noqa: BLE001 - the next way is tried
                 log.info("the Codex host pid %s did not read the rate limits: %s",
                          session.pid, exc)
@@ -247,8 +247,8 @@ def _from_app_server(binary: str, deadline: float) -> CodexLimits:
             raise TimeoutError("the time ran out")
         return remaining
 
-    folder = Path(tempfile.mkdtemp(prefix="moxi-turns-limits-"))
-    server = AppServer(folder / "app.sock", binary=binary)
+    server_dir = Path(tempfile.mkdtemp(prefix="moxi-turns-limits-"))
+    server = AppServer(server_dir / "app.sock", binary=binary)
     ws = None
     try:
         server.start()
@@ -266,7 +266,7 @@ def _from_app_server(binary: str, deadline: float) -> CodexLimits:
         if ws is not None:
             ws.close()
         server.stop()
-        shutil.rmtree(folder, ignore_errors=True)
+        shutil.rmtree(server_dir, ignore_errors=True)
 
 
 __all__ = ["AppServer", "AppServerBusy", "BINARY", "CodexLimits", "LIMITS_READ",

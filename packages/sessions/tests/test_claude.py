@@ -39,8 +39,8 @@ LINES = [
 
 
 def _stream(path: Path, **kw) -> list[dict]:
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        return list(claude.stream_entries(handle, **kw))
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        return list(claude.stream_entries(fh, **kw))
 
 
 # --- parse_line and parse_timestamp ---------------------------------------------------
@@ -227,7 +227,7 @@ def test_search_roots_orders_live_archives_extra_and_drops_repeats(tmp_path):
 
 # --- the projects root ----------------------------------------------------------------
 
-def test_the_root_follows_claude_config_dir_in_the_environment_handed():
+def test_the_root_follows_claude_config_dir_in_the_env_handed():
     assert projects_root({"CLAUDE_CONFIG_DIR": "/cfg", "HOME": "/h"}) == Path("/cfg/projects")
 
 
@@ -242,7 +242,7 @@ def test_a_tilde_takes_the_handed_environments_home():
     assert projects_root({"HOME": "/s", "CLAUDE_CONFIG_DIR": "~/alt"}) == Path("/s/alt/projects")
 
 
-def test_the_root_ignores_this_processs_environment_when_handed_one(monkeypatch):
+def test_the_root_ignores_this_processs_env_when_handed_one(monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/mine")
     assert projects_root({"HOME": "/h"}) == Path("/h/.claude/projects")
 
@@ -274,3 +274,26 @@ def test_the_config_key_expands_a_tilde_and_refuses_a_relative_path(own_config,
     with pytest.raises(ConfigError):
         projects_root(None)
 
+
+
+def test_a_lines_bytes_tell_whether_it_can_hold_a_typed_message():
+    def line(**fields) -> bytes:
+        return json.dumps({"type": "user", "message": {"role": "user", "content": "hi"},
+                           **fields}).encode()
+
+    assert claude.may_be_typed(line(origin={"kind": "human"}))
+    assert claude.may_be_typed(b'{"origin" : {"kind" :"human"}}')
+    assert not claude.may_be_typed(line())
+    assert not claude.may_be_typed(line(origin={"kind": "task-notification"}))
+    # A message that only quotes the words has them escaped, so it is passed by.
+    assert not claude.may_be_typed(
+        line(message={"role": "user", "content": '{"origin": {"kind": "human"}}'}))
+    # The same key or kind written with an escape, or in UTF-16, is left to the decode;
+    # an escape of some other character is not.
+    assert claude.may_be_typed(b'{"\\u006frigin": {"kind": "human"}}')
+    assert claude.may_be_typed(b'{"origin": {"kind": "hu\\u006Dan"}}')
+    assert claude.may_be_typed(line(origin={"kind": "human"}).decode().encode("utf-16-le"))
+    assert not claude.may_be_typed(line(message={"role": "user", "content": "\x1b[0m \u2603"}))
+    # Every kind the reader takes as typed is one the bytes are looked for.
+    assert [json.loads(kind) for kind in claude.TYPED_KINDS] == [
+        kind for kind, injected in claude.ORIGIN_KINDS.items() if injected is False]

@@ -9,8 +9,11 @@ public .gitattributes
 public .github
 public .gitignore
 public .nvmrc
+public .refs-allow
+public CONTRIBUTING.md
 public LICENSE
 public README.md
+public SECURITY.md
 public package-lock.json
 public package.json
 public packages

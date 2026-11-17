@@ -23,9 +23,9 @@ def record(*, kind="warm", age=60.0, ttl=3600, seen_ago=0.0, session=SID, **extr
 
 
 def put(rec: dict) -> None:
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{rec['session']}.json").write_text(json.dumps(rec))
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / f"{rec['session']}.json").write_text(json.dumps(rec))
 
 
 def seg(rec, *, now=NOW):
@@ -37,7 +37,7 @@ def seg(rec, *, now=NOW):
 def test_a_record_holds_every_field_in_order():
     assert records.FIELDS == ("v", "session", "harness", "pid", "kind", "last_request",
                               "ttl", "read_at", "seen_at", "code", "warn_before",
-                              "stale_after")
+                              "stale_after", "asks")
     assert records.valid(record())
     assert records.valid(record(kind="fresh", age=None, ttl=None))
     assert records.thresholds(record()) == (900, 30)
@@ -73,7 +73,7 @@ def test_a_record_missing_a_field_is_not_valid():
     assert not records.valid(rec)
 
 
-def test_the_records_live_under_the_runtime_directory(own_roots):
+def test_the_records_live_under_the_runtime_dir(own_roots):
     assert records.record_dir() == own_roots / "runtime" / "cache" / "clock"
     assert records.record_path(SID) == own_roots / "runtime" / "cache" / "clock" / f"{SID}.json"
 
@@ -197,15 +197,15 @@ def test_segment_is_none_with_no_record():
 def test_segment_is_none_for_a_record_naming_another_session():
     other = "bbbbbbbb-2222-4222-8222-222222222222"
     rec = record(session=other)
-    directory = records.record_dir()
-    directory.mkdir(parents=True)
-    (directory / f"{SID}.json").write_text(json.dumps(rec))
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True)
+    (records_dir / f"{SID}.json").write_text(json.dumps(rec))
     assert segment.segment(SID, now=NOW) is None
 
 
 def test_segment_reads_the_records_thresholds_and_no_config(own_roots):
     # the config says otherwise; the record's own values decide the band and the dim
-    write_cache_config(own_roots, "[segment]\nwarn_before = 300\n[watch]\ntick = 20\n")
+    write_cache_config(own_roots, "[segment]\nwarn_before_s = 300\n[watch]\ntick_s = 20\n")
     put(record(age=3000, seen_ago=50, warn_before=3599, stale_after=300))
     found = segment.segment(SID, now=NOW)
     assert found.band == "near" and not found.dim

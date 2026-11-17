@@ -9,10 +9,12 @@
 // Each message's text is cut at 2,000 characters, with a button that shows the rest the
 // page server sent, and a line when the server itself cut the text at 64 KiB. A refusal
 // (a session the page server can't find or read, a `before` it can't use) shows its
-// reason.
+// reason. A tool result that failed and a message its harness wrote for a failed request
+// each start with a word that says so, in the heavier weight.
 //
 // What selecting a subagent or the parent session does is the component's: the page
-// navigates to its route, the block opens it in place.
+// navigates to its route, the block opens it in place. The page also draws its own header
+// over the turns, so the turns and the subagents are each a part it can place.
 
 import { html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
@@ -24,7 +26,7 @@ import {
   headerFields, headingOf, keepEarlier, listingView, pages, subagentsPath, textView, unknownLine,
   windowPath, windowView,
 } from "./views.ts";
-import type { EntryView, Item, Target } from "./views.ts";
+import type { EntryView, Field, Item, Target } from "./views.ts";
 
 export abstract class SessionView extends LitElement {
   #target: Target | null = null;
@@ -135,6 +137,11 @@ export abstract class SessionView extends LitElement {
 
   // -- rendering ---------------------------------------------------------------------------
 
+  /** The read of the open session's turns; null when no session is open. */
+  protected get windowFeed(): Feed<WindowAnswer> | null {
+    return this.#window;
+  }
+
   /** Whether sessions went away while the view was open. */
   protected get sessionGone(): boolean {
     return this.#window?.gone === true || this.#listing?.gone === true;
@@ -156,19 +163,22 @@ export abstract class SessionView extends LitElement {
       </div>
       ${view.state === "loading" ? html`<div class="placeholder"></div>` : nothing}
       ${view.line !== null ? html`<p class="problem" data-line=${view.state} role="status">${view.line}</p>` : nothing}
-      ${answer !== null ? this.#body(target, answer) : nothing}
+      ${answer !== null ? this.renderTurns(target, answer) : nothing}
     </section>
-    ${this.#listingPart()}`;
+    ${this.renderSubagents()}`;
   }
 
-  #body(target: Target, answer: WindowAnswer) {
+  /** The header's facts as `fields` (none when null), the link to the parent session,
+   * "Earlier" and the records. */
+  protected renderTurns(target: Target, answer: WindowAnswer, fields: Field[] | null = headerFields(answer)) {
     const header = answer.header;
     const parent: Target | null = target.agent !== null ? { ...target, agent: null }
       : typeof header.parent === "string" && header.parent !== "" ? { harness: target.harness, session: header.parent, agent: null }
       : null;
     const shown = pages(answer, this.#earlier);
-    return html`<dl data-part="header">${headerFields(answer).map((field) => html`
-        <dt>${field.label}</dt><dd data-field=${field.name}>${field.code ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>
+    return html`${fields !== null ? html`<dl data-part="header">${fields.map((field) => html`
+        <dt>${field.label}</dt><dd data-field=${field.name}>${field.code ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>`
+        : nothing}
       ${parent !== null ? html`<p><button type="button" class="link" data-action="parent"
         @click=${() => this.openParent(parent)}>Open the parent session</button></p>` : nothing}
       <div class="bar" data-part="earlier">
@@ -183,6 +193,11 @@ export abstract class SessionView extends LitElement {
         : html`<p class="dim" data-line="no-records">No records in these turns.</p>`}`;
   }
 
+  /** A record's word for what went wrong, in the heavier weight, before its line. */
+  #word(word: string | null) {
+    return word !== null ? html`<strong class="word" data-line="word">${word}</strong> ` : nothing;
+  }
+
   #item(item: Item) {
     const unknown = unknownLine(item.unknown) ?? nothing;
     switch (item.type) {
@@ -191,7 +206,7 @@ export abstract class SessionView extends LitElement {
         const text = textView(item.row, open);
         return html`<li class="msg" data-kind="message" data-key=${item.key} data-role=${item.role}
           data-reasoning=${item.reasoning ? "true" : "false"} title=${unknown}>
-          <div class="who"><span>${item.label}</span>${item.tags.map((tag) => html`<span class="tag">${tag}</span>`)}</div>
+          <div class="who">${this.#word(item.word)}<span>${item.label}</span>${item.tags.map((tag) => html`<span class="tag">${tag}</span>`)}</div>
           ${text.shown !== null ? html`<p class="text" data-line="text">${text.shown}</p>`
             : html`<p class="dim" data-line="text">(hidden)</p>`}
           ${text.long ? html`<p><button type="button" class="link" data-action="expand" aria-expanded=${open ? "true" : "false"}
@@ -203,9 +218,9 @@ export abstract class SessionView extends LitElement {
         return html`<li class="line call" data-kind="tool_call" title=${unknown}><code>${item.line}</code></li>`;
       case "result":
         return html`<li class="line result" data-kind="tool_result" data-error=${item.error ? "true" : "false"}
-          title=${unknown}>${item.line}</li>`;
+          title=${unknown}>${this.#word(item.word)}${item.line}</li>`;
       case "rule":
-        return html`<li class="rule" data-kind="marker" data-marker=${item.marker} title=${unknown}><span>${item.line}</span></li>`;
+        return html`<li class="rule" data-kind="marker" data-marker=${item.marker} title=${unknown}><span>${this.#word(item.word)}${item.line}</span></li>`;
       case "request":
         return html`<li class="line request" data-kind="request" title=${unknown}>${item.line}</li>`;
       default:
@@ -213,7 +228,8 @@ export abstract class SessionView extends LitElement {
     }
   }
 
-  #listingPart() {
+  /** The session's subagents, each a button that opens it. */
+  protected renderSubagents() {
     const feed = this.#listing;
     if (feed === null) return nothing;
     const view = listingView(feed);

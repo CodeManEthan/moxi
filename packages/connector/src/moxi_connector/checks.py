@@ -23,9 +23,9 @@ def ask(method: str, params: object = None, *, wait: float = ASK_WAIT) -> object
     (`NotServing` when nothing listens) when it can't be asked."""
     from moxi import ipc
 
-    with ipc.connect(ipc.address(MODULE, CONTROL), timeout=wait) as client:
+    with ipc.connect(ipc.address(MODULE, CONTROL), timeout_s=wait) as client:
         client.hello(VERSIONS)
-        return client.call(method, params, timeout=wait)
+        return client.call(method, params, timeout_s=wait)
 
 
 def health():
@@ -35,9 +35,9 @@ def health():
 
     try:
         answer = ask("status")
-    except ipc.IpcError as e:
+    except ipc.IpcError as exc:
         return Row(MODULE, "server", "fail",
-                   f"the control socket doesn't answer within {ASK_WAIT:g} s: {e}", RESTART)
+                   f"the control socket doesn't answer within {ASK_WAIT:g} s: {exc}", RESTART)
     url = answer.get("url") if isinstance(answer, dict) else None
     return Row(MODULE, "server", "ok",
                f"answers; the door's address is {url}" if url else

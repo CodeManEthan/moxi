@@ -286,11 +286,11 @@ class Spawner:
         return proc
 
 
-def make_timer(tmp_path, subs, *, environ=None, entries=None):
+def make_timer(tmp_path, subs, *, env=None, entries=None):
     spawner = Spawner()
     config = [entries if entries is not None else []]
     t = Timer(config_entries=lambda: config[0], modules=subs,
-              environ=environ or (lambda pid: {}), spawn=spawner,
+              process_env=env or (lambda pid: {}), spawn=spawner,
               log_file=tmp_path / "state" / "timer.jsonl")
     return t, spawner, config
 
@@ -385,12 +385,12 @@ def test_a_session_with_no_clock_is_not_asked_about(tmp_path, exe, rec):
 def test_requires_env_reads_the_sessions_process(tmp_path, exe, want, env, met):
     seen = []
 
-    def environ(pid):
+    def process_env(pid):
         seen.append(pid)
         return env
 
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env=want)],
-                         environ=environ)
+                         env=process_env)
     assert bool(asks(t, {A: record(pid=777)}, T0 + TTL)) is met
     assert seen == [777]
 
@@ -398,30 +398,139 @@ def test_requires_env_reads_the_sessions_process(tmp_path, exe, want, env, met):
 def test_requires_env_not_met_is_checked_again_at_the_next_tick(tmp_path, exe):
     env = {}
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "on"})],
-                         environ=lambda pid: env)
+                         env=lambda pid: env)
     assert asks(t, {A: record()}, T0 + TTL) == []
     env["V"] = "on"
     assert asks(t, {A: record()}, T0 + TTL + 10) == [("r", A)]
 
 
+# --- what it says it asks -------------------------------------------------------------------
+
+class Environs:
+    """A counting process environment reader: `envs` by pid, None for a pid not in it."""
+
+    def __init__(self, envs=None):
+        self.envs = dict(envs or {})
+        self.reads: list[int] = []
+
+    def __call__(self, pid):
+        self.reads.append(pid)
+        return self.envs.get(pid)
+
+
+def test_asking_names_the_subscriptions_the_process_meets(tmp_path, exe):
+    subs = [raw_sub(exe, name="plain", at=0),
+            raw_sub(exe, name="needs-v", at=0, requires_env={"V": "*"}),
+            raw_sub(exe, name="needs-w", at=0, requires_env={"W": "on"})]
+    environs = Environs({7: {"V": "x", "W": "off"}})
+    t, _, _ = make_timer(tmp_path, subs, env=environs)
+    t.reload()
+    assert t.asking(A, 7) == ("needs-v", "plain")
+    # a process whose environment can't be read meets only the plain one
+    assert t.asking(B, 8) == ("plain",)
+
+
+def test_asking_is_none_before_the_first_reload(tmp_path, exe):
+    environs = Environs({7: {"V": "x"}})
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "*"})],
+                         env=environs)
+    assert t.asking(A, 7) is None
+    assert environs.reads == []
+    t.tick({}, T0)
+    assert t.asking(A, 7) == ("r",)
+
+
+def test_asking_reads_no_env_without_a_subscription_that_needs_one(tmp_path, exe):
+    environs = Environs({7: {"V": "x"}})
+    t, _, _ = make_timer(tmp_path, [], env=environs)
+    t.reload()
+    assert t.asking(A, 7) == ()
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="plain", at=0)], env=environs)
+    t.reload()
+    assert t.asking(A, 7) == ("plain",)
+    t.tick({A: record(pid=7)}, T0 + TTL)
+    assert environs.reads == []
+
+
+def test_the_env_is_read_once_over_several_ticks(tmp_path, exe):
+    environs = Environs({7: {"V": "on"}})
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, every=10,
+                                            requires_env={"V": "on"})], env=environs)
+    live = {A: record(pid=7)}
+    t.reload()
+    for n in range(4):
+        assert t.asking(A, 7) == ("r",)
+        assert asks(t, live, T0 + TTL + 10 * n) == [("r", A)]
+    assert environs.reads == [7]
+
+
+def test_an_env_that_cannot_be_read_is_read_again_once_a_tick(tmp_path, exe):
+    environs = Environs()
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "on"})],
+                         env=environs)
+    live = {A: record(pid=7)}
+    t.reload()
+    for n in range(3):
+        assert t.asking(A, 7) == ()
+        assert asks(t, live, T0 + TTL + n) == []
+    assert environs.reads == [7, 7, 7]
+    environs.envs[7] = {"V": "on"}
+    assert t.asking(A, 7) == ("r",)
+    assert asks(t, live, T0 + TTL + 5) == [("r", A)]
+    assert environs.reads == [7, 7, 7, 7]
+
+
+def test_a_session_that_leaves_the_live_list_has_its_env_forgotten(tmp_path, exe):
+    environs = Environs({7: {"V": "on"}, 9: {"V": "on"}})
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "on"})],
+                         env=environs)
+    t.reload()
+    t.asking(A, 7)
+    t.tick({A: record(pid=7)}, T0)
+    t.tick({B: record(B, pid=8)}, T0 + 10)
+    assert (A, 7) not in t.environs
+    t.asking(A, 7)
+    assert environs.reads == [7, 7]
+    # a new process for the same session is read again
+    t.tick({A: record(pid=9)}, T0 + 20)
+    t.asking(A, 9)
+    assert environs.reads == [7, 7, 9] and set(t.environs) == {(A, 9)}
+
+
+def test_a_changed_set_of_subscriptions_changes_the_answer_at_the_next_tick(tmp_path, exe):
+    environs = Environs({7: {"V": "on"}})
+    subs = [raw_sub(exe, name="r", at=0)]
+    t = Timer(modules=lambda: list(subs), process_env=environs, spawn=Spawner(),
+              log_file=tmp_path / "timer.jsonl")
+    t.tick({A: record(pid=7)}, T0)
+    assert t.asking(A, 7) == ("r",)
+    subs.append(raw_sub(exe, name="kw", at=-900, requires_env={"V": "on"}))
+    assert t.asking(A, 7) == ("r",)
+    t.tick({A: record(pid=7)}, T0 + 10)
+    assert t.asking(A, 7) == ("kw", "r")
+    subs.clear()
+    t.tick({A: record(pid=7)}, T0 + 20)
+    assert t.asking(A, 7) == ()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
-def test_proc_environ_reads_a_process_and_none_for_a_gone_one():
-    env = timer.proc_environ(os.getpid())
+def test_read_process_env_reads_a_process_and_none_for_a_gone_one():
+    env = timer.read_process_env(os.getpid())
     assert env is not None and env.get("PATH") == os.environ.get("PATH")
     import subprocess
 
     gone = subprocess.Popen([sys.executable, "-c", "pass"])
     gone.wait()
-    assert timer.proc_environ(gone.pid) is None
+    assert timer.read_process_env(gone.pid) is None
 
 
-def test_proc_environ_is_moxi_procs_reader(monkeypatch):
+def test_read_process_env_is_moxi_procs_reader(monkeypatch):
     from moxi import proc
 
-    monkeypatch.setattr(proc, "environ", lambda pid: {"PID": str(pid)})
-    assert timer.proc_environ(7) == {"PID": "7"}
-    monkeypatch.setattr(proc, "environ", lambda pid: None)
-    assert timer.proc_environ(7) is None
+    monkeypatch.setattr(proc, "process_env", lambda pid: {"PID": str(pid)})
+    assert timer.read_process_env(7) == {"PID": "7"}
+    monkeypatch.setattr(proc, "process_env", lambda pid: None)
+    assert timer.read_process_env(7) is None
 
 
 @pytest.mark.parametrize("platform, expected",
@@ -433,8 +542,8 @@ def test_env_checkable_asks_the_platform_and_reads_no_process(monkeypatch, platf
     def refuse(*_):
         raise AssertionError("env_checkable read a process")
 
-    monkeypatch.setattr(proc, "environ", refuse)
-    monkeypatch.setattr(timer, "proc_environ", refuse)
+    monkeypatch.setattr(proc, "process_env", refuse)
+    monkeypatch.setattr(timer, "read_process_env", refuse)
     monkeypatch.setattr(sys, "platform", platform)
     assert timer.env_checkable() is expected
 
@@ -442,7 +551,7 @@ def test_env_checkable_asks_the_platform_and_reads_no_process(monkeypatch, platf
 def test_a_subscription_needing_env_never_asks_where_env_cannot_be_read(tmp_path, exe):
     t, spawner, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0,
                                                   requires_env={"V": "on"})],
-                               environ=lambda pid: None)
+                               env=lambda pid: None)
     assert asks(t, {A: record()}, T0 + TTL) == []
     assert spawner.argvs == []
 
@@ -500,7 +609,7 @@ def test_read_log_skips_a_cut_first_line_and_junk(tmp_path):
     assert timer.read_log(tmp_path / "absent") == []
 
 
-def test_the_log_is_under_caches_state_directory(own_roots):
+def test_the_log_is_under_caches_state_dir(own_roots):
     assert timer.log_path() == own_roots / "state" / "cache" / "timer.jsonl"
 
 
@@ -544,7 +653,7 @@ def test_on_windows_an_ask_starts_through_moxi_procs_detached_spawn(tmp_path, ex
                         lambda argv, **kw: started.append((argv, kw)) or 4242)
     monkeypatch.setattr(proc, "status", lambda pid: codes[pid])
     t = Timer(config_entries=lambda: [], modules=[raw_sub(exe, name="r", at=0)],
-              environ=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
+              process_env=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
     (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
     output = tmp_path / "asks" / f"{int((T0 + TTL) * 1000)}-1-r.log"
     assert started == [([str(exe), "--session", A], {"detached": True, "output": output})]
@@ -571,7 +680,7 @@ def test_a_windows_ask_whose_status_is_no_longer_held_logs_no_exit(tmp_path, exe
 
     monkeypatch.setattr(proc, "status", dropped)
     t = Timer(config_entries=lambda: [], modules=[raw_sub(exe, name="r", at=0)],
-              environ=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
+              process_env=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
     t.tick({A: record(pid=31)}, T0 + TTL)
     t.reap(T0 + TTL + 1)
     (line,) = logged(t)
@@ -897,8 +1006,8 @@ def test_the_watcher_hands_its_records_to_the_timer(tmp_path):
     root.mkdir(parents=True)
     fake = Fake([entry(11, A)])
     w = watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,
-                      projects_root=lambda: str(root), directory=tmp_path / "clock",
-                      sessions=tmp_path / "sessions")
+                      projects_root=lambda: str(root), records_dir=tmp_path / "clock",
+                      session_files_dir=tmp_path / "sessions")
     w.tick()
     assert set(w.current) == {A} and w.current[A]["pid"] == 11
     assert w.tick_at == fake.t
@@ -912,7 +1021,7 @@ def test_run_ticks_the_timer_after_the_watcher_and_closes_it(tmp_path):
     calls = []
 
     class W:
-        directory = tmp_path
+        records_dir = tmp_path
         current = {A: record()}
         tick_at = T0
 
@@ -924,6 +1033,12 @@ def test_run_ticks_the_timer_after_the_watcher_and_closes_it(tmp_path):
                 calls.append(message)
 
     class T:
+        def reload(self):
+            calls.append("reload")
+
+        def asking(self, session, pid):
+            return ()
+
         def tick(self, live, now):
             calls.append(("timer", live, now))
             stop.set()
@@ -931,8 +1046,10 @@ def test_run_ticks_the_timer_after_the_watcher_and_closes_it(tmp_path):
         def close(self):
             calls.append("close")
 
-    assert watch.run(watcher=W(), timer=T(), stop=stop) == 0
-    assert calls == ["watch", ("timer", {A: record()}, T0), "close"]
+    w, t = W(), T()
+    assert watch.run(watcher=w, timer=t, stop=stop) == 0
+    assert calls == ["reload", "watch", ("timer", {A: record()}, T0), "close"]
+    assert w.asking == t.asking
 
 
 def test_a_failing_timer_tick_is_logged_and_the_watcher_goes_on(tmp_path):
@@ -940,7 +1057,7 @@ def test_a_failing_timer_tick_is_logged_and_the_watcher_goes_on(tmp_path):
     said = []
 
     class W:
-        directory = tmp_path
+        records_dir = tmp_path
         current = None
         tick_at = T0
         n = 0
@@ -956,13 +1073,19 @@ def test_a_failing_timer_tick_is_logged_and_the_watcher_goes_on(tmp_path):
     class T:
         closed = False
 
+        def reload(self):
+            pass
+
+        def asking(self, session, pid):
+            return None
+
         def tick(self, live, now):
             raise ValueError("boom")
 
         def close(self):
             T.closed = True
 
-    write_cache_config(Path(os.environ["MOXI_CACHE_HOME"]), "[watch]\ntick = 0\n")
+    write_cache_config(Path(os.environ["MOXI_CACHE_HOME"]), "[watch]\ntick_s = 0\n")
     assert watch.run(watcher=W(), timer=T(), stop=stop) == 0
     assert ("timer-error", "the timer's tick failed (ValueError: boom)") in said
     assert T.closed
@@ -979,9 +1102,9 @@ def run_cli(capsys, *argv):
 def put_record(rec):
     from moxi_cache import records
 
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    watch.write_record(directory, rec)
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
+    watch.write_record(records_dir, rec)
 
 
 def test_timers_lists_subscriptions_refusals_sessions_and_next_asks(own_roots, exe, capsys):

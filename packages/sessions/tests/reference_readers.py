@@ -16,9 +16,9 @@ import os
 
 def claude_walk(path, block: int, limit: int):
     lines = []
-    with open(path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        pos = f.tell()
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        pos = fh.tell()
         carry = b""
         scanned = 0
         while pos > 0:
@@ -26,8 +26,8 @@ def claude_walk(path, block: int, limit: int):
                 return lines, "limit"
             step = min(block, pos)
             pos -= step
-            f.seek(pos)
-            data = f.read(step) + carry
+            fh.seek(pos)
+            data = fh.read(step) + carry
             scanned += step
             parts = data.split(b"\n")
             carry = parts[0] if pos > 0 else b""
@@ -39,12 +39,12 @@ def claude_walk(path, block: int, limit: int):
 
 
 def codex_walk(path, block: int, limit: int):
-    with open(path, "rb") as f:
-        size = os.fstat(f.fileno()).st_size
-        f.seek(0)
+    with open(path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
+        fh.seek(0)
         chunk = b""
         while True:
-            more = f.read(block)
+            more = fh.read(block)
             if not more:
                 break
             chunk += more
@@ -54,8 +54,8 @@ def codex_walk(path, block: int, limit: int):
         first_end = len(head) + len(sep)
         unterminated = False
         if size:
-            f.seek(size - 1)
-            unterminated = f.read(1) != b"\n"
+            fh.seek(size - 1)
+            unterminated = fh.read(1) != b"\n"
         pos, scanned, carry, first = size, 0, b"", True
         pairs, hit_limit = [], False
         while pos > first_end:
@@ -64,8 +64,8 @@ def codex_walk(path, block: int, limit: int):
                 break
             step = min(block, pos - first_end)
             pos -= step
-            f.seek(pos)
-            data = f.read(step) + carry
+            fh.seek(pos)
+            data = fh.read(step) + carry
             scanned += step
             parts = data.split(b"\n")
             if pos > first_end:

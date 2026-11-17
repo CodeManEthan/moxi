@@ -46,8 +46,9 @@ VERSIONS = (1, 1)
 #: version. `mcp` is the adapter method `mcp_token`, which registers the hash of the
 #: session's token for comms' tools; an adapter calls it only when the hello lists it.
 #: `connector` is the read `replies_to`, the replies one identity can read to one message,
-#: which comms' connector provider asks only when the hello lists it.
-CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names", "mcp",
+#: which comms' connector provider asks only when the hello lists it. `remove` is the
+#: method that withdraws a message, so a daemon that lists `delete` instead is older.
+CAPABILITIES = frozenset({"remove", "expiry", "interrupt", "reserved-names", "mcp",
                           "connector"})
 
 # -- error codes -------------------------------------------------------------------------
@@ -176,25 +177,25 @@ class Host:
 
     `call(conn, method, params)` runs on a pool thread for every request and notification
     once the host is open, and returns the answer (or a `Then`) or raises `RpcError`.
-    `closed(conn)` runs on a pool thread once a connection has closed. `start` serves the
+    `on_closed(conn)` runs on a pool thread once a connection has closed. `start` serves the
     address and takes its lock, so a second daemon refuses at once; methods wait until
     `open`, so nothing is answered before the daemon has loaded what it routes from.
 
     The daemon serves comms' tools on the same loop and pool: `loop`, `run_on_loop`,
-    `opened` and `pool` are that seam, and `stop_hook` closes the tools' endpoint before
+    `on_opened` and `pool` are that seam, and `stop_hook` closes the tools' endpoint before
     the address. Nothing on the loop uses the loop's default executor, which has one
     thread; work that blocks goes to `pool`.
     """
 
     def __init__(self, address: str, call: Callable[[ipc.Connection, str, object], object],
-                 closed: Callable[[ipc.Connection], object], *,
+                 on_closed: Callable[[ipc.Connection], object], *,
                  capabilities=CAPABILITIES, max_connections: int = MAX_CONNECTIONS,
                  workers: int = WORKERS, name: str = "comms-daemon"):
         self.address = address
         self.capabilities = frozenset(capabilities)
         self.name = name
         self._call = call
-        self._closed_cb = closed
+        self._on_closed = on_closed
         self.max_connections = max_connections
         #: The pool every comms method runs on, public so the endpoint of comms' tools
         #: runs its synchronous work on the same threads (`WORKERS` of them).
@@ -240,7 +241,7 @@ class Host:
 
     def close(self, timeout: float = CLOSE_WAIT) -> bool:
         """Stop serving: the stop hook first, then no new connections, every open one
-        ended without waiting on a peer past the write deadline, each one's `closed` run,
+        ended without waiting on a peer past the write deadline, each one's `on_closed` run,
         the socket removed. True when it finished within `timeout` (the stop hook's time
         is its own, bounded by `STOP_HOOK_WAIT`)."""
         self._run_stop_hook()
@@ -304,7 +305,7 @@ class Host:
             future.cancel()
             raise
 
-    async def opened(self) -> None:
+    async def on_opened(self) -> None:
         """On the loop: wait until `open` has let methods through."""
         if not self._gate.is_set():
             await self._gate.wait()
@@ -332,7 +333,7 @@ class Host:
                 server = await ipc.serve(
                     self.address, self._handle,
                     hello=ipc.Hello(VERSIONS, self.capabilities),
-                    write_deadline=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
+                    write_timeout_s=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
                     on_close=self._on_close)
             except BaseException as exc:
                 ready.set_exception(exc)
@@ -392,7 +393,7 @@ class Host:
                     tail.result()
                 except Exception:  # noqa: BLE001 - the work logs its own failure
                     log.exception("the work after an answer failed")
-            self._closed_cb(conn)
+            self._on_closed(conn)
 
         # Handed to the pool before the first wait, so a cancelled close still releases.
         try:
@@ -403,11 +404,11 @@ class Host:
             return
         with self._releases_lock:
             self._releases.add(future)
-        future.add_done_callback(self._released)
+        future.add_done_callback(self._on_released)
         # Shielded: cancelling this wait must not cancel a release not yet started.
         await asyncio.shield(asyncio.wrap_future(future))
 
-    def _released(self, future: concurrent.futures.Future) -> None:
+    def _on_released(self, future: concurrent.futures.Future) -> None:
         with self._releases_lock:
             self._releases.discard(future)
 

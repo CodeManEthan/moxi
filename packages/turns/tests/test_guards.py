@@ -18,7 +18,7 @@ from moxi_turns import config, guards, module
 from moxi_turns.guards import Allow, Deny, Guard, Prompt, ToolCall
 
 #: The removal guard's pre-filter, as the design gives it.
-REMOVAL_MATCH = r"""\b(r[\\'"{}$]*m([\\'"{}$]*d[\\'"{}$]*i[\\'"{}$]*r)?)(?![A-Za-z_])"""
+REMOVAL_MATCH = r"""\b(r[\\'"]*m([\\'"]*d[\\'"]*i[\\'"]*r)?)(?![A-Za-z_])"""
 
 
 class Entry:
@@ -146,6 +146,20 @@ def test_a_codex_alias_is_refused_naming_the_canonical_name(alias, canonical):
     assert Guard("g", {"claude": (alias,), "codex": (canonical,)}, deny="no").problems() == []
 
 
+def test_a_guards_step_is_call_or_ask():
+    assert Guard("g", {"claude": ("Bash",)}, deny="no").step == "call"
+    assert Guard("g", {"claude": ("Bash",)}, deny="no", step="ask").problems() == []
+    problems = Guard("g", {"claude": ("Bash",)}, deny="no", step="later").problems()
+    assert problems == ["step 'later' must be \"call\" or \"ask\""]
+
+
+@pytest.mark.parametrize("harness", ["codex", "opencode"])
+def test_an_ask_step_guard_naming_codex_or_opencode_is_refused(harness):
+    g = Guard("g", {"claude": ("Bash",), harness: ("shell",)}, deny="no", step="ask")
+    assert g.problems() == [f"turns has no ask step on {harness}"]
+    assert Guard("g", {harness: ("shell",)}, deny="no").problems() == []
+
+
 def test_the_alias_list_is_codexs_and_names_its_version():
     assert guards.CODEX_ALIASES == {"Agent": "spawn_agent", "Write": "apply_patch",
                                     "Edit": "apply_patch"}
@@ -192,9 +206,9 @@ def test_match_compiles_ascii_and_case_blind_under_i():
     g = Guard("removal", {"claude": ("Bash",)}, match={"command": REMOVAL_MATCH},
               match_flags="i", judge="a:b")
     rx = guards.compile_match(g)["command"]
-    for text in ("rm -rf /x", "R''M x", r"r\m -rf /x", "r{}m x", "r$'m' x", "rmdir d"):
+    for text in ("rm -rf /x", "R''M x", r"r\m -rf /x", "r\"m\" x", "rmdir d"):
         assert rx.search(text), text
-    assert not rx.search("rmx") and not rx.search("form")
+    assert not rx.search("rmx") and not rx.search("form") and not rx.search("r{}m x")
     assert guards.compile_match(Guard("x", {}, deny="no")) == {}
     assert guards.compile_match(Guard("x", {}, match={"a": "A"}, deny="n"))["a"].search(
         "a") is None
@@ -448,7 +462,7 @@ def test_a_tilde_entry_is_a_file(tmp_path, monkeypatch):
 
 def test_turns_settings_declare_the_keys_with_their_defaults():
     keys = config.schema().keys
-    expect = {"guards.on": ("list", [], "use"),
+    expect = {"guards.run": ("list", [], "use"),
               "guards.removal": ("bool", False, "use"),
               "guards.no_nested_agents": ("bool", False, "use"),
               "guards.question_mode": ("bool", False, "use"),
@@ -459,6 +473,18 @@ def test_turns_settings_declare_the_keys_with_their_defaults():
         key = keys[name]
         assert (key.type, key.default, key.read, key.env) == (kind, default, read, None)
     assert guards.MAX_WAIT_MS == keys["guards.max_wait_ms"].default
+
+
+@pytest.mark.parametrize("text, old, new", [
+    ('[guards]\non = ["turns.removal"]\n', "guards.on", "guards.run"),
+    ("[start]\nlimit = 100\n", "start.limit", "start.limit_chars"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(turns_env, text, old, new):
+    write_config(turns_env, text)
+    with pytest.raises(moxi_config.ConfigError) as caught:
+        config.load()
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
 
 
 def test_questions_name_exactly_the_three_switches_each_a_switch_and_a_noun_phrase():
@@ -489,7 +515,7 @@ def test_a_shipped_switch_turns_its_guard_on_and_nothing_else_does(turns_env):
     write_config(turns_env, "[guards]\nremoval = true\n")
     loaded = guards.load(None, entries=[entry], env=env)
     assert [(o.id, o.by) for o in loaded.on] == [("turns.removal", ("switch",))]
-    write_config(turns_env, '[guards]\nremoval = false\non = ["turns.removal"]\n')
+    write_config(turns_env, '[guards]\nremoval = false\nrun = ["turns.removal"]\n')
     loaded = guards.load(None, entries=[entry], env=env)
     assert [(o.id, o.by) for o in loaded.on] == [("turns.removal", ("list",))]
     assert loaded.problems == ()

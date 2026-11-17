@@ -35,12 +35,12 @@ def one_turn(db: OpenCodeDb, *, finish_second: bool = True):
     first = a.step_start()
     a.reasoning("which suite?")
     a.tool("bash", {"command": "pytest -q"}, output="3 passed", call_id="call_1")
-    a.step_finish(input=900, output=40, reasoning=3, cache_read=1200, cache_write=7,
+    a.step_finish(input_tokens=900, output=40, reasoning=3, cache_read=1200, cache_write=7,
                   cost=0.25)
     second = a.step_start()
     a.text("all green")
     if finish_second:
-        a.step_finish(input=5, output=6, cache_read=2100)
+        a.step_finish(input_tokens=5, output=6, cache_read=2100)
         a.complete()
     return s, user, a, first, second
 
@@ -82,15 +82,15 @@ def test_a_database_locked_past_the_busy_timeout_is_a_failed_query(tmp_path):
     db = OpenCodeDb(tmp_path / "opencode", wal=False)
     s = db.session()
     path = db.write()
-    holder = sqlite3.connect(path)
-    holder.execute("BEGIN EXCLUSIVE")
+    conn = sqlite3.connect(path)
+    conn.execute("BEGIN EXCLUSIVE")
     try:
         with pytest.raises(QueryFailed) as caught:
             with Snapshot(path) as snap:
                 snap.session(s.id)
     finally:
-        holder.rollback()
-        holder.close()
+        conn.rollback()
+        conn.close()
     assert "locked" in caught.value.error
 
 
@@ -206,7 +206,7 @@ def test_the_session_row_is_the_header(db):
     with Snapshot(db.write()) as snap:
         row = snap.session(s.id)
     assert row.id == s.id and row.parent_id is None
-    assert row.title == "fix the tests" and row.directory == "/work/project"
+    assert row.title == "fix the tests" and row.work_dir == "/work/project"
     assert row.version == "1.18.34" and row.agent == "build"
     assert row.model == {"id": "big-pickle", "providerID": "opencode",
                          "variant": "default"}
@@ -302,7 +302,7 @@ def test_an_open_step_is_not_final_and_keeps_its_id_once_it_finishes(db):
     assert open_.input_tokens is UNKNOWN and open_.output_tokens is UNKNOWN
     assert open_.cost_usd is UNKNOWN and open_.time is UNKNOWN
     assert open_.start_time == opencode_seconds(db, "part", second, "time_created")
-    a.step_finish(input=1, output=2)
+    a.step_finish(input_tokens=1, output=2)
     db.write()
     done = [r for r in read(path, s.id) if r.kind == "request"][-1]
     assert done.request_id == second and done.final is True and done.input_tokens == 1
@@ -312,7 +312,7 @@ def test_a_step_with_no_start_takes_its_finish_parts_id(db):
     s = db.session()
     s.user()
     a = s.assistant()
-    finish = a.step_finish(input=3)
+    finish = a.step_finish(input_tokens=3)
     path = db.write()
     (request,) = [r for r in read(path, s.id) if r.kind == "request"]
     assert request.request_id == finish and request.start_time is UNKNOWN
@@ -325,7 +325,7 @@ def test_a_step_started_twice_leaves_the_first_open(db):
     a = s.assistant()
     first = a.step_start()
     second = a.step_start()
-    a.step_finish(input=3)
+    a.step_finish(input_tokens=3)
     requests = [r for r in read(db.write(), s.id) if r.kind == "request"]
     assert [(r.request_id, r.final) for r in requests] == [(first, False), (second, True)]
 
@@ -349,9 +349,9 @@ def test_compaction_gives_a_marker(db):
     s = db.session()
     s.user()
     by_agent = s.assistant(agent="compaction")
-    by_agent.step(input=1)
+    by_agent.step(input_tokens=1)
     summary = s.assistant(summary=True)
-    summary.step(input=1)
+    summary.step(input_tokens=1)
     records = read(db.write(), s.id)
     markers = [r for r in records if isinstance(r, Marker)]
     assert [m.at["id"] for m in markers] == [by_agent.id, summary.id]
@@ -448,7 +448,7 @@ def test_child_sessions_are_the_subagents(db):
     a.tool("task", {"description": "explore"}, metadata={"sessionId": child.id},
            call_id="call_task")
     child.user("explore")
-    child.assistant().step(input=4)
+    child.assistant().step(input_tokens=4)
     path = db.write()
     with Snapshot(path) as snap:
         (entry,) = snap.children(parent.id)
@@ -489,7 +489,7 @@ def test_last_request_is_the_newest_finished_step_an_open_one_left_out(db):
     assert last.request_id == first and last.final is True
     assert back[0].kind == "request" and back[0].request_id == second
     assert back[0].final is False
-    a.step_finish(input=11)
+    a.step_finish(input_tokens=11)
     s.user("next")
     db.write()
     with Snapshot(path) as snap:
@@ -526,7 +526,7 @@ def test_a_changed_part_reads_its_whole_message_again_and_nothing_else(db):
     s, user, a, first, second = one_turn(db, finish_second=False)
     path = db.write()
     cursor = since(path).cursor
-    a.step_finish(input=8)
+    a.step_finish(input_tokens=8)
     db.write()
     batch = since(path, cursor)
     assert ids(batch) == [a.id]

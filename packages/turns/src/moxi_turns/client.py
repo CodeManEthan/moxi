@@ -145,9 +145,9 @@ def _version_error(address: str, data: Any) -> VersionError:
                         client=ours, server=server)
 
 
-def _v1_error(directory: Path) -> VersionError:
+def _v1_error(endpoint_dir: Path) -> VersionError:
     ours = protocol.VERSIONS
-    return VersionError(f"this session's endpoint ({directory}) speaks turns protocol 1; "
+    return VersionError(f"this session's endpoint ({endpoint_dir}) speaks turns protocol 1; "
                         f"this library speaks {ours[0]} to {ours[1]}; reload the "
                         f"session's plugins or restart it", client=ours, server=(1, 1))
 
@@ -168,7 +168,7 @@ class _NotWritten(Exception):
     failed during its hello or its `session`. `error` is the `TurnsError` for the reads;
     `cause` is what failed; `connect` is True when the connect itself failed."""
 
-    def __init__(self, error: TurnsError, cause: BaseException, connect: bool):
+    def __init__(self, error: TurnsError, cause: BaseException, *, connect: bool):
         super().__init__(str(error))
         self.error = error
         self.cause = cause
@@ -204,28 +204,28 @@ def _connect(address: str) -> tuple[ipc.Client, ipc.Agreed, dict[str, Any]]:
     """A new connection to `address`, past its `rpc.hello` and `session`: the client, what
     the hello agreed and the session answer. Raises `_NotWritten`."""
     try:
-        client = ipc.connect(address, timeout=CONNECT_S)
+        client = ipc.connect(address, timeout_s=CONNECT_S)
     except (ipc.IpcError, OSError) as exc:
         raise _NotWritten(TurnsError(f"the endpoint at {address} cannot be reached: "
-                                     f"{exc}"), exc, True) from None
+                                     f"{exc}"), exc, connect=True) from None
     try:
         agreed = client.hello(protocol.VERSIONS)
-        info = client.call("session", timeout=READ_S)
+        info = client.call("session", timeout_s=READ_S)
     except ipc.RpcError as exc:
         client.close()
-        raise _NotWritten(_rpc_error(exc, address, "the hello"), exc, False) from None
+        raise _NotWritten(_rpc_error(exc, address, "the hello"), exc, connect=False) from None
     except ipc.NotRpc as exc:
         client.close()
         raise _NotWritten(TurnsError(f"the endpoint at {address} does not speak "
-                                     f"JSON-RPC: {exc}"), exc, False) from None
+                                     f"JSON-RPC: {exc}"), exc, connect=False) from None
     except (ipc.IpcError, OSError) as exc:
         client.close()
         raise _NotWritten(TurnsError(f"the endpoint at {address} did not finish its "
-                                     f"hello: {exc}"), exc, False) from None
+                                     f"hello: {exc}"), exc, connect=False) from None
     if not isinstance(info, dict):
         client.close()
         error = TurnsError(f"the endpoint at {address} answered session with {info!r}")
-        raise _NotWritten(error, error, False)
+        raise _NotWritten(error, error, connect=False)
     return client, agreed, info
 
 
@@ -244,7 +244,7 @@ class _Link:
         with self._lock:
             if self._closed:
                 error = TurnsError("this Session is closed")
-                raise _NotWritten(error, error, False)
+                raise _NotWritten(error, error, connect=False)
             client = self._client
             if client is not None and _is_open(client):
                 return client
@@ -254,7 +254,7 @@ class _Link:
             session = self._session()
             if session is None:
                 error = TurnsError("this Session is closed")
-                raise _NotWritten(error, error, False)
+                raise _NotWritten(error, error, connect=False)
             self._client = session._open()
             return self._client
 
@@ -275,7 +275,7 @@ def _call(client: ipc.Client, method: str, params: Any, timeout: float | None) -
     """`client.call`, with a failure after the request was handed to the connection
     raised as `_Unanswered`. An error the endpoint answered is raised as given."""
     try:
-        return client.call(method, params, timeout=timeout)
+        return client.call(method, params, timeout_s=timeout)
     except ipc.RpcError:
         raise
     except (ipc.IpcError, OSError) as exc:
@@ -302,9 +302,9 @@ class Session:
     """
 
     def __init__(self, address: str, info: dict[str, Any] | None = None, *,
-                 directory: Path | None = None):
+                 endpoint_dir: Path | None = None):
         self.address = address
-        self.dir = directory
+        self.dir = endpoint_dir
         self._info: dict[str, Any] = dict(info or {})
         self._capabilities: frozenset[str] | None = None
         self._short = _Link(self)
@@ -410,11 +410,11 @@ class Session:
         return self._value(self._read(self._reads, "agents", LIVE_READ_S), "agents",
                            Agents)
 
-    def environ(self, names: Iterable[str]) -> dict[str, str | None]:
+    def env(self, names: Iterable[str]) -> dict[str, str | None]:
         """The values of the named variables in the session's own environment, None for
         one that is unset, read from the session's endpoint: on Claude Code the
         environment the session started with, on the Codex and OpenCode hosts the
-        launch's. At most `ENVIRON_MAX_NAMES` names, each `[A-Za-z_][A-Za-z0-9_]*`.
+        launch's. At most `ENV_MAX_NAMES` names, each `[A-Za-z_][A-Za-z0-9_]*`.
         Raises `TurnsError`: code -32602 for names the endpoint refuses, the
         `capability` error on a session without `environ`."""
         if isinstance(names, str):
@@ -430,29 +430,29 @@ class Session:
         return dict(values)
 
     def codex_limits(self, *, cached: bool = False,
-                     timeout: float = READ_S) -> dict[str, Any]:
+                     timeout_s: float = READ_S) -> dict[str, Any]:
         """A Codex host's `usage.codex_limits`: `{payload, received_at}` read from its
         app-server now (`payload` null and a `reason` when it could not be), or with
         `cached` the last reading the host saw, `{payload, received_at, kind}`, each null
         before the first. Most callers want `moxi_turns.codex_rate_limits()`. Raises
         `TurnsError`: the `capability` error on a session without it."""
         params = {"cached": True} if cached else {}
-        answer = self._read(self._short, "usage.codex_limits", timeout, params)
+        answer = self._read(self._short, "usage.codex_limits", timeout_s, params)
         if not isinstance(answer, dict) or not isinstance(answer.get("payload"),
                                                           (dict, type(None))):
             raise TurnsError(f"the endpoint at {self.address} answered "
                              f"usage.codex_limits with something turns cannot read")
         return answer
 
-    def mcp_reload(self, *, timeout: float = MCP_RELOAD_S) -> dict[str, Any]:
+    def mcp_reload(self, *, timeout_s: float = MCP_RELOAD_S) -> dict[str, Any]:
         """A Codex host's `mcp.reload`: settle the MCP servers its launch rendered,
         reloading them once when one reads `failed`. Answers `{reloaded, servers}`,
         `servers` mapping each rendered server to the status it last read (null: never
         read, or unavailable). The host answers within its settle deadline, or twice
         that when the call waits behind a settle already past its first read, so the
-        default `timeout` is above both. Raises `TurnsError`: the `capability` error on a
-        session without `mcp-token`, or no answer within `timeout`."""
-        answer = self._read(self._short, "mcp.reload", timeout, {})
+        default `timeout_s` is above both. Raises `TurnsError`: the `capability` error on a
+        session without `mcp-token`, or no answer within `timeout_s`."""
+        answer = self._read(self._short, "mcp.reload", timeout_s, {})
         if (not isinstance(answer, dict) or not isinstance(answer.get("reloaded"), bool)
                 or not isinstance(answer.get("servers"), dict)):
             raise TurnsError(f"the endpoint at {self.address} answered mcp.reload with "
@@ -518,9 +518,9 @@ class Session:
     # -- commands -----------------------------------------------------------------------
 
     def command(self, name: str, *, if_turn_number: int | None = None,
-                timeout: float | None = None,
+                timeout_s: float | None = None,
                 stop_shells: bool = False) -> Ran | Refused | Failed:
-        """Run `clear`, `exit` or `compact`; `timeout` bounds this call's wait for the
+        """Run `clear`, `exit` or `compact`; `timeout_s` bounds this call's wait for the
         harness to settle it (None: 30 s for `clear` and `exit`, 330 s for `compact`,
         plus 10 s with `stop_shells`). A call that stops waiting first reads `Failed`,
         and the command may still run.
@@ -537,10 +537,10 @@ class Session:
             raise ValueError("a command is one of " + ", ".join(COMMANDS))
         if stop_shells and name == "exit":
             raise ValueError("stop_shells is valid with clear and compact only")
-        if timeout is None:
-            timeout = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
+        if timeout_s is None:
+            timeout_s = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
         params: dict[str, Any] = {"name": name, "if_turn_number": if_turn_number,
-                                  "timeout_ms": _ms(timeout)}
+                                  "timeout_ms": _ms(timeout_s)}
         if stop_shells:
             params["stop_shells"] = True
         proc_id, watched = None, False
@@ -554,7 +554,7 @@ class Session:
             log.info("command %s was never written: %s", name, exc.error)
             return Refused(REFUSED_GONE)
         try:
-            answer = _call(client, "command", params, timeout + READ_S)
+            answer = _call(client, "command", params, timeout_s + READ_S)
         except _Unanswered as exc:
             log.info("command %s was written and not answered: %s; it may still run",
                      name, exc.cause)
@@ -668,15 +668,15 @@ class Delivery:
     def __repr__(self) -> str:
         return f"Delivery({self.id!r}, ref={self.ref!r})"
 
-    def wait_started(self, timeout: float | None) -> Started | Refused | Lost:
+    def wait_started(self, timeout_s: float | None) -> Started | Refused | Lost:
         """The delivery's start: `Started`, or why it did not start. Raises
-        `TimeoutError` when `timeout` passes first; a later wait asks again."""
-        return self._wait("started", timeout)
+        `TimeoutError` when `timeout_s` passes first; a later wait asks again."""
+        return self._wait("started", timeout_s)
 
-    def wait_ended(self, timeout: float | None) -> Ended | Refused | Lost:
+    def wait_ended(self, timeout_s: float | None) -> Ended | Refused | Lost:
         """The end of the turn that took the delivery: `Ended`, or why there is none.
-        Raises `TimeoutError` when `timeout` passes first."""
-        return self._wait("ended", timeout)
+        Raises `TimeoutError` when `timeout_s` passes first."""
+        return self._wait("ended", timeout_s)
 
     def _wait(self, until: str, timeout: float | None):
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -874,7 +874,7 @@ class StopHandler:
             reason = None
         try:
             answer = self._client.call("stops.answer", {"ask": ask, "reason": reason},
-                                       timeout=READ_S)
+                                       timeout_s=READ_S)
         except ipc.RpcError as exc:
             log.warning("the endpoint refused the answer to Stop %s: %s", ask, exc)
             return
@@ -900,14 +900,14 @@ def _candidates() -> list[tuple[Path, dict[str, Any], int]]:
     version. A directory with no readable `hello.json` is an endpoint starting."""
     root = runtime_dir()
     found = []
-    for directory in protocol.v2_directories(root):
-        hello = protocol.read_hello(directory)
+    for endpoint_dir in protocol.v2_endpoint_dirs(root):
+        hello = protocol.read_hello(endpoint_dir)
         if hello is not None:
-            found.append((directory, hello, 2))
-    for directory in protocol.v1_directories(root):
-        hello = protocol.read_hello(directory)
+            found.append((endpoint_dir, hello, 2))
+    for endpoint_dir in protocol.v1_endpoint_dirs(root):
+        hello = protocol.read_hello(endpoint_dir)
         if hello is not None:
-            found.append((directory, hello, 1))
+            found.append((endpoint_dir, hello, 1))
 
     def started(item) -> float:
         value = item[1].get("started")
@@ -917,7 +917,7 @@ def _candidates() -> list[tuple[Path, dict[str, Any], int]]:
     return found
 
 
-def _probe(directory: Path, hello: dict[str, Any]) -> Session | None:
+def _probe(endpoint_dir: Path, hello: dict[str, Any]) -> Session | None:
     """The version 2 endpoint in `directory` as a `Session`, when a connection to its
     address passes the hello and `session`. When the connect fails, the directory is
     cleared on `moxi.ipc.sweep`'s word. Raises `VersionError` when the endpoint refuses
@@ -931,12 +931,12 @@ def _probe(directory: Path, hello: dict[str, Any]) -> Session | None:
         if isinstance(exc.error, VersionError):
             raise exc.error from None
         if exc.connect:
-            verdict = protocol.sweep(directory, address)
+            verdict = protocol.sweep(endpoint_dir, address)
             if verdict != protocol.SWEPT_LIVE:
-                log.info("swept the dead endpoint directory %s", directory)
+                log.info("swept the dead endpoint directory %s", endpoint_dir)
         return None
     client.close()
-    session = Session(address, info, directory=directory)
+    session = Session(address, info, endpoint_dir=endpoint_dir)
     session._capabilities = frozenset(agreed.capabilities)
     return session
 
@@ -946,11 +946,11 @@ def _names(info: dict[str, Any], session_id: str) -> bool:
             or session_id in (info.get("earlier") or ()))
 
 
-def _probe_listed(directory: Path, hello: dict[str, Any]) -> Session | None:
+def _probe_listed(endpoint_dir: Path, hello: dict[str, Any]) -> Session | None:
     """`_probe`, with an endpoint that refuses this library's versions logged and left
     out."""
     try:
-        return _probe(directory, hello)
+        return _probe(endpoint_dir, hello)
     except VersionError as exc:
         log.info("%s", exc)
         return None
@@ -974,7 +974,7 @@ def sessions() -> list[Session]:
     raises here once all have ended, the newest endpoint's first, and the sessions found
     are closed. An interrupt leaves the probes under way to end within their bounds,
     closing what they find."""
-    wanted = [(directory, hello) for directory, hello, version in _candidates()
+    wanted = [(endpoint_dir, hello) for endpoint_dir, hello, version in _candidates()
               if version == 2]
     if not wanted:
         return []
@@ -982,8 +982,8 @@ def sessions() -> list[Session]:
         max_workers=min(_PROBE_WORKERS, len(wanted)), thread_name_prefix="turns-probe")
     futures: list[concurrent.futures.Future] = []
     try:
-        for directory, hello in wanted:
-            futures.append(pool.submit(_probe_listed, directory, hello))
+        for endpoint_dir, hello in wanted:
+            futures.append(pool.submit(_probe_listed, endpoint_dir, hello))
         concurrent.futures.wait(futures)
     except BaseException:
         # Interrupted: drop the probes not yet begun, and close each session found,
@@ -1036,15 +1036,15 @@ def find(*, session_id: str | None = None, pid: int | None = None,
         order = []
         for ancestor in (proc or DEFAULT_PROC).ancestry(pid):
             order.extend(by_pid.get(ancestor, ()))
-    for directory, hello, version in order:
+    for endpoint_dir, hello, version in order:
         if version == 1:
-            answer = protocol.v1_hello(directory)
+            answer = protocol.v1_hello(endpoint_dir)
             if answer is None:
                 continue
             if session_id is not None and not _names(answer, session_id):
                 continue
-            raise _v1_error(directory)
-        session = _probe(directory, hello)
+            raise _v1_error(endpoint_dir)
+        session = _probe(endpoint_dir, hello)
         if session is None:
             continue
         if session_id is not None and not _names(session._info, session_id):
@@ -1055,15 +1055,15 @@ def find(*, session_id: str | None = None, pid: int | None = None,
 
 
 def wait_ready(*, session_id: str | None = None, pid: int | None = None,
-               timeout: float, proc: ProcView | None = None) -> Session:
+               timeout_s: float, proc: ProcView | None = None) -> Session:
     """The `Session` once an endpoint names the session and its `facts().ready` is set:
     the session started, resumed, was cleared or compacted. Polls `find` every 100 ms,
     backing off to 1 s, and reads `ready` from the facts, so a Ready raised before this
-    looked is not missed. Raises `TimeoutError` when `timeout` passes first, and
+    looked is not missed. Raises `TimeoutError` when `timeout_s` passes first, and
     `VersionError` as `find` does."""
     if (session_id is None) == (pid is None):
         raise TypeError("wait_ready() takes exactly one of session_id= or pid=")
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout_s
     delay = 0.1
     while True:
         session = find(session_id=session_id, pid=pid, proc=proc)
@@ -1077,7 +1077,7 @@ def wait_ready(*, session_id: str | None = None, pid: int | None = None,
         left = deadline - time.monotonic()
         if left <= 0:
             who = f"session {session_id}" if session_id is not None else f"pid {pid}"
-            raise TimeoutError(f"no ready endpoint for {who} in {timeout} s")
+            raise TimeoutError(f"no ready endpoint for {who} in {timeout_s} s")
         time.sleep(min(delay, left))
         delay = min(delay * 2, 1.0)
 

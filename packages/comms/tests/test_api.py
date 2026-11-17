@@ -17,7 +17,7 @@ import inspect
 import re
 
 import pytest
-from conftest import wait_for_queue, write_config
+from conftest import wait_for_queue, wait_until, write_config
 
 import bind_kit
 from moxi import modules
@@ -89,12 +89,16 @@ def test_interface_2_holds_its_names():
     assert set(api.__all__) == {
         "INTERFACE", "send", "check", "Sender", "SendResult", "Recipient", "Refusal",
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
-        "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
+        "session", "roster", "owner", "Roster", "Agent", "Standing", "Waiting", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
-        "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME",
-        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT"}
+        "session_of", "caller_identity", "roster_rows", "RosterRow", "CacheFact",
+        "CODEX_RESUME",
+        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
+        "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
+        "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
+        "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -107,12 +111,12 @@ def test_the_send_and_check_signatures():
     for fn in (api.send, api.check):
         params = inspect.signature(fn).parameters
         assert list(params) == ["sender", "to", "text", "posture", "reply_to", "new",
-                                "audience", "held", "cap", "no_cap", "deadline",
+                                "audience", "held", "cap", "no_cap", "timeout_s",
                                 "standing", "new_name", "interrupt", "expires"], fn
         assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY
                    for n in list(params)[3:])
         assert params["posture"].default is inspect.Parameter.empty
-        assert params["deadline"].default == 30.0
+        assert params["timeout_s"].default == 30.0
         assert [params[n].default for n in ("reply_to", "new", "audience", "held", "cap",
                                             "no_cap", "standing", "new_name")] == [
             None, False, None, False, None, False, False, False]
@@ -144,11 +148,11 @@ def test_waiting_has_one_meaning_bound_with_no_endpoint():
 
 
 def test_the_reads_and_names_are_pinned():
-    for name, params in {"attributed": ["message_id", "deadline"],
-                         "session": ["identity", "deadline"],
-                         "roster": ["deadline"], "owner": ["session_id", "deadline"],
-                         "roster_rows": ["deadline"],
-                         "identity_state": ["name", "scope", "deadline"],
+    for name, params in {"attributed": ["message_id", "timeout_s"],
+                         "session": ["identity", "timeout_s"],
+                         "roster": ["timeout_s"], "owner": ["session_id", "timeout_s"],
+                         "roster_rows": ["timeout_s", "with_roster"],
+                         "identity_state": ["name", "scope", "timeout_s"],
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
@@ -160,14 +164,18 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Holder.__dataclass_fields__) == ["adapter", "session_id"]
     assert api.IDENTITY_STATES == ("free", "held", "standing", "reserved", "retired",
                                    "offline")
-    assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
+    assert list(api.Roster.__dataclass_fields__) == ["bound", "standing", "waiting"]
+    assert list(api.Waiting.__dataclass_fields__) == ["qualified", "count", "oldest"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
                                                     "directors", "awaiting"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting"]
-    assert inspect.signature(api.roster_rows).parameters["deadline"].default == \
-        api.READ_DEADLINE
+        "directors", "session_id", "bound_at", "awaiting", "cache"]
+    assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
+    params = inspect.signature(api.roster_rows).parameters
+    assert params["timeout_s"].default == api.READ_DEADLINE
+    assert params["with_roster"].default is False
+    assert params["with_roster"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_api_tokens_holds_the_store_calls():
@@ -218,10 +226,10 @@ def test_a_bad_argument_raises_as_the_parser_would():
 
 def test_the_sender_forms_name_the_process_the_verb_would_see(tmp_path):
     base = {"HOME": "/h", "MOXI_COMMS_CLAIM_SOCKET": "/old"}
-    assert api.Sender.session().environ(base) == base
-    assert api.Sender.socket(tmp_path / "s.sock").environ(base)[
+    assert api.Sender.session().sender_env(base) == base
+    assert api.Sender.socket(tmp_path / "s.sock").sender_env(base)[
         "MOXI_COMMS_CLAIM_SOCKET"] == str(tmp_path / "s.sock")
-    op = api.Sender.operator("900001").environ(base)
+    op = api.Sender.operator("900001").sender_env(base)
     assert op["MOXI_COMMS_OPERATOR"] == "900001" and "MOXI_COMMS_CLAIM_SOCKET" not in op
 
     class Server:
@@ -256,11 +264,11 @@ def test_the_deadline_reaches_the_daemon_call_and_the_records_busy_timeout(env):
 # --------------------------------------------------------------------------- the rig
 
 def _sender(rig, name, scope=None):
-    environ = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name}
+    env = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name}
     if scope:
-        environ["MOXI_COMMS_SCOPE"] = scope
+        env["MOXI_COMMS_SCOPE"] = scope
     from conftest import _stamp_of
-    return _stamp_of(environ)
+    return _stamp_of(env)
 
 
 def _ids_out(lines):
@@ -451,6 +459,42 @@ def test_roster_and_owner_carry_declared_directors(rig):
     assert api.owner("no-such-session").identity is None
     with pytest.raises(api.DaemonError):
         api.owner("")
+
+
+def test_roster_carries_the_mail_waiting_for_each_name_from_the_daemons_answer(rig):
+    """`roster().waiting` is the daemon's `agents` answer's `waiting`, one `Waiting` per
+    name with mail queued: a name nobody has started yet counts here."""
+    rig.shim(name="planner", scope="proj-a")
+    sent_at = rig.clock()
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "first"], name="planner", scope="proj-a")
+    assert code == 0, out
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "second"], name="planner", scope="proj-a")
+    assert code == 0, out
+    assert wait_until(lambda: [w.count for w in api.roster().waiting] == [2])
+    got = api.roster()
+    (waiting,) = got.waiting
+    assert (waiting.qualified, waiting.count) == ("curator@proj-a", 2)
+    assert isinstance(waiting.oldest, float) and abs(waiting.oldest - sent_at) <= 5
+    assert "curator@proj-a" not in {a.qualified for a in got.bound}
+
+
+def test_roster_keeps_each_waiting_entry_as_the_daemon_gives_it(monkeypatch):
+    class Client:
+        def call(self, method):
+            assert method == "agents"
+            return {"bindings": [], "standing": [], "pending": {},
+                    "waiting": {"coder": {"count": 1, "oldest": 1700000000.5},
+                                "main@proj-a": {"count": 3, "oldest": 1690000000.0}}}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(api, "_daemon", lambda deadline: Client())
+    assert api.roster().waiting == (api.Waiting("coder", 1, 1700000000.5),
+                                    api.Waiting("main@proj-a", 3, 1690000000.0))
+    assert api.Roster().waiting == ()
 
 
 def _store(sql: str, *params) -> None:

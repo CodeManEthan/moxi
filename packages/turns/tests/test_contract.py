@@ -23,7 +23,7 @@ import pytest
 from fake_harness import FakeHarness
 from moxi import ipc
 from moxi_dev.contract import check
-from moxi_turns import results as R
+from moxi_turns import results as results
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (ROOT / "contracts" / "socket-protocol.md").read_text(encoding="utf-8")
@@ -76,11 +76,11 @@ DELIVERY_VALUES = ("started", "refused", "lost", "ended")
 
 #: The fields of the values inside other values.
 NESTED = {
-    R.OpenTurn: ("turn_id", "opening", "command", "started_at"),
-    R.Agent: ("id", "kind", "state", "final", "description", "parent_id"),
-    R.Shells: ("stopped", "left", "complete"),
-    R.LeftShell: ("id", "why"),
-    R.Ready: ("source", "session_id", "at"),
+    results.OpenTurn: ("turn_id", "opening", "command", "started_at"),
+    results.Agent: ("id", "kind", "state", "final", "description", "parent_id"),
+    results.Shells: ("stopped", "left", "complete"),
+    results.LeftShell: ("id", "why"),
+    results.Ready: ("source", "session_id", "at"),
 }
 
 #: Each notification on a watch and its params.
@@ -149,39 +149,39 @@ SESSION_OPTIONAL = {"trouble"}
 
 #: One sample of every value, nested values filled in.
 SAMPLES = [
-    R.Facts("s", 3, True, R.OpenTurn("t", R.DeliveryRef("d1", "r1"), None, 1.5), 2, False,
-            2.5, True, R.Ready("startup", "s", 1.0)),
-    R.Facts("s", 0, False, None, None, True, 2.5),
-    R.Facts("s", 1, True, R.OpenTurn("t", None, "compact", 1.5), 0, False, 2.5),
-    R.Agents((R.Agent("a", "subagent", "running", False, "look", None),
-              R.Agent("b", "shell", "running", False),
-              R.Agent("c", "teammate", "done", True, None, "a")), True, 3.0),
-    R.Agents((), False, 3.0),
-    R.Started("t", "d1", "r1"),
-    R.Started("t", "d1"),
-    R.Refused("draft", "d1", "r1"),
-    R.Refused("rate"),
-    R.Lost("expired: no word", "d1", "r1"),
-    R.Ended("t", "answer", "d1", None),
-    R.Ran("s2"),
-    R.Ran(None, R.Shells(("b1",), (R.LeftShell("b2", "timeout"),
-                                    R.LeftShell(None, R.SHELL_UNLISTED)), False)),
-    R.Ran(None, R.Shells((), (), True)),
-    R.Failed("expired: no word"),
-    R.Passed(),
-    R.StopFacts("t", "s", True, ("shell",), 2),
-    R.StopFacts(),
+    results.Facts("s", 3, turn_open=True, turn=results.OpenTurn("t", results.DeliveryRef("d1", "r1"), None, 1.5), agents=2, draft=False,
+            at=2.5, stale=True, ready=results.Ready("startup", "s", 1.0)),
+    results.Facts("s", 0, turn_open=False, turn=None, agents=None, draft=True, at=2.5),
+    results.Facts("s", 1, turn_open=True, turn=results.OpenTurn("t", None, "compact", 1.5), agents=0, draft=False, at=2.5),
+    results.Agents((results.Agent("a", "subagent", "running", final=False, description="look", parent_id=None),
+              results.Agent("b", "shell", "running", final=False),
+              results.Agent("c", "teammate", "done", final=True, description=None, parent_id="a")), complete=True, at=3.0),
+    results.Agents((), complete=False, at=3.0),
+    results.Started("t", "d1", "r1"),
+    results.Started("t", "d1"),
+    results.Refused("draft", "d1", "r1"),
+    results.Refused("rate"),
+    results.Lost("expired: no word", "d1", "r1"),
+    results.Ended("t", "answer", "d1", None),
+    results.Ran("s2"),
+    results.Ran(None, results.Shells(("b1",), (results.LeftShell("b2", "timeout"),
+                                    results.LeftShell(None, results.SHELL_UNLISTED)), complete=False)),
+    results.Ran(None, results.Shells((), (), complete=True)),
+    results.Failed("expired: no word"),
+    results.Passed(),
+    results.StopFacts("t", "s", stop_hook_active=True, task_types=("shell",), crons=2),
+    results.StopFacts(),
 ]
 
 NOTE_SAMPLES = [
-    R.Ready("clear", "s2"),
-    R.TurnStarted("t", "s", 1, (R.DeliveryRef("d1", "r1", "opened"),)),
-    R.TurnStarted("t", "s", 2),
-    R.TurnStarted("t", "s", 3, (), "compact"),
-    R.TurnSteered("t", "s", R.DeliveryRef("d2", "r2")),
-    R.TurnEnded("t", "s", 1, "answer", (R.DeliveryRef("d1", "r1", "opened"),
-                                        R.DeliveryRef("d2", None, "steered"))),
-    R.Gone("the session ended"),
+    results.Ready("clear", "s2"),
+    results.TurnStarted("t", "s", 1, (results.DeliveryRef("d1", "r1", "opened"),)),
+    results.TurnStarted("t", "s", 2),
+    results.TurnStarted("t", "s", 3, (), "compact"),
+    results.TurnSteered("t", "s", results.DeliveryRef("d2", "r2")),
+    results.TurnEnded("t", "s", 1, "answer", (results.DeliveryRef("d1", "r1", "opened"),
+                                        results.DeliveryRef("d2", None, "steered"))),
+    results.Gone("the session ended"),
 ]
 
 
@@ -221,7 +221,7 @@ def test_the_table_and_the_values_agree():
     for value in SAMPLES:
         wire = value.to_wire()
         fields = set(VALUES[wire.pop("kind")])
-        if isinstance(value, R.Refused) and value.delivery is None:
+        if isinstance(value, results.Refused) and value.delivery is None:
             fields = {"reason"}
         assert set(wire) == fields, value
     assert {v.to_wire()["kind"] for v in SAMPLES} == set(VALUES)
@@ -229,11 +229,11 @@ def test_the_table_and_the_values_agree():
         assert tuple(f for f in cls.__dataclass_fields__) == fields, cls
     for note in NOTE_SAMPLES:
         assert set(note.to_params()) == set(NOTIFICATIONS[note.METHOD]), note
-    assert set(R.NOTIFICATIONS) == set(NOTIFICATIONS)
-    assert {code: name for code, name in ERRORS.items() if code > 0} == R.ERRORS
-    assert (R.ERROR_GONE, R.ERROR_CAPABILITY, R.ERROR_STOP_HANDLER_TAKEN) == (1001, 1002, 1003)
-    assert tuple(CAPABILITIES) == R.CAPABILITIES
-    assert {need for need, _ in METHODS.values() if need} <= set(R.CAPABILITIES)
+    assert set(results.NOTIFICATIONS) == set(NOTIFICATIONS)
+    assert {code: name for code, name in ERRORS.items() if code > 0} == results.ERRORS
+    assert (results.ERROR_GONE, results.ERROR_CAPABILITY, results.ERROR_STOP_HANDLER_TAKEN) == (1001, 1002, 1003)
+    assert tuple(CAPABILITIES) == results.CAPABILITIES
+    assert {need for need, _ in METHODS.values() if need} <= set(results.CAPABILITIES)
 
 
 def test_each_adapter_offers_its_column_of_the_capability_table():
@@ -269,29 +269,29 @@ def test_the_table_and_the_document_agree():
 def test_the_refusals_and_names_the_document_spells():
     delivery = DOC.split("A delivery's refusal `reason` is one of:\n", 1)[1].split("\n\n")[0]
     assert [_names(line)[0] for line in delivery.splitlines() if line.startswith("- ")] \
-        == list(R.DELIVERY_REFUSALS)
+        == list(results.DELIVERY_REFUSALS)
     command = DOC.split("A command's refusal `reason` is one of", 1)[1].split("\n\n")[0]
-    assert set(_names(command)) - {"compact", "stop_shells"} == set(R.COMMAND_REFUSALS)
+    assert set(_names(command)) - {"compact", "stop_shells"} == set(results.COMMAND_REFUSALS)
     assert "`gone` is not a refusal on the wire" in DOC
-    assert R.REFUSED_GONE not in R.DELIVERY_REFUSALS + R.COMMAND_REFUSALS
+    assert results.REFUSED_GONE not in results.DELIVERY_REFUSALS + results.COMMAND_REFUSALS
     outcomes = DOC.split("- `outcome` is one of", 1)[1].split("\n- ")[0]
-    assert tuple(_names(outcomes)) == R.OUTCOMES
+    assert tuple(_names(outcomes)) == results.OUTCOMES
     sources = DOC.split("- `source` is one of", 1)[1].split("\n\n")[0]
-    assert tuple(_names(sources)) == R.READY_SOURCES
+    assert tuple(_names(sources)) == results.READY_SOURCES
     command_names = DOC.split("Params: `name`,", 1)[1].split(";")[0]
-    assert tuple(_names(command_names)) == R.COMMANDS
-    for name in R.AGENT_KINDS + R.AGENT_STATES + R.DELIVERY_HOW:
+    assert tuple(_names(command_names)) == results.COMMANDS
+    for name in results.AGENT_KINDS + results.AGENT_STATES + results.DELIVERY_HOW:
         assert f"`{name}`" in DOC, name
-    for prefix in (R.LOST_UNTIED, R.LOST_EXPIRED, R.LOST_UNKNOWN, R.LOST_UNANSWERED,
-                   R.FAILED_TIMEOUT, R.FAILED_UNANSWERED):
+    for prefix in (results.LOST_UNTIED, results.LOST_EXPIRED, results.LOST_UNKNOWN, results.LOST_UNANSWERED,
+                   results.FAILED_TIMEOUT, results.FAILED_UNANSWERED):
         assert f"`{prefix}`" in DOC, prefix
 
 
 def test_every_value_round_trips_through_json():
     for value in SAMPLES:
-        assert R.from_wire(_wire(value.to_wire())) == value, value
+        assert results.from_wire(_wire(value.to_wire())) == value, value
     for note in NOTE_SAMPLES:
-        assert R.from_notification(note.METHOD, _wire(note.to_params())) == note, note
+        assert results.from_notification(note.METHOD, _wire(note.to_params())) == note, note
 
 
 def test_every_delivery_value_names_its_delivery_and_echoes_its_ref():
@@ -299,11 +299,11 @@ def test_every_delivery_value_names_its_delivery_and_echoes_its_ref():
         wire = value.to_wire()
         if wire["kind"] in DELIVERY_VALUES and getattr(value, "delivery", None):
             assert wire["delivery"] == "d1" and "ref" in wire, value
-    assert R.Started("t", "d1").to_wire()["ref"] is None
+    assert results.Started("t", "d1").to_wire()["ref"] is None
     for note in NOTE_SAMPLES:
         params = note.to_params()
         for entry in params.get("deliveries", ()):
-            assert set(entry) == {"id", "ref", "how"} and entry["how"] in R.DELIVERY_HOW
+            assert set(entry) == {"id", "ref", "how"} and entry["how"] in results.DELIVERY_HOW
         if "delivery" in params:
             assert set(params["delivery"]) == {"id", "ref"}
 
@@ -313,13 +313,13 @@ def test_the_nested_shapes_on_the_wire():
     assert facts["turn"] == {"turn_id": "t", "opening": {"id": "d1", "ref": "r1"},
                              "command": None, "started_at": 1.5}
     assert facts["ready"] == {"source": "startup", "session_id": "s", "at": 1.0}
-    assert R.Ready("startup", "s", 1.0).to_params() == {"source": "startup",
+    assert results.Ready("startup", "s", 1.0).to_params() == {"source": "startup",
                                                         "session_id": "s"}
     assert SAMPLES[12].to_wire()["shells"] == {
         "stopped": ["b1"], "left": [{"id": "b2", "why": "timeout"},
                                     {"id": None, "why": "unlisted"}], "complete": False}
-    assert R.Ran("s2").to_wire() == {"kind": "ran", "new_session_id": "s2", "shells": None}
-    assert R.Refused("rate").to_wire() == {"kind": "refused", "reason": "rate"}
+    assert results.Ran("s2").to_wire() == {"kind": "ran", "new_session_id": "s2", "shells": None}
+    assert results.Refused("rate").to_wire() == {"kind": "refused", "reason": "rate"}
 
 
 def test_malformed_values_and_notifications_are_refused():
@@ -328,41 +328,41 @@ def test_malformed_values_and_notifications_are_refused():
                 {"kind": "ran", "shells": "all"},
                 {"kind": "agents", "entries": [{"id": "a"}], "complete": True, "at": 1}):
         with pytest.raises(ValueError):
-            R.from_wire(raw)
+            results.from_wire(raw)
     for method, params in (("turn.begun", {}), ("turn.started", {"turn_id": "t"}),
                            ("turn.steered", {"turn_id": "t", "session_id": "s",
                                              "delivery": "d1"}),
                            ("session.gone", None)):
         with pytest.raises(ValueError):
-            R.from_notification(method, params)
+            results.from_notification(method, params)
 
 
 def test_a_ref_is_at_most_256_bytes_of_utf8():
-    assert R.check_ref(None) is None
-    assert R.check_ref("x" * 256) == "x" * 256
-    assert R.check_ref("é" * 128) == "é" * 128
+    assert results.check_ref(None) is None
+    assert results.check_ref("x" * 256) == "x" * 256
+    assert results.check_ref("é" * 128) == "é" * 128
     for bad in ("x" * 257, "é" * 129, 5, b"x", ["x"], "\ud800"):
         with pytest.raises(ValueError):
-            R.check_ref(bad)
+            results.check_ref(bad)
 
 
 def test_the_busy_count_reads_the_agents_list():
-    agents = R.Agents((R.Agent("a", "subagent", "running", False),
-                       R.Agent("b", "subagent", "waiting", None),
-                       R.Agent("c", "subagent", "running", True),
-                       R.Agent("d", "subagent", "idle", False),
-                       R.Agent("e", "shell", "running", False),
-                       R.Agent("f", "teammate", "pending", False)), True, 1.0)
+    agents = results.Agents((results.Agent("a", "subagent", "running", final=False),
+                       results.Agent("b", "subagent", "waiting", None),
+                       results.Agent("c", "subagent", "running", final=True),
+                       results.Agent("d", "subagent", "idle", final=False),
+                       results.Agent("e", "shell", "running", final=False),
+                       results.Agent("f", "teammate", "pending", final=False)), complete=True, at=1.0)
     assert agents.busy() == 4
-    assert agents.busy(shells=False) == 3
-    assert R.Agents(agents.entries, False, 1.0).busy() is None
-    assert R.Agents((), True, 1.0).busy() == 0
+    assert agents.busy(include_shells=False) == 3
+    assert results.Agents(agents.entries, complete=False, at=1.0).busy() is None
+    assert results.Agents((), complete=True, at=1.0).busy() == 0
 
 
 def test_lost_tells_the_endpoints_own_reasons_apart():
-    assert R.Lost("untied: no turn").untied and R.Lost("expired: no word").untied
+    assert results.Lost("untied: no turn").untied and results.Lost("expired: no word").untied
     for reason in ("unknown delivery: not made here", "unanswered", "the endpoint ended"):
-        assert not R.Lost(reason).untied
+        assert not results.Lost(reason).untied
 
 
 # -- the table's wire rows, against an endpoint ---------------------------------------
@@ -376,10 +376,10 @@ def connect(make_endpoint):
     a client connected to it, past `rpc.hello` when `hello` is true."""
     clients = []
 
-    def make(can=R.CAPABILITIES, *, hello=True, ep=None):
+    def make(can=results.CAPABILITIES, *, hello=True, ep=None):
         if ep is None:
             ep, _ = make_endpoint(FakeHarness(can=can))
-        client = ipc.connect(ipc.address("turns", ep.dir.name), timeout=5)
+        client = ipc.connect(ipc.address("turns", ep.dir.name), timeout_s=5)
         clients.append(client)
         if hello:
             client.hello((2, 2))
@@ -392,7 +392,7 @@ def connect(make_endpoint):
 
 def _code(client, method, params=None) -> ipc.RpcError:
     with pytest.raises(ipc.RpcError) as caught:
-        client.call(method, params, timeout=5)
+        client.call(method, params, timeout_s=5)
     return caught.value
 
 
@@ -466,7 +466,7 @@ def test_the_hello_rows(connect):
     assert _code(client, "session", {}).code == -32002
     client, _ = connect(hello=False, ep=ep)
     agreed = client.hello((1, 2))
-    assert agreed.version == 2 and set(agreed.capabilities) == set(R.CAPABILITIES)
+    assert agreed.version == 2 and set(agreed.capabilities) == set(results.CAPABILITIES)
 
 
 @_POSIX
@@ -495,54 +495,54 @@ def test_invalid_params(connect, method, params):
 @pytest.mark.parametrize("method, params, capability", CAPABILITY_ROWS,
                          ids=[f"{c}-{i}" for i, (_, _, c) in enumerate(CAPABILITY_ROWS)])
 def test_a_capability_the_session_lacks(connect, method, params, capability):
-    can = [name for name in R.CAPABILITIES if name != capability]
+    can = [name for name in results.CAPABILITIES if name != capability]
     client, _ = connect(can=can)
     error = _code(client, method, params)
-    assert (error.code, error.data) == (R.ERROR_CAPABILITY, {"capability": capability})
+    assert (error.code, error.data) == (results.ERROR_CAPABILITY, {"capability": capability})
 
 
 @_POSIX
 def test_the_result_shapes_of_the_reads(connect):
     client, ep = connect()
-    session = client.call("session", {}, timeout=5)
+    session = client.call("session", {}, timeout_s=5)
     want = METHODS["session"][1]
     assert want <= set(session) <= want | SESSION_OPTIONAL
     assert session["harness"] == ep.harness.name and session["nonce"] == ep.nonce
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
-    assert isinstance(facts, R.Facts) and facts.turn_number == 0 and facts.turn is None
-    assert set(client.call("facts", {}, timeout=5)) == {"kind", *VALUES["facts"]}
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
+    assert isinstance(facts, results.Facts) and facts.turn_number == 0 and facts.turn is None
+    assert set(client.call("facts", {}, timeout_s=5)) == {"kind", *VALUES["facts"]}
     watch, _ = connect(ep=ep)
-    first = watch.call("watch", {}, timeout=5)
+    first = watch.call("watch", {}, timeout_s=5)
     assert set(first) == METHODS["watch"][1]
-    assert isinstance(R.from_wire(first["facts"]), R.Facts)
+    assert isinstance(results.from_wire(first["facts"]), results.Facts)
 
 
 @_POSIX
-def test_environ_answers_the_names_asked_from_the_endpoints_environment(
+def test_env_answers_the_names_asked_from_the_endpoints_env(
         connect, make_endpoint):
     # A session's environment is a whole one: it places the endpoint's own folders too.
-    ep, _ = make_endpoint(FakeHarness(can=R.CAPABILITIES),
+    ep, _ = make_endpoint(FakeHarness(can=results.CAPABILITIES),
                           env={**os.environ, "MOXI_T_SET": "one", "MOXI_T_EMPTY": "",
                                "PATH": "/bin"})
     client, _ = connect(ep=ep)
     answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},
-                         timeout=5)
+                         timeout_s=5)
     assert set(answer) == METHODS["environ"][1]
     assert answer["values"] == {"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "MOXI_T_NO": None}
-    assert client.call("environ", {"names": []}, timeout=5) == {"values": {}}
-    names = [f"MOXI_T_{n}" for n in range(R.ENVIRON_MAX_NAMES)]
-    assert client.call("environ", {"names": names}, timeout=5)["values"] == \
+    assert client.call("environ", {"names": []}, timeout_s=5) == {"values": {}}
+    names = [f"MOXI_T_{n}" for n in range(results.ENV_MAX_NAMES)]
+    assert client.call("environ", {"names": names}, timeout_s=5)["values"] == \
         dict.fromkeys(names)
-    assert R.ENVIRON_MAX_NAMES == 64
+    assert results.ENV_MAX_NAMES == 64
 
 
 @_POSIX
 def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
     client, _ = connect()
-    answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
     assert {"delivery", "ref"} <= set(answer) <= {"delivery", "ref", "result"}
     assert answer["ref"] == "r1" and isinstance(answer["delivery"], str)
-    plain = client.call("deliver", {"text": "y"}, timeout=5)
+    plain = client.call("deliver", {"text": "y"}, timeout_s=5)
     assert plain["ref"] is None
 
 
@@ -550,19 +550,19 @@ def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
 def test_a_wait_for_an_unknown_delivery(connect):
     client, _ = connect()
     by_id = client.call("wait", {"delivery": "nonesuch", "until": "started",
-                                 "timeout_ms": 0}, timeout=5)
-    lost = R.from_wire(by_id["result"])
-    assert isinstance(lost, R.Lost) and lost.reason.startswith(R.LOST_UNKNOWN)
+                                 "timeout_ms": 0}, timeout_s=5)
+    lost = results.from_wire(by_id["result"])
+    assert isinstance(lost, results.Lost) and lost.reason.startswith(results.LOST_UNKNOWN)
     by_ref = client.call("wait", {"ref": "nonesuch", "until": "started", "timeout_ms": 0},
-                         timeout=5)
+                         timeout_s=5)
     assert by_ref["delivery"] is None
-    lost = R.from_wire(by_ref["result"])
-    assert isinstance(lost, R.Lost) and lost.reason.startswith(R.LOST_UNKNOWN)
+    lost = results.from_wire(by_ref["result"])
+    assert isinstance(lost, results.Lost) and lost.reason.startswith(results.LOST_UNKNOWN)
 
 
 @_POSIX
 def test_one_stop_handler_at_a_time(connect):
     first, ep = connect()
-    assert first.call("stops.handle", {}, timeout=5) == {}
+    assert first.call("stops.handle", {}, timeout_s=5) == {}
     second, _ = connect(ep=ep)
-    assert _code(second, "stops.handle", {}).code == R.ERROR_STOP_HANDLER_TAKEN
+    assert _code(second, "stops.handle", {}).code == results.ERROR_STOP_HANDLER_TAKEN

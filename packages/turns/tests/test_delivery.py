@@ -14,7 +14,7 @@ import pytest
 
 from fake_harness import FakeHarness
 from moxi import ipc
-from moxi_turns import results as R
+from moxi_turns import results as results
 from moxi_turns.harness import Live
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
@@ -26,7 +26,7 @@ def connect():
     clients = []
 
     def make(ep):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         client.hello((2, 2))
         return client
@@ -80,7 +80,7 @@ class Gated(FakeHarness):
         self._gate("command", request.id)
         super().command(request)
 
-    def expired(self, delivery_id):
+    def on_expired(self, delivery_id):
         self.expired_ids.append(delivery_id)
 
 
@@ -104,17 +104,17 @@ class SlowLive(FakeHarness):
 def test_only_if_idle_refuses_from_the_ledger_in_the_answer(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    first = client.call("deliver", {"text": "a", "only_if_idle": True}, timeout=5)
+    first = client.call("deliver", {"text": "a", "only_if_idle": True}, timeout_s=5)
     assert "result" not in first                       # in flight now
     busy = client.call("deliver", {"text": "b", "only_if_idle": True, "ref": "r"},
-                       timeout=5)
-    assert R.from_wire(busy["result"]) == R.Refused("busy-turn", busy["delivery"], "r")
+                       timeout_s=5)
+    assert results.from_wire(busy["result"]) == results.Refused("busy-turn", busy["delivery"], "r")
     fake.enter(fake.handed(1)[0])
     fake.end_turn()
     stale = client.call("deliver", {"text": "c", "only_if_idle": True,
-                                    "if_turn_number": 0}, timeout=5)
-    assert R.from_wire(stale["result"]).reason == "stale-turn"
-    plain = client.call("deliver", {"text": "d", "if_turn_number": None}, timeout=5)
+                                    "if_turn_number": 0}, timeout_s=5)
+    assert results.from_wire(stale["result"]).reason == "stale-turn"
+    plain = client.call("deliver", {"text": "d", "if_turn_number": None}, timeout_s=5)
     assert "result" not in plain
 
 
@@ -124,23 +124,23 @@ def test_a_flagged_deliver_never_waits_on_a_slow_live_read(make_endpoint, connec
     fake.draft = True
     answer, took = timed(lambda: client.call(
         "deliver", {"text": "x", "only_if_idle": True, "refuse_draft": True,
-                    "refuse_agents": True}, timeout=5))
+                    "refuse_agents": True}, timeout_s=5))
     assert took < 0.5 and "result" not in answer
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    assert R.from_wire(got["result"]).reason == "draft"
+                               "timeout_ms": 5000}, timeout_s=10)
+    assert results.from_wire(got["result"]).reason == "draft"
     fake.draft, fake.live_agents = False, 1
     answer = client.call("deliver", {"text": "x", "only_if_idle": True,
-                                     "refuse_agents": True}, timeout=5)
+                                     "refuse_agents": True}, timeout_s=5)
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    assert R.from_wire(got["result"]).reason == "busy-agents"
+                               "timeout_ms": 5000}, timeout_s=10)
+    assert results.from_wire(got["result"]).reason == "busy-agents"
     # facts answers within the live bound, its live part unreadable, and joins the read
     # still out rather than starting another.
-    facts, took = timed(lambda: R.from_wire(client.call("facts", {}, timeout=5)))
+    facts, took = timed(lambda: results.from_wire(client.call("facts", {}, timeout_s=5)))
     assert took < 2.0 and facts.draft is True and facts.agents is None
     reads = fake.reads
-    timed(lambda: client.call("facts", {}, timeout=5))
+    timed(lambda: client.call("facts", {}, timeout_s=5))
     assert fake.reads == reads
 
 
@@ -155,7 +155,7 @@ def test_an_adapters_own_word_reads_unsupported(make_endpoint):
     ep2, fake = make_endpoint(FakeHarness(auto=False), session_id="s-2")
     d = ep2.deliver("y")
     until(lambda: fake.submitted)
-    ep2.refused(d.id, "gone")
+    ep2.on_refused(d.id, "gone")
     assert ep2.wait(d.id, "started", 5).reason == "unsupported"
 
 
@@ -164,19 +164,19 @@ def test_an_adapters_own_word_reads_unsupported(make_endpoint):
 def test_while_a_hand_off_holds_the_worker_every_short_call_answers(make_endpoint, connect):
     ep, fake = make_endpoint(Gated(hold={"submit"}))
     client = connect(ep)
-    held = client.call("deliver", {"text": "a", "ref": "r1"}, timeout=5)
+    held = client.call("deliver", {"text": "a", "ref": "r1"}, timeout_s=5)
     assert until(lambda: fake.order)                  # the worker is in the submit now
     for method, params in (("session", {}), ("deliver", {"text": "b"}),
                            ("steer", {"text": "c"}),
                            ("wait", {"ref": "r1", "until": "started", "timeout_ms": 0})):
-        _, took = timed(lambda: client.call(method, params, timeout=5))
+        _, took = timed(lambda: client.call(method, params, timeout_s=5))
         assert took < 0.5, method
-    _, took = timed(lambda: client.call("facts", {}, timeout=5))
+    _, took = timed(lambda: client.call("facts", {}, timeout_s=5))
     assert took < 1.0
     fake.release.set()
     got = client.call("wait", {"delivery": held["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    assert R.from_wire(got["result"]).turn_id == "t1"
+                               "timeout_ms": 5000}, timeout_s=10)
+    assert results.from_wire(got["result"]).turn_id == "t1"
 
 
 @pytest.mark.parametrize("after", ["deliver", "command"])
@@ -200,7 +200,7 @@ def test_hand_offs_reach_the_harness_in_the_order_recorded(make_endpoint, after)
     assert fake.order[1][0] == ("submit" if after == "deliver" else "command")
     if after == "command":
         later.join(10)
-        assert isinstance(result[0], R.Ran)
+        assert isinstance(result[0], results.Ran)
 
 
 def test_a_stalled_worker_settles_everything_queued_and_hands_none_of_it_on(
@@ -211,19 +211,19 @@ def test_a_stalled_worker_settles_everything_queued_and_hands_none_of_it_on(
     stuck = ep.deliver("stuck")
     queued = ep.deliver("behind it")
     assert until(lambda: fake.order)
-    assert isinstance(ep.wait(stuck.id, "started", 5), R.Lost)
+    assert isinstance(ep.wait(stuck.id, "started", 5), results.Lost)
     assert ep.wait(queued.id, "started", 5).reason.startswith("expired")
     fake.start_turn()                                  # the person's turn: a steer goes in
     steer = ep.steer("late")
     assert ep.wait(steer.id, "started", 5).reason.startswith("expired")
     fake.end_turn()
     command = ep.command("clear", timeout=5)
-    assert isinstance(command, R.Failed) and command.reason.startswith("expired")
+    assert isinstance(command, results.Failed) and command.reason.startswith("expired")
     fake.release.set()
     assert until(lambda: steer.id in fake.expired_ids)  # the skipped steer is let go
     time.sleep(0.2)
     assert [kind for kind, _ in fake.order] == ["submit"]   # only the stuck one ran
-    ep.steered(steer.id)                               # a late word changes nothing
+    ep.on_steered(steer.id)                               # a late word changes nothing
     assert ep.wait(steer.id, "ended", 0).reason.startswith("expired")
 
 
@@ -232,29 +232,29 @@ def test_a_stalled_worker_settles_everything_queued_and_hands_none_of_it_on(
 def test_a_steer_starts_at_the_harnesss_word_and_its_turn_names_it(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto_steer=False))
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     fake.start_turn()
     client = connect(ep)
-    answer = client.call("steer", {"text": "also", "ref": "s1"}, timeout=5)
+    answer = client.call("steer", {"text": "also", "ref": "s1"}, timeout_s=5)
     assert "result" not in answer
     assert until(lambda: fake.appended)
     pending = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                                   "timeout_ms": 0}, timeout=5)
+                                   "timeout_ms": 0}, timeout_s=5)
     assert pending == {"pending": True}
     fake.take(fake.appended[0])
     got = client.call("wait", {"ref": "s1", "until": "started", "timeout_ms": 0},
-                      timeout=5)
-    assert R.from_wire(got["result"]) == R.Started("t1", answer["delivery"], "s1")
+                      timeout_s=5)
+    assert results.from_wire(got["result"]) == results.Started("t1", answer["delivery"], "s1")
     fake.end_turn()
-    ref = R.DeliveryRef(answer["delivery"], "s1")
+    ref = results.DeliveryRef(answer["delivery"], "s1")
     notes = []
     for note in watch.notifications():
-        notes.append(R.from_notification(*note))
+        notes.append(results.from_notification(*note))
         if len(notes) == 3:
             break
-    assert notes == [R.TurnStarted("t1", "s-1", 1, ()), R.TurnSteered("t1", "s-1", ref),
-                     R.TurnEnded("t1", "s-1", 1, "answer",
-                                 (R.DeliveryRef(ref.id, "s1", "steered"),))]
+    assert notes == [results.TurnStarted("t1", "s-1", 1, ()), results.TurnSteered("t1", "s-1", ref),
+                     results.TurnEnded("t1", "s-1", 1, "answer",
+                                 (results.DeliveryRef(ref.id, "s1", "steered"),))]
 
 
 def test_a_steer_the_harness_turns_down_reads_idle_through_wait(make_endpoint):
@@ -263,8 +263,8 @@ def test_a_steer_the_harness_turns_down_reads_idle_through_wait(make_endpoint):
     d = ep.steer("too late")
     assert d.early is None
     until(lambda: fake.appended)
-    ep.refused(d.id, "idle")
-    assert ep.wait(d.id, "started", 1) == R.Refused("idle", d.id)
+    ep.on_refused(d.id, "idle")
+    assert ep.wait(d.id, "started", 1) == results.Refused("idle", d.id)
 
 
 def test_a_steer_never_confirmed_settles_lost_expired(make_endpoint):
@@ -273,13 +273,13 @@ def test_a_steer_never_confirmed_settles_lost_expired(make_endpoint):
     fake.start_turn()
     d = ep.steer("unheard")
     lost = ep.wait(d.id, "ended", 5)
-    assert isinstance(lost, R.Lost) and lost.reason.startswith("expired")
+    assert isinstance(lost, results.Lost) and lost.reason.startswith("expired")
 
 
 def test_a_steer_into_a_held_turn_is_named_after_its_turn_started(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     d = ep.deliver("opening")
     ep.turn_started("t1", held=True)
     fake.open_turn = "t1"
@@ -300,10 +300,10 @@ def test_a_steer_into_a_held_turn_is_named_after_its_turn_started(make_endpoint,
 def test_wait_by_ref_names_the_newest_delivery_carrying_it(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    client.call("deliver", {"text": "a", "ref": "same"}, timeout=5)
-    second = client.call("deliver", {"text": "b", "ref": "same"}, timeout=5)
+    client.call("deliver", {"text": "a", "ref": "same"}, timeout_s=5)
+    second = client.call("deliver", {"text": "b", "ref": "same"}, timeout_s=5)
     got = client.call("wait", {"ref": "same", "until": "started", "timeout_ms": 0},
-                      timeout=5)
+                      timeout_s=5)
     assert got == {"delivery": second["delivery"], "pending": True}
 
 
@@ -313,7 +313,7 @@ def test_watch_has_no_gap_for_a_turn_raised_while_it_subscribes(make_endpoint, c
         watch = connect(ep)
         raiser = threading.Thread(target=fake.start_turn)
         raiser.start()
-        facts = R.from_wire(watch.call("watch", {}, timeout=5)["facts"])
+        facts = results.from_wire(watch.call("watch", {}, timeout_s=5)["facts"])
         raiser.join()
         if not facts.turn_open:
             method, _ = next(iter(watch.notifications()))
@@ -325,12 +325,12 @@ def test_facts_turn_follows_the_ledger_through_a_missed_end(make_endpoint, conne
     ep, fake = make_endpoint()
     client = connect(ep)
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     fake.start_turn()                                 # the person's: no opening delivery
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn.turn_id == "t1" and facts.turn.opening is None
     fake.start_turn()                                 # t1's end was missed
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn.turn_id == "t2"
     got = []
     for method, params in watch.notifications():
@@ -340,18 +340,18 @@ def test_facts_turn_follows_the_ledger_through_a_missed_end(make_endpoint, conne
     assert got == [("turn.started", "t1", None), ("turn.ended", "t1", "error"),
                    ("turn.started", "t2", None)]
     fake.end_turn()
-    assert R.from_wire(client.call("facts", {}, timeout=5)).turn is None
+    assert results.from_wire(client.call("facts", {}, timeout_s=5)).turn is None
 
 
 def test_a_held_turn_keeps_its_start_time_across_the_tie(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    d = client.call("deliver", {"text": "x"}, timeout=5)
+    d = client.call("deliver", {"text": "x"}, timeout_s=5)
     ep.turn_started("t1", held=True)
     opened_at = ep.ledger.open.started_at
     time.sleep(0.05)
     ep.turn_tied("t1", d["delivery"])
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn.started_at == opened_at
 
 
@@ -360,12 +360,12 @@ def test_a_held_turn_keeps_its_start_time_across_the_tie(make_endpoint, connect)
 def test_each_harness_refusal_is_a_value_through_wait(make_endpoint, connect, reason):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    d = client.call("deliver", {"text": "x", "ref": "r"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r"}, timeout_s=5)
     assert until(lambda: fake.submitted)
-    ep.refused(d["delivery"], reason)
+    ep.on_refused(d["delivery"], reason)
     got = client.call("wait", {"delivery": d["delivery"], "until": "ended",
-                               "timeout_ms": 1000}, timeout=5)
-    assert R.from_wire(got["result"]) == R.Refused(reason, d["delivery"], "r")
+                               "timeout_ms": 1000}, timeout_s=5)
+    assert results.from_wire(got["result"]) == results.Refused(reason, d["delivery"], "r")
 
 
 def test_loading_refuses_in_the_answer_and_a_plain_deliver_waits(make_endpoint, connect):
@@ -379,28 +379,28 @@ def test_loading_refuses_in_the_answer_and_a_plain_deliver_waits(make_endpoint, 
     client = connect(ep)
     for method, params in (("steer", {"text": "x"}),
                            ("deliver", {"text": "x", "only_if_idle": True})):
-        answer = client.call(method, params, timeout=5)
-        assert R.from_wire(answer["result"]).reason == "loading"
-    held = client.call("deliver", {"text": "held"}, timeout=5)
+        answer = client.call(method, params, timeout_s=5)
+        assert results.from_wire(answer["result"]).reason == "loading"
+    held = client.call("deliver", {"text": "held"}, timeout_s=5)
     assert "result" not in held and fake.submitted == []
     fake.loading_now = False
     ep.load_changed()
     got = client.call("wait", {"delivery": held["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    assert isinstance(R.from_wire(got["result"]), R.Started)
+                               "timeout_ms": 5000}, timeout_s=10)
+    assert isinstance(results.from_wire(got["result"]), results.Started)
 
 
 def test_a_wait_in_flight_when_the_endpoint_stops_reads_its_reason(make_endpoint, connect):
     for _ in range(5):
         ep, fake = make_endpoint(FakeHarness(auto=False))
         client = connect(ep)
-        d = client.call("deliver", {"text": "x"}, timeout=5)
+        d = client.call("deliver", {"text": "x"}, timeout_s=5)
         got: list = []
         waiter = threading.Thread(target=lambda: got.append(client.call(
             "wait", {"delivery": d["delivery"], "until": "ended", "timeout_ms": None},
-            timeout=10)))
+            timeout_s=10)))
         waiter.start()
         time.sleep(0.2)                               # the wait is out on its thread
         ep.stop("the session ended")
         waiter.join(10)
-        assert R.from_wire(got[0]["result"]) == R.Lost("the session ended", d["delivery"])
+        assert results.from_wire(got[0]["result"]) == results.Lost("the session ended", d["delivery"])

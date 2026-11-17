@@ -17,7 +17,7 @@ from slots_kit import record
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/server.py")
 
 
-def test_the_server_environment_keeps_only_the_named_variables():
+def test_the_server_env_keeps_only_the_named_variables():
     env = server.clean_env({"HOME": "/h", "USER": "u", "LOGNAME": "u", "SHELL": "/bin/sh",
                             "PATH": "/bin", "LANG": "C.UTF-8", "LC_TIME": "C",
                             "XDG_RUNTIME_DIR": "/run/user/1", "TMUX": "x",
@@ -63,16 +63,16 @@ def test_a_named_config_replaces_the_users():
 
 
 def test_the_sweep_removes_launch_files_older_than_the_bound(fence):
-    directory = fence.short / "launch"
-    directory.mkdir()
-    old, new = directory / "old", directory / "new"
+    launch_dir = fence.short / "launch"
+    launch_dir.mkdir()
+    old, new = launch_dir / "old", launch_dir / "new"
     old.write_text("env")
     new.write_text("env")
     past = time.time() - 120
     os.utime(old, (past, past))
-    assert server.sweep_launch_files(directory, older_than=60) == [old]
+    assert server.sweep_launch_files(launch_dir, older_than=60) == [old]
     assert new.exists()
-    assert server.sweep_launch_files(directory) == [new]
+    assert server.sweep_launch_files(launch_dir) == [new]
     assert server.sweep_launch_files(fence.short / "none") == []
 
 

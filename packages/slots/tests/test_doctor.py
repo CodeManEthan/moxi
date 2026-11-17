@@ -105,7 +105,7 @@ def test_the_options_row_reads_the_live_values(fake_tmux, monkeypatch):
     assert doctor.options_row().state == "ok"
 
 
-def test_the_socket_row_fails_on_an_open_runtime_directory():
+def test_the_socket_row_fails_on_an_open_runtime_dir():
     runtime = places.runtime_dir(create=True)
     assert doctor.socket_row().state == "ok"
     runtime.chmod(0o755)
@@ -114,9 +114,9 @@ def test_the_socket_row_fails_on_an_open_runtime_directory():
 
 
 def test_the_launch_files_row_removes_stale_ones():
-    directory = places.launch_dir()
-    directory.mkdir(parents=True, mode=0o700)
-    stale = directory / "a1"
+    launch_dir = places.launch_dir()
+    launch_dir.mkdir(parents=True, mode=0o700)
+    stale = launch_dir / "a1"
     stale.write_text("{}")
     past = time.time() - 600
     os.utime(stale, (past, past))
@@ -139,9 +139,9 @@ def test_the_trampoline_row_fails_without_its_script(monkeypatch):
 
 def test_the_mismatches_row_counts():
     assert doctor.mismatches_row().detail.startswith("0 saved")
-    directory = places.mismatches_dir()
-    directory.mkdir(parents=True)
-    (directory / "one.txt").write_text("")
+    mismatches_dir = places.mismatches_dir()
+    mismatches_dir.mkdir(parents=True)
+    (mismatches_dir / "one.txt").write_text("")
     assert doctor.mismatches_row().detail.startswith("1 saved")
 
 

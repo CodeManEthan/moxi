@@ -64,6 +64,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
+from ..log import LOG_FILE_ENV
+
 from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, listen_address, socket_name)
 from ._fence import Fence, Ran
@@ -166,7 +168,7 @@ class LaunchdBackend:
         body["ProcessType"] = "Background"
         body["StandardOutPath"] = log
         body["StandardErrorPath"] = log
-        body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log, **dict(spec.environment)}
+        body["EnvironmentVariables"] = {LOG_FILE_ENV: log, **dict(spec.env)}
         if spec.kind == "daemon" and spec.stop == "process":
             body["AbandonProcessGroup"] = True
         if spec.kind == "daemon" and spec.socket is not None:
@@ -341,7 +343,8 @@ class LaunchdBackend:
         try:
             files.private_dir(logs)
         except OSError as exc:
-            return Ran(False, None, "", "", ("mkdir", "-m", "700", str(logs)), str(exc))
+            return Ran(ok=False, returncode=None, stdout="", stderr="",
+                       argv=("mkdir", "-m", "700", str(logs)), reason=str(exc))
         return None
 
     def _label_of(self, change: UnitChange) -> str:
@@ -397,12 +400,13 @@ class LaunchdBackend:
         if act in ("start", "enable") and (unit.kind == "daemon" or act == "enable"):
             path = unit.paths[0] if unit.paths else self.plist(label)
             if not path.is_file():
-                return Acted(unit.module, unit.name, act, False,
-                             (f"{label} has no plist at {path}",))
+                return Acted(unit.module, unit.name, act, ok=False,
+                             lines=(f"{label} has no plist at {path}",))
         if unit.marked and act in ("start", "enable", "restart"):
             problem = self._logs(unit.module, unit.name)
             if problem is not None:
-                return Acted(unit.module, unit.name, act, False, (problem.failure(),))
+                return Acted(unit.module, unit.name, act, ok=False,
+                             lines=(problem.failure(),))
         if act == "enable":
             ok = done(fence.run("enable", self.target(label))) and done(
                 self._load(label, fence, path))
@@ -523,14 +527,16 @@ class LaunchdBackend:
     # -- a foreign timer's wrap: systemd only --------------------------------------------------
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
-        return Acted(None, ref, "wrap", False, (f"wrap is systemd only; {ref} runs as it is",))
+        return Acted(None, ref, "wrap", ok=False,
+                     lines=(f"wrap is systemd only; {ref} runs as it is",))
 
     def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
         """Empty: launchd has no wraps."""
         return ()
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
-        return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+        return Acted(None, ref, "unwrap", ok=True,
+                     lines=(f"{ref} is not wrapped by {module}",))
 
     def unwrap_all(self, module: str, fence: Fence) -> list[Acted]:
         return []
@@ -558,9 +564,9 @@ class LaunchdBackend:
     def _load(self, label: str, fence: Fence, path: Path) -> Ran:
         """`bootstrap` of the plist at `path`; a label already loaded is done."""
         if not path.is_file():
-            return Ran(False, None, "", "", tuple(_argv("launchd", "bootstrap", self.domain,
-                                                        str(path))),
-                       f"no plist at {path}")
+            return Ran(ok=False, returncode=None, stdout="", stderr="",
+                       argv=tuple(_argv("launchd", "bootstrap", self.domain, str(path))),
+                       reason=f"no plist at {path}")
         ran = fence.run("bootstrap", self.domain, str(path))
         if ran.ok or ran.reason is not None:
             return ran
@@ -671,8 +677,8 @@ def _load(path: Path) -> dict | None:
     from xml.parsers.expat import ExpatError
 
     try:
-        with open(path, "rb") as handle:
-            body = plistlib.load(handle)
+        with open(path, "rb") as fh:
+            body = plistlib.load(fh)
     except (OSError, ValueError, ExpatError):
         return None
     return body if isinstance(body, dict) else None

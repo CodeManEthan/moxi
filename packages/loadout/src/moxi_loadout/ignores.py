@@ -129,7 +129,7 @@ class Git:
             self._env = {k: v for k, v in os.environ.items() if k not in drop}
         return self._env
 
-    def run(self, argv: list[str], input: bytes | None, env: dict | None = None):
+    def run(self, argv: list[str], stdin_data: bytes | None, env: dict | None = None):
         import subprocess
 
         from moxi import proc
@@ -140,17 +140,17 @@ class Git:
             if seconds <= 0:
                 raise GitError("loadout's time for git ran out", timed_out=True)
         try:
-            return proc.run(argv, timeout=seconds, input=input,
+            return proc.run(argv, timeout_s=seconds, stdin_data=stdin_data,
                             env=self.env() if env is None else env)
         except subprocess.TimeoutExpired:
             raise GitError(f"git took longer than {seconds:.0f} s", timed_out=True) from None
         except OSError as exc:
             raise GitError(f"git can't be run ({exc})") from None
 
-    def toplevel(self, folder: str) -> str | None:
-        """The top of the work tree holding `folder` (or its nearest existing ancestor),
+    def toplevel(self, target_dir: str) -> str | None:
+        """The top of the work tree holding `target_dir` (or its nearest existing ancestor),
         or None outside one."""
-        here = _existing(folder)
+        here = _existing(target_dir)
         if here not in self._tops:
             done = self.run(["git", "-C", here, "rev-parse", "--show-toplevel"], None)
             top = done.stdout.decode("utf-8", "surrogateescape").strip()
@@ -168,8 +168,8 @@ class Git:
         return {p.decode("utf-8", "surrogateescape") for p in done.stdout.split(b"\0") if p}
 
 
-def _existing(folder: str) -> str:
-    here = os.path.abspath(folder)
+def _existing(target_dir: str) -> str:
+    here = os.path.abspath(target_dir)
     while not os.path.isdir(here):
         parent = os.path.dirname(here)
         if parent == here:
@@ -181,9 +181,9 @@ def _existing(folder: str) -> str:
 def _relative(target: str, top: str) -> str | None:
     """`target` relative to `top`, read through the real path of its folder (never of
     the target, which may be a link loadout placed)."""
-    folder, name = os.path.split(os.path.abspath(target))
-    here = _existing(folder)
-    real = os.path.join(os.path.realpath(here), os.path.relpath(folder, here), name)
+    target_dir, name = os.path.split(os.path.abspath(target))
+    here = _existing(target_dir)
+    real = os.path.join(os.path.realpath(here), os.path.relpath(target_dir, here), name)
     rel = os.path.relpath(os.path.normpath(real), os.path.realpath(top))
     return None if rel == ".." or rel.startswith(".." + os.sep) else rel.replace(os.sep, "/")
 
@@ -193,11 +193,11 @@ def _relative(target: str, top: str) -> str | None:
 @dataclass
 class Verdict:
     """What the check says of one target: `ok` (ignored, or outside a work tree),
-    `needs` (loadout's ignore file in `folder` covers it once written), `would-commit`
+    `needs` (loadout's ignore file in `target_dir` covers it once written), `would-commit`
     (with the `line` to show) or `unchecked` (git ran out of time)."""
 
     state: str
-    folder: str
+    target_dir: str
     line: str = ""
 
 
@@ -210,15 +210,15 @@ def check(targets, git: Git | None) -> dict[str, Verdict]:
         return {t: Verdict("ok", os.path.dirname(t)) for t in targets}
     trees: dict[str, list[tuple[str, str]]] = {}
     for t in dict.fromkeys(targets):
-        folder = os.path.dirname(t)
+        target_dir = os.path.dirname(t)
         try:
-            top = git.toplevel(folder)
+            top = git.toplevel(target_dir)
         except GitError as exc:
-            out[t] = Verdict("unchecked", folder, str(exc))
+            out[t] = Verdict("unchecked", target_dir, str(exc))
             continue
         rel = None if top is None else _relative(t, top)
         if rel is None:
-            out[t] = Verdict("ok", folder)
+            out[t] = Verdict("ok", target_dir)
         else:
             trees.setdefault(top, []).append((t, rel))
     for top, pairs in trees.items():
@@ -226,33 +226,33 @@ def check(targets, git: Git | None) -> dict[str, Verdict]:
             ignored = git.ignored(top, [rel for _, rel in pairs])
         except GitError as exc:
             for t, _ in pairs:
-                folder = os.path.dirname(t)
+                target_dir = os.path.dirname(t)
                 state = "unchecked" if exc.timed_out else "would-commit"
-                out[t] = Verdict(state, folder, f"git check-ignore in {top} failed "
+                out[t] = Verdict(state, target_dir, f"git check-ignore in {top} failed "
                                  f"({exc}), so loadout can't tell whether git would "
                                  "commit it")
             continue
         for t, rel in pairs:
-            folder = os.path.dirname(t)
-            out[t] = Verdict("ok", folder) if rel in ignored else _uncovered(t, folder)
+            target_dir = os.path.dirname(t)
+            out[t] = Verdict("ok", target_dir) if rel in ignored else _uncovered(t, target_dir)
     return out
 
 
-def _uncovered(target: str, folder: str) -> Verdict:
+def _uncovered(target: str, target_dir: str) -> Verdict:
     """A target git would commit: what loadout's ignore file can do about it."""
-    path = os.path.join(folder, IGNORE)
+    path = os.path.join(target_dir, IGNORE)
     name = os.path.basename(target)
     found = state(path)
     if found == "absent" or (found == "ours" and name not in listed(path)):
-        return Verdict("needs", folder)
+        return Verdict("needs", target_dir)
     if found == "ours":
-        return Verdict("would-commit", folder, f"{path} ignores it, but git tracks it; "
+        return Verdict("would-commit", target_dir, f"{path} ignores it, but git tracks it; "
                        f"git rm --cached it")
     if found == "edited":
-        return Verdict("would-commit", folder, f"git would commit it; {path} was "
+        return Verdict("would-commit", target_dir, f"git would commit it; {path} was "
                        f"edited since loadout wrote it: add /{name} to it, or delete it "
                        "and run install again")
-    return Verdict("would-commit", folder, f"git would commit it; add /{name} to {path}")
+    return Verdict("would-commit", target_dir, f"git would commit it; add /{name} to {path}")
 
 
 # -- the ignore files ----------------------------------------------------------------------
@@ -263,19 +263,19 @@ def records(data: dict) -> dict[str, dict]:
             if isinstance(r, dict) and r.get("kind") == KIND and isinstance(r.get("file"), str)}
 
 
-def write(folder: str, names, data: dict, section, say) -> str | None:
-    """Write loadout's ignore file in `folder` for `names`, and record it in `data`.
+def write(target_dir: str, names, data: dict, section, say) -> str | None:
+    """Write loadout's ignore file in `target_dir` for `names`, and record it in `data`.
     Returns None, or the line saying why it wasn't written."""
     from moxi.files import atomic_write
 
-    path = os.path.join(folder, IGNORE)
+    path = os.path.join(target_dir, IGNORE)
     found = state(path)
     if found not in ("absent", "ours"):
         return f"{path} is not loadout's; loadout leaves it"
     want = text(names)
     try:
         if found == "absent" or Path(path).read_text(encoding="utf-8") != want:
-            os.makedirs(folder, exist_ok=True)
+            os.makedirs(target_dir, exist_ok=True)
             atomic_write(path, want, mode=0o644)
             if found == "absent":
                 say(f"wrote {path}")
@@ -299,8 +299,8 @@ def _drop(data: dict, path: str) -> None:
                                and r.get("file") == path)]
 
 
-def settle(data: dict, placements, folders=None, *, say) -> list[str]:
-    """Bring each of loadout's ignore files in `folders` (every recorded one when None)
+def settle(data: dict, placements, target_dirs=None, *, say) -> list[str]:
+    """Bring each of loadout's ignore files in `target_dirs` (every recorded one when None)
     into line with `placements` (the `moxi.place.Placed` loadout holds now): rewritten,
     or removed once nothing of loadout's is left in its folder. An ignore file edited
     since loadout wrote it is left as it is, its record kept; one whose header is gone is
@@ -314,8 +314,8 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
     lines = []
     recorded = records(data)
     for path, rec in recorded.items():
-        folder = os.path.dirname(path)
-        if folders is not None and folder not in folders:
+        target_dir = os.path.dirname(path)
+        if target_dirs is not None and target_dir not in target_dirs:
             continue
         found = state(path)
         if found == "absent":
@@ -330,7 +330,7 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
             continue
         if found != "ours":
             continue
-        now = names.get(folder, set())
+        now = names.get(target_dir, set())
         if not now:
             try:
                 os.unlink(path)
@@ -340,7 +340,7 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
             _drop(data, path)
             say(f"removed {path}")
             continue
-        problem = write(folder, now, data, rec.get("section"), say)
+        problem = write(target_dir, now, data, rec.get("section"), say)
         if problem:
             lines.append(problem)
     return lines

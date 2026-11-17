@@ -36,7 +36,7 @@ def item(app, event, payload, thread="thread-1"):
 
 
 def session(endpoint):
-    return Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    return Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
 
 
 def wait_for(pred, timeout=3.0):
@@ -92,7 +92,7 @@ def test_a_spawn_reads_pending_until_its_state_comes_then_its_latest_notice(host
     # A later call on it (a wait) carries its newer notice.
     item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}, tool="wait",
                                   item_id="call-2"))
-    assert s.agents().entries == (Agent("sub-1", "subagent", "done", True),)
+    assert s.agents().entries == (Agent("sub-1", "subagent", "done", final=True),)
     assert s.facts().agents == 0
 
 
@@ -112,8 +112,8 @@ def test_terminals_are_shell_entries_and_count_as_busy(host):
     harness.ws.call = _terminals(harness.ws, ["p1", "p2"])
     a = s.agents()
     assert a.complete
-    assert a.entries == (Agent("p1", "shell", "running", False),
-                         Agent("p2", "shell", "running", False))
+    assert a.entries == (Agent("p1", "shell", "running", final=False),
+                         Agent("p2", "shell", "running", final=False))
     assert s.facts().agents == 2
 
 
@@ -153,7 +153,7 @@ def test_a_final_notice_inside_an_open_turn_reads_final_before_the_turn_ends(hos
                                   item_id="call-2"))
     f, a = s.facts(), s.agents()
     assert f.turn_open and f.turn.turn_id == "turn-1"
-    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert a.entries == (Agent("sub-1", "subagent", "done", final=True),)
     assert f.agents == 0
     app.complete()
 
@@ -216,7 +216,7 @@ def test_a_live_subagent_activity_item_leaves_the_list_not_complete_for_good(hos
     item(app, "started", activity())
     a = s.agents()
     assert a.complete is False and a.busy() is None
-    assert a.entries == (Agent("sub-1", "subagent", "running", False),)
+    assert a.entries == (Agent("sub-1", "subagent", "running", final=False),)
     assert s.facts().agents is None
     # A final notice for every readable entry does not make it whole again.
     item(app, "completed", activity(kind="completed"))
@@ -224,7 +224,7 @@ def test_a_live_subagent_activity_item_leaves_the_list_not_complete_for_good(hos
                                   item_id="call-2"))
     a = s.agents()
     assert a.complete is False
-    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert a.entries == (Agent("sub-1", "subagent", "done", final=True),)
     assert s.facts().agents is None
     d = s.deliver("x", only_if_idle=True, refuse_agents=True)
     assert d.wait_started(3) == Refused("busy-agents", d.id)
@@ -245,7 +245,7 @@ def test_a_rebuild_that_finds_a_subagent_activity_item_stays_not_complete(host):
     _reconnect(harness, app)
     a = s.agents()
     assert a.complete is False
-    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert a.entries == (Agent("sub-1", "subagent", "done", final=True),)
     assert s.facts().agents is None
     # A later load whose history no longer shows it does not clear it.
     harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
@@ -282,8 +282,8 @@ def test_a_resumed_load_rebuilds_the_record_from_the_threads_history(host):
         in harness.ws.calls
     a = s.agents()
     assert a.complete
-    assert a.entries == (Agent("sub-1", "subagent", "done", True),
-                         Agent("sub-2", "subagent", "pending", False))
+    assert a.entries == (Agent("sub-1", "subagent", "done", final=True),
+                         Agent("sub-2", "subagent", "pending", final=False))
 
 
 def test_a_grandchild_tracked_live_outlives_a_rebuild_and_is_busy_until_confirmed(host):
@@ -297,8 +297,8 @@ def test_a_grandchild_tracked_live_outlives_a_rebuild_and_is_busy_until_confirme
     harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
     _reconnect(harness, app)
     after = s.agents()
-    assert after.entries == (Agent("sub-1", "subagent", "done", True),
-                             Agent("sub-2", "subagent", "running", False, None, "sub-1"))
+    assert after.entries == (Agent("sub-1", "subagent", "done", final=True),
+                             Agent("sub-2", "subagent", "running", final=False, description=None, parent_id="sub-1"))
     assert after.complete is False and s.facts().agents is None   # unknown is busy
     # The grandchild's end arrives live on its parent's thread: the list is whole again.
     item(app, "completed", collab(["sub-2"], {"sub-2": "completed"}, sender="sub-1",
@@ -372,7 +372,7 @@ def test_a_failed_terminal_list_refuses_a_plain_compact_but_not_one_that_stops_t
     assert s.command("compact") == Refused("busy-agents")
     # With stop_shells the terminals leave the check, so the known subagents decide it.
     app.list_errors = [error] * 3
-    result = s.command("compact", stop_shells=True, timeout=15)
+    result = s.command("compact", stop_shells=True, timeout_s=15)
     assert result.shells is not None and result.shells.complete is False
 
 

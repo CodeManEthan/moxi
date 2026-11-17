@@ -22,7 +22,7 @@ finish by hand. If the row write then fails, the directory stays as made and the
 names the `moxi projects add` that adds its row.
 
 `remove` takes a `record` from the page: what the remove came to is then kept in the
-store under the request's idempotency key, so a repeat of the request gets the same answer
+store under the `job` the page minted for that press, so a repeat of it gets the same answer
 (`record_status`, `remove_status`). The verb passes none and keeps nothing.
 
 `promote` turns one of notes' inbox one-offs into a project. It reaches notes only through
@@ -57,7 +57,7 @@ GIT_TIMEOUT = 30
 
 
 class Added:
-    """What `add` did: `project`, the row as written; `notes`, sentences worth showing
+    """What `add` did: `project`, the row as written; `notes_installed`, sentences worth showing
     that refuse nothing (a root that doesn't exist yet, what a mint made); and
     `warnings`, sentences about what the add went ahead without (a contribution skipped
     since it won't load, naming the fix)."""
@@ -84,19 +84,19 @@ def root_note(root: str) -> str | None:
 
 def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
         lead: str | None = None, notes_root: str | None = None, create: bool = False,
-        contributions: Contributions | None = None, notes: bool | None = None,
+        contributions: Contributions | None = None, notes_installed: bool | None = None,
         git_timeout: float = GIT_TIMEOUT) -> Added:
     """Add project `key`; with `create`, mint its root first.
 
     Paths must already be absolute (`rules.absolutize` makes a command line's so). A root
     left out comes from a contribution's default, or the add stops with `Usage`. A
     contribution that won't load is skipped unless the kind may be its own, and
-    `Added.warnings` names it. `contributions` and `notes` stand in for the installed contributions and for whether
+    `Added.warnings` names it. `contributions` and `notes_installed` stand in for the installed contributions and for whether
     notes is installed. `git_timeout` bounds a `git` mint's `git init`, in seconds.
     """
     planned = _contributions.plan_add(key, kind=kind, root=root, lead=lead,
                                       notes_root=notes_root,
-                                      contributions=contributions, notes=notes)
+                                      contributions=contributions, notes_installed=notes_installed)
     if not create:
         project = store.write(planned.insert)
         note = root_note(project.root)
@@ -195,7 +195,7 @@ def _mint(planned: Planned, git: str | None, command: str,
     import moxi.proc
 
     try:
-        done = moxi.proc.run([git, "init", root], timeout=timeout)
+        done = moxi.proc.run([git, "init", root], timeout_s=timeout)
         why = None if done.returncode == 0 else _git_said(done)
     except subprocess.TimeoutExpired:
         why = f"it ran past {timeout:g} s and was stopped"
@@ -315,7 +315,7 @@ def promote(slug: str, key: str, *, kind: str = TOPIC, root: str | None = None,
         found = _ask(notes, f"the notes folder for {root}", notes.notes_root_for, root)
         notes_root = None if found is None else str(found)
     planned = _contributions.plan_add(key, kind=kind, root=root, notes_root=notes_root,
-                                      contributions=contributions, notes=True)
+                                      contributions=contributions, notes_installed=True)
     root = planned.row["root"]
     if create and planned.kind.kind.mint == "git":
         top = str(_ask(notes, "where the notes root is", notes.root))
@@ -461,7 +461,7 @@ _FIELDS = ("root", "kind", "lead", "notes_root")
 
 
 def set_fields(key: str, *, contributions: Contributions | None = None,
-               notes: bool | None = None, **changes) -> Project:
+               notes_installed: bool | None = None, **changes) -> Project:
     """Change the named fields of project `key` and return it as it now stands.
 
     `changes` holds any of `root`, `kind`, `lead` and `notes_root`; None clears `lead` or
@@ -470,7 +470,7 @@ def set_fields(key: str, *, contributions: Contributions | None = None,
         raise Usage("nothing to change: name at least one field",
                     "pass --root, --kind, --lead, --no-lead, --notes-root or "
                     "--no-notes-root")
-    _contributions.plan_set(key, contributions=contributions, notes=notes, **changes)
+    _contributions.plan_set(key, contributions=contributions, notes_installed=notes_installed, **changes)
     return store.write(lambda conn: store.update(conn, key, **changes))
 
 
@@ -553,8 +553,8 @@ def _store_exists() -> bool:
 
 
 def record_status(job: str) -> Record:
-    """A `record` for `remove` that keeps its outcome under the request's idempotency key
-    `job`, for `remove_status` to read back."""
+    """A `record` for `remove` that keeps its outcome under `job`, the page's key for
+    that press, for `remove_status` to read back."""
     def record(conn: sqlite3.Connection, outcome: dict) -> None:
         store.keep_remove_status(conn, job, outcome["key"], outcome)
 

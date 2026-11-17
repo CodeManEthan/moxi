@@ -1,11 +1,11 @@
-"""sessions' page in a browser, through a real shell that starts sessions' real page
-server: the contract check; the id form opening a session's route, and refusing an id that
-holds `/`, `?` or `#`; a Claude Code session's header, its last five turns and "Earlier";
-a subagent opened by its route, with the browser's back returning to the parent; an
-OpenCode child and a Codex subagent thread each opened as a session of their own; a
-session the page server can't find, shown with its reason; a long message cut and
-expanded, and one the page server cut at 64 KiB; a route naming an agent under Codex; and
-the 360 px width check.
+"""One session on sessions' page, at its own address, in a browser, through a real shell
+that starts sessions' real page server: a Claude Code session's facts behind `Details`,
+its last five turns and "Earlier"; a subagent opened by its route, with the browser's back returning to
+the parent; an OpenCode child and a Codex subagent thread each opened as a session of
+their own; a session the page server can't find, shown with its reason; a long message cut
+and expanded, and one the page server cut at 64 KiB; a route naming an agent under Codex;
+and the 360 px width check. The list the page shows at its own address is checked in
+`test_browser_list`, and the header over a session's turns in `test_browser_transcript`.
 
 The records are written by `moxi_sessions.testing`'s builders under the roots the shell's
 environment names (see `browser_seed`).
@@ -58,37 +58,11 @@ def texts(panel, role: str):
     return panel.locator(f'li.msg[data-role="{role}"][data-reasoning="false"] [data-line="text"]')
 
 
-def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "sessions", "page", keep=True)
-    assert check.element == "moxi-sessions-page"
-    expect(check.locator.locator("h1")).to_have_text("Sessions")
-    expect(check.locator.get_by_label("Session id")).to_be_visible()
-
-
-def test_the_id_form_opens_the_sessions_route(seeded, ui_page):
-    panel = open_route(ui_page, "")
-    panel.get_by_label("Harness").select_option("claude")
-    panel.get_by_label("Session id").fill(f" {SESSION} ")
-    panel.get_by_role("button", name="Open").click()
-    expect(ui_page).to_have_url(at(f"claude/{SESSION}"))
-    expect(window(panel)).to_have_attribute("data-state", "up")
-    expect(window(panel).locator("h2")).to_have_text("fix the tests")
-
-
-@pytest.mark.parametrize("typed", [f"{SESSION}/{AGENT}", f"{SESSION}?x=1", f"{SESSION}#top"])
-def test_the_id_form_refuses_an_id_holding_a_route_character(seeded, ui_page, typed):
-    panel = open_route(ui_page, "")
-    panel.get_by_label("Session id").fill(typed)
-    panel.get_by_role("button", name="Open").click()
-    expect(panel.get_by_role("alert")).to_contain_text("holds no /, ? or #")
-    expect(ui_page).to_have_url(at(""))
-    expect(window(panel)).to_have_count(0)
-
-
 def test_a_claude_session_shows_its_header_and_last_turns_and_pages_back(seeded, ui_page):
     panel = open_route(ui_page, f"claude/{SESSION}")
     view = window(panel)
     expect(view).to_have_attribute("data-state", "up")
+    panel.get_by_role("button", name="Details").click()
     expect(view.locator('[data-field="harness"]')).to_have_text("Claude Code")
     expect(view.locator('[data-field="session"]')).to_have_text(SESSION)
     expect(view.locator('[data-field="cwd"]')).to_have_text("/work/project")
@@ -119,12 +93,13 @@ def test_a_subagent_opens_by_its_route_and_back_returns(seeded, ui_page):
     expect(panel.locator('section[data-part="subagents"]')).to_have_count(0)
     ui_page.go_back()
     expect(ui_page).to_have_url(at(f"claude/{SESSION}"))
-    expect(window(panel).locator("h2")).to_have_text("fix the tests")
+    expect(panel.locator('[data-line="name"]')).to_have_text("fix the tests")
 
 
 def test_an_opencode_child_opens_as_a_session_of_its_own(seeded, ui_page):
     panel = open_route(ui_page, f"opencode/{seeded['opencode']}")
-    expect(window(panel).locator("h2")).to_have_text("opencode work")
+    panel.get_by_role("button", name="Details").click()
+    expect(window(panel).locator('[data-field="title"]')).to_have_text("opencode work")
     expect(texts(panel, "user")).to_have_text(["opencode turn"])
     panel.locator(f'li[data-agent="{seeded["opencode_child"]}"] button').click()
     expect(ui_page).to_have_url(at(f"opencode/{seeded['opencode_child']}"))
@@ -170,7 +145,7 @@ def test_a_long_message_is_cut_and_expands_and_a_server_cut_says_so(seeded, ui_p
 def test_an_agent_under_codex_names_how_to_open_it(seeded, ui_page):
     panel = open_route(ui_page, f"codex/{THREAD}/{CHILD_THREAD}")
     expect(panel.locator('[data-line="unknown"]')).to_contain_text("a session of its own")
-    expect(panel.get_by_label("Session id")).to_be_visible()
+    expect(panel.get_by_label("Find a session")).to_be_visible()
 
 
 def test_the_page_fits_a_phone(seeded, ui_page, ui_width_check):

@@ -391,7 +391,7 @@ def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
 
 
 def _command(s, name, out):
-    out.put(s.command(name, timeout=5))
+    out.put(s.command(name, timeout_s=5))
 
 
 def test_clear_runs_through_the_gate_and_reads_ran_with_the_new_id(claude, monkeypatch):
@@ -698,7 +698,7 @@ def test_a_clear_with_stop_shells_settles_at_the_stop_report_not_its_session_sta
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     assert line["name"] == "clear" and line["stop_shells"] is True
     _gate_pass(runner, line)
@@ -709,13 +709,13 @@ def test_a_clear_with_stop_shells_settles_at_the_stop_report_not_its_session_sta
         "stopped": ["b1"], "left": [{"id": "m1", "why": "timeout"}], "complete": False})
     assert out.get(timeout=3) == turns.Ran("s-2", turns.Shells(
         ("b1",), (turns.LeftShell("m1", "timeout"), turns.LeftShell(None, "unlisted")),
-        False))
+        complete=False))
 
 
 @pytest.mark.parametrize("shells,expected", [
-    ({"stopped": [], "left": [], "complete": True}, turns.Shells((), (), True)),
-    ("garbage", turns.Shells((), (turns.LeftShell(None, "unlisted"),), False)),
-    (None, turns.Shells((), (turns.LeftShell(None, "unlisted"),), False)),
+    ({"stopped": [], "left": [], "complete": True}, turns.Shells((), (), complete=True)),
+    ("garbage", turns.Shells((), (turns.LeftShell(None, "unlisted"),), complete=False)),
+    (None, turns.Shells((), (turns.LeftShell(None, "unlisted"),), complete=False)),
 ])
 def test_a_compact_with_stop_shells_settles_at_the_later_of_ready_and_report(
         claude, monkeypatch, shells, expected):
@@ -724,7 +724,7 @@ def test_a_compact_with_stop_shells_settles_at_the_later_of_ready_and_report(
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("compact", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     _gate_pass(runner, line)
     runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "compact",
@@ -740,7 +740,7 @@ def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",
                   reason="unsupported", new_session_id=None)
@@ -749,7 +749,7 @@ def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
 
 # -- mod.sock's path ------------------------------------------------------------------
 
-def test_mod_sock_sits_in_the_endpoint_directory_when_its_path_is_short(
+def test_mod_sock_sits_in_the_endpoint_dir_when_its_path_is_short(
         turns_env, short_runtime):
     from moxi_turns.claude_endpoint import mod_sock_path
 
@@ -839,7 +839,7 @@ def test_after_tool_floors_usage_and_the_prompt_through_the_leg(claude):
     assert all(c[1] == ep.harness.cwd for c in seen)
 
 
-def test_an_after_tool_events_cwd_is_the_launch_directory_not_the_calls(claude):
+def test_an_after_tool_events_cwd_is_the_launch_dir_not_the_calls(claude):
     import listener_targets
 
     listener_targets.CALLS.clear()

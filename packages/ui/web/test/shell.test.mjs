@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadPanel, menuEntries, where } from "../src/shell.ts";
+import { bandEntries, bandTab, isCurrent, loadPanel, pageName, settingsShown, topName, where } from "../src/shell.ts";
 
 test("the URL names the module and the route", () => {
   assert.deepEqual(where("/m/ui/"), { module: "ui", route: "" });
@@ -11,21 +11,99 @@ test("the URL names the module and the route", () => {
   assert.equal(where("/elsewhere"), null);
 });
 
-test("the menu: the shell's panel first, the others by name, then Settings", () => {
-  const page = (title) => ({ title });
-  const entries = menuEntries([
-    { name: "zeta", page: page("Zeta"), refused: null },
-    { name: "alpha", page: page("Alpha"), refused: null },
-    { name: "ui", page: page("Modules"), refused: null },
+const page = (title, group, order) => ({ title, group, order });
+const mod = (name, title, group, order) => ({ name, page: page(title, group, order), refused: null });
+const names = (entries) => entries.map((e) => `${e.group}:${e.module}/${e.route}:${e.title}`);
+
+test("the band: Home first, each group by order then title, Modules last", () => {
+  const entries = bandEntries([
+    mod("zeta", "Zeta", "setup", 10),
+    mod("beta", "Beta", "daily", 30),
+    mod("ui", "Modules", "setup", 500),
+    mod("delta", "Delta", "daily", 30),
+    mod("alpha", "Alpha", "daily", 40),
+    mod("gamma", "Gamma", "daily", 5),
+    mod("eta", "Eta", "setup", 5),
     { name: "nopage", page: null, refused: "its script is missing" },
   ]);
-  assert.deepEqual(entries.map((e) => `${e.module}/${e.route}:${e.title}`),
-                   ["ui/:Modules", "alpha/:Alpha", "zeta/:Zeta", "ui/settings:Settings"]);
+  assert.deepEqual(names(entries), [
+    "daily:ui/:Home", "daily:gamma/:Gamma", "daily:beta/:Beta", "daily:delta/:Delta", "daily:alpha/:Alpha",
+    "setup:eta/:Eta", "setup:zeta/:Zeta", "setup:ui/modules:Modules"]);
 });
 
-test("on the phone the menu leaves out Settings, which only the desk reaches", () => {
-  const entries = menuEntries([{ name: "ui", page: { title: "Modules" }, refused: null }], false);
-  assert.deepEqual(entries.map((e) => `${e.module}/${e.route}`), ["ui/"]);
+test("a page with a wrong or absent group is in setup, and one with no order is at 500", () => {
+  const entries = bandEntries([
+    mod("alpha", "Alpha", "dialy", 10),
+    mod("beta", "Beta", null, null),
+    mod("gamma", "Gamma", "setup", 499),
+    mod("delta", "Delta", "setup", 501),
+    { name: "eta", page: { title: "Eta" }, refused: null },
+  ]);
+  assert.deepEqual(names(entries), [
+    "daily:ui/:Home", "setup:alpha/:Alpha", "setup:gamma/:Gamma", "setup:beta/:Beta", "setup:eta/:Eta",
+    "setup:delta/:Delta", "setup:ui/modules:Modules"]);
+});
+
+test("the band holds the shell's own two pages with no module, and never Settings", () => {
+  assert.deepEqual(names(bandEntries([])), ["daily:ui/:Home", "setup:ui/modules:Modules"]);
+  const full = bandEntries([mod("ui", "Modules", "setup", 500), mod("alpha", "Settings", "daily", 1)]);
+  assert.deepEqual(full.filter((e) => e.module === "ui").map((e) => e.route), ["", "modules"]);
+});
+
+test("the current entry: the module's page, and on the shell's own routes Home or Modules only", () => {
+  const home = { module: "ui", route: "" };
+  const modules = { module: "ui", route: "modules" };
+  const alpha = { module: "alpha", route: "" };
+  const current = (path) => [home, modules, alpha].filter((entry) => isCurrent(entry, where(path)))
+    .map((entry) => `${entry.module}/${entry.route}`);
+  assert.deepEqual(current("/m/ui/"), ["ui/"]);
+  assert.deepEqual(current("/m/ui/modules"), ["ui/modules"]);
+  assert.deepEqual(current("/m/ui/settings"), []);
+  assert.deepEqual(current("/m/ui/settings/alpha"), []);
+  assert.deepEqual(current("/m/alpha/"), ["alpha/"]);
+  assert.deepEqual(current("/m/alpha/deep/route"), ["alpha/"]);
+  assert.deepEqual(current("/elsewhere"), []);
+});
+
+test("the page's name on every route, and none where the shell shows a message", () => {
+  const mods = [mod("ui", "Modules", "setup", 500), mod("alpha", "Alpha", "daily", 1),
+                { name: "nopage", page: null, refused: null }];
+  const name = (path) => pageName(where(path), mods);
+  assert.equal(name("/m/ui/"), "Home");
+  assert.equal(name("/m/ui/modules"), "Modules");
+  assert.equal(name("/m/ui/settings"), "Settings");
+  assert.equal(name("/m/ui/settings/alpha"), "Settings");
+  assert.equal(name("/m/ui/settingsx"), null);
+  assert.equal(name("/m/ui/elsewhere"), null);
+  assert.equal(name("/m/alpha/"), "Alpha");
+  assert.equal(name("/m/alpha/a/b"), "Alpha");
+  assert.equal(name("/m/nopage/"), null);
+  assert.equal(name("/m/missing/"), null);
+  assert.equal(name("/elsewhere"), null);
+});
+
+test("on the phone the top line names Home on a settings route, and every other page as the desk does", () => {
+  const mods = [mod("ui", "Modules", "setup", 500), mod("alpha", "Alpha", "daily", 1)];
+  const top = (path, gateway) => topName(gateway, where(path), mods);
+  assert.equal(top("/m/ui/settings", true), "Home");
+  assert.equal(top("/m/ui/settings/alpha", true), "Home");
+  assert.equal(top("/m/ui/settings", false), "Settings");
+  for (const path of ["/m/ui/", "/m/ui/modules", "/m/alpha/", "/m/ui/settingsx", "/elsewhere"]) {
+    assert.equal(top(path, true), pageName(where(path), mods), path);
+  }
+});
+
+test("the top line's Settings is hidden on the Settings page and on the phone, and shown elsewhere", () => {
+  const shown = (path, gateway = false) => settingsShown(gateway, where(path));
+  for (const path of ["/m/ui/", "/m/ui/modules", "/m/alpha/", "/m/ui/settingsx", "/elsewhere"]) {
+    assert.equal(shown(path), true, path);
+    assert.equal(shown(path, true), false, path);
+  }
+  for (const path of ["/m/ui/settings", "/m/ui/settings/", "/m/ui/settings/alpha/more", "/m/ui/settings/changed"]) {
+    assert.equal(shown(path), false, path);
+  }
+  // Tab skips it as where it is hidden on the phone.
+  assert.equal(bandTab(3, 4, false, shown("/m/ui/settings")), "close");
 });
 
 /** A `place` that gives each answer in turn, counting its calls. */
@@ -102,4 +180,41 @@ test("a load another one replaced during the second try gives nothing and remove
   };
   assert.equal(await loadPanel("fixture", place, async () => null, () => shown), null);
   assert.equal(el.removed, true);
+});
+
+test("Tab with the band open: from the button to the first name, from the last to Settings, then on", () => {
+  const tab = (from, settingsShown = true) => bandTab(from, 4, false, settingsShown);
+  assert.equal(tab("button"), "first");
+  assert.equal(tab(3), "settings");
+  assert.equal(tab("settings"), "close");
+  // Between the names, and from anywhere else, the browser's own Tab moves on.
+  for (const from of [0, 1, 2, null]) assert.equal(tab(from), null);
+});
+
+test("Tab from the band's last name closes it where Settings is hidden", () => {
+  assert.equal(bandTab(3, 4, false, false), "close");
+  assert.equal(bandTab("button", 4, false, false), "first");
+});
+
+test("Shift+Tab with the band open walks back the same way", () => {
+  const back = (from, settingsShown = true) => bandTab(from, 4, true, settingsShown);
+  assert.equal(back("settings"), "last");
+  assert.equal(back(0), "button");
+  for (const from of ["button", 1, 2, 3, null]) assert.equal(back(from), null);
+  assert.equal(back(0, false), "button");
+});
+
+test("a band of one name is its first and its last", () => {
+  assert.equal(bandTab("button", 1, false, true), "first");
+  assert.equal(bandTab(0, 1, false, true), "settings");
+  assert.equal(bandTab(0, 1, false, false), "close");
+  assert.equal(bandTab(0, 1, true, true), "button");
+  assert.equal(bandTab("settings", 1, true, true), "last");
+});
+
+test("a band with no names leaves Tab alone", () => {
+  for (const from of ["button", "settings", null]) {
+    assert.equal(bandTab(from, 0, false, true), null);
+    assert.equal(bandTab(from, 0, true, true), null);
+  }
 });

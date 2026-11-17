@@ -24,7 +24,7 @@ import pytest
 from moxi import modules
 from moxi import proc
 
-from moxi_launcher import catalog, page, pagehandlers, presets, slots, store
+from moxi_launcher import catalog, first, page, pagehandlers, presets, slots, store
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Where the web build writes the page's assets.
@@ -34,8 +34,9 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/preview", "/api/launch", "/api/resume",
-          "/api/events"]
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
+          "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
+          "/api/keep-warm", "/api/running", "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
 NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",
@@ -139,25 +140,26 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_every_route_none_for_the_gateway():
+def test_the_page_declares_every_route_and_only_the_running_launches_for_the_gateway():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ROUTES
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
-        "/api/preview", "/api/launch", "/api/resume"}
-    assert not any(r["gateway"] for r in routes.values())
+        "/api/preview", "/api/launch", "/api/resume", "/api/keep-warm"}
+    assert [p for p, r in routes.items() if r["gateway"]] == ["/api/running"]
     assert [p for p, r in routes.items() if r["stream"]] == ["/api/events"]
-    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches"]
+    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches", "running"]
     assert routes["/api/launches"]["query"]["request"]["type"] == "string"
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "sessions.js", "state.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "running.js",
+                                  "sessions.js", "state.js"]
 
 
-def test_no_answer_declares_an_environment_a_brief_or_a_process():
+def test_no_answer_declares_an_env_a_brief_or_a_process():
     found = declared()
     assert not set(found) & NEVER_SENT
 
@@ -447,6 +449,60 @@ def test_no_presets_file_gives_the_shipped_defaults():
     assert {r["source"] for r in said["rows"]} == {"shipped"}
 
 
+def form_modes(query: str = "") -> dict[str, str | None]:
+    said = form(query)
+    assert [m["target"] for m in said["modes"]] == ["terminal", "headless", "slot"]
+    return {m["target"]: m["mode"] for m in said["modes"]}
+
+
+def test_the_form_names_the_command_a_launch_composes_in_each_target():
+    assert form()["modes"] == [{"target": "terminal", "mode": "interactive"},
+                               {"target": "headless", "mode": "print"},
+                               {"target": "slot", "mode": "interactive"}]
+    assert form_modes("harness=codex") == {"terminal": "interactive", "headless": "exec",
+                                           "slot": "interactive"}
+
+
+def test_the_forms_modes_follow_turns_host_for_codex(monkeypatch):
+    installed(monkeypatch, "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    assert form_modes("harness=codex") == {"terminal": "host", "headless": "exec",
+                                           "slot": "host"}
+    assert form_modes("harness=claude")["terminal"] == "interactive"
+
+
+def test_the_forms_modes_are_null_where_a_launch_under_the_identity_is_refused(monkeypatch):
+    installed(monkeypatch, "comms", "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    assert form_modes("identity=planner") == {"terminal": "interactive", "headless": None,
+                                              "slot": "interactive"}
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": "host", "headless": None, "slot": "host"}
+    # Without its wrapper's host a Codex launch under a name is refused everywhere.
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": None, "headless": None, "slot": None}
+    assert form_modes("harness=codex")["terminal"] == "interactive"
+
+
+def test_an_identity_changes_no_mode_without_comms():
+    assert form_modes("identity=planner") == form_modes()
+    assert form_modes("harness=codex&identity=planner") == form_modes("harness=codex")
+
+
+def test_the_forms_modes_are_for_the_harness_it_is_drawn_for():
+    write_presets(FORM_FILE)
+    assert form_modes("seat=coder")["headless"] == "exec"
+    # A form that is refused still says its harness's modes.
+    said = form("seat=coder&harness=claude")
+    assert said["rows"] == [] and said["modes"][1] == {"target": "headless", "mode": "print"}
+    # Every mode named is one some row of that harness composes into.
+    for harness in catalog.HARNESSES:
+        known = {mode for row in catalog.load(harness) for mode in row.modes}
+        assert set(form_modes(f"harness={harness}").values()) <= known
+
+
 def test_a_failed_form_read_says_only_the_class(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("/home/someone/private/presets.toml")
@@ -461,23 +517,23 @@ def test_a_failed_form_read_says_only_the_class(monkeypatch):
 # --- /api/launches ------------------------------------------------------------------------
 
 def seed(conn, request_id: str, at: str, **more) -> None:
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus"}, argv=["claude", "the brief text"],
                  env={"MOXI_LAUNCHER_REQUEST": "secret-stamp"}, posture="operator",
                  session_id=SID if request_id == "r1" else str(uuid.uuid4()), slot="3",
-                 brief="the brief text", base_env={"HOME": "/home/ann-secret"}, at=at,
+                 brief="the brief text", base_env={"HOME": "/users/ann-secret"}, at=at,
                  **more)
 
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    seed(connection, "r1", "2026-01-01T00:00:00.000000Z")
-    seed(connection, "r2", "2026-01-02T00:00:00.000000Z", preset_kind="seat",
+    conn = store.connect()
+    seed(conn, "r1", "2026-01-01T00:00:00.000000Z")
+    seed(conn, "r2", "2026-01-02T00:00:00.000000Z", preset_kind="seat",
          preset_name="planner")
-    seed(connection, "r3", "2026-01-03T00:00:00.000000Z")
-    yield connection
-    connection.close()
+    seed(conn, "r3", "2026-01-03T00:00:00.000000Z")
+    yield conn
+    conn.close()
 
 
 def test_launches_come_newest_first_cut_to_what_the_page_shows(conn):
@@ -516,6 +572,23 @@ def test_a_request_id_answers_its_row_its_refusal_or_nothing_yet(conn):
                                "problem": "slot 3 is taken", "hint": "pick another slot"}
 
 
+def test_a_failed_launch_asked_by_its_id_carries_the_sentence_recorded_for_it(conn):
+    _, said, _ = get("/api/launches", "request=r2")
+    assert said["why"] is None
+    store.set_state(conn, "r2", "failed", reason="occupied")
+    _, said, _ = get("/api/launches", "request=r2")
+    assert (said["launches"][0]["reason"], said["why"]) == ("occupied", None)
+    store.add_event(conn, "start-failed", {"reason": "occupied", "why": "an older try"},
+                    request_id="r2")
+    store.add_event(conn, "start-failed",
+                    {"reason": "occupied", "why": "slots refused the slot: slot 3 is taken"},
+                    request_id="r2")
+    _, said, _ = get("/api/launches", "request=r2")
+    assert said["why"] == "slots refused the slot: slot 3 is taken"
+    # The log's page names no one launch, and carries no sentence.
+    assert get("/api/launches")[1]["why"] is None
+
+
 @pytest.mark.parametrize("query,words", [
     ("request=r1&limit=2", "request is asked alone, without limit"),
     ("before=yesterday", "before is a time"),
@@ -529,7 +602,7 @@ def test_a_query_the_launch_log_cant_take_is_refused(conn, query, words):
 def test_no_launch_log_reads_empty_and_makes_none():
     status, said, _ = get("/api/launches")
     assert (status, said) == (200, {"state": "up", "detail": None, "launches": [],
-                                    "refused": None})
+                                    "refused": None, "why": None})
     assert not store.path().exists()
 
 
@@ -553,7 +626,7 @@ def me() -> str:
 
 def ran(conn, request_id: str = "r1", outcome: str = "nudged"):
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id=request_id,
-                           session_id=SID, actor="launcher", state="acting", job=me(),
+                           session_id=SID, by="launcher", state="acting", job=me(),
                            handoff_path="/notes/handoff.md")
     store.add_run_event(conn, run.run_id, "note",
                         {"verdict": "taken", "why": "", "text": "the whole notice"})
@@ -601,6 +674,269 @@ def test_no_launch_log_has_no_runs():
     assert get("/api/runs")[1] == {"state": "up", "detail": None, "runs": []}
 
 
+# --- /api/places --------------------------------------------------------------------------
+
+def launched(connection, request_id: str, at: str, **more) -> None:
+    """A launch the page server's own actor made, started in a terminal."""
+    args = {"request_id": request_id, "by": first.actor(), "harness": "codex",
+            "target": "terminal", "cwd": "/work", "values": {}, "argv": ["codex"],
+            "env": {}, "posture": "operator", "at": at}
+    store.insert(connection, **{**args, **more})
+
+
+@pytest.fixture
+def log():
+    conn = store.connect()
+    yield conn
+    conn.close()
+
+
+def test_places_are_the_actors_own_newest_first_with_the_actor_named(log):
+    launched(log, "a", "2026-01-01T09:00:00.000000Z", cwd="/work/one")
+    launched(log, "b", "2026-01-01T10:00:00.000000Z", cwd="/src/proj-a/docs",
+             project_key="proj-a")
+    launched(log, "c", "2026-01-01T11:00:00.000000Z", cwd="/work/one")
+    launched(log, "d", "2026-01-01T12:00:00.000000Z", cwd="/work/theirs", by="alice")
+    status, said, _ = get("/api/places")
+    assert (status, said) == (200, {
+        "state": "up", "detail": None, "projects": False, "actor": first.actor(),
+        "home": os.path.expanduser("~"),
+        "places": [
+            {"project_key": None, "cwd": "/work/one", "at": "2026-01-01T11:00:00.000000Z"},
+            {"project_key": "proj-a", "cwd": "/src/proj-a/docs",
+             "at": "2026-01-01T10:00:00.000000Z"}]})
+    assert said["actor"] != "alice"
+
+
+def test_places_leave_out_failed_relaunched_resumed_and_scratch_launches(log):
+    launched(log, "kept", "2026-01-01T09:00:00.000000Z", cwd="/work/kept")
+    launched(log, "failed", "2026-01-01T10:00:00.000000Z", cwd="/work/failed")
+    store.set_state(log, "failed", "failed", reason="exited")
+    launched(log, "again", "2026-01-01T11:00:00.000000Z", cwd="/work/again",
+             relaunch_of="kept")
+    launched(log, "resumed", "2026-01-01T12:00:00.000000Z", cwd="/work/resumed",
+             resume_of="kept", session_id="thread-1")
+    launched(log, "scratch", "2026-01-01T13:00:00.000000Z", cwd="/tmp/scratch-1",
+             values={"scratch": True})
+    assert [p["cwd"] for p in get("/api/places")[1]["places"]] == ["/work/kept"]
+
+
+def test_places_stop_at_five(log):
+    for number in range(7):
+        launched(log, f"r{number}", f"2026-01-01T1{number}:00:00.000000Z",
+                 cwd=f"/work/{number}")
+    assert [p["cwd"] for p in get("/api/places")[1]["places"]] == [
+        f"/work/{number}" for number in (6, 5, 4, 3, 2)]
+
+
+def test_places_say_whether_a_launch_may_name_a_project(monkeypatch):
+    assert get("/api/places")[1]["projects"] is False
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: name == "projects")
+    assert get("/api/places")[1]["projects"] is True
+
+
+def test_a_launch_made_under_a_comms_name_is_that_names_place(log, monkeypatch):
+    launched(log, "mine", "2026-01-01T09:00:00.000000Z", cwd="/work/mine")
+    launched(log, "theirs", "2026-01-01T10:00:00.000000Z", cwd="/work/theirs",
+             by="planner")
+    monkeypatch.setenv(first.comms_name_env(), "planner")
+    said = get("/api/places")[1]
+    assert said["actor"] == "planner"
+    assert [p["cwd"] for p in said["places"]] == ["/work/theirs"]
+
+
+def test_no_launch_log_reads_no_place_and_makes_none():
+    status, said, _ = get("/api/places")
+    assert (status, said) == (200, {"state": "up", "detail": None, "projects": False,
+                                    "actor": first.actor(),
+                                    "home": os.path.expanduser("~"), "places": []})
+    assert not store.path().exists()
+
+
+def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("/home/someone/private/launcher.db")
+
+    monkeypatch.setattr(store, "places", broken)
+    status, said, raw = get("/api/places")
+    assert status == 200 and said == {
+        "state": "error", "detail": pagehandlers.UNEXPECTED.format("RuntimeError"),
+        "projects": False, "actor": first.actor(), "home": os.path.expanduser("~"),
+        "places": []}
+    assert b"someone" not in raw
+
+
+def test_places_name_the_home_dir_the_page_server_sees(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    assert get("/api/places")[1]["home"] == str(tmp_path / "elsewhere")
+
+
+# --- /api/targets -------------------------------------------------------------------------
+
+TERMINAL = {"state": "up", "detail": None, "slots": [], "new_slot": False, "unread": False,
+            "default": {"target": "terminal", "slot": None}}
+
+
+@pytest.fixture
+def fake_slots(tmp_path, monkeypatch):
+    """The fake slots behind the launcher's seam, read as installed; `fake_slots(...)`
+    scripts it, and `fake_slots.calls(name)` lists the calls it got."""
+    import launcher_fake_slots as fake
+
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
+    installed(monkeypatch, "slots")
+    fake.reset()
+
+    def plan(**keys):
+        (slots_dir / "script.json").write_text(json.dumps(keys))
+
+    plan.calls = lambda name=None: fake.calls(slots_dir, name)
+    plan.fake = fake
+    return plan
+
+
+def targets_answer() -> dict:
+    status, said, _ = get("/api/targets")
+    assert status == 200 and said["state"] == "up" and said["detail"] is None
+    return said
+
+
+def test_targets_list_each_slot_in_number_order_with_its_state_and_hold(fake_slots):
+    fake_slots(slots={
+        "4": {"state": "missing", "launchable": False},
+        "3": {"state": "free", "launchable": False,
+              "hold": {"holder": "planner", "until": 1900000000.5}},
+        "2": {"state": "ended", "launchable": True},
+        "1": {"state": "occupied", "launchable": False},
+        "10": {"state": "free", "launchable": True}})
+    said = targets_answer()
+
+    def slot(number, state, launchable, holder=None, until=None):
+        return {"number": number, "state": state, "launchable": launchable,
+                "holder": holder, "until": until, "taken_by": None}
+
+    assert said["slots"] == [
+        slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),
+        slot(3, "free", launchable=False, holder="planner", until=1900000000.5),
+        slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]
+    assert said["new_slot"] is True
+    assert said["default"] == {"target": "slot", "slot": 2}
+
+
+def test_the_default_is_a_new_slot_when_none_is_launchable_or_there_is_none(fake_slots):
+    fake_slots(slots={"1": {"state": "occupied", "launchable": False},
+                      "2": {"state": "free", "launchable": False,
+                            "hold": {"holder": "planner", "until": 1900000000.0}}})
+    said = targets_answer()
+    assert said["new_slot"] is True and said["default"] == {"target": "slot", "slot": None}
+    fake_slots()
+    assert targets_answer() == {"state": "up", "detail": None, "slots": [], "new_slot": True,
+                                "unread": False,
+                                "default": {"target": "slot", "slot": None}}
+
+
+def test_a_session_with_no_registry_row_is_not_listed(fake_slots):
+    fake_slots(slots={"1": {"state": "free", "launchable": True},
+                      "2": {"state": "occupied", "launchable": False, "created": None}})
+    assert [s["number"] for s in targets_answer()["slots"]] == [1]
+
+
+def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
+    launched(log, "named", "2026-01-01T09:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a")
+    launched(log, "bare", "2026-01-01T10:30:00.000000Z", cwd="/src/proj-b")
+    launched(log, "called", "2026-01-01T11:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a", values={"name": "proj-a-opus-Jan-01 11:00"})
+    at = store.parse_time("2026-01-01T10:30:00.000000Z").astimezone()
+
+    def taken(request_id, state="occupied"):
+        return {"state": state, "launchable": state != "occupied",
+                "last": {"at": 1.0, "label": f"launcher:{request_id}",
+                         "meta": {"request_id": request_id}}}
+
+    fake_slots(slots={"1": taken("named"), "2": taken("bare"), "3": taken("unknown"),
+                      "4": {"state": "occupied", "launchable": False},
+                      "5": taken("named", state="ended"), "7": taken("called"),
+                      "6": {"state": "occupied", "launchable": False,
+                            "last": {"at": 1.0, "label": "by hand", "meta": None}}})
+    by = {s["number"]: s["taken_by"] for s in targets_answer()["slots"]}
+    assert by == {1: {"request_id": "named", "label": "planner"},
+                  2: {"request_id": "bare", "label": f"proj-b {at:%H:%M}"},
+                  3: None, 4: None, 5: None, 6: None,
+                  7: {"request_id": "called", "label": "proj-a-opus-Jan-01 11:00"}}
+
+
+def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, tmp_path):
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", identity="coder")
+    fake_slots(slots={"1": {"state": "free", "launchable": True}})
+    fake_slots.fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+                          meta={"request_id": "r1"}, create=True)
+    said = targets_answer()
+    assert said["slots"] == [{"number": 1, "state": "occupied", "launchable": False,
+                              "holder": None, "until": None,
+                              "taken_by": {"request_id": "r1", "label": "coder"}}]
+    assert said["default"] == {"target": "slot", "slot": None}
+
+
+def test_slots_that_cannot_be_read_offer_the_terminal_and_say_they_are_unread(fake_slots):
+    fake_slots(list="error", slots={"1": {"state": "free", "launchable": True}})
+    assert targets_answer() == {**TERMINAL, "unread": True}
+
+
+def test_slots_that_cannot_run_here_offer_no_slot_and_the_terminal(fake_slots):
+    fake_slots(supported={"ok": False, "why": "no tmux"},
+               slots={"1": {"state": "free", "launchable": True}})
+    assert targets_answer() == TERMINAL
+    assert fake_slots.calls("list_slots") == []
+
+
+def test_without_slots_the_default_is_the_terminal_and_slots_is_not_asked(fake_slots,
+                                                                         monkeypatch):
+    fake_slots(slots={"1": {"state": "free", "launchable": True}})
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: False)
+    assert targets_answer() == TERMINAL
+    assert fake_slots.calls() == []
+
+
+def test_slots_installed_but_not_loadable_offers_the_terminal(monkeypatch):
+    installed(monkeypatch, "slots")
+    monkeypatch.setattr(slots, "api", lambda: None)
+    assert targets_answer() == TERMINAL
+
+
+def test_headless_is_never_the_default(fake_slots, monkeypatch):
+    for plan in ({}, {"slots": {"1": {"state": "free", "launchable": True}}},
+                 {"list": "error"}, {"supported": {"ok": False}}):
+        fake_slots(**plan)
+        assert targets_answer()["default"]["target"] in ("slot", "terminal")
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: False)
+    assert targets_answer()["default"]["target"] == "terminal"
+
+
+def test_a_failed_targets_read_says_only_the_class(fake_slots, monkeypatch):
+    def broken():
+        raise RuntimeError("/home/someone/private/registry.json")
+
+    monkeypatch.setattr(fake_slots.fake, "list_slots", broken)
+    status, said, raw = get("/api/targets")
+    assert status == 200 and said == {
+        **TERMINAL, "state": "error", "unread": True,
+        "detail": pagehandlers.UNEXPECTED.format("RuntimeError")}
+    assert b"someone" not in raw
+
+
+def test_a_failed_targets_read_without_slots_does_not_say_slots_are_unread(monkeypatch):
+    def broken(conn=None):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(pagehandlers, "_available", lambda: broken)
+    status, said, _ = get("/api/targets")
+    assert status == 200 and (said["state"], said["unread"]) == ("error", False)
+
+
 # --- the announcement, and the launcher without the UI ---------------------------------------
 
 def test_the_announcement_names_the_page_and_the_ui_link():
@@ -612,21 +948,29 @@ def test_the_announcement_names_the_page_and_the_ui_link():
     assert found.ok and found.page == module.PAGE
 
 
-def test_the_announcement_declares_the_panel_the_home_block_and_the_state():
+def test_the_announcement_declares_the_panel_the_home_pieces_the_block_and_the_state():
     from moxi_launcher import module
 
-    assert set(module.COMPONENTS) == {"page", "sessions", "state"}
+    assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}
     assert {name: decl["place"] for name, decl in module.COMPONENTS.items()} == {
-        "page": "page", "sessions": "block", "state": "inline"}
+        "page": "page", "prompt": "block", "running": "block", "sessions": "block",
+        "state": "inline"}
     assert module.COMPONENTS["sessions"]["home"] is True
+    assert "home_as" not in module.COMPONENTS["sessions"]
     assert "attributes" not in module.COMPONENTS["sessions"]
+    running = module.COMPONENTS["running"]
+    assert (running["title"], running["home"], running["home_as"], running["order"]) == (
+        "Sessions", True, "row", 100)
+    assert running["attributes"]["open"]["type"] == "bool"
+    assert module.OPTIONAL["sessions"].startswith("The latest thing said in each running")
     assert module.COMPONENTS["state"]["attributes"] == {
         "session": {"type": "string", "required": True, "doc": "a session id"}}
     for decl in module.COMPONENTS.values():
         assert decl["contract"] == 1
         assert decl["title"].strip() and "\n" not in decl["doc"]
     found = modules.load("launcher")
-    assert found.ok and set(found.components) == {"page", "sessions", "state"}
+    assert found.ok and set(found.components) == {"page", "prompt", "running", "sessions",
+                                                  "state"}
 
 
 def test_each_components_script_is_a_built_asset_that_defines_its_element():
@@ -655,6 +999,11 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"api/state"' in sessions and '"api/launches"' in sessions
     assert '"launcher","launches"' in sessions
     assert "api/state?session=" in state
+    # Home's Sessions row reads its one route and follows its topic.
+    running = (WEB / "running.js").read_text(encoding="utf-8")
+    assert '"api/running"' in running and '"launcher","running"' in running
+    assert "fetch(" not in running and "WebSocket" not in running
+    assert "EventSource" not in running
     # The panel reads and acts only through its own routes, follows both topics, draws the
     # launch form with the shell's one form renderer and places a state per live row.
     panel = (WEB / "page.js").read_text(encoding="utf-8")
@@ -716,3 +1065,10 @@ def test_the_launcher_works_without_the_ui(tmp_path):
     assert out["loaded"] == []
     assert out["refused"].startswith("the launcher's page needs the ui module")
     assert out["findings"] == []
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_launcher import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 10)

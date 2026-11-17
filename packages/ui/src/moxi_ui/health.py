@@ -202,8 +202,8 @@ def probe(*, wait: float = WAIT) -> Probe:
     # 3. No socket: one connect, which wakes nothing.
     try:
         port = config.port()
-    except Exception as err:  # noqa: BLE001 - a bad setting is the row's detail
-        return Probe("error", task=task, detail=f"the port can't be read: {err}")
+    except Exception as exc:  # noqa: BLE001 - a bad setting is the row's detail
+        return Probe("error", task=task, detail=f"the port can't be read: {exc}")
     if _accepts(port):
         return Probe("held", task=task, port=port,
                      detail=f"port {port} is held by another program")

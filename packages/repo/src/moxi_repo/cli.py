@@ -1,4 +1,5 @@
-"""`moxi repo`: the git hooks of the repos you name, and the committer's specs.
+"""`moxi repo`: the git hooks of the repos you name, a repo's commit rules, and the
+committer's specs.
 
     moxi repo git-hooks [list] [PATH] [--projects] [--json]
     moxi repo git-hooks available [--json]
@@ -6,7 +7,8 @@
     moxi repo git-hooks remove PATH [PIECE...]
     moxi repo git-hooks enable|disable PATH PIECE
     moxi repo git-hooks refresh [PATH]
-    moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]
+    moxi repo rules [PATH]
+    moxi repo commit PATH [--spec NAME] [--wait-s SECONDS] [--json]
     moxi repo specs [PATH] [--json]
     moxi repo specs remove PATH NAME
 
@@ -100,13 +102,22 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                     "piece's enabled key, settings and record flag.")
     rf.add_argument("path", nargs="?", metavar="PATH")
 
+    ru = verbs.add_parser(
+        "rules", help="what a committer in a repo must know",
+        description="Print the commit rules of the repo at PATH, or of the one you are in: "
+                    "the trailers it refuses, the text its commit messages may not hold, "
+                    "its own rule lines, and last, where the commit-proof piece is "
+                    "registered, the Commit-Check line for what is staged in that work "
+                    "tree. A repo with none says so.", epilog=note)
+    ru.add_argument("path", nargs="?", metavar="PATH")
+
     cm = verbs.add_parser(
-        "commit", help="run a repo's saved committer specs",
+        "commit", allow_abbrev=False, help="run a repo's saved committer specs",
         description="Run one pass of the spec saved as NAME in the repo at PATH, or of every "
                     "spec saved there, and print each pass's line.", epilog=note)
     cm.add_argument("path", metavar="PATH")
     cm.add_argument("--spec", metavar="NAME", help="the saved spec to run")
-    cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+    cm.add_argument("--wait-s", type=float, default=0, metavar="SECONDS",
                     help="wait this long for another pass's lock (default: try once)")
     cm.add_argument("--json", action="store_true", help="print one JSON array")
 
@@ -308,6 +319,12 @@ def _refresh(args) -> int:
     return print_report(api.refresh(args.path))
 
 
+def _rules(args) -> int:
+    for line in api.rules(args.path if args.path is not None else os.curdir):
+        print(line)
+    return 0
+
+
 def _commit(args) -> int:
     from moxi_repo import committer
 
@@ -326,11 +343,11 @@ def _commit(args) -> int:
         else:
             print(f"no spec is saved in {where.top}")
         return 0
-    results = [committer.commit_saved(where.top, name, wait=args.wait) for name in names]
+    results = [committer.commit_saved(where.top, name, wait_s=args.wait_s) for name in names]
     codes = []
     for result in results:
         code = result.exit_code
-        if result.status == "busy" and args.wait:
+        if result.status == "busy" and args.wait_s:
             code = 75
         codes.append(code)
         if not args.json:
@@ -366,7 +383,7 @@ def _specs(args) -> int:
             spec = item.get("spec")
             if spec:
                 print(f"    paths: {', '.join(spec['paths'])}; every "
-                      f"{spec['min_interval']} s; push: {spec['push'] or 'none'}")
+                      f"{spec['min_interval_s']} s; push: {spec['push'] or 'none'}")
             if last.get("line"):
                 print(f"    {last['line']}")
             if item.get("refused_since"):
@@ -383,4 +400,4 @@ def _specs(args) -> int:
 
 _ACTIONS = {"list": _list, "available": _available, "add": _add, "remove": _remove,
             "enable": _enable, "disable": _disable, "refresh": _refresh,
-            "commit": _commit, "specs": _specs}
+            "rules": _rules, "commit": _commit, "specs": _specs}

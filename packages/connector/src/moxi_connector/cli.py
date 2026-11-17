@@ -1,7 +1,7 @@
 """`moxi connector`: the public MCP door, from the command line.
 
-    moxi connector on
-    moxi connector off
+    moxi connector enable
+    moxi connector disable
     moxi connector status [--json]
     moxi connector check [--json]
     moxi connector log [--days N] [--json]
@@ -65,14 +65,14 @@ class Refused(Exception):
 
 # -- the switch ------------------------------------------------------------------------------
 
-def _set_switch(value: bool, by: str) -> list[str]:
+def _set_switch(*, enabled: bool, by: str) -> list[str]:
     """Set `enabled` through `moxi.config.set`, which writes and applies the daemon's
     units. Returns the lines the core printed while it applied them."""
     from moxi import config
 
     lines = io.StringIO()
     with contextlib.redirect_stdout(lines):
-        config.set(MODULE, "enabled", value, by=by)
+        config.set_value(MODULE, "enabled", enabled, by=by)
     return [line for line in lines.getvalue().splitlines() if line.strip()]
 
 
@@ -89,22 +89,22 @@ def _store():
 def _revoke_row(**fields: Any) -> None:
     try:
         calllog.event(calllog.CallLog(), "revoke", **fields)
-    except Exception as e:  # noqa: BLE001 - the revoke stands without its row
-        print(f"The revoke couldn't be written to the call log: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - the revoke stands without its row
+        print(f"The revoke couldn't be written to the call log: {exc}", file=sys.stderr)
 
 
 def revoke_every_grant() -> str | None:
-    """Revoke every grant in the grants file, before `off` sets the switch false, so no
-    grant stays valid behind a port nothing holds. Returns the line `off` prints about
+    """Revoke every grant in the grants file, before `disable` sets the switch false, so no
+    grant stays valid behind a port nothing holds. Returns the line `disable` prints about
     it. Raises when the file can't be written."""
-    count = _store().revoke_all(by="off")
+    count = _store().revoke_all(by="disable")
     if count:
-        _revoke_row(all=True, by="off", count=count)
+        _revoke_row(all=True, by="disable", count=count)
     return REVOKED_ALL
 
 
 def _on(args, out: TextIO) -> int:
-    for line in _set_switch(True, "moxi connector on"):
+    for line in _set_switch(enabled=True, by="moxi connector enable"):
         print(line, file=out)
     snap = doctor.take(ask=_no_ask)
     print("The connector is on.", file=out)
@@ -126,14 +126,14 @@ def _off(args, out: TextIO) -> int:
     code = codes.OK
     try:
         said = revoke_every_grant()
-    except Exception as e:  # noqa: BLE001 - said, and the switch still goes off
-        print(f"The grants couldn't be revoked: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - said, and the switch still goes off
+        print(f"The grants couldn't be revoked: {exc}", file=sys.stderr)
         print("  fix: moxi connector revoke --all", file=sys.stderr)
         code = codes.ERROR
     else:
         if said:
             print(said, file=out)
-    for line in _set_switch(False, "moxi connector off"):
+    for line in _set_switch(enabled=False, by="moxi connector disable"):
         print(line, file=out)
     print("The connector is off.", file=out)
     address = doctor.take(ask=_no_ask).address
@@ -158,7 +158,7 @@ def _status(args, out: TextIO) -> int:
         print(json.dumps(_status_json(snap, rows), indent=2), file=out)
         return codes.OK
     if not snap.switch:
-        print("The connector is off; moxi connector on turns it on.", file=out)
+        print("The connector is off; moxi connector enable turns it on.", file=out)
     if snap.origin is not None:
         print(f"URL: {snap.origin.resource}   (paste into {ADD_IN_CLAUDE})", file=out)
     else:
@@ -224,7 +224,7 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
 
     snap = doctor.take()
     if not snap.switch:
-        raise Refused("the connector is off", "moxi connector on")
+        raise Refused("the connector is off", "moxi connector enable")
     if snap.answer is None:
         raise Refused(f"the connector's process doesn't answer: {snap.error}",
                       checks.RESTART)
@@ -238,8 +238,8 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
 
     try:
         steps = probe.run(found, ask=ask, fetch=fetch or probe.fetch, provider=snap.edge)
-    except ipc.IpcError as e:
-        raise Refused(f"the connector stopped answering during the check: {e}",
+    except ipc.IpcError as exc:
+        raise Refused(f"the connector stopped answering during the check: {exc}",
                       checks.RESTART) from None
     passed = probe.passed([s for s in steps if s.name != "note"])
     failed = next((s.name for s in steps if not s.passed), None)
@@ -249,8 +249,8 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
                                  "steps": {s.name: s.passed for s in steps
                                            if s.name != "note"}},
                                 durable=True, collapse=None)
-    except Exception as e:  # noqa: BLE001 - the check's answer stands without its row
-        print(f"The check's result couldn't be written to the call log: {e}",
+    except Exception as exc:  # noqa: BLE001 - the check's answer stands without its row
+        print(f"The check's result couldn't be written to the call log: {exc}",
               file=sys.stderr)
     if args.json:
         print(json.dumps({"url": found.url, "passed": passed,
@@ -295,11 +295,11 @@ def _local_gates() -> list[tuple[str, Any]]:
 def _refused_row(**fields: Any) -> None:
     try:
         calllog.event(calllog.CallLog(), "code-refused", **fields)
-    except Exception as e:  # noqa: BLE001 - the refusal stands without its row
-        print(f"The refusal couldn't be written to the call log: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - the refusal stands without its row
+        print(f"The refusal couldn't be written to the call log: {exc}", file=sys.stderr)
 
 
-def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
+def _code(args, out: TextIO, *, source_env: dict[str, str] | None = None) -> int:
     import os
     import time
 
@@ -308,7 +308,7 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
     from . import codes as mint
     from . import settings
 
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if source_env is None else source_env)
     name = "moxi connector code"
     gates = _local_gates()
     if not gates:
@@ -318,24 +318,24 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
     for module, gate in gates:
         try:
             said = gate.shell(env)
-        except Exception as e:  # noqa: BLE001 - a check that fails never lets a mint through
+        except Exception as exc:  # noqa: BLE001 - a check that fails never lets a mint through
             said = (f"The mint gate of {module} failed in this shell "
-                    f"({type(e).__name__}), so no code is minted.")
+                    f"({type(exc).__name__}), so no code is minted.")
         if said is not None:
             _refused_row(check="shell", module=module, refusal=str(said))
             print(f"{name}: {said}", file=sys.stderr)
             return NOPERM
     if not settings.enabled():
         print(f"{name}: the connector is off, so it can't mint a code.", file=sys.stderr)
-        print("  fix: moxi connector on", file=sys.stderr)
+        print("  fix: moxi connector enable", file=sys.stderr)
         return codes.TEMPFAIL
     try:
         got = checks.ask("mint_code", {"label": mint.clean_label(args.label)})
-    except ipc.RpcError as e:
-        print(f"{name}: {e.message}", file=sys.stderr)
-        return NOPERM if e.code in (mint.REFUSED, mint.NO_GATE) else codes.ERROR
-    except ipc.IpcError as e:
-        print(f"{name}: the connector's process doesn't answer ({e}), so no code is "
+    except ipc.RpcError as exc:
+        print(f"{name}: {exc.message}", file=sys.stderr)
+        return NOPERM if exc.code in (mint.REFUSED, mint.NO_GATE) else codes.ERROR
+    except ipc.IpcError as exc:
+        print(f"{name}: the connector's process doesn't answer ({exc}), so no code is "
               "minted.", file=sys.stderr)
         print(f"  fix: {checks.RESTART}", file=sys.stderr)
         return codes.TEMPFAIL
@@ -402,7 +402,7 @@ def _revoke(args, out: TextIO) -> int:
 # -- the parser and the dispatch -------------------------------------------------------------
 
 VERBS: dict[str, Callable[[argparse.Namespace, TextIO], int]] = {
-    "on": _on, "off": _off, "status": _status, "check": _check, "log": _log,
+    "enable": _on, "disable": _off, "status": _status, "check": _check, "log": _log,
     "code": _code, "grants": _grants, "revoke": _revoke,
 }
 
@@ -415,10 +415,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    verbs.add_parser("on", help="turn the connector on",
+    verbs.add_parser("enable", help="turn the connector on",
                      description="Set the switch; the core writes and starts the daemon. "
                                  "Prints the next steps.")
-    verbs.add_parser("off", help="revoke every grant and turn the connector off",
+    verbs.add_parser("disable", help="revoke every grant and turn the connector off",
                      description="Revoke every grant, so the next sign-in needs a code, "
                                  "then set the switch false. The tunnel entry stays.")
     p = verbs.add_parser("status", help="the address, the process, the providers",

@@ -44,14 +44,14 @@ def set_up(**values) -> Path:
 
 # -- root ---------------------------------------------------------------------------------
 
-def _setup_ran(monkeypatch, ran: bool) -> list[str]:
+def _setup_ran(monkeypatch, *, ran: bool) -> list[str]:
     asked = []
     monkeypatch.setattr(moxi.modules, "setup_ran", lambda m: asked.append(m) or ran)
     return asked
 
 
-def test_root_fails_when_the_folder_is_missing_after_setup_ran(monkeypatch):
-    asked = _setup_ran(monkeypatch, True)
+def test_root_fails_when_the_dir_is_missing_after_setup_ran(monkeypatch):
+    asked = _setup_ran(monkeypatch, ran=True)
     row = rows()["root"]
     assert row.state == "fail" and "missing" in row.detail
     assert "moxi notes setup" in row.fix
@@ -71,13 +71,13 @@ def test_a_missing_root_before_setup_ran_warns_and_names_the_install():
 
 
 def test_the_setup_record_is_read_only_for_a_missing_root(monkeypatch):
-    asked = _setup_ran(monkeypatch, False)
+    asked = _setup_ran(monkeypatch, ran=False)
     (home() / "notes").mkdir()
     assert rows()["root"].state == "warn"
     assert asked == []
 
 
-def test_root_warns_when_the_folder_is_no_git_repo_and_the_rest_is_off():
+def test_root_warns_when_the_dir_is_no_git_repo_and_the_rest_is_off():
     (home() / "notes").mkdir()
     found = rows()
     assert found["root"].state == "warn" and found["root"].fix == "moxi notes setup"
@@ -96,7 +96,7 @@ def test_root_warns_when_it_is_inside_a_repo_but_not_its_top():
 def test_a_config_that_cannot_be_read_fails_the_root_row():
     path = Path(moxi.paths.Layout("notes").config_file())
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("max_mb = 'many'\n", encoding="utf-8")
+    path.write_text("max_mib = 'many'\n", encoding="utf-8")
     found = list(doctor.rows())
     assert [(r.name, r.state) for r in found] == [("root", "fail")]
 
@@ -115,11 +115,11 @@ def test_after_setup_every_row_is_ok():
 @posix
 def test_snapshot_is_off_with_both_triggers_off_and_warns_on_a_spec_that_differs():
     set_up()
-    configure(snapshot__interval=30)
+    configure(snapshot__interval_minutes=30)
     row = rows()["snapshot"]
     assert row.state == "warn" and "differs" in row.detail
     assert row.fix == "moxi notes setup"
-    configure(snapshot__auto=False)
+    configure(snapshot__session_end=False)
     assert state("snapshot") == "off"
     configure(snapshot__timer=True)
     assert state("snapshot") == "warn"
@@ -248,8 +248,15 @@ def test_allowlist_fails_closed_for_a_separate_git_dir(tmp_path):
     sh(tmp_path, "init", "-q", f"--separate-git-dir={tmp_path / 'store' / 'notes.git'}",
        str(root))
     assert setup.setup(out=io.StringIO()) == 0
+    # With no private file there is nothing to refuse: secrets reads a missing file as
+    # no lines wherever it would be, so only the public file's allowances apply.
+    assert rows()["allowlist"].state == "ok"
+    private = tmp_path / "store" / "notes.git" / "secrets-allow-private"
+    private.write_text(allow_line("*", "private-names/private-name", "text:quillon"),
+                       encoding="utf-8")
     row = rows()["allowlist"]
     assert row.state == "fail" and "is not a folder named .git" in row.detail
+    assert str(private) in row.detail
 
 
 # -- topics -------------------------------------------------------------------------------
@@ -260,7 +267,7 @@ def test_topics_is_off_without_projects(monkeypatch):
     assert row.state == "off" and row.fix == "moxi install projects"
 
 
-def test_topics_warns_on_a_missing_folder_and_on_a_git_inside():
+def test_topics_warns_on_a_missing_dir_and_on_a_git_inside():
     for key in ("gardening", "baking"):
         code, out, err = moxi_cmd("projects", "add", key, "--kind", "topic", "--create")
         assert code == 0, out + err

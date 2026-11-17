@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Every setting carries page fields, which `moxi config tunnel show --json` prints
+  and the settings page draws: a plain label, and a line where the label can't carry
+  it. `cloudflare.enabled` names the commands that turn it on and off, `moxi tunnel
+  add <target> --provider cloudflare` and `moxi tunnel remove <target>`, so the page
+  shows it without a switch to flip. tunnel needs moxi 0.1.9 or later.
+
 ## 0.2.0 (2026-11-08)
 
 The first public release.

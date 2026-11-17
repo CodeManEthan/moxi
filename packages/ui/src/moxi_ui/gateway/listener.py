@@ -170,11 +170,11 @@ def read_tunnel() -> TunnelRead:
     if not current:
         found = modules.load("tunnel", interface=1)
         if found.state != modules.PRESENT or found.api is None:
-            return TunnelRead(None, False, reason)
+            return TunnelRead(None, current=False, reason=reason)
     try:
         return TunnelRead(found.api.address("ui", "gateway"), current, reason)
-    except Exception as err:  # noqa: BLE001 - a record that can't be read is a row of its own
-        return TunnelRead(REFUSED, current, str(err) or type(err).__name__)
+    except Exception as exc:  # noqa: BLE001 - a record that can't be read is a row of its own
+        return TunnelRead(REFUSED, current, str(exc) or type(exc).__name__)
 
 
 def remove_entry() -> None:
@@ -219,16 +219,16 @@ class Gateway:
                  tunnel: Callable[[], TunnelRead] = read_tunnel,
                  find_uid: Callable[[str], int | None] = provider.provider_uid,
                  remove: Callable[[], None] = remove_entry,
-                 environ: Mapping[str, str] | None = None, proc: str = "/proc",
+                 env: Mapping[str, str] | None = None, proc: str = "/proc",
                  head_limit: int = _HEAD_LIMIT, tick_s: float = TICK_S):
         self.layout = layout or Layout("ui")
         self.parts = parts or Parts()
         self.system = system or endpoint.system()
         self.kind = kind or endpoint.resolve_kind(self.system)
         self._settings, self._extra, self._tunnel = settings, extra, tunnel
-        self._find_uid, self._remove, self._environ = find_uid, remove, environ
+        self._find_uid, self._remove, self._env = find_uid, remove, env
         self.proc, self.head_limit, self.tick_s = proc, head_limit, tick_s
-        self.runtime_dir: Path = self.layout.runtime_dir(environ)
+        self.runtime_dir: Path = self.layout.runtime_dir(env)
         self.path = os.path.join(self.runtime_dir, endpoint.SOCKET_FILE)
         #: Main's locator text when this shell's environment moves its runtime directory.
         self.moved: str | None = None
@@ -236,6 +236,8 @@ class Gateway:
         self.shell_port: int | None = None
         self.switch = False
         self.extra = False
+        #: Whether a reading has been applied, so `switch` and `extra` hold what it read.
+        self.has_read = False
         self.current = False
         #: Why the gateway is off on the tunnel's side, or the record's failure.
         self.tunnel_reason: str | None = None
@@ -245,7 +247,7 @@ class Gateway:
         self.kept: Kept | None = None
         self.profile: Profile | None = None
         self.uid: int | None = None
-        self.mount = Mount(False, "off")
+        self.mount = Mount(mounted=False, reason="off")
         self._wrote: tuple[Any, ...] | None = None
         #: The text of the hold the shell couldn't take, or of the setting that stops it.
         self.problem: str | None = None
@@ -259,7 +261,7 @@ class Gateway:
 
     def start(self) -> None:
         """Read what is read once: the runtime-directory check and the two ports."""
-        self.moved = endpoint.runtime_problem(self._environ)
+        self.moved = endpoint.runtime_problem(self._env)
         if self.moved:
             _log.warning("the gateway takes no hold: %s", self.moved)
             return
@@ -267,13 +269,19 @@ class Gateway:
             settings = self._settings()
             self.port = _port(settings["gateway.port"], "gateway.port")
             self.shell_port = _port(settings["port"], "port")
-        except Exception as err:  # noqa: BLE001 - said by the hold and the doctor
-            self._port_problem = f"the gateway's port can't be read: {err}"
+        except Exception as exc:  # noqa: BLE001 - said by the hold and the doctor
+            self._port_problem = f"the gateway's port can't be read: {exc}"
 
     @property
     def endpoint(self) -> str | int | None:
         """The endpoint the tunnel's target must name: the socket path, or the TCP port."""
         return self.path if self.kind == "unix" else self.port
+
+    @property
+    def installed(self) -> bool:
+        """Whether the `gateway` extra is installed: as the last reading found it, else
+        looked up now."""
+        return self.extra if self.has_read else bool(self._extra())
 
     @property
     def holding(self) -> bool:
@@ -335,7 +343,7 @@ class Gateway:
     def apply(self, reading: Reading) -> str | None:
         """Apply one reading to the profile and the mount. Returns the provider whose uid
         is to be found again, or None."""
-        self.switch, self.extra = reading.switch, reading.extra
+        self.switch, self.extra, self.has_read = reading.switch, reading.extra, True
         self.current, self.tunnel_reason = reading.tunnel.current, reading.tunnel.reason
         read = reading.tunnel.address
         self.refused = read == REFUSED
@@ -361,18 +369,18 @@ class Gateway:
             self.profile = gateway(self.parts.table(mount), session=self.parts.session,
                                    host=self.kept.host, port=self.kept.port,
                                    fallback=self.parts.fallback)
-        except ValueError as err:
+        except ValueError as exc:
             _log.warning("the gateway's profile can't be built for %s: %s",
-                         self.kept.host, err)
+                         self.kept.host, exc)
             self.kept, self.profile, self.uid = None, None, None
 
     def _mount(self) -> None:
-        mount = decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+        mount = decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                        address=self.address, refused=self.refused)
         if mount.mounted != self.mount.mounted and self.kept is not None:
             # The table holds the act paths only while the acts are mounted.
             self._build(mount)
-            mount = decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+            mount = decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                            address=self.address, refused=self.refused)
         changed = mount != self.mount
         self.mount = mount
@@ -414,7 +422,7 @@ class Gateway:
 
     def acts_now(self) -> Mount:
         """The mount as the inputs stand now, for a prepare or a commit to check again."""
-        return decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+        return decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                       address=self.address, refused=self.refused)
 
     # --- the hold -------------------------------------------------------------------
@@ -434,9 +442,9 @@ class Gateway:
         elif want and self.kind == "unix":
             try:
                 endpoint.check_socket_path(self.path)
-            except endpoint.PathRefused as err:
+            except endpoint.PathRefused as exc:
                 await self._let_go()
-                await self._failed(str(err))
+                await self._on_failed(str(exc))
         elif not want and self._held is not None:
             await self._let_go()
         if not want:
@@ -445,20 +453,20 @@ class Gateway:
     async def _take(self) -> None:
         try:
             sock = self._bind()
-        except _Stopped as err:
-            self.problem = str(err)
+        except _Stopped as exc:
+            self.problem = str(exc)
             return
-        except (endpoint.PathRefused, NotPrivate) as err:
-            await self._failed(str(err))
+        except (endpoint.PathRefused, NotPrivate) as exc:
+            await self._on_failed(str(exc))
             return
-        except OSError as err:
-            if self.kind == "tcp" and (err.errno in _IN_USE
-                                       or getattr(err, "winerror", None) in (10013, 10048)):
+        except OSError as exc:
+            if self.kind == "tcp" and (exc.errno in _IN_USE
+                                       or getattr(exc, "winerror", None) in (10013, 10048)):
                 text = (f"port {self.port} was held by another program; the tunnel entry "
-                        f"was removed; free the port and run `moxi ui gateway on`")
+                        f"was removed; free the port and run `moxi ui gateway enable`")
             else:
-                text = f"the gateway's endpoint can't be bound: {err}"
-            await self._failed(text)
+                text = f"the gateway's endpoint can't be bound: {exc}"
+            await self._on_failed(text)
             return
         stop = asyncio.Event()
         task = asyncio.ensure_future(serve(
@@ -482,7 +490,7 @@ class Gateway:
                            "another with `moxi config set ui gateway.port N`")
         return bind_tcp(self.port)
 
-    async def _failed(self, text: str) -> None:
+    async def _on_failed(self, text: str) -> None:
         if text != self.problem:
             _log.warning("the gateway can't hold its endpoint: %s", text)
             where = self.path if self.kind == "unix" else f"127.0.0.1:{self.port}"
@@ -559,4 +567,3 @@ def _unlink_socket(path: str) -> None:
             os.unlink(path)
     except OSError:
         pass
-

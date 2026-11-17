@@ -89,14 +89,14 @@ def test_the_verbs_that_act_stay_four():
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "whoami",
-                                "claude", "codex", "migrate", "delete", "reserved"}
+                                "claude", "codex", "migrate", "remove", "reserved"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     claim = {"whoami"}
     wrapper = {"claude", "codex"}
     store_verb = {"migrate", "reserved"}
-    # `delete` acts only on the sender's own message, taking back what it sent.
-    withdraw = {"delete"}
+    # `remove` acts only on the sender's own message, taking back what it sent.
+    withdraw = {"remove"}
     assert (acting | reading | claim | wrapper | store_verb | withdraw
             == set(sub.choices)) \
         and len(acting) == 4
@@ -169,8 +169,8 @@ def _shipped_text(path: Path):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             yield n, line
         return
-    with path.open("rb") as f:
-        for tok in tokenize.tokenize(f.readline):
+    with path.open("rb") as fh:
+        for tok in tokenize.tokenize(fh.readline):
             if tok.type in _TEXT_TOKENS:
                 yield tok.start[0], tok.string
 
@@ -238,11 +238,18 @@ _RETIRED_SLOT_SITES = Counter([
 ])
 
 
+#: The page's built scripts, where `slot` is the DOM's (`slot="acts"` places an element in a
+#: shadow root's slot), not comms' retired word. They are built from `web/src`.
+_BUILT_WEB = ("src", "moxi_comms", "web")
+
+
 def retired_slot_vocabulary(repo=REPO):
     allowed = _RETIRED_SLOT_SITES.copy()
     hits = []
     for path in sorted((repo / "src").rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.relative_to(repo).parts[:3] == _BUILT_WEB:
             continue
         relative = str(path.relative_to(repo))
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

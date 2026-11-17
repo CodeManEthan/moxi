@@ -2,7 +2,7 @@
 
 turns calls `judge(call)` before a covered tool call, in the session's endpoint, when the
 guard `sessions.transcript-read` is on: by sessions' switch `guard.transcript_read`, which
-the install asks about, or by naming the guard on turns' `guards.on`. It answers None (let
+the install asks about, or by naming the guard on turns' `guards.run`. It answers None (let
 the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <session>`.
 
 **What it refuses.** A call that names a path under a transcript root:
@@ -174,10 +174,10 @@ def transcript_roots(env: Mapping[str, str] | None = None) -> tuple[tuple[str, s
     from .shape import HARNESSES
     from .source import root
 
-    environ = dict(os.environ if env is None else env)
+    roots_env = dict(os.environ if env is None else env)
     out: list[tuple[str, str]] = list(_configured_roots())
     for harness in HARNESSES:
-        out.append((harness, str(root(harness, environ))))
+        out.append((harness, str(root(harness, roots_env))))
     return tuple(dict.fromkeys(out))
 
 

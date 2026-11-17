@@ -46,20 +46,20 @@ args = ["docs-mcp", "--root", "{source}/docs"]
 """
 
 
-def read(text: str, folder: Path) -> manifest.Manifest:
-    return manifest.parse(textwrap.dedent(text), path=folder / "loadout.toml")
+def read(text: str, loadout_dir: Path) -> manifest.Manifest:
+    return manifest.parse(textwrap.dedent(text), path=loadout_dir / "loadout.toml")
 
 
-def problems(text: str, folder: Path) -> tuple[str, ...]:
+def problems(text: str, loadout_dir: Path) -> tuple[str, ...]:
     with pytest.raises(ManifestError) as caught:
-        read(text, folder)
+        read(text, loadout_dir)
     assert caught.value.exit_code == 2
     return caught.value.lines
 
 
-def test_the_example_reads_with_every_section_and_kind(folder):
-    m = read(EXAMPLE, folder)
-    assert m.exists and m.mode == "off" and m.global_file == folder / "global.md"
+def test_the_example_reads_with_every_section_and_kind(loadout_dir):
+    m = read(EXAMPLE, loadout_dir)
+    assert m.exists and m.mode == "off" and m.global_file == loadout_dir / "global.md"
     assert m.user.names("skill") == ("review", "launcher/moxi-handoff")
     assert m.user.names("hook") == ("guard-rm",)
     assert m.user.names("permissions") == ("git-reads",)
@@ -77,16 +77,16 @@ def test_the_example_reads_with_every_section_and_kind(folder):
     assert m.refused == ()
 
 
-def test_a_missing_manifest_is_empty_and_sets_no_mode(folder):
-    m = manifest.load(folder)
+def test_a_missing_manifest_is_empty_and_sets_no_mode(loadout_dir):
+    m = manifest.load(loadout_dir)
     assert not m.exists and m.mode is None and m.global_mode == "off"
     assert m.sections() == (m.user,) and m.user.lists == {}
 
 
-def test_no_global_mode_key_reads_none_so_the_question_is_asked(folder):
-    assert read("[global]\nfile = 'text.md'\n", folder).mode is None
-    assert read("[global]\nfile = 'text.md'\n", folder).global_file == folder / "text.md"
-    assert read("[global]\nmode = 'managed'\n", folder).mode == "managed"
+def test_no_global_mode_key_reads_none_so_the_question_is_asked(loadout_dir):
+    assert read("[global]\nfile = 'text.md'\n", loadout_dir).mode is None
+    assert read("[global]\nfile = 'text.md'\n", loadout_dir).global_file == loadout_dir / "text.md"
+    assert read("[global]\nmode = 'managed'\n", loadout_dir).mode == "managed"
 
 
 @pytest.mark.parametrize("text, line", [
@@ -104,8 +104,8 @@ def test_no_global_mode_key_reads_none_so_the_question_is_asked(folder):
      "unknown key permissions.p.claude.alow (did you mean allow?)"),
     ("[mcp.m]\ncommand = 'c'\nargz = []\n", "unknown key mcp.m.argz (did you mean args?)"),
 ])
-def test_an_unknown_key_names_the_closest_known_one(folder, text, line):
-    assert line in problems(text, folder)
+def test_an_unknown_key_names_the_closest_known_one(loadout_dir, text, line):
+    assert line in problems(text, loadout_dir)
 
 
 @pytest.mark.parametrize("text, part", [
@@ -128,26 +128,26 @@ def test_an_unknown_key_names_the_closest_known_one(folder, text, line):
     ("[agent.'a/b']\n", "names agent 'a/b'"),
     ("user = 3\n", "user: want a table"),
 ])
-def test_a_value_of_the_wrong_shape_is_a_usage_error(folder, text, part):
-    assert any(part in line for line in problems(text, folder))
+def test_a_value_of_the_wrong_shape_is_a_usage_error(loadout_dir, text, part):
+    assert any(part in line for line in problems(text, loadout_dir))
 
 
-def test_every_problem_is_reported_at_once_each_naming_the_file(folder):
+def test_every_problem_is_reported_at_once_each_naming_the_file(loadout_dir):
     with pytest.raises(ManifestError) as caught:
-        read("[user]\nskils = []\n[skill.x]\nharness = []\n", folder)
+        read("[user]\nskils = []\n[skill.x]\nharness = []\n", loadout_dir)
     assert len(caught.value.lines) == 2
     assert str(caught.value).splitlines() == [
-        f"{folder / 'loadout.toml'}: {line}" for line in caught.value.lines]
+        f"{loadout_dir / 'loadout.toml'}: {line}" for line in caught.value.lines]
 
 
-def test_text_that_is_not_toml_is_a_usage_error(folder):
-    assert any("is not valid TOML" in line for line in problems("[user\n", folder))
+def test_text_that_is_not_toml_is_a_usage_error(loadout_dir):
+    assert any("is not valid TOML" in line for line in problems("[user\n", loadout_dir))
 
 
-def test_a_manifest_that_cannot_be_read_is_an_error(folder):
-    (folder / "loadout.toml").mkdir(parents=True)
+def test_a_manifest_that_cannot_be_read_is_an_error(loadout_dir):
+    (loadout_dir / "loadout.toml").mkdir(parents=True)
     with pytest.raises(ManifestError) as caught:
-        manifest.load(folder)
+        manifest.load(loadout_dir)
     assert caught.value.exit_code == 1
 
 
@@ -155,34 +155,34 @@ def test_a_manifest_that_cannot_be_read_is_an_error(folder):
     ("~/code/app", "path"), ("/srv/app", "path"), ("./app", "path"), ("app\\sub", "path"),
     ("~", "path"), ("app", "key"), ("delta.web", "key"), ("Beta", "key"),
 ])
-def test_a_section_name_is_a_path_or_a_key(folder, name, where):
-    m = read(f'[project."{name.replace(chr(92), chr(92) * 2)}"]\nskills = ["x"]\n', folder)
+def test_a_section_name_is_a_path_or_a_key(loadout_dir, name, where):
+    m = read(f'[project."{name.replace(chr(92), chr(92) * 2)}"]\nskills = ["x"]\n', loadout_dir)
     assert m.projects[0].where == where
 
 
-def test_a_relative_path_section_is_read_from_the_loadout_folder(folder):
+def test_a_relative_path_section_is_read_from_the_loadout_dir(loadout_dir):
     m = read('[project."./app"]\nskills = ["x"]\n[project."../work/b"]\nskills = ["x"]\n',
-             folder)
-    assert [s.root for s in m.projects] == [str(folder / "app"),
-                                             str(folder.parent / "work" / "b")]
+             loadout_dir)
+    assert [s.root for s in m.projects] == [str(loadout_dir / "app"),
+                                             str(loadout_dir.parent / "work" / "b")]
 
 
-def test_two_sections_for_one_project_are_refused(folder):
+def test_two_sections_for_one_project_are_refused(loadout_dir):
     home = os.path.expanduser("~")
-    lines = problems(f'[project."~/app"]\n[project."{home}/app/"]\n', folder)
+    lines = problems(f'[project."~/app"]\n[project."{home}/app/"]\n', loadout_dir)
     assert any("name one project" in line for line in lines)
-    lines = problems("[project.App]\n[project.app]\n", folder)
+    lines = problems("[project.App]\n[project.app]\n", loadout_dir)
     assert any("name one project" in line for line in lines)
 
 
-def test_hooks_permissions_and_mcp_in_a_project_are_refused_with_a_line(folder):
+def test_hooks_permissions_and_mcp_in_a_project_are_refused_with_a_line(loadout_dir):
     m = read("""\
         [project.app]
         skills = ["x"]
         hooks = ["guard"]
         permissions = ["reads"]
         mcp = ["docs"]
-        """, folder)
+        """, loadout_dir)
     section = m.projects[0]
     assert section.lists == {"skill": ("x",)}
     assert [(r.kind, r.name) for r in m.refused] == [("hook", "guard"),
@@ -191,11 +191,11 @@ def test_hooks_permissions_and_mcp_in_a_project_are_refused_with_a_line(folder):
     assert "written at user scope only" in m.refused[0].line
 
 
-def test_a_name_listed_twice_is_listed_once(folder):
-    assert read("[user]\nskills = ['a', 'b', 'a']\n", folder).user.names("skill") == ("a", "b")
+def test_a_name_listed_twice_is_listed_once(loadout_dir):
+    assert read("[user]\nskills = ['a', 'b', 'a']\n", loadout_dir).user.names("skill") == ("a", "b")
 
 
-def test_disabled_switches_only_its_own_section_and_star_means_every_harness(folder):
+def test_disabled_switches_only_its_own_section_and_star_means_every_harness(loadout_dir):
     m = read("""\
         [user]
         skills = ["x"]
@@ -203,7 +203,7 @@ def test_disabled_switches_only_its_own_section_and_star_means_every_harness(fol
         [project.app]
         skills = ["x"]
         disabled = ["skill:x@codex"]
-        """, folder)
+        """, loadout_dir)
     assert m.user.is_disabled("skill", "x", "claude")
     assert m.user.is_disabled("skill", "x", "opencode")
     app = m.section("app")
@@ -212,8 +212,8 @@ def test_disabled_switches_only_its_own_section_and_star_means_every_harness(fol
     assert not app.is_disabled("skill", "y", "codex")
 
 
-def test_a_section_is_found_by_name_by_root_and_by_key_ignoring_case(folder):
-    m = read('[project."~/code/app"]\n[project.Web]\n', folder)
+def test_a_section_is_found_by_name_by_root_and_by_key_ignoring_case(loadout_dir):
+    m = read('[project."~/code/app"]\n[project.Web]\n', loadout_dir)
     assert m.section(None) is m.user
     assert m.section("~/code/app").name == "~/code/app"
     assert m.section(os.path.expanduser("~/code/app/")).name == "~/code/app"
@@ -231,19 +231,19 @@ def test_parse_id_round_trips_and_refuses_bad_ids():
 
 
 def test_source_expands_quoted_in_a_command_and_plain_elsewhere(tmp_path):
-    folder = tmp_path / "my loadout"
+    loadout_dir = tmp_path / "my loadout"
     command = "python3 {source}/hooks/guard.py"
-    assert manifest.expand_command(command, folder, windows=False) == (
-        f"python3 '{folder}'/hooks/guard.py")
-    assert manifest.expand_command(command, folder, windows=True) == (
-        f'python3 "{folder}"/hooks/guard.py')
-    assert manifest.expand("{source}/docs", folder) == f"{folder}/docs"
+    assert manifest.expand_command(command, loadout_dir, is_windows=False) == (
+        f"python3 '{loadout_dir}'/hooks/guard.py")
+    assert manifest.expand_command(command, loadout_dir, is_windows=True) == (
+        f'python3 "{loadout_dir}"/hooks/guard.py')
+    assert manifest.expand("{source}/docs", loadout_dir) == f"{loadout_dir}/docs"
     plain = tmp_path / "plain"
-    assert manifest.expand_command(command, plain, windows=False) == (
+    assert manifest.expand_command(command, plain, is_windows=False) == (
         f"python3 {plain}/hooks/guard.py")
 
 
-def test_an_items_own_source_is_absolute(folder):
+def test_an_items_own_source_is_absolute(loadout_dir):
     m = read("""\
         [skill.a]
         source = "elsewhere/a"
@@ -251,17 +251,17 @@ def test_an_items_own_source_is_absolute(folder):
         source = "~/skills/b"
         [skill.c]
         source = "{source}/x/c"
-        """, folder)
-    assert m.source_of("skill", "a") == folder / "elsewhere" / "a"
+        """, loadout_dir)
+    assert m.source_of("skill", "a") == loadout_dir / "elsewhere" / "a"
     assert m.source_of("skill", "b") == Path(os.path.expanduser("~/skills/b"))
-    assert m.source_of("skill", "c") == folder / "x" / "c"
+    assert m.source_of("skill", "c") == loadout_dir / "x" / "c"
     assert m.source_of("skill", "d") is None
 
 
-def test_load_reads_the_configured_folder(folder, monkeypatch):
+def test_load_reads_the_configured_loadout_dir(loadout_dir, monkeypatch):
     from moxi_loadout import stores
 
-    monkeypatch.setattr(stores, "source_dir", lambda: folder)
-    folder.mkdir()
-    (folder / "loadout.toml").write_text("[user]\nskills = ['x']\n", encoding="utf-8")
+    monkeypatch.setattr(stores, "source_dir", lambda: loadout_dir)
+    loadout_dir.mkdir()
+    (loadout_dir / "loadout.toml").write_text("[user]\nskills = ['x']\n", encoding="utf-8")
     assert manifest.load().user.names("skill") == ("x",)

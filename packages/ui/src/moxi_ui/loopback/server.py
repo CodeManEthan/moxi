@@ -264,7 +264,7 @@ class Activity:
             scope[HANDED] = self
             self.pending += 1
 
-    def _settled(self) -> None:
+    def _on_settled(self) -> None:
         self.pending -= 1
 
     def quiet(self, now: float | None = None) -> float | None:
@@ -296,7 +296,7 @@ def settle(scope: dict[str, Any]) -> None:
     """End the hand-off count `Activity.hand_off` made for this request. Idempotent."""
     activity = scope.pop(HANDED, None)
     if activity is not None:
-        activity._settled()
+        activity._on_settled()
 
 
 # --- topics and the snapshot ---------------------------------------------------------
@@ -392,13 +392,13 @@ class Topics:
 class Snapshot:
     """A single-flight gatherer for one topic.
 
-    `await snapshot.changed()` asks for one rebuild: `gather()` runs (a plain function
+    `await snapshot.on_changed()` asks for one rebuild: `gather()` runs (a plain function
     through `moxi.aio.offload`, a coroutine function on the loop), and its result is
     published to `topics` under `name` only when its hash differs from the last one
     published. A fresh `Snapshot` has no last hash, so its first gather always
     publishes. Callers that ask while a rebuild waits to start share it; callers that ask
     while one is gathering share the one rebuild that follows it, so no change is missed.
-    `changed()` returns when the rebuild it shares has finished, and raises what that
+    `on_changed()` returns when the rebuild it shares has finished, and raises what that
     gather raised.
     """
 
@@ -416,7 +416,7 @@ class Snapshot:
         self._next: asyncio.Future[None] | None = None
         self._task: asyncio.Task[None] | None = None
 
-    async def changed(self) -> None:
+    async def on_changed(self) -> None:
         loop = asyncio.get_running_loop()
         if self._next is None:
             self._next = loop.create_future()
@@ -438,8 +438,8 @@ class Snapshot:
                 except asyncio.CancelledError:
                     waiter.cancel()
                     raise
-                except Exception as err:
-                    waiter.set_exception(err)
+                except Exception as exc:
+                    waiter.set_exception(exc)
                     continue
                 if digest != self._last:
                     self.topics.publish(self.name, result)
@@ -630,7 +630,7 @@ def guard(inner: Callable[..., Any], profile: Callable[[], Profile]) -> Callable
     any, is settled first, in the request's first step.
     """
 
-    async def guarded(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_guarded(scope: dict[str, Any], receive: Callable[..., Any],
                       send: Callable[..., Any]) -> None:
         settle(scope)
         if scope.get("type") != "http":
@@ -648,7 +648,7 @@ def guard(inner: Callable[..., Any], profile: Callable[[], Profile]) -> Callable
             return
         await inner({**scope, CHECKED: True}, receive, send)
 
-    return guarded
+    return on_guarded
 
 
 def prove(inner: Callable[..., Any], *, token: str, server_id: str,
@@ -692,8 +692,10 @@ def _resolve(target: str, what: str) -> Callable[..., Any]:
     try:
         module = importlib.import_module(module_name)
         found = getattr(module, name)
-    except Exception as err:
-        raise PageError(f"the {what} {target} cannot be loaded: {type(err).__name__}: {err}") from None
+    except Exception as exc:
+        raise PageError(
+            f"the {what} {target} cannot be loaded: {type(exc).__name__}: {exc}"
+        ) from None
     if not callable(found):
         raise PageError(f"the {what} {target} is not callable")
     return found
@@ -770,9 +772,9 @@ class PageApp:
             for name in names:
                 try:
                     body = root.joinpath(name).read_bytes()
-                except OSError as err:
+                except OSError as exc:
                     raise PageError(f"the asset {name} cannot be read: "
-                                    f"{err.strerror or type(err).__name__}") from None
+                                    f"{exc.strerror or type(exc).__name__}") from None
                 suffix = name[name.rfind("."):]
                 self._assets["/" + name] = (body, _etag(body), CONTENT_TYPES[suffix])
             if "/index.html" in self._assets:
@@ -860,17 +862,19 @@ class PageApp:
                 body = parse_body(route, raw)
                 if route.confirmed:
                     key = idempotency_key(scope)
-        except BadRequest as err:
-            return _bad_request(err)
+        except BadRequest as exc:
+            return _bad_request(exc)
         if key is not None:
             return await self._confirmed(route, Call(self.module, query, body, key), raw)
         call = Call(self.module, query, body)
         try:
             result = await self._run(self._handlers[route.path], call)
-        except Conflict as err:
-            return _json(409, {"conflict": err.text})
-        except Refused as err:
-            return _json(422, {"refused": err.text})
+        except Conflict as exc:
+            return _json(409, {"conflict": exc.text})
+        except Refused as exc:
+            return _json(422, {"refused": exc.text})
+        except BadRequest as exc:
+            return _bad_request(exc)
         if route.stream:
             return self._stream(route, result, names)
         if isinstance(result, Accepted):
@@ -879,9 +883,9 @@ class PageApp:
             raise TypeError(f"{route.path} is not the stream route but returned a stream")
         try:
             value = project(result, route.shape, strict=self.strict,
-                            dropped=lambda key: self._dropped(route.path, key))
-        except ProjectionError as err:
-            self.log.error("%s returned a value outside its shape: %s", route.path, err)
+                            on_dropped=lambda key: self._on_dropped(route.path, key))
+        except ProjectionError as exc:
+            self.log.error("%s returned a value outside its shape: %s", route.path, exc)
             return _response(500)
         return _json(200, value)
 
@@ -918,10 +922,12 @@ class PageApp:
     async def _confirmed_answer(self, route: Route, call: Call) -> _Answer:
         try:
             result = await self._run(self._handlers[route.path], call)
-        except Conflict as err:
-            return 409, _json_bytes({"conflict": err.text}), _JSON
-        except Refused as err:
-            return 422, _json_bytes({"refused": err.text}), _JSON
+        except Conflict as exc:
+            return 409, _json_bytes({"conflict": exc.text}), _JSON
+        except Refused as exc:
+            return 422, _json_bytes({"refused": exc.text}), _JSON
+        except BadRequest as exc:
+            return 400, _json_bytes({"error": str(exc)}), _JSON
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -958,7 +964,7 @@ class PageApp:
             return None, None
         return b"".join(chunks), None
 
-    def _dropped(self, route_path: str, key: str) -> None:
+    def _on_dropped(self, route_path: str, key: str) -> None:
         if (route_path, key) not in self._dropped_seen:
             self._dropped_seen.add((route_path, key))
             self.log.warning("%s returned the undeclared key %s; it was dropped", route_path, key)
@@ -1029,16 +1035,16 @@ class PageApp:
                     continue
                 for name, value in topics._latest(sub.take()):
                     yield self._event(route, name, value)
-        except ProjectionError as err:
+        except ProjectionError as exc:
             # A topic carries state, so a skipped event would leave the page on a stale
             # value with no sign; the stream ends instead, and the error is logged.
-            self.log.error("%s topic event outside its shape, stream ended: %s", route.path, err)
+            self.log.error("%s topic event outside its shape, stream ended: %s", route.path, exc)
         finally:
             topics._close(sub)
 
     def _event(self, route: Route, name: str, value: Any) -> bytes:
         cut = project(value, route.topics[name], strict=self.strict,
-                      dropped=lambda key: self._dropped(f"{route.path} topic {name}", key))
+                      on_dropped=lambda key: self._on_dropped(f"{route.path} topic {name}", key))
         return b"event: " + name.encode("ascii") + b"\ndata: " + _json_bytes(cut) + b"\n\n"
 
 

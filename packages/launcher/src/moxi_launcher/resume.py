@@ -82,7 +82,8 @@ class Past:
     when it could not be read (`unread` says why). `resumable` is whether `resume` would
     take it now, `why` the reason when it would not, and `hint` what to do instead.
     `held_by` names a later launch that holds the same session id (a resume of it), which
-    is the one a resume of that id acts on."""
+    is the one a resume of that id acts on. `project_key` is the project the launch ran
+    in, None for a launch in a folder alone, and `actor` who made it."""
 
     request_id: str
     created_at: str
@@ -90,6 +91,8 @@ class Past:
     target: str
     slot: str | None
     cwd: str
+    project_key: str | None
+    actor: str
     identity: str | None
     state: str
     session_id: str | None
@@ -141,11 +144,12 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
         refused = Refused("held-by", f"launch {held_by} resumed session {newest} since",
                           f"resume it as that launch's: moxi launcher resume {newest}")
     if refused is None:
-        refused = live_refusal(row, newest, live, unread)
+        refused = live_refusal(row, newest, live=live, unread=unread)
     return Past(
         request_id=row.request_id, created_at=row.created_at, harness=row.harness,
-        target=row.target, slot=row.slot, cwd=row.cwd, identity=row.identity,
-        state=row.state, session_id=newest, live=live, resumable=refused is None,
+        target=row.target, slot=row.slot, cwd=row.cwd, project_key=row.project_key,
+        actor=row.actor, identity=row.identity, state=row.state, session_id=newest,
+        live=live, resumable=refused is None,
         why=None if refused is None else refused.problem,
         hint=None if refused is None else refused.hint, unread=unread, held_by=held_by,
         resume_of=row.resume_of, relaunch_of=row.relaunch_of)
@@ -173,8 +177,8 @@ def liveness(row: store.LaunchRow, session_id: str | None,
     if turns is not None and session_id:
         try:
             session = turns.find(session_id=session_id)
-        except Exception as error:  # noqa: BLE001  (a failed read marks only this row)
-            failed = f"turns could not be asked: {error}"
+        except Exception as exc:  # noqa: BLE001  (a failed read marks only this row)
+            failed = f"turns could not be asked: {exc}"
         else:
             if session is not None:
                 _close(session)
@@ -215,7 +219,7 @@ def static_refusal(row: store.LaunchRow, session_id: str | None, *,
     return None
 
 
-def live_refusal(row: store.LaunchRow, session_id: str | None, live: bool | None,
+def live_refusal(row: store.LaunchRow, session_id: str | None, *, live: bool | None,
                  unread: str | None) -> Refused | None:
     """The refusal a live session, or one whose liveness is unread, meets, or None."""
     if live is None:
@@ -233,7 +237,7 @@ def live_refusal(row: store.LaunchRow, session_id: str | None, live: bool | None
 
 
 def resume(session_id: str, *, slot: int | str | None = None,
-           request_id: str | None = None, environ: Mapping[str, str] | None = None,
+           request_id: str | None = None, caller_env: Mapping[str, str] | None = None,
            turns: Any = LOOK, slots_api: Any = LOOK,
            launch: Callable[..., Any] | None = None,
            warn: Callable[[str], None] | None = None,
@@ -245,7 +249,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
     `slot` is the slot to use in place of the original's; `request_id` the new launch's
     (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
     for turns' and slots' APIs (None: not installed) and `api.launch`."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         row = store.resolve(c, session_id)
         if row is None:
@@ -253,7 +257,8 @@ def resume(session_id: str, *, slot: int | str | None = None,
         newest = row.newest_session_id or row.session_id
         refused = static_refusal(row, newest)
         if refused is None:
-            refused = live_refusal(row, newest, *liveness(row, newest, _turns(turns)))
+            live, unread = liveness(row, newest, _turns(turns))
+            refused = live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
         # A relaunch, exit or recycle under way owns the session: between its exit and
@@ -271,11 +276,11 @@ def resume(session_id: str, *, slot: int | str | None = None,
                                 session_id=newest, actor=first.actor(env), slot=chosen)
     try:
         if launch is None:
-            result = api.launch(request, environ=environ, warn=warn)
+            result = api.launch(request, env=caller_env, warn=warn)
         else:
-            result = launch(request, environ=environ, warn=warn)
-    except store.SessionLive as met:
-        raise met_refusal(met) from None
+            result = launch(request, env=caller_env, warn=warn)
+    except store.SessionLive as exc:
+        raise met_refusal(exc) from None
     lines = (result.line,)
     if result.outcome is not None and result.outcome.line() != result.line:
         lines += (result.outcome.line(),)
@@ -319,13 +324,13 @@ def choose_slot(api: Any | None, row: store.LaunchRow,
             if number is not None and _create(api, number):
                 return wanted
             return wanted if asked is not None else ""
-    except api.TryAgain as error:
-        raise Refused("slots-busy", f"slots did not answer about slot {wanted}: {error}",
+    except api.TryAgain as exc:
+        raise Refused("slots-busy", f"slots did not answer about slot {wanted}: {exc}",
                       "try again in a moment", codes.TEMPFAIL) from None
-    except api.SlotsError as error:
+    except api.SlotsError as exc:
         if asked is not None:  # the launch's own check gives slots' words for it
             return asked
-        raise Refused("slots-failed", f"slots could not show slot {wanted}: {error}",
+        raise Refused("slots-failed", f"slots could not show slot {wanted}: {exc}",
                       "moxi slots list shows the slots", codes.ERROR) from None
     if asked is not None or found.launchable:
         return wanted

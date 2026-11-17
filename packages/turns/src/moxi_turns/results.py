@@ -28,7 +28,7 @@ CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "ex
                 "mcp-token", "environ")
 
 #: The most names one `environ` call may ask.
-ENVIRON_MAX_NAMES = 64
+ENV_MAX_NAMES = 64
 
 #: The deadline over one settle of a Codex host's MCP servers (`mcp.reload`, and at each
 #: ready), in seconds. An `mcp.reload` answers within it, or within twice it when the call
@@ -408,13 +408,13 @@ class Agents(_Value):
     complete: bool
     at: float
 
-    def busy(self, *, shells: bool = True) -> int | None:
+    def busy(self, *, include_shells: bool = True) -> int | None:
         """The count the busy checks read (`Facts.agents`): entries not final and pending,
-        running or waiting, or None when the list is not complete. With `shells` False
+        running or waiting, or None when the list is not complete. With `include_shells` False
         the `shell` entries are left out, as a command with `stop_shells` reads it."""
         if not self.complete:
             return None
-        return sum(1 for a in self.entries if a.busy and (shells or a.kind != "shell"))
+        return sum(1 for a in self.entries if a.busy and (include_shells or a.kind != "shell"))
 
 
 @dataclass(frozen=True)
@@ -616,7 +616,7 @@ def from_notification(method: str, params: Any):
         raise ValueError(f"malformed {method} notification: {exc}") from None
 
 
-__all__ = ["CAPABILITIES", "ENVIRON_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
+__all__ = ["CAPABILITIES", "ENV_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
            "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
            "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",

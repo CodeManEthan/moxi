@@ -21,7 +21,7 @@ from moxi_turns import claude_leg as leg
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
 from moxi_turns import protocol
-from moxi_turns import results as R
+from moxi_turns import results as results
 from moxi_turns.claude_endpoint import ClaudeHarness
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
@@ -51,7 +51,7 @@ def connect():
     clients = []
 
     def make(ep):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         client.hello((2, 2))
         return client
@@ -64,7 +64,7 @@ def connect():
 def notifications(watch, count):
     out = []
     for note in watch.notifications():
-        out.append(R.from_notification(*note))
+        out.append(results.from_notification(*note))
         if len(out) == count:
             return out
     return out
@@ -107,11 +107,11 @@ def test_a_stuck_submit_line_never_wedges_the_expiry_sweep(claude):
     behind = ep.deliver("behind it")
     assert until(lambda: harness._window is not None)
     lost = ep.wait(stuck.id, "started", 5)
-    assert isinstance(lost, R.Lost) and lost.reason.startswith("expired")
+    assert isinstance(lost, results.Lost) and lost.reason.startswith("expired")
     # The sweep goes on while the write is stuck: the delivery queued behind it is handed
     # to the stuck worker and settles at its own bound.
     lost = ep.wait(behind.id, "started", 5)
-    assert isinstance(lost, R.Lost) and lost.reason.startswith("expired")
+    assert isinstance(lost, results.Lost) and lost.reason.startswith("expired")
     assert until(lambda: harness._window is None)    # the adapter closed the window
     facts, took = timed(ep.facts)
     assert took < 1.5 and facts.draft is True and facts.agents is None
@@ -128,25 +128,25 @@ def test_a_stuck_submit_line_never_wedges_the_expiry_sweep(claude):
 def test_append_done_starts_the_steer_and_its_turn_names_it(claude, connect):
     ep, runner, harness = claude()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     runner.turn_start("T1")                          # the person's turn
     client = connect(ep)
     answer, took = timed(lambda: client.call("steer", {"text": "also", "ref": "s1"},
-                                             timeout=5))
+                                             timeout_s=5))
     assert took < 0.5 and "result" not in answer
     steer = answer["delivery"]
     assert runner.next_line() == {"op": leg.LINE_APPEND, "delivery": steer,
                                   "text": "also"}
     assert ep.wait(steer, "started", 0.2) is None    # handed, not yet taken
     runner.report(leg.R_APPEND_DONE, delivery=steer)
-    assert ep.wait(steer, "started", 2) == R.Started("T1", steer, "s1")
+    assert ep.wait(steer, "started", 2) == results.Started("T1", steer, "s1")
     runner.turn_complete("T1")
-    assert ep.wait(steer, "ended", 2) == R.Ended("T1", "answer", steer, "s1")
+    assert ep.wait(steer, "ended", 2) == results.Ended("T1", "answer", steer, "s1")
     started, steered, ended = notifications(watch, 3)
-    assert isinstance(started, R.TurnStarted) and started.turn_id == "T1"
-    assert steered == R.TurnSteered("T1", "s-1", R.DeliveryRef(steer, "s1"))
-    assert isinstance(ended, R.TurnEnded)
-    assert ended.deliveries == (R.DeliveryRef(steer, "s1", "steered"),)
+    assert isinstance(started, results.TurnStarted) and started.turn_id == "T1"
+    assert steered == results.TurnSteered("T1", "s-1", results.DeliveryRef(steer, "s1"))
+    assert isinstance(ended, results.TurnEnded)
+    assert ended.deliveries == (results.DeliveryRef(steer, "s1", "steered"),)
 
 
 def test_a_steers_line_comes_before_a_later_submit_and_append_failed_reads_idle(claude):
@@ -159,8 +159,8 @@ def test_a_steers_line_comes_before_a_later_submit_and_append_failed_reads_idle(
     assert (first["op"], first["delivery"]) == (leg.LINE_APPEND, steer.id)
     assert (second["op"], second["delivery"]) == (leg.LINE_SUBMIT, later.id)
     runner.report(leg.R_APPEND_FAILED, delivery=steer.id)
-    assert ep.wait(steer.id, "started", 2) == R.Refused("idle", steer.id)
-    assert ep.wait(steer.id, "ended", 0) == R.Refused("idle", steer.id)
+    assert ep.wait(steer.id, "started", 2) == results.Refused("idle", steer.id)
+    assert ep.wait(steer.id, "ended", 0) == results.Refused("idle", steer.id)
 
 
 # -- Codex: the host, a stand-in app-server ----------------------------------------------
@@ -296,23 +296,23 @@ def codex(turns_env):
 def test_a_late_turn_steer_answers_at_once_and_starts_at_codexs_word(codex, connect):
     ep, harness, app = codex()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     app.steer_delay = 1.0
     client = connect(ep)
     answer, took = timed(lambda: client.call("steer", {"text": "also", "ref": "s1"},
-                                             timeout=5))
+                                             timeout_s=5))
     assert took < 0.5 and "result" not in answer
     steer = answer["delivery"]
     assert until(lambda: app.steer_log)              # turn/steer is out
-    facts, took = timed(lambda: R.from_wire(client.call("facts", {}, timeout=5)))
+    facts, took = timed(lambda: results.from_wire(client.call("facts", {}, timeout_s=5)))
     assert took < 0.5 and facts.turn_open
     assert ep.wait(steer, "started", 0) is None
-    assert ep.wait(steer, "started", 5) == R.Started("turn-1", steer, "s1")
+    assert ep.wait(steer, "started", 5) == results.Started("turn-1", steer, "s1")
     app.complete()
-    assert ep.wait(steer, "ended", 2) == R.Ended("turn-1", "answer", steer, "s1")
+    assert ep.wait(steer, "ended", 2) == results.Ended("turn-1", "answer", steer, "s1")
     steered, ended = notifications(watch, 2)         # turn-1 started before the watch
-    assert steered == R.TurnSteered("turn-1", "thread-1", R.DeliveryRef(steer, "s1"))
-    assert R.DeliveryRef(steer, "s1", "steered") in ended.deliveries
+    assert steered == results.TurnSteered("turn-1", "thread-1", results.DeliveryRef(steer, "s1"))
+    assert results.DeliveryRef(steer, "s1", "steered") in ended.deliveries
     assert app.texts("turn/steer") == ["also"]
     assert app.texts("turn/start") == ["first"]
 
@@ -321,11 +321,11 @@ def test_no_active_turn_answered_late_reads_idle_through_wait(codex, connect):
     ep, harness, app = codex()
     app.steer_delay, app.steer_no_turn = 1.0, True
     client = connect(ep)
-    answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout=5))
+    answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout_s=5))
     assert took < 0.5 and "result" not in answer
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    assert R.from_wire(got["result"]) == R.Refused("idle", answer["delivery"])
+                               "timeout_ms": 5000}, timeout_s=10)
+    assert results.from_wire(got["result"]) == results.Refused("idle", answer["delivery"])
     assert until(lambda: not ep.reading().turn_open)  # the held end goes out after
     assert app.texts("turn/start") == ["first"]      # never a turn of its own
 
@@ -342,7 +342,7 @@ def test_two_steers_reach_turn_steer_in_order_one_at_a_time(codex):
 def test_a_turn_completed_after_the_record_is_held_for_the_steer(codex, connect):
     ep, harness, app = codex()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     reached, go = threading.Event(), threading.Event()
     append = harness.append
 
@@ -362,11 +362,11 @@ def test_a_turn_completed_after_the_record_is_held_for_the_steer(codex, connect)
     time.sleep(0.2)
     assert ep.reading().turn_open                    # held
     go.set()
-    assert ep.wait(steer.id, "started", 5) == R.Started("turn-1", steer.id)
-    assert ep.wait(steer.id, "ended", 5) == R.Ended("turn-1", "answer", steer.id)
+    assert ep.wait(steer.id, "started", 5) == results.Started("turn-1", steer.id)
+    assert ep.wait(steer.id, "ended", 5) == results.Ended("turn-1", "answer", steer.id)
     notes = notifications(watch, 2)
     assert [type(n).__name__ for n in notes] == ["TurnSteered", "TurnEnded"]
-    assert R.DeliveryRef(steer.id, None, "steered") in notes[1].deliveries
+    assert results.DeliveryRef(steer.id, None, "steered") in notes[1].deliveries
 
 
 def test_a_steer_expired_by_the_bound_releases_the_held_end(codex):
@@ -379,7 +379,7 @@ def test_a_steer_expired_by_the_bound_releases_the_held_end(codex):
     time.sleep(0.1)
     assert ep.reading().turn_open
     lost = ep.wait(steer.id, "started", 5)
-    assert isinstance(lost, R.Lost) and lost.reason.startswith("expired")
+    assert isinstance(lost, results.Lost) and lost.reason.startswith("expired")
     assert until(lambda: not ep.reading().turn_open, 2)
     assert steer.id not in harness._steering
     app.steer_gate.set()                             # Codex's late word changes nothing

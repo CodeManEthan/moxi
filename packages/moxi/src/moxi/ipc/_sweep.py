@@ -51,7 +51,7 @@ def sweep(address: str) -> str:
         if not os.path.exists(lock):
             return ABSENT
         try:
-            with files.lock(lock, timeout=0):
+            with files.lock(lock, timeout_s=0):
                 return ABSENT
         except files.LockTimeout:
             return LIVE
@@ -60,7 +60,7 @@ def sweep(address: str) -> str:
     if not os.path.lexists(address):
         return ABSENT
     try:
-        with files.lock(lock, timeout=0):
+        with files.lock(lock, timeout_s=0):
             try:
                 os.unlink(address)
             except FileNotFoundError:

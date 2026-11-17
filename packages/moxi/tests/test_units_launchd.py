@@ -598,18 +598,18 @@ def run_time(mac, tool, flag):
 def test_enabled_false_is_written_and_disabled_and_a_flip_takes_effect_now(mac, tmp_path):
     tool = tmp_path / "tool"
     tool.write_text("")
-    run_time(mac, tool, False)
+    run_time(mac, tool, flag=False)
     mac.module(UNITS_FROM="'moxi_demo.runtime:units'")
     [done] = mac.apply(units.plan("demo"))
     assert done.ok and mac.ctl.calls == [("disable", f"{DOMAIN}/moxi.demo.row")]
-    run_time(mac, tool, True)
+    run_time(mac, tool, flag=True)
     [change] = units.plan("demo")
     assert change.action == "change" and change.enabled_before is False
     mac.ctl.calls.clear()
     assert mac.apply([change])[0].ok
     assert [c[0] for c in mac.ctl.verbs()] == ["bootout", "enable", "bootstrap"]
     assert "moxi.demo.row" in mac.ctl.loaded
-    run_time(mac, tool, False)
+    run_time(mac, tool, flag=False)
     mac.ctl.calls.clear()
     assert mac.apply(units.plan("demo"))[0].ok
     assert mac.ctl.calls == [("bootout", f"{DOMAIN}/moxi.demo.row"),
@@ -721,7 +721,7 @@ def test_a_loaded_keep_socket_daemon_whose_port_changed_is_reloaded(mac):
     _loaded_keep_shell(mac, "127.0.0.1")
     from moxi import config
 
-    config.set("demo", "port", "9000", by="test")
+    config.set_value("demo", "port", "9000", by="test")
     [done] = mac.apply(units.plan("demo"))
     assert done.ok and done.lines == ()
     assert [c[0] for c in mac.ctl.verbs()] == RELOAD
@@ -798,17 +798,17 @@ def test_remove_of_a_module_takes_its_plists_and_wraps_nothing(mac):
 
 # -- the acts --------------------------------------------------------------------------------------
 
-def installed(mac, *, timer=False):
+def installed(mac, *, include_timer=False):
     """The relay daemon (and a switchless snapshot timer) written and loaded."""
     daemon = mac.backend.render(spec())[0]
     groups = [daemon] + ([mac.backend.render(spec("timer", name="snap",
                                                   schedule=Schedule(every=5)))[0]]
-                         if timer else [])
+                         if include_timer else [])
     for group in groups:
         for path, text in group.files:
             path.write_text(text)
     mac.ctl.loaded[RELAY] = [321, None]
-    if timer:
+    if include_timer:
         mac.ctl.loaded["moxi.demo.snap"] = [None, 0]
     return {r.name: r for r in mac.backend.marked("demo")}
 
@@ -845,7 +845,7 @@ def test_restart_of_a_daemon_that_is_not_loaded_bootstraps_it(mac):
 
 
 def test_timer_acts_by_the_verb_table(mac):
-    ref = installed(mac, timer=True)["snap"]
+    ref = installed(mac, include_timer=True)["snap"]
     target = f"{DOMAIN}/moxi.demo.snap"
     assert act(mac, "start", ref).ok and mac.ctl.verbs() == [("kickstart", "-k", target)]
     assert act(mac, "stop", ref).ok and mac.ctl.verbs() == [("kill", "SIGTERM", target)]
@@ -1216,7 +1216,7 @@ def test_foreign_with_no_fence_reads_the_same_unit_and_makes_no_call(mac):
 def test_ids_is_the_label_whether_or_not_a_plist_is_there(mac):
     assert mac.backend.ids("demo", "relay", "daemon") == (RELAY,)
     assert mac.backend.ids("demo", "snap", "timer") == ("moxi.demo.snap",)
-    refs = installed(mac, timer=True)
+    refs = installed(mac, include_timer=True)
     assert refs["relay"].ids == mac.backend.ids("demo", "relay", "daemon")
     assert refs["snap"].ids == mac.backend.ids("demo", "snap", "timer")
     assert mac.ctl.calls == []
@@ -1242,11 +1242,11 @@ def test_a_failed_domain_read_stops_nothing_and_records_nothing(mac):
     mac.apply(units.plan("demo"))
     mac.ctl.calls.clear()
     mac.ctl.fail[("print", None)] = (1, "Operation not permitted")
-    record: list = []
-    [done] = units.stop("demo", record=record)
+    stopped: list = []
+    [done] = units.stop("demo", stopped=stopped)
     assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
     assert "Operation not permitted" in done.lines[0]
-    assert record == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
+    assert stopped == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
 
 
 def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_it(mac):
@@ -1255,12 +1255,12 @@ def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_
     (mac.agents / f"{RELAY}.plist").write_bytes(plistlib.dumps(
         {"Label": RELAY, "ProgramArguments": ["/bin/true"], "RunAtLoad": True}))
     mac.ctl.loaded[RELAY] = [99, None]
-    record: list = []
-    [done] = units.stop("demo", replace=True, record=record)
+    stopped: list = []
+    [done] = units.stop("demo", replace=True, stopped=stopped)
     assert done.ok and done.lines == (f"{RELAY} stopped",)
-    assert [(e.unit, e.marked, e.backend) for e in record] == [(RELAY, False, "launchd")]
+    assert [(e.unit, e.marked, e.backend) for e in stopped] == [(RELAY, False, "launchd")]
     assert RELAY not in mac.ctl.loaded
-    [started] = units.resume(record)
+    [started] = units.resume(stopped)
     assert started.ok and RELAY in mac.ctl.loaded
 
 
@@ -1702,7 +1702,7 @@ def test_proof_a_keep_socket_daemons_port_change_reloads_it(real_mac, serving):
         conn, pid = _hold(m.port)
         assert _until(m.daemon, lambda d: d.pid).pid == int(pid)
     try:
-        config.set(m.module, "port", str(m.other), by="test")
+        config.set_value(m.module, "port", str(m.other), by="test")
         m.ctl.calls.clear()
         [done] = m.apply()
         assert done.ok, m.lines
@@ -1841,7 +1841,7 @@ def test_a_login_only_change_is_rewritten_and_the_loaded_job_left_as_it_is(mac, 
         if value is None:
             applied = config.unset("demo", "snapshot.enabled", by="test")
         else:
-            applied = config.set("demo", "snapshot.enabled", value, by="test")
+            applied = config.set_value("demo", "snapshot.enabled", value, by="test")
         [done] = applied
         # One read is the plan's (its own job names the address), one the apply's.
         assert done.ok and mac.ctl.calls == [("print", DOMAIN)] * 2
@@ -1861,7 +1861,7 @@ def test_a_change_with_another_key_beside_the_login_ones_reloads_as_before(mac):
     mac.apply(units.plan("demo"))
     mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1", more=", 'args': ['-v']"))
     mac.ctl.calls.clear()
-    [done] = config.set("demo", "snapshot.enabled", True, by="test")
+    [done] = config.set_value("demo", "snapshot.enabled", value=True, by="test")
     assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
     assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it
 
@@ -1875,7 +1875,7 @@ def test_restart_after_an_upgrade_kickstarts_a_running_daemon_with_a_login_only_
     mac.apply(units.plan("demo"))
     mac.ctl.loaded[RELAY][0] = 4242                    # a connection started it
     monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
-    config.set("demo", "snapshot.enabled", True, by="test")
+    config.set_value("demo", "snapshot.enabled", value=True, by="test")
     mac.ctl.calls.clear()
     assert all(a.ok for a in mac.apply(units.plan("demo"), restart=True))
     assert [c[0] for c in mac.ctl.verbs()] == ["kickstart"]

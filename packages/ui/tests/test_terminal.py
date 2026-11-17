@@ -29,15 +29,15 @@ def write_record(env, **kw):
 @pytest.fixture
 def at(tmp_path, monkeypatch):
     """Absolute folders under the test's tmp, and an environment that sets them."""
-    def folder(name):
+    def test_dir(name):
         return str(tmp_path / name)
 
-    return folder
+    return test_dir
 
 
 def without_anchor_clause(line):
-    return line.replace(" " + terminal.anchor_clause(page=True), "").replace(
-        " " + terminal.anchor_clause(page=False), "")
+    return line.replace(" " + terminal.anchor_clause(for_page=True), "").replace(
+        " " + terminal.anchor_clause(for_page=False), "")
 
 
 # -- agreement and differences -----------------------------------------------------------------
@@ -81,7 +81,7 @@ def test_an_empty_terminal_value_is_named_as_empty(monkeypatch, at):
 def test_the_terminal_wording_says_what_the_page_does(monkeypatch, at):
     write_record({**os.environ, "MOXI_HOME": at("terminal")})
     monkeypatch.setenv("MOXI_HOME", at("page"))
-    line = terminal.check(store, page=False)
+    line = terminal.check(store, for_page=False)
     assert ("The browser page refuses to write while its shell differs from the last run "
             "in a terminal" in line)
     assert f"set MOXI_HOME to {at('terminal')}" in line
@@ -194,14 +194,14 @@ def test_the_anchor_variable_is_outside_the_set():
     write_record(None)
 
     def places(env):
-        env.get(paths.ANCHOR_HOME)
+        env.get(paths.ANCHOR_HOME_ENV)
         return store(env)
 
-    with pytest.raises(ValueError, match=paths.ANCHOR_HOME):
+    with pytest.raises(ValueError, match=paths.ANCHOR_HOME_ENV):
         terminal.check(places)
 
 
-def test_iterating_the_environment_is_refused():
+def test_iterating_the_env_is_refused():
     write_record(None)
     with pytest.raises(TypeError):
         terminal.check(lambda env: {k: Path("/x") for k in env})
@@ -209,9 +209,9 @@ def test_iterating_the_environment_is_refused():
 
 # -- programs ----------------------------------------------------------------------------------
 
-def tool(folder: Path, name: str) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / (name + (".exe" if os.name == "nt" else ""))
+def tool(bin_dir: Path, name: str) -> Path:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    path = bin_dir / (name + (".exe" if os.name == "nt" else ""))
     path.write_text("")
     path.chmod(0o755)
     return path
@@ -257,7 +257,7 @@ def test_a_persisting_read_error_gives_the_unreadable_line(monkeypatch):
     real = core.read
     monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(
         PermissionError(13, "Permission denied")))
-    monkeypatch.setattr(core, "read", lambda path=None: real(path, retry=0.05))
+    monkeypatch.setattr(core, "read", lambda path=None: real(path, retry_s=0.05))
     line = terminal.check(store)
     assert "can't be read (Permission denied), so this page refuses to write" in line
     assert "then type moxi modules in a terminal of your own" in line
@@ -296,7 +296,7 @@ def test_the_pages_anchor_variable_is_named():
 
 @pytest.mark.skipif(os.name == "nt", reason="the user database places the anchor on POSIX")
 def test_no_anchor_variable_no_clause_and_no_place_line(monkeypatch, tmp_path):
-    monkeypatch.delenv(paths.ANCHOR_HOME)
+    monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     monkeypatch.setattr(paths, "_account_home", lambda: str(tmp_path / "acct"))
     line = terminal.check(store)
     assert "MOXI_ANCHOR_HOME" not in line
@@ -312,10 +312,10 @@ def test_no_anchor_variable_no_clause_and_no_place_line(monkeypatch, tmp_path):
 # -- Windows names ------------------------------------------------------------------------------
 
 def test_names_compare_without_case_on_windows():
-    env = terminal.Noting({"Path": "a", "moxi_home": "b"}, windows=True)
+    env = terminal.Noting({"Path": "a", "moxi_home": "b"}, is_windows=True)
     assert env.get("PATH") == "a" and env["MOXI_HOME"] == "b" and "path" in env
     assert list(env.read) == ["PATH", "MOXI_HOME"]
-    posix = terminal.Noting({"Path": "a"}, windows=False)
+    posix = terminal.Noting({"Path": "a"}, is_windows=False)
     assert posix.get("PATH") is None
 
 
@@ -352,7 +352,7 @@ def test_where_per_platform():
 
 def test_the_page_fix_reads_set_where_then_step(monkeypatch, at):
     for platform in ("linux", "darwin", "win32"):
-        line = terminal.fix(["x"], ["A to /b"], [], page=True, platform=platform)
+        line = terminal.fix(["x"], ["A to /b"], [], for_page=True, platform=platform)
         place, step = terminal.where(platform)
         assert line == f"x. Set A to /b {place}, then {step}; or run the command in a terminal."
 
@@ -361,7 +361,7 @@ def test_the_terminal_fix_always_names_the_step():
     # A terminal caller loaded ui to get the line, so the step that restarts the shell is
     # always ui's to name.
     for platform in ("linux", "darwin", "win32"):
-        line = terminal.fix(["x"], ["A to /b"], [], page=False, platform=platform)
+        line = terminal.fix(["x"], ["A to /b"], [], for_page=False, platform=platform)
         place, step = terminal.where(platform)
         assert line.endswith(f"set A to /b {place}, then {step}.")
 
@@ -369,18 +369,18 @@ def test_the_terminal_fix_always_names_the_step():
 def test_the_lines_name_the_cores_commands():
     record = str(paths.terminal_record())
     for page in (True, False):
-        line = terminal.no_record(record, page=page)
+        line = terminal.no_record(record, for_page=page)
         assert f"Type {core.RECORD_COMMAND} in a terminal of your own" in line
         assert f"run {core.DOCTOR_COMMAND} in that terminal" in line
         assert f"then type {core.RECORD_COMMAND} in" in terminal.unreadable(record, "x",
-                                                                          page=page)
+                                                                          for_page=page)
 
 
 def test_the_restart_step_names_uis_own_stop_verb():
     from moxi_ui import cli
 
     assert "moxi ui stop" in terminal.where("linux").step
-    assert "moxi ui stop" in terminal.newer("r", 2, "9", "1", page=True)
+    assert "moxi ui stop" in terminal.newer("r", 2, "9", "1", for_page=True)
     with pytest.raises(SystemExit) as done:
         cli.main(["stop", "--help"])
     assert done.value.code == 0
@@ -406,6 +406,6 @@ def test_loading_the_api_imports_nothing_of_the_shell_or_the_core():
     code = ("import sys; before = set(sys.modules); import moxi_ui.api; "
             "print(sorted(m for m in set(sys.modules) - before "
             "if m.split('.')[0] in ('moxi', 'moxi_ui', 'moxi_loopback')))")
-    done = proc.run([str(python()), "-I", "-c", code], timeout=60)
+    done = proc.run([str(python()), "-I", "-c", code], timeout_s=60)
     assert done.returncode == 0, done.stderr
     assert done.stdout.decode().strip() == "['moxi_ui', 'moxi_ui.api', 'moxi_ui.terminal']"

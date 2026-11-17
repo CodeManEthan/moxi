@@ -1,11 +1,12 @@
 """The announcement of Moxi's projects module, which moxi.modules reads.
 
-It offers interface 1, the read API in `moxi_projects.api`, the verb `moxi projects`, and,
-with the `ui` extra, a page in the browser UI shell and three components other pages may
-place: a project picker, a project's card and the add form.
+It offers interfaces 1 and 2 of the read API in `moxi_projects.api` (2 is 1 and
+`for_paths`), the verb `moxi projects`, and, with the `ui` extra, a page in the browser UI
+shell and three components other pages may place: a project picker, a project's card and
+the add form.
 """
 
-INTERFACES = frozenset({1})
+INTERFACES = frozenset({1, 2})
 API = "moxi_projects.api"
 #: What `moxi projects` runs, in process, as `main(argv, prog="moxi projects")`.
 CLI = "moxi_projects.cli:main"
@@ -36,6 +37,7 @@ PAGE = "moxi_projects.page:PAGE"
 #: a `moxi-change` with the key only (never the root), a project's card, and the add form.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Projects", "contract": 1, "place": "page",
+             "group": "daily", "order": 60,
              "doc": "Your projects: each one's key, root, kind and agents, and add"},
     "picker": {"script": "picker.js", "title": "Project picker", "contract": 1,
                "place": "inline",

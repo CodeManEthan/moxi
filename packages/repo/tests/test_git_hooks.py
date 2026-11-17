@@ -132,7 +132,7 @@ def test_what_a_piece_prints_on_ok_reaches_the_committer_and_ctx_git_takes_input
     done = commit(repo)
     assert done.returncode == 0
     assert "gate printed this" in done.stderr
-    blob = git(repo, "hash-object", "--stdin", input="hello\n").stdout.strip()
+    blob = git(repo, "hash-object", "--stdin", stdin_data="hello\n").stdout.strip()
     assert f"hash {blob}" in done.stderr
 
 
@@ -399,10 +399,10 @@ def test_exports_are_not_module_names_and_resolve_after_every_import():
 
 def test_chain_lines_name_no_path():
     from moxi_repo import shim
-    assert shim.chain_line("pre-commit", False) == (
+    assert shim.chain_line("pre-commit", stdin=False) == (
         'h="$(git rev-parse --path-format=absolute --git-common-dir)/moxi-repo/hook"; '
         'if [ -f "$h" ]; then sh "$h" pre-commit "$@" || exit 1; fi')
-    assert json.dumps(shim.chain_line("pre-push", True)).count("mktemp") == 1
+    assert json.dumps(shim.chain_line("pre-push", stdin=True)).count("mktemp") == 1
 
 
 # -- managers: a hooks dir repo doesn't own ------------------------------------------------
@@ -603,6 +603,15 @@ def _set_up(demo, via: str, pieces_: list[str]) -> Path:
     else:
         api.add(repo, pieces_, mode=via)
     return repo
+
+
+@pytest.mark.parametrize("via", VIAS)
+def test_status_gives_the_text_git_runs_for_each_event(demo, via):
+    repo = _set_up(demo, via, ["demo/gate"])
+    info = api.status(repo)[0]["events"]["pre-commit"]
+    assert info["via"] == {"config": "config entry"}.get(via, via)
+    # Each form names the interpreter, as one sh word with forward slashes.
+    assert gitconf.interpreter().replace("\\", "/") in info["command"]
 
 
 @pytest.mark.parametrize("via", VIAS)

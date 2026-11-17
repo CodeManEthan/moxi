@@ -6,7 +6,8 @@ Code's projects root), `codex.sessions` (Codex's sessions root) and `opencode.da
 environment. A fourth, `guard.transcript_read`, is the transcript-read guard's switch
 (`moxi_sessions.readguard`), off by default, and a fifth,
 `guard.transcript_read_escapes`, names the `moxi` verbs that guard lets through
-(`["sessions"]` by default).
+(`["sessions"]` by default). A sixth, `list.recent_s`, is how many seconds after its last
+change a session counts as active recently in a list (3600 by default).
 """
 
 from __future__ import annotations
@@ -43,3 +44,9 @@ def configured(key: str) -> Path | None:
     """`key` (`claude.projects`, `codex.sessions` or `opencode.database`) when the file or
     its default sets it, else None."""
     return current()[key]
+
+
+def recent_s() -> int:
+    """`list.recent_s`: how many seconds after its last change a session counts as active
+    recently. Read at each call, so a change shows in the next list."""
+    return current()["list.recent_s"]

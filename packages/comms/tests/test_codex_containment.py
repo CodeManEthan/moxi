@@ -109,7 +109,7 @@ def test_the_roster_has_no_load_verifier_of_its_own():
     assert not hasattr(CodexAgent, "verify_load")
 
 
-def test_the_mock_backend_adds_the_store_directory(monkeypatch, tmp_path):
+def test_the_mock_backend_adds_the_store_dir(monkeypatch, tmp_path):
     store = tmp_path / "mock" / "store.json"
     monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
     monkeypatch.setenv("MOXI_COMMS_MOCK_BACKEND", str(store))

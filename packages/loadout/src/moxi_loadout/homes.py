@@ -14,7 +14,7 @@ writes it uses, from the environment it is given:
 - Moxi's state folder and settings file (`moxi.paths.core()`): the core lock, the
   placer's ledger, the harness table and the opencode row loadout adds to it;
 - each harness row's skills and agents folders, as the placer resolves them
-  (`moxi.place.folders`);
+  (`moxi.place.harness_dirs`);
 - Claude Code's, Codex's and OpenCode's homes (`moxi_loadout.harness`), which place the
   harness files loadout writes;
 - projects' data, state and config folders when the act reads a project section named by
@@ -39,7 +39,7 @@ Where ui is needed:
 - `path_fix`, the lasting fix for a program `PATH` doesn't find, names where to set it for
   the browser shell only when ui loads at interface 2.
 
-`MARKER` set to `PAGE_JOB` in a page job's environment, or `as_page` in the page server's
+`CALLER_ENV` set to `PAGE_JOB` in a page job's environment, or `as_page` in the page server's
 own threads, words the lines for the browser page.
 
 Standard library only at import.
@@ -54,7 +54,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 #: The variable a page job sets so its lines are worded for the browser page.
-MARKER = "MOXI_LOADOUT_CALLER"
+CALLER_ENV = "MOXI_LOADOUT_CALLER"
 #: The marker's value in a page job.
 PAGE_JOB = "page-job"
 #: The ui interface whose API holds the check.
@@ -75,7 +75,7 @@ Places = Callable[[Mapping[str, str]], dict[str, Path]]
 def on_page() -> bool:
     """Whether a line said now is read on the browser page: in a page job, or inside
     `as_page` (the page server's reads)."""
-    return os.environ.get(MARKER) == PAGE_JOB or _page.get()
+    return os.environ.get(CALLER_ENV) == PAGE_JOB or _page.get()
 
 
 @contextlib.contextmanager
@@ -134,9 +134,8 @@ def places(*, reads: Sequence[str] = ()) -> Places:
                  "loadout's config file": mine.config_file(env),
                  "Moxi's state folder": core().state_dir(env),
                  "Moxi's settings file": core().config_file(env)}
-        found.update(place.folders(env))
-        found.update({f"{NAMES[h]}'s home": harness.home(h, env)
-                      for h in harness.HARNESSES})
+        found.update(place.harness_dirs(env))
+        found.update({f"{NAMES[h]}'s home": harness.home(h, env) for h in harness.HARNESSES})
         for m in modules:
             theirs, whose = Layout(m), m + ("'" if m.endswith("s") else "'s")
             found[f"{whose} data folder"] = theirs.data_dir(env)
@@ -199,7 +198,7 @@ def check(argv: Sequence[str] = ()) -> str | None:
     api, why = ui()
     if api is None:
         return unloadable(why)
-    return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)
+    return api.check(places(reads=reads(argv)), programs=PROGRAMS, for_page=True)
 
 
 def note() -> str | None:
@@ -211,7 +210,7 @@ def note() -> str | None:
     if api is None:
         return unloadable(why) if page else None
     try:
-        return api.check(places(reads=reads()), programs=PROGRAMS, page=page)
+        return api.check(places(reads=reads()), programs=PROGRAMS, for_page=page)
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return f"loadout couldn't compare its folders with your terminal's: {exc}"
 
@@ -233,5 +232,5 @@ def path_fix(program: str) -> str:
             f"login, set it {where.place}, then {where.step}")
 
 
-__all__ = ["MARKER", "PAGE_JOB", "UI_INTERFACE", "PROGRAMS", "READS", "NAMES", "on_page",
+__all__ = ["CALLER_ENV", "PAGE_JOB", "UI_INTERFACE", "PROGRAMS", "READS", "NAMES", "on_page",
            "as_page", "ui", "unloadable", "places", "reads", "check", "note", "path_fix"]

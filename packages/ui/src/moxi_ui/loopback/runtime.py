@@ -109,9 +109,9 @@ def write_runtime(module: str, *, transport: str, address: str, port: int | None
     _check_listener(transport, address, port)
     if not isinstance(version, str) or not version:
         raise ValueError("version is the page module's distribution version")
-    directory = Layout(module).runtime_dir()
-    if not directory.is_dir():
-        raise FileNotFoundError(f"{directory} does not exist; the server creates it with "
+    runtime_dir = Layout(module).runtime_dir()
+    if not runtime_dir.is_dir():
+        raise FileNotFoundError(f"{runtime_dir} does not exist; the server creates it with "
                                 "runtime_dir(create=True) before it writes its runtime file")
     info = RuntimeInfo(
         module=module,
@@ -127,7 +127,7 @@ def write_runtime(module: str, *, transport: str, address: str, port: int | None
     data = json.dumps(_data(info), separators=(",", ":")).encode("utf-8") + b"\n"
     if len(data) > SIZE_MAX:
         raise ValueError(f"the runtime file would be over {SIZE_MAX} bytes")
-    files.atomic_write(directory / RUNTIME_FILE, data, mode=0o600)
+    files.atomic_write(runtime_dir / RUNTIME_FILE, data, mode=0o600)
     return info
 
 
@@ -159,8 +159,8 @@ def read_runtime(module: str) -> RuntimeInfo | None:
     the read. The directory is never created.
     """
     try:
-        directory = Layout(module).runtime_dir()
-        data = _read_windows(directory) if _WINDOWS else _read_posix(directory)
+        runtime_dir = Layout(module).runtime_dir()
+        data = _read_windows(runtime_dir) if _WINDOWS else _read_posix(runtime_dir)
         if data is None:
             return None
         info = parse_runtime(data)
@@ -264,11 +264,11 @@ def _private(st: os.stat_result) -> bool:
     return st.st_uid == os.getuid() and not st.st_mode & 0o077
 
 
-def _read_posix(directory: Path) -> bytes | None:
+def _read_posix(runtime_dir: Path) -> bytes | None:
     # The directory is opened without following a link and the file is opened relative to
     # that descriptor, so nothing swapped in between the checks and the read is followed.
     try:
-        dir_fd = os.open(directory, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+        dir_fd = os.open(runtime_dir, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
     except OSError:
         return None
     try:
@@ -309,21 +309,21 @@ _GENERIC_READ = 0x80000000
 _FILE_SHARE_ALL = 0x1 | 0x2 | 0x4  # read, write and delete
 _OPEN_EXISTING = 3
 _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_FILE_ATTRIBUTE_DIRECTORY = 0x10
+_FILE_ATTRIBUTE_DIRECTORY = 0x10  # noqa: MX3 -- fixed Win32 attribute name
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _FILE_TYPE_DISK = 1
 
 
-def _read_windows(directory: Path) -> bytes | None:
-    if not directory.is_dir():
+def _read_windows(runtime_dir: Path) -> bytes | None:
+    if not runtime_dir.is_dir():
         return None
     # The access-list check reads the directory's list back. It is called only on a
     # directory that exists, so a reader never creates one.
     try:
-        files.private_dir(directory)
+        files.private_dir(runtime_dir)
     except OSError:
         return None
-    handle = _win_open(directory / RUNTIME_FILE)
+    handle = _win_open(runtime_dir / RUNTIME_FILE)
     if handle is None:
         return None
     try:

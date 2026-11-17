@@ -19,8 +19,8 @@ OPTIONAL = {
           "installs.",
 }
 GATED = {}
-#: CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME are the harnesses' own, read where
-#: the harness homes are found.
+#: CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG_DIR and XDG_CONFIG_HOME are the
+#: harnesses' own, read where the harness homes are found.
 INTERNAL_ENV = {
     "MOXI_LOADOUT_CALLER": "set to page-job by loadout's page jobs, so what the run says "
                            "is worded for the browser page",
@@ -47,6 +47,7 @@ PAGE = "moxi_loadout.page:PAGE"
 #: linking to the page.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Loadout", "contract": 1, "place": "page",
+             "group": "setup", "order": 10,
              "doc": "Your items for each harness, their states, the global file and installs"},
     "drift": {"script": "drift.js", "title": "Loadout drift", "contract": 1, "place": "block",
               "home": True, "doc": "How many of your items aren't ok, linking to the page"},

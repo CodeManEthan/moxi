@@ -13,7 +13,8 @@ this one way, from the launch log and turns:
 3. turns' `find(session_id=<the newest id>)` gives the live session, or None, and then the
    target is not live. A live session must be served by the endpoint process the claim
    names, else refused `changed`.
-4. From the row, the slot and pane, and for a slot launch slots' view of the slot.
+4. From the row, the slot and pane, and for a slot launch slots' view of the slot, unless
+   the caller asked for none (`slot=False`).
 
 **The claim is compared with the process it recorded.** A claim names the endpoint
 process, `<pid>@<start time>` (`listeners.endpoint_id`). For Claude that process is a child
@@ -92,7 +93,7 @@ class Changed(catalog.Refused):
     code = "changed"
 
     def __init__(self, request_id: str, claimed: str, serving: str | None,
-                 reclaim_pending: bool):
+                 *, reclaim_pending: bool):
         self.request_id, self.claimed, self.serving = request_id, claimed, serving
         self.reclaim_pending = reclaim_pending
         if reclaim_pending:
@@ -157,15 +158,19 @@ class Target:
 
 
 def find(session_id: str, *, conn: sqlite3.Connection | None = None,
-         turns: Any | None = None, slots_api: Any | None = None) -> Target:
+         turns: Any | None = None, slots_api: Any | None = None,
+         slot: bool = True) -> Target:
     """The target of an act on `session_id`. Raises `NotLaunched`, `Unclaimed`, `Changed`,
     `NoTurns`, `TurnsFailed`, or slots' refusals (`targets.SlotsBusy`,
     `targets.SlotsFailed`) when the slot can't be read.
 
     `conn` is the launch log (opened and closed here when not given); `turns` and
-    `slots_api` stand in for turns' and slots' APIs.
+    `slots_api` stand in for turns' and slots' APIs. With `slot` false, slots is not asked:
+    the target's `slot` is None and no slots refusal is raised, for a reader that needs the
+    claim and the live session only.
     """
-    return _with_store(conn, lambda c: _find(c, session_id, None, turns, slots_api))
+    return _with_store(conn, lambda c: _find(c, session_id, None, turns, slots_api,
+                                             slot=slot))
 
 
 def caller(*, pid: int | None = None, conn: sqlite3.Connection | None = None,
@@ -179,8 +184,8 @@ def caller(*, pid: int | None = None, conn: sqlite3.Connection | None = None,
     turns = turns if turns is not None else _turns()
     try:
         session = turns.find(pid=os.getpid() if pid is None else pid)
-    except Exception as error:
-        raise TurnsFailed(error) from error
+    except Exception as exc:
+        raise TurnsFailed(exc) from exc
     if session is None:
         raise NotLaunched("no session turns serves was found above this process",
                           "run a self act from the session's own tool shell")
@@ -202,19 +207,19 @@ def _with_store(conn: sqlite3.Connection | None, run):
     if conn is not None:
         return run(conn)
     try:
-        opened = store.connect(create=False)
+        store_conn = store.connect(create=False)
     except core_store.StoreTooNew:
         raise
     except core_store.StoreError:
         raise NotLaunched() from None
     try:
-        return run(opened)
+        return run(store_conn)
     finally:
-        opened.close()
+        store_conn.close()
 
 
 def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns: Any | None,
-          slots_api: Any | None) -> Target:
+          slots_api: Any | None, *, slot: bool = True) -> Target:
     row = store.resolve(conn, session_id)
     if row is None:
         raise NotLaunched()
@@ -224,17 +229,17 @@ def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns:
         turns = turns if turns is not None else _turns()
         try:
             session = turns.find(session_id=row.newest_session_id)
-        except Exception as error:
-            raise TurnsFailed(error) from error
+        except Exception as exc:
+            raise TurnsFailed(exc) from exc
     try:
         if session is not None:
             check_claim(row, session)
-        slot = _slot(row, slots_api)
+        seen = _slot(row, slots_api) if slot else None
     except BaseException:
         if session is not None:
             session.close()
         raise
-    return Target(row, session, slot, row.pane_id, session is not None)
+    return Target(row, session, seen, row.pane_id, session is not None)
 
 
 def check_claim(row: store.LaunchRow, session: Any) -> None:
@@ -248,7 +253,7 @@ def check_claim(row: store.LaunchRow, session: Any) -> None:
     pending = serving_id is not None and store.endpoint_gone(claimed)
     named = (f"{serving_id.pid}@{serving_id.started:.6f}" if serving_id is not None
              else (str(serving) if serving is not None else None))
-    raise Changed(row.request_id, claimed, named, pending)
+    raise Changed(row.request_id, claimed, named, reclaim_pending=pending)
 
 
 def claims(endpoint: str, pid: int) -> bool:
@@ -269,12 +274,12 @@ def _slot(row: store.LaunchRow, slots_api: Any | None) -> Any | None:
         return None
     try:
         return api.show(row.slot)
-    except api.TryAgain as error:
+    except api.TryAgain as exc:
         raise targets.SlotsBusy("slot", f"slots did not answer about slot {row.slot}: "
-                                f"{error}", "try again in a moment") from error
-    except api.SlotsError as error:
-        raise targets.SlotsFailed("slot", f"slots could not show slot {row.slot}: {error}",
-                                  "moxi slots list shows the slots") from error
+                                f"{exc}", "try again in a moment") from exc
+    except api.SlotsError as exc:
+        raise targets.SlotsFailed("slot", f"slots could not show slot {row.slot}: {exc}",
+                                  "moxi slots list shows the slots") from exc
 
 
 def _turns() -> Any:

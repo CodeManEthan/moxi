@@ -46,7 +46,7 @@ the hold starts at record, not when the worker reaches the steer, so a steer rec
 while the turn ran is either taken into that turn or refused ``idle``, and ``turn.ended``
 lists it when taken. ``turn/steer`` answered reports ``steered``; "no active turn" reports
 ``refused`` ``idle``; no answer within the app-server client's bound reports ``lost``. A
-steer the endpoint settles meanwhile (its own bound) goes to ``expired``, which drops it
+steer the endpoint settles meanwhile (its own bound) goes to ``on_expired``, which drops it
 from ``_steering`` and runs the completions it held. Its ``turn/steer``, if already sent,
 may still be taken by Codex: the caller read ``lost``, and Codex's late answer changes
 nothing.
@@ -386,7 +386,7 @@ class CodexHarness(Harness):
         self.hook_server = codex_hooks.HookServer(self, hook_socket)
 
     def _guard_settings(self) -> tuple[list[str], int]:
-        """`guards.on` and `guards.max_wait_ms` now, the wait held to the launch's value,
+        """`guards.run` and `guards.max_wait_ms` now, the wait held to the launch's value,
         since the ping's wait is fixed for the launch. Raises `ConfigError`."""
         from . import config as turns_config
 
@@ -716,7 +716,7 @@ class CodexHarness(Harness):
                 self.endpoint.identify(
                     thread_id, ready="startup" if starting or unturned else "resume")
                 self._accepted.set()
-                self._loaded(ws)
+                self._on_loaded(ws)
                 if old_turn and old_turn != turn_id:
                     if turn_id:
                         # The load shows another running turn. Reporting it ends the old
@@ -785,7 +785,7 @@ class CodexHarness(Harness):
             except (codex_hooks.HooksUntrusted, CodexTooOld) as exc:
                 # Neither mends on a retry.
                 self._load_failed(exc)
-                self.endpoint.gone(self.trouble)
+                self.endpoint.on_gone(self.trouble)
                 return
             except Exception as exc:  # retry until the host itself is stopped
                 self._load_failed(exc)
@@ -802,8 +802,8 @@ class CodexHarness(Harness):
         subagents, whole, shells = self._read_agents()
         busy = sum(1 for a in subagents if a.busy) if whole else None
         if busy is None or shells is None:
-            return Live(None, False, without_shells=busy)
-        return Live(busy + len(shells), False, shells=len(shells))
+            return Live(None, draft=False, without_shells=busy)
+        return Live(busy + len(shells), draft=False, shells=len(shells))
 
     def agents(self) -> Agents:
         """The collab subagents as the host recorded Codex's notices, and the background
@@ -827,7 +827,7 @@ class CodexHarness(Harness):
             subagents = [Agent(agent_id, "subagent", state, final, None, parent)
                          for agent_id, (state, final, parent) in self._collab.items()]
         try:
-            shells = [Agent(pid, "shell", "running", False)
+            shells = [Agent(pid, "shell", "running", final=False)
                       for pid in self._terminals(ws, thread_id)]
         except Exception as exc:  # noqa: BLE001 - an unread list is unknown, never empty
             log.info("the background terminals could not be listed: %s", exc)
@@ -905,7 +905,7 @@ class CodexHarness(Harness):
             elif delivery.refuse_draft and live.draft:
                 reason = "draft"
         if reason is not None:
-            self.endpoint.refused(delivery.id, reason)
+            self.endpoint.on_refused(delivery.id, reason)
             return
         try:
             turn_id = self._start_turn(delivery.text, delivery.id)
@@ -925,7 +925,7 @@ class CodexHarness(Harness):
             # Never sent, or Codex answered it with an error.
             self._drop_pending(delivery.id)
             log.warning("Codex refused delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "unsupported")
+            self.endpoint.on_refused(delivery.id, "unsupported")
             return
         if turn_id is None:
             log.warning("Codex took delivery %s's turn/start but named no turn the host "
@@ -958,20 +958,20 @@ class CodexHarness(Harness):
             self._inject(delivery.text)
         except (proto.NoActiveTurn, _TurnEnding):
             # Codex has no turn to steer, or its turn is ending: the text never went out.
-            self.endpoint.refused(delivery.id, "idle")
+            self.endpoint.on_refused(delivery.id, "idle")
         except proto.NoReply as exc:
             log.warning("Codex did not answer steer %s: %s; it reads lost",
                         delivery.id, exc)
             self.endpoint.lost(delivery.id, _no_reply(exc))
         except Exception as exc:
             log.warning("Codex could not steer delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "unsupported")
+            self.endpoint.on_refused(delivery.id, "unsupported")
         else:
-            self.endpoint.steered(delivery.id)
+            self.endpoint.on_steered(delivery.id)
         finally:
             self._release(delivery.id)
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         """The endpoint settled a steer without the host's word (its bound), or its worker
         skipped one that had settled: stop holding ``turn/completed`` for it."""
         self._release(delivery_id)
@@ -1022,7 +1022,7 @@ class CodexHarness(Harness):
         if running:
             self.endpoint.command_settled(request.id, Refused("busy-turn"))
             return
-        if self.live().busy(shells=not request.stop_shells):
+        if self.live().busy(include_shells=not request.stop_shells):
             self.endpoint.command_settled(request.id, Refused("busy-agents"))
             return
         compaction = _Compaction(request, listed, time.monotonic())
@@ -1050,7 +1050,7 @@ class CodexHarness(Harness):
             log.warning("/compact %s did not run: %s", request.id, exc)
             self.endpoint.command_settled(request.id, result)
 
-    def compacted(self) -> None:
+    def on_compacted(self) -> None:
         """A Ready with source ``compact`` was raised (the core settles a plain
         compaction there). The compaction the host sent has taken effect: with
         ``stop_shells`` the stop begins, on a thread of its own, so the hook that raised
@@ -1095,7 +1095,7 @@ class CodexHarness(Harness):
         """Terminate each background terminal and read what is left, by `deadline`."""
         if listed is None:
             # No list before the command: nothing is stopped, and the report says so.
-            return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+            return Shells((), (LeftShell(None, SHELL_UNLISTED),), complete=False)
         with self._lock:
             thread_id, ws = self.session_id, self.ws
         complete = True
@@ -1176,8 +1176,8 @@ class CodexHarness(Harness):
                 self._steers_out += 1
             try:
                 result = ws.call("turn/steer", proto.steer_params(thread_id, expected, text))
-            except proto.ActiveTurnMismatch as mismatch:
-                expected = mismatch.found
+            except proto.ActiveTurnMismatch as exc:
+                expected = exc.found
                 with self._lock:
                     self.active_turn_id = expected
                 continue
@@ -1310,7 +1310,7 @@ class CodexHarness(Harness):
                 return
             self._report_started(turn_id, claim=True)
         elif method == "turn/completed":
-            self._completed(params)
+            self._on_completed(params)
         elif method in ("item/started", "item/completed"):
             self._track_collab(params)
         elif method == "thread/tokenUsage/updated":
@@ -1321,7 +1321,7 @@ class CodexHarness(Harness):
         elif method == STARTUP_STATUS:
             if isinstance(params, dict) and params.get("threadId") in (None,
                                                                       self.session_id):
-                self.mcp.notified(params)
+                self.mcp.on_notified(params)
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -1343,7 +1343,7 @@ class CodexHarness(Harness):
         elif rid is not None:
             log.warning("unanswered app-server request %s; approvals are disabled", method)
 
-    def _loaded(self, ws) -> None:
+    def _on_loaded(self, ws) -> None:
         """An accepted load, which raised its `ready`: read the account's rate limits
         once, and settle the MCP servers, each on a thread of its own, so the load waits
         for neither."""
@@ -1430,7 +1430,7 @@ class CodexHarness(Harness):
                 return
             self._usage = (thread, total)
 
-    def _completed(self, params: dict) -> None:
+    def _on_completed(self, params: dict) -> None:
         """A turn's end, by Codex's word: held while a steer recorded by the endpoint
         is unsettled, so that steer is taken into the turn (or refused) before the end is
         reported, and ``turn.ended`` lists it."""
@@ -1458,7 +1458,7 @@ class CodexHarness(Harness):
         # Should Codex resume the turn after all, the ledger is closed while it runs:
         # a delivery made then is absorbed into it, meets the reported-turn guard in
         # `_start_turn` and reads lost. A duplicate at worst.
-        self._completed({"turn": {"id": turn_id, "status": "failed"}})
+        self._on_completed({"turn": {"id": turn_id, "status": "failed"}})
 
     def _turn_completed(self, params: dict) -> None:
         turn = params.get("turn") or {}
@@ -1547,11 +1547,11 @@ class CodexHarness(Harness):
                  event, session_id)
 
     def window_closed(self, status: int | None) -> None:
-        self.endpoint.gone(f"the Codex window closed with status {status or 0}")
+        self.endpoint.on_gone(f"the Codex window closed with status {status or 0}")
 
     def window_failed(self, reason: str) -> None:
         self._set_trouble(reason)
-        self.endpoint.gone(reason)
+        self.endpoint.on_gone(reason)
 
     def generation_answers(self, generation: Generation, timeout: float) -> bool:
         ws = self.ws

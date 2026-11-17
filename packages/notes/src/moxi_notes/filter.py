@@ -10,7 +10,7 @@ for notes' sets at the file's path. The file on disk keeps the original.
 It redacts exactly what the gates refuse in a text blob, and `redact` reaches a fixed
 point, so a redacted blob passes the prepare step and both gates. What it passes through
 unchanged, and so is still left out or refused by them: a blob with a NUL byte in its
-first 8,000 bytes (git's own binary test), and a blob over `max_mb`.
+first 8,000 bytes (git's own binary test), and a blob over `max_mib`.
 
 It never answers with one placeholder in place of a whole text. git writes the committed
 copy back over the file at the next checkout, reset, stash, merge, rebase or pull, so a

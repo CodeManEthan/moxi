@@ -22,6 +22,7 @@ EXPORTS = {
     "Prepared": "moxi_repo.committer",
     "HookContext": "moxi_repo.pieces",
     "Outcome": "moxi_repo.pieces",
+    "commit_rules_problems": "moxi_repo.commit_rules",
 }
 
 __all__ = sorted(EXPORTS)

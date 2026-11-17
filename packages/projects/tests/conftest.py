@@ -1,5 +1,6 @@
 """Fixtures: projects' store in the test's own Moxi home, a golden store built once (and
-one at schema version 1), and a site of fake distributions that contribute to projects.
+one at schema version 1), a site of fake distributions that contribute to projects, and
+the Projects page's two installs for its browser tests (projects_page_kit.py).
 
 The test kit points `MOXI_PROJECTS_HOME` into each test's tmp, so the store every call
 reads and writes is the test's own. The golden store is built once per session and
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+import projects_page_kit as kit
 from moxi_projects import api, store
 
 #: The golden store's rows: (key, root under the golden root, kind, lead, associated).
@@ -54,7 +56,7 @@ def golden_v1(tmp_path_factory) -> tuple[Path, str]:
     where = tmp_path_factory.mktemp("golden-v1")
     base = os.path.join(str(where), "roots")
     db = where / "projects.db"
-    conn = moxi.store.connect(str(db), timeout=store.TIMEOUT)
+    conn = moxi.store.connect(str(db), timeout_s=store.TIMEOUT)
     try:
         moxi.store.migrate(conn, store.STEPS[:1])
         with moxi.store.transaction(conn):
@@ -166,3 +168,25 @@ def site(tmp_path, monkeypatch):
     for mod in list(sys.modules):
         if mod.split(".")[0] in s.packages:
             del sys.modules[mod]
+
+
+# --- the Projects page's two installs -----------------------------------------------------
+
+@pytest.fixture(scope="module")
+def fixture_shell(ui_shells, tmp_path_factory):
+    """A test shell of the fixture install, with the seven projects and their notes roots,
+    the fixture saying nothing."""
+    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("fixture-install"), with_fixture=True))
+    kit.record_terminal(shell)
+    kit.seed(shell)
+    kit.reset(shell)
+    return shell
+
+
+@pytest.fixture(scope="module")
+def small_shell(ui_shells, tmp_path_factory):
+    """A test shell of the small install, with the seven projects and no notes roots."""
+    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("small-install"), with_fixture=False))
+    kit.record_terminal(shell)
+    kit.seed(shell, with_notes=False)
+    return shell

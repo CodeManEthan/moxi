@@ -248,7 +248,7 @@ class Choice:
     slot), or `slot` "" for the lowest launchable one; `chain` set when the recorded slot
     holds the chain's own session, which refuses the repair."""
 
-    def __init__(self, slot: str, respawn: bool = False, held: bool = False,
+    def __init__(self, slot: str, *, respawn: bool = False, held: bool = False,
                  why: str = "", chain: bool = False):
         self.slot, self.respawn, self.held, self.why, self.chain = (slot, respawn, held,
                                                                     why, chain)
@@ -388,10 +388,10 @@ class RelaunchJob:
             self.steps()
         except _Ended:
             pass
-        except Exception as error:  # noqa: BLE001  (a run never stays open on a fault)
+        except Exception as exc:  # noqa: BLE001  (a run never stays open on a fault)
             log.exception("run %s stopped on a fault", self.run_id)
             try:
-                self.end("error", type(error).__name__, _words(error))
+                self.end("error", type(exc).__name__, _words(exc))
             except _Ended:
                 pass
         finally:
@@ -423,10 +423,10 @@ class RelaunchJob:
                 self.acting = True
                 self.exit(number)
                 break
-            except _Again as again:
+            except _Again as exc:
                 self.acting = False
                 self._release()
-                self.event("again", {"word": again.word, "detail": again.detail})
+                self.event("again", {"word": exc.word, "detail": exc.detail})
         self.dialog(number)
         self.name()
         self.respawn(self.request())
@@ -483,10 +483,10 @@ class RelaunchJob:
         try:
             found = target.find(run.session_id, conn=self.conn, turns=self.turns,
                                 slots_api=self.slots_api)
-        except catalog.Refused as refused:
-            self.end("error", refused.code, refused.problem)
-        except Exception as error:  # noqa: BLE001  (a find that breaks ends the run)
-            self.end("error", "turns-failed", _words(error))
+        except catalog.Refused as refused_exc:
+            self.end("error", refused_exc.code, refused_exc.problem)
+        except Exception as exc:  # noqa: BLE001  (a find that breaks ends the run)
+            self.end("error", "turns-failed", _words(exc))
         if not found.live:
             found.close()
             self.end("gone", GONE, f"session {run.session_id} is not live")
@@ -512,9 +512,9 @@ class RelaunchJob:
         if self.watch is None:
             try:
                 self.watch = quiet.Watch(session, clock=self.wall)
-            except Exception as error:  # noqa: BLE001  (a watch that can't start ends it)
+            except Exception as exc:  # noqa: BLE001  (a watch that can't start ends it)
                 self.end("error", "turns-failed",
-                         f"the session's watch could not start: {_words(error)}")
+                         f"the session's watch could not start: {_words(exc)}")
         watch = self.watch
         read = dict(slot=self.slot, slots_api=self.slots_api, person_s=person_s)
         seen = watch.events
@@ -557,12 +557,12 @@ class RelaunchJob:
         seconds = float(self.setting("relaunch.wait_s"))
         try:
             api.hold(slot, holder=self.holder, seconds=seconds)
-        except api.TryAgain as error:
-            self._transient("try-again", f"slots did not answer: {error}")
-        except api.Refused as refused:
-            self.end("not-held", refused.reason, refused.words or str(refused))
-        except api.SlotsError as error:
-            self.end("not-held", type(error).__name__, _words(error))
+        except api.TryAgain as exc:
+            self._transient("try-again", f"slots did not answer: {exc}")
+        except api.Refused as refused_exc:
+            self.end("not-held", refused_exc.reason, refused_exc.words or str(refused_exc))
+        except api.SlotsError as exc:
+            self.end("not-held", type(exc).__name__, _words(exc))
         self.held = str(slot)
         self.event("hold", {"slot": str(slot), "holder": self.holder, "seconds": seconds})
 
@@ -578,9 +578,9 @@ class RelaunchJob:
         self.exit_sent_at = self.wall()
         try:
             result = self.target.session.command("exit", if_turn_number=number)
-        except Exception as error:  # noqa: BLE001  (turns' error reads as gone)
+        except Exception as exc:  # noqa: BLE001  (turns' error reads as gone)
             self.event("exit-result", {"kind": "error", "reason": GONE,
-                                       "why": _words(error)})
+                                       "why": _words(exc)})
             return "error", GONE
         kind = getattr(result, "KIND", type(result).__name__.lower())
         reason = getattr(result, "reason", None)
@@ -602,12 +602,12 @@ class RelaunchJob:
             self.check_stop()
             if pane:
                 try:
-                    ended = api.wait_ended(slot, pane_id=pane, timeout=1)
+                    ended = api.wait_ended(slot, pane_id=pane, timeout_s=1)
                 except api.TryAgain:
                     ended = None
-                except api.SlotsError as error:
+                except api.SlotsError as exc:
                     self.end("relaunch-failed", "slots", f"the pane could not be watched: "
-                                                         f"{_words(error)}")
+                                                         f"{_words(exc)}")
                 if ended is not None and (ended.ended or ended.gone):
                     self.event("pane-ended", {"pane_id": pane, "status": ended.dead_status,
                                               "gone": ended.gone})
@@ -616,9 +616,9 @@ class RelaunchJob:
                 seen = api.read_screen(slot, [screen])
             except api.TryAgain:
                 seen = None
-            except api.SlotsError as error:
+            except api.SlotsError as exc:
                 self.end("relaunch-failed", "slots", f"the pane could not be read: "
-                                                     f"{_words(error)}")
+                                                     f"{_words(exc)}")
             if seen is not None and seen.dead:
                 self.event("pane-ended", {"pane_id": pane})
                 return
@@ -656,9 +656,9 @@ class RelaunchJob:
                          " at the exit dialog; it was left for a person")
         try:
             pane = api.pane_use(slot)
-        except api.SlotsError as error:
+        except api.SlotsError as exc:
             self.end("exit-pending", "unreadable", f"the pane could not be read at the "
-                                                   f"exit dialog: {_words(error)}")
+                                                   f"exit dialog: {_words(exc)}")
         # The dialog drawing itself is pane output: output written in or after the second
         # the exit command was sent is the harness's own, never a person's. tmux keeps
         # the pane's activity in whole seconds.
@@ -669,7 +669,7 @@ class RelaunchJob:
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")
-        answer = api.answer_screen(slot, screen, wait=0)
+        answer = api.answer_screen(slot, screen, wait_s=0)
         outcome, why = answer.outcome, answer.why or ""
         detail = {"outcome": outcome, "why": why, "capture": answer.capture}
         if turns_gone:
@@ -694,8 +694,8 @@ class RelaunchJob:
         while True:
             try:
                 state = comms.identity_state(row.identity, scope=row.scope or None).state
-            except Exception as error:  # noqa: BLE001  (an unreadable state is not held)
-                state = f"unreadable: {_words(error)}"
+            except Exception as exc:  # noqa: BLE001  (an unreadable state is not held)
+                state = f"unreadable: {_words(exc)}"
             if state != "held":
                 self.event("name", {"identity": row.identity, "state": state})
                 return
@@ -708,20 +708,20 @@ class RelaunchJob:
         """The replay a relaunch respawns: the row made again into its slot's ended
         pane, under the run's hold."""
         return self._replay(mode=self.run.mode, handoff=self.run.handoff_path,
-                            actor=self.run.actor, slot=self.slot, respawn=True,
+                            by=self.run.actor, slot=self.slot, respawn=True,
                             hold=self.holder, director=self.run.mode == "director")
 
-    def _replay(self, *, mode: str, handoff: str | None, actor: str, slot: str | None,
+    def _replay(self, *, mode: str, handoff: str | None, by: str, slot: str | None,
                 respawn: bool, hold: str | None, director: bool = False) -> Any:
         from . import api
         from .compose import common
 
         handoff = handoff if mode == "self" else None
         posture = (common.RELAUNCHED.format(path=handoff) if handoff
-                   else f"with:{actor}")
+                   else f"with:{by}")
         return api.ReplayRequest(
             self.row, relaunch_of=self.row.request_id, request_id=str(uuid.uuid4()),
-            actor=actor, posture=posture, handoff=handoff, run=self.run_id,
+            actor=by, posture=posture, handoff=handoff, run=self.run_id,
             slot=slot, hold=hold, respawn=respawn, director=director)
 
     def respawn(self, request: Any) -> None:
@@ -735,11 +735,11 @@ class RelaunchJob:
                                "respawn": request.respawn, "holder": request.hold})
         try:
             result = self.launch(request)
-        except catalog.Refused as refused:
-            self.end("relaunch-failed", refused.code, refused.problem)
-        except Exception as error:  # noqa: BLE001  (every failed launch is relaunch-failed)
-            self.end("relaunch-failed", getattr(error, "code", None) or type(error).__name__,
-                     _words(error))
+        except catalog.Refused as refused_exc:
+            self.end("relaunch-failed", refused_exc.code, refused_exc.problem)
+        except Exception as exc:  # noqa: BLE001  (every failed launch is relaunch-failed)
+            self.end("relaunch-failed", getattr(exc, "code", None) or type(exc).__name__,
+                     _words(exc))
         self.check_stop()
         if result.base in ("job", "no-credentials"):
             self.event("base", {"base": result.base})
@@ -767,8 +767,8 @@ class RelaunchJob:
         try:
             if api.release(slot, holder=self.holder):
                 self.event("released", {"slot": slot, "holder": self.holder})
-        except Exception as error:  # noqa: BLE001  (a hold that can't be released expires)
-            log.warning("run %s could not release slot %s: %s", self.run_id, slot, error)
+        except Exception as exc:  # noqa: BLE001  (a hold that can't be released expires)
+            log.warning("run %s could not release slot %s: %s", self.run_id, slot, exc)
 
     def _tell(self) -> None:
         run = store.get_run(self.conn, self.run_id)
@@ -803,8 +803,8 @@ class RelaunchJob:
     def _prune(self) -> None:
         try:
             store.prune(self.conn, float(self.setting("records.keep_days")))
-        except Exception as error:  # noqa: BLE001  (retention never stops a run)
-            log.warning("the launcher's records were not pruned: %s", error)
+        except Exception as exc:  # noqa: BLE001  (retention never stops a run)
+            log.warning("the launcher's records were not pruned: %s", exc)
 
 
 class RepairJob(RelaunchJob):
@@ -826,9 +826,9 @@ class RepairJob(RelaunchJob):
         chain = chain_of(self.conn, self.row.request_id)
         try:
             choice = choose_slot(api, original.slot or self.row.slot, self.holder, chain)
-        except Exception as error:  # noqa: BLE001  (a slot that can't be read: nothing done)
+        except Exception as exc:  # noqa: BLE001  (a slot that can't be read: nothing done)
             self.end("relaunch-failed", "slots", f"slot {original.slot} could not be read: "
-                                                 f"{_words(error)}")
+                                                 f"{_words(exc)}")
         if choice.chain:
             self.end("occupied-by-chain", "occupied-by-chain", choice.why)
         if choice.recorded:
@@ -837,7 +837,7 @@ class RepairJob(RelaunchJob):
                             "holder": self.holder, "why": choice.why or None})
         self.name()
         self.respawn(self._replay(
-            mode=original.mode, handoff=original.handoff_path, actor=original.actor,
+            mode=original.mode, handoff=original.handoff_path, by=original.actor,
             slot=choice.slot, respawn=choice.respawn,
             hold=self.holder if choice.recorded else None))
 
@@ -849,15 +849,15 @@ class RepairJob(RelaunchJob):
             try:
                 api.hold(choice.slot, holder=self.holder,
                          seconds=float(self.setting("relaunch.wait_s")))
-            except api.TryAgain as error:
+            except api.TryAgain as exc:
                 if attempt + 1 == HOLD_TRIES:
                     self.end("relaunch-failed", "slots-busy",
                              f"slots did not answer about slot {choice.slot}: "
-                             f"{_words(error)}; nothing was launched")
+                             f"{_words(exc)}; nothing was launched")
                 self.sleep(HOLD_RETRY_S)
-            except api.SlotsError as error:
+            except api.SlotsError as exc:
                 return Choice("", why=f"slot {choice.slot} could not be held: "
-                                      f"{_words(error)}")
+                                      f"{_words(exc)}")
             else:
                 self.held = choice.slot
                 return choice
@@ -908,8 +908,8 @@ class CompactJob(RelaunchJob):
             self.event("compact", {"turn_number": number})
             try:
                 result = self.target.session.command("compact", if_turn_number=number)
-            except Exception as error:  # noqa: BLE001  (turns' error is the verdict)
-                result = error
+            except Exception as exc:  # noqa: BLE001  (turns' error is the verdict)
+                result = exc
             verdict = recycle.verdict_of("compact", result)
             self.event("result", {"outcome": verdict.outcome, "word": verdict.word,
                                   "detail": verdict.detail})
@@ -976,9 +976,10 @@ def write_request(request_id: str, data: Mapping[str, Any],
 
 def launch_request(request_id: str, data: Mapping[str, Any]):
     """The `api.LaunchRequest` a request file holds: its preset, the values the page set,
-    typed as `catalog.parse` gives them, the flags passed on, the rows left out (none
-    when the file names none) and `off_posture`, under `request_id`. It names no caller's
-    directory: a page launch names its own place."""
+    typed as `catalog.parse` gives them, the flags passed on, the rows left out and the
+    rows filled in from an earlier launch (none when the file names none) and
+    `off_posture`, under `request_id`. It names no caller's directory: a page launch
+    names its own place."""
     from . import api
 
     def text(key: str) -> str | None:
@@ -988,14 +989,16 @@ def launch_request(request_id: str, data: Mapping[str, Any]):
     typed = data.get("typed") or {}
     extra = data.get("extra") or []
     left_out = data.get("left_out") or []
+    filled = data.get("filled") or []
     if not isinstance(typed, dict) or not isinstance(extra, list) \
-            or not isinstance(left_out, list):
+            or not isinstance(left_out, list) or not isinstance(filled, list):
         raise NotHere(None, f"the page's request for launch {request_id} is not one the "
                             "launcher wrote", "preview the launch again and launch it")
     return api.LaunchRequest(seat=text("seat"), project_preset=text("project_preset"),
                              typed=typed, extra=tuple(str(word) for word in extra),
                              off_posture=bool(data.get("off_posture")),
                              left_out=tuple(str(name) for name in left_out),
+                             filled=tuple(str(name) for name in filled),
                              request_id=request_id)
 
 
@@ -1104,9 +1107,9 @@ def run_request(request_id: str, *, wait_s: float | None = None,
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             act = data.get("act")
-        except (OSError, ValueError, AttributeError) as error:
+        except (OSError, ValueError, AttributeError) as request_exc:
             log.warning("the request file of launch %s could not be read: %s", request_id,
-                        _words(error))
+                        _words(request_exc))
             record_refused(request_id, refused_detail(NotHere(
                 None, f"the page's request for launch {request_id} could not be read",
                 "preview the launch again and launch it")))
@@ -1133,8 +1136,8 @@ def run_request(request_id: str, *, wait_s: float | None = None,
                     raise NotHere("target", "a launch in a terminal is not run from the page",
                                   "run its command in a terminal of your own")
                 done["state"] = go(request).state
-            except BaseException as error:  # noqa: BLE001  (each end is recorded)
-                done["error"] = error
+            except BaseException as exc:  # noqa: BLE001  (each end is recorded)
+                done["error"] = exc
 
         worker = threading.Thread(target=start, name=f"{act} {request_id}", daemon=True)
         worker.start()

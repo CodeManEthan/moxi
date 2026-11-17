@@ -235,7 +235,6 @@ test("the repository's pages pass, and only the QR code and the dialog scrim are
     }
   }
   assert.deepEqual(fixed, [
-    "packages/ui/web/src/confirm.ts", "packages/ui/web/src/gateway-desk.ts",
-    "packages/ui/web/src/gateway-desk.ts",
+    "packages/ui/web/src/confirm.ts", "packages/ui/web/src/phones.ts", "packages/ui/web/src/phones.ts",
   ]);
 });

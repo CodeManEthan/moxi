@@ -86,17 +86,17 @@ from pathlib import Path
 from moxi import ipc
 
 from . import (attribution, bindings, cache, claimfile, config, constants, directory,
-               membership, wire)
+               membership, replies, wire)
 from .store import books as books_mod
 from .mcp import tokens as mcp_tokens_mod
 from .attribution import Author
-from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
-                           POSTURE_ONCE, parse as parse_machine_line)
+from .machine_line import COLD_AT_LIVE, POSTURE_ONCE, parse as parse_machine_line
 from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
 from . import reserved as reserved_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
+from .replies import SentEntry
 from .provision import NAMES
 from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, split_tag,
                       tag_matches)
@@ -226,30 +226,13 @@ CASE_REASONS = {
         "The message waited past its expiry and was dropped before it reached the "
         "model. Its sender was not told; the expiry is on its line zero."),
     CASE_WITHDRAWN: (
-        "Its author withdrew the message (moxi comms delete) before it reached the "
+        "Its author withdrew the message (moxi comms remove) before it reached the "
         "model, so it was never handed over."),
     CASE_RESERVED: (
         "The message was waiting for this name when a module reserved it as a send-only "
         "name. Nobody receives mail under a reserved name, so it was dropped undelivered, "
         "and its sender was not told."),
 }
-
-
-@dataclass
-class SentEntry:
-    """One `#names` message in the sent index.
-
-    `tags` are the recipient tags exactly as written on line zero: the index keys on
-    nothing `resolve` computes, because a bare tag qualifies differently live and at boot.
-    """
-
-    id: str
-    author: str
-    tags: tuple
-    posture: str
-    reply_to: str | None
-    at: float
-    verified: bool
 
 
 @dataclass(eq=False)
@@ -585,7 +568,7 @@ class Daemon:
             "bind": self._bind,
             # The reads take no connection.
             **{name: _read(self, f"_{name}_query") for name in READS},
-            "delete": self._delete,
+            "remove": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
             "injected": self._injected,
@@ -618,7 +601,7 @@ class Daemon:
     def start(self) -> "Daemon":
         # `[cache] required`: a box that says its cold-send hold must hold refuses to
         # start without the cache module, before anything is served or written.
-        refusal = cache.required_refusal(self.settings.use("cache").required)
+        refusal = cache.required_refusal(required=self.settings.use("cache").required)
         if refusal:
             raise RuntimeError(refusal)
         # The socket first, before anything is written or fenced: serving it takes the
@@ -628,15 +611,15 @@ class Daemon:
         self.host = wire.Host(str(self.socket_path), self._call, self._deregister)
         try:
             self.host.start()
-        except ipc.AlreadyServing as e:
+        except ipc.AlreadyServing as exc:
             self.host = None
-            who = f"pid {e.holder}" if e.holder else "another process"
+            who = f"pid {exc.holder}" if exc.holder else "another process"
             raise RuntimeError(
                 f"a live comms daemon ({who}) is serving at {self.socket_path}; refusing "
                 f"to start a second one. Stop the running daemon first.") from None
-        except OSError as e:
+        except OSError as exc:
             self.host = None
-            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {e}") \
+            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {exc}") \
                 from None
         try:
             self._boot()
@@ -743,9 +726,9 @@ class Daemon:
         try:
             from .mcp import server as mcp_server
             from .mcp import tools as mcp_tools
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
             self.mcp_why = "failed"
-            self.mcp_detail = f"the MCP libraries didn't load: {type(e).__name__}: {e}"
+            self.mcp_detail = f"the MCP libraries didn't load: {type(exc).__name__}: {exc}"
             log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
         from .mcp import listen
@@ -768,7 +751,7 @@ class Daemon:
                         "[mcp] port %d; launches get the port served", sock.getsockname()[1],
                         port)
         verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
-                                       self.host.opened)
+                                       self.host.on_opened)
         from .mcp import inprocess
 
         # Where tool calls run: on the host's pool, a few at a time, so adapters' and
@@ -781,9 +764,9 @@ class Daemon:
         self.host.stop_hook = endpoint.stop
         try:
             self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
             self.mcp_why, self.mcp_held = "failed", False
-            self.mcp_detail = f"the endpoint didn't start: {e}"
+            self.mcp_detail = f"the endpoint didn't start: {exc}"
             log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
         self.mcp_endpoint = endpoint
@@ -923,26 +906,26 @@ class Daemon:
         except DaemonStopping:
             raise wire.error(wire.STOPPING, "the comms daemon is stopping; try again in "
                              "a moment") from None
-        except sqlite3.OperationalError as e:
-            if "locked" not in str(e) and "busy" not in str(e):
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) and "busy" not in str(exc):
                 log.exception("%s failed", method)
-                raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+                raise wire.error(wire.FAILED, f"{type(exc).__name__}: {exc}") from None
             # comms.db's busy timeout passed: nothing of this method was committed.
             raise wire.error(wire.STORE_BUSY, "comms' store is busy; try again in a "
                              "moment") from None
-        except Refusal as e:
+        except Refusal as exc:
             if method == "bind":
                 # One journal line per refused attempt, naming what was asked. A waiting
                 # shim at the backoff ceiling adds about two a minute; that is the price
                 # of the journal showing the attempt at all.
-                log.warning("bind refused: %s: %s", _asked(params), e)
-            raise wire.error(e.code, str(e), **e.extra) from None
-        except Exception as e:  # never take the daemon down for one bad message
+                log.warning("bind refused: %s: %s", _asked(params), exc)
+            raise wire.error(exc.code, str(exc), **exc.extra) from None
+        except Exception as exc:  # never take the daemon down for one bad message
             # An ACCIDENT, not a refusal: a record read that failed, say. Answered
             # `failed`, in the try-again range, so a shim that has held its name keeps
             # retrying instead of reading it as a rival claim.
             log.exception("%s failed", method)
-            raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+            raise wire.error(wire.FAILED, f"{type(exc).__name__}: {exc}") from None
 
     def _own_binding(self, conn, params: dict) -> Binding | None:
         """The binding `conn` holds that `params` speaks for: the one its `identity`
@@ -1327,9 +1310,9 @@ class Daemon:
             inside = membership.sessions_of(
                 pid, claimfile.membership_table(claimfile.live_records(view)), view,
                 strict=True)
-        except membership.Unplaceable as e:
+        except membership.Unplaceable as exc:
             log.info("send under %s refused: process %s's ancestry stops at %s, which "
-                     "can't be read", name, pid, e.pid)
+                     "can't be read", name, pid, exc.pid)
             raise unplaced from None
         if inside:
             raise Refusal(f"a send under a reserved name from inside a session: {name} "
@@ -1337,7 +1320,7 @@ class Daemon:
                           code=wire.NAME_RESERVED, name=name)
 
     def _delete(self, conn, params: dict) -> dict:
-        """`delete`: the author withdraws `message_id` from every recipient that hasn't
+        """`remove`: the author withdraws `message_id` from every recipient that hasn't
         had it in a digest. Refused `not-sender` for anyone but its author,
         `already-delivered` when every recipient has had it, `unknown-message` for an
         id the record doesn't hold. A message withdrawn again answers as the first time
@@ -1451,8 +1434,8 @@ class Daemon:
             message = self.record.post_as_user(user, self._names_channel(), content,
                                                token=token if isinstance(token, str)
                                                else None)
-        except Forbidden as e:
-            raise Refusal(f"the operator's credential was refused: {e}",
+        except Forbidden as exc:
+            raise Refusal(f"the operator's credential was refused: {exc}",
                           code=wire.CREDENTIAL, credential=True) from None
         return {"message_id": str(message.id)}
 
@@ -1460,13 +1443,14 @@ class Daemon:
         """(hwm, error): the record's high id for a register's catch-up boundary.
 
         One read per register, concurrent with every other register's: no register
-        waits out another's round trip. A failed read fails the register `transient`, and
-        the shim's backoff retries it a moment later. See `_register`.
+        waits out another's round trip. A failed read fails the register with
+        `wire.FAILED`, an error in the try-again range, and the shim's backoff retries it
+        a moment later. See `_register`.
         """
         try:
             return self.record.max_message_id(self._names_channel()) or "0", None
-        except Exception as e:            # re-raised by the caller, in the old call's place
-            return "0", e
+        except Exception as exc:            # re-raised by the caller, in the old call's place
+            return "0", exc
 
     def _ping_ordered(self, conn, identity: str, method: str, raw) -> bool:
         """Is this ordered notification (`activity` and its kinds, `injected`) newer
@@ -1532,7 +1516,7 @@ class Daemon:
                 # signal, so the connection's end is the release, here and nowhere else.
                 # Its tool tokens lose the binding in the same transaction.
                 self.binding_history.release(b.history_id)
-                self.mcp_tokens.released(b.history_id)
+                self.mcp_tokens.on_released(b.history_id)
                 log.info("unbind %s: its connection from pid %s ended (a peer that stops "
                          "reading is dropped after %.0f s)", b.qualified,
                          getattr(getattr(conn, "peer", None), "pid", None),
@@ -1543,7 +1527,7 @@ class Daemon:
             # revoked only on positive evidence.
             claims = {b.claim_key for b in gone if b.claim_key}
             if claims:
-                self.mcp_tokens.check_ended(claims)
+                self.mcp_tokens.revoke_ended(claims)
 
     # ------------------------------------------------------------------ the tool token
     def _mcp_token(self, conn, params: dict) -> dict:
@@ -1578,10 +1562,10 @@ class Daemon:
                 self.mcp_tokens.register(token_hash, claim=b.claim_key,
                                          identity=b.qualified, adapter=b.adapter,
                                          binding_id=b.history_id)
-            except mcp_tokens_mod.Refused as e:
-                raise Refusal(e.reason, code=e.code) from None
-            except RuntimeError as e:
-                raise wire.error(wire.FAILED, str(e)) from None
+            except mcp_tokens_mod.Refused as exc:
+                raise Refusal(exc.reason, code=exc.code) from None
+            except RuntimeError as exc:
+                raise wire.error(wire.FAILED, str(exc)) from None
         return {"served": bool(self.mcp_served)}
 
     # ------------------------------------------------------------------ query
@@ -1751,7 +1735,7 @@ class Daemon:
 
         It is NOT resolution: `identity` is a qualified name taken literally, and the
         answer says nothing about where mail goes. `cache_kind` (`warm`, `cold`, `fresh`,
-        `no-cache` or `unknown`), `age_seconds` and `cache_reason` are the daemon's own
+        `no-cache` or `unknown`), `age_s` and `cache_reason` are the daemon's own
         read of the bound session's cache, the one its gate delivers by, with
         `cache_ttl` (the lifetime that read used, None when it used none), `cache_key`
         (what the lifetime was looked up by, in words), `cache_code` (the read's code,
@@ -1771,7 +1755,7 @@ class Daemon:
             if b is None:
                 return {"identity": identity, "bound": False, "adapter": None,
                         "session_id": None, "session_seen_at": None, "bound_at": None,
-                        "bound_for": None, "cache_kind": None, "age_seconds": None,
+                        "bound_for": None, "cache_kind": None, "age_s": None,
                         "cache_reason": None, "cache_ttl": None, "cache_key": None,
                         "cache_code": None, "cache_source": None, "endpoint": None,
                         "endpoint_for": None}
@@ -1784,8 +1768,8 @@ class Daemon:
         # The daemon's own read of the bound session's cache, by the function the gate
         # delivers by: the verb's hold and `moxi comms cache` read these.
         clock = self._read(b)
-        answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,
-                      cache_reason=clock.reason, cache_ttl=clock.ttl_seconds,
+        answer.update(cache_kind=clock.kind, age_s=clock.age_s,
+                      cache_reason=clock.reason, cache_ttl=clock.ttl_s,
                       cache_key=clock.key, cache_code=clock.code)
         return answer
 
@@ -1852,8 +1836,8 @@ class Daemon:
         id that is not a message id is refused as a bad param.
 
         A READ. It changes no hold, pend, delivery, cursor or ask state. Who may ask:
-        any process that can open this socket, as for `record_message`, `session` and
-        `owner`. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
+        any process that can open this socket, as for the `message`, `session` and
+        `owner` reads. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
         not already show any process of this user (the body, its author with tier and
         verified or unverified, its recipients), so no caller learns more through it.
         """
@@ -1967,12 +1951,12 @@ class Daemon:
         elif message_id is not None:
             try:
                 case = self.classify(identity, message_id)
-            except (TypeError, ValueError) as e:
+            except (TypeError, ValueError) as exc:
                 # A cursor that is not a message id reaches `classify`'s `int()` and
                 # raises. `cursor["reason"]` already names that, so the command has
                 # something true to print; what it must not do is answer the whole
                 # query with a traceback.
-                case_error = f"{type(e).__name__}: {e}"
+                case_error = f"{type(exc).__name__}: {exc}"
         return {"identity": identity,
                 "bound": b is not None,
                 "binding": binding,
@@ -2322,7 +2306,7 @@ class Daemon:
             through = min(through, hold - 1)
         if through > 0 and self.books.is_open:
             self._book("raise the routed mark for", str(through),
-                       lambda: self.books.routed(through))
+                       lambda: self.books.on_routed(through))
 
     def _index_ask(self, msg, ml, author: Author, r: Resolution, *, opens: bool,
                    opening: bool | None) -> bool | None:
@@ -2602,36 +2586,23 @@ class Daemon:
     def _awaiting(self, identity: str, mine, now: float) -> list[str]:
         """The names `identity` awaits. Under the lock.
 
-        An ask is `identity`'s own `[reply-once]` entry, verified, within `ASK_TTL`;
-        nothing else is. For each of its tags, the live binding the tag
-        names (by the one rule) is awaited until it answers: its entry to
-        `identity` threaded to the ask, of any posture, or its first entry to `identity`
-        after the ask not marked `[no reply]`. A name that is not bound is not awaited.
+        An ask is `identity`'s own entry that `replies.is_ask` takes; nothing else is.
+        For each of its tags, the live binding the tag names (by the one rule) is
+        awaited until its own entries in the index answer the ask, by
+        `replies.answered`. A name that is not bound is not awaited.
         """
         names: list[str] = []
         for ask in mine:
-            if (ask.posture != POSTURE_ONCE or not ask.verified
-                    or now - ask.at > constants.ASK_TTL):
+            if not replies.is_ask(ask, now):
                 continue
             for tag in ask.tags:
                 for b in self.bindings.values():
                     q = b.qualified
                     if q == identity or q in names or not tag_matches(tag, q):
                         continue
-                    if not self._answered(ask, q, identity):
+                    if not replies.answered(ask.id, identity, self.sent.get(q, ())):
                         names.append(q)
         return sorted(names)
-
-    def _answered(self, ask: SentEntry, answerer: str, asker: str) -> bool:
-        """Has `answerer` answered `ask` (by `asker`) in the index? Under the lock."""
-        for e in self.sent.get(answerer, ()):
-            if _as_id(e.id) <= _as_id(ask.id):
-                continue
-            if not any(tag_matches(t, asker) for t in e.tags):
-                continue
-            if e.reply_to == ask.id or e.posture != POSTURE_NONE:
-                return True
-        return False
 
     def _queue_unbound(self, b: Binding) -> None:
         """At unbind, the release: every row the binding held, handed or in a digest,
@@ -3008,11 +2979,11 @@ class Daemon:
                                       bound_at=bound_at, store=self.cache_store,
                                       kinds=self.kinds)
             self._drift_lines(binding, clock, quiet=quiet)
-        except Exception as e:                                     # noqa: BLE001
+        except Exception as exc:                                     # noqa: BLE001
             log.exception("the cache read failed for %s; it reads unknown",
                           getattr(binding, "qualified", "?"))
             clock = cache.Clock(cache.UNKNOWN,
-                                reason=f"the daemon's check failed ({type(e).__name__})",
+                                reason=f"the daemon's check failed ({type(exc).__name__})",
                                 code=cache.READ_FAILED)
         return clock
 
@@ -3046,7 +3017,7 @@ class Daemon:
         lifetime, `cold (<reason>; last request 3m ago)` for one without a lifetime, and
         `unreadable (<reason>)`."""
         if clock is not None and clock.kind == cache.COLD:
-            age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)
+            age, ttl = clock.age_s, getattr(clock, "ttl_s", None)
             if age is not None and ttl is not None:
                 return f"cold for {cache.span(age - ttl)} (last request {cache.span(age)} ago)"
             reason = clock.reason or "no cache lifetime to count it by"
@@ -3792,7 +3763,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if args.backend_store:
-        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
+        os.environ[constants.MOCK_BACKEND_ENV] = args.backend_store
     # The flag may name a backend the box's config does not, and every adapter resolves the
     # backend WITHOUT a flag. A daemon holding one record while the shims and the CLI write
     # another is a fleet that looks connected and delivers nothing, so the disagreement is
@@ -3803,12 +3774,12 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     settings = config.Config(report=_config_kept)
     try:
         settings.start()
-    except config.ConfigError as e:
-        raise SystemExit(str(e)) from None
+    except config.ConfigError as exc:
+        raise SystemExit(str(exc)) from None
     try:
         choice = backend_choice(None, env=os.environ)
-    except RecordError as e:
-        raise SystemExit(str(e)) from None
+    except RecordError as exc:
+        raise SystemExit(str(exc)) from None
     resolved = choice.name
     if args.backend and args.backend != resolved and not (
             args.backend == MOCK and args.backend_store):
@@ -3820,17 +3791,17 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
             f"file (or MOXI_COMMS_BACKEND) if the flip is what you meant, or drop the flag.")
     try:
         record = open_record(args.backend, role="reader")
-    except RecordError as e:
-        raise SystemExit(str(e)) from None
-    except (StoreError, LockTimeout) as e:
+    except RecordError as exc:
+        raise SystemExit(str(exc)) from None
+    except (StoreError, LockTimeout) as exc:
         # The store's gate refused (comms 0.2's files can't be moved, or a store sits
         # beside them that the move didn't make): the daemon doesn't start. The log has
         # it, and so does the next doctor run, until a start opens the store.
-        log.error("comms.db can't be opened, so the daemon doesn't start: %s", e)
+        log.error("comms.db can't be opened, so the daemon doesn't start: %s", exc)
         with contextlib.suppress(Exception):
-            moxi_doctor.record(MODULE, f"the daemon didn't start: {e}", key=STORE_RECORD,
+            moxi_doctor.record(MODULE, f"the daemon didn't start: {exc}", key=STORE_RECORD,
                                fix="moxi comms migrate --dry-run")
-        raise SystemExit(f"moxi-comms-daemon: {e}") from None
+        raise SystemExit(f"moxi-comms-daemon: {exc}") from None
     with contextlib.suppress(Exception):
         moxi_doctor.clear(MODULE, STORE_RECORD)
     # systemd stops the unit with SIGTERM. Without a handler the process died before the
@@ -3855,13 +3826,13 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
                     on_fatal=lambda why: stopping.set())
     try:
         daemon.start()
-    except RuntimeError as e:
+    except RuntimeError as exc:
         # A refusal is an answer, not a crash: the operator gets the recovery sentence
         # and systemd gets a clean nonzero exit, and the record connection this process
         # opened does not leak past the `finally` it never reaches.
         with contextlib.suppress(Exception):
             record.close()
-        raise SystemExit(str(e)) from None
+        raise SystemExit(str(exc)) from None
     log.info("comms daemon listening on %s", daemon.socket_path)
     try:
         stopping.wait()

@@ -65,7 +65,7 @@ def test_a_tie_to_a_delivery_no_longer_waiting_releases_the_turn(make_endpoint):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     s = turns.find(session_id="s-1")
     d = s.deliver("x", only_if_idle=True)
-    ep.refused(d.id, "stale-turn")
+    ep.on_refused(d.id, "stale-turn")
     ep.turn_started("T", held=True)
     assert ep.turn_tied("T", d.id) is False
     assert d.wait_ended(1) == turns.Refused("stale-turn", d.id)

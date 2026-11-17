@@ -196,9 +196,9 @@ def test_keyword_calls_write_todays_bytes_and_positional_ones_fail():
     assert machine_line.format_line(["a", "b"], reply_to="123") == "::to a, b re:123"
     assert machine_line.compose(["a"], "t") == "::to a\nt"
     with pytest.raises(TypeError):
-        machine_line.format_line(["a", "b"], False, "123")
+        machine_line.format_line(["a", "b"], False, "123")  # noqa: FBT003 -- verifies positional booleans are refused
     with pytest.raises(TypeError):
-        machine_line.format_line(["a", "b"], True, "123")
+        machine_line.format_line(["a", "b"], True, "123")  # noqa: FBT003 -- verifies positional booleans are refused
 
 
 def test_bodies_with_a_bare_namespace_gives_the_plain_bytes(rig):

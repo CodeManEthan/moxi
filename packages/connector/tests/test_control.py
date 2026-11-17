@@ -60,9 +60,9 @@ def test_a_call_before_the_hello_is_refused(make_host):
     from moxi import ipc
 
     with Running(started_host(make_host), ORIGIN):
-        with ipc.connect(ipc.address("connector", "control"), timeout=2) as client:
+        with ipc.connect(ipc.address("connector", "control"), timeout_s=2) as client:
             with pytest.raises(ipc.RpcError) as got:
-                client.call("status", None, timeout=2)
+                client.call("status", None, timeout_s=2)
     assert got.value.code == -32002
 
 

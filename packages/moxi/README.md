@@ -46,9 +46,12 @@ commands:
   chooses can't be read. It is what systemd and launchd do; on Windows every daemon starts
   at each logon. Python code gets the same value from `moxi.units.starts(found)`.
   `moxi modules --available` lists the first-party modules, installed or not, and
-  `--refresh` first fetches the newest list from the repository: the one listing
-  command that uses the network (`moxi install` and `moxi uninstall` run uv, which does
-  too).
+  `--refresh` first fetches the list a released core shipped: the one at the highest
+  `moxi-v<version>` tag whose version is on PyPI, since the repository's main branch
+  holds unreleased work. It is the one listing command that uses the network (`moxi
+  install` and `moxi uninstall` run uv, which does too). A module the list marks
+  `unreleased = true` is not on PyPI yet: `moxi install` refuses it unless `--from`
+  gives its source.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
   `--without`, `--all` and `--none` answer ahead.
@@ -62,12 +65,19 @@ commands:
   removes one. `moxi config <module> path` prints the file's path, `check` exits non-zero
   when the file can't be read or the module refuses it, and `init` writes the file with
   every key commented out at its default. `moxi config moxi` is the core's own.
+  `moxi config <module> show --json` prints every key as JSON, with the page fields its
+  schema gives (how a settings page shows the key: its label, its one line, whether it
+  shows first, its group, unit, words for an enum's values, and whether a change can hurt
+  or is made at the terminal or on another page). `moxi config set --json` and `unset
+  --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and
-  stores, and exits 1 when a row fails. `--json` prints the rows as JSON, and `--costs`
-  also measures each module's daemons. `moxi doctor --clear <module> <key>` removes a
-  record a program left for the doctor.
+  stores, and exits 1 when a row fails. `--json` prints the rows as JSON, each with its
+  `module`, `name`, `state`, `detail` and `fix`; an `off` row about a part that is not
+  installed adds `needs`, naming it: a module (`projects`) or `<module>[<extra>]`
+  (`ui[gateway]`). `--costs` also measures each module's daemons. `moxi doctor --clear
+  <module> <key>` removes a record a program left for the doctor.
 - `moxi help [<command>|<module>]` prints the command list, or one command's or module's
   help.
 - `moxi version` prints the versions of `moxi` and the modules it sees.
@@ -144,4 +154,4 @@ shortcut file, or reinstall.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/moxi/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.10/packages/moxi/LICENSE).

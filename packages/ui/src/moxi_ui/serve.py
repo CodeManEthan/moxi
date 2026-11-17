@@ -1,4 +1,4 @@
-"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-serve`: the shell.
+"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-shell`: the shell.
 
 It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 
@@ -63,6 +63,7 @@ from moxi_ui.loopback.api import (
 
 from . import cli, config, listen
 from . import page as shell_page
+from .checks import CHECKS_FILE, Checks
 from .listen import Listeners
 from .gateway import Gateway, Parts
 from .gateway import audit as _audit
@@ -178,7 +179,7 @@ class Activity:
         return None if self.open else max(0.0, self._clock() - self._quiet_since)
 
     def wrap(self, inner: ASGIApp) -> ASGIApp:
-        async def counted(scope: dict[str, Any], receive: Callable[..., Any],
+        async def on_counted(scope: dict[str, Any], receive: Callable[..., Any],
                           send: Callable[..., Any]) -> None:
             if scope.get("type") != "http" or scope.get("path") in _NOT_COUNTED:
                 await inner(scope, receive, send)
@@ -191,7 +192,7 @@ class Activity:
                 if not self.open:
                     self._quiet_since = self._clock()
 
-        return counted
+        return on_counted
 
 
 class Shell:
@@ -221,6 +222,10 @@ class Shell:
     `gateway` is the shell's `Gateway`, or True to build one, with the gateway's sign-in
     state as `phone`; without it (the default, which tests take) the shell runs no
     gateway. `phone` is that sign-in state when a test passes its own gateway.
+
+    `checks` is the shell's kept doctor run, `Shell.checks`. With `run_checks` False it
+    starts no doctor and answers with what is kept (test shells, unless a test asks).
+    `run()` cancels a run that is going before the shell's page servers stop.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -230,7 +235,8 @@ class Shell:
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
                  leave_out: Sequence[str] = (), idle_s: float | None = None,
-                 gateway: Gateway | bool = False, phone: Access | None = None):
+                 gateway: Gateway | bool = False, phone: Access | None = None,
+                 run_checks: bool = True):
         self.listeners = listeners
         self.epoch = epoch
         self.idle_s = idle_s
@@ -251,6 +257,10 @@ class Shell:
             runtime_dir=self.layout.runtime_dir(), state_dir=self.layout.state_dir(),
             log=cli.log_path(), child_args=child_args)
         self.push = push if push is not None else Push(self.starters, mounts=self._mounts)
+        self.checks = Checks(self.layout.state_dir() / CHECKS_FILE,
+                             run=lambda: shell_page.doctor_answer(self),
+                             on_changed=self._checks_changed, enabled=run_checks)
+        self._checks_changed(self.checks.value())
         self._proxy = proxy if proxy is not None else Proxy(
             self.starters, table=lambda: self.profile.table)
         if snapshot is True:
@@ -295,7 +305,7 @@ class Shell:
         def key() -> bytes:
             return _audit.key(state_dir)
 
-        def mounted() -> bool:
+        def on_mounted() -> bool:
             return self.gateway is not None and self.gateway.acts_now().mounted
 
         async def own_page(scope: dict[str, Any], receive: Callable[..., Any],
@@ -308,12 +318,13 @@ class Shell:
             profile = self.gateway.profile if self.gateway is not None else None
             return profile.table if profile is not None else Table()
 
-        acts = Acts(mounts=lambda: self._mounts, mounted=mounted,
+        acts = Acts(mounts=lambda: self._mounts, on_mounted=on_mounted,
                     client=getattr(self.push, "client", None) or Client(self.starters),
                     audit=audit, key=key, device_of=phone.device_of)
         router = self.gateway_router = GatewayRouter(
             phone, mounts=lambda: self._mounts, table=table,
-            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(False, "off"),
+            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(
+                mounted=False, reason="off"),
             page=own_page, push=self.push, starters=self.starters, acts=acts, key=key)
         parts = phone.parts(Parts(table=router.build, router=router, fallback=fallback,
                                   audit=write, refusals=router.refusals))
@@ -374,6 +385,11 @@ class Shell:
             self.push.set_exports(mounts)
             self.push.publish("modules", view.value)
 
+    def _checks_changed(self, value: dict[str, Any]) -> None:
+        """Send the kept doctor run's new value as `ui.checks`."""
+        if isinstance(self.push, Push):
+            self.push.publish("checks", value)
+
     def set_table(self, table: Table) -> None:
         """Check every request from the next one on against `table`, which this freezes."""
         self.profile = shell_profile(table, self.sessions, self.listeners.names)
@@ -408,6 +424,7 @@ class Shell:
             ending.cancel()
             if idling is not None:
                 idling.cancel()
+            await self.checks.aclose()
             if self.snapshot is not None:
                 await self.snapshot.aclose()
             if isinstance(self.push, Push):
@@ -492,11 +509,11 @@ def run(*, bind: Callable[[Callable[[], int]], Listeners] = listen.take,
     layout = Layout(MODULE)
     try:
         runtime_dir = layout.runtime_dir(create=True)
-    except OSError as err:
-        say(f"moxi ui: the runtime directory cannot be made private: {err}")
+    except OSError as exc:
+        say(f"moxi ui: the runtime directory cannot be made private: {exc}")
         return 1
     try:
-        with files.lock(runtime_dir / LOCK_FILE, timeout=LOCK_WAIT):
+        with files.lock(runtime_dir / LOCK_FILE, timeout_s=LOCK_WAIT):
             return _run_held(layout, bind, say)
     except files.LockTimeout:
         say("moxi ui: another shell is running or starting (it holds page.lock)")
@@ -513,26 +530,26 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
 
     try:
         listeners = bind(port)
-    except listen.PortInUse as err:
-        say(f"moxi ui: {err}")
+    except listen.PortInUse as exc:
+        say(f"moxi ui: {exc}")
         return 1
-    except listen.NotLoopback as err:
-        say(f"moxi ui: the sockets passed to the shell can't be served: {err}; "
+    except listen.NotLoopback as exc:
+        say(f"moxi ui: the sockets passed to the shell can't be served: {exc}; "
             "`moxi install ui` writes its socket units again")
         return 1
-    except OSError as err:
+    except OSError as exc:
         where = f" on port {asked[-1]}" if asked else ""
-        say(f"moxi ui: the listener{where} could not be bound: {err}")
+        say(f"moxi ui: the listener{where} could not be bound: {exc}")
         return 1
-    except Exception as err:  # noqa: BLE001 - a bad port setting is said and ends the start
-        say(f"moxi ui: {err}")
+    except Exception as exc:  # noqa: BLE001 - a bad port setting is said and ends the start
+        say(f"moxi ui: {exc}")
         return 1
     idle_s = None
     if listeners.inherited:
         try:
             idle_s = config.idle_s()
-        except Exception as err:  # noqa: BLE001 - a bad setting keeps the shell running
-            say(f"moxi ui: {err}; the shell won't exit idle")
+        except Exception as exc:  # noqa: BLE001 - a bad setting keeps the shell running
+            say(f"moxi ui: {exc}; the shell won't exit idle")
     shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True,
                   idle_s=idle_s, gateway=True)
     try:
@@ -549,7 +566,7 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="moxi-ui-serve", description="Run Moxi's browser shell in the foreground.")
+        prog="moxi-ui-shell", description="Run Moxi's browser shell in the foreground.")
     parser.parse_args(argv)
     from moxi import log
 

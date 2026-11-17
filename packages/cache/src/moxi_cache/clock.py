@@ -50,7 +50,7 @@ CLOCK_BLOCK = 64 * 1024
 CLOCK_SCAN_LIMIT = 64 * 1024 * 1024
 
 #: Where a Claude read's lifetime came from (`Clock.ttl_source`): the cache tier the
-#: requests wrote, or config `claude.ttl_seconds` when no line read named one.
+#: requests wrote, or config `claude.ttl_s` when no line read named one.
 TTL_TIER, TTL_CONFIG = "tier", "config"
 
 # ---------------------------------------------------------------------------- codes
@@ -131,7 +131,7 @@ CODES = frozenset({
 @dataclass
 class Clock:
     """What a read found: a kind, the cache's age when there is a clock, the lifetime the
-    read used (`ttl_seconds`, None when it used none) and where it came from
+    read used (`ttl_s`, None when it used none) and where it came from
     (`ttl_source`, Claude only), what the lifetime was looked up by (`key`, in words),
     and why (`reason` in words, `code` from `CODES`) when the read is `unknown`,
     `no-cache`, or a `cold` with no lifetime.
@@ -144,9 +144,9 @@ class Clock:
     `judged`, (thread id, the newest turn the drift scan judged)."""
 
     kind: str
-    age_seconds: float | None = None
+    age_s: float | None = None
     reason: str | None = None
-    ttl_seconds: float | None = None
+    ttl_s: float | None = None
     key: str | None = None
     basis: str | None = None             # "documented" or "measured", with a lifetime
     provider: str | None = None

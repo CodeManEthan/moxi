@@ -7,8 +7,12 @@ worker count or base stops it there, before any step runs. Then, in order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
-2. The tag check over the repository's files (`moxi_dev.tags`): no short reference ids,
-   pointing into notes a reader of the repository can't see, in code, tests or docs.
+2. The tag, comment-reference, naming and Ruff checks over the repository's files
+   (`moxi_dev.tags`, `moxi_dev.refs`, `moxi_dev.naming`, `ruff`): no short reference ids
+   pointing into notes a reader of the repository can't see; every source name, file and
+   flag cited by a comment exists or has a live `.refs-allow` entry; public config keys,
+   flags, parameters and CLI verbs keep their unit and switch-word rules; code uses the
+   house words and naming forms; every exception mark names its rule and reason.
    Then the release step over every workspace member, whatever the change picks
    (`moxi_dev.release`): the core's catalogue lists exactly the module packages, every
    requirement one member places on another admits that member's version, and each
@@ -76,14 +80,14 @@ worker count or base stops it there, before any step runs. Then, in order:
    package), keep the commit's record and find the newest record on `main` to compare
    with (`moxi_dev.durations`).
 10. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, release, stamp, web, sync and lint results, each package's tests and seconds (and
+   lock, tag, reference, name, Ruff, release, stamp, web, sync and lint results, each package's tests and seconds (and
    `without its browser tests` where Chromium couldn't start), the serial pass's
    packages with their results and seconds (`timed none` when no package held a timed
    test, `timed not run` when the suites never ran), the tests' own seconds with the
    slowest 5 %'s share of them and the delta against main, the total and the exit code.
 
-The tags, the release step, each package's lint and each package's tests (both passes) all run even when
-one before them failed, so one run shows every failure.
+The tags, references, names, Ruff, release step, each package's lint and each package's tests
+(both passes) all run even when one before them failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -105,7 +109,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, release, stamp, tags
+from . import durations, lint, naming, refs, release, ruff_check, stamp, tags
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -113,7 +117,7 @@ PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
-WORKERS_VAR = "MOXI_TEST_WORKERS"
+WORKERS_ENV = "MOXI_TEST_WORKERS"
 #: pytest-xdist's arguments for the serial pass of the timed tests: no workers.
 SERIAL = ("-n", "0")
 
@@ -287,15 +291,15 @@ def cpu_count() -> int:
         return os.cpu_count() or 1
 
 
-def worker_args(environ: Mapping[str, str], cpus: int | None = None) -> list[str]:
+def worker_args(env: Mapping[str, str], cpus: int | None = None) -> list[str]:
     """pytest-xdist's arguments: `-n N`, N the CPU count capped by MOXI_TEST_WORKERS.
 
     N is never 0, which would run the suite serially."""
     count = max(1, cpu_count() if cpus is None else cpus)
-    cap = environ.get(WORKERS_VAR, "").strip()
+    cap = env.get(WORKERS_ENV, "").strip()
     if cap:
         if not cap.isdigit() or int(cap) < 1:
-            raise CheckError(f"{WORKERS_VAR} must be a whole number of workers, 1 or more; "
+            raise CheckError(f"{WORKERS_ENV} must be a whole number of workers, 1 or more; "
                              f"it is {cap!r}")
         count = min(count, int(cap))
     return ["-n", str(count)]
@@ -308,9 +312,9 @@ def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str]) -> int:
         raise CheckError(f"could not run {cmd[0]} ({exc})") from exc
 
 
-def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
+def _base_env(env: Mapping[str, str]) -> dict[str, str]:
     # `uv run` points VIRTUAL_ENV at the root's .venv; no step here may use or change it.
-    return {key: value for key, value in environ.items()
+    return {key: value for key, value in env.items()
             if key not in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")}
 
 
@@ -368,6 +372,9 @@ class Result:
     packages: list[str] | None = None
     lock: str = "not run"
     tags: str = "not run"
+    refs: str = "not run"
+    names: str = "not run"
+    ruff: str = "not run"
     release: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
@@ -418,7 +425,8 @@ class Result:
             failed = [name for name, ok in self.lint if not ok]
             linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
-                f"lock {self.lock} | tags {self.tags} | release {self.release} | "
+                f"lock {self.lock} | tags {self.tags} | refs {self.refs} | "
+                f"names {self.names} | ruff {self.ruff} | release {self.release} | "
                 f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
@@ -441,11 +449,11 @@ def check_findings(findings: Sequence[str]) -> list[str]:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          finding: Sequence[str] = (), environ: Mapping[str, str] | None = None,
+          finding: Sequence[str] = (), env: Mapping[str, str] | None = None,
           run: Run | None = None, plan: Plan | None = None,
           probe: Probe | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code."""
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
     probe = probe or chromium_probe
@@ -455,11 +463,11 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
-        workers = worker_args(environ)
+        workers = worker_args(env)
         changed = None if full else changed_paths(root, base or "main")
         chosen = list(packages) if changed is None else pick(packages, changed)
         result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, environ, run, plan, result,
+        steps = _Steps(root, packages, workers, env, run, plan, result,
                        changed=changed, findings=findings, base=base or "main",
                        probe=probe)
         result.code = 0 if steps.all(chosen) else 1
@@ -475,7 +483,7 @@ class _Steps:
     root: Path
     packages: Sequence[Package]
     workers: Sequence[str]
-    environ: Mapping[str, str]
+    check_env: Mapping[str, str]
     run: Run
     plan: Plan
     result: Result
@@ -488,12 +496,15 @@ class _Steps:
         """The lock, the tags, the stamps, the sync, the lint and the suites, recorded in
         the result; True when all passed."""
         root, run, result = self.root, self.run, self.result
-        env = _base_env(self.environ)
+        env = _base_env(self.check_env)
         ok = run(["uv", "lock", "--check"], root, env) == 0
         result.lock = "pass" if ok else "fail"
         if not ok:
             return False
         ok = self.tags()
+        ok = self.references() and ok
+        ok = self.names() and ok
+        ok = self.ruff() and ok
         ok = self.release() and ok
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
@@ -623,14 +634,14 @@ class _Steps:
         if not every:
             return
         result.durations = durations.summarize(every)
-        directory = durations.records_dir(self.root)
-        if directory is None:
+        records_dir = durations.records_dir(self.root)
+        if records_dir is None:
             return
         clean = not result.commit.endswith("+dirty")
         if passed and clean and not self.findings:
             head = _git(self.root, "rev-parse", "HEAD").strip()
             try:
-                result.kept = durations.keep(directory, head, passed)
+                result.kept = durations.keep(records_dir, head, passed)
             except OSError as exc:
                 # The record is a by-product; the check's own results and its line come
                 # first, so a disk that refuses the write costs the record, not the run.
@@ -638,7 +649,7 @@ class _Steps:
                       f"({exc})", file=sys.stderr, flush=True)
         if not self.findings:
             try:
-                result.delta = durations.against_main(self.root, directory, passed,
+                result.delta = durations.against_main(self.root, records_dir, passed,
                                                       self.base)
             except OSError as exc:
                 print(f"moxi-dev check: durations: no delta ({exc})", file=sys.stderr,
@@ -660,6 +671,36 @@ class _Steps:
             print(f"moxi-dev check: {problem}", flush=True)
         self.result.release = "fail" if problems else "pass"
         return not problems
+
+    def references(self) -> bool:
+        try:
+            hits = refs.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the comment reference check could not read the tree ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.refs = "fail" if hits else "pass"
+        return not hits
+
+    def names(self) -> bool:
+        try:
+            hits = naming.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the naming check could not read the tree ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.names = "fail" if hits else "pass"
+        return not hits
+
+    def ruff(self) -> bool:
+        try:
+            hits = ruff_check.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"ruff could not read the tree ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.ruff = "fail" if hits else "pass"
+        return not hits
 
     def lint(self, package: Package, venv: Path, suite_env: Mapping[str, str]) -> bool:
         """The package's lint commands, run in the check's environment; True when each
@@ -721,7 +762,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
         description="Run the checks a change must pass before it merges: the lock, the "
-                    "tag check and the release step, then the import rules and the tests "
+                    "tag, comment-reference, naming and Ruff checks and the release step, "
+                    "then the import rules and the tests "
                     "of every package the change touches and of every package that "
                     "depends on one, in an environment of the check's own. Run it from "
                     "the repository's root.")
@@ -734,11 +776,42 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
+    parser.add_argument("--only", choices=("refs", "names", "ruff"),
+                        help="run only this whole-tree code check")
+    parser.add_argument("paths", nargs="*", metavar="PATH",
+                        help="with --only, print findings only under these paths")
     return parser
+
+
+def _shown(path: str, selected: Sequence[str]) -> bool:
+    if not selected:
+        return True
+    clean = path.removeprefix("./")
+    return any(clean == one.removeprefix("./").rstrip("/")
+               or clean.startswith(one.removeprefix("./").rstrip("/") + "/")
+               for one in selected)
+
+
+def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
+    """Run one whole-tree code check and print its selected findings."""
+    scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan}[step]
+    try:
+        hits = scanner(root)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"moxi-dev check: {step} could not read the tree ({exc})", file=sys.stderr)
+        return 2
+    shown = [hit for hit in hits if _shown(hit.path, paths)]
+    for hit in shown:
+        print(hit, flush=True)
+    return 1 if shown else 0
 
 
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
+    if args.paths and not args.only:
+        _parser().error("PATH may be given only with --only")
+    if args.only and (args.full or args.base or args.finding):
+        _parser().error("--only cannot be combined with --full, --base or --finding")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -746,6 +819,8 @@ def main(argv: list[str]) -> int:
         result = Result(code=2)
         print(result.line(), flush=True)
         return result.code
+    if args.only:
+        return only(root, args.only, args.paths)
     result = check(root, full=args.full, base=args.base, finding=args.finding)
     print(result.line(), flush=True)
     return result.code

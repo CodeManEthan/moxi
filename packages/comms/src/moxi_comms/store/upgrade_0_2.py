@@ -137,15 +137,15 @@ def files(env=None) -> dict[str, Path]:
             if (p.is_dir() if role == "cursors" else p.exists())}
 
 
-def moved_name(p: Path) -> Path:
+def moved_path(p: Path) -> Path:
     return p.with_name(p.name + MOVED_SUFFIX)
 
 
 def leftovers(env=None) -> list[Path]:
     """The renamed 0.2 files still on disk, for the doctor."""
-    return [moved_name(p) for p in (_paths.record_db(env), _paths.directory_db(env),
+    return [moved_path(p) for p in (_paths.record_db(env), _paths.directory_db(env),
                                     _paths.bindings_db(env), _paths.cursors_dir(env))
-            if moved_name(p).exists()]
+            if moved_path(p).exists()]
 
 
 # -- what the move found ----------------------------------------------------------------
@@ -173,8 +173,8 @@ class Plan:
     denied: list = field(default_factory=list)
     renamed: list = field(default_factory=list)        # (from, to)
     # What the reading passes to the rows it makes.
-    directory_rows: dict = field(default_factory=dict, repr=False)  # (name, scope) -> row
-    directory_rooms: dict = field(default_factory=dict, repr=False)  # room id -> row
+    directory_rows: dict = field(default_factory=dict, repr=False)  # noqa: MX3 -- legacy address-directory rows
+    directory_rooms: dict = field(default_factory=dict, repr=False)  # noqa: MX3 -- legacy address-directory rooms
     queued: list = field(default_factory=list, repr=False)  # 0.2's (name, message id)
     cursor_of: dict = field(default_factory=dict, repr=False)  # name -> message id
 
@@ -197,7 +197,7 @@ class Plan:
         out.extend(self.skipped)
         out.extend(FENCED_LINE.format(name=n) for n in self.fenced)
         if dry_run:
-            out.extend(f"would rename {p} to {moved_name(p)}"
+            out.extend(f"would rename {p} to {moved_path(p)}"
                        for p in self.files.values())
         else:
             out.extend(f"renamed {a} to {b}" for a, b in self.renamed)
@@ -284,14 +284,14 @@ def _open_0_2(role: str, p: Path) -> sqlite3.Connection:
         raise StoreRefused(p, "is empty, not a comms 0.2 database; nothing was moved")
     try:
         conn = _store.connect(p, create=False, private=False)
-    except (sqlite3.Error, _store.StoreError) as e:
-        raise StoreRefused(p, f"can't be opened ({e}); nothing was moved") from None
+    except (sqlite3.Error, _store.StoreError) as exc:
+        raise StoreRefused(p, f"can't be opened ({exc}); nothing was moved") from None
     try:
         try:
             check = [r[0] for r in conn.execute("PRAGMA quick_check").fetchall()]
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-        except sqlite3.Error as e:
-            raise StoreRefused(p, f"can't be read ({e}); nothing was moved") from None
+        except sqlite3.Error as exc:
+            raise StoreRefused(p, f"can't be read ({exc}); nothing was moved") from None
         if check != ["ok"]:
             raise StoreRefused(p, "fails SQLite's quick_check ("
                                + "; ".join(str(c) for c in check[:3])
@@ -359,8 +359,8 @@ def read(env=None, *, now: float | None = None, prepare: bool = False) -> Plan:
             for role, conn in conns.items():
                 try:
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
-                except sqlite3.Error as e:
-                    raise StoreRefused(found[role], f"can't be checkpointed ({e}); "
+                except sqlite3.Error as exc:
+                    raise StoreRefused(found[role], f"can't be checkpointed ({exc}); "
                                                     "nothing was moved") from None
             plan.fingerprint = {role: _fingerprint(role, p) for role, p in found.items()}
         for conn in conns.values():
@@ -378,7 +378,7 @@ def read(env=None, *, now: float | None = None, prepare: bool = False) -> Plan:
     return plan
 
 
-def _read_directory(plan: Plan, conn, path) -> None:
+def _read_directory(plan: Plan, conn, path) -> None:  # noqa: MX3 -- reads the legacy address-directory store
     if conn is None:
         return
     for row in _select(conn, "directory", "agents", "ORDER BY rowid"):
@@ -391,14 +391,14 @@ def _read_directory(plan: Plan, conn, path) -> None:
                                 _record_time(row["created_at"])))
     plan.operators = [(r["user_id"], r["name"], _record_time(r["created_at"]))
                       for r in _select(conn, "directory", "operators", "ORDER BY rowid")]
-    plan.directory_rooms = {r["channel_id"]: r for r in _select(conn, "directory", "rooms",
+    plan.directory_rooms = {r["channel_id"]: r for r in _select(conn, "directory", "rooms",  # noqa: MX3 -- legacy address-directory rooms
                                                        "ORDER BY rowid")}
     for r in _select(conn, "directory", "meta"):
         plan.meta[r["key"]] = r["value"]
 
 
 def _read_record(plan: Plan, conn, path) -> None:
-    directory_rooms = plan.directory_rooms
+    directory_rooms = plan.directory_rooms  # noqa: MX3 -- legacy address-directory rooms
     record_meta = {}
     channels = []
     if conn is not None:
@@ -473,14 +473,14 @@ def _read_bindings(plan: Plan, conn, now: float) -> None:
     plan.fenced = sorted(set(fenced))
 
 
-def _read_cursors(plan: Plan, folder) -> None:
-    if folder is None:
+def _read_cursors(plan: Plan, cursor_dir) -> None:
+    if cursor_dir is None:
         return
     seen = {}
-    for p in sorted(folder.rglob("*")):
+    for p in sorted(cursor_dir.rglob("*")):
         if not p.is_file():
             continue
-        rel = p.relative_to(folder)
+        rel = p.relative_to(cursor_dir)
         if rel.name.startswith("."):
             plan.skipped.append(f"skipped {p}: a cursor writer's temporary file")
             continue
@@ -499,8 +499,8 @@ def _read_cursors(plan: Plan, folder) -> None:
             cursor = record["cursor"]
             if isinstance(cursor, bool) or not str(cursor).isdigit():
                 raise ValueError(f"cursor {cursor!r} is not a message id")
-        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as e:
-            raise StoreRefused(p, f"doesn't read as a cursor ({e}); nothing was moved") \
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+            raise StoreRefused(p, f"doesn't read as a cursor ({exc}); nothing was moved") \
                 from None
         q = identity_of(tag)
         if is_auto_name(name):
@@ -538,9 +538,9 @@ def _replay_bound(env) -> tuple[int, int]:
 
     try:
         replay = load(env).replay
-    except ConfigError as e:
-        raise StoreRefused(e.file or config_path(env),
-                           f"can't be read for the move's catch-up bound ({e}); "
+    except ConfigError as exc:
+        raise StoreRefused(exc.file or config_path(env),
+                           f"can't be read for the move's catch-up bound ({exc}); "
                            "nothing was moved") from None
     return replay.messages, replay.hours * 3600
 
@@ -664,10 +664,10 @@ def move(target, env=None, *, now: float | None = None) -> Plan:
     _discard(new)                      # a run that died before its rename
     try:
         _build(plan, new, now)
-    except sqlite3.IntegrityError as e:
+    except sqlite3.IntegrityError as exc:
         _discard(new)
         raise StoreRefused(next(iter(plan.files.values())), (
-            f"holds a row comms.db can't take ({e}); nothing was moved")) from None
+            f"holds a row comms.db can't take ({exc}); nothing was moved")) from None
     except BaseException:
         _discard(new)
         raise
@@ -708,8 +708,8 @@ def _rename(found: dict, kept: dict, target: Path) -> list[tuple[Path, Path]]:
             changed.append(f"{p} (not there when the move ran)")
         elif not _same(role, p, kept_print) or _wal_has_frames(p):
             changed.append(str(p))
-        elif moved_name(p).exists():
-            changed.append(f"{p} ({moved_name(p)} is there already)")
+        elif moved_path(p).exists():
+            changed.append(f"{p} ({moved_path(p)} is there already)")
     if changed:
         raise StoreRefused(target, (
             "was moved from comms 0.2, but comms' 0.2 files changed after they were "
@@ -720,7 +720,7 @@ def _rename(found: dict, kept: dict, target: Path) -> list[tuple[Path, Path]]:
         p = found.get(role)
         if p is None or (role == "cursors" and role not in kept):
             continue
-        dest = moved_name(p)
+        dest = moved_path(p)
         os.replace(p, dest)
         for side in ("-wal", "-shm"):
             if Path(f"{p}{side}").exists():
@@ -738,10 +738,10 @@ def _wal_has_frames(p: Path) -> bool:
         return False
 
 
-def _fsync_dir(directory: Path) -> None:
+def _fsync_dir(target_dir: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(directory, os.O_RDONLY)
+    fd = os.open(target_dir, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -761,8 +761,8 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
         return [f"nothing to move: no comms 0.2 files here; the store is {target}"]
     try:
         state = state_of(target)
-    except sqlite3.Error as e:
-        raise StoreRefused(target, f"can't be read ({e}); nothing was written") from None
+    except sqlite3.Error as exc:
+        raise StoreRefused(target, f"can't be read ({exc}); nothing was written") from None
     if state == MARKED:
         _refuse_live_daemon(env)
         conn = _store.connect(target, create=False)
@@ -782,7 +782,7 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
                 "was moved from comms 0.2, but comms' 0.2 files changed after they were "
                 "moved: " + ", ".join(changed) + "; nothing would be renamed"))
         return [f"{target} was moved from comms 0.2; the move would finish by renaming:"] \
-            + [f"would rename {p} to {moved_name(p)}" for role, p in present.items()
+            + [f"would rename {p} to {moved_path(p)}" for role, p in present.items()
                if role in kept]
     if state != _open.ABSENT:
         raise StoreRefused(target, (
@@ -805,12 +805,12 @@ def doctor_rows(env=None) -> list:
     if _open.zero_two_files(env):
         try:
             dry_run(env=env)
-        except StoreRefused as e:
-            rows.append(Row(MODULE, "store", "fail", str(e),
+        except StoreRefused as exc:
+            rows.append(Row(MODULE, "store", "fail", str(exc),
                             "moxi comms migrate --dry-run"))
-        except (sqlite3.Error, OSError, ValueError) as e:
+        except (sqlite3.Error, OSError, ValueError) as exc:
             rows.append(Row(MODULE, "store", "fail",
-                            f"comms' 0.2 files can't be read: {e}",
+                            f"comms' 0.2 files can't be read: {exc}",
                             "moxi comms migrate --dry-run"))
         else:
             rows.append(Row(MODULE, "store", "warn",
@@ -883,5 +883,5 @@ def waiting_fenced(env=None) -> list[str]:
 
 __all__ = ["FROM", "MOVED_SUFFIX", "NEW_SUFFIX", "META_MIGRATED_AT", "META_MIGRATED_FILES",
            "META_MIGRATED_FENCED", "FENCED_LINE", "DaemonLive", "Plan", "files",
-           "leftovers", "moved_name", "daemon_answers", "read", "move", "finish",
+           "leftovers", "moved_path", "daemon_answers", "read", "move", "finish",
            "dry_run", "doctor_rows", "waiting_fenced"]

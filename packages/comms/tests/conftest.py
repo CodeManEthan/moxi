@@ -138,15 +138,15 @@ def turns_plugins(tmp_path) -> Path:
     import moxi_turns
 
     words = moxi_turns.launch_additions("claude", cwd=tmp_path, env=dict(os.environ)).argv
-    folders = [Path(words[i + 1]) for i, word in enumerate(words) if word == "--plugin-dir"]
-    assert len(folders) == 2 and folders[0].parent == folders[1].parent, words
-    return folders[0].parent
+    plugin_dirs = [Path(words[i + 1]) for i, word in enumerate(words) if word == "--plugin-dir"]
+    assert len(plugin_dirs) == 2 and plugin_dirs[0].parent == plugin_dirs[1].parent, words
+    return plugin_dirs[0].parent
 
 
-def files_under(folder: Path) -> dict:
+def files_under(root_dir: Path) -> dict:
     """Every file under `folder`, with its size and modification time."""
     return {path: (path.stat().st_size, path.stat().st_mtime_ns)
-            for path in sorted(folder.rglob("*"))}
+            for path in sorted(root_dir.rglob("*"))}
 
 
 #: The reserve step's own read of the modules installed, before `installs` scopes it.
@@ -250,7 +250,7 @@ BOTH_BACKENDS = (
     "test_directory_provision.py",  # provision against the seam
     "test_local_record.py",        # its rig tests state the no-op half on the mock too
     "test_audience.py",             # the audience mark, verb to frame
-    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --next-turn
+    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --held
     "test_cold_every_sender.py",    # THE RULE: the clock, the hold, the daemon's gate
     "test_cold_hold.py",            # a cold claude-shim recipient is posted and held
     "test_cache_clock.py",          # the codex and opencode clocks, drift, the free rows
@@ -268,6 +268,7 @@ BOTH_BACKENDS = (
     "test_attributed_read.py",      # the attributed_message read: author and recipients
     "test_send_check.py",           # send --check: send's refusals, nothing posted
     "test_names.py",                # one rule for names; retired identities
+    "test_record_reads.py",         # the seam's reads back from an id or a time
 )
 
 
@@ -288,10 +289,9 @@ def backend(request):
 def build_record(backend: str, clock):
     """One record, chosen by name. The record and the daemon always share one clock.
 
-    The local one takes no `secret_reader`: provision is the writer of every minted
+    The local one is given no tokens: provision is the writer of every minted
     token, so the rig lays the files down the way `moxi-comms-provision` does and the record
-    reads them back through its own resolver chain. The stand-in that used to serve them
-    out of memory is gone with it.
+    reads them back through its own resolver chain.
     """
     if backend == "local":
         return LocalRecord(clock=clock, poll_interval=0.02)
@@ -309,14 +309,14 @@ def build_store(backend: str):
 
 
 #: The verbs that post under the sender's identity.
-SEND_VERBS = ("send", "reply", "delete")
+SEND_VERBS = ("send", "reply", "remove")
 
 
-def _stamp_of(environ) -> SenderIdentity | None:
+def _stamp_of(env) -> SenderIdentity | None:
     """The identity a launch stamp names, read as the send verb read it before the env
     path closed; None for no stamp or a malformed one (which stays a stamp alone)."""
     try:
-        return sender_from_env(environ, project_key(env=environ))
+        return sender_from_env(env, project_key(env=env))
     except MalformedStamp:
         return None
 
@@ -432,20 +432,20 @@ class Rig:
         sends from the stamp alone, which is refused. An `env` that brings its own claim
         socket or the operator's stamp is left as it is. `clock` is the verb's clock
         (`Context.clock`); None leaves it the wall clock."""
-        environ = {"MOXI_COMMS_PROJECT": project}
+        cli_env = {"MOXI_COMMS_PROJECT": project}
         if name is not None:
-            environ["MOXI_COMMS_NAME"] = name
+            cli_env["MOXI_COMMS_NAME"] = name
         if scope is not None:
-            environ["MOXI_COMMS_SCOPE"] = scope
-        environ.update(env or {})
+            cli_env["MOXI_COMMS_SCOPE"] = scope
+        cli_env.update(env or {})
         if (not stamp_only and argv and argv[0] in SEND_VERBS
-                and not environ.get(CLAIM_SOCKET_ENV) and not environ.get("MOXI_COMMS_OPERATOR")):
-            stamped = _stamp_of(environ)
+                and not cli_env.get(CLAIM_SOCKET_ENV) and not cli_env.get("MOXI_COMMS_OPERATOR")):
+            stamped = _stamp_of(cli_env)
             if stamped is not None:
                 with self.session_holding(stamped) as socket_path:
-                    environ[CLAIM_SOCKET_ENV] = socket_path
-                    return self._run_cli(argv, environ, record, clock)
-        return self._run_cli(argv, environ, record, clock)
+                    cli_env[CLAIM_SOCKET_ENV] = socket_path
+                    return self._run_cli(argv, cli_env, record, clock)
+        return self._run_cli(argv, cli_env, record, clock)
 
     def send(self, to, text, *flags, sender=None, posture="none", **kw):
         """`moxi comms send` to `to` from `sender` (the `cli` stamp: `name`, `scope`),
@@ -506,14 +506,14 @@ class Rig:
                 if sender.qualified in self.daemon.bindings:
                     pytest.fail(f"stand-in session for {sender.qualified} stayed bound")
 
-    def _run_cli(self, argv, environ, record, clock=None):
+    def _run_cli(self, argv, env, record, clock=None):
         # The verb's env is this process's (the env fixture's tmp roots) plus the stamps:
         # config reads the file under the roots ctx.env names, so stamps alone would
         # resolve the real home's config file.
         out = io.StringIO()
         ctx = cli.Context(record=record if record is not None else self.record,
                           db_path=comms_db(), socket_path=daemon_socket(),
-                          env=dict(os.environ, **environ), out=out, clock=clock)
+                          env=dict(os.environ, **env), out=out, clock=clock)
         code = cli.main(argv, ctx=ctx)
         return code, out.getvalue()
 
@@ -533,8 +533,8 @@ def join_threads(before: set, timeout: float | None = None) -> None:
     back, and writes there (a shim's reader marking its claim file offline after the
     test's tmp is gone, or under the real runtime directory). So whatever a test
     started ends inside it, while its roots still point into its tmp. `timeout` None
-    is `WAIT`."""
-    timeout = WAIT if timeout is None else timeout
+    is `LIVE_S`: the threads must end, and how fast is not the claim."""
+    timeout = LIVE_S if timeout is None else timeout
     deadline = time.monotonic() + timeout
     while True:
         left = [t for t in _others(before) if t.is_alive()]
@@ -635,7 +635,7 @@ def clock_reads_warm(monkeypatch, *kinds):
 
     def reads(adapter, session_id, **kw):
         if adapter in kinds:
-            return cache.Clock(cache.WARM, age_seconds=0.0)
+            return cache.Clock(cache.WARM, age_s=0.0)
         return real(adapter, session_id, **kw)
 
     monkeypatch.setattr(cache, "clock_state", reads)
@@ -701,6 +701,11 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
 #: its own short timeout.
 WAIT = 10.0
 
+#: How long a wait gives something that must happen: a bind after a reconnect, a post,
+#: a frame. The test proves that it happens, not how fast, so the bound is long; it
+#: costs time only when a test is failing.
+LIVE_S = 30.0
+
 
 def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
     deadline = time.monotonic() + timeout
@@ -736,7 +741,7 @@ def raw_connection(path=None):
     from moxi import ipc
 
     from moxi_comms import wire
-    client = ipc.connect(str(path or daemon_socket()), timeout=5.0)
+    client = ipc.connect(str(path or daemon_socket()), timeout_s=5.0)
     try:
         client.hello(wire.VERSIONS)
         yield client
@@ -747,7 +752,7 @@ def raw_connection(path=None):
 def settle(client) -> None:
     """A round trip on `client`: the daemon handles one connection's messages in order,
     so its answer says every message sent before it has been handled."""
-    client.call("max_id", {}, timeout=5.0)
+    client.call("max_id", {}, timeout_s=5.0)
 
 
 def cursor_of(qualified: str):

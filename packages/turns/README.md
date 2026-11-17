@@ -27,7 +27,7 @@ host that is experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/main/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.4/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -60,9 +60,13 @@ its switch, for example `moxi config set turns guards.removal true`:
 
 - **The removal guard** (`turns.removal`, switch `guards.removal`): refuses a Claude Code
   shell command that Claude Code's own dangerous-removal check would stop for your
-  approval even in bypass mode, where an unattended agent would sit blocked. Its rules
-  are coarse text rules: an `rm` or `rmdir` beside a `cd` and a `*`, beside a word that is
-  not a plain path, beside more than 64 substitutions, or inside a shell's `-c` script.
+  approval even in bypass mode, where an unattended agent would sit blocked. Its one
+  rule is coarse and reads text: an `rm` or `rmdir` beside a `cd` and a `*`, where Claude
+  Code can't tell which directory the `*` means. It skips the body of a quoted heredoc
+  (`<<'EOF'`) fed to `cat`, `tee`, `python3 -` or `node -`, so file content can go there.
+  Claude Code's other removal stops (your working directory or a directory above it, a
+  path it can't read, a shell's `-c` script) can be refused by a guard of your own at the
+  ask step, below.
 - **The no-nested-agents guard** (`turns.no-nested-agents`, switch
   `guards.no_nested_agents`): refuses a subagent's call to start a subagent of its own
   (Claude Code's `Agent` and `Task`, Codex's `spawn_agent`), and tells it to report to
@@ -73,8 +77,13 @@ its switch, for example `moxi config set turns guards.removal true`:
   gets a one-line reminder of this.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
-`usage.ceiling`), and a guard can also be a file of your own. `guards.on` lists the
+`usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
 guards that run beyond the switches: guard ids or paths to guard files.
+
+A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
+then it runs when Claude Code is about to ask you to approve a call, and it can refuse
+that ask (Claude Code denies the call and the agent reads why) but never approve one.
+Only Claude Code has an ask step.
 
 ## Settings
 
@@ -91,11 +100,17 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `listen.wait_ms`: how long an event waits for the registered listeners, in
   milliseconds. Default 2000.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
-  compacted, in order: module names and file paths. A module not installed is skipped.
+  compacted, in order: module names, file paths and run entries. A module not installed
+  is skipped. A run entry, `run:<path>`, runs that program at each start, with the
+  start's source as its argument and the session's facts as JSON on stdin; what it prints
+  on exit 0 is added. It has the listeners' `listen.wait_ms` to finish and is then
+  killed, so a program with longer work starts it in a session of its own and exits.
   Default `["launcher", "comms", "notes", "memory"]`; setting it replaces the whole list.
-- `start.limit`: the most start context a session gets, in characters; 0 means the
+  Add `turns` to the list to give each session its own id at every start, resume, clear
+  and compaction.
+- `start.limit_chars`: the most start context a session gets, in characters; 0 means the
   harness's own ceiling. Default 0.
-- `guards.on`: the guards that run besides those switched on: guard ids and paths to
+- `guards.run`: the guards that run besides those switched on: guard ids and paths to
   guard files. Default none.
 - `guards.removal`, `guards.no_nested_agents`, `guards.question_mode`: the switches of
   turns' three guards. Default off.
@@ -105,6 +120,8 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   together, in milliseconds. Default 300.
 - `question_mode.origins`: the prompt origins question mode counts as yours. Default
   `["composer"]`, a prompt typed at this terminal.
+- `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
+  question-mode reminder. Default `["prose"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
 `stop_handler.wait_ms` instead.
@@ -142,4 +159,4 @@ per session; turns adds no daemon for it.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.4/packages/turns/LICENSE).

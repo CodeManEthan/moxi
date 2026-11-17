@@ -1,7 +1,7 @@
 """Page jobs: an act from the browser page, run as the same verb in the user's terminal.
 
 The page server never runs an install on its own threads. Each act that writes the
-manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `global off`,
+manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `global remove`,
 `install`) starts a process of its own, the runner:
 
     python -P -m moxi_loadout.pagejob <job> <verb> [<argument>...]
@@ -55,7 +55,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi_loadout.homes import MARKER, PAGE_JOB
+from moxi_loadout.homes import CALLER_ENV, PAGE_JOB
 
 #: The folder of job records, in loadout's state directory.
 JOBS = "jobs"
@@ -107,8 +107,8 @@ def jobs_dir(*, create: bool = False) -> Path:
 
 
 def valid(job: object) -> bool:
-    """Whether `job` can name a job: 1 to 64 letters, digits, `-` and `_`. An
-    idempotency key (43 base64url characters) is one."""
+    """Whether `job` can name a job: 1 to 64 letters, digits, `-` and `_`. The id the
+    page mints for a press (32 hex characters) is one."""
     return isinstance(job, str) and _ID.fullmatch(job) is not None
 
 
@@ -158,8 +158,8 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     """Start a job running verb `argv` (no `--json`; the runner adds it), under id `job`
     (a fresh one when None). The record is created exclusively before the spawn and
     gets the job's pid and start time right after it. A record of `job` with the same
-    arguments is found, not started again (`Started.new` False), so a confirmed act's
-    retry after a restart of the page server reaches the job it started; one with other
+    arguments is found, not started again (`Started.new` False), so a repeat of a press
+    the page named by its id reaches the job it started; one with other
     arguments raises `Clash`. A spawn that fails removes the record and raises. Once the
     spawn returns the job is running, so a pid that can't be recorded is logged, never
     raised: the job then reads `interrupted` from the grace period until its end lands."""
@@ -180,7 +180,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     except FileExistsError:
         found = _load(path)
         if found is not None and found.get("argv") == argv:
-            return Started(job, False)
+                return Started(job, new=False)
         raise Clash(f"job {job} was started already with other arguments") from None
     try:
         pid = _spawn(command(job, argv), cwd=os.fspath(stores.state_dir(create=True)),
@@ -196,7 +196,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
         atomic_write(path, json.dumps(record) + "\n", mode=0o600)
     except Exception:  # noqa: BLE001 - the job reads interrupted until its end lands
         log.exception("page job %s started (pid %s), but its pid wasn't recorded", job, pid)
-    return Started(job, True)
+    return Started(job, new=True)
 
 
 def _create(path: Path, text: str) -> None:
@@ -275,11 +275,11 @@ def _load(path: Path) -> dict | None:
 def prune(now: float | None = None) -> int:
     """Remove the job records (and their logs) older than a day; returns how many files
     went."""
-    folder = jobs_dir()
+    records_dir = jobs_dir()
     cutoff = (time.time() if now is None else now) - KEEP_SECONDS
     gone = 0
     try:
-        found = list(os.scandir(folder))
+        found = list(os.scandir(records_dir))
     except FileNotFoundError:
         return 0
     for entry in found:
@@ -299,7 +299,7 @@ def run(job: str, argv: Sequence[str]) -> int:
     `--json`, and write the end in one write. Returns the exit code written. An error
     anywhere before the end, the log's setup included, is written as exit 1 with its
     line."""
-    os.environ[MARKER] = CALLER
+    os.environ[CALLER_ENV] = CALLER
     try:
         code, outcome, lines = _steps(list(argv))
     except Exception as exc:  # noqa: BLE001 - an error outside the CLI is the job's end

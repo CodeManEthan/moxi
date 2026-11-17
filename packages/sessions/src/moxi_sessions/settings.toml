@@ -1,29 +1,40 @@
 # The sessions module's config schema. The file it governs is CONFIG/sessions/config.toml;
 # `moxi config sessions` shows every key and `moxi config sessions init` writes the file.
 
-[claude.projects]
+[claude.projects]  # noqa: MX4 -- a folder path, named as Claude Code names its own folder; rounds.projects is the table of settings per project
 type = "path"
 default = ""
 doc = "Where Claude Code transcripts are read for a session that stated no root of its own; unset, it is ${CLAUDE_CONFIG_DIR:-~/.claude}/projects in the reading process's environment."
 read = "use"
+label = "Claude Code transcripts"
+line = "Not set: the folder Claude Code itself uses."
+common = true
 
 [codex.sessions]
 type = "path"
 default = ""
 doc = "Where Codex rollouts are read when no root is handed in; unset, it is ${CODEX_HOME:-~/.codex}/sessions in the reading process's environment."
 read = "use"
+label = "Codex sessions"
+common = true
 
 [opencode.database]
 type = "path"
 default = ""
 doc = "The OpenCode database read when no database is handed in; unset, it is ${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db in the reading process's environment."
 read = "use"
+label = "OpenCode database"
+common = true
 
 [guard.transcript_read]
 type = "bool"
 default = false
-doc = "Run the transcript-read guard, which turns enforces: an agent's Read, Grep or Glob of a path under a harness's transcript root, or a shell command naming one, is refused and pointed to moxi sessions read. Naming sessions.transcript-read on turns' guards.on runs it too."
+doc = "Run the transcript-read guard, which turns enforces: an agent's Read, Grep or Glob of a path under a harness's transcript root, or a shell command naming one, is refused and pointed to moxi sessions read. Naming sessions.transcript-read on turns' guards.run runs it too."
 read = "use"
+label = "Transcript-read guard"
+line = "Agents may not read transcript files themselves; they are pointed to moxi sessions read."
+common = true
+hurts = { when = "off", says = "turns this guard off", confirm = "From its next tool call, an agent in any session can read transcript files itself, unless turns' guards.run names sessions.transcript-read." }
 
 [guard.transcript_read_escapes]
 type = "list"
@@ -31,3 +42,14 @@ items = "str"
 default = ["sessions"]
 doc = "The verbs of this environment's moxi whose commands the transcript-read guard lets name a transcript path (moxi sessions by default); add a module's verb when that module reads transcripts for its agents."
 read = "use"
+label = "Commands the guard lets through"
+line = "The verbs of moxi whose commands may name a transcript path; sessions by default."
+
+[list.recent_s]
+type = "int"
+default = 3600
+doc = "How many seconds after its last change a session counts as active recently: the list shows it in its first group, and a list row says so."
+read = "use"
+label = "A session counts as recent for"
+line = "After its last change; the list shows it in its first group."
+unit = "seconds"
