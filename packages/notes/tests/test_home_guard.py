@@ -3,6 +3,7 @@ login gets one line after it; nothing else does, and it never refuses."""
 
 from __future__ import annotations
 
+import importlib
 import io
 
 import moxi.config
@@ -146,7 +147,9 @@ def test_patch_hunks_outside_the_root_are_ignored_and_relative_paths_join_cwd():
 
 def test_the_guard_value_and_its_switch():
     from moxi.units import switch_problem
-    from moxi_turns.guards import read_switch
+
+    # turns' guard loader, which turns' own endpoint runs (as sessions' and usage's tests reach it)
+    read_switch = importlib.import_module("moxi_turns.guards").read_switch
 
     from moxi_notes import settings
 
