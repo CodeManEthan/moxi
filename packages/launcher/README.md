@@ -584,10 +584,11 @@ rule: the `headless_exit` row, one `--exit` per value (`done`, `cold`, `idle=<D>
 its brief and the mail that reached it are done. The launcher checks the values with
 comms' own parser before anything starts, so a bad one is refused (2) in comms' words,
 and a rule with `idle=` or `after=` and no `cold` gets a warning: mail sent once the
-session's cache is cold waits for the name's next holder. `headless_exit` on any other
-launch is left out with a warning, and so are `keep_warm` and `recycle_on_expiry` on a
-headless launch with an identity, since nudging or recycling the session would work
-against its exit rule. The launch returns at once; the deliverer watches the bind and
+session's cache is cold waits for the name's next holder. `headless_exit` set by a
+preset or a flag on any other launch is left out with a warning; set in your `[defaults]`
+it is left out without one, as `director` and `scope` are. `keep_warm` and
+`recycle_on_expiry` are left out with a warning on a headless launch with an identity,
+since nudging or recycling the session would work against its exit rule. The launch returns at once; the deliverer watches the bind and
 ends the row `failed` as above when the name can't be taken, and sends nothing more. A
 harness comms doesn't list (Claude, for now) is refused headless with an identity.
 `moxi comms exit-session NAME` ends such a session.

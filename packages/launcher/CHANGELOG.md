@@ -14,9 +14,11 @@
   `headless_exit` (`--headless-exit`, repeatable, with comms): one `--exit` per value,
   checked at resolve and by `check` with comms' own `parse_exit`, so a bad value is
   refused (2) in comms' words before anything starts; `idle=` or `after=` without `cold`
-  warns that mail held for a cold cache waits for the name's next holder. Set on any
-  other launch it is left out with a warning, and `keep_warm` and `recycle_on_expiry`
-  are left out of a headless launch with an identity with a warning. The size checks
+  warns that mail held for a cold cache waits for the name's next holder. Set by a
+  preset or a flag on any other launch it is left out with a warning; set in
+  `[defaults]` it is left out without one, as `director` and `scope` are. `keep_warm`
+  and `recycle_on_expiry` are left out of a headless launch with an identity with a
+  warning. The size checks
   count the brief on `--brief` as the opening prompt.
 
 - Every setting but the two name templates carries page fields, which `moxi config
