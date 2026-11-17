@@ -222,6 +222,82 @@ def test_a_resume_held_on_a_screen_fails_as_a_fresh_launch(work, rig):
     assert no_key_sent(rig)
 
 
+# -- Claude's first-run screens and the Chrome dialog -----------------------------------------
+
+
+#: The three screens on the startup list with no setting, with rows from their 2.1.326
+#: captures.
+NEVER_ANSWERED = {
+    "CLAUDE_THEME_PICKER": [" Let's get started.",
+                            " Choose the text style that looks best with your terminal",
+                            " ❯ ✔ Auto (match terminal)", "     Dark mode"],
+    "CLAUDE_WELCOME": [" Welcome to Claude Code v2.1.326", " Security notes:",
+                       " Press Enter to continue…"],
+    "CLAUDE_CHROME_DIALOG": ["  Claude in Chrome extension detected",
+                             "  ❯ No, keep browser tools off", "    Yes, use my browser",
+                             "  Enter to confirm · Esc to keep browser tools off"],
+}
+EVERY_SETTING_ON = {"trust_dialog": True, "dev_channels_dialog": True,
+                    "bypass_warning": True}
+FIRST_RUN_HINT = ("Claude Code's first-run setup is not done for this config folder: run "
+                  "`claude` once in a terminal with the same `CLAUDE_CONFIG_DIR` and "
+                  "finish it")
+CHROME_HINT = ("answer Claude Code's Claude-in-Chrome question once in a terminal session; "
+               "it is not asked again")
+
+
+def test_the_three_screens_are_on_the_startup_list_with_no_setting():
+    assert [name for key, name in startup.SCREENS["claude"] if key is None] == \
+        list(NEVER_ANSWERED)
+    on = {key: True for key, _ in startup.SCREENS["claude"] if key is not None}
+    for entry in startup.listed("claude", fake, on):
+        assert entry.answer is (entry.setting is not None), entry.name
+
+
+def test_the_hints_of_the_three_screens():
+    assert startup.HINTS["CLAUDE_THEME_PICKER"] == FIRST_RUN_HINT
+    assert startup.HINTS["CLAUDE_WELCOME"] == FIRST_RUN_HINT
+    assert startup.HINTS["CLAUDE_CHROME_DIALOG"] == CHROME_HINT
+
+
+@pytest.mark.parametrize("mode", ["default", "manual", "acceptEdits", "plan", "dontAsk",
+                                  "auto", "bypassPermissions"])
+@pytest.mark.parametrize("name", list(NEVER_ANSWERED))
+def test_a_first_run_screen_or_the_chrome_dialog_fails_the_launch_at_once(
+        work, harness, rig, turns, name, mode):
+    settings_file(**EVERY_SETTING_ON)
+    rows = NEVER_ANSWERED[name]
+    rig.plan(frames=[{"screen": name, "rows": rows}])
+    asked = LaunchRequest(typed={"target": "slot", "permission_mode": mode},
+                          cwd=str(work), request_id="r1", session_id=SID, actor="ann",
+                          off_posture=True)
+    got = api.launch(asked)
+    assert (got.state, got.reason, got.exit_code) == (
+        "failed", startup.SCREEN_NOT_ANSWERED, exits.ERROR)
+    assert f"the {name} screen showed and the launcher never answers it" in got.line
+    assert "slot 1" in got.line
+    assert (FIRST_RUN_HINT if name != "CLAUDE_CHROME_DIALOG" else CHROME_HINT) in got.line
+    # One read of the watch saw it; nothing was pressed and no first turn went.
+    assert len(rig.calls("read_screen")) == 1 and no_key_sent(rig)
+    assert turns.calls("deliver") == []
+    [seen] = events(kind=startup.EVENT)
+    assert (seen.detail["screen"], seen.detail["outcome"], seen.detail["setting"]) == (
+        name, startup.NOT_ANSWERED, None)
+    assert seen.detail["rows"] == rows
+    [failed] = events(kind="start-failed")
+    assert failed.detail["screen"] == name
+
+
+def test_a_relaunch_held_on_the_chrome_dialog_is_flagged(work, rig, turns):
+    settings_file(**EVERY_SETTING_ON)
+    rig.plan(frames=[{"screen": "CLAUDE_CHROME_DIALOG"}])
+    started, now = direct(work, rid="r2", relaunch_of="r1", brief=BRIEF)
+    assert (started.state, started.exit_code, started.finding) == (
+        "started", 0, startup.SCREEN_NOT_ANSWERED)
+    assert now.state == "started" and no_key_sent(rig)
+    assert turns.calls("deliver") == []
+
+
 # -- the ready read ---------------------------------------------------------------------------
 
 
@@ -233,9 +309,10 @@ def test_a_fresh_launch_owing_no_first_turn_that_never_gets_ready_fails_no_ready
     got = api.launch(request(work))
     assert (got.state, got.reason, got.exit_code) == ("failed", first.NO_READY,
                                                       exits.ERROR)
-    assert "not ready: a screen or dialog the launcher does not know may be waiting" \
-        in got.line
-    assert "attach to slot 1" in got.line
+    # Both causes a launch can't tell apart: a screen it doesn't know, and no turns.
+    assert ("not ready: turns never reported the session ready; a screen the launcher "
+            "does not know may be waiting, or turns may not be running in the session; "
+            "attach to slot 1") in got.line
     [failed] = events(kind="start-failed")
     assert failed.detail["rows"] == ["  Pick a theme", "  ❯ Dark"]
     assert no_key_sent(rig)

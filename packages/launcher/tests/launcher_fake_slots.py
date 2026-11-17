@@ -184,6 +184,8 @@ class Screen:
     then: str
     marker: str = "❯"
     items: Items | None = None
+    ruled: bool = True
+    answerable: bool = True
 
 
 @dataclass(frozen=True)
@@ -224,9 +226,26 @@ CLAUDE_BYPASS_WARNING = Screen(
     phrases=("WARNING: Claude Code running in Bypass Permissions mode",
              "By proceeding, you accept"),
     option="Yes, I accept", move=True, then="gone")
+CLAUDE_THEME_PICKER = Screen(
+    name="CLAUDE_THEME_PICKER",
+    phrases=("Let's get started.",
+             "Choose the text style that looks best with your terminal"),
+    option="Dark mode", move=True, then="gone", ruled=False, answerable=False)
+CLAUDE_WELCOME = Screen(
+    name="CLAUDE_WELCOME",
+    phrases=("Welcome to Claude Code", "Security notes:", "Press Enter to continue"),
+    option="Press Enter to continue…", move=False, then="gone", ruled=False,
+    answerable=False)
+CLAUDE_CHROME_DIALOG = Screen(
+    name="CLAUDE_CHROME_DIALOG",
+    phrases=("Claude in Chrome extension detected", "Enter to confirm"),
+    option="No, keep browser tools off", move=True, then="gone", answerable=False)
 SCREENS = {"CLAUDE_TRUST_DIR": CLAUDE_TRUST_DIR,
            "CLAUDE_DEV_CHANNELS": CLAUDE_DEV_CHANNELS,
            "CLAUDE_BYPASS_WARNING": CLAUDE_BYPASS_WARNING,
+           "CLAUDE_THEME_PICKER": CLAUDE_THEME_PICKER,
+           "CLAUDE_WELCOME": CLAUDE_WELCOME,
+           "CLAUDE_CHROME_DIALOG": CLAUDE_CHROME_DIALOG,
            "CLAUDE_EXIT_DIALOG": CLAUDE_EXIT_DIALOG}
 
 

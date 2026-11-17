@@ -592,8 +592,9 @@ class Slot(Target):
                                line=f"{here}; nothing could confirm that the session is "
                                     f"ready: attach to slot {slot} to see it")
         elif not is_ready and not _came_ready(ready, _number(current, "ready.wait_s")):
-            why = ("not ready: a screen or dialog the launcher does not know may be "
-                   f"waiting; attach to slot {slot}")
+            why = ("not ready: turns never reported the session ready; a screen the "
+                   "launcher does not know may be waiting, or turns may not be running in "
+                   f"the session; attach to slot {slot}")
             rows = _rows(api, slot, screens)
             if relaunch:
                 return _flag(conn, rid, first.NO_READY, why,
@@ -986,7 +987,8 @@ def _startup_list(harness: str, api: Any, current: Any | None) -> list[startup.L
     """The startup list of a slot launch of `harness`; with the settings unreadable, every
     screen on it unanswered."""
     if current is None:
-        current = {key: False for key, _ in startup.SCREENS.get(harness, ())}
+        current = {key: False for key, _ in startup.SCREENS.get(harness, ())
+                   if key is not None}
     return startup.listed(harness, api, current)
 
 

@@ -83,11 +83,21 @@ its run files, holding `skipDangerousModePermissionPrompt: true` for that launch
 A Codex launch settles its folder's trust on its own command line (below), so Codex's
 trust screen does not show.
 
+Three more Claude Code screens are on the watch with no setting, and the launcher never
+answers them: the first-run theme picker and the welcome screen ("Security notes ... Press
+Enter to continue"), which show in a config folder Claude Code has never run in, and the
+"Claude in Chrome extension detected" dialog, which shows once onboarding is done until
+it is answered once. Each ends the launch at once, `screen-not-answered`, naming the
+screen. For the first two, run `claude` once in a terminal with the same
+`CLAUDE_CONFIG_DIR` and finish its setup; for the Chrome dialog, answer it once in a
+terminal session.
+
 Then every slot launch waits for its session to be ready, up to `ready.wait_s`, first
 turn owed or not. With nothing that can say so (no turns), it ends `started` with the
 reason `ready-unknown`: attach to the slot to see it. A launch of a new session (a fresh
 launch or a resume) that finds a screen it won't answer, or no ready in time (`no-ready`),
-ends `failed`, exit 1, naming the slot. The session is never stopped: it stays in its slot
+ends `failed`, exit 1, naming the slot. The `no-ready` line names both causes a launch
+can't tell apart: a screen the launcher doesn't know, and a session turns isn't running in. The session is never stopped: it stays in its slot
 for you to attach to. A relaunch has already exited the session it replaces, so the same
 findings only flag it: its row stays `started` with a `flagged` event, a self relaunch's
 run ends `first-turn-not-sent` (its handoff is not sent), a director's ends `relaunched`

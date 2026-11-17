@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Three more Claude Code screens are on the startup list with no setting, so a slot launch
+  held on one fails at once, `screen-not-answered`, naming the screen: the first-run
+  theme picker and welcome screen (the line says to run `claude` once in a terminal with
+  the same `CLAUDE_CONFIG_DIR` and finish its setup) and the "Claude in Chrome extension
+  detected" dialog (the line says to answer it once in a terminal session). The launcher
+  never answers them. Needs slots with `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME` and
+  `CLAUDE_CHROME_DIALOG`.
+- The `no-ready` line now reads "not ready: turns never reported the session ready; a
+  screen the launcher does not know may be waiting, or turns may not be running in the
+  session; attach to slot N", naming both causes.
 - A Claude slot launch watches for every screen on the launcher's startup list (folder
   trust, development channels, the bypass-permissions warning) whatever the settings say.
   A screen whose `startup.*` setting is off now ends the launch at once,

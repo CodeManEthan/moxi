@@ -6,16 +6,21 @@ Claude Code can open on a screen of its own before the session starts: the folde
 screen, the development-channels screen, and the bypass-permissions warning. Nothing
 inside the session can answer them. The launcher's startup list (`SCREENS`) holds each,
 by harness, with the setting that lets the launcher answer it: `startup.trust_dialog`,
-`startup.dev_channels_dialog` and `startup.bypass_warning`, all off by default. In a slot
+`startup.dev_channels_dialog` and `startup.bypass_warning`, all off by default. Three
+more are on the list with no setting, since the launcher never answers them: Claude
+Code's first-run theme picker and welcome screen, drawn in a config folder it has never
+run in, and its Claude-in-Chrome dialog, drawn once onboarding is done until a person
+answers it. In a slot
 launch the watch reads every screen on the list, whatever the settings say, through
 slots' screen calls, which recognise each screen by its content and press only the keys
 it declares. In this terminal the person answers them; headless runs do not show them.
 slots' exit dialog is not a startup screen and is never on the list.
 
 **The rule: the launcher presses a key only on a screen it has just seen showing and whose
-setting is on. A screen on the list whose setting is off ends the watch at once, with
-nothing pressed: the launch fails `screen-not-answered` (a relaunch is flagged instead; see
-`targets`), naming the setting that would answer it.** A screen that never shows, or that
+setting is on. A screen on the list whose setting is off, or that has no setting, ends
+the watch at once, with nothing pressed: the launch fails `screen-not-answered` (a
+relaunch is flagged instead; see `targets`), naming the setting that would answer it, or
+what a person does to get past a screen with none.** A screen that never shows, or that
 leaves on its own (a person attached and answered it) before the watch reads it, is not a
 finding. The session is never stopped: it stays in its slot for a person.
 
@@ -107,13 +112,21 @@ SCREEN_NOT_ANSWERED = "screen-not-answered"
 NOT_ANSWERED = "not-answered"
 
 #: The launcher's startup list: by harness, each screen a session may draw before it
-#: starts, with the setting that lets the launcher answer it, by the name slots declares
-#: the screen under.
+#: starts, with the setting that lets the launcher answer it (None: the launcher never
+#: answers it), by the name slots declares the screen under.
 SCREENS = {
     "claude": (("startup.trust_dialog", "CLAUDE_TRUST_DIR"),
                ("startup.dev_channels_dialog", "CLAUDE_DEV_CHANNELS"),
-               ("startup.bypass_warning", "CLAUDE_BYPASS_WARNING")),
+               ("startup.bypass_warning", "CLAUDE_BYPASS_WARNING"),
+               (None, "CLAUDE_THEME_PICKER"),
+               (None, "CLAUDE_WELCOME"),
+               (None, "CLAUDE_CHROME_DIALOG")),
 }
+
+#: The hint of Claude Code's two first-run screens.
+FIRST_RUN_HINT = ("Claude Code's first-run setup is not done for this config folder: run "
+                  "`claude` once in a terminal with the same `CLAUDE_CONFIG_DIR` and "
+                  "finish it")
 
 #: What gets a slot launch past each screen, for the line of a launch held on it.
 HINTS = {
@@ -129,6 +142,11 @@ HINTS = {
         "the warning there. Either way Claude Code writes "
         "skipDangerousModePermissionPrompt into ~/.claude/settings.json, which turns the "
         "warning off for every later bypass session on this machine",
+    "CLAUDE_THEME_PICKER": FIRST_RUN_HINT,
+    "CLAUDE_WELCOME": FIRST_RUN_HINT,
+    "CLAUDE_CHROME_DIALOG":
+        "answer Claude Code's Claude-in-Chrome question once in a terminal session; it is "
+        "not asked again",
 }
 
 #: The install questions: each `startup.*` switch and the question asked for it.
@@ -180,20 +198,23 @@ class Watched:
 @dataclass(frozen=True)
 class Listed:
     """One screen on the startup list: slots' name for it and the `Screen` itself, the
-    setting that lets the launcher answer it, and whether that setting is on."""
+    setting that lets the launcher answer it (None for a screen it never answers), and
+    whether that setting is on."""
 
     name: str
     screen: Any
-    setting: str
+    setting: str | None
     answer: bool
 
 
 def listed(harness: str, api: Any, current: Mapping[str, Any] | None = None
            ) -> list[Listed]:
     """The startup list of a slot launch of `harness`, as slots' API module declares each
-    screen, by name, with whether its setting is on. Empty for Codex, which has no screen
-    declared yet. Raises `moxi.config.ConfigError` when the settings can't be read."""
-    return [Listed(name, getattr(api, name), key, answer=_setting(current, key))
+    screen, by name, with whether its setting is on (never, for a screen with none).
+    Empty for Codex, which has no screen declared yet. Raises `moxi.config.ConfigError`
+    when the settings can't be read."""
+    return [Listed(name, getattr(api, name), key,
+                   answer=key is not None and _setting(current, key))
             for key, name in SCREENS.get(harness, ())]
 
 
@@ -328,10 +349,16 @@ def _named(shown: Any, screens: Sequence[Listed]) -> Listed | None:
 
 def held_words(entry: Listed, slot: Any) -> str:
     """Why a launch held on `entry`'s screen did not go on: the screen, the setting that is
-    off, the slot the session waits in, and what gets a launch past it."""
-    hint = HINTS.get(entry.name, f"turn on {entry.setting}")
-    return (f"the {entry.name} screen showed and {entry.setting} is off, so the launcher "
-            f"pressed nothing; the session waits in slot {slot} for a person ({hint})")
+    off (or that the launcher never answers it), the slot the session waits in, and what
+    gets a launch past it."""
+    if entry.setting is None:
+        hint = HINTS.get(entry.name, "a person answers it")
+        held = "the launcher never answers it"
+    else:
+        hint = HINTS.get(entry.name, f"turn on {entry.setting}")
+        held = f"{entry.setting} is off"
+    return (f"the {entry.name} screen showed and {held}, so the launcher pressed nothing; "
+            f"the session waits in slot {slot} for a person ({hint})")
 
 
 def _exited(api: Any, slot: Any) -> str:
@@ -415,7 +442,7 @@ def _ask(question: str) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
-__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "GO_ON", "HINTS", "INTERVAL_S", "Listed",
+__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "FIRST_RUN_HINT", "GO_ON", "HINTS", "INTERVAL_S", "Listed",
            "MIN_ANSWER_S", "MISMATCH", "NOT_ANSWERED", "NOT_SETTLED", "PANE_ENDED",
            "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "SCREEN_NOT_ANSWERED", "Watched",
            "held_words", "listed", "setup", "watch"]

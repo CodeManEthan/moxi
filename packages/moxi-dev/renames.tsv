@@ -4786,7 +4786,7 @@ launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUD
 launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused={	keep	refused	refused
 launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused={"reason": "no-free-slot",	keep	refused	refused
 launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
-launcher	packages/launcher/tests/test_slot.py	assert len(off) == 3 and not any(e.answer for e in off)	keep	any	any
+launcher	packages/launcher/tests/test_slot.py	assert len(off) == 6 and not any(e.answer for e in off)	keep	any	any
 launcher	packages/launcher/tests/test_slot.py	assert set(startup.HINTS) == set(names)	keep	set	set
 launcher	packages/launcher/tests/test_state.py	"exited", "held", "expired", "not-held", "stopped",	keep	expired	expired
 launcher	packages/launcher/tests/test_state.py	@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "nudged",	keep	compacted	compacted

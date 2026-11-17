@@ -575,7 +575,8 @@ def test_a_codex_slot_launch_answers_no_screen_and_names_the_slot_when_not_ready
 # -- startup screens, through a launch ------------------------------------------------------
 
 
-ALL = ["CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING"]
+ALL = ["CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+       "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG"]
 
 
 def test_with_the_settings_off_every_screen_on_the_list_is_still_read(work, harness, rig):
@@ -1123,11 +1124,15 @@ def test_the_startup_list_holds_every_screen_with_its_setting():
         ("CLAUDE_DEV_CHANNELS", fake.CLAUDE_DEV_CHANNELS, "startup.dev_channels_dialog",
          False),
         ("CLAUDE_BYPASS_WARNING", fake.CLAUDE_BYPASS_WARNING, "startup.bypass_warning",
-         False)]
+         False),
+        ("CLAUDE_THEME_PICKER", fake.CLAUDE_THEME_PICKER, None, False),
+        ("CLAUDE_WELCOME", fake.CLAUDE_WELCOME, None, False),
+        ("CLAUDE_CHROME_DIALOG", fake.CLAUDE_CHROME_DIALOG, None, False)]
     off = startup.listed("claude", fake, settings_of())
-    assert len(off) == 3 and not any(e.answer for e in off)
+    assert len(off) == 6 and not any(e.answer for e in off)
     on = startup.listed("claude", fake, settings_of(trust=True, dev=True, bypass=True))
-    assert all(e.answer for e in on)
+    # A screen with no setting is never answered, whatever the settings say.
+    assert [e.answer for e in on] == [True, True, True, False, False, False]
 
 
 def test_slots_exit_dialog_is_never_on_the_startup_list():
@@ -1301,7 +1306,8 @@ def test_a_slot_one_process_started_in_reads_taken_in_another(rig, tmp_path):
 #: Every name the launcher reads from slots' API module.
 USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "answer_screen",
         "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
-        "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING")
+        "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+        "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG")
 #: The shapes the launcher reads, as the fake gives them.
 SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
 
@@ -1337,7 +1343,10 @@ def test_the_launcher_reads_only_names_slots_api_has(real_slots):
     assert [(e.name, e.screen) for e in got] == [
         ("CLAUDE_TRUST_DIR", real_slots.CLAUDE_TRUST_DIR),
         ("CLAUDE_DEV_CHANNELS", real_slots.CLAUDE_DEV_CHANNELS),
-        ("CLAUDE_BYPASS_WARNING", real_slots.CLAUDE_BYPASS_WARNING)]
+        ("CLAUDE_BYPASS_WARNING", real_slots.CLAUDE_BYPASS_WARNING),
+        ("CLAUDE_THEME_PICKER", real_slots.CLAUDE_THEME_PICKER),
+        ("CLAUDE_WELCOME", real_slots.CLAUDE_WELCOME),
+        ("CLAUDE_CHROME_DIALOG", real_slots.CLAUDE_CHROME_DIALOG)]
 
 
 def test_the_fakes_shapes_are_slots_own(real_slots):
