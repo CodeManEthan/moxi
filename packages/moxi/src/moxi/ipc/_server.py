@@ -25,12 +25,20 @@ Each connection gets one reader, which hands the handler one message at a time i
 and one writer, which drains a bounded queue of frames with a deadline on each write. A
 full queue or a missed deadline drops that peer, so a peer that stops reading never holds
 up the loop or another peer. A peer running as another user is dropped before it is read.
+
+At the file-descriptor limit asyncio's accept fails up to 101 times per readiness event,
+and its exception handler would log each with a traceback. A Unix server therefore puts a
+filter in front of its loop's exception handler: an accept failure on a listener a
+`moxi.ipc` server owns on that loop becomes one warning a minute per errno, with a count
+of the ones held back, and every other context goes on, once and unchanged, to the
+handler the filter wraps. asyncio still drops the listener's reader and retries in 1 s.
 """
 
 from __future__ import annotations
 
 import asyncio
 import collections
+import errno
 import inspect
 import logging
 import os
@@ -38,6 +46,9 @@ import socket
 import stat
 import struct
 import sys
+import threading
+import time
+import weakref
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 
@@ -56,6 +67,14 @@ _PLATFORM = sys.platform
 #: How long `serve` waits for a lock another process holds, in seconds. A sweep holds it
 #: for one unlink; only a live server holds it this long.
 LOCK_WAIT = 1.0
+
+#: The fewest seconds between two lines logged for accept failures of one errno on one
+#: loop. The failures in between are counted, and the next line says how many.
+ACCEPT_LOG_EVERY = 60.0
+
+# The message asyncio's selector loop passes its exception handler when accept fails for
+# want of a file descriptor, buffer space or memory.
+_ACCEPT_FAILED = "socket.accept() out of system resource"
 
 # macOS: the socket level and options for a peer's credentials and pid (sys/un.h).
 _SOL_LOCAL = getattr(socket, "SOL_LOCAL", 0)
@@ -109,6 +128,89 @@ def _pipe_peer(transport: asyncio.BaseTransport) -> tuple[Peer, str | None]:
             pid = None
     peer = Peer(pid, None, _proc.identity(pid) if pid else None)
     return peer, _users.user_of(pid) if pid else None
+
+
+class _LoopState:
+    """What every `moxi.ipc` Unix server on one event loop shares for accept failures:
+    `owned`, each listener's fd to its server's address, and per errno the time of the
+    last line (monotonic, then wall clock) and the failures held back since. It holds
+    neither the loop nor any handler, so the registry's weak key can let the loop go."""
+
+    __slots__ = ("held", "last", "owned")
+
+    def __init__(self) -> None:
+        self.owned: dict[int, str] = {}
+        self.last: dict[int | None, tuple[float, float]] = {}
+        self.held: dict[int | None, int] = {}
+
+    def log_accept_failure(self, context: dict) -> bool:
+        """Log `context` at the rate, or count it held back, when it is an accept
+        failure on an owned listener; False, with nothing done, for any other context."""
+        if context.get("message") != _ACCEPT_FAILED:
+            return False
+        sock = context.get("socket")
+        if sock is None:
+            return False
+        address = self.owned.get(sock.fileno())
+        if address is None:
+            return False
+        exc = context.get("exception")
+        number = getattr(exc, "errno", None)
+        now = time.monotonic()
+        last = self.last.get(number)
+        if last is not None and now - last[0] < ACCEPT_LOG_EVERY:
+            self.held[number] = self.held.get(number, 0) + 1
+            return True
+        held = self.held.pop(number, 0)
+        self.last[number] = (now, time.time())
+        why = getattr(exc, "strerror", None) or str(exc)
+        name = errno.errorcode.get(number, str(number))
+        line = (f"accept failed on {address}: {why} (errno {name}); retrying every "
+                f"{asyncio.constants.ACCEPT_RETRY_DELAY:g} s")
+        if held:
+            since = time.strftime("%H:%M:%S", time.localtime(last[1]))
+            line += f"; {held} more since {since}"
+        _log.warning("%s", line)
+        return True
+
+
+class _AcceptFilter:
+    """A loop's exception handler while a `moxi.ipc` Unix server runs on it: accept
+    failures on the listeners in `state.owned` are logged at `ACCEPT_LOG_EVERY`, and
+    every other context goes to `wrapped`, or to the loop's default handler when
+    `wrapped` is None. It takes the loop from its call and never keeps it."""
+
+    def __init__(self, state: _LoopState,
+                 wrapped: Callable[[asyncio.AbstractEventLoop, dict], object] | None):
+        self.state = state
+        self.wrapped = wrapped
+
+    def __call__(self, loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        try:
+            taken = self.state.log_accept_failure(context)
+        except Exception:
+            taken = False
+        if taken:
+            return
+        if self.wrapped is None:
+            loop.default_exception_handler(context)
+        else:
+            self.wrapped(loop, context)
+
+
+# Each loop's `_LoopState`, kept while the loop lives; servers and filters hold it too.
+_loop_states: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopState] = (
+    weakref.WeakKeyDictionary())
+_loop_states_lock = threading.Lock()
+
+
+def _loop_state(loop: asyncio.AbstractEventLoop) -> _LoopState:
+    """Loop `loop`'s `_LoopState`, made the first time it is asked for."""
+    with _loop_states_lock:
+        state = _loop_states.get(loop)
+        if state is None:
+            state = _loop_states[loop] = _LoopState()
+        return state
 
 
 Handler = Callable[["Connection", str, object], Awaitable[object]]
@@ -333,6 +435,8 @@ class Server:
         self._loop = asyncio.get_running_loop()
         self._hold = ExitStack()
         self._listener: asyncio.Server | None = None
+        # Unix: the loop's state for accept failures, which lists this server's listener.
+        self._loop_state: _LoopState | None = None
         self._inode: tuple[int, int] | None = None
         # Windows: whether this server is on a pipe, the access list of its instances,
         # the instance waiting for a client, the accept loop, the instances handed on
@@ -372,10 +476,24 @@ class Server:
             except BaseException:
                 sock.close()
                 raise
+            self._own_listener()
         except BaseException:
+            if self._listener is not None:
+                self._listener.close()
             self._unlink()
             self._hold.close()
             raise
+
+    def _own_listener(self) -> None:
+        """Make the loop's exception handler our filter, unless it already is one for
+        this loop, and list this server's listening sockets in the loop's state."""
+        loop = self._loop
+        state = self._loop_state = _loop_state(loop)
+        current = loop.get_exception_handler()
+        if not (isinstance(current, _AcceptFilter) and current.state is state):
+            loop.set_exception_handler(_AcceptFilter(state, current))
+        for sock in self._listener.sockets:
+            state.owned[sock.fileno()] = self.address
 
     async def _start_pipe(self) -> None:
         """Hold the lock, make the pipe's first instance, and start the accept loop."""
@@ -570,6 +688,9 @@ class Server:
             return
         self._closed.set()
         if self._listener is not None:
+            if self._loop_state is not None:
+                for sock in self._listener.sockets:
+                    self._loop_state.owned.pop(sock.fileno(), None)
             self._listener.close()
         try:
             me = asyncio.current_task()
@@ -714,6 +835,12 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
 
     On Windows each pipe instance admits only this user and SYSTEM, and no client on
     another machine. There is no fallback to Windows' default list for a pipe.
+
+    On Unix the loop's exception handler becomes a filter that wraps the one it finds
+    (unless it is already ours): an accept failure on a `moxi.ipc` listener, at the
+    file-descriptor limit, is logged as one warning per `ACCEPT_LOG_EVERY` seconds per
+    errno on the `moxi.ipc` logger, without a traceback, and every other context goes on
+    to the wrapped handler. The filter stays on the loop after the server closes.
 
     Raises `AlreadyServing` when another server still holds the address's lock after a
     one-second wait, and on Windows also when a pipe of that name already exists. On
