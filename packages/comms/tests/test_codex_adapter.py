@@ -917,3 +917,17 @@ def test_a_launch_with_a_person_has_no_watch_and_refuses_end(rig, launch):
     assert adapter.exit_watch is None and adapter.headless_step() is None
     assert adapter.claims.end_answer()["not_headless"] is True
     assert "headless" not in (claimfile.read(adapter.claims.key)["claim"] or {})
+
+
+def test_an_end_asked_before_the_bind_ends_the_session_once_the_watch_starts(
+        rig, headless):
+    """The claim socket answers `end` from before the bind: the cause is kept, and the
+    session ends on it as the watch starts, since the name is held by then."""
+    adapter = headless("after=10m", start=False)
+    assert adapter.exit_watch is None
+    assert adapter.end_headless("exit-session") is True
+    assert adapter.ended == []
+    adapter.start()
+    assert [cause for cause, _, _ in adapter.ended] == ["exit-session"]
+    assert adapter.ended_cause == "exit-session"
+    assert adapter.end_headless("exit-session") is False, "it ends once"

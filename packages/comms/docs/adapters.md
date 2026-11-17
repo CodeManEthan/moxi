@@ -361,8 +361,11 @@ releases the name as on any host's end. The host holds a lifeline whose other en
 the adapter holds (`MOXI_LIFELINE_FD`), so a host whose adapter died by any death stops
 too. `moxi comms exit-session NAME` asks the adapter's claim socket to `end` the session
 (any local caller may; an adapter whose claim is not headless refuses) and waits up to
-`--wait-s` for the name to be released: exit 0 once it is, 1 when the socket didn't
-answer or the wait ran out, 3 when nobody holds the name or its session is not headless.
+`--wait-s` for the name to be released. An `end` that reaches the adapter before its bind
+is answered is kept, and the session ends on it as soon as the name is bound. While a
+second launch of the name is still binding, two claim files hold it; the verb asks the
+`bound` one. It exits 0 once the name is released, 1 when the socket didn't answer or
+the wait ran out, 3 when nobody holds the name or its session is not headless.
 
 `--headless` is refused with `--window`, `--no-window`, `--resume` and in the roster
 form; `--exit`, `--brief` and `--brief-file` are refused without it; so are a value

@@ -1184,11 +1184,12 @@ EXIT_SESSION_POLL_S = 0.2
 
 
 def _holding(qualified: str, env) -> dict | None:
-    """The live claim record that holds `qualified`, or None."""
-    for _key, record in claimfile.all_records(env):
-        if claimfile.held_identity(record) == qualified and claimfile.is_live(record):
-            return record
-    return None
+    """The live claim record that holds `qualified`, or None. When two hold it (a second
+    launch of the name is still binding, `offline` until refused), the `bound` one."""
+    held = [record for _key, record in claimfile.all_records(env)
+            if claimfile.held_identity(record) == qualified and claimfile.is_live(record)]
+    bound = [record for record in held if record.get("state") == claimfile.BOUND]
+    return (bound or held or [None])[0]
 
 
 def cmd_exit_session(args, ctx: Context) -> int:

@@ -70,6 +70,25 @@ def test_it_ends_a_headless_session_and_waits_for_the_name_to_go(holders):
     assert asked.is_set()
 
 
+def test_the_bound_record_is_ended_when_a_second_launch_still_binds(holders):
+    """A second launch of the name, `offline` while its bind is refused, holds the name
+    too until it ends: the verb ends the session that is bound."""
+    binding = holders(key="a-1", headless=True, exit=["done"])
+    binding.on_end = lambda: pytest.fail("the launch still binding is not the session")
+    h = holders(key="b-2", headless=True, exit=["done"])
+    h.bound({"identity": {"qualified": "x@proj-a"}})
+    asked = threading.Event()
+
+    def end():
+        asked.set()
+        threading.Timer(0.2, lambda: (h.close(), binding.close())).start()
+
+    h.on_end = end
+    code, lines = run("x", "--scope", "proj-a")
+    assert (code, lines) == (moxi_exit.OK, ["x@proj-a has ended"])
+    assert asked.is_set()
+
+
 def test_a_bare_name_is_the_global_identity(holders):
     h = holders(name="herald", scope="global", headless=True, exit=["done"])
     h.on_end = lambda: threading.Timer(0.2, h.close).start()

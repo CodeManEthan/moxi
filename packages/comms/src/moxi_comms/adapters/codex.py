@@ -337,6 +337,9 @@ class CodexAdapter(HarnessAdapter):
         #: what ends the host (`serve` sets it: `headless.end` on the host's pidfd).
         self.exit_watch: headless_mod.ExitWatch | None = None
         self.ended_cause: str | None = None
+        #: A cause asked for before the bind built the watch (`exit-session` while the
+        #: name was still binding): the watch ends the session on it as it starts.
+        self._end_asked: str | None = None
         self.on_headless_end = None
         self._watch_clock = watch_clock
         self._headless_tick_s = headless_tick_s
@@ -497,12 +500,16 @@ class CodexAdapter(HarnessAdapter):
 
     # ------------------------------------------------------------------ headless
     def _start_headless(self) -> None:
-        """The watch, from the bind, and the thread that asks it for a cause."""
+        """The watch, from the bind, and the thread that asks it for a cause. A cause
+        asked for before the watch existed ends the session now."""
         watch = headless_mod.ExitWatch(self.exit_rule, self._watch_clock)
         with self._lock:
             self.exit_watch = watch
+            asked, self._end_asked = self._end_asked, None
         threading.Thread(target=self._headless_loop, daemon=True,
                          name="comms-codex-headless").start()
+        if asked is not None:
+            self.end_headless(asked)
 
     def _deliver_brief(self, session) -> None:
         """Hand the brief to the session as its first turn, `ref="brief"`. Its hand is a
@@ -623,10 +630,17 @@ class CodexAdapter(HarnessAdapter):
     def end_headless(self, cause: str) -> bool:
         """End this headless session on `cause`, once: the first cause wins. Logs the
         end line with the rows left waiting for the name and ends the host
-        (`on_headless_end`). False when it had ended already."""
+        (`on_headless_end`). False when it had ended already, or is not headless.
+
+        Asked before the bind has built the watch (the claim socket answers `end` from
+        before the bind), the cause is kept and the session ends on it once the watch
+        starts: the name is held by then, and its holder must end."""
         with self._lock:
-            if self.exit_watch is None or self.ended_cause is not None:
+            if self.exit_rule is None or self.ended_cause is not None:
                 return False
+            if self.exit_watch is None:
+                self._end_asked = self._end_asked or cause
+                return True
             self.ended_cause = cause
             why = self.exit_watch.why(cause)
         waiting = self._read_mail(look=False)
