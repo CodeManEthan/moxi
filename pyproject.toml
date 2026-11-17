@@ -65,7 +65,8 @@ dev = ["moxi-dev"]
 # commit once confirmed. Every member is on exactly one of the two lists: a member added
 # to the workspace goes on not-ready with it, and moxi-dev check refuses one on neither.
 # check-workflow and check-job name the CI job whose success on a push to main the gate
-# wants at the tagged commit.
+# wants at the tagged commit. check-job is also the check GitHub requires before main
+# moves (moxi publishing github apply), so that job runs on pushes to every branch.
 [tool.moxi-publishing]
 not-ready = [
     "moxi",

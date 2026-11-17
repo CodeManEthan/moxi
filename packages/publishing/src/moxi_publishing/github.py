@@ -3,11 +3,16 @@ needs, read back or written with `gh api`.
 
 What a public repo expects of GitHub:
 
-- ruleset `moxi-main` on the push piece's main branch: no deletion, no force push;
+- ruleset `moxi-main` on the push piece's main branch: no deletion, no force push, and
+  the check the root `pyproject.toml` names as `check-job` in `[tool.moxi-publishing]`
+  required, from the GitHub Actions app only, not strict. GitHub then moves the branch
+  only to a commit that check has already passed on, which for a direct push means a
+  run on another ref first. With no `check-job` there is no check to require: the
+  difference is printed and left, and a required check GitHub already holds is kept;
 - no other branch ruleset: other branches are created, updated and deleted freely, and
   the push piece holds "deleted only once merged" locally;
 - ruleset `moxi-tags` on every tag: no update, deletion or force push;
-- ruleset `tags-create` on every tag but release tags (`*-v*`): no creation;
+- ruleset `moxi-tags-create` on every tag but release tags (`*-v*`): no creation;
 - secret scanning with push protection;
 - environment `pypi`, deployable from release tags only, whose required reviewer is the
   account `gh` is signed in as, allowed to approve its own runs since that account pushes
@@ -16,10 +21,13 @@ What a public repo expects of GitHub:
 - a trusted publisher on the package index for each distribution, which GitHub can't
   show; `show` says so.
 
-Each ruleset is active with no bypass actors. `show` prints each difference field by
-field, and the push piece's `main` setting when it isn't the repository's default branch.
-`apply` writes the expected rulesets and settings; it deletes no ruleset and changes no
-branch, and prints what it left for you.
+Each ruleset is active with no bypass actors, and its rules are compared with their
+parameters, not by type alone. `show` prints each difference field by field, and the push
+piece's `main` setting when it isn't the repository's default branch. `apply` writes the
+expected rulesets and settings; it deletes no ruleset and changes no branch, and prints
+what it left for you. Where the required check is new, both say what it asks of the CI
+workflow: a check that runs only on pushes to main can never pass first elsewhere, so
+main could no longer move.
 """
 
 from __future__ import annotations
@@ -29,6 +37,9 @@ from dataclasses import dataclass, field
 
 from moxi_publishing.flag import Failure
 from moxi_publishing.release import Result
+from moxi_publishing.tags import CHECK_JOB as CHECK_JOB_KEY
+from moxi_publishing.tags import CHECK_WORKFLOW as CHECK_WORKFLOW_KEY
+from moxi_publishing.tags import TABLE as TOOL_TABLE
 
 #: How long one `gh api` call may take.
 GH_TIMEOUT_S = 30.0
@@ -40,6 +51,14 @@ RELEASE_TAGS = "*-v*"
 WORKFLOW = "release.yml"
 #: The two kinds of ref a ruleset may target that `show` judges.
 _REF_TARGETS = ("branch", "tag")
+#: The GitHub Actions app: the one source `moxi-main`'s required check is taken from, so a
+#: commit status another token posts under the check's name doesn't meet it.
+ACTIONS_APP_ID = 15368
+#: The ruleset rule that requires checks, and the expected rulesets' names.
+REQUIRED_CHECKS = "required_status_checks"
+MAIN_RULESET = "moxi-main"
+TAGS_RULESET = "moxi-tags"
+TAGS_CREATE_RULESET = "moxi-tags-create"
 
 
 @dataclass(frozen=True)
@@ -60,9 +79,21 @@ class Difference:
     text: str
     writes: tuple[Request, ...] = ()
     left: str = ""
+    #: Whether the writes make `moxi-main` require a check it doesn't require today.
+    adds_required_check: bool = False
 
     def line(self) -> str:
         return f"{self.subject}: {self.text}"
+
+
+@dataclass(frozen=True)
+class CheckJob:
+    """The check `moxi-main` requires, as the root `pyproject.toml` names it: `job` is
+    `check-job`, `workflow` is `check-workflow`, and `missing` says why there is no job."""
+
+    job: str | None
+    workflow: str | None = None
+    missing: str = ""
 
 
 @dataclass
@@ -77,8 +108,17 @@ class State:
     notes: list[str] = field(default_factory=list)
 
 
-def expected_rulesets(main: str) -> list[dict]:
-    """The rulesets a public repo expects, as `gh api` takes them."""
+def required_check_rule(check: str) -> dict:
+    """The rule requiring `check` from the GitHub Actions app, not strict (the branch
+    need not be up to date with main first)."""
+    return {"type": REQUIRED_CHECKS, "parameters": {
+        "strict_required_status_checks_policy": False,
+        "required_status_checks": [{"context": check, "integration_id": ACTIONS_APP_ID}]}}
+
+
+def expected_rulesets(main: str, check: str | None = None) -> list[dict]:
+    """The rulesets a public repo expects, as `gh api` takes them. `check` is the root
+    `pyproject.toml`'s `check-job`; without one `moxi-main` requires no check."""
 
     def ruleset(name: str, target: str, include: list[str], exclude: list[str],
                 rules: list[str]) -> dict:
@@ -87,12 +127,15 @@ def expected_rulesets(main: str) -> list[dict]:
                 "conditions": {"ref_name": {"include": include, "exclude": exclude}},
                 "rules": [{"type": rule} for rule in rules]}
 
+    main_ruleset = ruleset(MAIN_RULESET, "branch", [f"refs/heads/{main}"], [],
+                           ["deletion", "non_fast_forward"])
+    if check:
+        main_ruleset["rules"].append(required_check_rule(check))
     return [
-        ruleset("moxi-main", "branch", [f"refs/heads/{main}"], [],
-                ["deletion", "non_fast_forward"]),
-        ruleset("moxi-tags", "tag", ["refs/tags/**/*"], [],
+        main_ruleset,
+        ruleset(TAGS_RULESET, "tag", ["refs/tags/**/*"], [],
                 ["deletion", "non_fast_forward", "update"]),
-        ruleset("tags-create", "tag", ["refs/tags/**/*"], [f"refs/tags/{RELEASE_TAGS}"],
+        ruleset(TAGS_CREATE_RULESET, "tag", ["refs/tags/**/*"], [f"refs/tags/{RELEASE_TAGS}"],
                 ["creation"]),
     ]
 
@@ -201,11 +244,33 @@ def _names(items) -> str:
     return ", ".join(items) if items else "none"
 
 
+def _checks(rule: dict | None) -> list[tuple[str, int | None]]:
+    """The (check name, app id) pairs a `required_status_checks` rule requires."""
+    items = ((rule or {}).get("parameters") or {}).get(REQUIRED_CHECKS) or []
+    found = [(str(item.get("context")), item.get("integration_id"))
+             for item in items if isinstance(item, dict)]
+    return sorted(found, key=lambda pair: (pair[0], str(pair[1])))
+
+
+def _checks_text(checks: list[tuple[str, int | None]]) -> str:
+    def one(name: str, app: int | None) -> str:
+        if app is None:
+            return f"{name} from any app"
+        if app == ACTIONS_APP_ID:
+            return f"{name} from GitHub Actions (app {app})"
+        return f"{name} from app {app}"
+
+    return ", ".join(one(*pair) for pair in checks) if checks else "none"
+
+
 def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Difference]:
     subject = f"ruleset {want['name']}"
+    want_rules = {rule["type"]: rule for rule in want["rules"]}
+    adds = REQUIRED_CHECKS in want_rules
     if have is None:
         return [Difference(subject, "missing",
-                           (Request("POST", f"repos/{github}/rulesets", want),))]
+                           (Request("POST", f"repos/{github}/rulesets", want),),
+                           adds_required_check=adds)]
     write = (Request("PUT", f"repos/{github}/rulesets/{have['id']}", want),)
     found = []
 
@@ -226,11 +291,32 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
         if has != wants:
             found.append(Difference(subject, f"{key}: has {_names(has)}; want "
                                              f"{_names(wants)}", write))
-    has = sorted({rule.get("type", "?") for rule in have.get("rules") or []})
-    wants = sorted(rule["type"] for rule in want["rules"])
+    have_rules: dict[str, dict] = {}
+    for rule in have.get("rules") or []:
+        have_rules.setdefault(rule.get("type", "?"), rule)
+    has = sorted(kind for kind in have_rules if kind != REQUIRED_CHECKS)
+    wants = sorted(kind for kind in want_rules if kind != REQUIRED_CHECKS)
     if has != wants:
         found.append(Difference(subject, f"rules: has {_names(has)}; want {_names(wants)}",
                                 write))
+    has_checks = _checks(have_rules.get(REQUIRED_CHECKS))
+    want_checks = _checks(want_rules.get(REQUIRED_CHECKS))
+    if has_checks != want_checks:
+        found.append(Difference(subject, f"required checks: has {_checks_text(has_checks)}; "
+                                         f"want {_checks_text(want_checks)}", write,
+                                adds_required_check=bool(
+                                    {name for name, _ in want_checks}
+                                    - {name for name, _ in has_checks})))
+    # A rule's parameters, where GitHub holds the rule: every one the expected rule sets.
+    for kind, rule in want_rules.items():
+        if kind not in have_rules:
+            continue
+        has_params = have_rules[kind].get("parameters") or {}
+        for key, value in (rule.get("parameters") or {}).items():
+            if key != REQUIRED_CHECKS and has_params.get(key) != value:
+                found.append(Difference(
+                    subject, f"{kind} {key}: has {json.dumps(has_params.get(key))}; want "
+                             f"{json.dumps(value)}", write))
     return found
 
 
@@ -290,7 +376,9 @@ def _security_differences(github: str, repo: dict) -> list[Difference]:
                        ("secret_scanning_push_protection", "push protection")):
         status = (security.get(key) or {}).get("status", "disabled")
         if status != "enabled":
-            found.append(Difference(label, f"has {status}; want enabled", (Request(
+            why = (" (GitHub then refuses a push it finds a secret in, and links a way "
+                   "past it)" if key == "secret_scanning_push_protection" else "")
+            found.append(Difference(label, f"has {status}; want enabled{why}", (Request(
                 "PATCH", f"repos/{github}",
                 {"security_and_analysis": {
                     "secret_scanning": {"status": "enabled"},
@@ -298,20 +386,38 @@ def _security_differences(github: str, repo: dict) -> list[Difference]:
     return found
 
 
-def differences(github: str, state: State, *, main: str) -> list[Difference]:
-    """Every field of `state` unlike what a public repo expects, in `show`'s order."""
+def differences(github: str, state: State, *, main: str,
+                check: CheckJob | None = None) -> list[Difference]:
+    """Every field of `state` unlike what a public repo expects, in `show`'s order.
+    `check` is the root `pyproject.toml`'s check job; none means it names none."""
+    check = check or CheckJob(None, missing=f"no {CHECK_JOB_KEY} in the root "
+                                            f"pyproject.toml's [tool.{TOOL_TABLE}]")
     found: list[Difference] = []
     by_name = {ruleset.get("name"): ruleset for ruleset in state.rulesets}
-    wanted = expected_rulesets(main)
+    wanted = expected_rulesets(main, check.job)
+    held = next((rule for rule in (by_name.get(MAIN_RULESET) or {}).get("rules") or []
+                 if rule.get("type") == REQUIRED_CHECKS), None)
+    if not check.job and held is not None:
+        # No check to require: one GitHub already holds is kept, never written away.
+        wanted[0]["rules"].append({"type": REQUIRED_CHECKS,
+                                   "parameters": held.get("parameters") or {}})
     for want in wanted:
         found += _ruleset_differences(github, by_name.get(want["name"]), want)
+    if not check.job:
+        kept = (f"GitHub holds {_checks_text(_checks(held))}, kept" if _checks(held)
+                else "GitHub holds none")
+        found.append(Difference(
+            f"ruleset {MAIN_RULESET}",
+            f"required checks: {check.missing}, so none is judged; {kept}",
+            left=f"name the CI job that must pass before {main} moves as {CHECK_JOB_KEY}, "
+                 "then run github apply again"))
     names = {want["name"] for want in wanted}
     for ruleset in state.rulesets:
         if ruleset.get("name") not in names and ruleset.get("target") in _REF_TARGETS:
             found.append(Difference(
                 f"ruleset {ruleset.get('name')}",
                 f"not expected ({ruleset.get('target')} ruleset); a public repo keeps "
-                "only moxi-main, moxi-tags and tags-create",
+                f"only {MAIN_RULESET}, {TAGS_RULESET} and {TAGS_CREATE_RULESET}",
                 left=f"delete it on GitHub, or: gh api --method DELETE "
                      f"repos/{github}/rulesets/{ruleset.get('id')}"))
     found += _security_differences(github, state.repo)
@@ -338,15 +444,45 @@ def _context(path: str, run) -> tuple[str, str, str, Gh]:
     return root, github, release.main_branch(root), Gh(run)
 
 
-def _publisher_line(root: str, github: str) -> str:
+def _work_tree(root: str):
+    """The workspace as the work tree has it, through the tag gate's reader, or the
+    reason it can't be read."""
     from moxi_publishing import tags
 
-    owner, _, name = github.partition("/")
     try:
-        dists = sorted(tags.work_tree_workspace(root).members)
-    except tags.ReleaseError:
-        # The line is advice; a workspace that can't be read only loses its list.
-        dists = []
+        return tags.work_tree_workspace(root), ""
+    except tags.ReleaseError as exc:
+        return None, str(exc)
+
+
+def check_job(root: str) -> CheckJob:
+    """The check `moxi-main` requires: the root `pyproject.toml`'s `check-job` in
+    `[tool.moxi-publishing]`, read from the work tree as the tag gate reads it."""
+    ws, problem = _work_tree(root)
+    if ws is None:
+        return CheckJob(None, missing=f"{CHECK_JOB_KEY} can't be read: {problem}")
+    job = ws.setting(CHECK_JOB_KEY)
+    workflow = ws.setting(CHECK_WORKFLOW_KEY)
+    if job is None:
+        return CheckJob(None, workflow, f"no {CHECK_JOB_KEY} in the root pyproject.toml's "
+                                        f"[tool.{TOOL_TABLE}]")
+    return CheckJob(job.strip(), workflow)
+
+
+def _check_note(check: CheckJob, main: str) -> str:
+    where = (f".github/workflows/{check.workflow}" if check.workflow
+             else "the CI workflow")
+    return (f"note: with {check.job} required, GitHub moves {main} only to a commit whose "
+            f"{check.job} check has already passed on another ref, so {where} must run "
+            f"{check.job} on pushes to branches other than {main}; a check that runs only "
+            f"on {main} can never pass first, and {main} could no longer move")
+
+
+def _publisher_line(root: str, github: str) -> str:
+    owner, _, name = github.partition("/")
+    ws, _problem = _work_tree(root)
+    # The line is advice; a workspace that can't be read only loses its list.
+    dists = sorted(ws.members) if ws is not None else []
     which = f" ({', '.join(dists)})" if dists else ""
     return (f"PyPI trusted publisher: can't be read from GitHub; on pypi.org each "
             f"distribution{which} needs one for owner {owner}, repository {name}, "
@@ -358,10 +494,13 @@ def show(path: str, *, run=None) -> Result:
     public repo expects, field by field. Raises `Failure`."""
     root, github, main, gh = _context(path, run)
     state = read(gh, github)
-    found = differences(github, state, main=main)
+    check = check_job(root)
+    found = differences(github, state, main=main, check=check)
     lines = [f"{github}: default branch {state.repo.get('default_branch')}, reviewer "
              f"{state.account['login']} (gh's account)"]
     lines += [each.line() for each in found]
+    if any(each.adds_required_check for each in found):
+        lines.append(_check_note(check, main))
     lines.append(_publisher_line(root, github))
     lines.append(f"{len(found)} difference(s)" if found else "no difference")
     return Result(lines, 0)
@@ -372,7 +511,8 @@ def apply(path: str, *, run=None) -> Result:
     differs, then print what is left for the user. Raises `Failure`."""
     root, github, main, gh = _context(path, run)
     state = read(gh, github)
-    found = differences(github, state, main=main)
+    check = check_job(root)
+    found = differences(github, state, main=main, check=check)
     lines = [f"{github}: reviewer {state.account['login']} (gh's account)"]
     done: list[Request] = []
     for each in found:
@@ -381,6 +521,8 @@ def apply(path: str, *, run=None) -> Result:
                 gh.send(request)
                 done.append(request)
                 lines.append(f"wrote {request.method} {request.path}")
+    if any(each.adds_required_check for each in found):
+        lines.append(_check_note(check, main))
     for each in found:
         if not each.writes:
             lines.append(f"left: {each.line()}" + (f"; {each.left}" if each.left else ""))
@@ -389,5 +531,7 @@ def apply(path: str, *, run=None) -> Result:
     return Result(lines, 0)
 
 
-__all__ = ["GITHUB_ENVIRONMENT", "RELEASE_TAGS", "WORKFLOW", "Request", "Difference", "State",
-           "Gh", "expected_rulesets", "read", "differences", "show", "apply"]
+__all__ = ["GITHUB_ENVIRONMENT", "RELEASE_TAGS", "WORKFLOW", "ACTIONS_APP_ID",
+           "REQUIRED_CHECKS", "MAIN_RULESET", "TAGS_RULESET", "TAGS_CREATE_RULESET",
+           "Request", "Difference", "CheckJob", "State", "Gh", "required_check_rule",
+           "expected_rulesets", "read", "differences", "check_job", "show", "apply"]
