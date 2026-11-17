@@ -9,6 +9,7 @@
   loads `dataclasses`. It keeps its fields, equality, hash, `coloured()` and `as_dict()`,
   and still refuses assignment, now with a plain `AttributeError` (`dataclasses`'
   `FrozenInstanceError` was one).
+- `Segment`'s `dim` is keyword-only: `Segment(text, band, age_s, ttl_s, dim=True)`.
 
 ## 0.1.6 (unreleased)
 
