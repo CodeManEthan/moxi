@@ -68,6 +68,28 @@ def test_the_set_of_wrappers_that_end_on_a_bind_timeout_is_what_they_do(
     assert isinstance(api.ENDS_ON_BIND_TIMEOUT, frozenset)
 
 
+def test_headless_names_the_wrappers_that_take_a_headless_launch():
+    """The launcher lifts its refusal of a headless launch with an identity for the
+    harnesses `HEADLESS` names, so it names only a wrapper that takes the flags."""
+    from moxi_comms.adapters import codex_wrapper
+
+    assert api.HEADLESS == frozenset({"codex"})
+    assert isinstance(api.HEADLESS, frozenset)
+    args = codex_wrapper.build_parser().parse_args(
+        ["--name", "w", "--headless", "--exit", "after=2h", "--brief", "go"])
+    assert (args.headless, args.exit, args.brief) == (True, ["after=2h"], "go")
+
+
+def test_parse_exit_is_the_wrappers_parser():
+    from moxi_comms.adapters import headless
+
+    assert api.parse_exit is headless.parse_exit
+    assert api.parse_exit([], harness="codex").values == ("done",)
+    assert api.parse_exit(["idle=90m"], harness="codex").cold_gap
+    with pytest.raises(ValueError, match="s, m or h"):
+        api.parse_exit(["idle=90"], harness="codex")
+
+
 def test_the_bind_wait_is_the_longer_wrappers_wait():
     from moxi_comms.adapters import codex_wrapper, session
 
@@ -95,7 +117,7 @@ def test_interface_2_holds_its_names():
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
         "session_of", "caller_identity", "roster_rows", "RosterRow", "CacheFact",
         "CODEX_RESUME",
-        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
+        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "HEADLESS", "parse_exit", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
         "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
         "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
         "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
