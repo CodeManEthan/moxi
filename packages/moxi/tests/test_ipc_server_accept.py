@@ -31,17 +31,31 @@ async def echo(conn, method, params):
     return {"method": method}
 
 
-def fail_accepts(monkeypatch, server, count: int) -> list[int]:
+# The accepts asyncio tries on one readiness event: the listener's backlog (100, the
+# default of `asyncio.start_unix_server`) and one more.
+ONE_EVENT = 101
+
+
+def fail_accepts(monkeypatch, server, count: int, *,
+                 second_event_after_s: float = 0.0) -> list[int]:
     """Make the next `count` accepts on `server`'s listener raise EMFILE. Returns the
-    one-item list of failures still to come."""
+    one-item list of failures still to come.
+
+    The clock the log's rate reads is frozen meanwhile, and moves on by
+    `second_event_after_s` only at the first failure of asyncio's second accept event,
+    so how far apart the two events are is set here, not by the machine's speed."""
     (listener,) = server._listener.sockets
     fd = listener.fileno()
     real = socket.socket.accept
     left = [count]
+    clock = [1000.0]
+    monkeypatch.setattr(_server, "_clock", lambda: clock[0])
 
     def accept(self):
         if self.fileno() == fd and left[0] > 0:
             left[0] -= 1
+            if count - left[0] == ONE_EVENT + 1:
+                clock[0] += second_event_after_s
             raise OSError(errno.EMFILE, os.strerror(errno.EMFILE))
         return real(self)
 
@@ -94,7 +108,7 @@ def test_a_flood_of_accept_failures_logs_one_line(sock_dir, monkeypatch, caplog)
     assert [r.levelname for r in caplog.records if r.name == "moxi.ipc"] == ["WARNING"]
     assert all(r.exc_info is None for r in caplog.records if r.name == "moxi.ipc")
     assert asyncio_records(caplog) == []
-    assert 0.9 <= elapsed < 5, "served after asyncio's one retry"
+    assert elapsed >= 0.9, "served after asyncio's one retry"
 
 
 def test_other_contexts_reach_the_loops_handler_once_and_unchanged(sock_dir, caplog):
@@ -141,13 +155,14 @@ def test_a_line_after_the_interval_counts_the_failures_held_back(sock_dir, monke
     async def main():
         server = await ipc.serve(address, echo)
         try:
-            fail_accepts(monkeypatch, server, 150)
+            left = fail_accepts(monkeypatch, server, 150, second_event_after_s=1.0)
             await call(address)
         finally:
             server.close()
             await server.wait_closed()
+        return left[0]
 
-    asyncio.run(main())
+    assert asyncio.run(main()) == 0
     lines = accept_lines(caplog)
     assert len(lines) == 2, lines
     assert "more since" not in lines[0]

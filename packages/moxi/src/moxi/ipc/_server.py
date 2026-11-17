@@ -72,6 +72,9 @@ LOCK_WAIT = 1.0
 #: loop. The failures in between are counted, and the next line says how many.
 ACCEPT_LOG_EVERY = 60.0
 
+# The clock that rate is timed on, read through this module so a test can drive it.
+_clock = time.monotonic
+
 # The message asyncio's selector loop passes its exception handler when accept fails for
 # want of a file descriptor, buffer space or memory.
 _ACCEPT_FAILED = "socket.accept() out of system resource"
@@ -156,7 +159,7 @@ class _LoopState:
             return False
         exc = context.get("exception")
         number = getattr(exc, "errno", None)
-        now = time.monotonic()
+        now = _clock()
         last = self.last.get(number)
         if last is not None and now - last[0] < ACCEPT_LOG_EVERY:
             self.held[number] = self.held.get(number, 0) + 1
