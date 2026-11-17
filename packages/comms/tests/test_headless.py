@@ -30,9 +30,8 @@ from moxi_comms.adapters.headless import ExitRule, ExitWatch, parse_exit
      ExitRule(values=("cold", "idle=1h", "after=12h", "done"), done=True, cold=True,
               idle_s=3600, after_s=43200)),
 ])
-@pytest.mark.parametrize("harness", ["codex", "claude"])
-def test_parse_exit_reads_every_value(values, rule, harness):
-    assert parse_exit(values, harness=harness) == rule
+def test_parse_exit_reads_every_value(values, rule):
+    assert parse_exit(values, harness="codex") == rule
 
 
 @pytest.mark.parametrize("values, words", [
@@ -54,9 +53,14 @@ def test_parse_exit_refuses_with_one_line_naming_the_fix(values, words):
     assert words in str(caught.value) and "\n" not in str(caught.value)
 
 
-def test_parse_exit_refuses_a_harness_with_no_headless_launch():
-    with pytest.raises(ValueError, match="opencode has no headless launch"):
-        parse_exit(["done"], harness="opencode")
+@pytest.mark.parametrize("harness", ["claude", "opencode"])
+def test_parse_exit_refuses_a_harness_with_no_headless_launch(harness):
+    """Only a harness whose wrapper takes the headless flags, the ones comms' API names
+    in `HEADLESS`, has a rule to parse."""
+    with pytest.raises(ValueError, match=f"{harness} has no headless launch; one of "
+                                         "codex has"):
+        parse_exit(["done"], harness=harness)
+    assert headless.HEADLESS == frozenset({"codex"})
 
 
 def test_parse_exit_takes_a_list_not_one_string():

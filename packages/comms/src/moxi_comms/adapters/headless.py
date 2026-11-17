@@ -75,8 +75,9 @@ SHELLS_WAIT_S = 3600.0
 
 #: The brief's delivery ref.
 BRIEF_REF = "brief"
-#: The harnesses whose wrapper a rule may be parsed for.
-HARNESSES = ("claude", "codex")
+#: The harnesses whose comms wrapper takes --headless, --exit and --brief: the ones a
+#: rule may be parsed for. comms' API publishes it.
+HEADLESS = frozenset({"codex"})
 #: The rule with no `--exit`.
 DEFAULT_EXIT = ("done",)
 
@@ -128,11 +129,11 @@ def parse_exit(values: Iterable[str] | None, *, harness: str) -> ExitRule:
     """The exit rule `values` (the `--exit` values, in order) give a headless launch of
     `harness`. Raises `ValueError` with the wrapper's words, one line naming the fix,
     for a value outside the rule's grammar, a value given twice, a harness that has no
-    headless launch, or `cold` while the cache module is not installed. No values is the
-    rule `done`."""
-    if harness not in HARNESSES:
+    headless launch (one `HEADLESS` doesn't name), or `cold` while the cache module is not
+    installed. No values is the rule `done`."""
+    if harness not in HEADLESS:
         raise ValueError(f"{harness} has no headless launch; one of "
-                         f"{', '.join(HARNESSES)} has")
+                         f"{', '.join(sorted(HEADLESS))} has")
     if isinstance(values, str):
         raise TypeError("values is an iterable of --exit values, not one string")
     given = tuple(values or ())
@@ -392,6 +393,6 @@ def end(handle: int, cause: str, *, waiting: int | None = None, why: str = "",
 
 __all__ = ["AFTER", "BRIEF_FAILED", "BRIEF_REF", "CACHE_READ_EVERY_S", "CACHE_UNREADABLE",
            "CAUSES", "COLD", "COLD_GAP", "DEFAULT_EXIT", "DONE", "DONE_READ_AFTER_S",
-           "EXIT_SESSION", "ExitRule", "ExitWatch", "HARNESSES", "HEADLESS_READY_WAIT_S",
+           "EXIT_SESSION", "ExitRule", "ExitWatch", "HEADLESS", "HEADLESS_READY_WAIT_S",
            "HOST_ENDED", "IDLE", "SHELLS_WAIT_S", "TICK_S", "WAITS_FOR_SHELLS", "end",
            "end_line", "parse_exit"]
