@@ -26,6 +26,9 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 - `moxi-dev stamp` checks that each web page's committed build matches its sources.
 - `moxi-dev rename` applies the identifier changes in `renames.tsv` and reports old uses
   it cannot resolve.
+- `moxi-dev timed` runs the timed tests on their own, each counted only when little other
+  work ran on the machine during it, and keeps their results per commit and machine;
+  `moxi-dev timed show` reads them (see "Timed tests" below).
 
 `moxi-dev <verb> --help` shows a verb's own arguments. From the repository root:
 
@@ -223,6 +226,80 @@ stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it e
 #!/bin/sh
 exec uv run --locked moxi-dev stamp --staged
 ```
+
+## Timed tests
+
+A test marked `timed` asserts a wall-clock budget, which a busy machine breaks whatever
+the test does, so `moxi-dev check` never runs one. `moxi-dev timed` does, from the
+repository's root:
+
+```sh
+uv run --locked moxi-dev timed [--wait-s S] [--idle-line CPUS] [--package NAME]...
+    [--finding L<n>]... [--machine NAME] [--record-dir DIR] [--no-record] [--scheduled]
+```
+
+It takes a run lock first (`.run-lock` in `<git common dir>/moxi-dev/timed/`; a second
+run exits 2 and says another run is measuring), checks `uv.lock`, syncs its own
+environment, `.moxi-dev/timed-env-3.12`, and runs each package's timed tests in one
+session with no workers, every tier but `live`, writing under `.moxi-dev/timed-run/`. It
+never touches the check's environment or files.
+
+The idle gate (`moxi_dev.testing`, "The idle gate"): before each timed test the kit reads
+how much other work ran on the machine, from the kernel's CPU counters less this run's
+own CPU time, and again after it. A test counts only when other work over its own run
+stayed under the line, 2.0 CPUs by default (`--idle-line`). The run waits for the line at
+most `--wait-s` seconds in all (300 by default), spent once across every package. Each
+test ends `passed`, `failed`, `skipped`, or `not measured` (the machine was busy during
+it, whatever it read), which is neither a pass nor a failure. On macOS the gauge is the
+one-minute load average; on Windows there is none yet, and a timed test there is not
+measured.
+
+The last line is the summary:
+`moxi-dev timed: commit <sha> on <machine> | passed <n>, failed <n>, skipped <n>, not
+measured <n> (...) | total <s> s | exit <code>`. Exit 0: every test passed or skipped; 1:
+one failed, or a session broke; 3: none failed and some were not measured; 2: it couldn't
+start (the lock held, a stale `uv.lock`, a failed sync, a refused option).
+
+`MOXI_TEST_TIMED_SLACK=<factor>` passes through to the tests and multiplies every budget
+(`moxi_dev.testing`, "Timed tests"). The run records the factor with each result.
+
+The record. Each run is kept at `<record dir>/<machine>/<sha>.json`, the record dir being
+`<git common dir>/moxi-dev/timed` (never tracked, shared by every worktree of the clone),
+or `--record-dir`. `--machine` names the machine (letters, digits and `._-`; the short host
+name by default). A file holds each run (when, the machine's system, CPU and Python, the
+gauge, the line, the wait, the factor, the exit, `scheduled` or `hand`), each test's newest
+result per factor, and, from the newest complete run (no `--package`, no `--finding`, every
+session collected), the list of timed tests it collected. Within a factor, a pass or
+failure replaces any earlier result, a skip replaces only `not measured` or a skip, and
+`not measured` replaces only `not measured`. A tree with changes of its own keeps no
+record, and neither does `--no-record`. A tree with no git (a host's run tree) measures
+the commit its `.moxi-dev/timed/commit.json` names and needs `--record-dir`.
+
+What settles a test. Each machine has one set factor: the factor of its newest scheduled
+run, 1 when it has none. A pass counts when taken at or under that factor, a failure at
+or over it, and a skip at any factor; any other result is kept and marked, and doesn't
+count. `--scheduled` exits 0 with `already measured` when the record of this commit
+already settles every collected test at this run's factor.
+
+`moxi-dev timed show [REV] [--days N] [--machine NAME] [--json]` reads the record along
+REV's first-parent line (`main`) back N days (7) from REV's time, each machine on its own,
+the machine it runs on first. It prints each machine's set factor, its newest measured
+commit and how many commits behind REV it is, its newest tick, and each test's newest
+counted outcome with its reading and budget, a failure's range of commits, and the tests
+with no counted outcome. A line before the machines says how many tests this machine's own
+strict reading covers. Exit 1 when a test's newest counted outcome failed on any machine;
+3 when some test of a machine's set has no counted outcome, or no machine has a complete
+run in the window; 0 otherwise. A machine with no complete run and no counted failure is
+listed and stays out of the exit.
+
+`moxi-dev timed take DIR --machine NAME` merges another machine's record, `DIR` being that
+machine's directory inside its results folder, into this clone's record under `NAME`, per
+commit: a file missing here is added, one both hold is merged (runs united by start time,
+results by the rule above, the collected list from the later complete run), and nothing
+here is removed. Its tick files are added when missing and never changed. A file that
+doesn't parse, names another machine or has a format this moxi-dev doesn't know is named
+and left, and the exit is 2; `nothing to take` (exit 0) when the source is missing or
+empty, and exit 2 when its results folder is gone.
 
 ## Browser tests
 

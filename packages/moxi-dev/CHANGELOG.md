@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `moxi-dev timed` runs the timed tests on their own: a run lock first, its own
+  environment (`.moxi-dev/timed-env-3.12`), one session per package with no workers and
+  the idle gate, and a summary line with exit 0, 1, 3 (some test not measured) or 2. It
+  keeps each run per machine and commit under `<git common dir>/moxi-dev/timed/` (or
+  `--record-dir`), with the slack factor of each result, and `--scheduled` leaves a commit
+  whose tests are all settled. `MOXI_TEST_TIMED_LOCK_FD` hands it a lock its parent holds.
+- `moxi-dev timed show` reads that record along a first-parent walk, each machine at its
+  own set factor, with its own exit codes; `moxi-dev timed take` merges another
+  machine's record into this clone's, per commit, never removing anything.
 - `moxi-dev check` has a renames step, after the Ruff check: it fails when the tree is
   not settled under `renames.tsv` (a row still to apply, a leftover or a row the script
   refuses), read in its own process with no `--main`, and prints the first of them with
