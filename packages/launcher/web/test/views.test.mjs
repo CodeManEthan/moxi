@@ -44,7 +44,7 @@ test("a run says its state, or its outcome once ended, and its word", () => {
   assert.equal(said(run({ outcome: "failed", word: "failed" })), "failed");
 });
 
-test("the lines say what `moxi launcher state` prints", () => {
+test("the lines say what `moxi launcher show` prints", () => {
   const busy = entry({
     relaunch: { state: "relaunch-failed", run: run({ outcome: "relaunch-failed", detail: "pane gone" }),
                 made_by: null, notices_refused: ["lead", "ops"], note_not_taken: true },

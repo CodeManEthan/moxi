@@ -128,7 +128,7 @@ def no_clock(adapter) -> str:
 @dataclass
 class Clock:
     """What `clock_state` read: a kind, the cache's age when there is a clock, the
-    lifetime the read used (`ttl_seconds`, None when it used none) and where it came from
+    lifetime the read used (`ttl_s`, None when it used none) and where it came from
     (`ttl_source`), what the lifetime was looked up by (`key`, in words), and why
     (`reason` in words, `code`) when the read is `unknown`, `no-cache` or a `cold` with no
     lifetime.
@@ -138,9 +138,9 @@ class Clock:
     lines about cold landings under the documented minimum; and `judged`, (thread id, the
     newest turn the drift scan judged)."""
     kind: str
-    age_seconds: float | None = None
+    age_s: float | None = None
     reason: str | None = None
-    ttl_seconds: float | None = None
+    ttl_s: float | None = None
     key: str | None = None
     basis: str | None = None             # "documented" or "measured", with a lifetime
     provider: str | None = None
@@ -193,7 +193,7 @@ def describe_module(found=None) -> str:
     return f"broken ({found.reason}); no cache is read. Reinstall it: {INSTALL}"
 
 
-def required_refusal(required: bool, found=None) -> str | None:
+def required_refusal(*, required: bool, found=None) -> str | None:
     """Why the daemon refuses to start, or None: `[cache] required` is true and cache is
     not `present`."""
     if not required:
@@ -208,7 +208,7 @@ def required_refusal(required: bool, found=None) -> str | None:
             "running without the hold is what you mean.")
 
 
-def projects_root(environ) -> str | None:
+def projects_root(env) -> str | None:
     """The Claude projects root a session states as its evidence, by cache's rule over
     the session's environment (cache re-exports sessions' `projects_root`). None when
     cache is not present: nothing would read it."""
@@ -216,10 +216,10 @@ def projects_root(environ) -> str | None:
     if found.state != "present" or found.api is None:
         return None
     try:
-        return str(found.api.projects_root(environ))
-    except Exception as e:                                         # noqa: BLE001
+        return str(found.api.projects_root(env))
+    except Exception as exc:                                         # noqa: BLE001
         log.warning("the Claude projects root could not be worked out (%s: %s)",
-                    type(e).__name__, e)
+                    type(exc).__name__, exc)
         return None
 
 
@@ -231,9 +231,9 @@ def open_store(*, learn: bool):
         return None
     try:
         return found.api.open_store(learn=learn)
-    except Exception as e:                                         # noqa: BLE001
+    except Exception as exc:                                         # noqa: BLE001
         log.warning("cache's drift store did not open (%s: %s); a measured lifetime "
-                    "reads unknown", type(e).__name__, e)
+                    "reads unknown", type(exc).__name__, exc)
         return None
 
 
@@ -292,8 +292,8 @@ def clock_state(adapter, session_id, *, projects_root=None, turned=True, name=No
                             cache_source=cache_source, new_session=new_session,
                             agent_model=agent_model, bound_at=bound_at, store=store,
                             kinds=kinds)
-    except Exception as e:                                         # noqa: BLE001
-        return Clock(UNKNOWN, reason=f"the cache read failed ({type(e).__name__}: {e})",
+    except Exception as exc:                                         # noqa: BLE001
+        return Clock(UNKNOWN, reason=f"the cache read failed ({type(exc).__name__}: {exc})",
                      code=READ_FAILED)
 
 
@@ -317,9 +317,9 @@ def _clock_state(adapter, session_id, *, projects_root, turned, name, now, cache
     if kind.evidence:
         try:
             answer = _evidence_fn(kind.evidence)(name, session_id)
-        except Exception as e:                                     # noqa: BLE001
+        except Exception as exc:                                     # noqa: BLE001
             return Clock(UNKNOWN, reason=f"the {adapter} kind's evidence failed "
-                                         f"({type(e).__name__}: {e})",
+                                         f"({type(exc).__name__}: {exc})",
                          code=EVIDENCE_FAILED)
         if answer == kinds_mod.UNREADABLE:
             who = name or f"the {adapter} agent"
@@ -348,7 +348,7 @@ class Target:
     """One thing to read: a bound name as the daemon described it, or a raw session id.
 
     `settled` is the kind already decided: the daemon's verdict for a name, or a failed
-    lookup (`unknown`, with `reason`). `age_seconds` comes with it. A Target with no
+    lookup (`unknown`, with `reason`). `age_s` comes with it. A Target with no
     `settled` is a raw session id, read in this process.
     """
     label: str
@@ -359,8 +359,8 @@ class Target:
     bound_for: float | None = None
     settled: str | None = None
     reason: str | None = None
-    age_seconds: float | None = None
-    ttl_seconds: float | None = None
+    age_s: float | None = None
+    ttl_s: float | None = None
     key: str | None = None
     cache_source: str | None = None
     code: str | None = None
@@ -376,8 +376,8 @@ class CacheState:
     target: str
     kind: str
     reason: str | None = None            # why `unknown`, a lifetime-less `cold`, a free model
-    age_seconds: float | None = None
-    ttl_seconds: float | None = None     # the lifetime the read used, when it used one
+    age_s: float | None = None
+    ttl_s: float | None = None     # the lifetime the read used, when it used one
     key: str | None = None               # what the lifetime was looked up by, in words
     cache_source: str | None = None      # a codex binding's sessions root
     session_id: str | None = None
@@ -397,7 +397,7 @@ def target_for_name(qualified: str, reply: dict | None = None, *,
                     error: str | None = None) -> Target:
     """A name, from the daemon's answer to `query kind="session"` (or why it failed).
 
-    The kind and age are the daemon's (`cache_kind`, `age_seconds`, `cache_reason`): the
+    The kind and age are the daemon's (`cache_kind`, `age_s`, `cache_reason`): the
     read it delivers by, with the lifetime it used (`cache_ttl`), what that was looked up
     by (`cache_key`) and a codex binding's root (`cache_source`), for every adapter: an
     adapter comms has no clock for reads as the daemon answers it. A reply whose
@@ -420,15 +420,15 @@ def target_for_name(qualified: str, reply: dict | None = None, *,
     kind = reply.get("cache_kind")
     if kind not in (WARM, COLD, FRESH, NO_CACHE, UNKNOWN):
         kind = UNKNOWN
-    age = reply.get("age_seconds")
+    age = reply.get("age_s")
     ttl = reply.get("cache_ttl")
     source = reply.get("cache_source")
     reason = reply.get("cache_reason") or None
     code = reply.get("cache_code")
     return Target(**base, settled=kind, code=code if isinstance(code, str) and code else None,
                   reason=(reason or "no reason given") if kind == UNKNOWN else reason,
-                  age_seconds=float(age) if _number(age) else None,
-                  ttl_seconds=float(ttl) if _number(ttl) else None,
+                  age_s=float(age) if _number(age) else None,
+                  ttl_s=float(ttl) if _number(ttl) else None,
                   key=reply.get("cache_key") if isinstance(reply.get("cache_key"), str)
                   else None,
                   cache_source=source if isinstance(source, str) and source else None)
@@ -447,10 +447,10 @@ def session_target(client, qualified: str) -> Target:
 
     try:
         reply = client.call("session", {"identity": qualified})
-    except DaemonOffline as e:
-        return target_for_name(qualified, error=f"the comms daemon is offline ({e})")
-    except DaemonError as e:
-        return target_for_name(qualified, error=f"the session query failed ({e})")
+    except DaemonOffline as exc:
+        return target_for_name(qualified, error=f"the comms daemon is offline ({exc})")
+    except DaemonError as exc:
+        return target_for_name(qualified, error=f"the session query failed ({exc})")
     return target_for_name(qualified, reply)
 
 
@@ -482,14 +482,14 @@ def kind_of(t: Target) -> CacheState:
     state = CacheState(target=t.label, kind=UNKNOWN, session_id=t.session_id,
                        adapter=t.adapter, bound_at=t.bound_at, bound_for=t.bound_for)
     if t.settled is not None:
-        state.kind, state.reason, state.age_seconds = t.settled, t.reason, t.age_seconds
-        state.ttl_seconds, state.key, state.cache_source = (t.ttl_seconds, t.key,
+        state.kind, state.reason, state.age_s = t.settled, t.reason, t.age_s
+        state.ttl_s, state.key, state.cache_source = (t.ttl_s, t.key,
                                                             t.cache_source)
         state.code = t.code
         return state
     clock = clock_state(t.adapter or "claude-shim", t.session_id)
-    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_seconds
-    state.ttl_seconds, state.key, state.code = clock.ttl_seconds, clock.key, clock.code
+    state.kind, state.reason, state.age_s = clock.kind, clock.reason, clock.age_s
+    state.ttl_s, state.key, state.code = clock.ttl_s, clock.key, clock.code
     return state
 
 
@@ -571,7 +571,7 @@ def hold_line(state: CacheState) -> str:
     rollout) says why it is counted cold and, where the age is known, when its last
     request was; it never prints a cold duration. Only a cold read is held: a read comms
     could not make refuses the send."""
-    age, ttl = state.age_seconds, state.ttl_seconds
+    age, ttl = state.age_s, state.ttl_s
     if state.kind == COLD and age is not None and ttl is not None:
         if _harness_agent(state) and state.key:
             _provider, model, _note = _key_parts(state.key)
@@ -588,7 +588,7 @@ def hold_line(state: CacheState) -> str:
 def _lifetime_words(state: CacheState) -> str:
     """`gpt-5.6-terra, 30 minutes after a request`, with a measured row's basis."""
     _provider, model, note = _key_parts(state.key)
-    words = f"{model}, {spoken_span(state.ttl_seconds)} after a request"
+    words = f"{model}, {spoken_span(state.ttl_s)} after a request"
     if note and note.startswith("measured"):
         words += f", {note}"
     return words
@@ -619,7 +619,7 @@ def spoken_line(state: CacheState) -> str:
     if state.kind == UNKNOWN:
         return (f"{name}: cache state not known ({state.reason}). Agents' messages to it "
                 "are held.")
-    age, ttl = state.age_seconds, state.ttl_seconds
+    age, ttl = state.age_s, state.ttl_s
     where = "window" if state.adapter == "opencode" else "session"
     if state.kind == COLD and (age is None or ttl is None):
         why = state.reason or "comms has no cache lifetime to count it by"

@@ -21,7 +21,7 @@ import moxi_turns as turns
 from fake_harness import FakeHarness
 from moxi import ipc
 from moxi_turns import listeners, protocol
-from moxi_turns import results as R
+from moxi_turns import results as results
 from moxi_turns.results import Passed, StopFacts
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
@@ -40,7 +40,7 @@ def connect():
     clients = []
 
     def make(ep, *, hello=True):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         if hello:
             client.hello((2, 2))
@@ -68,17 +68,17 @@ def notes(client, count: int, timeout: float = 5.0) -> list[tuple[str, object]]:
     return out
 
 
-def started(client, answer: dict) -> R.Started:
+def started(client, answer: dict) -> results.Started:
     """Wait until the delivery `answer` names has started: the answer comes before the
     worker hands the delivery to the harness."""
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
-    return R.from_wire(got["result"])
+                               "timeout_ms": 5000}, timeout_s=10)
+    return results.from_wire(got["result"])
 
 
 # -- where the endpoint serves, and what it leaves on disk ------------------------------
 
-def test_the_directory_the_address_and_hello_json(make_endpoint):
+def test_the_dir_the_address_and_hello_json(make_endpoint):
     ep, fake = make_endpoint()
     assert ep.dir == runtime() / "v2" / f"fake-{ep.nonce}"
     assert stat.S_IMODE(ep.dir.stat().st_mode) == 0o700
@@ -99,7 +99,7 @@ def test_hello_json_follows_the_session_id(make_endpoint):
 
 def test_the_session_answer_names_the_harness_and_the_endpoint(make_endpoint, connect):
     ep, _ = make_endpoint(FakeHarness(pid=4242))
-    session = connect(ep).call("session", {}, timeout=5)
+    session = connect(ep).call("session", {}, timeout_s=5)
     assert (session["pid"], session["endpoint_pid"]) == (4242, os.getpid())
     assert session["harness"] == "fake" and session["nonce"] == ep.nonce
     assert session["session_id"] == "s-1" and "trouble" not in session
@@ -114,14 +114,14 @@ def test_the_hello_offers_the_sessions_capabilities_in_the_contracts_order(
     assert ep.capabilities == ("deliver", "steer")
 
 
-def test_stop_takes_the_directory_the_socket_and_its_lock(make_endpoint):
+def test_stop_takes_the_dir_the_socket_and_its_lock(make_endpoint):
     ep, _ = make_endpoint()
     ep.stop("the test stopped it")
     assert not ep.dir.exists()
     assert not os.path.lexists(ep.address)
     assert not os.path.lexists(ep.address + ".lock")
     with pytest.raises(ipc.NotServing):
-        ipc.connect(ep.address, timeout=1)
+        ipc.connect(ep.address, timeout_s=1)
 
 
 def test_framing_is_moxi_ipcs(make_endpoint, connect):
@@ -136,11 +136,11 @@ def test_framing_is_moxi_ipcs(make_endpoint, connect):
     assert "v" not in answer
     client = connect(ep, hello=False)
     with pytest.raises(ipc.RpcError) as caught:
-        client.call("facts", {}, timeout=5)
+        client.call("facts", {}, timeout_s=5)
     assert caught.value.code == -32002
     client = connect(ep)
     with pytest.raises(ipc.RpcError) as caught:
-        client.call("deliver", ["x"], timeout=5)
+        client.call("deliver", ["x"], timeout_s=5)
     assert caught.value.code == -32602
 
 
@@ -157,38 +157,38 @@ def _v1_scan(root: Path) -> list[Path]:
     refused or missing socket a sweep of its files and the directory. Returns the
     directories whose hello answered."""
     found = []
-    for directory in root.iterdir():
+    for endpoint_dir in root.iterdir():
         try:
-            hello = json.loads((directory / "hello.json").read_text(encoding="utf-8"))
+            hello = json.loads((endpoint_dir / "hello.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if not isinstance(hello, dict):
             continue
-        if protocol.v1_hello(directory, 1.0) is not None:
-            found.append(directory)
+        if protocol.v1_hello(endpoint_dir, 1.0) is not None:
+            found.append(endpoint_dir)
             continue
-        verdict, _ = protocol.probe(directory / "sock")
+        verdict, _ = protocol.probe(endpoint_dir / "sock")
         if verdict == protocol.STALE:
             for name in ("hello.json", "sock", "mod.sock", ".hello.json.tmp",
                          "instructions.md"):
                 with contextlib.suppress(OSError):
-                    (directory / name).unlink()
+                    (endpoint_dir / name).unlink()
             with contextlib.suppress(OSError):
-                directory.rmdir()
+                endpoint_dir.rmdir()
     return found
 
 
 def _dead_v2(name: str = "fake-dead") -> tuple[Path, str]:
     """A version 2 directory left by an endpoint that died: its `hello.json`, a socket
     file nothing listens on, and no lock holder."""
-    directory = runtime() / "v2" / name
-    directory.mkdir(parents=True, mode=0o700)
+    endpoint_dir = runtime() / "v2" / name
+    endpoint_dir.mkdir(parents=True, mode=0o700)
     address = ipc.address("turns", name)
     with socket.socket(socket.AF_UNIX) as s:
         s.bind(address)
-    (directory / "hello.json").write_text(json.dumps(
+    (endpoint_dir / "hello.json").write_text(json.dumps(
         {"address": address, "protocol": 2, "session_id": "s-dead", "pid": 1}))
-    return directory, address
+    return endpoint_dir, address
 
 
 def test_version_1s_scan_finds_and_removes_nothing_of_version_2(make_endpoint):
@@ -197,23 +197,23 @@ def test_version_1s_scan_finds_and_removes_nothing_of_version_2(make_endpoint):
     before = sorted(p for p in runtime().rglob("*"))
     assert _v1_scan(runtime()) == []
     assert sorted(p for p in runtime().rglob("*")) == before
-    assert protocol.v1_directories(runtime()) == []
+    assert protocol.v1_endpoint_dirs(runtime()) == []
     assert protocol.read_hello(ep.dir)["session_id"] == "s-1"
     assert os.path.lexists(dead_address)
 
 
 # -- sweeping a version 2 directory -----------------------------------------------------
 
-def test_a_dead_directory_goes_on_sweeps_word(turns_env):
+def test_a_dead_dir_goes_on_sweeps_word(turns_env):
     dead, address = _dead_v2()
     with pytest.raises(ipc.NotServing):
-        ipc.connect(address, timeout=1)
+        ipc.connect(address, timeout_s=1)
     assert protocol.sweep(dead, address) == "removed"
     assert not dead.exists() and not os.path.lexists(address)
     assert not os.path.lexists(address + ".lock")
 
 
-def test_a_directory_whose_socket_is_gone_goes_too(turns_env):
+def test_a_dir_whose_socket_is_gone_goes_too(turns_env):
     dead, address = _dead_v2("fake-nosock")
     os.unlink(address)
     assert protocol.sweep(dead, address) == "absent"
@@ -233,13 +233,13 @@ def test_a_refused_connect_with_the_lock_held_removes_nothing(turns_env):
     holder = subprocess.Popen(
         [sys.executable, "-c",
          "import sys\nfrom moxi import files\n"
-         "with files.lock(sys.argv[1], timeout=5):\n"
+         "with files.lock(sys.argv[1], timeout_s=5):\n"
          "    print('held', flush=True)\n    sys.stdin.read()\n", address + ".lock"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
         assert holder.stdout.readline().strip() == "held"
         with pytest.raises(ipc.NotServing):
-            ipc.connect(address, timeout=1)
+            ipc.connect(address, timeout_s=1)
         assert protocol.sweep(dead, address) == "live"
         assert (dead / "hello.json").exists() and os.path.lexists(address)
     finally:
@@ -260,13 +260,13 @@ def long_root(turns_env, monkeypatch):
     return short_root
 
 
-def _plant_moved(directory: Path) -> list[str]:
+def _plant_moved(endpoint_dir: Path) -> list[str]:
     """A socket file at each internal socket's short path, as a crashed endpoint leaves
     them."""
     planted = []
     for name in protocol.INTERNAL_SOCKS:
-        path = protocol.endpoint_socket(directory, name)
-        assert Path(path).parent != directory
+        path = protocol.endpoint_socket(endpoint_dir, name)
+        assert Path(path).parent != endpoint_dir
         with socket.socket(socket.AF_UNIX) as s:
             s.bind(path)
         planted.append(path)
@@ -274,7 +274,7 @@ def _plant_moved(directory: Path) -> list[str]:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
-def test_a_dead_endpoints_moved_sockets_go_with_its_directory(long_root):
+def test_a_dead_endpoints_moved_sockets_go_with_its_dir(long_root):
     dead, address = _dead_v2("fake-moved")
     planted = _plant_moved(dead)
     assert turns.sessions() == []                     # the list sweeps it
@@ -301,17 +301,17 @@ def test_a_live_endpoints_moved_sockets_are_never_swept(long_root, make_endpoint
         os.unlink(p)
 
 
-def test_a_short_root_keeps_every_internal_socket_in_the_directory(
+def test_a_short_root_keeps_every_internal_socket_in_the_dir(
         turns_env, short_runtime):
     dead, address = _dead_v2("fake-short")
     for name in protocol.INTERNAL_SOCKS:
         assert protocol.endpoint_socket(dead, name) == str(dead / name)
 
 
-def test_a_starting_directory_has_no_hello_and_is_listed_as_such(turns_env):
+def test_a_starting_dir_has_no_hello_and_is_listed_as_such(turns_env):
     starting = runtime() / "v2" / "fake-starting"
     starting.mkdir(parents=True)
-    assert protocol.v2_directories(runtime()) == [starting]
+    assert protocol.v2_endpoint_dirs(runtime()) == [starting]
     assert protocol.read_hello(starting) is None
 
 
@@ -320,14 +320,14 @@ def test_a_starting_directory_has_no_hello_and_is_listed_as_such(turns_env):
 class V1Endpoint:
     """A version 1 endpoint's directory and socket, answering version 1's hello."""
 
-    def __init__(self, directory: Path, session_id: str):
-        directory.mkdir(parents=True)
-        self.dir = directory
+    def __init__(self, endpoint_dir: Path, session_id: str):
+        endpoint_dir.mkdir(parents=True)
+        self.dir = endpoint_dir
         self.hello = {"harness": "claude", "pid": 4242, "session_id": session_id,
                       "earlier": [], "protocol": [1]}
-        (directory / "hello.json").write_text(json.dumps(self.hello))
+        (endpoint_dir / "hello.json").write_text(json.dumps(self.hello))
         self.server = socket.socket(socket.AF_UNIX)
-        self.server.bind(str(directory / "sock"))
+        self.server.bind(str(endpoint_dir / "sock"))
         self.server.listen(4)
         self.lines: list[dict] = []
         threading.Thread(target=self._serve, daemon=True).start()
@@ -359,7 +359,7 @@ def test_a_live_version_1_endpoint_answers_version_1s_hello(turns_env):
     v1 = V1Endpoint(runtime() / "claude-old", "s-old")
     try:
         before = sorted(os.listdir(v1.dir))
-        assert protocol.v1_directories(runtime()) == [v1.dir]
+        assert protocol.v1_endpoint_dirs(runtime()) == [v1.dir]
         assert protocol.v1_hello(v1.dir)["session_id"] == "s-old"
         assert v1.lines == [protocol.V1_HELLO]
         assert sorted(os.listdir(v1.dir)) == before
@@ -367,13 +367,13 @@ def test_a_live_version_1_endpoint_answers_version_1s_hello(turns_env):
         v1.close()
 
 
-def test_a_dead_version_1_directory_reads_as_no_answer_and_stays(turns_env):
+def test_a_dead_version_1_dir_reads_as_no_answer_and_stays(turns_env):
     v1 = V1Endpoint(runtime() / "claude-gone", "s-gone")
     v1.close()                                   # its socket file stays, nothing listens
     before = sorted(os.listdir(v1.dir))
     assert protocol.v1_hello(v1.dir, 0.5) is None
     assert sorted(os.listdir(v1.dir)) == before
-    assert protocol.v1_directories(runtime()) == [v1.dir]
+    assert protocol.v1_endpoint_dirs(runtime()) == [v1.dir]
 
 
 # -- watches ----------------------------------------------------------------------------
@@ -381,34 +381,34 @@ def test_a_dead_version_1_directory_reads_as_no_answer_and_stays(turns_env):
 def test_a_watch_gets_its_facts_then_every_notification_in_order(make_endpoint, connect):
     ep, fake = make_endpoint()
     watch = connect(ep)
-    first = R.from_wire(watch.call("watch", {}, timeout=5)["facts"])
+    first = results.from_wire(watch.call("watch", {}, timeout_s=5)["facts"])
     assert (first.turn_number, first.turn_open, first.turn) == (0, False, None)
     client = connect(ep)
     ep.ready("startup", "s-1")
-    opened = client.call("deliver", {"text": "one", "ref": "r1"}, timeout=5)
+    opened = client.call("deliver", {"text": "one", "ref": "r1"}, timeout_s=5)
     started(client, opened)
-    steered = client.call("steer", {"text": "two", "ref": "r2"}, timeout=5)
+    steered = client.call("steer", {"text": "two", "ref": "r2"}, timeout_s=5)
     started(client, steered)
     fake.end_turn("answer")
     fake.start_turn()                             # the person's own turn
     fake.end_turn("aborted")
     got = notes(watch, 6)
-    one = R.DeliveryRef(opened["delivery"], "r1", "opened")
-    two = R.DeliveryRef(steered["delivery"], "r2", "steered")
-    assert [R.from_notification(m, p) for m, p in got] == [
-        R.Ready("startup", "s-1"),
-        R.TurnStarted("t1", "s-1", 1, (one,)),
-        R.TurnSteered("t1", "s-1", R.DeliveryRef(steered["delivery"], "r2")),
-        R.TurnEnded("t1", "s-1", 1, "answer", (one, two)),
-        R.TurnStarted("t2", "s-1", 2, ()),
-        R.TurnEnded("t2", "s-1", 2, "aborted", ()),
+    one = results.DeliveryRef(opened["delivery"], "r1", "opened")
+    two = results.DeliveryRef(steered["delivery"], "r2", "steered")
+    assert [results.from_notification(m, p) for m, p in got] == [
+        results.Ready("startup", "s-1"),
+        results.TurnStarted("t1", "s-1", 1, (one,)),
+        results.TurnSteered("t1", "s-1", results.DeliveryRef(steered["delivery"], "r2")),
+        results.TurnEnded("t1", "s-1", 1, "answer", (one, two)),
+        results.TurnStarted("t2", "s-1", 2, ()),
+        results.TurnEnded("t2", "s-1", 2, "aborted", ()),
     ]
 
 
 def test_a_watch_ends_with_session_gone(make_endpoint, connect):
     ep, _ = make_endpoint()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     threading.Timer(0.1, ep.stop, args=("the session ended",)).start()
     assert list(watch.notifications()) == [("session.gone", {"reason": "the session ended"})]
 
@@ -416,50 +416,50 @@ def test_a_watch_ends_with_session_gone(make_endpoint, connect):
 def test_facts_name_the_open_turn_and_the_last_ready(make_endpoint, connect):
     ep, fake = make_endpoint()
     client = connect(ep)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.ready is None and facts.turn is None
     ep.ready("resume", "s-1")
     before = time.time()
-    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
     started(client, d)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn_open and facts.turn_number == 1
-    assert facts.turn.opening == R.DeliveryRef(d["delivery"], "r1")
+    assert facts.turn.opening == results.DeliveryRef(d["delivery"], "r1")
     assert facts.turn.turn_id == "t1" and facts.turn.command is None
     assert before - 1 <= facts.turn.started_at <= time.time()
     assert (facts.ready.source, facts.ready.session_id) == ("resume", "s-1")
     assert facts.ready.at is not None
     fake.end_turn()
-    assert R.from_wire(client.call("facts", {}, timeout=5)).turn is None
+    assert results.from_wire(client.call("facts", {}, timeout_s=5)).turn is None
 
 
 def test_a_held_turn_reads_no_turn_until_its_tie(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    d = client.call("deliver", {"text": "x", "ref": "r9"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r9"}, timeout_s=5)
     ep.turn_started("t1", held=True)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn_open and facts.turn is None
     ep.turn_tied("t1", d["delivery"])
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
-    assert facts.turn.opening == R.DeliveryRef(d["delivery"], "r9")
+    facts = results.from_wire(client.call("facts", {}, timeout_s=5))
+    assert facts.turn.opening == results.DeliveryRef(d["delivery"], "r9")
 
 
 def test_every_delivery_value_names_its_delivery_and_its_ref(make_endpoint, connect):
     ep, fake = make_endpoint()
     client = connect(ep)
-    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
-    assert started(client, d) == R.Started("t1", d["delivery"], "r1")
+    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
+    assert started(client, d) == results.Started("t1", d["delivery"], "r1")
     by_ref = client.call("wait", {"ref": "r1", "until": "ended", "timeout_ms": 0},
-                         timeout=5)
+                         timeout_s=5)
     assert by_ref == {"delivery": d["delivery"], "pending": True}
     fake.end_turn()
     ended = client.call("wait", {"ref": "r1", "until": "ended", "timeout_ms": 1000},
-                        timeout=5)
+                        timeout_s=5)
     assert ended["delivery"] == d["delivery"]
-    assert R.from_wire(ended["result"]) == R.Ended("t1", "answer", d["delivery"], "r1")
-    idle = client.call("steer", {"text": "y", "ref": "r2"}, timeout=5)
-    assert R.from_wire(idle["result"]) == R.Refused("idle", idle["delivery"], "r2")
+    assert results.from_wire(ended["result"]) == results.Ended("t1", "answer", d["delivery"], "r1")
+    idle = client.call("steer", {"text": "y", "ref": "r2"}, timeout_s=5)
+    assert results.from_wire(idle["result"]) == results.Refused("idle", idle["delivery"], "r2")
 
 
 # -- the stop handler -------------------------------------------------------------------
@@ -467,22 +467,22 @@ def test_every_delivery_value_names_its_delivery_and_its_ref(make_endpoint, conn
 def test_the_stop_handler_answers_each_stop_on_its_connection(make_endpoint, connect):
     ep, _ = make_endpoint()
     handler = connect(ep)
-    assert handler.call("stops.handle", {}, timeout=5) == {}
+    assert handler.call("stops.handle", {}, timeout_s=5) == {}
     answers: list = []
     asked = threading.Thread(target=lambda: answers.append(
-        ep.on_stop(StopFacts("t1", "s-1", False, ("shell",), 0))))
+        ep.on_stop(StopFacts("t1", "s-1", stop_hook_active=False, task_types=("shell",), crons=0))))
     asked.start()
     [(method, params)] = notes(handler, 1)
     assert method == "stop.asked"
-    assert R.from_wire(params["facts"]) == StopFacts("t1", "s-1", False, ("shell",), 0)
+    assert results.from_wire(params["facts"]) == StopFacts("t1", "s-1", stop_hook_active=False, task_types=("shell",), crons=0)
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": "keep going"},
-                        timeout=5) == {"taken": True}
+                        timeout_s=5) == {"taken": True}
     asked.join(5)
     assert answers == ["keep going"]
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": None},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
     assert handler.call("stops.answer", {"ask": 999, "reason": None},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
 
 
 def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
@@ -490,20 +490,20 @@ def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
     ep, _ = make_endpoint()
     ep.stop_wait_s = 0.2
     handler = connect(ep)
-    handler.call("stops.handle", {}, timeout=5)
+    handler.call("stops.handle", {}, timeout_s=5)
     assert ep.on_stop(StopFacts()) is None               # nobody answered in time
     [(_, params)] = notes(handler, 1)
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": "late"},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
     other = connect(ep)
     with pytest.raises(ipc.RpcError) as caught:
-        other.call("stops.handle", {}, timeout=5)
-    assert caught.value.code == R.ERROR_STOP_HANDLER_TAKEN
+        other.call("stops.handle", {}, timeout_s=5)
+    assert caught.value.code == results.ERROR_STOP_HANDLER_TAKEN
     handler.close()
     deadline = time.monotonic() + 5
     while True:
         try:
-            assert other.call("stops.handle", {}, timeout=5) == {}
+            assert other.call("stops.handle", {}, timeout_s=5) == {}
             break
         except ipc.RpcError:
             assert time.monotonic() < deadline
@@ -537,15 +537,15 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
     ep, _ = make_endpoint(ExitPasses(), registry=registry, env=env)
     ep.listen_wait_s = 10
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     client = connect(ep)
-    result = client.call("command", {"name": "exit"}, timeout=5)
-    assert R.from_wire(result["result"]) == Passed()
+    result = client.call("command", {"name": "exit"}, timeout_s=5)
+    assert results.from_wire(result["result"]) == Passed()
     # The harness is still up: every method answers.
-    assert R.from_wire(client.call("facts", {}, timeout=5)).session_id == "s-1"
-    assert R.from_wire(client.call("agents", {}, timeout=5)).complete is True
-    assert "facts" in connect(ep).call("watch", {}, timeout=5)
-    assert client.call("session", {}, timeout=5)["nonce"] == ep.nonce
+    assert results.from_wire(client.call("facts", {}, timeout_s=5)).session_id == "s-1"
+    assert results.from_wire(client.call("agents", {}, timeout_s=5)).complete is True
+    assert "facts" in connect(ep).call("watch", {}, timeout_s=5)
+    assert client.call("session", {}, timeout_s=5)["nonce"] == ep.nonce
     # The endpoint's own end: from then on each method answers `gone`.
     stopping = threading.Thread(target=ep.stop, args=("the harness process exited",))
     stopping.start()
@@ -553,8 +553,8 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
         assert gone_called.wait(5)
         for method in ("session", "facts", "agents", "watch"):
             with pytest.raises(ipc.RpcError) as caught:
-                client.call(method, {}, timeout=5)
-            assert caught.value.code == R.ERROR_GONE
+                client.call(method, {}, timeout_s=5)
+            assert caught.value.code == results.ERROR_GONE
     finally:
         released.set()
         stopping.join(10)

@@ -1,18 +1,20 @@
-// The shell document's own script, run by client.js in the one document: the menu, and
-// the panel for the URL. For `/m/<module>/<route>` it places `<moxi-<module>-page
-// route="<route>">`. Moving between panels is `history.pushState`; the push stream and
-// the menu stay. Everything is built with DOM calls and text nodes, never HTML strings.
-// On the phone it leaves out Settings, which only the desk reaches, and its signed-out
-// notice links to the gateway's sign-in page.
+// The shell document's own script, run by client.js in the one document: the top line,
+// the band of pages and the panel for the URL. For `/m/<module>/<route>` it places
+// `<moxi-<module>-page route="<route>">`. Moving between panels is `history.pushState`;
+// the push stream and the top line stay. Everything is built with DOM calls and text
+// nodes, never HTML strings. On the phone it hides Settings, which only the desk
+// reaches, and its signed-out notice links to the gateway's sign-in page. Every move off
+// the panel runs through the gate (`hold-model.ts`), so a page that holds is asked first.
 
 import type { ComponentInfo } from "./client.ts";
+import type { Gate } from "./hold-model.ts";
 import { freshN } from "./passkey.ts";
 import type { UpstreamState } from "./push.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import type { Named } from "./place-model.ts";
 import { NAME } from "./rules.ts";
 
-/** One installed module as the menu sees it. */
+/** One installed module as the band sees it. */
 export interface PanelModule {
   name: string;
   /** Its component named `page`, when the shell can place it. */
@@ -34,6 +36,8 @@ export interface ShellDeps {
   onState(fn: (state: UpstreamState) => void): void;
   state(module: string): UpstreamState | null;
   setNavigator(fn: (module: string, route: string) => void): void;
+  /** The gate every move off the panel runs through, and a page's hold on it. */
+  gate: Gate;
 }
 
 /** The module and route the URL path names, or null for a path outside `/m/<module>/`. */
@@ -43,16 +47,114 @@ export function where(pathname: string): { module: string; route: string } | nul
   return { module: match[1], route: match[2] };
 }
 
-/** The menu's entries: each module with a page, the shell's own first, then Settings, at
- * the desk only (`desk` false leaves it out). */
-export function menuEntries(modules: PanelModule[], desk = true): Array<{ module: string; route: string; title: string }> {
-  const pages = modules.filter((item) => item.page !== null)
-    .sort((a, b) => (a.name === "ui" ? -1 : b.name === "ui" ? 1 : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const entries = pages.map((item) => ({ module: item.name, route: "", title: (item.page as ComponentInfo).title }));
-  if (desk && modules.some((item) => item.name === "ui" && item.page !== null)) {
-    entries.push({ module: "ui", route: "settings", title: "Settings" });
+/** A page's group in the band: the pages of a day's work, then the pages that set Moxi up. */
+export type Group = "daily" | "setup";
+
+export const GROUPS: readonly Group[] = ["daily", "setup"];
+
+/** One name in the band. */
+export interface BandEntry {
+  module: string;
+  route: string;
+  title: string;
+  group: Group;
+}
+
+/**
+ * The band's entries, in the order shown: the shell's own Home first in `daily`, each
+ * module's placed page by its `order` and then its title within its group, and the
+ * shell's own Modules last in `setup`. A group that is not `daily` reads as `setup` and
+ * an order that is no number as 500. Settings is not in the band; the top line holds it.
+ */
+export function bandEntries(modules: PanelModule[]): BandEntry[] {
+  const pages = modules.filter((item) => item.name !== "ui" && item.page !== null).map((item) => {
+    const page = item.page as ComponentInfo;
+    const group: Group = page.group === "daily" ? "daily" : "setup";
+    return { module: item.name, route: "", title: page.title, group,
+             order: typeof page.order === "number" ? page.order : 500 };
+  }).sort((a, b) => a.order - b.order || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0)
+                    || (a.module < b.module ? -1 : 1));
+  const of = (group: Group): BandEntry[] => pages.filter((item) => item.group === group)
+    .map(({ module, route, title }) => ({ module, route, title, group }));
+  return [{ module: "ui", route: "", title: "Home", group: "daily" }, ...of("daily"),
+          ...of("setup"), { module: "ui", route: "modules", title: "Modules", group: "setup" }];
+}
+
+/** Whether the band's `entry` is the page at `at`. No entry is current on a settings
+ * route, or on a route of the shell's own that is neither Home nor Modules. */
+export function isCurrent(entry: { module: string; route: string }, at: { module: string; route: string } | null): boolean {
+  if (at === null || at.module !== entry.module) return false;
+  return entry.module === "ui" ? at.route.replace(/\/+$/, "") === entry.route : true;
+}
+
+/**
+ * The name the top line gives the page at `at`: Home, Modules or Settings on the shell's
+ * own routes, another module's `page` title on its routes. Null when no page is there to
+ * name, and the panel holds a message of the shell's own.
+ */
+export function pageName(at: { module: string; route: string } | null, modules: PanelModule[]): string | null {
+  if (at === null) return null;
+  if (at.module === "ui") {
+    const route = at.route.replace(/\/+$/, "");
+    if (route === "") return "Home";
+    if (route === "modules") return "Modules";
+    return route === "settings" || route.startsWith("settings/") ? "Settings" : null;
   }
-  return entries;
+  return modules.find((item) => item.name === at.module)?.page?.title ?? null;
+}
+
+/** The name the top line shows for the page at `at`: `pageName`'s, except on the phone,
+ * where a settings route names Home, the one page its line sends the phone to. */
+export function topName(gateway: boolean, at: { module: string; route: string } | null,
+                        modules: PanelModule[]): string | null {
+  const named = pageName(at, modules);
+  return gateway && at !== null && at.module === "ui" && named === "Settings" ? "Home" : named;
+}
+
+/** Whether the top line shows its right-hand `Settings`: not on the phone, which only the
+ * desk reaches, and not on the Settings page itself. */
+export function settingsShown(gateway: boolean, at: { module: string; route: string } | null): boolean {
+  return !gateway && !(at !== null && at.module === "ui" && pageName(at, []) === "Settings");
+}
+
+/**
+ * What the panel at `at` is, for telling whether an event changed it: its module, the
+ * page's name and the module's page facts, not the full path, so an address a page
+ * writes for itself is still the panel placed.
+ */
+export function panelSignature(at: { module: string; route: string } | null, modules: PanelModule[],
+                               installed: boolean, known: boolean): string {
+  if (at === null) return "none";
+  const item = modules.find((mod) => mod.name === at.module);
+  return JSON.stringify([at.module, pageName(at, modules), installed, known, item?.page?.url ?? "",
+                         item?.page?.contract ?? "", item?.page?.title ?? "", item?.refused ?? ""]);
+}
+
+/** Where the focus is when Tab is pressed with the band open: the page-name button,
+ * `Settings`, the band's name at that index, or elsewhere (null). */
+export type TabFrom = "button" | "settings" | number | null;
+
+/** What the shell does with that Tab: focus the band's first or last name, the button or
+ * `Settings`; close the band and leave the Tab to the browser; or nothing (null). */
+export type TabMove = "first" | "last" | "button" | "settings" | "close" | null;
+
+/**
+ * Keeps Tab with the open band in the order it is seen, the band's `names` names between
+ * the page-name button and `Settings` (`back` for Shift+Tab). From the band's last name
+ * Tab goes to `Settings`, or with `Settings` hidden closes the band; from `Settings` it
+ * closes the band. Either close lets the browser's Tab go on into the page past the
+ * hidden names.
+ */
+export function bandTab(from: TabFrom, names: number, back: boolean, settingsShown: boolean): TabMove {
+  if (names === 0) return null;
+  if (back) {
+    if (from === "settings") return "last";
+    return from === 0 ? "button" : null;
+  }
+  if (from === "button") return "first";
+  if (from === "settings") return "close";
+  if (from === names - 1) return settingsShown ? "settings" : "close";
+  return null;
 }
 
 /** What a panel load came to: the element placed, or the error panel to show; null when
@@ -82,20 +184,23 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLE
 
 export function boot(deps: ShellDeps): void {
   const root = document.getElementById("moxi-shell") as HTMLElement;
-  const list = root.querySelector("#moxi-menu ul") as HTMLElement;
-  const button = root.querySelector("#moxi-menu-button") as HTMLButtonElement;
+  const top = root.querySelector(".moxi-top") as HTMLElement;
+  const band = root.querySelector("#moxi-pages") as HTMLElement;
+  const button = root.querySelector("#moxi-pages-button") as HTMLButtonElement;
+  const settings = root.querySelector("#moxi-settings") as HTMLAnchorElement;
   const panel = root.querySelector("#moxi-panel") as HTMLElement;
   const notice = root.querySelector("#moxi-notice") as HTMLElement;
+  const reads = root.querySelector("#moxi-reads") as HTMLElement;
   const status = root.querySelector("#moxi-status") as HTMLElement;
   let shown = "";
   let seq = 0;
 
+  const { gate } = deps;
+
   const signature = (): string => {
     const at = where(location.pathname);
-    if (at === null) return "none";
-    const item = deps.modules().find((mod) => mod.name === at.module);
-    return [location.pathname, deps.installed(at.module), deps.known(at.module),
-            item?.page?.url ?? "", item?.page?.contract ?? "", item?.refused ?? ""].join("|");
+    return panelSignature(at, deps.modules(), at !== null && deps.installed(at.module),
+                          at !== null && deps.known(at.module));
   };
 
   const say = (title: string, ...lines: string[]): void => {
@@ -104,7 +209,16 @@ export function boot(deps: ShellDeps): void {
     box.className = "moxi-message";
     box.append(el("h1", title), ...lines.map((line) => el("p", line)));
     panel.replaceChildren(box);
-    document.title = `${title} - Moxi`;
+    name(null);
+  };
+
+  /** The top line's name for the page, with its caret; `Pages` when none is shown. */
+  const name = (title: string | null): void => {
+    const caret = el("span", "▾");
+    caret.className = "moxi-caret";
+    caret.setAttribute("aria-hidden", "true");
+    button.replaceChildren(title ?? "Pages", caret);
+    document.title = title === null ? "Moxi" : `${title} - Moxi`;
   };
 
   const showStatus = (): void => {
@@ -120,10 +234,11 @@ export function boot(deps: ShellDeps): void {
 
   const renderPanel = async (): Promise<void> => {
     shown = signature();
+    gate.markDrawn();
     showStatus();
     const at = where(location.pathname);
     if (at === null) {
-      say("Nothing is here", "Open a panel from the menu.");
+      say("Nothing is here", "Open a page from the top line.");
       return;
     }
     const { module, route } = at;
@@ -144,7 +259,7 @@ export function boot(deps: ShellDeps): void {
     seq += 1;
     const mine = seq;
     panel.replaceChildren();
-    document.title = `${item.page.title} - Moxi`;
+    name(topName(deps.gateway, at, deps.modules()));
     const url = item.page.url;
     // A script that did not load may be a start that failed: the proxy answers its 502
     // with the exit and the log, and a second fetch within 10 s gets the same answer
@@ -154,48 +269,98 @@ export function boot(deps: ShellDeps): void {
     if (load !== null && "error" in load) say(load.error.title, ...load.error.lines);
   };
 
-  const renderMenu = (): void => {
+  const renderBand = (): void => {
     const at = where(location.pathname);
-    const items = menuEntries(deps.modules(), !deps.gateway).map((entry) => {
-      const link = el("a", entry.title);
-      link.href = `/m/${entry.module}/${entry.route}`;
-      link.dataset.module = entry.module;
-      link.dataset.route = entry.route;
-      const current = at !== null && at.module === entry.module
-        && (entry.route === "" ? !(entry.module === "ui" && at.route.startsWith("settings"))
-          : at.route.startsWith(entry.route));
-      if (current) link.setAttribute("aria-current", "page");
-      const item = el("li");
-      item.append(link);
-      return item;
-    });
-    list.replaceChildren(...items);
+    const entries = bandEntries(deps.modules());
+    const groups = GROUPS.map((group) => entries.filter((entry) => entry.group === group))
+      .filter((items) => items.length > 0).map((items) => {
+        const box = el("span");
+        box.className = "moxi-pages-group";
+        box.dataset.group = items[0].group;
+        box.append(...items.map((entry) => {
+          const link = el("a", entry.title);
+          link.href = `/m/${entry.module}/${entry.route}`;
+          link.dataset.module = entry.module;
+          link.dataset.route = entry.route;
+          if (isCurrent(entry, at)) link.setAttribute("aria-current", "page");
+          return link;
+        }));
+        return box;
+      });
+    band.replaceChildren(...groups);
+    // On the Settings page the top line's `Settings` is hidden, and Tab skips it.
+    settings.hidden = !settingsShown(deps.gateway, at);
   };
 
+  const isOpen = (): boolean => !band.hidden;
   const setOpen = (open: boolean): void => {
-    root.classList.toggle("moxi-menu-open", open);
+    band.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
   };
 
   const go = (): void => {
     setOpen(false);
-    renderMenu();
+    renderBand();
     void renderPanel();
   };
 
+  // A link marked with its module, the shell's own or one a page draws in its shadow
+  // root, moves within the document, through the gate.
   root.addEventListener("click", (event) => {
-    const link = (event.target as Element).closest?.("a[data-module]") as HTMLAnchorElement | null;
+    const link = event.composedPath().find((node): node is HTMLAnchorElement =>
+      node instanceof HTMLAnchorElement && node.matches("a[data-module]")) ?? null;
     if (link === null || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (link.pathname !== location.pathname) history.pushState(null, "", link.pathname);
-    go();
+    const picked = band.contains(link);
+    setOpen(false);
+    gate.move(() => {
+      if (link.pathname !== location.pathname) history.pushState(null, "", link.pathname);
+      go();
+      // A pick hides the name that held the focus; the button that opened the band takes it.
+      if (picked) button.focus();
+    });
   });
-  button.addEventListener("click", () => setOpen(!root.classList.contains("moxi-menu-open")));
-  addEventListener("popstate", go);
+  button.addEventListener("click", () => setOpen(!isOpen()));
+  // The open band closes on Escape, which hands the focus back to its button, and on a
+  // click or a focus that lands outside the top line and the band. Tab walks it in the
+  // order it is seen (`bandTab`).
+  const outside = (event: Event): void => {
+    const target = event.target as Node | null;
+    if (isOpen() && target !== null && !top.contains(target) && !band.contains(target)) setOpen(false);
+  };
+  document.addEventListener("click", outside);
+  document.addEventListener("focusin", outside);
+  document.addEventListener("keydown", (event) => {
+    if (!isOpen()) return;
+    if (event.key === "Escape") {
+      setOpen(false);
+      button.focus();
+      return;
+    }
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const names = [...band.querySelectorAll<HTMLAnchorElement>("a")];
+    const on = document.activeElement;
+    const at = names.indexOf(on as HTMLAnchorElement);
+    const from: TabFrom = on === button ? "button" : on === settings ? "settings" : at >= 0 ? at : null;
+    const move = bandTab(from, names.length, event.shiftKey, !settings.hidden);
+    if (move === null) return;
+    if (move === "close") {
+      setOpen(false);
+      return;
+    }
+    event.preventDefault();
+    ({ first: names[0], last: names[names.length - 1], button, settings })[move].focus();
+  });
+  const redraw = (): void => { void renderPanel(); };
+  addEventListener("popstate", () => gate.onPopstate(go));
+  // While a page holds, the browser's own prompt covers a load of another document.
+  addEventListener("beforeunload", (event) => {
+    if (gate.held) event.preventDefault();
+  });
   deps.setNavigator(go);
   deps.onModules(() => {
-    renderMenu();
-    if (signature() !== shown) void renderPanel();
+    renderBand();
+    gate.refresh(signature() !== shown, redraw);
   });
   deps.onState(showStatus);
   // On the phone the way back in is the gateway's sign-in page, with a new `n` each time
@@ -209,8 +374,12 @@ export function boot(deps: ShellDeps): void {
   deps.onSession((signedIn) => {
     if (deps.gateway) signIn.href = `/signin?n=${freshN()}`;
     notice.hidden = signedIn;
-    if (signedIn) void renderPanel();
+    reads.hidden = !deps.gateway || !signedIn;
+    if (signedIn) gate.refresh(true, redraw);
   });
-  renderMenu();
+  // The phone's every page says, first under the top line, that it only reads there.
+  reads.hidden = !deps.gateway;
+  name(topName(deps.gateway, where(location.pathname), deps.modules()));
+  renderBand();
   void renderPanel();
 }

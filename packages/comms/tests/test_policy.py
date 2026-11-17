@@ -44,7 +44,7 @@ def test_merged_takes_the_tables_callers_whole_and_adds_its_labels():
     assert policy.merged(base, None) is base
 
 
-def test_the_policy_reads_a_given_environment(tmp_path):
+def test_the_policy_reads_a_given_env(tmp_path):
     other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
     write_config(other, '[policy]\ncache_callers = ["pal@x"]\n')
     assert policy.for_env(other).cache_callers == ("pal@x",)

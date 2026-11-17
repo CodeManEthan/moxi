@@ -1,6 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Both settings carry page fields, which `moxi config slots show --json` prints and
+  the settings page draws: a plain label and a line. slots needs moxi 0.1.9 or later.
+
 ## 0.1.0 (2026-11-08)
+
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_slots.api.answer_screen`: `wait` is now `wait_s`;
+  `moxi_slots.api.wait_ended`: `timeout` is now `timeout_s`; `moxi_slots.api`:
+  `CLAUDE_TRUST_FOLDER` is now `CLAUDE_TRUST_DIR`.
 
 The first public release.
 

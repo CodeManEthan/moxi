@@ -114,8 +114,8 @@ def _replace(src: Path, dst: Path) -> None:
             time.sleep(POLL)
 
 
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(directory, os.O_RDONLY)
+def _fsync_dir(target_dir: Path) -> None:
+    fd = os.open(target_dir, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -144,7 +144,7 @@ _gates: dict[str, threading.Lock] = {}
 #: The variable through which an install's parent names, to a settle or teardown child,
 #: the descriptor (on Windows the handle) of the core lock it holds. Only
 #: `adopt_core_claim` reads it; `lock` never reads the environment.
-CLAIM_VARIABLE = "MOXI_CORE_LOCK_FD"
+LOCK_FD_ENV = "MOXI_CORE_LOCK_FD"
 # The install's claim this process adopted: a descriptor open on the core lock file, or
 # None. Kept here, never in the environment, for the process's whole life.
 _claim: int | None = None
@@ -152,12 +152,12 @@ _adopted = False
 _claim_guard = threading.Lock()
 
 
-def lock(path: str | os.PathLike, *, timeout: float | None = None,
+def lock(path: str | os.PathLike, *, timeout_s: float | None = None,
          nested: bool = False) -> AbstractContextManager[None]:
     """Hold an exclusive lock on the lock file `path` for the length of the block.
 
-    `timeout=None` waits as long as it takes; `timeout=0` tries once; a number waits that
-    many seconds. When the wait runs out, `LockTimeout` names the holder's pid.
+    `timeout_s=None` waits as long as it takes; `timeout_s=0` tries once; a number waits
+    that many seconds. When the wait runs out, `LockTimeout` names the holder's pid.
 
     The lock file is created (0600) and never removed. Once the lock is taken, the
     holder's pid is written at the start of the file, so a waiting process can name it.
@@ -187,12 +187,12 @@ def lock(path: str | os.PathLike, *, timeout: float | None = None,
     """
     path = Path(path)
     if not nested:
-        return _lock(path, timeout)
+        return _lock(path, timeout_s)
     from .paths import core_lock
 
     if os.path.abspath(path) != os.path.abspath(core_lock()):
         raise ValueError(f"lock(nested=True) is for the core lock alone, not {path}")
-    return _nested_lock(path, timeout)
+    return _nested_lock(path, timeout_s)
 
 
 @contextmanager
@@ -285,6 +285,11 @@ def _descriptor(path: str | os.PathLike) -> int:
 
 # -- the install's claim -----------------------------------------------------------------
 
+def _claim_handed() -> bool:
+    """Whether this process was handed the core lock claim."""
+    return LOCK_FD_ENV in os.environ
+
+
 def adopt_core_claim(path: str | os.PathLike) -> bool:
     """Take over the claim on the core lock `path` that an install's parent handed this
     process, and say whether this process now holds one.
@@ -304,7 +309,7 @@ def adopt_core_claim(path: str | os.PathLike) -> bool:
         if _adopted:
             return _claim is not None
         _adopted = True
-        value = os.environ.pop(CLAIM_VARIABLE, None)
+        value = os.environ.pop(LOCK_FD_ENV, None)
         if value is None:
             return False
         fd = _claim_descriptor(value)
@@ -462,11 +467,11 @@ def update(path: str | os.PathLike, fn: Callable[[bytes | None], bytes], *,
 
 
 @contextmanager
-def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
+def edit_toml(path: str | os.PathLike, *, timeout_s: float | None = 10.0,
               lock: str | os.PathLike | None = None) -> Iterator:
     """Edit the TOML file `path` in a `with` block, keeping its comments and order.
 
-    Under the file's lock, `<path>.lock` or the lock file `lock` names (waiting `timeout`
+    Under the file's lock, `<path>.lock` or the lock file `lock` names (waiting `timeout_s`
     as `lock` does), the file is read and parsed with the core's vendored tomlkit, and
     the block gets the document (an empty one when the file is missing). When the block
     ends cleanly the document's text is written with `atomic_write`, keeping an existing
@@ -487,7 +492,7 @@ def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
 
     path = Path(path)
     held = _lock_path(path) if lock is None else Path(lock)
-    with _gated_lock(held, timeout=timeout):
+    with _gated_lock(held, timeout=timeout_s):
         target = Path(os.path.realpath(path))
         try:
             text = target.read_text(encoding="utf-8")
@@ -541,10 +546,10 @@ def append_record(path: str | os.PathLike, record: dict, *,
                              f"{', '.join(found)}")
     _check_length(line, max_bytes)
     if collapse is None:
-        _write_line(path, line, max_bytes, durable)
+        _write_line(path, line, max_bytes, durable=durable)
     else:
         window, name = collapse
-        window._take(path, name, line, max_bytes, durable)
+        window._take(path, name, line, max_bytes, durable=durable)
 
 
 def _refused(value: object, names: frozenset[str]) -> set[str]:
@@ -568,7 +573,7 @@ def _check_length(line: bytes, max_bytes: int | None) -> None:
                          f"of {max_bytes} bytes")
 
 
-def _write_line(path: Path, line: bytes, max_bytes: int | None, durable: bool) -> None:
+def _write_line(path: Path, line: bytes, max_bytes: int | None, *, durable: bool) -> None:
     if max_bytes is None or _size(path) + len(line) <= max_bytes:
         _append(path, line, durable=durable)
         return
@@ -607,8 +612,9 @@ class Collapse:
     `clock` gives the time in seconds since the epoch.
     """
 
-    def __init__(self, after: int = 10, hourly_past: int | None = None, *,
-                 clock: Callable[[], float] = time.time) -> None:
+    def __init__(  # noqa: MX1 -- after is a count of rows, not a duration
+            self, after: int = 10, hourly_past: int | None = None, *,
+            clock: Callable[[], float] = time.time) -> None:
         if after < 0:
             raise ValueError("after must be zero or more")
         if hourly_past is not None and hourly_past < 0:
@@ -641,7 +647,7 @@ class Collapse:
         return [key for key in self._windows if wanted is None or key[0] == wanted]
 
     def _take(self, path: Path, name: str, line: bytes, max_bytes: int | None,
-              durable: bool) -> None:
+              *, durable: bool) -> None:
         now = self._clock()
         key = (_key_path(path), name)
         with self._lock:
@@ -656,7 +662,7 @@ class Collapse:
                 window = self._windows[key] = [start, per, 0, 0, max_bytes, durable]
             window[4], window[5] = max_bytes, durable
             if per == "minute" and window[2] < self.after:
-                _write_line(path, line, max_bytes, durable)
+                _write_line(path, line, max_bytes, durable=durable)
                 window[2] += 1
             else:
                 window[3] += 1
@@ -670,7 +676,7 @@ class Collapse:
         row = {"at": _stamp(self._clock()), "kind": "summary", "class": key[1],
                "count": held, "per": per, "since": _stamp(start * _SPAN[per])}
         line = (json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
-        _write_line(key[0], line, max_bytes, durable)
+        _write_line(key[0], line, max_bytes, durable=durable)
 
 
 _SPAN = {"minute": 60, "hour": 3600}
@@ -856,8 +862,8 @@ def private_dir(path: str | os.PathLike) -> Path:
     return path
 
 
-def _make_dirs(directory: str | os.PathLike, *, private: bool = True) -> None:
-    """Make each missing directory down to `directory`, outermost first.
+def _make_dirs(target_dir: str | os.PathLike, *, private: bool = True) -> None:
+    """Make each missing directory down to `target_dir`, outermost first.
 
     With `private` each one is made 0700 (on Windows with the access list that grants only
     the current user); without it, with the default mode. A directory that already exists
@@ -867,13 +873,13 @@ def _make_dirs(directory: str | os.PathLike, *, private: bool = True) -> None:
     would not do: it gives the mode to the last directory alone and makes every missing
     parent with the default mode.
     """
-    directory = Path(directory)
+    target_dir = Path(target_dir)
     missing = []
-    while not os.path.isdir(directory):
-        missing.append(directory)
-        if directory.parent == directory:
+    while not os.path.isdir(target_dir):
+        missing.append(target_dir)
+        if target_dir.parent == target_dir:
             break
-        directory = directory.parent
+        target_dir = target_dir.parent
     for each in reversed(missing):
         if private and _WINDOWS:
             from . import _win

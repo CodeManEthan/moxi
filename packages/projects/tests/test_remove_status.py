@@ -216,9 +216,9 @@ def test_an_unreadable_store_keeps_nothing(store_path):
 
 def test_a_store_locked_past_the_wait_keeps_nothing(golden_copy, store_path, monkeypatch):
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
+    holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         with pytest.raises(api.Busy):
             remove("gamma", job("a"))
         # A refusal decided about the project whose own write is locked out is that
@@ -226,8 +226,8 @@ def test_a_store_locked_past_the_wait_keeps_nothing(golden_copy, store_path, mon
         with pytest.raises(api.Busy):
             remove("alpha", job("b"))
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        holder_conn.execute("ROLLBACK")
+        holder_conn.close()
     assert api.get("gamma") and api.get("alpha")
     assert acts.remove_status(job("a")) is None and acts.remove_status(job("b")) is None
     assert _rows(store_path) == []

@@ -16,6 +16,7 @@ import sys
 import textwrap
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import cli, files, paths, terminal
 from moxi.terminal import _record, _walk
@@ -185,7 +186,7 @@ def test_an_interrupt_during_the_step_ends_the_command_as_an_interrupt(
 
 # -- written only on a change ------------------------------------------------------------------
 
-def test_an_unchanged_environment_rewrites_nothing_and_walks_nothing(
+def test_an_unchanged_env_rewrites_nothing_and_walks_nothing(
         fence, walks, typed, console):
     console("modules")
     before = paths.terminal_record().stat()
@@ -228,16 +229,26 @@ def test_a_record_that_doesnt_read_is_replaced(fence, walks, typed, console, dat
 
 
 @posix_only
-def test_a_file_that_cant_be_read_is_replaced_without_waiting(fence, walks, typed, console):
+def test_a_file_that_cant_be_read_is_replaced_without_waiting(
+        fence, walks, typed, console, monkeypatch):
+    """The step tries the unreadable file once and replaces it. It doesn't try again
+    through the replace window `read()` waits out (`files.REPLACE_RETRY`), which would
+    read the file more than once; the count is the proof, not a time."""
     path = terminal.write({"HOME": "/x"})
     path.chmod(0)
     if os.access(path, os.R_OK):
         pytest.skip("this account reads any file")
-    import time
+    real = type(path).read_bytes
+    reads = []
 
-    started = time.monotonic()
+    def counted(self):
+        if self == path:
+            reads.append(1)
+        return real(self)
+
+    monkeypatch.setattr(type(path), "read_bytes", counted)
     console("modules")
-    assert time.monotonic() - started < 0.5
+    assert reads == [1] and terminal.last.kind == terminal.WRITTEN
     assert recorded()["env"] == terminal.of()
 
 
@@ -283,14 +294,14 @@ def test_a_home_or_store_change_does_not_move_the_file(
 def no_account(monkeypatch):
     """No entry for this uid in the user database (no local folder on Windows), and no
     test kit's anchor variable, so the anchor has no place."""
-    monkeypatch.delenv(paths.ANCHOR_HOME)
+    monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     if WINDOWS:
         from moxi import _win
 
-        def no_folder(name):
+        def no_dir(name):
             raise OSError("no folder")
 
-        monkeypatch.setattr(_win, "known_folder", no_folder)
+        monkeypatch.setattr(_win, "known_folder", no_dir)
     else:
         monkeypatch.setattr(paths, "_account_home", lambda: None)
 
@@ -340,16 +351,16 @@ def test_a_write_that_fails_gives_one_warning_and_the_commands_code(
 
 
 @posix_only
-def test_a_read_only_folder_gives_one_warning(fence, walks, typed, console):
-    folder = paths.anchor_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    folder.chmod(0o500)
+def test_a_read_only_dir_gives_one_warning(fence, walks, typed, console):
+    anchor_dir = paths.anchor_dir()
+    anchor_dir.mkdir(parents=True, exist_ok=True)
+    anchor_dir.chmod(0o500)
     try:
-        if os.access(folder, os.W_OK):
+        if os.access(anchor_dir, os.W_OK):
             pytest.skip("this account writes any folder")
         code, err = console("modules")
     finally:
-        folder.chmod(0o700)
+        anchor_dir.chmod(0o700)
     assert code == 0 and err.count("moxi: warning:") == 1
     assert "can't be written (Permission denied)" in err and recorded() is None
 
@@ -368,7 +379,7 @@ LIVE = textwrap.dedent("""\
     """)
 
 
-def _typed(argv, found="None", tty=True) -> tuple[int, str]:
+def _typed(argv, found="None", *, tty=True) -> tuple[int, str]:
     """Run the console path in a child with a pseudo-terminal (or a pipe) on its input,
     the walk replaced by one that finds `found`."""
     code = LIVE.format(found=found)
@@ -487,4 +498,4 @@ def test_an_unchanged_step_costs_under_two_milliseconds(fence):
         before = ms(base)
         differences.append(ms(step) - before)
     cost = statistics.quantiles(differences, n=4, method="inclusive")[0]
-    assert cost < UNCHANGED_MS, f"an unchanged step costs {cost:.2f} ms"
+    assert cost < UNCHANGED_MS * timed_slack(), f"an unchanged step costs {cost:.2f} ms"

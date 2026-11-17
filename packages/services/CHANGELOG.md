@@ -1,6 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The `adopted` switch table carries page fields, which `moxi config services show
+  --json` prints and the settings page draws: a plain label and a line. services needs
+  moxi 0.1.9 or later.
+
 ## 0.1.2 (2026-11-08)
+
+- `moxi services watch --every` is now `--every-s`, with no alias.
+- The process fields `uptime_seconds` and `cpu_seconds` are now `uptime_s` and `cpu_s`.
 
 The first public release.
 

@@ -137,23 +137,23 @@ class DaemonClient:
         """Connect and agree a wire version. Raises `DaemonOffline` when nothing
         answers, and `VersionMismatch` when the daemon refuses this comms' version."""
         try:
-            client = ipc.connect(self.socket_path, timeout=self.timeout)
-        except (ipc.IpcError, OSError) as e:
-            raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
+            client = ipc.connect(self.socket_path, timeout_s=self.timeout)
+        except (ipc.IpcError, OSError) as exc:
+            raise DaemonOffline(f"comms offline: {self.socket_path}: {exc}") from exc
         try:
             agreed = client.hello(wire.VERSIONS)
-        except ipc.RpcError as e:
+        except ipc.RpcError as exc:
             client.close()
-            if e.code == wire.VERSION_REFUSED:
-                raise VersionMismatch(wire.version_text(e.data)) from None
-            raise DaemonOffline(f"comms offline: the daemon refused the hello: {e}") from e
-        except ipc.NotRpc as e:
+            if exc.code == wire.VERSION_REFUSED:
+                raise VersionMismatch(wire.version_text(exc.data)) from None
+            raise DaemonOffline(f"comms offline: the daemon refused the hello: {exc}") from exc
+        except ipc.NotRpc as exc:
             client.close()
             raise DaemonOffline(f"comms offline: {self.socket_path} does not speak this "
-                                f"comms' wire: {e}") from e
-        except (ipc.IpcError, OSError) as e:
+                                f"comms' wire: {exc}") from exc
+        except (ipc.IpcError, OSError) as exc:
             client.close()
-            raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
+            raise DaemonOffline(f"comms offline: {self.socket_path}: {exc}") from exc
         self._client = client
         self.capabilities = frozenset(agreed.capabilities or ())
         self._closed = False
@@ -200,9 +200,9 @@ class DaemonClient:
         first, self._asked = not self._asked, True
         try:
             result = self._client.call(method, dict(params or {}),
-                                       timeout=self.timeout if timeout is None else timeout)
-        except ipc.RpcError as e:
-            if e.code == wire.BUSY and first and self._may_retry():
+                                       timeout_s=self.timeout if timeout is None else timeout)
+        except ipc.RpcError as exc:
+            if exc.code == wire.BUSY and first and self._may_retry():
                 # The daemon had no room for this connection and closed it, having done
                 # nothing for it: one more try on a new connection, after a moment.
                 self._client.close()
@@ -210,14 +210,14 @@ class DaemonClient:
                 time.sleep(BUSY_RETRY)
                 self.connect()
                 return self._call(method, params, timeout=timeout, no_answer=no_answer)
-            raise _error(e) from None
+            raise _error(exc) from None
         except ipc.Timeout:
             raise (no_answer or DaemonTimeout)(f"timeout waiting for {method}") from None
-        except (ipc.IpcError, OSError) as e:
+        except (ipc.IpcError, OSError) as exc:
             if no_answer is not None:
                 raise no_answer(f"the daemon closed the connection after {method} was "
                                 f"sent") from None
-            raise DaemonOffline(f"comms offline: {e}") from e
+            raise DaemonOffline(f"comms offline: {exc}") from exc
         return result if isinstance(result, dict) else {}
 
     def _may_retry(self) -> bool:
@@ -290,14 +290,14 @@ class DaemonClient:
         return self._call("send", params, no_answer=DaemonNoAnswer)
 
     def delete(self, as_: str, token: str | None, message_id, *, user=None) -> dict:
-        """`delete` as `as_` with its `token`: the result's `message_id`, `withdrawn`
+        """`remove` as `as_` with its `token`: the result's `message_id`, `withdrawn`
         and `delivered` (names), and `expired`. A request that left this process and got
         no answer raises `DaemonNoAnswer`, since the message may have been withdrawn.
         `user` is the operator's user id, for `as_` "operator"."""
         params = {"as": as_, "token": token, "message_id": str(message_id)}
         if user is not None:
             params["user"] = user
-        return self._call("delete", params, no_answer=DaemonNoAnswer)
+        return self._call("remove", params, no_answer=DaemonNoAnswer)
 
     def attributed_message(self, message_id) -> dict | None:
         """One message with its author as the daemon attributes it, or None when the
@@ -308,8 +308,8 @@ class DaemonClient:
         not a message id)."""
         try:
             answer = self.call("attributed_message", {"message_id": str(message_id)})
-        except DaemonError as e:
-            if e.code == wire.UNKNOWN_MESSAGE:
+        except DaemonError as exc:
+            if exc.code == wire.UNKNOWN_MESSAGE:
                 return None
             raise
         return {k: answer.get(k) for k in ATTRIBUTED_FIELDS}

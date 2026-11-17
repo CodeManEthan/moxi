@@ -15,7 +15,7 @@ The rule the move keeps, with the settle step around it:
 2. A unit file among them that moxi did not write for the module makes it refuse, naming
    `--replace`, unless `replace=True`.
 3. Whatever it stops, marked or not, it records as it stops it, one unit at a time,
-   before it stops the next (`moxi.units.stop(..., record=...)`).
+   before it stops the next (`moxi.units.stop(..., stopped=...)`).
 4. On every way out of the settle step, the settle step starts exactly the recorded units
    again (`moxi.units.resume`), and nothing else.
 5. An interrupt never ends the settle step before that start has run (see `moxi._settle`).
@@ -86,16 +86,16 @@ def link_fix(module: str, old: Path, new: Path) -> str:
             f"run `moxi install {module}` again")
 
 
-def move(module: str, record: list, *, replace: bool = False,
+def move(module: str, stopped: list, *, replace: bool = False,
          say: Callable[[str], object] = print) -> list:
     """Move `module`'s old state and cache directories to their new paths, with the
-    module's running daemons stopped, and return `record`.
+    module's running daemons stopped, and return `stopped`.
 
-    `record` is a list the caller owns and passes in empty. Each unit the move stops is
+    `stopped` is a list the caller owns and passes in empty. Each unit the move stops is
     appended to it (a `moxi.units.Stopped`) before it is stopped, so what it holds
     survives the move raising; the caller starts exactly those again with
     `moxi.units.resume(record)` however the move ends. With nothing to move, nothing is
-    read or stopped and `record` comes back empty.
+    read or stopped and `stopped` comes back empty.
 
     An old directory that is a symbolic link to an absolute path is moved as the link:
     the new path becomes the link, and the data stays where the user put it.
@@ -111,20 +111,20 @@ def move(module: str, record: list, *, replace: bool = False,
     with files.lock(paths.core_lock(), nested=True):
         moves = _what_moves(module, say)
         if not moves:
-            return record
+            return stopped
         names, impl = _daemons(module)
         if impl is not None and names:
-            _unmarked(module, names, impl, replace)
+            _unmarked(module, names, impl, replace=replace)
             if not replace:
                 # No unit file of these names is unmarked (`_unmarked`), so a name with
                 # no marked unit has no unit at all, and nothing of it can run.
                 marked = {ref.name for ref in impl.marked(module)}
                 names = [name for name in names if name in marked]
             if names:
-                _stop(module, names, replace, record)
+                _stop(module, names, replace=replace, stopped=stopped)
         for _, old, new in moves:
             _rename(module, old, new, say)
-        return record
+        return stopped
 
 
 # -- the steps ---------------------------------------------------------------------------------
@@ -186,7 +186,7 @@ def _daemons(module: str):
     return names, impl
 
 
-def _unmarked(module: str, names: list[str], impl, replace: bool) -> None:
+def _unmarked(module: str, names: list[str], impl, *, replace: bool) -> None:
     """Step 3: refuse when a unit file of one of `names` is not this module's, unless
     `replace`."""
     if replace:
@@ -206,16 +206,16 @@ def _unmarked(module: str, names: list[str], impl, replace: bool) -> None:
                                 refused=True)
 
 
-def _stop(module: str, names: list[str], replace: bool, record: list) -> None:
+def _stop(module: str, names: list[str], *, replace: bool, stopped: list) -> None:
     """Step 4: stop what runs, recorded; raise before the rename when a stop failed."""
     from . import units
 
-    before = len(record)
-    acted = units.stop(module, names, replace=replace, record=record)
+    before = len(stopped)
+    acted = units.stop(module, names, replace=replace, stopped=stopped)
     failed = [a for a in acted if not a.ok]
     if not failed:
         return
-    stopped_now = record[before:]
+    stopped_now = stopped[before:]
     if not stopped_now:
         # The running read failed: nothing was stopped, so this is a refusal.
         line = failed[0].lines[0] if failed[0].lines else f"{failed[0].name} did not stop"
@@ -260,9 +260,9 @@ def _tidy(old: Path) -> None:
     _tidy_label(old.parent)
 
 
-def _tidy_label(folder: Path) -> None:
+def _tidy_label(label_dir: Path) -> None:
     try:
-        folder.rmdir()
+        label_dir.rmdir()
     except OSError:
         pass  # not empty: another module's data is still there
 

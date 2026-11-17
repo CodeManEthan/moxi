@@ -754,10 +754,10 @@ class _DistInfo:
         return None
 
 
-def _read_text(directory: str, name: str) -> str | None:
+def _read_text(source_dir: str, name: str) -> str | None:
     try:
-        with open(os.path.join(directory, name), encoding="utf-8") as file:
-            return file.read()
+        with open(os.path.join(source_dir, name), encoding="utf-8") as fh:
+            return fh.read()
     except OSError:
         return None
 
@@ -1020,11 +1020,11 @@ def _units(kind: str):
     return check
 
 
-def _unit(kind: str, name: object, entry: object, *, runtime: bool = False,
+def _unit(kind: str, name: object, entry: object, *, is_runtime: bool = False,
           label: str | None = None) -> None:
     """Check one daemon or timer entry; raises `_Bad`. `kind` is "daemon" or "timer".
 
-    `runtime` allows the forms only a run-time declaration may use: `argv` and `cwd`,
+    `is_runtime` allows the forms only a run-time declaration may use: `argv` and `cwd`,
     `enabled`, and a timer with no `switch`.
     """
     label = label or ("DAEMONS" if kind == "daemon" else "TIMERS")
@@ -1035,14 +1035,14 @@ def _unit(kind: str, name: object, entry: object, *, runtime: bool = False,
     if not isinstance(entry, Mapping):
         raise _Bad(f"has {where} = {entry!r}; an entry is a table")
     known = _DAEMON_KEYS if kind == "daemon" else _TIMER_KEYS
-    if runtime:
+    if is_runtime:
         known = known | _RUNTIME_KEYS
     for key in entry:
         if key not in known:
             raise _Bad(f"has {where} key {key!r}, which this moxi does not know; a new key "
                        "comes with a raised ANNOUNCES")
     get = entry.get
-    if runtime and "argv" in entry:
+    if is_runtime and "argv" in entry:
         if "command" in entry:
             raise _Bad(f"has {where} with both command and argv; it takes one of the two")
         argv = get("argv")
@@ -1070,7 +1070,7 @@ def _unit(kind: str, name: object, entry: object, *, runtime: bool = False,
     if kind == "daemon":
         _daemon(where, entry)
     else:
-        _timer(where, entry, runtime=runtime)
+        _timer(where, entry, is_runtime=is_runtime)
 
 
 def _daemon(where: str, entry: Mapping) -> None:
@@ -1174,9 +1174,9 @@ def clash_line(daemon: str, kind: str, other: str) -> str:
             "name, so give one of them another name")
 
 
-def _timer(where: str, entry: Mapping, *, runtime: bool) -> None:
+def _timer(where: str, entry: Mapping, *, is_runtime: bool) -> None:
     get = entry.get
-    if "switch" not in entry and not runtime:
+    if "switch" not in entry and not is_runtime:
         raise _Bad(f"has {where} with no switch; a timer starts behind a switch")
     if ("every" in entry) == ("at" in entry):
         raise _Bad(f"has {where} with {'both' if 'every' in entry else 'neither'} every "

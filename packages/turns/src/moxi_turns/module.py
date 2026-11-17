@@ -37,8 +37,8 @@ SETTINGS = "settings.toml"
 #: The install questions: one per shipped guard, keyed by its switch, each a noun phrase
 #: the installer asks as "turns: <text>? [y/N]".
 QUESTIONS = {
-    "guards.removal": "the removal guard (refuse shell removals Claude Code would stop "
-                      "for your approval)",
+    "guards.removal": "the removal guard (refuse a shell command with a cd, an rm and a "
+                      "*, which Claude Code would stop for your approval)",
     "guards.no_nested_agents": "the no-nested-agents guard (stop subagents from starting "
                                "subagents of their own)",
     "guards.question_mode": "question mode (let agents ask you questions only in a turn "
@@ -53,6 +53,7 @@ PAGE = "moxi_turns.page:PAGE"
 #: What turns offers the browser UI shell: its panel, and no other component.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Live sessions", "contract": 1, "place": "page",
+             "group": "daily", "order": 25,
              "doc": "Every running session turns can reach: its turn, its agents and its "
                     "trouble, read-only"},
 }

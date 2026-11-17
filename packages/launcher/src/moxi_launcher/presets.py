@@ -605,16 +605,16 @@ def roles(harness: str, *, cwd: str | os.PathLike | None = None,
     core's harness table, `moxi config moxi harnesses`; its built-in folder when the row
     leaves it empty) and, with `cwd`, in the project's own agents folder. A role is a
     file's name without `.md`, and the `name:` its front matter gives."""
-    environ = os.environ if env is None else env
-    folders = [_agents_folder(harness, environ)]
+    caller_env = os.environ if env is None else env
+    agents_dirs = [_agents_dir(harness, caller_env)]
     if cwd is not None and harness in PROJECT_AGENTS:
-        folders.append(Path(cwd) / PROJECT_AGENTS[harness])
+        agents_dirs.append(Path(cwd) / PROJECT_AGENTS[harness])
     found: set[str] = set()
-    for folder in folders:
-        if folder is None:
+    for agents_dir in agents_dirs:
+        if agents_dir is None:
             continue
         try:
-            files = [p for p in folder.iterdir() if p.suffix in (".md", ".toml")]
+            files = [p for p in agents_dir.iterdir() if p.suffix in (".md", ".toml")]
         except OSError:
             continue
         for file in files:
@@ -625,11 +625,11 @@ def roles(harness: str, *, cwd: str | os.PathLike | None = None,
     return frozenset(found)
 
 
-def _agents_folder(harness: str, environ: Mapping[str, str]) -> Path | None:
+def _agents_dir(harness: str, env: Mapping[str, str]) -> Path | None:
     configured = ""
     try:
         core = load_config("moxi", Schema.from_resource("moxi", "settings.toml"),
-                           env=environ)
+                           env=env)
         for entry in core["harnesses"]:
             if isinstance(entry, dict) and entry.get("name") == harness:
                 configured = str(entry.get("agents") or "")
@@ -639,7 +639,7 @@ def _agents_folder(harness: str, environ: Mapping[str, str]) -> Path | None:
     if configured:
         return Path(configured).expanduser()
     if harness == "claude":
-        base = environ.get("CLAUDE_CONFIG_DIR")
+        base = env.get("CLAUDE_CONFIG_DIR")
         return (Path(base).expanduser() if base else Path.home() / ".claude") / "agents"
     if harness == "codex":
         return Path.home() / ".codex" / "agents"
@@ -708,7 +708,7 @@ def _get_project(key: str, what: str, available=None):
     return _projects_call(api, api.get, key)
 
 
-def _project_for(directory: str, available) -> object | None:
+def _project_for(work_dir: str, available) -> object | None:
     """The project `directory` is in, or None; None without projects."""
     if not available("projects"):
         return None
@@ -716,7 +716,18 @@ def _project_for(directory: str, available) -> object | None:
         api = projects_api("this", available)
     except NeedsProjects:
         return None
-    return _projects_call(api, api.for_path, directory)
+    return _projects_call(api, api.for_path, work_dir)
+
+
+def dir_place(cwd: str, *, available: Callable[[str], bool] | None = None
+                 ) -> tuple[str, str | None]:
+    """Where a launch given the folder `cwd` starts: the folder as the command line reads
+    it (`~` expanded, a relative path read against this process's directory), and the key
+    of the project `resolve` finds that folder in, none without projects or outside every
+    project. Raises projects' refusals."""
+    cli_dir = catalog.cli_path(cwd)
+    _, _, project = _place({"cwd": cli_dir}, cli_dir, _avail(available), "the launch")
+    return cli_dir, project.key if project is not None else None
 
 
 @dataclass(frozen=True)
@@ -1046,9 +1057,9 @@ def resolve(request, *, presets: Presets | None = None,
 
 def _one_spelling(layers, rows, values: dict, sources: dict) -> None:
     """Each text given inline or from a file (`TWO_SPELLINGS`) is taken from the latest
-    layer that gives it either way, so a typed `--instructions` replaces a seat's
-    `instructions_file`; the other spelling goes back to its default. One layer giving
-    both is refused, since one of them would go unread."""
+    layer that gives it either way, so `instructions` typed on the command line
+    replaces a seat's `instructions_file`; the other spelling goes back to its default.
+    One layer giving both is refused, since one of them would go unread."""
     for inline, from_file in TWO_SPELLINGS:
         for source, layer in reversed(layers):
             given = [k for k in (inline, from_file) if catalog.is_set(layer.get(k))]
@@ -1071,8 +1082,8 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     launch with turns but without turns' host installed runs as one without turns, with
     a warning. A Codex launch with an identity runs comms' Codex wrapper, which execs
     turns' host, so it is `host` and refused where the host can't start or comms has no
-    such wrapper. Refused for now: a headless launch with an identity (comms' headless
-    wrapper flags)."""
+    such wrapper. A headless launch with an identity is refused (`NotYet`): comms has no
+    headless wrapper to run it."""
     avail = _avail(available)
     turns = avail("turns")
     headless = target == "headless"
@@ -1202,10 +1213,10 @@ def _place(place: Mapping[str, object], caller: str, avail, what: str
         project = _get_project(key, what, avail)
         return str(project.root), False, project
     if HOME in place:
-        directory = _home_path(str(place[HOME]), what, None)
+        place_dir = _home_path(str(place[HOME]), what, None)
     else:
-        directory = str(place.get("cwd") or os.path.abspath(caller))
-    return directory, False, _project_for(directory, avail)
+        place_dir = str(place.get("cwd") or os.path.abspath(caller))
+    return place_dir, False, _project_for(place_dir, avail)
 
 
 def _project_key_of(values: Mapping[str, object]) -> str | None:
@@ -1232,16 +1243,29 @@ def _home_path(home: str, what: str, problems: list | None) -> str | None:
     return None
 
 
+def off_posture_rows(harness: str, values: Mapping[str, object],
+                     sources: Mapping[str, str],
+                     defaults: Mapping[str, object]) -> list[str]:
+    """The posture rows of a `harness` launch whose value, from the preset, typed or left
+    out, differs from its effective default: `defaults`' value (`Layered.defaults`), else
+    the shipped one. A launch without `off_posture` is refused on the first."""
+    return [row.name for row in catalog.load(harness)
+            if row.posture and row.name in values
+            and sources[row.name] in (PRESET, TYPED, LEFT_OUT)
+            and values[row.name] != _posture_default(row, defaults)]
+
+
+def _posture_default(row, defaults: Mapping[str, object]):
+    return _checked(row, defaults[row.name]) if row.name in defaults else row.default
+
+
 def _check_posture_rows(harness, values, sources, defaults, off_posture) -> None:
-    for row in catalog.load(harness):
-        if not row.posture or row.name not in values:
-            continue
-        if sources[row.name] not in (PRESET, TYPED, LEFT_OUT):
-            continue
-        default = (_checked(row, defaults[row.name]) if row.name in defaults
-                   else row.default)
-        if values[row.name] != default and not off_posture:
-            raise OffPosture(row.name, values[row.name], default, sources[row.name])
+    if off_posture:
+        return
+    for name in off_posture_rows(harness, values, sources, defaults)[:1]:
+        raise OffPosture(name, values[name],
+                         _posture_default(catalog.load(harness)[name], defaults),
+                         sources[name])
 
 
 def _checked(row, value):
@@ -1273,6 +1297,7 @@ __all__ = [
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "harness_of",
-    "layered", "mode_of", "needed", "path", "project_agents", "projects_api", "read",
+    "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
+    "projects_api", "read",
     "resolve", "roles", "schema",
 ]

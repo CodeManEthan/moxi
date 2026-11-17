@@ -51,40 +51,40 @@ def work(tmp_path) -> Path:
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     """The fake slots behind the launcher's seam; `rig.plan(...)` scripts it."""
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(dir=directory, plan=plan,
-                           calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(dir=slots_dir, plan=plan,
+                           calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 @pytest.fixture
 def turns(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-turns"
-    directory.mkdir()
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
-    monkeypatch.setenv(fake_turns.DIR, str(directory))
+    turns_dir = tmp_path / "fake-turns"
+    turns_dir.mkdir()
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
+    monkeypatch.setenv(fake_turns.DIR, str(turns_dir))
     monkeypatch.syspath_prepend(str(TESTS))
-    script = directory / "script.json"
+    script = turns_dir / "script.json"
     return SimpleNamespace(
-        dir=directory, plan=lambda **keys: script.write_text(json.dumps(keys)),
-        calls=lambda name=None: [c for c in fake_turns.calls(directory)
+        dir=turns_dir, plan=lambda **keys: script.write_text(json.dumps(keys)),
+        calls=lambda name=None: [c for c in fake_turns.calls(turns_dir)
                                  if name is None or c["call"] == name])
 
 
 @pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
 
@@ -290,7 +290,7 @@ def common_root_name() -> str:
     return compose.common.scratch_root().name
 
 
-def test_a_relative_temp_folder_still_gives_an_absolute_scratch_dir(tmp_path,
+def test_a_relative_temp_dir_still_gives_an_absolute_scratch_dir(tmp_path,
                                                                    monkeypatch):
     import tempfile
 
@@ -541,9 +541,9 @@ def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work
     startup settings on, and one whose session never got ready says Codex's trust prompt
     may be waiting for a person."""
     screens_on()
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}])
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
     conn = store.connect()
-    store.insert(conn, request_id="r1", actor="ann", harness="codex", target="slot",
+    store.insert(conn, request_id="r1", by="ann", harness="codex", target="slot",
                  cwd=str(work), values={}, argv=["moxi-turns-codex-host"], env={},
                  posture="", brief=BRIEF)
     sent = []
@@ -575,24 +575,24 @@ def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work
 
 
 def test_with_the_settings_off_no_screen_is_read(work, harness, rig):
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}])
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
     got = api.launch(request(work))
     assert rig.calls("read_screen") == [] and got.state == "started"
 
 
 def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
     screens_on(2)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}, {"screen": None}],
              answers=[{"outcome": "gone"}])
     got = api.launch(request(work))
     reads = rig.calls("read_screen")
-    assert reads[0]["screens"] == ["CLAUDE_TRUST_FOLDER"] and reads[0]["slot"] == 1
+    assert reads[0]["screens"] == ["CLAUDE_TRUST_DIR"] and reads[0]["slot"] == 1
     [answer] = rig.calls("answer_screen")
-    assert answer["screen"] == "CLAUDE_TRUST_FOLDER"
+    assert answer["screen"] == "CLAUDE_TRUST_DIR"
     # The answer is bounded by what remains of startup.wait_s, never more than 5 s.
     assert 1 <= answer["wait"] <= 2
     [seen] = events(kind=startup.EVENT)
-    assert (seen.detail["screen"], seen.detail["outcome"]) == ("CLAUDE_TRUST_FOLDER",
+    assert (seen.detail["screen"], seen.detail["outcome"]) == ("CLAUDE_TRUST_DIR",
                                                               "gone")
     # Without turns the loop runs to its bound, and the launch goes on.
     assert len(reads) > 2
@@ -602,7 +602,7 @@ def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
 def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
     screens_on(1, dev=True)
     api.launch(request(work))
-    assert rig.calls("read_screen")[0]["screens"] == ["CLAUDE_TRUST_FOLDER",
+    assert rig.calls("read_screen")[0]["screens"] == ["CLAUDE_TRUST_DIR",
                                                       "CLAUDE_DEV_CHANNELS"]
 
 
@@ -610,7 +610,7 @@ def test_a_screen_slots_cant_answer_that_still_shows_fails_screen_mismatch(
         work, harness, rig, turns):
     screens_on(3)
     turns.plan(ready="timeout")
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}],
              answers=[{"outcome": "mismatch", "why": "the option row is missing",
                        "capture": "/state/slots/mismatches/1.txt"}])
     got = api.launch(request(work, brief=BRIEF))
@@ -634,7 +634,7 @@ def test_a_screen_slots_cant_answer_that_left_lets_the_launch_go_on(work, harnes
     """slots says `mismatch` when the screen left between the loop's read and its answer:
     a person attached and answered it. The launch goes on and sends its first turn."""
     screens_on(3)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}, {"screen": None}],
              answers=[{"outcome": "mismatch",
                        "why": "the screen did not settle within 2 s"}])
     got = api.launch(request(work, brief=BRIEF))
@@ -649,7 +649,7 @@ def test_a_screen_slots_cant_answer_that_left_lets_the_launch_go_on(work, harnes
 def test_a_screen_not_settled_until_the_bound_runs_out_lets_the_launch_go_on(
         work, harness, rig):
     screens_on(2)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}],
              answers=[{"outcome": "mismatch", "why": "not-settled: the marker moved",
                        "capture": "/state/slots/mismatches/2.txt"}])
     got = api.launch(request(work))
@@ -664,7 +664,7 @@ def test_a_screen_not_settled_until_the_bound_runs_out_lets_the_launch_go_on(
 
 def test_a_screen_not_settled_whose_screen_left_is_not_a_failure(work, harness, rig):
     screens_on(2)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}, {"screen": None}],
              answers=[{"outcome": "mismatch", "why": "not-settled"}])
     got = api.launch(request(work))
     assert got.state == "started"
@@ -675,7 +675,7 @@ def test_a_screen_not_settled_whose_screen_left_is_not_a_failure(work, harness, 
 
 def test_a_screen_not_settled_then_answered_lets_the_launch_go_on(work, harness, rig):
     screens_on(3)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": "CLAUDE_TRUST_FOLDER"},
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}, {"screen": "CLAUDE_TRUST_DIR"},
                      {"screen": None}],
              answers=[{"outcome": "mismatch",
                        "why": "not-settled: the marker stayed on No, exit for 2 s"},
@@ -692,7 +692,7 @@ def test_a_screen_not_settled_then_answered_lets_the_launch_go_on(work, harness,
 def test_a_screen_not_settled_then_an_ended_pane_fails_exited(work, harness, rig, turns):
     screens_on(3)
     turns.plan(ready="timeout")
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}], dead_status=1,
              answers=[{"outcome": "mismatch", "why": "not-settled: x"},
                       {"outcome": "ended"}])
     got = api.launch(request(work, brief=BRIEF))
@@ -710,7 +710,7 @@ def test_a_mismatch_whose_pane_died_fails_exited(work, harness, rig, turns, why)
     the last read dead: it exited, it did not show another screen."""
     screens_on(3)
     turns.plan(ready="timeout")
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}], dead_status=1,
              answers=[{"outcome": "mismatch", "why": why, "dead": True,
                        "keys": ["Down", "Enter"]}])
     got = api.launch(request(work, brief=BRIEF))
@@ -736,7 +736,7 @@ def test_a_pane_that_died_at_startup_fails_exited(work, harness, rig, turns):
 
 def test_with_turns_the_loop_ends_when_the_session_is_ready(work, harness, rig, turns):
     screens_on(20)
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}])
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}, {"screen": None}])
     got = api.launch(request(work, brief=BRIEF))
     assert len(rig.calls("read_screen")) == 2
     assert got.state == "first-sent"
@@ -773,14 +773,14 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
         seen.reads.append(clock.now)
         frame = frames[min(len(seen.reads) - 1, len(frames) - 1)]
         name = frame.get("screen")
-        return fake.Seen(fake.SCREENS[name] if name else None, True, "",
+        return fake.Seen(fake.SCREENS[name] if name else None, full=True, why="",
                          dead=frame.get("dead", False), pane_id="%7")
 
-    def answer_screen(slot, screen, wait=5):
-        seen.answers.append(wait)
+    def answer_screen(slot, screen, wait_s=5):
+        seen.answers.append(wait_s)
         answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
-        clock.now += min(answer_takes, wait) + overrun
-        last = fake.Seen(screen, False, answer.get("why", ""),
+        clock.now += min(answer_takes, wait_s) + overrun
+        last = fake.Seen(screen, full=False, why=answer.get("why", ""),
                          dead=answer.get("dead", False), pane_id="%7")
         return fake.Answer(answer["outcome"], screen, answer.get("why", ""), last,
                            answer.get("capture"), tuple(answer.get("keys", ())))
@@ -798,16 +798,16 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    store.insert(connection, request_id="r1", actor="ann", harness="claude",
+    conn = store.connect()
+    store.insert(conn, request_id="r1", by="ann", harness="claude",
                  target="slot", cwd="/w", values={}, argv=["claude"], env={}, posture="",
                  session_id=SID)
-    yield connection
-    connection.close()
+    yield conn
+    conn.close()
 
 
-TRUST = [("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER)]
-SHOWING = {"screen": "CLAUDE_TRUST_FOLDER"}
+TRUST = [("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR)]
+SHOWING = {"screen": "CLAUDE_TRUST_DIR"}
 NONE = {"screen": None}
 
 
@@ -909,8 +909,8 @@ def test_a_screen_not_settled_then_answered_goes_on(conn):
                      {"outcome": "gone"}], answer_takes=2.0)
     got = watch(conn, clock, seen, wait_s=6)
     assert got.ended == "bound" and not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),
-                            ("CLAUDE_TRUST_FOLDER", "gone"))
+    assert got.answered == (("CLAUDE_TRUST_DIR", startup.NOT_SETTLED),
+                            ("CLAUDE_TRUST_DIR", "gone"))
     detail = [e.detail for e in store.events(conn, "r1")]
     assert [d["outcome"] for d in detail] == [startup.NOT_SETTLED, "gone"]
     assert detail[0]["why"] == "not-settled: the marker did not move"
@@ -951,8 +951,8 @@ def test_any_other_mismatch_whose_screen_still_shows_fails_screen_mismatch(conn,
     assert seen.answers == [5.0] and seen.reads == [0.0, 1.0]
     assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
                                                      "/c")
-    assert "CLAUDE_TRUST_FOLDER" in got.why and why in got.why
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),)
+    assert "CLAUDE_TRUST_DIR" in got.why and why in got.why
+    assert got.answered == (("CLAUDE_TRUST_DIR", "mismatch"),)
     [event] = store.events(conn, "r1")
     assert event.detail["outcome"] == "mismatch" and "answer" not in event.detail
 
@@ -964,7 +964,7 @@ def test_a_mismatch_whose_screen_left_goes_on_watching(conn):
                                               "capture": "/c"}])
     got = watch(conn, clock, seen, wait_s=2)
     assert got.ended == "bound" and not got.failed and seen.answers == [2.0]
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),)
+    assert got.answered == (("CLAUDE_TRUST_DIR", "mismatch"),)
     assert len(seen.reads) > 2
 
 
@@ -975,8 +975,8 @@ def test_a_mismatch_whose_screen_left_then_came_back_is_answered_again(conn):
                      {"outcome": "gone"}])
     got = watch(conn, clock, seen, wait_s=2)
     assert not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),
-                            ("CLAUDE_TRUST_FOLDER", "gone"))
+    assert got.answered == (("CLAUDE_TRUST_DIR", "mismatch"),
+                            ("CLAUDE_TRUST_DIR", "gone"))
 
 
 def test_a_mismatch_whose_pane_died_by_the_read_after_fails_exited(conn):
@@ -1013,7 +1013,7 @@ def test_a_why_led_by_the_word_not_settled_is_not_settled(conn, why):
     seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "mismatch", "why": why}])
     got = watch(conn, clock, seen, wait_s=2)
     assert got.ended == "bound" and not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),)
+    assert got.answered == (("CLAUDE_TRUST_DIR", startup.NOT_SETTLED),)
 
 
 def test_not_ended_goes_on_watching(conn):
@@ -1021,7 +1021,7 @@ def test_not_ended_goes_on_watching(conn):
     seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "not-ended"}])
     got = watch(conn, clock, seen, wait_s=2)
     assert got.ended == "bound" and not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "not-ended"),)
+    assert got.answered == (("CLAUDE_TRUST_DIR", "not-ended"),)
 
 
 def test_an_answer_word_the_loop_does_not_know_stops_the_watch(conn):
@@ -1060,7 +1060,7 @@ def test_a_read_matches_the_screen_object_slots_gives(conn):
     clock = Clock()
     seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "gone"}])
     got = watch(conn, clock, seen, wait_s=2)
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "gone"),)
+    assert got.answered == (("CLAUDE_TRUST_DIR", "gone"),)
     # Another screen than the ones enabled is not answered.
     clock = Clock()
     other = loop_api(clock, [{"screen": "CLAUDE_EXIT_DIALOG"}], [{"outcome": "gone"}])
@@ -1087,7 +1087,7 @@ def test_slots_that_cant_answer_stop_the_loop_without_failing(conn, error):
     clock = Clock()
     seen = loop_api(clock, [SHOWING], [])
 
-    def answer_screen(slot, screen, wait=5):
+    def answer_screen(slot, screen, wait_s=5):
         raise error
 
     seen.api.answer_screen = answer_screen
@@ -1106,10 +1106,10 @@ def test_the_keys_slots_sent_are_recorded(conn):
 def test_the_enabled_screens_follow_the_settings():
     on = {"startup.trust_dialog": True, "startup.dev_channels_dialog": False}
     assert startup.screens("claude", fake, on) == [
-        ("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER)]
+        ("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR)]
     both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
     assert startup.screens("claude", fake, both) == [
-        ("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER),
+        ("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR),
         ("CLAUDE_DEV_CHANNELS", fake.CLAUDE_DEV_CHANNELS)]
     off = {"startup.trust_dialog": False, "startup.dev_channels_dialog": False}
     assert startup.screens("claude", fake, off) == []
@@ -1118,7 +1118,7 @@ def test_the_enabled_screens_follow_the_settings():
 def test_the_screens_are_read_from_slots_api_module_only():
     both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
     elsewhere = SimpleNamespace(screens=SimpleNamespace(
-        CLAUDE_TRUST_FOLDER=fake.CLAUDE_TRUST_FOLDER,
+        CLAUDE_TRUST_DIR=fake.CLAUDE_TRUST_DIR,
         CLAUDE_DEV_CHANNELS=fake.CLAUDE_DEV_CHANNELS))
     with pytest.raises(AttributeError):
         startup.screens("claude", elsewhere, both)
@@ -1129,7 +1129,7 @@ def test_the_screens_are_read_from_slots_api_module_only():
 
 def test_the_announcement_names_the_setup_and_the_seam():
     assert module.SETUP == "moxi_launcher.startup:setup"
-    assert slots.SEAM in module.INTERNAL_ENV
+    assert slots.SLOTS_ENV in module.INTERNAL_ENV
 
 
 def test_without_slots_setup_asks_nothing(no_slots):
@@ -1189,20 +1189,91 @@ def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
     assert "moxi config set launcher startup.trust_dialog true" in done.stdout
 
 
+# -- the fake's listing ---------------------------------------------------------------------
+
+
+def test_the_fake_lists_the_scripts_slots_in_number_order(rig):
+    assert fake.list_slots() == fake.Listing(ok=True)
+    rig.plan(slots={"10": {"state": "free", "launchable": True},
+                    "2": {"state": "occupied", "launchable": False,
+                          "hold": {"holder": "planner", "until": 5.0},
+                          "last": {"at": 2.0, "label": "x", "meta": {"request_id": "r"}}},
+                    "7": {"state": "occupied", "launchable": False, "created": None}})
+    listing = fake.list_slots()
+    assert listing.ok and listing.why == ""
+    assert [(s.number, s.state, s.launchable) for s in listing.slots] == [
+        (2, "occupied", False), (10, "free", True)]
+    assert listing.slots[0].hold == fake.Hold("planner", 5.0)
+    assert listing.slots[0].last == fake.Last(2.0, "x", {"request_id": "r"})
+    assert [s.number for s in listing.unregistered] == [7]
+    assert listing.slots[0] == fake.show(2)
+
+
+def test_the_fake_says_when_the_slots_cannot_be_read(rig):
+    rig.plan(list="error", slots={"1": {"state": "free", "launchable": True}})
+    listing = fake.list_slots()
+    assert not listing.ok and listing.why and listing.slots == ()
+
+
+def test_a_start_records_the_slot_it_placed_in_the_script(rig, tmp_path):
+    rig.plan(placed=4, slots={"1": {"state": "free", "launchable": True}})
+    meta = {"request_id": "r1"}
+    fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1", meta=meta,
+               create=True)
+    fake.start(1, ["true"], env={}, cwd=str(tmp_path), label="launcher:r2",
+               meta={"request_id": "r2"})
+    written = json.loads((rig.dir / "script.json").read_text())
+    assert written["placed"] == 4
+    assert written["slots"] == {
+        "1": {"state": "occupied", "launchable": False, "label": "launcher:r2",
+              "meta": {"request_id": "r2"}},
+        "4": {"state": "occupied", "launchable": False, "label": "launcher:r1",
+              "meta": meta}}
+
+
+def test_a_start_told_to_wait_places_nothing_until_it_has(rig, tmp_path, monkeypatch):
+    waited = []
+
+    def wait(seconds):
+        waited.append(seconds)
+        assert "slots" not in json.loads((rig.dir / "script.json").read_text())
+
+    monkeypatch.setattr(fake.time, "sleep", wait)
+    rig.plan(start_wait_s=7)
+    fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+               meta={"request_id": "r1"}, create=True)
+    assert waited == [7]
+    assert "1" in json.loads((rig.dir / "script.json").read_text())["slots"]
+
+
+def test_a_slot_one_process_started_in_reads_taken_in_another(rig, tmp_path):
+    fake.start(3, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+               meta={"request_id": "r1"})
+    mine = fake.show(3)
+    assert (mine.state, mine.pane_id, mine.pane_pid) == ("occupied", "%7", 4343)
+    code = ("import json, launcher_fake_slots as fake\n"
+            "print(json.dumps([[s.number, s.state, s.launchable, s.label, s.last.meta, "
+            "s.pane_id] for s in fake.list_slots().slots]))")
+    ran = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env={**os.environ, "PYTHONPATH": str(TESTS)}, check=True)
+    assert json.loads(ran.stdout) == [
+        [3, "occupied", False, "launcher:r1", {"request_id": "r1"}, None]]
+
+
 # -- the fake against slots as built ----------------------------------------------------------
 
 #: Every name the launcher reads from slots' API module.
-USED = ("supported", "show", "create", "start", "read_screen", "answer_screen",
+USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "answer_screen",
         "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
-        "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS")
+        "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS")
 #: The shapes the launcher reads, as the fake gives them.
-SHAPES = ("Support", "Hold", "Last", "Slot", "Placed", "Screen", "Seen", "Answer")
+SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
 
 
 @pytest.fixture
 def real_slots(monkeypatch):
     """slots' own API module; skips when slots is not installed."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     if not modules.available("slots"):
         pytest.skip("slots is not installed")
     found = slots.api()
@@ -1228,7 +1299,7 @@ def test_the_launcher_reads_only_names_slots_api_has(real_slots):
     assert missing == []
     assert startup.screens("claude", real_slots, {"startup.trust_dialog": True,
                                                   "startup.dev_channels_dialog": True}) == [
-        ("CLAUDE_TRUST_FOLDER", real_slots.CLAUDE_TRUST_FOLDER),
+        ("CLAUDE_TRUST_DIR", real_slots.CLAUDE_TRUST_DIR),
         ("CLAUDE_DEV_CHANNELS", real_slots.CLAUDE_DEV_CHANNELS)]
 
 
@@ -1253,7 +1324,8 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "show", "create", "start", "read_screen", "answer_screen"):
+    for name in ("supported", "list_slots", "show", "create", "start", "read_screen",
+                 "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [

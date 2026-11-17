@@ -44,7 +44,7 @@ class Address:
 
 
 def address(state="on", change="r1.1", host="gw.example.test", port=443,
-            provider_name="cloudflare", target=SOCK, form="unix", retired=False):
+            provider_name="cloudflare", target=SOCK, form="unix", *, retired=False):
     return Address(module="ui", name="gateway", reach="own-devices", provider=provider_name,
                    exposure="internet", url=f"https://{host}/", host=host, port=port,
                    target=target, state=state, change=change, applied_at=None, form=form,
@@ -115,12 +115,12 @@ def test_the_runtime_dir_and_an_owner_only_state_root_pass():
     ("/home/someone", OTHER, 0o700, "who owns it"),
     ("/home", 0, 0o1777, "who owns it"),
 ])
-def test_a_directory_another_user_owns_or_can_write_is_refused_and_named(where, owner, mode,
+def test_a_dir_another_user_owns_or_can_write_is_refused_and_named(where, owner, mode,
                                                                         fix):
     tree = {**STATE, where: (owner, mode)}
     with pytest.raises(endpoint.PathRefused) as err:
         _check(STATE_SOCK, tree)
-    assert err.value.directory == where
+    assert err.value.failed_dir == where
     assert where in str(err.value) and fix in str(err.value)
 
 
@@ -134,7 +134,7 @@ def test_the_tmp_fallback_is_refused():
     tree = {"/": (0, 0o755), "/tmp": (0, 0o1777), f"/tmp/moxi-{UID}": (UID, 0o700)}
     with pytest.raises(endpoint.PathRefused) as err:
         _check(f"/tmp/moxi-{UID}/0123456789abcdef.sock", tree)
-    assert err.value.directory == "/tmp"
+    assert err.value.failed_dir == "/tmp"
 
 
 def test_a_link_another_user_owns_is_refused_and_a_link_is_followed():
@@ -142,7 +142,7 @@ def test_a_link_another_user_owns_is_refused_and_a_link_is_followed():
               "/var/home": (0, 0o755)}
     with pytest.raises(endpoint.PathRefused) as err:
         _check(STATE_SOCK, linked)
-    assert err.value.directory == "/home"
+    assert err.value.failed_dir == "/home"
     # A link root owns passes, and the directories it leads to are walked too.
     resolved = {**{p.replace("/home", "/var/home", 1): v for p, v in STATE.items()
                    if p.startswith("/home/")},
@@ -151,7 +151,7 @@ def test_a_link_another_user_owns_is_refused_and_a_link_is_followed():
     real = lambda p: p.replace("/home", "/var/home", 1)  # noqa: E731
     with pytest.raises(endpoint.PathRefused) as err:
         _check(STATE_SOCK, resolved, realpath=real)
-    assert err.value.directory == "/var"
+    assert err.value.failed_dir == "/var"
     resolved["/var"] = (0, 0o755)
     _check(STATE_SOCK, resolved, realpath=real)
 
@@ -165,7 +165,7 @@ def test_a_path_past_the_socket_limit_is_refused():
 
 @pytest.mark.skipif(sys.platform != "linux" or not os.path.isdir(f"/run/user/{os.getuid()}"),
                     reason="needs a login runtime directory")
-def test_the_real_login_runtime_directory_passes():
+def test_the_real_login_runtime_dir_passes():
     endpoint.check_socket_path(f"/run/user/{os.getuid()}/{endpoint.SOCKET_FILE}")
 
 
@@ -200,7 +200,7 @@ def test_a_locator_that_leaves_the_runtime_dir_where_it_was_passes(plain):
     assert endpoint.runtime_problem(same, platform="linux") is None
 
 
-def test_on_windows_the_logon_tasks_stored_environment_counts(plain, tmp_path):
+def test_on_windows_the_logon_tasks_stored_env_counts(plain, tmp_path):
     moved = {**plain, "MOXI_HOME": str(tmp_path / "m")}
     assert endpoint.runtime_problem(moved, platform="win32", stored={"moxi_home": moved["MOXI_HOME"]}) is None
     assert endpoint.runtime_problem(plain, platform="win32", stored={"MOXI_HOME": moved["MOXI_HOME"]})
@@ -326,31 +326,32 @@ def test_a_none_between_a_remove_and_an_add_changes_nothing_by_itself():
 
 def test_the_mount_and_its_reasons_in_order():
     sock = address()
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=sock, refused=False) == Mount(True, None)
-    assert decide(on=False, kind="unix", endpoint=SOCK, address=sock, refused=False).reason == "off"
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=sock, refused=True).reason == "record"
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=sock, refused=False) == Mount(
+        mounted=True, reason=None)
+    assert decide(enabled=False, kind="unix", endpoint=SOCK, address=sock, refused=False).reason == "off"
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=sock, refused=True).reason == "record"
     for other in (address(target="/elsewhere/gateway.sock"), address(form="http", target=8461)):
-        assert decide(on=True, kind="unix", endpoint=SOCK, address=other,
+        assert decide(enabled=True, kind="unix", endpoint=SOCK, address=other,
                       refused=False).reason == "target"
     tcp = address(form="http", target=8461)
-    assert decide(on=True, kind="tcp", endpoint=8461, address=tcp, refused=False).reason == "tcp"
-    assert decide(on=True, kind="tcp", endpoint=8461, address=address(form="http", target=8462),
+    assert decide(enabled=True, kind="tcp", endpoint=8461, address=tcp, refused=False).reason == "tcp"
+    assert decide(enabled=True, kind="tcp", endpoint=8461, address=address(form="http", target=8462),
                   refused=False).reason == "target"
     retired = address(retired=True)
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=retired,
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=retired,
                   refused=False).reason == "origin"
-    assert decide(on=True, kind="tcp", endpoint=8461,
+    assert decide(enabled=True, kind="tcp", endpoint=8461,
                   address=address(form="http", target=8461, retired=True),
                   refused=False).reason == "tcp", "tcp comes before origin"
 
 
 def test_gateway_acts_holds_the_pid_the_value_and_the_reason(tmp_path):
-    write_acts(tmp_path, Mount(False, "tcp"))
+    write_acts(tmp_path, Mount(mounted=False, reason="tcp"))
     assert read_acts(tmp_path) == {"pid": os.getpid(), "acts": False, "reason": "tcp"}
     assert stat.S_IMODE(os.stat(tmp_path / "gateway.acts").st_mode) == 0o600
-    write_acts(tmp_path, Mount(False, "tcp"), refusals={"fixture": "why"})
+    write_acts(tmp_path, Mount(mounted=False, reason="tcp"), refusals={"fixture": "why"})
     assert read_acts(tmp_path)["refusals"] == {"fixture": "why"}
-    write_acts(tmp_path, Mount(False, "tcp"), refusals={})
+    write_acts(tmp_path, Mount(mounted=False, reason="tcp"), refusals={})
     assert "refusals" not in read_acts(tmp_path)
 
 

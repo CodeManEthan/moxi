@@ -10,7 +10,7 @@ keep it on that one thread:
     runs for a socket request, under a connection with no peer. A request through it and
     the same request over the socket get the same answer and the same `DaemonError`
     classes from the same codes, so `sending.run` branches as it does for the verbs. It
-    serves the reads, `send` and `delete`; an adapter's methods (`bind` among them) are
+    serves the reads, `send` and `remove`; an adapter's methods (`bind` among them) are
     refused, since nothing here holds a binding. It refuses, before dispatch, a request
     whose `as` names a reserved name or that names the operator's `user`: no tool sends
     under a reserved name or on the operator's lane.
@@ -47,8 +47,8 @@ log = logging.getLogger("comms.mcp.inprocess")
 #: threads; the rest stay for adapters' binds, acks and turn ends and the verbs.
 TOOLS_AT_ONCE = 8
 
-#: The daemon methods a tool reaches: the reads, `send` and `delete`.
-SERVED = frozenset({*READS, "send", "delete", "mcp_endpoint"})
+#: The daemon methods a tool reaches: the reads, `send` and `remove`.
+SERVED = frozenset({*READS, "send", "remove", "mcp_endpoint"})
 
 
 class InProcessConnection:
@@ -110,8 +110,8 @@ class InProcessClient(DaemonClient):
             raise DaemonOffline("comms offline: the daemon has stopped")
         try:
             answer = self._daemon._call(self._conn, method, params)
-        except ipc.RpcError as e:
-            raise _error(ipc.RpcError(e.code, e.message, _wire_copy(e.data))) from None
+        except ipc.RpcError as exc:
+            raise _error(ipc.RpcError(exc.code, exc.message, _wire_copy(exc.data))) from None
         if isinstance(answer, wire.Then):
             # Only `bind` answers one, and it isn't served here.
             raise DaemonError(f"{method} answered work for a connection; nothing here "
@@ -136,9 +136,9 @@ class InProcessClient(DaemonClient):
                 held = [name for name in names if reserved.lookup(conn, name) is not None]
             finally:
                 conn.close()
-        except Exception as e:  # noqa: BLE001 - a read that fails sends nothing
+        except Exception as exc:  # noqa: BLE001 - a read that fails sends nothing
             log.warning("the reserved names couldn't be read (%s); the request is refused",
-                        type(e).__name__)
+                        type(exc).__name__)
             raise DaemonError("comms couldn't read its reserved names; try again in a "
                               "moment", wire.FAILED, {}) from None
         if held:
@@ -194,7 +194,7 @@ class Calls:
         self.running = 0
 
     async def run(self, body, *args):
-        await self._host.opened()
+        await self._host.on_opened()
         await self._places.acquire()
         loop = asyncio.get_running_loop()
         try:

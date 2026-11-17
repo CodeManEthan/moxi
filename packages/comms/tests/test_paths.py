@@ -41,13 +41,13 @@ def test_comms_locations(monkeypatch, tmp_path):
     assert p.config_dir() == tmp_path / "config" / "comms"
 
 
-def test_every_location_reads_a_given_environment(tmp_path):
+def test_every_location_reads_a_given_env(tmp_path):
     env = {"MOXI_COMMS_HOME": str(tmp_path), "MOXI_COMMS_DEVICE": "box2"}
     assert paths.comms_db(env) == tmp_path / "state" / "comms" / "comms.db"
     assert paths.daemon_socket(env) == tmp_path / "runtime" / "comms" / "daemon.sock"
 
 
-def test_a_socket_under_the_runtime_directory_passes():
+def test_a_socket_under_the_runtime_dir_passes():
     sock = paths.runtime_dir() / "comms-claimsrv-x.sock"
     assert paths.refuse_outside_runtime(sock, "MOXI_COMMS_CLAIM_SOCKET") == sock
     assert paths.refuse_outside_runtime(str(paths.daemon_socket()),
@@ -55,7 +55,7 @@ def test_a_socket_under_the_runtime_directory_passes():
 
 
 @pytest.mark.parametrize("variable", ["MOXI_COMMS_CLAIM_SOCKET", "MOXI_COMMS_SOCKET"])
-def test_a_socket_outside_the_runtime_directory_is_refused(tmp_path, variable):
+def test_a_socket_outside_the_runtime_dir_is_refused(tmp_path, variable):
     """A session whose stamp names a socket under another program's runtime root: a
     send inside it must not claim that identity against comms' daemon."""
     other = tmp_path / "other-program" / "comms-daemon.sock"
@@ -65,7 +65,7 @@ def test_a_socket_outside_the_runtime_directory_is_refused(tmp_path, variable):
     assert variable in text and str(paths.runtime_dir()) in text and str(other) in text
 
 
-def test_the_runtime_directory_itself_and_its_root_are_refused():
+def test_the_runtime_dir_itself_and_its_root_are_refused():
     """Only a path inside RUNTIME/comms is comms' own: not the directory itself, and not
     another module's directory under the shared root."""
     for path in (paths.runtime_dir(), paths.LAYOUT.runtime_root() / "turns" / "x.sock",
@@ -75,7 +75,7 @@ def test_the_runtime_directory_itself_and_its_root_are_refused():
 
 
 @pytest.mark.usefixtures("needs_symlinks")
-def test_a_link_inside_the_runtime_directory_that_leaves_it_is_refused(tmp_path):
+def test_a_link_inside_the_runtime_dir_that_leaves_it_is_refused(tmp_path):
     outside = tmp_path / "elsewhere.sock"
     outside.touch()
     runtime = paths.runtime_dir()

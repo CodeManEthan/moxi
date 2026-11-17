@@ -143,7 +143,7 @@ class Daemon:
             log.exception("the switch couldn't be read at the stop; it reads off")
             switch_on = False
         try:
-            await self.host.signin.stopping(switch_on)
+            await self.host.signin.stopping(switch_on=switch_on)
         except Exception:  # noqa: BLE001
             log.exception("the sign-in failed at the stop")
         await self.host.registry.stop()
@@ -178,8 +178,8 @@ async def _serve(daemon: Daemon) -> int:
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stopping.set))
     try:
         await daemon.start()
-    except Exception as e:
-        log.error("the connector couldn't start: %s", e)
+    except Exception as exc:
+        log.error("the connector couldn't start: %s", exc)
         await daemon.stop()
         return codes.ERROR
     await stopping.wait()
@@ -194,11 +194,11 @@ def main(argv: list[str] | None = None) -> int:
     moxi.log.setup(MODULE, "info")
     try:
         values = connector_settings.load()
-    except Exception as e:  # noqa: BLE001 - a config the door can't read stops it
-        print(f"moxi-connector-server: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - a config the door can't read stops it
+        print(f"moxi-connector-server: {exc}", file=sys.stderr)
         return codes.ERROR
     if not values["enabled"]:
-        print("moxi-connector-server: the connector is off; moxi connector on turns it on",
+        print("moxi-connector-server: the connector is off; moxi connector enable turns it on",
               file=sys.stderr)
         return codes.REFUSED
     taken = listen.take(values["port"])

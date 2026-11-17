@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AGENT_ONLY_CLAUDE, CUT, charCount, cutAt, entryView, fmtBytes, fmtCount, fmtDuration, fmtTime, formRoute,
-  headerFields, headingOf, HIDDEN, itemOf, keepEarlier, LIMIT_LINE, listingView, markerLine, NO_ID,
-  NO_SUBAGENTS, NOT_AN_ID, pages, parseRoute, requestLine, routeOf, sentLine, START_LINE, subagentsPath,
+  AGENT_ONLY_CLAUDE, CUT, charCount, cutAt, entryView, ERROR, ERROR_FLAG, FAILED, failureWord, fmtBytes, fmtCount,
+  fmtDuration, fmtTime, headerFields, headingOf, HIDDEN, itemOf, keepEarlier, LIMIT_LINE, listingView, markerLine,
+  NO_SUBAGENTS, pages, parseRoute, requestLine, routeOf, sentLine, START_LINE, subagentsPath,
   textView, UNKNOWN_ROUTE, unknownLine, windowPath, windowView,
 } from "../src/views.ts";
 
@@ -25,9 +25,9 @@ const EARLIER = { ...WINDOW, has_earlier: false, before: null, ended: "start",
 
 // -- routes -------------------------------------------------------------------------------------
 
-test("the empty route is the id form", () => {
-  assert.deepEqual(parseRoute(""), { view: "form" });
-  assert.deepEqual(parseRoute("/"), { view: "form" });
+test("the empty route is the list", () => {
+  assert.deepEqual(parseRoute(""), { view: "list" });
+  assert.deepEqual(parseRoute("/"), { view: "list" });
 });
 
 test("a route names a session by harness and id, and a Claude subagent under it", () => {
@@ -53,22 +53,6 @@ test("a session's route encodes each part, and reads back", () => {
   assert.equal(routeOf(target), "claude/a%20b/x%2Fy");
   assert.deepEqual(parseRoute(routeOf(target)), { view: "session", target });
   assert.equal(routeOf({ harness: "codex", session: "t1", agent: null }), "codex/t1");
-});
-
-// -- the id form --------------------------------------------------------------------------------
-
-test("the id form opens the session's route", () => {
-  assert.deepEqual(formRoute("opencode", "  ses_1 "), { route: "opencode/ses_1" });
-  assert.deepEqual(formRoute("claude", "0190b000-0000-7000-8000-00000000c1a0"),
-                   { route: "claude/0190b000-0000-7000-8000-00000000c1a0" });
-});
-
-test("the id form refuses an empty id, and one holding /, ? or #, with a message", () => {
-  assert.deepEqual(formRoute("claude", "   "), { problem: NO_ID });
-  for (const id of ["s1/a1", "s1?x=1", "s1#top", "/home/me/.claude/projects/x.jsonl"]) {
-    assert.deepEqual(formRoute("claude", id), { problem: NOT_AN_ID }, id);
-  }
-  assert.deepEqual(formRoute("gemini", "s1"), { problem: "Choose a harness." });
 });
 
 // -- queries ------------------------------------------------------------------------------------
@@ -184,6 +168,49 @@ test("a tool call is one line, its summary; a result is its size and error flag"
   assert.deepEqual([result.type, result.line, result.error], ["result", "Result: 2.0 KB", false]);
   const failed = itemOf({ kind: "tool_result", raw_kind: "user", at: at(3), unknown: [], is_error: true, size_bytes: 10 });
   assert.deepEqual([failed.line, failed.error], ["Result: error, 10 B", true]);
+});
+
+test("a record that failed is called by a word, and no other record is", () => {
+  const result = (over) => ({ kind: "tool_result", raw_kind: "user", at: at(3), unknown: [], size_bytes: 10, ...over });
+  const marker = (name) => ({ kind: "marker", raw_kind: "system", at: at(4), unknown: [], marker: name });
+  const failing = [
+    [result({ is_error: true }), FAILED, "result"],
+    [message("API Error: 529", { role: "assistant", synthetic: true, flags: [ERROR_FLAG] }), ERROR, "rule"],
+    [message("API Error: 529", { role: "assistant", flags: [ERROR_FLAG, "isMeta"] }), ERROR, "message"],
+  ];
+  for (const [row, word, type] of failing) {
+    assert.equal(failureWord(row), word);
+    const item = itemOf(row);
+    assert.deepEqual([item.type, item.word], [type, word]);
+  }
+  assert.deepEqual([FAILED, ERROR], ["Failed", "Error"]);
+  // The word stands before the record's own line, which is as it was.
+  assert.equal(itemOf(failing[0][0]).line, "Result: error, 10 B");
+  assert.equal(itemOf(failing[1][0]).line, "Synthetic: API Error: 529");
+
+  const ordinary = [
+    result({ is_error: false }), result({ is_error: null }), result({}),
+    message("hello"), message("done", { role: "assistant", flags: ["isMeta"] }),
+    message("thinking", { role: "assistant", reasoning: true }),
+    message("No response requested.", { role: "assistant", synthetic: true }),
+    { kind: "message", raw_kind: "user", at: at(0), unknown: [], role: "user", text: "no flags sent" },
+    marker("compaction"), marker("turn_aborted"), marker("rollback"), marker("turn_end"),
+  ];
+  for (const row of ordinary) {
+    assert.equal(failureWord(row), null);
+    assert.equal(itemOf(row).word, null);
+  }
+  // A call, a request and a note have no word: none of them says how anything ended.
+  for (const row of [
+    { kind: "tool_call", raw_kind: "assistant", at: at(1), unknown: [], name: "Read", call_id: "c1", summary: "Read /work/a" },
+    { kind: "request", raw_kind: "assistant", at: at(5), unknown: [], request_id: "r1", model: "claude-model-x" },
+    { kind: "limits", raw_kind: "event_msg", at: at(6), unknown: [], limit_id: "codex", windows: [] },
+    { kind: "malformed", raw_kind: "malformed", at: at(7), unknown: [], why: "not JSON" },
+    { kind: "other", raw_kind: "system/api_error", at: at(8), unknown: [], recognised: true },
+  ]) {
+    assert.equal(failureWord(row), null);
+    assert.equal("word" in itemOf(row), false);
+  }
 });
 
 test("markers are labelled rules", () => {

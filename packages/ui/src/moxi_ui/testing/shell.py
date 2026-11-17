@@ -50,8 +50,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
+
 #: Seconds a test shell has to print its ready line.
 START_TIMEOUT = 30.0
+#: The default seconds of a session's sign-in and reads, a token route's call and
+#: `wait_server`. A module's first request starts its page server before it answers,
+#: which a loaded machine slows.
+READ_S = 30.0
 #: Seconds a stopping test shell has before it is killed.
 STOP_TIMEOUT = 15.0
 #: Lines of the shell process's stderr kept for a failure's message.
@@ -60,13 +66,13 @@ STDERR_LINES = 200
 #: The variables passed on from this process, when set. `MOXI_ANCHOR_HOME` is the test
 #: kit's stand-in for the account's folder, so the shell reads the test's record.
 _KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
-         "MOXI_ANCHOR_HOME")
+         ANCHOR_HOME_ENV)
 #: The variables that keep a test shell under its home; a test's `env` can't set them.
 _OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-                    "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "MOXI_HOME", "TMPDIR", "TEMP", "TMP",
+                    "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", HOME_ENV, "TMPDIR", "TEMP", "TMP",
                     "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH",
                     "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-                    "PYTEST_CURRENT_TEST", "MOXI_ANCHOR_HOME"})
+                    "PYTEST_CURRENT_TEST", ANCHOR_HOME_ENV})
 #: A Moxi locator variable: `MOXI_HOME`, `MOXI_<M>_HOME`, `MOXI_<M>_<KIND>_HOME` or
 #: `MOXI_<M>_RUNTIME_DIR`. Gateway mode sets none.
 _LOCATOR = re.compile(r"MOXI_(?:HOME|[A-Z0-9_]+_(?:HOME|RUNTIME_DIR))")
@@ -112,7 +118,7 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         env[key] = str(home / rel)
     env["XDG_RUNTIME_DIR"] = str(home / "run")
     if not gateway:
-        env["MOXI_HOME"] = str(home / "moxi")
+        env[HOME_ENV] = str(home / "moxi")
     for key in ("TMPDIR", "TEMP", "TMP"):
         env[key] = str(home / "tmp")
     if sys.platform == "win32":
@@ -122,8 +128,8 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         if gateway:
             env["WIN_PD_OVERRIDE_APPDATA"] = env["APPDATA"]
             env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = env["LOCALAPPDATA"]
-    if not env.get("MOXI_ANCHOR_HOME"):  # no kit's fence: the shell's own home stands in
-        env["MOXI_ANCHOR_HOME"] = env.get("LOCALAPPDATA") or str(home)
+    if not env.get(ANCHOR_HOME_ENV):  # no kit's fence: the shell's own home stands in
+        env[ANCHOR_HOME_ENV] = env.get("LOCALAPPDATA") or str(home)
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
     env.update(extra)
@@ -163,6 +169,9 @@ class TestShell:
     shell's environment, which its page servers and the `moxi` commands it runs inherit
     (for example `{"GIT_CONFIG_NOSYSTEM": "1"}`); see `shell_env` for the ones it can't set.
     `gateway` runs the shell with its gateway, in gateway mode (see the module doc).
+    `checks` lets the shell run the doctor for its kept run. Without it (the default)
+    `/m/ui/api/checks` and its run act answer with what is kept and start no doctor, so
+    no test starts a process it did not ask for.
     """
 
     __test__ = False  # pytest: not a test class
@@ -171,7 +180,8 @@ class TestShell:
                  child_args: Sequence[str] = (), leave_out: Sequence[str] = (),
                  failed_for: float | None = None, port: int = 0,
                  env: Mapping[str, str] | None = None,
-                 start_timeout: float = START_TIMEOUT, gateway: bool = False):
+                 start_timeout: float = START_TIMEOUT, gateway: bool = False,
+                 checks: bool = False):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
         self.child_args = tuple(str(arg) for arg in child_args)
@@ -180,6 +190,7 @@ class TestShell:
         self.bind_port = int(port)
         self.start_timeout = start_timeout
         self.gateway = bool(gateway)
+        self.checks = bool(checks)
         self.env = shell_env(self.home, self.site, env, gateway=self.gateway)
         self.port: int | None = None
         self.info: Any = None
@@ -219,7 +230,7 @@ class TestShell:
         cwd = Layout("ui").runtime_dir(self.env, create=True)
         given: dict[str, Any] = {"child_args": list(self.child_args),
                                  "leave_out": list(self.leave_out), "port": self.bind_port,
-                                 "gateway": self.gateway}
+                                 "gateway": self.gateway, "checks": self.checks}
         if self.failed_for is not None:
             given["failed_for"] = self.failed_for
         options = json.dumps(given)
@@ -370,7 +381,7 @@ class TestShell:
         page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
         return page
 
-    def session(self, *, timeout: float = 10.0) -> Session:
+    def session(self, *, timeout: float = READ_S) -> Session:
         """A signed-in session with no browser: the cookie and the key a sign-in gives,
         sent the way the shell's document sends them."""
         if self.port is None:
@@ -380,7 +391,7 @@ class TestShell:
     # -- the token routes -----------------------------------------------------------------
 
     def call(self, method: str, path: str, body: Any = None, *,
-             timeout: float = 10.0) -> tuple[int, Any]:
+             timeout: float = READ_S) -> tuple[int, Any]:
         """One request to a shell route with the runtime file's token, as `moxi ui status`
         sends it: `(status, data)`."""
         from moxi_ui.loopback.api import call
@@ -401,7 +412,7 @@ class TestShell:
         return next((row for row in self.servers() if row["module"] == module), None)
 
     def wait_server(self, module: str, check: str | Callable[[dict[str, Any]], bool], *,
-                    timeout: float = 10.0) -> dict[str, Any]:
+                    timeout: float = READ_S) -> dict[str, Any]:
         """Wait for `module`'s row to be in state `check` (or for `check(row)` to be
         true), and return it. Raises `AssertionError` after `timeout` seconds."""
         wanted = (lambda row: row["state"] == check) if isinstance(check, str) else check
@@ -433,14 +444,14 @@ class TestShell:
 class Session:
     """A signed-in session with no browser, over plain HTTP to the shell's listener."""
 
-    def __init__(self, port: int, cookie: str, key: str, *, timeout: float = 10.0):
+    def __init__(self, port: int, cookie: str, key: str, *, timeout: float = READ_S):
         self.port = port
         self.cookie = cookie
         self.key = key
         self.timeout = timeout
 
     @classmethod
-    def sign_in(cls, port: int, ticket: str, *, timeout: float = 10.0) -> Session:
+    def sign_in(cls, port: int, ticket: str, *, timeout: float = READ_S) -> Session:
         """Redeem `ticket` at the shell's sign-in route, as the sign-in page does."""
         body = json.dumps({"ticket": ticket}).encode()
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)

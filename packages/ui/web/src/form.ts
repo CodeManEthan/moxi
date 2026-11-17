@@ -464,8 +464,9 @@ export function defineForm(installed: (module: string) => boolean): void {
       return node;
     }
 
-    #toggle(plan: Plan, toggle: Toggle, on: Record<string, boolean>, off: boolean): HTMLElement {
+    #toggle(plan: Plan, toggle: Toggle, on: Record<string, boolean>, fieldOff: boolean): HTMLElement {
       const mode = this.mode;
+      const off = fieldOff || toggle.off !== null;
       const node = el("div", undefined, "toggle");
       const line = el("div", undefined, "check");
       const box = el("input");
@@ -490,6 +491,8 @@ export function defineForm(installed: (module: string) => boolean): void {
       line.append(box, label);
       node.append(line);
       for (const note of toggle.notes) node.append(el("p", note, "note"));
+      // A field that is off says why once, under all its toggles.
+      if (toggle.off !== null && plan.off === null) node.append(el("p", toggle.off, "off-line"));
       if (mode === "each" && toggle.resettable) {
         const reset = button("Reset", () => this.#change(plan.name, resetOf(toggle.key)));
         reset.disabled = off;

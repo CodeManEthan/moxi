@@ -59,8 +59,8 @@ class ProcView:
 
     def stat(self, pid: int):
         try:
-            with open(f"{self.root}/{int(pid)}/stat", "rb") as f:
-                raw = f.read().decode("utf-8", "replace")
+            with open(f"{self.root}/{int(pid)}/stat", "rb") as fh:
+                raw = fh.read().decode("utf-8", "replace")
         except (OSError, ValueError):
             return None
         # The command name sits in parentheses and may itself hold spaces or parens;

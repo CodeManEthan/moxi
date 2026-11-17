@@ -36,6 +36,7 @@ from urllib.parse import parse_qsl
 # Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
 # package's own.
 __all__ = [
+    "BadRequest",
     "Entry",
     "Field",
     "Out",
@@ -100,7 +101,7 @@ _SCALARS = ("string", "int", "float", "bool", "enum")
 _QUERY_TYPES = ("string", "int", "bool", "enum")
 _FIELD_TYPES = _SCALARS + ("list", "table")
 _OUT_TYPES = ("string", "int", "float", "bool", "list", "table")
-_MARKS = (None, "path", "redact")
+_MARKS = (None, "path", "redact", "scrub")
 _EMPTY: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -242,9 +243,11 @@ class Out:
     `type` is `string`, `int`, `float`, `bool`, `list` or `table`. `items` says what a
     `list` holds (one `Out`) or a `table` holds (a key map of `Out`s), nested to any
     depth; a list of rows is `Out("list", items=Out("table", items={...}))`. `mark` is
-    `path` (the gateway sends a handle in its place) or `redact` (the gateway cuts it);
-    only the gateway acts on a mark. `nullable` lets the value be JSON `null`; a `null`
-    anywhere else is refused by projection.
+    `path` (the gateway sends a handle in its place), `redact` (the gateway cuts it) or
+    `scrub` (the gateway sends the text with each path that starts a word, or follows `:`
+    or `=`, with `/` or `~` cut to its last folder name); only the gateway acts on a mark,
+    and `path` and `scrub` go on a string. `nullable` lets the value be JSON `null`; a
+    `null` anywhere else is refused by projection.
     """
 
     type: str
@@ -256,9 +259,9 @@ class Out:
         if self.type not in _OUT_TYPES:
             raise PageError(f"an Out type is one of {', '.join(_OUT_TYPES)}, not {self.type!r}")
         if self.mark not in _MARKS:
-            raise PageError(f"an Out mark is 'path' or 'redact', not {self.mark!r}")
-        if self.mark == "path" and self.type != "string":
-            raise PageError("the path mark belongs on a string Out")
+            raise PageError(f"an Out mark is 'path', 'redact' or 'scrub', not {self.mark!r}")
+        if self.mark in ("path", "scrub") and self.type != "string":
+            raise PageError(f"the {self.mark} mark belongs on a string Out")
         if not isinstance(self.nullable, bool):
             raise PageError("an Out's nullable is True or False")
         items = self.items
@@ -583,9 +586,10 @@ class Table:
             new[key] = entry
         self._entries.update(new)
 
-    def add(self, method: str, raw_path: str, kind: str = "builtin", stream: bool = False) -> Entry:
+    def add(self, method: str, raw_path: str, kind: str = "builtin", *,
+            streaming: bool = False) -> Entry:
         """Add one literal entry and return it."""
-        entry = Entry(method, raw_path, kind, stream)
+        entry = Entry(method, raw_path, kind, streaming)
         self._put([entry])
         return entry
 
@@ -645,8 +649,8 @@ def list_assets(page: Page) -> tuple[str, ...]:
         raise PageError("a page with assets needs its package; pass package= to Page")
     try:
         root = importlib.resources.files(page.package).joinpath(page.assets)
-    except (ImportError, TypeError, ValueError) as err:
-        raise PageError(f"the assets package {page.package} cannot be read: {err}") from None
+    except (ImportError, TypeError, ValueError) as exc:
+        raise PageError(f"the assets package {page.package} cannot be read: {exc}") from None
     if not root.is_dir():
         raise PageError(f"the asset directory {page.assets} is not in {page.package}")
     names = []
@@ -689,8 +693,8 @@ def build_table(page: Page) -> tuple[Table, tuple[str, ...]]:
     table = Table()
     try:
         table._put(entries)
-    except ValueError as err:
-        raise PageError(f"an asset collides with a route: {err}") from None
+    except ValueError as exc:
+        raise PageError(f"an asset collides with a route: {exc}") from None
     return table, names
 
 
@@ -850,8 +854,8 @@ def parse_body(route: Route, raw: bytes) -> dict[str, Any]:
     try:
         data = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_repeats,
                           parse_constant=_no_constant)
-    except (UnicodeDecodeError, ValueError) as err:
-        if isinstance(err, BadRequest):
+    except (UnicodeDecodeError, ValueError) as exc:
+        if isinstance(exc, BadRequest):
             raise
         raise BadRequest(None, "the body is not JSON") from None
     if not isinstance(data, dict):
@@ -924,20 +928,21 @@ def project(
     shape: Out,
     *,
     strict: bool = False,
-    dropped: Callable[[str], None] | None = None,
+    on_dropped: Callable[[str], None] | None = None,
 ) -> Any:
     """`value` cut to `shape` at every depth, ready to send as JSON.
 
-    A table key the shape does not declare is dropped: `dropped` is called with its
+    A table key the shape does not declare is dropped: `on_dropped` is called with its
     dotted path, or, when `strict` (the testing helper), `ProjectionError` is raised. A
     value of the wrong JSON type, a non-finite float, or a `null` where the shape is not
     nullable raises `ProjectionError` whether strict or not. A declared nullable value
     that is `null` is kept as `null`. A declared key the value lacks stays absent.
     """
-    return _cut(value, shape, "", strict, dropped)
+    return _cut(value, shape, "", strict=strict, on_dropped=on_dropped)
 
 
-def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str], None] | None) -> Any:
+def _cut(value: Any, shape: Out, path: str, *, strict: bool,
+         on_dropped: Callable[[str], None] | None) -> Any:
     if value is None:
         if shape.nullable:
             return None
@@ -954,7 +959,7 @@ def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str
     elif kind == "list":
         if not isinstance(value, (list, tuple)):
             raise ProjectionError(path, "not a list")
-        return [_cut(sub, shape.items, _join(path, str(n)), strict, dropped)
+        return [_cut(sub, shape.items, _join(path, str(n)), strict=strict, on_dropped=on_dropped)
                 for n, sub in enumerate(value)]
     else:
         if not isinstance(value, Mapping):
@@ -966,10 +971,10 @@ def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str
             if declared is None:
                 if strict:
                     raise ProjectionError(where, "a key the shape does not declare")
-                if dropped is not None:
-                    dropped(where)
+                if on_dropped is not None:
+                    on_dropped(where)
                 continue
-            out[key] = _cut(sub, declared, where, strict, dropped)
+            out[key] = _cut(sub, declared, where, strict=strict, on_dropped=on_dropped)
         return out
     if not ok:
         raise ProjectionError(path, f"not a {'finite ' if kind == 'float' else ''}{kind}")

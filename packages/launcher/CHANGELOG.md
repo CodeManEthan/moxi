@@ -1,8 +1,248 @@
 # Changelog
 
-## 0.1.4 (2026-11-08)
+## Unreleased
 
-- The `usage` extra accepts moxi-usage 0.3.
+- Every setting but the two name templates carries page fields, which `moxi config
+  launcher show --json` prints and the settings page draws: a plain label, a line where
+  the label can't carry it, the unit of each wait and count, six settings shown first
+  (run files, run records, the fallback agent, the two startup screens and the variables
+  a relaunch carries), the rest under Waits, Relaunch and Keep warm, and a can-hurt mark
+  on turning on either startup-screen answer (the folder-trust one stays marked while on)
+  and on adding a name to `relaunch.pass_env` or `relaunch.director_pass_env`. The
+  launcher needs moxi 0.1.9 or later.
+- `name.template` and `name.templates` are marked `elsewhere`: the settings page leaves
+  them off, and its Find answers a search for either with the sentence that they are
+  edited in Home's Options.
+- The prompt's menus open inside the page: each one that would pass 16 px from an edge
+  is shifted back, after it opens and when the window is resized. On a narrow page the
+  plus, the chip and the options word wrap, so no button passes the edge either.
+- The handoff lines answer at a resume as at a startup, and a resume of a launch the
+  endpoint holds marks the handoff it shows as picked. After the seat's own pointer, one
+  line per other seat's waiting handoff in the same folder, newest first, at most 5, then
+  `… and N more`; these lines mark nothing picked. A session with no key gets them
+  for every waiting handoff in its folder. New `handoffs.others`, `handoffs.keyed` and
+  `handoffs.other_lines`: read without a key, a name's trailing `-<n>` is a count only
+  when the same date holds the name without it.
+- The crossing handler `recycle.on_crossing` is declared on usage's
+  `moxi.usage.crossings` group, so a launch with `recycle_at_limit` gets the relaunch line
+  or the limit compact when its session passes `limit_at`. Before, nothing called it.
+- Home's Sessions row: a new component `running` (`<moxi-launcher-running>`), a row under
+  Home's box that says how many launched sessions are running, and none when nothing is.
+  Opened, it lists the first four with where each runs, its cache when known and the
+  time of its latest message, or of its launch, then `All sessions (N)`. A session waiting
+  on agents or subagents with a warm cache and no keep-warm cover comes first, says when
+  it goes cold, and puts the row above the rows that need nothing. On the phone the list
+  is always open. New route `GET /api/running`, reached by the gateway, with no path in
+  its answer, and a third topic `running` on `/api/events`; a call of either starts the
+  page server's poller. New optional link `sessions` (an extra of the same name).
+  The page server reads each running session's cache (when cache is installed) and its
+  latest message (when sessions is) apart from the launch log, for the 24 newest, every
+  15 seconds and when the running sessions change, on four threads with an 8 second
+  bound; what it read last stands for 45 seconds when a read does not finish. The first
+  call of `/api/running` waits up to 3 seconds for the first of these reads.
+- Home's Sessions row reads what each running session waits on while its own turn is
+  closed: its subagents at work (with turns), else the agents its comms name directs
+  that work (with comms too), each comms read bounded at 2 seconds and none after the
+  daemon is found down. It reads a waiting session as kept warm only when keep-warm's next
+  ask would nudge it at every step it can read, with an ask still certain to come before
+  the window shuts. The reads write nothing, send nothing and never ask slots.
+- Keep-warm: `keepwarm.signal_of` is the count of the ask's signal on values alone, which
+  the ask and Home's row share, and `keepwarm.would_nudge` reads the ask's steps without
+  writing. The ask does what it did.
+- `target.find(.., slot=False)` finds a launched session without asking slots; the
+  default, which every act uses, still asks.
+- `Keep warm` for a session that is already running. On Home's Sessions row, opened at
+  the desk, a waiting session that nothing keeps warm and that a press would cover has a
+  `Keep warm` button before `Open`. Its tooltip says what a press costs, with the most
+  nudges in a row. A press sends nothing to the session: it records keep-warm cover, and
+  cache's timer's next ask sends the first nudge. The row then turns quiet, `kept warm
+  while 1 subagent runs`, with `Open` alone, and the focus moves to that `Open`. The
+  button stays disabled until the row's next update after the answer, or 20 s. A refused
+  press shows its reason under the row until the row next changes. The phone reads the
+  same rows and draws no button.
+- `POST /api/keep-warm` (`{"request_id"}`), the press. It reads the session now, within
+  8 s, as Home's row reads it. When keep-warm's next ask would nudge the session once
+  covered, it writes one `keep-warm-cover` event and wakes the row's reader. On a
+  session already covered it writes nothing. Otherwise it is refused with the first step
+  that fails: `not-launched`, `no-session`, `unclaimed`, `changed`, `no-turns`,
+  `turns-failed`, `not-live`, `run-open`, `no-timer`, `cold`, `no-window`, `too-late`,
+  `busy`, `not-waiting`, `unreadable`, `capped`, `draft` or `ask-failed`. The phone's
+  gateway does not reach it.
+- Cover belongs to one launch and the session id it has now: a `/clear`, a relaunch or a
+  resume starts without it. It is an event in the launch log, not a store step, so the
+  log's version does not move and an older launcher passes over it. `moxi launcher show`
+  reads a covered session as keep-warm on, with no holds listed. Holds still need the
+  launch value: `keep-warm hold`, `release` and `holds` refuse a launch with cover alone,
+  and an open hold keeps a session warm only when its launch was made with `keep_warm`
+  on.
+- Under cover a session is also kept warm while agents it directs through comms are at
+  work. With no subagent of its own at work, the ask reads those agents and nudges with
+  the new `keep_warm.directing_texts`, naming them; the `nudge` event records them as
+  `directed`. `keep_warm.director_cap` applies to both of a director's signals, and
+  under cover the cap counts only the nudges made since the press. The cover ends at the
+  first ask that reads the session's own subagents and its directed agents whole and
+  finds nobody at work; a read that falls short keeps the cover and ends the ask
+  `unreadable`.
+- Cache's timer now asks about every session the launcher started, by the request stamp
+  `MOXI_LAUNCHER_REQUEST`, which a press needs, since a running process can't gain the
+  old keep-warm stamp. An ask about a launch where keep-warm is off ends at its read of
+  the launch log. `cachetimers.KEEP_WARM` names the subscription. After upgrading,
+  restart cache's watcher (see the README's "Upgrading").
+- `moxi doctor` has a row `keep-warm.timer`, with cache installed: it warns when the
+  installed moxi-cache is older than 0.1.6, when cache refuses the keep-warm
+  subscription, or when cache's running watcher started before the upgrade and should be
+  restarted; it is `off` where a process's environment can't be read.
+- The `cache` extra now needs `moxi-cache>=0.1.6`.
+- Home's Sessions row reads cover. A waiting session counts as covered when its launch
+  keeps warm by the launch value or by cover, cache's watcher says it asks keep-warm about
+  it (its clock record's `asks`), and every other step of the next ask passes. A launch
+  made with `keep_warm` on is no longer read as covered when the watcher's record says it
+  doesn't ask. Each entry of `GET /api/running` and the `running` topic gains
+  `coverable`: `{cap}` on a waiting session that isn't covered when a press would cover
+  it, `cap` being the most nudges in a row the press would lead to; else null.
+- `keepwarm.reading` names the first step at which the next ask would not nudge;
+  `would_nudge` and `reading` take `directed` and `pressed`. The agents a session directs
+  that are at work are read by one function, `waits.directed`, shared by Home's row, the
+  ask and the press; it reports each way its read fell short as its own fact. The row
+  reads as before.
+- The launcher offers interface 2: `running()` gives the launches running now, newest
+  first, each a frozen `Running` with its request id, harness, the session id it was
+  last known by, target, slot, project key, folder, name, comms name, start time and
+  whether its process runs. It reads only the launch log and the process table.
+  `running(live_only=False)` keeps the launches whose process has ended; `limit` caps
+  the count (200) and `timeout_s` the wait for a busy log (1 s).
+- The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
+  what the agent should do, the line above it that picks the project or folder the
+  session starts in, a chip that picks the harness, the model and the effort, and a
+  button that starts the session. The button names where the launch runs (the lowest
+  free slot, a new slot, or the command to copy where no slot can be used) and its caret
+  opens the other choices; a launch from Home runs where the button says, whatever
+  `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
+  went. New component `prompt` (`<moxi-launcher-prompt>`).
+- Home's launch piece has `Options` beside the chip: a panel at the window's right edge
+  with a find field and the launch form's other rows in the catalog's groups, each group
+  saying while closed which of its values differ from the defaults. Each row changed
+  there is named on a `Changed` line under the box and counted on the word
+  (`Options · 2`); `Reset` puts every changed row back and leaves the box, the place,
+  the chip and where the launch runs. A value that can do harm is in the theme's
+  `danger` colour wherever it is drawn. Picked by hand it is set only after `Turn on`
+  under it, and it holds for the one launch that starts with it or whose command is
+  copied. A request from Home
+  carries `off_posture: true` when a permission row it sends or leaves out is off the
+  user's usual value, so such a launch is not refused for it.
+- Home's `Options` panel draws a harness's row only where the place the button launches
+  in passes its flag, and lets go of a value set on a row it stops drawing. Its Tools >
+  Built-in is a line per built-in tool with `allow` and `deny`: a press changes only that
+  tool's own entry in `allowed_tools` or `disallowed_tools`, scoped rules and every other
+  entry stay listed in their places with `Remove`, and while `tools` names a set the
+  lines it leaves out are dim.
+- Home's launch piece has `Preset` on the line above the box once any seat or project
+  preset is set up: its menu takes the preset off or applies one, each row saying what it
+  sets and where it puts the launch. A project picked there, or the one Home opens on,
+  applies that project's own preset; a seat stays applied when a place is picked. The
+  applied preset's values are what `Changed` and the count measure from, and a dim line
+  under the box names the permission rows it sets off the user's defaults.
+- Home's launch piece fills each row the form leaves at its shipped default with the
+  value the last launch of the seat, else the project, else the folder on the line above
+  the box gave it, the harness first. `From last launch` on that line names the filled
+  values, its list gives each with `Clear`, and the panel says under each when that
+  launch was made. A filled value is no change, an edited one becomes the user's, and
+  one that can do harm is in the `danger` colour, asks nothing and stays after a launch.
+  The request names the filled rows in `filled`.
+- Home's launch piece lists up to three earlier launches of the same seat, project or
+  folder under the box, `Run again`, each by the first words of its brief and when it was
+  made. Pointing at one shows a card with what a click runs today and where (the prompt,
+  the harness, model and effort, the preset, where and when it ran, each permission row
+  off the user's defaults, a value that can do harm in the `danger` colour, and the rows
+  this install no longer offers) and what the click does; one click runs it again where
+  the button's default places it, or copies its command for the user's terminal.
+- Home's `Options` panel shows the session name under Seat > Name & notes: the name the
+  template gives, following the seat, the place, the model and the comms name, with a
+  sentence saying whose template it is, a folder inside a project naming that project's.
+  A name typed over it is a change for that launch, and `Use the template` takes it
+  back. Its caret opens the template's editor (pieces, date format, the template as
+  written, `Keep for` that project), each edit rendered unsaved; `Save template` writes
+  `name.template` or `name.templates` through the shell's own settings route, so a key
+  locked for the shell's run is refused there.
+- Home's launch piece has a `+` at the left of the chip with two entries. `Brief from a
+  file` takes a path: while it is set the box is off and the launch sends that file as
+  its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
+  time the menu opens, resumes the newest session the user made in the place the line
+  names that can be resumed now, in a slot or by copying its resume command, with the
+  lines under the box saying how the resume went; the box keeps its text.
+- A catalog row takes seven new optional fields, read by the browser's launch options:
+  `group` and `sub` (where the row is drawn), `label` (its name in plain words),
+  `danger` (its values that can hurt), `carry` (false for a row never filled from an
+  earlier launch), `shown_with` (modules the row is drawn only with; no launch rule) and
+  `typed_with` (the module a row with listed values needs to take a typed one). Every
+  row a user may set has its label, and its group unless another control sets it. New
+  `catalog.GROUPS` and `catalog.PANEL_FIELDS`. `GET /api/catalog` sends each field's
+  `group`, `sub`, `label`, `danger`, `carry` and `modes` (the commands the row composes
+  into), and `shown` and `typed`, which say whether this install draws the row and
+  whether it takes a typed value.
+- `GET /api/form` takes the query `identity` and answers `modes`: for each value of the
+  `target` row, the command a launch of the form's harness composes there under that
+  comms name, or null where such a launch is refused. A catalog field's `modes` are
+  matched with it. New `pagehandlers.modes` and `page.FORM_MODE`.
+- A fresh launch records what its own request gave: its values hold `sources`, where
+  each row's value came from (`last` for a typed row the request names in `filled`, a
+  value filled in from an earlier launch), and `filled`. A relaunch or resume records
+  neither, and the launch log takes no new step. A page request's `filled` is signed
+  with its ticket and written to the request file. New `GET /api/last?seat=|project=|cwd=`:
+  the values the newest launch of a seat, else a project, else a folder was asked for
+  beyond its preset and the defaults, without the place, the first turn, where it ran
+  and its name. A launch logged before this records no sources and fills nothing. New
+  `pagehandlers.request_of`, `api.LaunchRequest.filled` and `page.LAST`.
+- New `GET /api/recents?seat=|project=|cwd=`: the newest three launches of a seat, else
+  a project, else a folder that asked for different requests, each with the start of
+  its brief (else its model and effort, else its harness) and where it ran. New `GET
+  /api/recent?request=&target=&slot=`: that launch's request with where the page would
+  run it now, resolved as `/api/preview` resolves a launch but with no ticket, and what
+  it would run: harness, model, effort, brief, folder and project, the posture rows off
+  the user's defaults, the rows holding a danger value, and the rows this install no
+  longer offers. A launch that can't run again (its preset deleted, a value that no longer
+  fits) is answered `refused`. New `presets.off_posture_rows`, the comparison the
+  resolver's posture check refuses on, and `page.RECENTS`, `page.RECENT`.
+- Every launch has a session name. New catalog row `name` (`--name`, or `name` in a
+  preset); a launch that sets none is named from a template, the new settings
+  `name.template` (shipped `<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates`
+  (a project's own, by project key). The name is recorded in the launch's values, a
+  relaunch or resume keeps it, and Claude Code shows it as the display name unless
+  `native_name` is set, so every Claude launch now passes `-n`. **`--name` changed
+  meaning for `moxi launcher run`:** it was passed on to the harness with a warning and
+  is now the launcher's row; a Codex launch is no longer handed it. New module
+  `moxi_launcher.names` (the template's pieces, date formats, cleanup and save check,
+  `shown(row)`, what a launch is called), which needs no UI shell. `api.preview` names
+  the launch as `api.launch` does. The page server answers `GET /api/name`: the name a
+  launch of the form would take and the key of the project whose template gave it (for a
+  folder, the project it is in), a template being edited rendered unsaved with the save
+  check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
+  is the launch's name.
+- Each entry of the past-sessions list (`GET /api/sessions`, `moxi launcher sessions
+  --json`) names the project its launch ran in, `project_key` (null for a launch in a
+  folder alone), and who made it, `actor`. `resume.Past` and `page.PAST` carry both.
+- New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
+  run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
+  so a caller on an install without the UI shell can read what is alive.
+- Home's launch line names the slot the launch takes when the page reads the slots twice
+  at once: a press that reads the slots again waits for the newest read asked, where it
+  used to go on with the old listing when a later read passed its own.
+- `moxi launcher state` is now `moxi launcher show`, with no alias.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
+  `moxi_launcher.api.launch`: `environ` is now `env`; `moxi_launcher.api.launch_kind`:
+  `timeout` is now `timeout_s`; `moxi_launcher.api.launch_kinds`: `timeout` is now
+  `timeout_s`; `moxi_launcher.api.preview`: `environ` is now `env`.
+- `moxi launcher handoffs --key KEY` reads KEY's own handoff folder, the one of KEY's
+  newest launch, so it finds the handoffs of a seat that works in another project. A key
+  with no launch is read in the folder of the caller's directory, as before. It says on
+  stderr which folder it read, and its `--json` names that launch as `launch`. Without
+  `--key` nothing changes. New `handoffs.folder_of_key` and `handoffs.newest_launch`.
+- The page server answers two new reads. `GET /api/places` gives where the user last
+  launched (a project or a folder each, newest first, five at most), whether a launch
+  here may name a project, and the user's home folder; `GET /api/targets` gives each slot with whether it is free
+  and which launch took it, whether a new slot can be made, and the choice a launch
+  starts with, which is never headless. New `store.places` and `store.launched_by`.
 
 ## 0.1.3 (2026-11-08)
 

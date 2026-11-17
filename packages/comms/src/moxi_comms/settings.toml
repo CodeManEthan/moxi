@@ -12,6 +12,8 @@ default = "local"
 doc = "Which record backend: local (this box's SQLite record) or mock (a JSON test double)."
 read = "start"
 env = "MOXI_COMMS_BACKEND"
+label = "Record backend"
+line = "local is this box's SQLite record; mock is a JSON test double."
 
 [local.record]
 type = "path"
@@ -19,6 +21,8 @@ default = ""
 doc = "The local record's file; empty means comms.db in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_LOCAL_RECORD"
+label = "Local record file"
+line = "Empty: comms.db in comms' state folder."
 
 [local.retain_days]
 type = "int"
@@ -26,18 +30,25 @@ default = 90
 doc = "How many days the local record keeps a message body; 0 keeps every one."
 read = "start"
 env = "MOXI_COMMS_LOCAL_RETAIN_DAYS"
+label = "Keep message bodies for"
+line = "0 keeps every one."
+unit = "days"
 
 [threads.reply_cap]
 type = "int"
 default = 8
 doc = "An open thread's reply cap when its opener set none; 1 or more."
 read = "start"
+label = "Replies an open thread may take"
+line = "When its opener set no cap; 1 or more."
 
 [credentials.chain]
 type = "list"
 default = ["env", "keychain", "store"]
 doc = "The credential chain, in order: env (MOXI_COMMS_SECRET_*), keychain, store."
 read = "start"
+label = "Where credentials are looked for, in order"
+line = "env (MOXI_COMMS_SECRET_*), keychain, store."
 
 [credentials.store]
 type = "path"
@@ -45,36 +56,48 @@ default = ""
 doc = "The token store's directory; empty means tokens/ in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_TOKEN_STORE"
+label = "Token store folder"
+line = "Empty: tokens/ in comms' state folder."
 
 [credentials.roles]
 type = "list"
 default = []
 doc = "Role holders this box adds to comms' own; each keys the token store by its name."
 read = "start"
+label = "More role holders"
+line = "Role holders this box adds to comms' own; each keys the token store by its name."
 
 [policy.cache_callers]
 type = "list"
 default = ["operator"]
 doc = "The identities `moxi comms cache` answers, by qualified name."
 read = "start"
+label = "Who moxi comms cache answers"
+line = "Identities by qualified name."
 
 [policy.labels]
 type = "table"
 default = {}
 doc = "Send-only identities by qualified name, each mapped to the words its refusal uses."
 read = "start"
+label = "Send-only identities"
+line = "Each qualified name, with the words its refusal uses."
 
 [provision.operator]
 type = "string"
 default = "operator"
 doc = "The human's identity name, provisioned at first start."
 read = "start"
+label = "Your identity name"
+line = "Provisioned at first start."
 
 [cache.required]
 type = "bool"
 default = false
 doc = "Refuse to start the daemon when the cache module is absent or broken, so the cold-send hold cannot switch off without a word."
 read = "start"
+label = "Need the cache module to start"
+line = "The daemon refuses to start without it, so the cold-send hold can't switch off without a word."
 
 [delivery.expiry]
 type = "string"
@@ -82,66 +105,88 @@ default = "24h"
 doc = "How long a sent message may wait before it is dropped undelivered, when the send names no --expires: a whole number with s, m, h or d (30m, 6h, 3d), or never."
 read = "use"
 env = "MOXI_COMMS_DELIVERY_EXPIRY"
+label = "Drop an undelivered message after"
+line = "When the send names no expiry: a whole number with s, m, h or d (30m, 6h, 3d), or never."
 
 [mcp.enabled]
 type = "bool"
 default = true
 doc = "Serve comms' tools to sessions over MCP from the daemon, on 127.0.0.1. Read when the daemon starts; launches follow what the running daemon serves."
 read = "start"
+label = "Serve comms' tools over MCP"
+line = "From the daemon, on 127.0.0.1."
 
 [mcp.port]
 type = "int"
 default = 8450
 doc = "The loopback port comms' tools are served on, 1 to 65535. The daemon's socket unit holds it, so a change takes effect at the next moxi install comms; a daemon with no unit reads it when it starts. A launch uses the address the running daemon answers."
 read = "start"
+label = "Port for agents' tools"
 
 [connector.identity]
 type = "string"
 default = "claude-app"
 doc = "The global comms name comms' tools in the Claude apps send and receive as, through the connector. Provisioned as a standing name when the connector starts them."
 read = "start"
+label = "The name the Claude apps send as"
+line = "The global comms name comms' tools in the Claude apps use, through the connector."
 
-[connector.wait_default]
+[connector.wait_default_s]
 type = "int"
 default = 45
-doc = "How many seconds send_and_wait waits for a reply when the call names no wait; 1 to wait_max."
+doc = "How many seconds send_and_wait waits for a reply when the call names no wait; 1 to wait_max_s."
 read = "start"
+label = "A connector call waits, by default"
+unit = "seconds"
 
-[connector.wait_max]
+[connector.wait_max_s]
 type = "int"
 default = 90
 doc = "The longest wait, in seconds, a send_and_wait call may ask for; 1 to 99, under Cloudflare's 100 s limit on an answer."
 read = "start"
+label = "A connector call waits, at most"
+line = "1 to 99, under Cloudflare's 100 s limit on an answer."
+unit = "seconds"
 
 [block]
 type = "bool"
 default = false
 doc = "Hold every delivery: while true, mail is recorded and nothing is handed to a session."
 read = "use"
+label = "Hold every delivery"
+line = "While on, mail is recorded and nothing is handed to a session."
 
 [codex.defaults]
 type = "table"
 default = {}
 doc = "Defaults every Codex roster row takes unless it names its own."
 read = "start"
+label = "Codex roster defaults"
+line = "What every Codex roster row takes unless it names its own."
 
 [codex.agents]
 type = "table"
 default = {}
 doc = "The Codex roster: one table per identity, [codex.agents.\"name@scope\"]."
 read = "start"
+label = "Codex roster"
+line = "One table per identity."
 
 [opencode.defaults]
 type = "table"
 default = {}
 doc = "Defaults every OpenCode roster row takes unless it names its own."
 read = "start"
+label = "OpenCode roster defaults"
+line = "What every OpenCode roster row takes unless it names its own."
 
 [opencode.agents]
 type = "table"
 default = {}
 doc = "The OpenCode roster: one table per identity, [opencode.agents.\"name@scope\"]."
 read = "start"
+label = "OpenCode roster"
+line = "One table per identity."
 
 # comms 0.2's catch-up bound. Read only when comms 0.2's files move into comms.db, to
 # bound the mail a name with no cursor gets; nothing else reads them.
@@ -151,12 +196,18 @@ type = "int"
 default = 50
 doc = "Read only when comms 0.2's files move: a name with no cursor gets at most this many messages; 1 or more. Otherwise unused."
 read = "start"
+label = "Messages a name with no cursor gets"
+line = "Read only when comms 0.2's files move."
+unit = "messages"
 
 [replay.hours]
 type = "int"
 default = 24
 doc = "Read only when comms 0.2's files move: a name with no cursor gets nothing older than this many hours. Otherwise unused."
 read = "start"
+label = "Oldest a name with no cursor gets"
+line = "Read only when comms 0.2's files move."
+unit = "hours"
 
 # Keys an earlier comms read, kept declared so a file that still sets one is told what
 # to do rather than refused as unknown.
@@ -172,3 +223,9 @@ retired = "remove it: no name refuses a next-turn send"
 
 [provision.slots]
 retired = "remove it: comms has no slots"
+
+[connector.wait_default]
+retired = "renamed: set connector.wait_default_s instead"
+
+[connector.wait_max]
+retired = "renamed: set connector.wait_max_s instead"

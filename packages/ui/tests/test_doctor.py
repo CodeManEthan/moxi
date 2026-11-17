@@ -153,7 +153,7 @@ class Listener:
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(8)
-        self.sock.setblocking(False)
+        self.sock.setblocking(False)  # noqa: FBT003 -- socket API requires a positional bool
         self.port = self.sock.getsockname()[1]
 
     def connects(self):
@@ -258,7 +258,7 @@ def test_a_held_lock_with_no_file_is_starting_never_idle_or_another_program(
     monkeypatch.setattr(health, "WAIT", 0.4)
     monkeypatch.setattr(health, "_units_status",
                         lambda: [_socket_unit()] if units == "socket" else [])
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         row = next(doctor.rows())
     assert row.state == "warn" and "starting or stopping" in row.detail
     assert listener.connects() == 0
@@ -299,7 +299,7 @@ def test_a_runtime_file_that_appears_within_the_wait_gives_the_running_row(monke
         started.append(_serve(snapshot=ModuleSnapshot(cwd=Layout("ui").runtime_dir(),
                                                       dirs=[str(site)])))
 
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         assert read_runtime("ui") is None
         thread = threading.Thread(target=late)
         thread.start()
@@ -325,7 +325,7 @@ def test_the_core_runs_the_modules_doctor(runtime):
     found = modules.load("ui")
     assert found.doctor == "moxi_ui.doctor:rows" and not found.budgets
     done = proc.run([str(python()), "-P", "-m", "moxi", "doctor", "ui", "--json"],
-                    timeout=60, cwd=str(runtime))
+                    timeout_s=60, cwd=str(runtime))
     rows = [row for row in json.loads(done.stdout) if row["module"] == "ui"]
     names = [row["name"] for row in rows]
     assert "shell" in names and "DOCTOR" not in names

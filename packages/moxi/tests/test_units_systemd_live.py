@@ -44,9 +44,10 @@ import pytest
 
 import moxi.paths
 from moxi.units import _systemd
-from moxi.units._fence import REAL_SUPERVISOR, Fence
+from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, command_line, quote
 from moxi.units._types import Wrapped
+from moxi_dev.testing import REAL_SUPERVISOR_ENV
 
 from conftest import drop_modules
 
@@ -60,8 +61,8 @@ def _user_manager() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get(REAL_SUPERVISOR) != "1" or not _user_manager(),
-    reason=f"a proof row on the real user manager: set {REAL_SUPERVISOR}=1 on a system "
+    os.environ.get(REAL_SUPERVISOR_ENV) != "1" or not _user_manager(),
+    reason=f"a proof row on the real user manager: set {REAL_SUPERVISOR_ENV}=1 on a system "
            "with a systemd user manager")
 
 
@@ -138,10 +139,10 @@ class Row:
     def output(self) -> list[str]:
         return self.out.read_text().splitlines() if self.out.exists() else []
 
-    def switch(self, on: bool) -> None:
+    def switch(self, *, enabled: bool) -> None:
         self.config.parent.mkdir(parents=True, exist_ok=True)
         table, _, key = KEY.partition(".")
-        self.config.write_text(f"[{table}]\n{key} = {'true' if on else 'false'}\n")
+        self.config.write_text(f"[{table}]\n{key} = {'true' if enabled else 'false'}\n")
 
     def clean(self) -> None:
         for name in (self.timer, self.service):
@@ -202,7 +203,7 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
             assert [r["result"] for r in row.lines()] == ["off"]
 
             # On: the script runs and one `ran` line carries its exit and seconds.
-            row.switch(True)
+            row.switch(enabled=True)
             assert row.start().ok
             assert row.output() == [f"first {a}" for a in odd]
             ran = row.lines()[-1]
@@ -311,7 +312,7 @@ def _known(stems: list[str]) -> list[str]:
     return [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
 
 
-def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
+def _scrub(unit_dir: Path, stems: list[str], fence: Fence) -> None:
     """Stop and delete every unit file under `stems` and every `.wants` link to one, then
     forget the failure of every unit under `stems` and reload. That takes in a unit whose
     file the row already deleted, such as a dropped socket unit that failed: the manager
@@ -320,10 +321,10 @@ def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
     def ours(name: str) -> bool:
         return any(name.startswith((stem + ".", stem + "-")) for stem in stems)
 
-    found = [p for p in directory.iterdir() if ours(p.name)]
+    found = [p for p in unit_dir.iterdir() if ours(p.name)]
     for path in sorted(found, key=lambda p: not p.name.endswith(".socket")):
         fence.run("stop", path.name)
-    for wants in directory.glob("*.wants"):
+    for wants in unit_dir.glob("*.wants"):
         for link in wants.iterdir():
             if ours(link.name) and link.is_symlink():
                 link.unlink()
@@ -576,7 +577,7 @@ def test_sockets_on_this_boxs_user_manager(site, tmp_path, monkeypatch, capsys):
             # unit step applied, then resume. The sockets start before the service, so
             # resume finds them running and is done.
             stops: list = []
-            stopped = units.stop(row.module, ["shell"], record=stops)
+            stopped = units.stop(row.module, ["shell"], stopped=stops)
             assert all(a.ok for a in stopped)
             declare("127.0.0.1", "::1", doc="the throwaway shell, rewritten")
             done = row.apply()
@@ -672,7 +673,7 @@ def test_a_changed_socket_restarts_a_keep_daemon_on_this_boxs_user_manager(
             assert first["ActiveState"] == "active" and first["MainPID"] not in ("", "0")
             assert row.show(sock, "Listen")["Listen"] == f"127.0.0.1:{row.port} (Stream)"
 
-            config.set(row.module, "port", str(row.other), by="test")
+            config.set_value(row.module, "port", str(row.other), by="test")
             if service_too:
                 declare("a throwaway daemon for the socket proof, rewritten")
             assert {(c.kind, c.action) for c in row.plan()} == {
@@ -731,8 +732,9 @@ def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
                                "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}})
 
     def lost_bus(self, ids, fence):
-        raise ReadError(Ran(False, 1, "", "Failed to connect to bus",
-                            ("systemctl", "--user", "show"), None))
+        raise ReadError(Ran(ok=False, returncode=1, stdout="",
+                            stderr="Failed to connect to bus",
+                            argv=("systemctl", "--user", "show"), reason=None))
 
     try:
         with _backend.use(SystemdBackend()):
@@ -741,7 +743,7 @@ def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
             assert row.show(service, "ActiveState")["ActiveState"] == "active"
 
             stops: list = []
-            assert all(a.ok for a in units.stop(row.module, ["relay"], record=stops))
+            assert all(a.ok for a in units.stop(row.module, ["relay"], stopped=stops))
             assert [e.unit for e in stops] == [sock, service]
             down = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
             declare("relay-next")

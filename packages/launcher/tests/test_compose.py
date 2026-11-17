@@ -171,7 +171,7 @@ def test_a_headless_launch_needs_a_brief():
         codex.compose(codex_values(target="headless"), ctx(session_id=None))
 
 
-def test_a_claude_launch_needs_its_session_id_and_an_absolute_directory():
+def test_a_claude_launch_needs_its_session_id_and_an_absolute_dir():
     with pytest.raises(ValueError, match="session id"):
         claude.compose(claude_values(), ctx(session_id=None))
     with pytest.raises(ValueError, match="absolute"):
@@ -388,7 +388,7 @@ def test_a_permissions_profile_passed_on_is_refused_like_the_sandbox_row(tail, l
     assert "set sandbox with --sandbox" in raised.value.hint
 
 
-def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory():
+def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_dir():
     values = codex_values(identity="coder", scope="moxi", director=["lead"],
                           model="gpt-5", add_dir=["/a"], sandbox="")
     got = codex.compose(values, ctx(session_id=None, modules=frozenset({"turns", "comms"}),
@@ -511,7 +511,7 @@ def test_the_first_turn_text_is_the_first_turns_own_with_the_posture_second():
     for kwargs in ({"brief": "go"},
                    {"brief": "then this", "handoff": "/h/2026-10-30-lead.md",
                     "handoff_text": "state of play\n"}):
-        assert common.first_turn("ann", **kwargs) == first.text(actor="ann", **kwargs)
+        assert common.first_turn("ann", **kwargs) == first.text(by="ann", **kwargs)
     assert common.first_turn("ann", brief="go", posture="operator") == (
         "Brief from launcher, launched by ann\nstart posture: operator\n\ngo")
 

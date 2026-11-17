@@ -42,12 +42,12 @@ def enabled() -> bool:
     return settings.enabled()
 
 
-# -- on, off ------------------------------------------------------------------------------
+# -- enable, disable ----------------------------------------------------------------------
 
 def test_on_sets_the_switch_and_says_to_add_the_tunnel_entry(config_file, applied, no_tunnel,
                                                            capsys):
     config_file("")
-    assert cli.main(["on"]) == 0
+    assert cli.main(["enable"]) == 0
     assert enabled() and applied == [("connector", "enabled")]
     out = capsys.readouterr().out
     assert "moxi tunnel add connector/mcp" in out
@@ -55,14 +55,14 @@ def test_on_sets_the_switch_and_says_to_add_the_tunnel_entry(config_file, applie
 
 def test_on_with_an_address_prints_the_url_to_paste(config_file, applied, no_tunnel, capsys):
     config_file('public_url = "https://door.example.net:8443"\n')
-    assert cli.main(["on"]) == 0
+    assert cli.main(["enable"]) == 0
     out = capsys.readouterr().out
     assert "https://door.example.net:8443/mcp" in out
     assert "Add custom connector" in out
     assert "known to reach only ports 443" in out
 
 
-def test_off_revokes_every_grant_before_the_switch_goes_false(config_file, applied,
+def test_disable_revokes_every_grant_before_the_switch_goes_false(config_file, applied,
                                                               monkeypatch, capsys):
     config_file("enabled = true\n")
     order = []
@@ -76,7 +76,7 @@ def test_off_revokes_every_grant_before_the_switch_goes_false(config_file, appli
 
     monkeypatch.setattr(cli, "revoke_every_grant", revoke)
     applied_at_set = applied
-    assert cli.main(["off"]) == 0
+    assert cli.main(["disable"]) == 0
     assert order == [("revoke", True)]
     assert applied_at_set == [("connector", "enabled")] and not enabled()
     out = capsys.readouterr().out
@@ -84,7 +84,7 @@ def test_off_revokes_every_grant_before_the_switch_goes_false(config_file, appli
     assert "stays until moxi tunnel remove connector/mcp" in out
 
 
-def test_off_turns_off_even_when_the_revoke_fails(config_file, applied, no_tunnel,
+def test_disable_turns_off_even_when_the_revoke_fails(config_file, applied, no_tunnel,
                                                   monkeypatch, capsys):
     config_file("enabled = true\n")
 
@@ -92,7 +92,7 @@ def test_off_turns_off_even_when_the_revoke_fails(config_file, applied, no_tunne
         raise OSError("the grants file is locked")
 
     monkeypatch.setattr(cli, "revoke_every_grant", revoke)
-    assert cli.main(["off"]) == 1
+    assert cli.main(["disable"]) == 1
     assert not enabled()
     err = capsys.readouterr().err
     assert "couldn't be revoked" in err and "moxi connector revoke --all" in err

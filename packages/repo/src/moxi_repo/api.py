@@ -1,8 +1,8 @@
-"""The verbs behind `moxi repo git-hooks` and `moxi repo specs`, for the CLI and for other
-modules.
+"""The verbs behind `moxi repo git-hooks`, `moxi repo rules` and `moxi repo specs`, for the
+CLI and for other modules.
 
 `add`, `remove`, `enable`, `disable` and `refresh` change a repo's git hooks and return a
-`Report` of what they did; `status` and `available` read. A verb that can't act raises a
+`Report` of what they did; `status`, `available` and `rules` read. A verb that can't act raises a
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
@@ -97,8 +97,13 @@ class Report:
         return not self.problems
 
 
-#: The commit-rules piece, which `commit_rules.everywhere` registers.
+#: repo's own two pieces.
 COMMIT_RULES = "repo/commit-rules"
+COMMIT_PROOF = "repo/commit-proof"
+#: The config key that makes `add` and `refresh` register a piece in each repo they touch
+#: that lacks it: piece id -> key, in the order the pieces are registered.
+EVERYWHERE: dict[str, str] = {COMMIT_RULES: "commit_rules.everywhere",
+                              COMMIT_PROOF: "commit_proof.everywhere"}
 
 
 def _seed_commit_rules() -> dict[str, list[str]]:
@@ -117,15 +122,58 @@ def _check_commit_rules(name: str, values: list[str]) -> str | None:
     return None
 
 
+def _seed_commit_proof() -> dict[str, list[str]]:
+    from moxi_repo.commit_proof import SALT, new_salt
+
+    return {SALT: [new_salt()]}
+
+
+def _check_commit_proof(name: str, values: list[str]) -> str | None:
+    from moxi_repo.commit_proof import SALT, salt_problem
+
+    if name != SALT:
+        return None
+    # Without a salt the piece refuses every commit, so clearing it is refused too.
+    why = salt_problem(values[-1] if values else "")
+    return None if why is None else f"--set {SALT}: {why}"
+
+
 #: Settings a piece starts with in a repo where it is first registered: piece id ->
 #: fn() -> {setting: [values]}. A key the same call gives with `--set` (the clearing form
 #: included) is not seeded.
-SEEDS: dict[str, Callable[[], dict[str, list[str]]]] = {COMMIT_RULES: _seed_commit_rules}
+SEEDS: dict[str, Callable[[], dict[str, list[str]]]] = {
+    COMMIT_RULES: _seed_commit_rules, COMMIT_PROOF: _seed_commit_proof}
 
 #: Checks of a piece's setting values before anything is written: piece id ->
-#: fn(setting, values) -> why they are refused, or None.
+#: fn(setting, values) -> why they are refused, or None. `--set KEY=`, which removes the
+#: key, reaches the check as no values.
 SETTING_CHECKS: dict[str, Callable[[str, list[str]], str | None]] = {
-    COMMIT_RULES: _check_commit_rules}
+    COMMIT_RULES: _check_commit_rules, COMMIT_PROOF: _check_commit_proof}
+
+
+def _commit_rules_lines(repo: Repo, settings: dict[str, list[str]], *, top: Path,
+                        enabled: bool) -> list[str]:
+    from moxi_repo.commit_rules import rule_lines
+
+    # The lines say what the repo refuses; with the piece off nothing refuses it.
+    off = [] if enabled else [f"{COMMIT_RULES} is disabled in this repo: nothing checks "
+                              "a commit against the lines below"]
+    return off + rule_lines(settings)
+
+
+def _commit_proof_lines(repo: Repo, settings: dict[str, list[str]], *, top: Path,
+                        enabled: bool) -> list[str]:
+    from moxi_repo.commit_proof import rule_lines
+
+    return rule_lines(settings, top)
+
+
+#: The pieces that give a repo commit rules, in the order `rules` prints them: piece id ->
+#: fn(repo, the piece's settings there, top=the work tree the command was pointed at,
+#: enabled=whether the piece is on there) -> its lines. A repo where none of them is
+#: registered has no commit rules.
+RULE_LINES: dict[str, Callable[..., list[str]]] = {
+    COMMIT_RULES: _commit_rules_lines, COMMIT_PROOF: _commit_proof_lines}
 
 
 # -- the module's config ------------------------------------------------------------------
@@ -147,9 +195,12 @@ def default_mode() -> str:
     return str(_config()["git_hooks.mode"])
 
 
-def everywhere() -> bool:
-    """`commit_rules.everywhere` from repo's config."""
-    return bool(_config()["commit_rules.everywhere"])
+def everywhere(piece_id: str = COMMIT_RULES) -> bool:
+    """Whether repo's config makes `add` and `refresh` register `piece_id` in each repo
+    they touch: `commit_rules.everywhere` for the commit-rules piece,
+    `commit_proof.everywhere` for the commit-proof piece. False for any other piece."""
+    key = EVERYWHERE.get(piece_id)
+    return key is not None and bool(_config()[key])
 
 
 # -- the index ----------------------------------------------------------------------------
@@ -376,7 +427,8 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
     repo = _resolve(path)
     report = Report()
     state = _state(repo)
-    good, bad = pieces.declared() if piece_ids or everywhere() else ({}, {})
+    good, bad = (pieces.declared() if piece_ids or any(map(everywhere, EVERYWHERE))
+                 else ({}, {}))
     named = _named(list(piece_ids), good, bad)
     implied = _implied(state, named, good)
     if not piece_ids and mode is None and not implied:
@@ -397,7 +449,7 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         problems = []
         for event in sorted(events):
             try:
-                shim.check_place(repo.hooks_dir, event, event in state.moved)
+                shim.check_place(repo.hooks_dir, event, moved=event in state.moved)
             except shim.ShimRefused as exc:
                 problems.append(f"{event}: {exc}")
         if problems:
@@ -414,7 +466,7 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
                 gitconf.apply_settings(repo, piece.id, changes_of[piece.id], state)
             report.lines.append(f"{'added' if new else 'rewrote'} {piece.id} "
                                 f"({piece.event}, {piece.fail}) in {repo.root}"
-                                + (" (commit_rules.everywhere)" if piece in implied
+                                + (f" ({EVERYWHERE[piece.id]})" if piece in implied
                                    else ""))
         report.take(repo.root, gitconf.sync(repo, state))
     except gitconf.GitError as exc:
@@ -424,12 +476,11 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
 
 
 def _implied(state: State, named: list[pieces.Piece], good: dict) -> list[pieces.Piece]:
-    """The commit-rules piece, when `commit_rules.everywhere` is on and the repo lacks it.
+    """Each of repo's own pieces whose `everywhere` key is on and that the repo lacks.
     A disabled registration is a registration, so it is left alone."""
-    if (COMMIT_RULES in state.pieces or COMMIT_RULES not in good
-            or any(p.id == COMMIT_RULES for p in named) or not everywhere()):
-        return []
-    return [good[COMMIT_RULES]]
+    return [good[pid] for pid in EVERYWHERE
+            if pid not in state.pieces and pid in good
+            and not any(p.id == pid for p in named) and everywhere(pid)]
 
 
 def _changes(piece: pieces.Piece, state: State,
@@ -445,7 +496,7 @@ def _changes(piece: pieces.Piece, state: State,
     check = SETTING_CHECKS.get(piece.id)
     if check is not None:
         for name, values in changes.items():
-            why = check(name, values) if values else None
+            why = check(name, values or [])
             if why is not None:
                 raise Usage(f"{piece.id}: {why}; nothing was written")
     return changes
@@ -522,29 +573,29 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
 
 
 def enable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, True)
+    return _flip(path, piece_id, enabled=True)
 
 
 def disable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, False)
+    return _flip(path, piece_id, enabled=False)
 
 
-def _flip(path: str | os.PathLike, piece_id: str, value: bool) -> Report:
+def _flip(path: str | os.PathLike, piece_id: str, *, enabled: bool) -> Report:
     repo = _resolve(path)
     state = _state(repo)
     if piece_id not in state.pieces:
         raise Usage(f"{piece_id} is not registered in {repo.root}")
     report = Report()
     try:
-        gitconf.set_enabled(repo, piece_id, value, state)
-        if not value:
+        gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
+        if not enabled:
             # The record, its ledger key, then the flag.
             _records.close_piece(repo.common_dir, piece_id)
             gitconf.clear_recorded(repo, piece_id, state)
         report.take(repo.root, gitconf.sync(repo, state))
     except gitconf.GitError as exc:
         raise Failure(str(exc)) from None
-    report.lines.append(f"{'enabled' if value else 'disabled'} {piece_id} in {repo.root}")
+    report.lines.append(f"{'enabled' if enabled else 'disabled'} {piece_id} in {repo.root}")
     _sweep(repo)
     return report
 
@@ -575,7 +626,7 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
                 if changes:
                     gitconf.apply_settings(repo, piece.id, changes, state)
                 report.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
-                                    f"{repo.root} (commit_rules.everywhere)")
+                                    f"{repo.root} ({EVERYWHERE[piece.id]})")
             for pid in sorted(state.pieces):
                 if pid in good:
                     gitconf.register(repo, good[pid], state)
@@ -945,11 +996,37 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 
 # -- reading ------------------------------------------------------------------------------
 
+def rules(path: str | os.PathLike) -> list[str]:
+    """What a committer in the repo at `path` must know, as the lines `moxi repo rules`
+    prints: a heading naming the work tree `path` is in, then the lines of each
+    registered piece in `RULE_LINES`, the commit-proof piece's `Commit-Check` line last.
+    With none of those pieces registered, one line saying the repo has no commit rules.
+
+    The pieces and their settings are the repo's, shared by all its work trees; the
+    `Commit-Check` line is for the index of the work tree `path` is in, since a linked
+    work tree has its own. A disabled piece is still registered, so its lines print."""
+    repo = _resolve(path)
+    top = gitconf.work_tree(path)
+    state = _state(repo)
+    found = [pid for pid in RULE_LINES if pid in state.pieces]
+    if not found:
+        return [f"no commit rules for {top}"]
+    lines = [f"commit rules for {top}"]
+    for pid in found:
+        section = state.pieces[pid]
+        lines += RULE_LINES[pid](repo, settings_of(section), top=top,
+                                 enabled=enabled(section))
+    return lines
+
+
 def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
-    enabled, fail policy, order, settings and whether a doctor record of it is open, and
-    its `records` each doctor record repo has open for it (`_records.open_of`)."""
+    enabled, fail policy, order, settings and whether a doctor record of it is open; its
+    `events` how git reaches each event's pieces (`via`), the existing git hook, and
+    `command`, the text git runs for it as repo wrote it (the config entry's command, the
+    shim, or the launcher; None when it can't be read or nothing of repo's runs); and its
+    `records` each doctor record repo has open for it (`_records.open_of`)."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -968,11 +1045,11 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
                                              f"moxi repo git-hooks remove {_arg(root)}",
                                              state="warn")]})
             continue
-        out.append(_status_of(repo, repo.key in index, version, good))
+        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good))
     return out
 
 
-def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
+def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
     state = _state(repo)
     problems: list[Problem] = []
     listed = []
@@ -1013,7 +1090,7 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
     running = state.events()
     for event in sorted({p["event"] for p in listed if p["event"] in EVENTS}):
         info: dict = {"pieces": [p["id"] for p in listed if p["event"] == event],
-                      "via": None, "existing": None, "chain_line": None}
+                      "via": None, "existing": None, "chain_line": None, "command": None}
         hook = repo.hooks_dir / event
         if event not in running:
             # Every piece of it is disabled, so nothing of repo's is there to check.
@@ -1025,6 +1102,7 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(f"{event} has pieces but no config entry",
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}"))
             else:
+                info["command"] = command
                 problems += _guard_problems(event, command, python, runner, repo.root)
             if _runnable(hook) and shim.shim_event(hook) is None:
                 info["existing"] = f"{hook}, run by git after the pieces"
@@ -1034,6 +1112,7 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
             local = repo.hooks_dir / (event + shim.LOCAL)
             if hook in mine:
                 text = hook.read_text(encoding="utf-8", errors="replace")
+                info["command"] = text
                 problems += _guard_problems(event, text, python, runner, repo.root)
             elif mine:
                 # A manager that moves a hook aside as `<event>.legacy` runs it from its
@@ -1045,8 +1124,9 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                     state="ok" if runs else "fail"))
                 if runs:
                     # It still runs, so its guard's two paths matter as the shim's do.
-                    problems += _guard_problems(event, mine[0].read_text(
-                        encoding="utf-8", errors="replace"), python, runner, repo.root)
+                    info["command"] = mine[0].read_text(encoding="utf-8", errors="replace")
+                    problems += _guard_problems(event, info["command"], python, runner,
+                                                repo.root)
             else:
                 problems.append(Problem(f"{event}: repo's shim is missing or another tool "
                                         "replaced it",
@@ -1068,8 +1148,10 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}",
                                         state="fail" if present else "warn"))
             else:
-                problems += _guard_problems(event, repo.launcher.read_text(
-                    encoding="utf-8", errors="replace"), python, runner, repo.root)
+                info["command"] = repo.launcher.read_text(encoding="utf-8",
+                                                          errors="replace")
+                problems += _guard_problems(event, info["command"], python, runner,
+                                            repo.root)
         events[event] = info
     for event, path, fixable in gitconf.leftovers(repo, state):
         if shim.shim_event(path) is not None:
@@ -1120,13 +1202,20 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
-#: Each name this module hands out for another module -> the module it comes from. Four
+#: Each name this module hands out for another module -> the module it comes from. Seven
 #: are not package exports: `SpecError`, which `save_spec` raises; `saved_spec`, the spec a
-#: name last saved; `last_commit_time`, when an author last committed; and `PATHSPEC_VARS`,
-#: the environment variables that change how git reads a pathspec.
+#: name last saved; `last_commit_time`, when an author last committed; `PATHSPEC_VARS`,
+#: the environment variables that change how git reads a pathspec; `interpreter`, the
+#: Python the git hook entries run; `resolve_project`, the path a PATH argument names,
+#: which may be a project key; and `ProjectUnavailable`, which it raises with an exit
+#: code in `code`.
 REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
              "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
-             "PATHSPEC_VARS": "moxi_repo.gitrun"}
+             "PATHSPEC_VARS": "moxi_repo.gitrun", "interpreter": "moxi_repo.gitconf",
+             "resolve_project": "moxi_repo.projects",
+             "ProjectUnavailable": "moxi_repo.projects", "resolve_repo": "moxi_repo.gitconf",
+             "NotARepo": "moxi_repo.gitconf", "comment_prefix": "moxi_repo.commit_rules",
+             "quote_arg": "moxi_repo.run"}
 
 
 def __getattr__(name):
@@ -1143,7 +1232,8 @@ def __dir__():
 
 
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
-           "available", "add", "remove", "enable", "disable", "refresh", "status",
+           "RULE_LINES", "EVERYWHERE", "available", "add", "remove", "enable", "disable",
+           "refresh", "rules", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
            "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

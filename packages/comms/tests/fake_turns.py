@@ -179,11 +179,11 @@ class FakeDelivery:
                 raise TimeoutError(f"delivery {self.id or self.ref!r} has not {key}")
             return self._values[key]
 
-    def wait_started(self, timeout):
-        return self._wait("started", timeout)
+    def wait_started(self, timeout_s):
+        return self._wait("started", timeout_s)
 
-    def wait_ended(self, timeout):
-        return self._wait("ended", timeout)
+    def wait_ended(self, timeout_s):
+        return self._wait("ended", timeout_s)
 
 
 class FakeStops:
@@ -261,12 +261,12 @@ class FakeSession:
     def close(self):
         self.closed = True
 
-    def mcp_reload(self, *, timeout=22.0):
+    def mcp_reload(self, *, timeout_s=22.0):
         if "mcp-token" not in self.capabilities:
             raise RuntimeError("the session does not offer mcp-token (the capability "
                                "error)")
         with self._lock:
-            self.reload_calls.append(timeout)
+            self.reload_calls.append(timeout_s)
             answer = self.reload_answer
         if isinstance(answer, BaseException):
             raise answer

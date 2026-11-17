@@ -53,13 +53,13 @@ def work(tmp_path) -> Path:
 @pytest.fixture
 def turns(tmp_path, monkeypatch):
     """The fake turns behind the launcher's seam."""
-    directory = tmp_path / "fake-turns"
-    directory.mkdir()
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
-    monkeypatch.setenv(fake_turns.DIR, str(directory))
+    turns_dir = tmp_path / "fake-turns"
+    turns_dir.mkdir()
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
+    monkeypatch.setenv(fake_turns.DIR, str(turns_dir))
     monkeypatch.syspath_prepend(str(TESTS))
-    return SimpleNamespace(dir=directory,
-                           calls=lambda name=None: [c for c in fake_turns.calls(directory)
+    return SimpleNamespace(dir=turns_dir,
+                           calls=lambda name=None: [c for c in fake_turns.calls(turns_dir)
                                                     if name is None or c["call"] == name])
 
 
@@ -209,7 +209,7 @@ def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, 
     assert deliverers == []
     assert result.state == "started" and result.exit_code == exits.OK
     # The harness is known as one Moxi started, whatever environment it was built from.
-    assert handed["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
+    assert handed["env"][terminal.STARTED_BY_ENV] == terminal.marked({})[terminal.STARTED_BY_ENV]
 
 
 def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec,
@@ -283,7 +283,8 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     # Its pid recorded, then the deliverer given that pid, then the child's exit code.
     assert deliverers[0]["pid"] == Child.pid and deliverers[0]["row"].state == "started"
     assert result.exit_code == 5 and row().pid == Child.pid
-    assert Child.seen["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
+    marked = terminal.marked({})[terminal.STARTED_BY_ENV]
+    assert Child.seen["env"][terminal.STARTED_BY_ENV] == marked
 
 
 def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(
@@ -371,16 +372,16 @@ def test_a_headless_launch_spawns_from_spawning_and_records_its_process(work, ha
     assert got.pid_started == pytest.approx(proc.identity(os.getpid()).started)
 
 
-def test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store(
+def test_a_headless_run_log_goes_where_the_callers_env_puts_the_store(
         work, harness, tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(kw) or 99)
-    environ = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
-    api.launch(request(work, target="headless", brief=BRIEF), environ=environ)
+    env = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
+    api.launch(request(work, target="headless", brief=BRIEF), env=env)
     [handed] = seen
-    assert handed["output"] == targets.run_log("r1", environ)
+    assert handed["output"] == targets.run_log("r1", env)
     assert handed["output"] != targets.run_log("r1")
-    assert store.path(environ).exists() and not store.path().exists()
+    assert store.path(env).exists() and not store.path().exists()
 
 
 def test_a_headless_spawn_that_fails_ends_the_row_failed(work, harness, monkeypatch):
@@ -513,8 +514,8 @@ def test_a_session_id_another_launch_holds_is_refused(work, harness, monkeypatch
 
 
 def test_a_busy_launch_log_exits_75_and_writes_nothing(work, harness, monkeypatch):
-    holder = store.connect()
-    holder.execute("BEGIN IMMEDIATE")
+    conn = store.connect()
+    conn.execute("BEGIN IMMEDIATE")
     real = store.connect
     monkeypatch.setattr(store, "connect",
                         lambda *a, **kw: real(*a, **{**kw, "timeout": 0.1}))
@@ -522,8 +523,8 @@ def test_a_busy_launch_log_exits_75_and_writes_nothing(work, harness, monkeypatc
         with pytest.raises(store.Busy) as raised:
             api.launch(request(work, target="headless", brief=BRIEF))
     finally:
-        holder.rollback()
-        holder.close()
+        conn.rollback()
+        conn.close()
     assert api.exit_code(raised.value) == exits.TEMPFAIL
     assert row() is None and harness.runs() == []
 
@@ -548,22 +549,22 @@ def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harn
     assert api.exit_code(raised.value) == exits.REFUSED and nothing_written()
 
 
-def test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row(
+def test_a_launch_with_a_handoff_key_makes_its_handoff_dir_after_the_row(
         work, harness, monkeypatch):
     from moxi_launcher import handoffs
 
-    folder = handoffs.own_folder(create=False)
+    handoff_dir = handoffs.own_handoffs_dir(create=False)
     seen = []
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(
-        (row(), folder.is_dir())) or 99)
-    real = handoffs.own_folder
+        (row(), handoff_dir.is_dir())) or 99)
+    real = handoffs.own_handoffs_dir
 
-    def own_folder(env=None, *, create=True):
+    def own_handoffs_dir(env=None, *, create=True):
         if create:
             seen.append(("made", row() is not None))
         return real(env, create=create)
 
-    monkeypatch.setattr(handoffs, "own_folder", own_folder)
+    monkeypatch.setattr(handoffs, "own_handoffs_dir", own_handoffs_dir)
     write_presets('[seat.lead]\ntarget = "headless"\n')
     api.launch(LaunchRequest(seat="lead", typed={"brief": BRIEF}, cwd=str(work),
                              request_id="r1"))
@@ -573,13 +574,13 @@ def test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row(
     assert started_row.state == "spawning" and there
 
 
-def test_a_refusal_from_the_composer_leaves_the_handoff_folder_unmade(work, harness):
+def test_a_refusal_from_the_composer_leaves_the_handoff_dir_unmade(work, harness):
     from moxi_launcher import handoffs
 
     write_presets('[seat.lead]\ntarget = "headless"\n')
     with pytest.raises(catalog.Refused):
         api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1"))
-    assert nothing_written() and not handoffs.own_folder(create=False).exists()
+    assert nothing_written() and not handoffs.own_handoffs_dir(create=False).exists()
 
 
 # -- projects ------------------------------------------------------------------------------
@@ -855,7 +856,7 @@ def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkey
 
 
 @POSIX
-def test_a_scratch_launch_makes_its_folder_and_never_removes_it(harness, tmp_path):
+def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
     assert not common.scratch_dir("r9").exists()
@@ -954,9 +955,9 @@ def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
 
 
 def runs_file(name: str, data: bytes | str = "x\n", *, age_days: float = 0) -> Path:
-    folder = targets.runs_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / name
+    runs_dir = targets.runs_dir()
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    path = runs_dir / name
     path.write_bytes(data.encode() if isinstance(data, str) else data)
     if age_days:
         then = time.time() - age_days * 86400
@@ -965,7 +966,7 @@ def runs_file(name: str, data: bytes | str = "x\n", *, age_days: float = 0) -> P
 
 
 def running_row(conn, rid: str) -> None:
-    store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+    store.insert(conn, request_id=rid, by="ann", harness="codex", target="headless",
                  cwd="/work", values={}, argv=["codex"], env={}, posture="")
     me = proc.identity(os.getpid())
     store.set_state(conn, rid, "started", pid=me.pid, pid_started=me.started)
@@ -1022,7 +1023,7 @@ def test_the_sweep_leaves_the_log_of_a_launch_still_running():
     assert targets.sweep(conn, cap=1000, keep_days=30).cut == ("live.log",)
 
 
-def test_the_sweep_with_no_runs_folder_does_nothing():
+def test_the_sweep_with_no_runs_dir_does_nothing():
     assert targets.sweep() == targets.Swept()
     assert not targets.runs_dir().exists()
 
@@ -1070,7 +1071,7 @@ def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
     assert not common.scratch_root().exists()
 
 
-def test_the_scratch_folder_of_a_request_id_that_is_not_a_plain_name_is_refused():
+def test_the_scratch_dir_of_a_request_id_that_is_not_a_plain_name_is_refused():
     for rid in ("../x", "a/b", "..", "."):
         with pytest.raises(ValueError):
             common.scratch_dir(rid)

@@ -73,14 +73,14 @@ def test_a_malformed_director_is_refused_where_it_was_typed(bad):
 def test_the_stamp_round_trips_beside_the_identity_stamp():
     env = session.identity_env(name="reviewer", scope="proj-a", project="proj-a",
                                directors=["planner@proj-a", "herald"])
-    assert env[directors.ENV_VAR] == "planner@proj-a,herald"
+    assert env[directors.DIRECTORS_ENV] == "planner@proj-a,herald"
     assert env["MOXI_COMMS_NAME"] == "reviewer" and env["MOXI_COMMS_SCOPE"] == "proj-a"
     assert directors.from_env(env) == ("planner@proj-a", "herald")
 
 
 def test_no_declaration_stamps_nothing_at_all():
     env = session.identity_env(name="reviewer", scope="proj-a")
-    assert directors.ENV_VAR not in env
+    assert directors.DIRECTORS_ENV not in env
     assert directors.from_env(env) == ()
 
 
@@ -95,7 +95,7 @@ def test_the_wrapper_qualifies_once_and_hands_the_adapter_the_qualified_names():
         assert shim.claims.claim["directors"] == ["planner", "herald"]
     finally:
         shim.stop(remove_claim_file=True)
-    assert s.env(base={})[directors.ENV_VAR] == "planner,herald"
+    assert s.env(base={})[directors.DIRECTORS_ENV] == "planner,herald"
 
 
 def test_the_shim_never_re_qualifies_what_the_wrapper_qualified():
@@ -219,7 +219,7 @@ def roster_agent(tmp_path, directors_toml, *, key="planner@proj-a"):
 def test_the_roster_carries_a_directors_list_qualified_like_the_wrapper(tmp_path):
     agent = roster_agent(tmp_path, '["main", "herald@global", "other@proj-b"]')
     assert agent.directors == ["main", "herald", "other@proj-b"]
-    assert agent.env(base={})[directors.ENV_VAR] == "main,herald,other@proj-b"
+    assert agent.env(base={})[directors.DIRECTORS_ENV] == "main,herald,other@proj-b"
 
 
 def test_a_roster_without_directors_declares_none(tmp_path):

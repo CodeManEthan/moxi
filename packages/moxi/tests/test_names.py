@@ -70,7 +70,7 @@ def test_test_is_kept_for_moxi_devs_test_tier_prefix():
     # moxi-dev's test tiers read MOXI_TEST_*; a module named test would own that prefix.
     from moxi_dev import contract
 
-    assert names.env_prefix("test") == contract.DEV_ENV_PREFIX == "MOXI_TEST_"
+    assert names.env_prefix("test") == contract.TEST_PREFIX_ENV == "MOXI_TEST_"
 
 
 @pytest.mark.parametrize("name", ["moxi-handoff", "moxi-comms-send", "moxi-2fa", "moxi-a1-b2",
@@ -98,5 +98,5 @@ def test_the_skill_name_cap_is_64_characters():
 @pytest.mark.parametrize("name, counted", [("moxi-x", True), ("handoff", True), ("x", True),
                                            (".x", False), (".git", False),
                                            ("__pycache__", False), ("_private", True)])
-def test_a_skill_folder_is_any_but_dot_named_and_pycache(name, counted):
-    assert names.is_skill_folder(name) is counted
+def test_a_skill_dir_is_any_but_dot_named_and_pycache(name, counted):
+    assert names.is_skill_dir(name) is counted

@@ -564,7 +564,7 @@ def test_a_session_answer_with_no_verdict_refuses(rig, monkeypatch):
 
     def bare(frame):
         answer = real(frame)
-        for key in ("cache_kind", "age_seconds", "cache_reason"):
+        for key in ("cache_kind", "age_s", "cache_reason"):
             answer.pop(key)
         return answer
 

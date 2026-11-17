@@ -134,8 +134,8 @@ class LinuxView(_View):
             owner = os.stat(base).st_uid
         except FileNotFoundError:
             raise Gone(pid) from None
-        except OSError as error:
-            raise Unread(pid, _words(error)) from None
+        except OSError as exc:
+            raise Unread(pid, _words(exc)) from None
         ppid, started, name = self._stat(pid)
         # Another uid owns a process that runs as another account or isn't dumpable. A
         # refused read is the system keeping it from this account too: `systemd --user`
@@ -147,28 +147,28 @@ class LinuxView(_View):
             raise Gone(pid) from None
         except PermissionError:
             argv, shielded = None, True
-        except OSError as error:
+        except OSError as exc:
             if not shielded:
-                raise Unread(pid, _words(error), name) from None
+                raise Unread(pid, _words(exc), name) from None
             argv = None
         env = None
         if not shielded:
             try:
-                env = proc._linux_read_environ(pid, self.root)
+                env = proc._linux_read_env(pid, self.root)
             except ProcessLookupError:
                 raise Gone(pid) from None
             except PermissionError:
                 shielded = True
-            except OSError as error:
-                raise Unread(pid, _words(error), name) from None
+            except OSError as exc:
+                raise Unread(pid, _words(exc), name) from None
         if shielded:
             return Proc(pid, ppid, started, argv, None, shielded=True, name=name)
         try:
             unit = _cgroup_unit(proc._linux_file(pid, self.root, "cgroup"))
         except ProcessLookupError:
             raise Gone(pid) from None
-        except OSError as error:
-            raise Unread(pid, _words(error), name) from None
+        except OSError as exc:
+            raise Unread(pid, _words(exc), name) from None
         return Proc(pid, ppid, started, argv, env, unit=unit, name=name)
 
     def _stat(self, pid: int) -> tuple[int, float, str]:
@@ -180,8 +180,8 @@ class LinuxView(_View):
             raw = proc._linux_file(pid, self.root, "stat")
         except ProcessLookupError:
             raise Gone(pid) from None
-        except OSError as error:
-            raise Unread(pid, _words(error)) from None
+        except OSError as exc:
+            raise Unread(pid, _words(exc)) from None
         cut = raw.rfind(b")")
         name = raw[raw.find(b"(") + 1:cut].decode("utf-8", "replace")
         fields = raw[cut + 1:].split()
@@ -223,8 +223,8 @@ class MacView(_View):
             name = found.name()
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             raise Gone(pid) from None
-        except psutil.Error as error:
-            raise Unread(pid, _words(error)) from None
+        except psutil.Error as exc:
+            raise Unread(pid, _words(exc)) from None
         ppid = proc.parent(pid)
         if ppid is None:
             if not psutil.pid_exists(pid):
@@ -236,9 +236,9 @@ class MacView(_View):
             argv, entries = proc._procargs2_parts(proc._mac_procargs(pid))
         except ProcessLookupError:
             raise Gone(pid) from None
-        except OSError as error:
+        except OSError as exc:
             if not shielded:
-                raise Unread(pid, _words(error), name) from None
+                raise Unread(pid, _words(exc), name) from None
             return Proc(pid, ppid, started, None, None, shielded=True, name=name)
         if shielded:
             return Proc(pid, ppid, started, tuple(argv), None, shielded=True, name=name)
@@ -254,9 +254,9 @@ class MacView(_View):
             from moxi import proc
 
             try:
-                done = proc.run(["launchctl", "list"], timeout=10)
-            except Exception as error:  # noqa: BLE001 - a timeout, a missing launchctl
-                self._units_error = _words(error)
+                done = proc.run(["launchctl", "list"], timeout_s=10)
+            except Exception as exc:  # noqa: BLE001 - a timeout, a missing launchctl
+                self._units_error = _words(exc)
                 return None
             if done.returncode != 0:
                 self._units_error = f"exit {done.returncode}"
@@ -302,8 +302,8 @@ class WindowsView(_View):
             started = found.create_time()
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             raise Gone(pid) from None
-        except psutil.Error as error:
-            raise Unread(pid, _words(error)) from None
+        except psutil.Error as exc:
+            raise Unread(pid, _words(exc)) from None
         ppid = self.parent(pid)
         if ppid is None:
             if not psutil.pid_exists(pid):
@@ -319,8 +319,8 @@ class WindowsView(_View):
             except psutil.AccessDenied:
                 shielded = True
                 read[what] = None
-            except (psutil.Error, OSError) as error:
-                raise Unread(pid, _words(error), str(read.get("name") or "")) from None
+            except (psutil.Error, OSError) as exc:
+                raise Unread(pid, _words(exc), str(read.get("name") or "")) from None
         argv = read["cmdline"]
         return Proc(pid, ppid, started, None if argv is None else tuple(argv),
                     None if shielded else read["environ"], image=read["exe"],

@@ -20,22 +20,23 @@ launched.
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
-    moxi launcher state [SESSION_ID] [--json]
+    moxi launcher show [SESSION_ID] [--json]
 
 `run` launches; `preview` prints the argv and environment a launch would use and starts
 nothing. `log` lists launches, newest first, or with `--table` the runs, the exits or the
 holds. `presets` lists, shows or checks the seats and project presets, and with `--project
 KEY` lists a project's agents beside the seat of each. `catalog` lists the flag rows this
 install offers. `handoff dir` prints the handoff folder for this session; `handoffs` lists
-a key's handoffs and which still wait for their seat. `deliver` is internal: the detached
-process that sends a terminal launch's first turn.
+a key's handoffs and which still wait for their seat, a `--key` in the folder of that key's
+newest launch. `deliver` is internal: the detached process that sends a terminal launch's
+first turn.
 
 The acts on a launched session: `relaunch` arms a relaunch of this session (`--self`), or
 relaunches another as one of its directors, shows a run (`--status`), or launches again
 the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `keep-warm` opens, releases and lists this session's named holds. `state` shows
+resumed. `keep-warm` opens, releases and lists this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -459,10 +460,10 @@ def _handoff(args: argparse.Namespace, prog: str) -> int:
 
     here = handoffs.current()
     if args.json:
-        print(_dump({"key": here.key, "folder": str(here.folder),
+        print(_dump({"key": here.key, "folder": str(here.handoff_dir),
                      "request_id": here.request_id}))
     else:
-        print(here.folder)
+        print(here.handoff_dir)
     return codes.OK
 
 
@@ -475,19 +476,30 @@ def _handoffs(args: argparse.Namespace, prog: str) -> int:
             print(f"{prog} handoffs: {args.key!r} can't be a handoff key; a key is "
                   "letters, digits, '.', '_' and '-'", file=sys.stderr)
             return codes.USAGE
-        folder = handoffs.folder(Path.cwd(), create=False)
+        read = handoffs.handoff_dir_of_key(key)
+        handoff_dir, launch = read.handoff_dir, read.launch
     else:
         here = handoffs.current(create=False)
-        key, folder = here.key, here.folder
-    found = handoffs.handoffs(folder, key)
-    waiting = {h.path for h in handoffs.unpicked(folder, key, _picked(key))}
+        key, handoff_dir, launch = here.key, here.handoff_dir, None
+    found = handoffs.handoffs(handoff_dir, key)
+    waiting = {h.path for h in handoffs.unpicked(handoff_dir, key, _picked(key))}
     if args.json:
-        print(_dump({"key": key, "folder": str(folder),
-                     "handoffs": [{"path": str(h.path), "date": h.date,
-                                   "waiting": h.path in waiting} for h in found]}))
+        shown = {"key": key, "folder": str(handoff_dir)}
+        if args.key is not None:
+            shown["launch"] = launch.request_id if launch is not None else None
+        shown["handoffs"] = [{"path": str(h.path), "date": h.date,
+                              "waiting": h.path in waiting} for h in found]
+        print(_dump(shown))
         return codes.OK
+    if args.key is not None:
+        if launch is not None:
+            print(f"reading {handoff_dir}, the handoff folder of {key}'s newest launch "
+                  f"({launch.cwd})", file=sys.stderr)
+        else:
+            print(f"reading {handoff_dir}: {key} has no launch, so this directory's folder",
+                  file=sys.stderr)
     if not found:
-        print(f"no handoffs of {key} in {folder}", file=sys.stderr)
+        print(f"no handoffs of {key} in {handoff_dir}", file=sys.stderr)
         return codes.OK
     for handoff in found:
         mark = "waiting" if handoff.path in waiting else "picked"
@@ -625,7 +637,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "sessions": _sessions,
     "resume": _resume,
     "keep-warm": _keep_warm,
-    "state": _state,
+    "show": _state,
 }
 
 
@@ -713,7 +725,8 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
                                 description="List a key's handoffs, newest first, and "
                                             "which still wait for their seat. The key is "
                                             "this session's unless --key names one.")
-    handoffs.add_argument("--key", metavar="KEY", help="list this key's handoffs")
+    handoffs.add_argument("--key", metavar="KEY",
+                          help="list this key's handoffs, in the folder of its newest launch")
     handoffs.add_argument("--json", action="store_true", help="print JSON")
 
     deliver = verbs.add_parser("deliver", help="internal: send a launch's first turn",
@@ -792,7 +805,7 @@ def _act_parsers(verbs) -> None:
     listed.add_argument("--json", action="store_true", help="print one JSON object")
 
     state = verbs.add_parser(
-        "state", help="show a launched session's state", allow_abbrev=False,
+        "show", help="show a launched session's state", allow_abbrev=False,
         description="Show a launched session's relaunch, recycle and keep-warm state, and "
                     "whether it needs a look. With no SESSION_ID, this session's.")
     state.add_argument("session_id", nargs="?", metavar="SESSION_ID",
@@ -837,8 +850,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher") -> i
     args = parse(argv, prog=prog)
     try:
         return VERBS[args.verb](args, prog)
-    except _errors() as error:
-        return _refuse(prog, args.verb, error)
+    except _errors() as exc:
+        return _refuse(prog, args.verb, exc)
 
 
 __all__ = ["LAUNCH_VERBS", "PRESET_ACTIONS", "TABLES", "VERBS", "NoPreset", "build_parser",

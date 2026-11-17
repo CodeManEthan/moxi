@@ -93,10 +93,10 @@ def choose(reach: str, *, target: int, port: int | None = None,
     skips `retired` too. Raises `Refused` (exit 3) when no port can be taken.
     """
     if reach == "public":
-        return _public(port, moxi, foreign, funnel_ports, replace)
+        return _public(port, moxi, foreign, funnel_ports, replace=replace)
     if port is not None:
         _check_range(port)
-        choice = _take(port, moxi, foreign, replace)
+        choice = _take(port, moxi, foreign, replace=replace)
         if port in FUNNEL_PORTS:
             line = (f"port {port} is one of Funnel's three ports, which a public target "
                     "then can't use")
@@ -113,7 +113,7 @@ def _check_range(port: int) -> None:
 
 
 def _take(port: int, moxi: Mapping[int, str], foreign: Mapping[int, str],
-          replace: bool) -> Choice:
+          *, replace: bool) -> Choice:
     if port in moxi:
         holder = moxi[port]
         fix = ("upgrade moxi-tunnel, or choose another port" if holder.endswith(f"({NEWER})")
@@ -129,7 +129,7 @@ def _take(port: int, moxi: Mapping[int, str], foreign: Mapping[int, str],
 
 
 def _public(port: int | None, moxi: Mapping[int, str], foreign: Mapping[int, str],
-            funnel_ports: Iterable[int] | None, replace: bool) -> Choice:
+            funnel_ports: Iterable[int] | None, *, replace: bool) -> Choice:
     granted = set(FUNNEL_PORTS if funnel_ports is None else funnel_ports)
     allowed = [p for p in FUNNEL_PORTS if p in granted]
     if not allowed:
@@ -142,7 +142,7 @@ def _public(port: int | None, moxi: Mapping[int, str], foreign: Mapping[int, str
             raise Refused(f"the tailnet's funnel-ports grant doesn't allow port {port}",
                           "give " + " or ".join(map(str, allowed)) + ", or add the port "
                           "to the grant")
-        return _take(port, moxi, foreign, replace)
+        return _take(port, moxi, foreign, replace=replace)
     for p in allowed:
         if p not in moxi and (replace or p not in foreign):
             return Choice(p, replace=p in foreign)

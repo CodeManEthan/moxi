@@ -2,12 +2,11 @@
 
 Code, tests and docs say a reason in plain words. A reference id is shorthand that points
 into notes a reader of the repository can't see, such as the notes a change was planned
-or reviewed in, so the reader can't follow it. The check refuses these shapes: a short
-capital id with a number in square brackets; one of a few capital letters with a number
-in parentheses; a D and two digits, perhaps with a letter after; a section sign with a
-number; "design v" and a number; a severity word in capitals with a number; the word
-"round" followed by two names joined by a slash, one of them hyphenated (two plain words
-with a slash between are as likely prose); and a finding id, an L and a number, bare or
+or reviewed in, so the reader can't follow it. The check refuses the shapes of
+publishing's `ruling-tag` and `round-pointer` rules, read from `moxi_publishing.rules` so
+the two checks never drift apart, and two shapes only this repository's own records use,
+which publishing leaves out so they never fire on someone else's repo: a D and two
+digits, perhaps with a letter after; and a finding id, an L and a number, bare or
 bracketed. No example of one is written here, so this file passes its own check.
 
 Two kinds of text are let through. A finding is one reported issue, and
@@ -33,20 +32,16 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from moxi_publishing.rules import ROUND_POINTER, RULING_TAG
+
 from .contract import CORE
 from .contract import VENDORED as _CORE_VENDORED
 
-#: The shapes of a tag.
-TAG = re.compile(
-    r"\[[A-Z]{1,2}[0-9]{1,3}[a-z]?\]"
-    r"|\([RSCFQNBIX][0-9]+\)"
-    r"|\bD[0-9]{2}[a-z]?\b"
-    r"|\u00a7 ?[0-9]"
-    r"|\bdesign v[0-9]"
-    r"|\b(?:MINOR|MAJOR|BLOCKER) [0-9]"
-    r"|\b[Rr]ound (?:[a-z0-9]+-[a-z0-9-]+/[a-z0-9-]+|[a-z0-9-]+/[a-z0-9]+-[a-z0-9-]+)"
-    r"|\bL[0-9]+\b"
-)
+#: The shapes only this repository's own records use: a D-number and a finding id.
+OWN = r"\bD[0-9]{2}[a-z]?\b|\bL[0-9]+\b"
+
+#: The shapes of a tag: publishing's two rules, then this repository's own.
+TAG = re.compile(f"{RULING_TAG}|{ROUND_POINTER}|{OWN}")
 
 #: A finding mark with its arguments, one or more strings, which are data. The call may
 #: run over several lines, as a formatter wraps it; each string stays on one line.
@@ -129,4 +124,4 @@ def scan(root: Path) -> list[Hit]:
     return sorted(hits)
 
 
-__all__ = ["Hit", "TAG", "FINDING_MARK", "allowed", "scan", "tags_in"]
+__all__ = ["Hit", "OWN", "TAG", "FINDING_MARK", "allowed", "scan", "tags_in"]

@@ -67,9 +67,9 @@ def seam(monkeypatch):
             hook()
         notes = s.notes.get(q)
         if kind == cache.WARM:
-            return cache.Clock(cache.WARM, age_seconds=1.0, ttl_seconds=HOUR, notes=notes)
+            return cache.Clock(cache.WARM, age_s=1.0, ttl_s=HOUR, notes=notes)
         if kind == cache.COLD:
-            return cache.Clock(cache.COLD, age_seconds=2 * HOUR, ttl_seconds=HOUR,
+            return cache.Clock(cache.COLD, age_s=2 * HOUR, ttl_s=HOUR,
                                notes=notes)
         return cache.Clock(kind, notes=notes)
 
@@ -121,8 +121,8 @@ def test_the_real_claude_reader_releases_once_the_turn_reaches_the_transcript(
     peer.turn()
     assert peer.held() == [], "the transcript did not hold the turn yet"
     time.sleep(0.15)
-    with path.open("a") as f:
-        f.write(json.dumps(assistant_line(0)) + "\n")
+    with path.open("a") as fh:
+        fh.write(json.dumps(assistant_line(0)) + "\n")
     assert wait_until(lambda: peer.held() == [held], timeout=2.0)
 
 
@@ -388,8 +388,8 @@ def test_mail_queued_cold_goes_out_when_the_warming_turns_line_lands_after_its_e
         peer.turn()
         assert peer.held() == [], "the transcript did not hold the turn yet"
         time.sleep(0.066)
-        with path.open("a") as f:
-            f.write(json.dumps(assistant_line(0)) + "\n")
+        with path.open("a") as fh:
+            fh.write(json.dumps(assistant_line(0)) + "\n")
         assert wait_until(lambda: peer.held() == [mid], timeout=2.0)
     assert still_lines(caplog) == []
 
@@ -436,8 +436,8 @@ def test_an_answered_turn_end_releases_at_once_however_long_the_transcript_lags(
         else:
             assert wait_until(lambda: still_lines(caplog), timeout=2.0)
         time.sleep(SHORT_STEPS[-1] + 0.1)
-        with path.open("a") as f:
-            f.write(json.dumps(assistant_line(0)) + "\n")
+        with path.open("a") as fh:
+            fh.write(json.dumps(assistant_line(0)) + "\n")
         time.sleep(0.1)
     if answered:
         assert peer.held() == [mid]

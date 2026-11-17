@@ -129,8 +129,8 @@ def own_slots(live_env, monkeypatch):
         socket = paths.socket_path("slots", "tmux")
         assert socket.startswith(str(home)), socket
         tmux = shutil.which("tmux")
-        config.set("slots", "tmux", tmux, by="launcher live test")
-        config.set("slots", "tmux_conf", os.devnull, by="launcher live test")
+        config.set_value("slots", "tmux", tmux, by="launcher live test")
+        config.set_value("slots", "tmux_conf", os.devnull, by="launcher live test")
         log = open(home / "server.log", "wb")
         server = subprocess.Popen([str(paths.script("moxi-slots-server"))],
                                   env=dict(os.environ), stdin=subprocess.DEVNULL,
@@ -335,7 +335,7 @@ def test_a_launch_without_turns_has_the_brief_as_its_opening_prompt(
     else:
         typed["scratch"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
-                        environ=live_env)
+                        env=live_env)
     assert result.state == "started", result.line
     assert first.on_argv(result.argv) and any(brief in word for word in result.argv)
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
@@ -358,15 +358,16 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
     screen when it shows (the switch is on), and runs the brief as the opening prompt."""
     needs(harness)
     monkeypatch.setattr(first, "turns_api", lambda quiet=False: None)
-    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
-    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", value=True,
+                     by="launcher live test")
+    config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     extra = kept_out(harness)
     if harness == "codex":
         typed["trust_cwd"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
-                        environ=live_env)
+                        env=live_env)
     row = launch_row(result.request_id)
     try:
         assert result.state == "started", result.line
@@ -386,13 +387,13 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
                         if e.kind == startup.EVENT]
         finally:
             conn.close()
-        assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"
+        assert answered == ([("CLAUDE_TRUST_DIR", "gone")] if harness == "claude"
                             else []), answered
         # The slot it took now reads occupied by this launch, and a second launch that
         # names it is refused as taken, naming this one.
         [taken] = api.check(api.LaunchRequest(
             typed={**flags(harness), "target": "slot", "slot": str(row.slot),
-                   "cwd": str(work)}, cwd=str(work)), environ=live_env)
+                   "cwd": str(work)}, cwd=str(work)), env=live_env)
         assert type(taken) is targets.SlotTaken, taken
         assert result.request_id in taken.problem
     finally:
@@ -410,13 +411,13 @@ def test_a_named_slot_with_no_registry_row_is_refused_as_missing(live_env, work,
                    env=live_env, capture_output=True, timeout=10, check=True)
     request = api.LaunchRequest(typed={"harness": "claude", "target": "slot",
                                        "slot": "7", "cwd": str(work)}, cwd=str(work))
-    [refused] = api.check(request, environ=live_env)
+    [refused] = api.check(request, env=live_env)
     assert type(refused) is targets.SlotMissing, refused
     assert "there is no slot 7 (a session of that name runs with no registry row)" in (
         refused.problem)
     assert "moxi slots create 7" in refused.hint
     with pytest.raises(targets.SlotMissing):
-        api.launch(request, environ=live_env)
+        api.launch(request, env=live_env)
     assert launch_row() is None
 
 
@@ -464,7 +465,7 @@ def test_a_headless_launch_with_turns_runs_its_brief(harness, live_env, work):
     typed = {**flags(harness), "target": "headless", "brief": brief}
     typed.update({"cwd": str(work)} if harness == "claude" else {"scratch": True})
     result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness),
-                                          cwd=str(work)), environ=live_env)
+                                          cwd=str(work)), env=live_env)
     assert result.state == "started", result.line
     # Headless, the brief is the harness's prompt even with turns: nothing is delivered.
     assert any(brief in word for word in result.argv)
@@ -482,14 +483,15 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
         needs_host()
     # The work dir is new, so Claude asks whether to trust it: the launcher answers that
     # screen through slots, as in the slot launch without turns.
-    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
-    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", value=True,
+                     by="launcher live test")
+    config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     if harness == "codex":
         typed["trust_cwd"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness, host=True),
-                                          cwd=str(work)), environ=live_env)
+                                          cwd=str(work)), env=live_env)
     row = launch_row(result.request_id)
     try:
         assert result.outcome is not None and result.outcome.outcome == "sent", result.line
@@ -545,13 +547,13 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
     file = presets.path()
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(f'[seat.liveprint]\nharness = "claude"\ncwd = "{work}"\n')
-    waiting = handoffs.own_folder() / handoffs.file_name("liveprint", "2026-10-30")
+    waiting = handoffs.own_handoffs_dir() / handoffs.file_name("liveprint", "2026-10-30")
     waiting.write_text("A handoff a headless run must neither show nor use up.\n")
     brief, answer = words()
     result = api.launch(api.LaunchRequest(
         seat="liveprint", typed={"target": "headless", "brief": brief,
                                  "model": CLAUDE_MODEL}, extra=CLAUDE_OWN, cwd=str(work)),
-        environ=live_env)
+        env=live_env)
     assert result.state == "started", result.line
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
              what=lambda: f"{answer} in {targets.run_log(result.request_id)}")
@@ -571,7 +573,7 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
     assert "Handoff waiting" not in targets.run_log(result.request_id).read_text()
 
 
-def test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it(
+def test_codex_trusts_the_launch_dir_from_the_trust_row_even_with_a_dot_in_it(
         tmp_path):
     """The trust row's words, as `codex` and `codex exec` launches carry them, trust the
     launch's directory in the real Codex, a dot in its path and all, and leave the
@@ -599,10 +601,10 @@ def test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in
     name = next(name for name, on in features(tmp_path).items()
                 if not on and "removed" not in stages[name])
     projects = {}
-    for folder in ("my.repo", "other"):
-        projects[folder] = tmp_path / folder
-        (projects[folder] / ".codex").mkdir(parents=True)
-        (projects[folder] / ".codex" / "config.toml").write_text(
+    for project_dir in ("my.repo", "other"):
+        projects[project_dir] = tmp_path / project_dir
+        (projects[project_dir] / ".codex").mkdir(parents=True)
+        (projects[project_dir] / ".codex" / "config.toml").write_text(
             f"[features]\n{name} = true\n", encoding="utf-8")
     (home / "config.toml").write_text(
         f'[projects.{catalog.toml_literal(str(projects["other"]))}]\n'
@@ -612,7 +614,7 @@ def test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in
     assert features(projects["other"])[name] is True
     row = catalog.load("codex")["trust_cwd"]
     for mode in ("interactive", "exec"):
-        words = row.tokens(mode, True, cwd=str(cwd))
+        words = row.tokens(mode, value=True, cwd=str(cwd))
         assert features(cwd, *words)[name] is True, (mode, words)
         assert features(projects["other"], *words)[name] is True, (mode, words)
 
@@ -646,13 +648,13 @@ def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, 
                                        "identity": "probe", "scope": "launcherlive",
                                        "cwd": str(work)},
                                 extra=CLAUDE_OWN, cwd=str(work))
-    [refused] = api.check(request, environ=live_env)
+    [refused] = api.check(request, env=live_env)
     assert type(refused) is api.CommsOffline and refused.exit_code == 75, refused
     with pytest.raises(api.CommsOffline):
-        api.launch(request, environ=live_env)
+        api.launch(request, env=live_env)
     assert launch_row() is None
     monkeypatch.setattr(api, "_identity_taken", lambda name, scope: None)
-    result = api.launch(request, environ=live_env)
+    result = api.launch(request, env=live_env)
     row = launch_row(result.request_id)
     try:
         assert (result.state, result.reason) == ("failed", targets.COMMS_OFFLINE), \

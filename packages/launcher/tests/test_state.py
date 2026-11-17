@@ -11,7 +11,7 @@ import pytest
 from moxi import exit as codes
 from moxi import proc
 
-from moxi_launcher import state, store, target
+from moxi_launcher import keepwarm, state, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -43,19 +43,19 @@ class FakeCache:
 
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id))
-        return SimpleNamespace(kind="warm", age_seconds=10.0, ttl_seconds=self.ttl)
+        return SimpleNamespace(kind="warm", age_s=10.0, ttl_s=self.ttl)
 
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus", **(values or {})}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id, slot="3",
                  relaunch_of=relaunch_of)
@@ -64,7 +64,7 @@ def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=
 def ran(conn, outcome, *, kind="keep-warm", mode="ask", word=None, detail=None,
         request_id="r1", at=None, **values):
     run = store.insert_run(conn, kind=kind, mode=mode, request_id=request_id,
-                           session_id=SID, actor="launcher", state="acting",
+                           session_id=SID, by="launcher", state="acting",
                            job=me(), at=at)
     store.end_run(conn, run.run_id, outcome, word=word, detail=detail, **values)
     return store.get_run(conn, run.run_id)
@@ -102,7 +102,7 @@ def test_a_blocked_run_is_red_blocked_since_the_block_began(conn):
 def test_a_repeated_block_keeps_its_first_start_as_since(conn):
     first = ran(conn, "blocked", kind="clear", mode="expiry", word="draft", at=OLD)
     run = store.insert_run(conn, kind="clear", mode="expiry", request_id="r1",
-                           session_id=SID, actor="launcher", state="acting", job=me())
+                           session_id=SID, by="launcher", state="acting", job=me())
     assert store.end_blocked(conn, run.run_id, "draft") == first.run_id
     got = read(conn)
     assert got.red and got.since == OLD
@@ -145,7 +145,7 @@ def test_a_later_run_that_ended_held_takes_the_place_of_red(conn):
 def test_an_open_run_after_a_failed_one_leaves_it_red(conn):
     ran(conn, "relaunch-failed", kind="relaunch", mode="self", at=OLD)
     store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1", session_id=SID,
-                     actor="launcher", state="acting", job=me())
+                     by="launcher", state="acting", job=me())
     got = read(conn)
     assert got.red and got.why == "relaunch-failed"
 
@@ -192,7 +192,7 @@ def test_a_run_of_the_new_launch_that_ended_well_clears_the_making_run(conn):
 
 def test_an_open_relaunch_shows_armed_then_its_latest_wait(conn):
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="ann", job="slots:relaunch-x")
+                           session_id=SID, by="ann", job="slots:relaunch-x")
     assert read(conn).relaunch.state == "armed"
     store.advance_run(conn, run.run_id, "waiting")
     store.add_run_event(conn, run.run_id, "wait", {"word": "turn", "detail": "open"})
@@ -202,7 +202,7 @@ def test_an_open_relaunch_shows_armed_then_its_latest_wait(conn):
 
 def test_an_open_run_whose_job_is_gone_shows_stale(conn):
     store.insert_run(conn, kind="relaunch", mode="self", request_id="r1", session_id=SID,
-                     actor="ann", job="proc:999999999@1.0", at=OLD)
+                     by="ann", job="proc:999999999@1.0", at=OLD)
     got = read(conn)
     assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"
 
@@ -262,6 +262,22 @@ def test_keep_warm_says_a_short_lifetime_leaves_no_window(conn):
     assert got.said == "keep warm: on (no window: lifetime 300 s)"[len("keep warm: "):]
     assert cache.reads == [("claude", SID)]
     assert read(conn, cache=FakeCache()).keep_warm.window is None
+
+
+def test_keep_warm_under_cover_alone_is_on_with_no_holds_listed(conn):
+    store.open_hold(conn, "r1", "port-cache")
+    launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1")
+    keepwarm.cover_on(conn, store.get(conn, "r2"), NEW, turn_number=3,
+                      waits={"kind": "subagents", "count": 1})
+    got = read(conn, NEW).keep_warm
+    assert got.on and got.holds == ()
+    assert read(conn, NEW).lines()[3].startswith("keep warm: on; holds: none")
+
+
+def test_cover_for_another_session_id_leaves_keep_warm_off(conn):
+    keepwarm.cover_on(conn, store.get(conn, "r1"), NEW, turn_number=3,
+                      waits={"kind": "subagents", "count": 1})
+    assert not read(conn).keep_warm.on
 
 
 def test_keep_warm_off_reads_no_cache(conn):

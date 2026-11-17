@@ -106,7 +106,7 @@ def test_every_string_leaf_is_plain_only_for_a_name_an_id_a_time_or_a_word():
     assert {k for k, v in found.items() if v is None} == plain
 
 
-def test_commands_are_redact_a_working_directory_path_and_every_sentence_redact():
+def test_commands_are_redact_a_working_dir_path_and_every_sentence_redact():
     redact = {f"{where} {row}.{leaf}"
               for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),
                                  ("/api/row", "row"))
@@ -162,3 +162,10 @@ def test_the_components_are_the_page_and_the_home_summary_block():
     assert module.COMPONENTS["page"]["place"] == "page"
     summary = module.COMPONENTS["summary"]
     assert summary["place"] == "block" and summary["home"] is True
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_services import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("setup", 30)

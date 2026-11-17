@@ -204,4 +204,4 @@ browser UI shell.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/statusline/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-statusline-v0.1.0/packages/statusline/LICENSE).

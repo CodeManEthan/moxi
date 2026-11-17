@@ -92,31 +92,31 @@ class Verifier:
 
     `verify(token)` is the registry's (`tokens.Registry.verify`): a row, or None. It may
     read claim files and process tables, and revoke a row whose session has ended, so it
-    runs on `pool`, never on the loop. `opened()` waits until the daemon lets methods
+    runs on `pool`, never on the loop. `on_opened()` waits until the daemon lets methods
     through, so no call is placed before the daemon has loaded what it routes from.
 
     The value stays in the request's memory: it is never logged or stored."""
 
     def __init__(self, verify: Callable[[str], Any], pool: concurrent.futures.Executor,
-                 opened: Callable[[], Awaitable[object]] | None = None):
+                 on_opened: Callable[[], Awaitable[object]] | None = None):
         self._verify = verify
         self._pool = pool
-        self._opened = opened
+        self._on_opened = on_opened
         self._at_once: asyncio.Semaphore | None = None
 
     async def verify_token(self, token: str) -> AccessToken | None:
         if not token:
             return None
-        if self._opened is not None:
-            await self._opened()
+        if self._on_opened is not None:
+            await self._on_opened()
         if self._at_once is None:
             self._at_once = asyncio.Semaphore(VERIFY_AT_ONCE)
         async with self._at_once:
             try:
                 row = await asyncio.wrap_future(self._pool.submit(self._verify, token))
-            except Exception as e:  # noqa: BLE001 - a check that fails lets nothing in
+            except Exception as exc:  # noqa: BLE001 - a check that fails lets nothing in
                 log.warning("a tool token couldn't be checked (%s); the call is refused",
-                            type(e).__name__)
+                            type(exc).__name__)
                 return None
         if row is None:
             return None
@@ -209,9 +209,9 @@ class Endpoint:
         except SystemExit:
             self.sock.close()
             raise StartFailed("the app's startup failed") from None
-        except Exception as e:
+        except Exception as exc:
             self.sock.close()
-            raise StartFailed(_first_line(e)) from None
+            raise StartFailed(_first_line(exc)) from None
         if not server.started:
             self.sock.close()
             raise StartFailed("the HTTP server didn't start")

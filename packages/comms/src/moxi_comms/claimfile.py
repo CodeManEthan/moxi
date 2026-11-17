@@ -61,9 +61,9 @@ def write(key: str, record: dict) -> Path:
     tmp = target.parent / f".claim.{os.getpid()}.{threading.get_ident()}.{key}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(record, f, indent=1, sort_keys=True)
-            f.write("\n")
+        with os.fdopen(fd, "w") as fh:
+            json.dump(record, fh, indent=1, sort_keys=True)
+            fh.write("\n")
         os.chmod(tmp, 0o600)
         os.replace(tmp, target)
         tmp = None

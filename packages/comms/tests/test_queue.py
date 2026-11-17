@@ -65,9 +65,9 @@ def reads(monkeypatch):
         if isinstance(kind, BaseException):
             raise kind
         if kind == cache.WARM:
-            return cache.Clock(cache.WARM, age_seconds=60.0, ttl_seconds=HOUR)
+            return cache.Clock(cache.WARM, age_s=60.0, ttl_s=HOUR)
         if kind == cache.COLD:
-            return cache.Clock(cache.COLD, age_seconds=2 * HOUR, ttl_seconds=HOUR)
+            return cache.Clock(cache.COLD, age_s=2 * HOUR, ttl_s=HOUR)
         if kind == cache.UNKNOWN:
             return cache.Clock(cache.UNKNOWN, reason="the rig says unknown")
         return cache.Clock(kind)
@@ -119,7 +119,7 @@ class Peer:
                            {"identity": self.q, **fields})
         self.sync()
 
-    def turn(self, handled=(), unhandled=(), answered=False) -> dict:
+    def turn(self, handled=(), unhandled=(), *, answered=False) -> dict:
         """A turn end, as an adapter sends it: one digest opened for the `handled`
         message ids and one for the `unhandled` ones, then `turn_ended` naming them,
         marked `answered` when the turn ended with the model's answer. Returns the

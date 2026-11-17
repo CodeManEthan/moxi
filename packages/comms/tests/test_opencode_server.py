@@ -140,7 +140,7 @@ def test_defaults_refuse_a_key_of_one_identity_or_an_unknown_one(tmp_path, row, 
     assert why in str(caught.value) and "[opencode.defaults]" in str(caught.value)
 
 
-def test_the_binary_is_the_rows_then_path_then_the_installers_directory(tmp_path,
+def test_the_binary_is_the_rows_then_path_then_the_installers_dir(tmp_path,
                                                                         monkeypatch):
     own = tmp_path / "own" / "opencode"
     own.parent.mkdir()

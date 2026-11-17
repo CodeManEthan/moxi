@@ -106,20 +106,20 @@ def _windows() -> bool:
 
 # -- where to look ---------------------------------------------------------------------
 
-def tool_dir(environ=None) -> str:
+def tool_dir(env=None) -> str:
     """uv's tool directory, as uv itself picks it."""
-    environ = os.environ if environ is None else environ
-    given = environ.get("UV_TOOL_DIR")
+    env = os.environ if env is None else env
+    given = env.get("UV_TOOL_DIR")
     if given:
         return os.path.abspath(os.path.expanduser(given))
     if os.path.isfile(os.path.join(sys.prefix, "uv-receipt.toml")):
         return os.path.dirname(os.path.abspath(sys.prefix))
     if _windows():
-        appdata = environ.get("APPDATA") or os.path.join(
+        appdata = env.get("APPDATA") or os.path.join(
             os.path.expanduser("~"), "AppData", "Roaming")
         return os.path.join(appdata, "uv", "data", "tools")
-    data = environ.get("XDG_DATA_HOME") or os.path.join(
-        environ.get("HOME") or os.path.expanduser("~"), ".local", "share")
+    data = env.get("XDG_DATA_HOME") or os.path.join(
+        env.get("HOME") or os.path.expanduser("~"), ".local", "share")
     return os.path.join(data, "uv", "tools")
 
 
@@ -197,9 +197,9 @@ def _declares_a_module(dist_info: str) -> bool:
         return False
 
 
-def scan(environ=None) -> list[Stray]:
+def scan(env=None) -> list[Stray]:
     """Every stray, found afresh (no cache)."""
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     own_site = _own_site()
     seen_sites: list[str] = [own_site]
     found: list[Stray] = []
@@ -211,7 +211,7 @@ def scan(environ=None) -> list[Stray]:
         for module, version in _modules_in(site_dir):
             found.append(Stray(module, version, where, kind, tool))
 
-    tools = tool_dir(environ)
+    tools = tool_dir(env)
     try:
         names_ = sorted(os.listdir(tools))
     except OSError:
@@ -229,7 +229,7 @@ def scan(environ=None) -> list[Stray]:
 
     own_script = _own_script()
     exe = "moxi.exe" if _windows() else "moxi"
-    for entry in (environ.get("PATH") or "").split(os.pathsep):
+    for entry in (env.get("PATH") or "").split(os.pathsep):
         if not entry:
             continue
         candidate = os.path.join(entry, exe)
@@ -260,21 +260,21 @@ def _mtime(path: str | None) -> int | None:
         return None
 
 
-def cache_key(environ=None) -> list:
+def cache_key(env=None) -> list:
     """What the cached answer depends on."""
     import hashlib
 
-    environ = os.environ if environ is None else environ
-    path_hash = hashlib.sha256((environ.get("PATH") or "").encode("utf-8",
+    env = os.environ if env is None else env
+    path_hash = hashlib.sha256((env.get("PATH") or "").encode("utf-8",
                                                                  "surrogatepass")).hexdigest()
-    return [_mtime(tool_dir(environ)), _mtime(_user_site()), path_hash[:16],
+    return [_mtime(tool_dir(env)), _mtime(_user_site()), path_hash[:16],
             os.path.abspath(sys.prefix)]
 
 
-def record_path(environ=None):
+def record_path(env=None):
     from . import paths
 
-    return paths.core().state_dir(environ) / RECORD
+    return paths.core().state_dir(env) / RECORD
 
 
 def _read(path) -> dict:
@@ -288,18 +288,18 @@ def _read(path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def find(environ=None, *, write: bool = True) -> list[Stray]:
+def find(env=None, *, write: bool = True) -> list[Stray]:
     """The strays, from the cache when its key is unchanged, else scanned (and, with
     `write`, cached)."""
-    path = record_path(environ)
-    key = cache_key(environ)
+    path = record_path(env)
+    key = cache_key(env)
     held = _read(path)
     if held.get("key") == key and isinstance(held.get("strays"), list):
         try:
             return [Stray.from_json(s) for s in held["strays"]]
         except (KeyError, TypeError):
             pass
-    strays = scan(environ)
+    strays = scan(env)
     if write:
         _write(path, key=key, strays=strays)
     return strays
@@ -332,22 +332,22 @@ def _write(path, *, key=None, strays=None, here=None, told=None) -> None:
     files.update(path, change)
 
 
-def _environment() -> str:
+def _env() -> str:
     """The environment this `moxi` runs in, which the told record is kept under."""
     return os.path.abspath(sys.prefix)
 
 
-def tell(stream=None, environ=None) -> list[Stray]:
+def tell(stream=None, env=None) -> list[Stray]:
     """Print one line for each stray this environment has not told before, and record it
     as told. Returns the strays told now. The record is kept per environment, so a run
     from another environment, which sees other strays, leaves this one's alone. A stray
     that goes away is dropped from this environment's record, so it is told again if it
     comes back."""
     stream = sys.stderr if stream is None else stream
-    strays = find(environ)
-    path = record_path(environ)
+    strays = find(env)
+    path = record_path(env)
     told = _told(_read(path))
-    here = _environment()
+    here = _env()
     told_before = set(told.get(here, ()))
     now = {s.key for s in strays}
     new = [s for s in strays if s.key not in told_before]
@@ -367,9 +367,9 @@ def _told(held: dict) -> dict[str, list]:
             if isinstance(env, str) and isinstance(keys, list)}
 
 
-def copy_of(module: str, environ=None) -> Stray | None:
+def copy_of(module: str, env=None) -> Stray | None:
     """A stray copy of `module`, for an absent-module message. Writes nothing."""
-    for stray in find(environ, write=False):
+    for stray in find(env, write=False):
         if stray.module == module:
             return stray
     return None

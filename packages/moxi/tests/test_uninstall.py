@@ -20,7 +20,7 @@ import moxi.cli as cli
 import moxi.install as install
 import moxi.modules as modules
 import moxi.uninstall as uninstall
-from conftest import WINDOWS, drop_modules, is_link, link_folder
+from conftest import WINDOWS, drop_modules, is_link, link_dir
 from moxi import _questions, _settle, files, paths, units
 from moxi.units import _backend, _state
 from fake_backend import FakeBackend, FakeSupervisor
@@ -132,7 +132,7 @@ def test_tool_command_without_a_module_keeps_the_rest_of_the_receipt(tmp_path):
                     "moxi-turns", "--find-links", "file:///w"]
 
 
-def test_plain_environment_removes_with_uv_or_pip(monkeypatch):
+def test_plain_env_removes_with_uv_or_pip(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/u/uv")
     assert uninstall.uninstall_command("moxi-comms") == [
         "/u/uv", "pip", "uninstall", "--python", sys.executable, "moxi-comms"]
@@ -168,8 +168,8 @@ def test_a_module_another_installed_module_requires_is_refused(fake, capsys):
     assert fake.runs == [] and fake.teardowns == []
 
 
-def test_the_environment_checks_are_install_s(fake, capsys, monkeypatch):
-    monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(
+def test_the_env_checks_are_install_s(fake, capsys, monkeypatch):
+    monkeypatch.setattr(install, "install_env", lambda: (_ for _ in ()).throw(
         install.InstallError("moxi runs from the system Python")))
     code, _, err = moxi_uninstall(capsys, "comms")
     assert code == 1 and "system Python" in err
@@ -203,7 +203,7 @@ def test_uninstalling_a_module_taken_through_an_extra_drops_the_extra(fake, caps
     assert "uninstalled cache" in out and "was installed for" not in out
 
 
-def test_uninstall_in_a_plain_environment(site, tmp_path, monkeypatch, capsys):
+def test_uninstall_in_a_plain_env(site, tmp_path, monkeypatch, capsys):
     f = Removing(site, tmp_path, monkeypatch, kind=install.PLAIN)
     monkeypatch.setattr(uninstall, "run_teardown", f.run_teardown)
     root = tmp_path / "units"
@@ -324,7 +324,7 @@ def on_install(module, found):
 
 def on_uninstall(module):
     # A core call under the uninstall's lock: it yields, so trying once never fails.
-    with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):
+    with files.lock(moxi.paths.core_lock(), nested=True, timeout_s=0):
         pass
     with open(os.environ["MOXITEST_HEARD"], "a") as fh:
         fh.write(json.dumps({"who": WHO, "module": module}) + "\\n")
@@ -394,7 +394,8 @@ def test_a_unit_that_fails_to_go_is_printed_and_the_package_still_goes(
     def remove(module, **k):
         change = units.UnitChange(module, "relay", "daemon", "remove", None, (), None,
                                   "uninstalled")
-        return [units.Applied(change, False, ("moxi-turns-relay.service: busy",))]
+        return [units.Applied(change, ok=False,
+                              lines=("moxi-turns-relay.service: busy",))]
     monkeypatch.setattr(units, "remove", remove)
     code, out, err = moxi_uninstall(capsys, "turns")
     assert code == 1
@@ -409,7 +410,7 @@ def test_units_remove_under_the_uninstall_s_own_lock_yields(torn, capsys, monkey
     code, _, err = moxi_uninstall(capsys, "turns")
     assert code == 0, err
     # The uninstall's own hold, then units.remove's nested call, which yields.
-    assert taken[0] == {"timeout": 0} and {"nested": True} in taken[1:]
+    assert taken[0] == {"timeout_s": 0} and {"nested": True} in taken[1:]
 
 
 def test_a_second_uninstall_waits_for_a_running_install(fake, capsys):
@@ -473,7 +474,7 @@ def skilled(fake, capsys, monkeypatch, tmp_path):
     from moxi import config, place
 
     if WINDOWS:
-        config.set("moxi", "skills.form", "link", by="test")
+        config.set_value("moxi", "skills.form", "link", by="test")
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
@@ -598,8 +599,8 @@ def stored(fake, capsys, monkeypatch):
     moxi_install(capsys, "turns", "--none")
     layout = paths.Layout("turns")
     data, cache, state = layout.data_dir(), layout.cache_dir(), layout.state_dir()
-    for folder in (data, cache / "index" / "deep", state / "logs"):
-        folder.mkdir(parents=True, exist_ok=True)
+    for store_dir in (data, cache / "index" / "deep", state / "logs"):
+        store_dir.mkdir(parents=True, exist_ok=True)
     (data / "mail.db").write_bytes(b"x" * 2048)
     (data / "mail.db-wal").write_bytes(b"w")
     (data / "mail.db-shm").write_bytes(b"s")
@@ -676,7 +677,7 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
     (elsewhere / "a").write_text("keep me")
     index = stored.cache / "index"
     shutil.rmtree(index)
-    link_folder(index, elsewhere)
+    link_dir(index, elsewhere)
     code, out, err = moxi_uninstall(capsys, "turns", "--purge")
     assert code == 0, err
     assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"
@@ -688,7 +689,7 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
                            "symlink or a junction as a link (the rmdir fallback), and keeps "
                            "what it points at")
 @pytest.mark.parametrize("made", ["junction", "symlink"])
-def test_purge_removes_a_directory_link_or_junction_store_on_windows(stored, capsys, tmp_path,
+def test_purge_removes_a_dir_link_or_junction_store_on_windows(stored, capsys, tmp_path,
                                                                      made):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()

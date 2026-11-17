@@ -236,8 +236,8 @@ class _Live:
         if exc is None:
             try:
                 return self.get(entry.provider).live_state(entry)
-            except TunnelError as caught:
-                exc = self.failed[entry.provider] = caught
+            except TunnelError as provider_exc:
+                exc = self.failed[entry.provider] = provider_exc
         return _Unread(exc.reason, exc.fix)
 
 

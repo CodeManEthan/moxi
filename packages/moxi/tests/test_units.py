@@ -406,7 +406,7 @@ def test_a_daemon_switch_off_skips_or_removes_and_on_installs(w):
     assert (change.action, change.cause) == ("skip", "switch")
     assert change.reason == ("demo/relay is off; turn it on with: moxi config set demo "
                              "relay.enabled true")
-    applied = config.set("demo", "relay.enabled", True, by="test")
+    applied = config.set_value("demo", "relay.enabled", value=True, by="test")
     assert [(a.change.name, a.change.action, a.ok) for a in applied] == [
         ("relay", "add", True)]
     assert w.sup.units["moxi-demo-relay.service"]["active"]
@@ -419,9 +419,9 @@ def test_a_switch_table_entry_switches_a_daemon(w):
     w.script("moxi-demo-relay")
     w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'rows.relay'}}")
     assert w.plan()[("relay", "daemon")].action == "skip"
-    applied = config.set("demo", "rows.relay", True, by="test")
+    applied = config.set_value("demo", "rows.relay", value=True, by="test")
     assert [a.change.action for a in applied] == ["add"]
-    applied = config.set("demo", "rows", {"relay": False}, by="test")
+    applied = config.set_value("demo", "rows", {"relay": False}, by="test")
     assert [a.change.action for a in applied] == ["remove"]
 
 
@@ -430,11 +430,11 @@ def test_config_set_of_a_daemon_switch_plans_only_that_daemon(w, capsys):
         w.script(name)
     w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'},"
                      " 'other': {'command': 'moxi-demo-other'}}")
-    applied = config.set("demo", "relay.enabled", True, by="test")
+    applied = config.set_value("demo", "relay.enabled", value=True, by="test")
     assert [a.change.name for a in applied] == ["relay"]
     assert "demo: applying units for relay.enabled" in capsys.readouterr().out
     assert not (w.root / "moxi-demo-other.service").exists()
-    assert config.set("demo", "snapshot.enabled", True, by="test") == []
+    assert config.set_value("demo", "snapshot.enabled", value=True, by="test") == []
 
 
 def test_config_set_plans_and_applies_a_daemon_switch_under_one_hold(w, monkeypatch):
@@ -467,7 +467,7 @@ def test_config_set_plans_and_applies_a_daemon_switch_under_one_hold(w, monkeypa
     monkeypatch.setattr(units, "apply", apply)
     w.script("moxi-demo-relay")
     w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}}")
-    applied = config.set("demo", "relay.enabled", True, by="test")
+    applied = config.set_value("demo", "relay.enabled", value=True, by="test")
     assert [a.change.action for a in applied] == ["add"]
     depth, hold, held_at = 0, 0, {}
     for event in events:
@@ -484,7 +484,7 @@ def test_config_set_plans_and_applies_a_daemon_switch_under_one_hold(w, monkeypa
 
 def test_config_set_with_a_failing_units_from_says_the_key_was_not_checked(w, capsys):
     w.module(units_from="def units():\n    raise OSError('rows missing')\n")
-    assert config.set("demo", "relay.enabled", True, by="test") == []
+    assert config.set_value("demo", "relay.enabled", value=True, by="test") == []
     out = capsys.readouterr().out
     assert ("demo: UNITS_FROM failed (OSError: rows missing), so relay.enabled was not "
             "checked as a daemon switch") in out
@@ -503,6 +503,28 @@ def test_the_config_verb_exits_1_when_the_units_fail(w, capsys):
         "demo")))["relay.enabled"] is True
 
 
+def test_the_config_verb_with_json_puts_the_units_lines_in_its_one_object(w, capsys):
+    import json
+
+    from moxi import cli
+
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}}")
+    w.sup.fail[("enable", "moxi-demo-relay.service")] = "Access denied."
+    capsys.readouterr()
+    assert cli.main(["config", "set", "demo", "relay.enabled", "true", "--json"]) == 1
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    done = json.loads(out)
+    assert (done["changed"], done["problem"], done["fix"]) == (True, None, None)
+    assert any("Access denied." in line for line in done["units"])
+    assert any("retries the units" in line for line in done["units"])
+    w.sup.fail.clear()
+    assert cli.main(["config", "unset", "demo", "relay.enabled", "--json"]) == 0
+    done = json.loads(capsys.readouterr().out)
+    assert done["changed"] is True and done["units"]
+
+
 def test_a_socket_takes_its_port_from_the_setting_and_a_new_port_is_a_change(w):
     w.script("moxi-demo-shell")
     w.module(DAEMONS="{'shell': {'command': 'moxi-demo-shell', "
@@ -512,7 +534,7 @@ def test_a_socket_takes_its_port_from_the_setting_and_a_new_port_is_a_change(w):
     w.apply(plan.values())
     assert w.sup.calls.index(("enable", "--now", "moxi-demo-shell.socket")) < \
         w.sup.calls.index(("start", "moxi-demo-shell.service"))
-    config.set("demo", "port", 8471, by="test")
+    config.set_value("demo", "port", 8471, by="test")
     plan = w.plan()
     assert plan[("shell", "socket")].action == "change"
     assert plan[("shell", "daemon")].action == "keep"

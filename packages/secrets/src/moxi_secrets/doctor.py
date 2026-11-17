@@ -54,8 +54,8 @@ def rules_row() -> Row:
         return Row(MODULE, "rules", "fail",
                    f"sets.json will not load ({type(exc).__name__})", _REINSTALL)
     try:
-        with open(_upstream_path(), "rb") as handle:
-            digest = hashlib.sha256(handle.read()).hexdigest()
+        with open(_upstream_path(), "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
     except OSError as exc:
         return Row(MODULE, "rules", "fail",
                    f"the pinned gitleaks rules cannot be read ({type(exc).__name__})",
@@ -148,15 +148,15 @@ def private_names_row() -> Row:
     return Row(MODULE, "private-names", "ok", counts)
 
 
-def _work_tree_above(directory) -> bool:
+def _work_tree_above(candidate_dir) -> bool:
     """True when `directory` or a parent of it holds `.git`, and it is not itself inside
     a `.git` directory (git tracks nothing there)."""
     from pathlib import Path
 
-    directory = Path(directory)
-    if ".git" in directory.parts:
+    candidate_dir = Path(candidate_dir)
+    if ".git" in candidate_dir.parts:
         return False
-    return any(os.path.lexists(p / ".git") for p in (directory, *directory.parents))
+    return any(os.path.lexists(p / ".git") for p in (candidate_dir, *candidate_dir.parents))
 
 
 def private_names_location_row() -> Row:
@@ -164,19 +164,19 @@ def private_names_location_row() -> Row:
     from moxi import paths
 
     layout = paths.Layout(MODULE)
-    directory = layout.config_file().parent
+    config_dir = layout.config_file().parent
     try:
-        resolved = directory.resolve()
+        resolved = config_dir.resolve()
     except OSError:
-        resolved = directory
-    if _work_tree_above(directory.absolute()) or _work_tree_above(resolved):
+        resolved = config_dir
+    if _work_tree_above(config_dir.absolute()) or _work_tree_above(resolved):
         return Row(MODULE, "private-names-location", "warn",
                    "the secrets config directory lies inside a git work tree (it or a "
                    "parent directory holds .git, directly or through a link): a repo there, "
                    "such as a dotfiles repo, could publish the private names list in the "
                    "config file and a private allowlist kept beside it",
                    f"move the config root outside every work tree with "
-                   f"{layout.prefix}CONFIG_HOME or {paths.HOME}, and move the file "
+                   f"{layout.prefix}CONFIG_HOME or {paths.HOME_ENV}, and move the file "
                    "`moxi config secrets path` names there")
     return Row(MODULE, "private-names-location", "ok",
                "the config file, and a private allowlist kept beside it, are outside every "

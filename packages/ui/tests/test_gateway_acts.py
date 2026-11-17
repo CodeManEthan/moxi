@@ -134,7 +134,7 @@ class Store:
         self.mono = mono if mono is not None else [1000.0]
         self.wall = [1_800_000_000.0]
         self.audit = audit_mod.Audit(tmp_path, clock=lambda: self.wall[0])
-        self.acts = Acts(mounts=lambda: {"fixture": EXPORT}, mounted=lambda: self.on,
+        self.acts = Acts(mounts=lambda: {"fixture": EXPORT}, on_mounted=lambda: self.on,
                          client=self.client, audit=self.audit, key=lambda: KEY,
                          device_of=DEVICES.get, clock=lambda: self.wall[0],
                          monotonic=lambda: self.mono[0])

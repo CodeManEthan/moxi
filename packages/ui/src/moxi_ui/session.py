@@ -256,8 +256,8 @@ class OwnerCheck:
     def here(cls) -> OwnerCheck:
         """The check for this system: on Linux other than WSL, against this user's uid."""
         if sys.platform != "linux" or is_wsl():
-            return cls(False)
-        return cls(True, os.getuid())
+            return cls(enabled=False)
+        return cls(enabled=True, uid=os.getuid())
 
     def allows(self, client: Any, server: Any) -> bool:
         if not self.enabled:
@@ -284,18 +284,18 @@ class Tickets:
     Only the redemption whose unlink succeeds spends a ticket, so two can't both win.
     """
 
-    def __init__(self, directory: str | os.PathLike, *, ttl: float = TICKET_TTL,
+    def __init__(self, tickets_dir: str | os.PathLike, *, ttl: float = TICKET_TTL,
                  clock: Callable[[], float] = time.time):
-        self.directory = Path(directory)
+        self.tickets_dir = Path(tickets_dir)
         self.ttl = ttl
         self.clock = clock
 
     def _path(self, ticket: str) -> Path:
-        return self.directory / _hash(ticket)[:32]
+        return self.tickets_dir / _hash(ticket)[:32]
 
     def mint(self) -> str:
         """A new ticket, written (0600) in a directory only this user can enter."""
-        files.private_dir(self.directory)
+        files.private_dir(self.tickets_dir)
         ticket = secrets.token_urlsafe(32)
         data = json.dumps({"expires": self.clock() + self.ttl}).encode("ascii")
         files.atomic_write(self._path(ticket), data, mode=0o600)
@@ -319,14 +319,14 @@ class Tickets:
     def sweep(self) -> None:
         """Remove every expired or unreadable ticket file."""
         try:
-            names = os.listdir(self.directory)
+            names = os.listdir(self.tickets_dir)
         except OSError:
             return
         now = self.clock()
         for name in names:
             if name.startswith("."):
                 continue
-            path = self.directory / name
+            path = self.tickets_dir / name
             expires = _expiry(path)
             if expires is None or now >= expires:
                 try:
@@ -425,13 +425,13 @@ class SessionStore:
 
     def _drop(self, id_hash: str) -> bool:
         """Remove one session, holding the lock; its watches are called once the lock is
-        let go (`_ended`)."""
+        let go (`_on_ended`)."""
         if self._sessions.pop(id_hash, None) is None:
             return False
         self._ending.extend(self._watches.pop(id_hash, ()))
         return True
 
-    def _ended(self) -> None:
+    def _on_ended(self) -> None:
         """Call the watches of the sessions dropped under the lock just let go."""
         with self._lock:
             calls, self._ending = self._ending, []
@@ -480,7 +480,7 @@ class SessionStore:
                 self._drop(oldest(list(self._sessions)))
             self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now, owner)
             self._save()
-        self._ended()
+        self._on_ended()
         return session_id, key
 
     def owner_of(self, id_hash: str) -> str | None:
@@ -497,10 +497,10 @@ class SessionStore:
                 self._drop(id_hash)
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return len(gone)
 
-    def find(self, session_ids: Sequence[str], key: str | None = None, *,
+    def use(self, session_ids: Sequence[str], key: str | None = None, *,
              need_key: bool) -> str | None:
         """The id hash of the first live session among `session_ids` (and, with
         `need_key`, whose key is `key`), marked used; or None."""
@@ -523,7 +523,7 @@ class SessionStore:
                     return id_hash
             return None
         finally:
-            self._ended()
+            self._on_ended()
 
     def end(self, session_ids: Iterable[str]) -> int:
         """End the sessions these ids name; returns how many there were."""
@@ -534,7 +534,7 @@ class SessionStore:
                     gone += 1
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return gone
 
     def end_hash(self, id_hash: str) -> bool:
@@ -543,7 +543,7 @@ class SessionStore:
             gone = self._drop(id_hash)
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return gone
 
     def clear(self) -> None:
@@ -552,7 +552,7 @@ class SessionStore:
             for id_hash in list(self._sessions):
                 self._drop(id_hash)
             self._save()
-        self._ended()
+        self._on_ended()
 
     def live(self) -> int:
         """How many sessions are live now."""
@@ -560,7 +560,7 @@ class SessionStore:
             if self._prune():
                 self._save()
             count = len(self._sessions)
-        self._ended()
+        self._on_ended()
         return count
 
 
@@ -679,7 +679,7 @@ class Sessions:
         ids = cookie_ids(headers)
         if not ids or not self.owner.allows_current():
             return None
-        return self.store.find(ids, _key(headers), need_key=need_key)
+        return self.store.use(ids, _key(headers), need_key=need_key)
 
     def end_named(self, headers: Iterable[tuple[bytes, bytes]]) -> int:
         """End every session the request's cookie names (a worker's update check)."""

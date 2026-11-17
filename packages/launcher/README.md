@@ -39,7 +39,10 @@ The flags are the catalog's rows: the launcher's own (`--harness`, `--cwd`, `--p
 `--instructions`, `--identity` and the rest) and the harness's (`--model`,
 `--permission-mode`, `--sandbox`, `--add-dir` and so on). `moxi launcher catalog` lists
 every row this install offers, and marks the rows the launcher sets itself and the rows
-whose module is not installed. A flag the catalog does not know is passed on to the
+whose module is not installed. `--name` is the launcher's own row, the session's name
+(below); it used to be passed on to the harness with a warning, which for Claude Code
+set its display name. Claude Code still shows the name you give, and Codex, which has
+no name flag, is no longer handed it. A flag the catalog does not know is passed on to the
 harness, last on its argv, after one warning line; the words after `--` are passed on as
 given. A passed-on flag that would set a row the launcher owns (the session id, a resume)
 or a permission row is refused, so the permission check always sees it. So is one that
@@ -91,6 +94,43 @@ and your own instructions can say more about each. Unset, the default, there is 
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
+
+### The session's name
+
+Every launch has a name. `--name TEXT` (or `name` in a preset) sets it; a launch that
+sets none is named from a template, `<project>-<model>-<date:mmm-dd hh:mm>` as shipped,
+which gives `docs-opus-Nov-08 12:45`. The name is recorded with the launch, a taken
+slot in the browser is labelled with it, and Claude Code shows it as the session's display name
+unless `--native-name` (or `native_name` in `[defaults]` or a preset) sets another.
+Codex has no display name, so there it is the launcher's label only. A relaunch or a
+resume keeps the name its launch had.
+
+A template is text with pieces in angle brackets, filled in the order written:
+
+| piece | filled with |
+|---|---|
+| `<project>` | the project key, else the name of the folder the session starts in |
+| `<agent>` | the seat's name when the launch names a seat, else its agent role |
+| `<model>` | the model the launch names; empty on the harness's default |
+| `<identity>`, `<scope>` | the comms name, and its scope beside one; empty without comms |
+| `<instance>` | the lowest number that makes the name differ from every running launch's |
+| `<date[:format]>`, `<time[:format]>` | the local date (`yyyymmdd`) and time (`hhmm`), or as the format says |
+
+A format is read by its tokens, in either case: `yyyy`, `yy`, `mmm` (`Nov`), `mm` (the
+month, or the minutes after an `hh`), `dd`, `hh` (24 hours), `ss`; a format holding `%`
+is taken as `strftime`'s. The filled name is then cleaned: anything outside printable
+ASCII becomes a dash, dashes in a row become one (an empty piece leaves two), the name
+starts with a letter or a digit and is cut at 63 characters; a name with nothing left is
+`launch`.
+
+`name.template` holds the template for every launch, and `name.templates` one of its own
+per project, by project key:
+
+    moxi config set launcher name.template '<identity>-<date:mmm-dd-yyyy hh:mm>'
+    moxi config set launcher name.templates '{docs = "<project> <time:hh:mm>"}'
+
+A template that names another piece, or holds a `<` or `>` outside a piece, is not used:
+the launch is named by the shipped template and warns, naming the setting.
 
 ## Presets
 
@@ -154,15 +194,34 @@ many ids in one read. Neither writes to the log, except to bring an older one's
 schema up to date; a log held past the wait (1 second)
 raises `Busy`, and the caller asks again.
 
+Interface 2 adds what is running now: `running()` gives each launch that recorded a
+process and whose process runs, newest first, at most `limit` (200), as a `Running` of
+plain values: `request_id`, `harness`, `session_id` (the id the launch was last known by,
+None when it never learned one), `target`, `slot`, `project_key`, `cwd`, `name` (the
+launch's name, else its comms name, else its folder and start time), `identity`,
+`created_at` and `live`. With `live_only=False` it keeps the launches whose process has
+ended, with `live` false. It reads the launch log and the process table and nothing else:
+it asks no other module, starts no process, and writes nothing but an older log's schema
+update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
+`Busy`.
+
 ## Handoffs
 
 A handoff is a short file a session writes for the next session of its seat. Its key is
 the session's comms name without its scope, else the seat's name, else the project key; it
 is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With turns,
-a seat's next start is pointed to its newest waiting handoff. A handoff counts as used only
-when the launcher gave it to a launch of its seat or showed it to one, so a session started
-by hand never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
+a seat's next start or resume is pointed to its newest waiting handoff, then shown one
+line for each other seat's waiting handoff in the same folder (newest first, at most 5, then
+how many more). A session with no key gets only those lines. A handoff counts as used only
+when the launcher gave it to a launch of its seat or showed it to one as that seat's own,
+so a session started by hand, or another seat, never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
+
+`moxi launcher handoffs` lists this session's handoffs, in its own folder. With `--key KEY`
+it lists KEY's handoffs in the folder of KEY's newest launch (that launch's directory and
+`notes_dir`), so a seat that works in another project is read where it files; a key with
+no launch is read in this directory's folder. It says on stderr which folder it read, and
+`--json` gives the launch it took the folder from as `launch` (null when none).
 
 ## Acting on launched sessions
 
@@ -270,7 +329,35 @@ A hold stays open until it is released, across a relaunch or a resume of the ses
 Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
-**State.** `moxi launcher state [SESSION_ID]` shows a launched session's relaunch,
+**Cover.** A session launched without `--keep-warm on` can still be kept warm once it
+runs: `Keep warm` on Home's Sessions row (see "The page") puts it under cover. Cover
+belongs to one launch and the session id it has now: a `/clear` gives the session a new
+id, and a relaunch or a resume is a new launch, so each starts without it. A covered
+session is nudged while its subagents run, as a session launched with `--keep-warm on`
+is, and also while agents it directs through comms are at work: an agent whose turn is
+open, or whose closed turn waits on subagents of its own. Those nudges use
+`keep_warm.directing_texts`, name the agents and stop at `keep_warm.director_cap`.
+Under cover the count in a row starts at the press. Holds belong to the launch value
+alone: a launch with cover alone takes no holds, and a hold left open in its chain does
+not keep it warm. `moxi launcher show` reads a covered session as keep-warm on.
+
+Cover lasts until a keep-warm ask reads the session's own subagents and its directed
+agents in full and finds nobody at work. Asks come only near the end of a cache
+lifetime, so a session that goes back to work and then waits again is still covered. A
+director that takes a turn at each report starts its count in a row again each time, so
+pressing on a director is close to having launched it with `--keep-warm on`. If comms or
+turns can't be read, the cover is kept. There is no off short of a `/clear`, a relaunch
+or ending the session.
+
+**What keep-warm costs.** Each nudge is a turn: the session reads its whole cached
+context and writes a short reply. It comes about once per cache lifetime while the
+session waits (every 45 to 54 minutes on an hour lifetime), up to the cap in a row.
+cache's timer asks about every Claude session the launcher started, shortly before its
+cache would go cold: at most 5 short `moxi-launcher-job keep-warm` runs per idle
+stretch, each ending at its read of the launch log when the launch is neither on nor
+covered.
+
+**State.** `moxi launcher show [SESSION_ID]` shows a launched session's relaunch,
 recycle and keep-warm state (this session's when none is named). It reads red, with
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
 and nothing has gone well since; a session merely waiting is never red.
@@ -278,9 +365,10 @@ and nothing has gone well since; a session merely waiting is never red.
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
-in the shell, and two small views other pages can show: a launched session's state, red
-when it needs a look, and a block on the shell's home listing each running launched
-session with its state.
+in the shell and four pieces other pages can show: the box on the shell's home that
+starts a session, the Sessions row under it, a launched session's state, red when it
+needs a look, and a block on the modules view listing each running launched session with
+its state.
 
 The page has four parts.
 
@@ -314,9 +402,102 @@ The page has four parts.
   the `moxi launcher resume` command to copy. The refusals `moxi launcher resume` gives
   (headless, live, a relaunch or recycle still under way) come back at once.
 
-A launch from the page runs with the shell's environment, so its harness must be on the
-shell's `PATH`; the preview says which `PATH` it searched when it isn't. The page server
-starts when the page is first opened and stops once nothing has used it for a while.
+**The box on Home.** The shell's home opens on a box that starts a session without a
+visit to the page. Type what the agent should do and press the button. The line above
+the box says where the session starts, a project or a folder: it opens on the place you
+last launched in, and its menu takes a typed folder path, lists your recent places and,
+with projects installed, every project. With any preset set up, `Preset` on the same
+line applies a seat or a project preset; a project picked there, or the one Home opens
+on, applies that project's own preset. The chip in the box sets the harness, the model
+and the effort. The button names where the launch runs, and its caret opens the choices:
+each slot with its state, your terminal, or headless. With slots it starts at the lowest
+free slot, without slots at your terminal, and the choice is not kept from one visit to
+the next. A launch from the box runs where its button says, whatever `[defaults]` or the
+preset sets for `target` and `slot`; every other row is filled from the preset and
+`[defaults]` as the page's form is. The text in the box is the whole first turn: nothing
+your `[defaults]` or the preset set to be sent as a first turn goes with a launch from
+the box, so an empty box starts a session with no first turn. The `+` beside the chip
+takes a brief from a file instead, which turns the box off while it is set, and offers to
+continue your last session in the place on the line. A slot or headless launch is
+previewed and handed to a detached job as on the page, and a line under the box says
+where it started, or why it failed or was refused. A terminal launch is not run: its
+command is copied for you to paste.
+
+`Options` beside the chip opens a panel with the form's other rows, in groups, with a
+find field. Each row you change there is named on a `Changed` line under the box, with
+`Reset`. A value that can do harm (skipping permission checks, no sandbox) is drawn in
+the theme's warning colour wherever it shows, and picked by hand it is set only after
+`Turn on`, for the one launch that starts with it. The panel also shows the session's
+name, with an editor for its template that saves `name.template` or `name.templates`
+through the shell's own settings, where a locked key is refused.
+
+Rows the form leaves at their shipped defaults are filled from the last launch of the
+seat, else the project, else the folder on the line; `From last launch` on the line
+names them, each with `Clear`. Under the box, `Run again` lists up to three earlier
+launches there; pointing at one shows what a click runs today, and one click runs it
+again where the button places a launch.
+
+**The Sessions row on Home.** Under the box, the row `Sessions` says how many launched
+sessions are running (`3 running`), and shows nothing when none is. Click it to open the
+list in place: at most four sessions, each with its name, where it runs (the slot,
+`terminal` or `headless`, then the project or the folder's name), its cache when that is
+known, and on the second line the time and first line of the latest thing said in it,
+or when it was launched. A session that waits on agents or subagents while its cache is
+warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
+goes cold and what it waits on; the row then names it while closed and rises above the
+rows that need nothing. `Open` goes to the session's transcript on the sessions page, and
+`All sessions (N)` to that page's list; without sessions installed both go to the
+launcher's page. On the phone the list is always open and shows each session's name,
+where it runs and its cache, with no time, no message and no `Open`. The row reads
+`GET /api/running` and follows the stream's topic `running`; that route is the one the
+phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
+
+**Keep warm on the row.** Opened at the desk, a session that waits with nothing keeping
+it warm (one of those that come first) has `Keep warm` before `Open` when a press would
+keep it warm. Hover it for the cost: it sends a short turn before each cold time while the
+session waits, at most the cap in a row (see "Acting on launched sessions" for what a
+turn costs and how long cover lasts). A press sends nothing at once. It records cover,
+and cache's timer's next ask sends the first nudge. The row then reads `kept warm while
+1 subagent runs` (or `n agents work`) with `Open` alone, moves down to its place, and
+the focus goes to its `Open`. The button isn't offered on a Codex or headless session,
+on a cache too close to cold for an ask to come, with text typed in the prompt box,
+after an ask that failed since the session's last request, or while cache's watcher
+doesn't yet ask about the session (see "Upgrading"). If the launcher refuses a press,
+the reason shows under the row until the row next changes, and the button comes back
+after 20 seconds. The phone shows the same rows without the button. The press is `POST
+/api/keep-warm`, which answers `{"refused": null}` once the session is covered, or a
+refusal naming the step that failed. It is desk only: the phone's gateway doesn't reach
+it.
+
+The count and the names come from the launch log and are never more than a few seconds
+behind it. The cache, the latest message and what a session waits on are read by the page
+server apart from them, in a pass over the 24 newest running sessions every 15 seconds and
+whenever a session starts, ends or changes its id: the cache from cache's own reading of the
+transcript, the message from the transcript's newest turn, read again only when the
+transcript changed. A read that takes longer than 8 seconds is left for the next pass,
+and the session keeps what was read before for up to 45 seconds. A slow or missing module
+never holds up the count. The first look after the page server starts waits up to 3
+seconds for these reads.
+
+A session waits only while its own turn is closed. With turns, it waits on its subagents
+and teammates at work, counted as keep-warm counts them; with none, and comms installed,
+on the agents its comms name directs whose turn is open, or whose turn is closed while
+they wait on subagents of their own (a Claude session's; a Codex session counts only by
+its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
+the pass asks it nothing more. A waiting session reads `kept warm` when every step of
+keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
+certain to come before its window shuts: its launch keeps warm (made with `keep_warm` on,
+or under cover), cache's watcher says it asks keep-warm about the session, no run open on
+the launch, no turn open, a live subagent, a directed agent at work under cover or an
+open hold with the launch value, the run of nudges under its cap, nothing typed into the
+prompt box, and no ask since the session's last request that ended without a nudge. Any
+step it can't read counts against it, so the row says `goes cold` whenever a nudge is
+not certain. These reads write nothing, send nothing to a session and never ask slots.
+
+A launch from the page or from the box runs with the shell's environment, so its harness
+must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
+The page server starts when the page or the shell's home is first opened and stops once
+nothing has used it for a while.
 
 ## Commands
 
@@ -331,7 +512,7 @@ starts when the page is first opened and stops once nothing has used it for a wh
 | `moxi launcher presets --project KEY [--json]` | a project's agents, each beside the seat whose identity is its name (needs projects) |
 | `moxi launcher catalog [HARNESS] [--json]` | the flag rows this install offers |
 | `moxi launcher handoff dir [--json]` | this session's handoff folder |
-| `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait |
+| `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait; a `--key` in the folder of its newest launch |
 | `moxi launcher deliver REQUEST_ID --pid PID` | internal: the detached process that sends a launch's first turn |
 | `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
 | `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |
@@ -342,7 +523,7 @@ starts when the page is first opened and stops once nothing has used it for a wh
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
-| `moxi launcher state [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
+| `moxi launcher show [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
 
 `--dry-run` takes an act's checks and writes nothing. `--json` prints the verb's data, its
 outcome word among it.
@@ -360,14 +541,15 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm |
-| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start or resume; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
+| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
-| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm | neither row is offered |
+| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
+| sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.
@@ -426,9 +608,15 @@ Set with `moxi config set launcher <key> <value>`:
   be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
-  words.
+  words. `keep_warm.director_cap` also caps the nudges for the agents a covered director
+  directs.
+- `keep_warm.directing_texts`: the nudges for a covered director with no open hold, in
+  order, the last repeating; the agents at work are named after each.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
+- `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
+  the template a launch's session name is made from, and a project's own by project key
+  (see "The session's name").
 
 ## Install
 
@@ -451,6 +639,17 @@ Optional links as an extra (`--with turns,comms`, say, answers ahead). The repos
 README, at [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi`
 command and lists the other modules.
 
+## Upgrading
+
+After upgrading to this version, restart cache's watcher so it asks about running
+sessions: `moxi services restart cache/watch` with services installed, or stop `moxi
+cache watch` and start it again. It is harmless where the upgrade already restarted it,
+and the asks it started keep running. Until it restarts, `Keep warm` is not offered for
+a running session; a session launched with `--keep-warm on` is kept warm as before.
+`moxi doctor`'s row `keep-warm.timer` warns while the restart is still needed and a
+launched session is there to read it by. If it says moxi-cache is older than 0.1.6,
+upgrade moxi-cache first: a restart alone doesn't help.
+
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/launcher/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-launcher-v0.1.3/packages/launcher/LICENSE).

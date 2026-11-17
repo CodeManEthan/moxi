@@ -98,12 +98,17 @@ def _indent(raw: bytes | None) -> int:
     return 2
 
 
-def write(doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False) -> str | None:
+def write(doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False,
+          keep_copy=None) -> str | None:
     """Write `doc` back once, or remove it when `remove_empty` and nothing is left in it,
-    keeping the old bytes under `backups` (`backup`, the newest `keep`).
+    keeping the old bytes under `backups` (`backup`, the newest `keep`). With
+    `keep_copy`, `keep_copy(path, now)` is called first, on a file that exists, with the
+    bytes just read again and checked.
 
     Returns None when written, else the one line saying why not: `<path> changed since it
-    was read`, or `<path> can't be read again (<why>)`. Either way nothing was written.
+    was read`, `<path> can't be read again (<why>)`, or, when `keep_copy` raises
+    `OSError`, `a copy of <path> couldn't be kept (<why>), so it was not written`. Either
+    way nothing was written.
     """
     target = Path(os.path.realpath(doc.path))
     try:
@@ -114,6 +119,12 @@ def write(doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False) -> 
         return f"{doc.path} can't be read again ({exc.strerror or exc})"
     if now != doc.raw:
         return f"{doc.path} changed since it was read"
+    if now is not None and keep_copy is not None:
+        try:
+            keep_copy(doc.path, now)
+        except OSError as exc:
+            return (f"a copy of {doc.path} couldn't be kept ({exc.strerror or exc}), so it "
+                    "was not written")
     if now is not None:
         backup(target, backups, now, keep)
     if remove_empty and doc.empty:

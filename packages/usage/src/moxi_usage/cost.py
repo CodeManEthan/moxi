@@ -35,6 +35,16 @@ cost is unknown. A request whose `unknown` names a token column the group sums c
 provider rule stands in for is the exception: when the provider bills cache writes as
 input (OpenAI's default multipliers are 1.0) an unknown write count is priced inside fresh
 input, the group says which rule applied, and those requests are not counted as unknown.
+
+**What caching saved.** `saving(priced)` is one group's part of an estimate: the same
+tokens with no cache, at the same prices. Its cache reads at the group's own input price
+(`reads_at_input`), what those reads did cost (`reads_cost`), and what its cache writes
+cost over the input price (`write_extra`: the 5-minute and the 1-hour writes, each at its
+write price less the input price). The saving is the first less the other two. A group
+with no cache read and no cache write gives zeros. A group that holds either and is
+unpriced, or lacks a price one of those products needs, gives `UNKNOWN`, and a caller
+that sums groups then has no saving to state. Where the provider bills a write as input
+the write price is the input price, so its writes add nothing.
 """
 
 from __future__ import annotations
@@ -275,3 +285,47 @@ def price(sums: Sums, facts: ModelFacts, defaults: Mapping[str, Any] | None, *,
                   for field, tokens, value, amount in found)
     return Priced(sum(term.cost for term in terms), 0, unknown_rows, paid, rule,
                   terms=terms)
+
+
+@dataclass(frozen=True, slots=True)
+class Saving:
+    """One group's part of what caching saved, in dollars: its cache reads at its own
+    input price, what those reads did cost, and what its cache writes cost over the input
+    price. `saved` is the first less the other two, and can be below 0."""
+
+    reads_at_input: float = 0.0
+    reads_cost: float = 0.0
+    write_extra: float = 0.0
+
+    @property
+    def saved(self) -> float:
+        return self.reads_at_input - self.reads_cost - self.write_extra
+
+
+def saving(priced: Priced) -> Any:
+    """What caching saved in one priced group, as a `Saving`, or `UNKNOWN`.
+
+    Zeros for a group with no cache read and no cache write, priced or not. `UNKNOWN`
+    for a group that holds either and is unpriced, or whose prices lack one the sum
+    needs: the input price, and the price of each cache class it holds tokens of."""
+    tokens = {term.cls: term.tokens for term in priced.terms}
+    held = [cls for cls in CACHE_FIELDS if tokens.get(cls)]
+    if not held:
+        return Saving()
+    paid = priced.prices
+    if not priced.priced or paid is None:
+        return UNKNOWN
+    at_input = paid.input
+    if at_input is UNKNOWN or not _number(at_input):
+        return UNKNOWN
+    found = {"reads_at_input": 0.0, "reads_cost": 0.0, "write_extra": 0.0}
+    for cls in held:
+        value = getattr(paid, cls)
+        if value is UNKNOWN or not _number(value):
+            return UNKNOWN
+        if cls == "cache_read":
+            found["reads_at_input"] += tokens[cls] * at_input / PER_MILLION
+            found["reads_cost"] += tokens[cls] * value / PER_MILLION
+        else:
+            found["write_extra"] += tokens[cls] * (value - at_input) / PER_MILLION
+    return Saving(**found)

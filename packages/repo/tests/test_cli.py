@@ -95,11 +95,11 @@ def test_add_prints_the_chain_line_where_one_is_needed(demo, capsys):
     hook = gitconf.resolve(repo).hooks_dir / "pre-commit"
     assert (f"{gitconf.resolve(repo).root}: pre-commit: chain line needed. Add this line to "
             f"{hook}, before any line that reads stdin:\n  "
-            f"{shim.chain_line('pre-commit', False)}\n") in out
+            f"{shim.chain_line('pre-commit', stdin=False)}\n") in out
     code, out, _ = run(capsys, "git-hooks", str(repo))
     assert "chain line needed in" in out
     hook.parent.mkdir()
-    hook.write_text(f"#!/bin/sh\n{shim.chain_line('pre-commit', False)}\n", encoding="utf-8")
+    hook.write_text(f"#!/bin/sh\n{shim.chain_line('pre-commit', stdin=False)}\n", encoding="utf-8")
     code, out, _ = run(capsys, "git-hooks", "refresh", str(repo))
     assert code == 0 and f"pre-commit: the chain line is in {hook}" in out
     assert "chain line present" in run(capsys, "git-hooks", str(repo))[1]

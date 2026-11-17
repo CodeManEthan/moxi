@@ -55,8 +55,8 @@ class Served:
         def thread():
             try:
                 asyncio.run(main())
-            except BaseException as err:  # noqa: BLE001 - reported by the test
-                self.error = err
+            except BaseException as exc:  # noqa: BLE001 - reported by the test
+                self.error = exc
                 self.ready.set()
 
         self.thread = threading.Thread(target=thread, daemon=True)
@@ -72,8 +72,8 @@ class Served:
             raise self.error
 
 
-def unix_listener(directory):
-    path = os.path.join(directory, "page.sock")
+def unix_listener(socket_dir):
+    path = os.path.join(socket_dir, "page.sock")
     return bind_unix(path), path
 
 
@@ -141,8 +141,8 @@ def info_for(transport, address, port=None):
 
 @posix
 def test_serve_answers_through_guard_and_prove_on_a_unix_socket(pages):
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         _, asgi = page_chain("unix")
         served = Served(asgi, [sock])
         try:
@@ -177,8 +177,8 @@ def test_serve_answers_through_guard_and_prove_on_tcp(pages):
 
 @posix
 def test_serve_awaits_drain_before_uvicorn_stops(pages):
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         _, asgi = page_chain("unix")
         seen = []
 
@@ -197,8 +197,8 @@ def test_serve_awaits_drain_before_uvicorn_stops(pages):
 
 @posix
 def test_a_signal_sets_should_exit_and_serve_puts_the_old_handlers_back(pages):
-    with short_dir() as directory:
-        sock, _ = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, _ = unix_listener(socket_dir)
         _, asgi = page_chain("unix")
         before = signal.getsignal(signal.SIGTERM)
 
@@ -247,8 +247,8 @@ def send_head(address, size):
 
 @posix
 def test_a_raised_head_limit_lets_a_big_head_reach_the_app_and_refuses_a_bigger_one():
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         seen = []
         served = Served(reaching_app(seen), [sock], head_limit=4 * MiB)
         try:
@@ -262,8 +262,8 @@ def test_a_raised_head_limit_lets_a_big_head_reach_the_app_and_refuses_a_bigger_
 
 @posix
 def test_the_default_head_limit_refuses_300000_bytes():
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         seen = []
         served = Served(reaching_app(seen), [sock])
         try:
@@ -475,8 +475,8 @@ def test_the_watchdog_ends_the_process_even_while_the_loop_is_blocked():
 class Proto:
     """The runner's chain behind its own protocol class, in this process."""
 
-    def __init__(self, directory):
-        self.sock, self.path = unix_listener(directory)
+    def __init__(self, socket_dir):
+        self.sock, self.path = unix_listener(socket_dir)
         self.stop = serve_mod._Stop(logging.getLogger("test.stop"), end=lambda code: None,
                                     exit_deadline=60)
         self.inner = app(asgi_kit.make_page(), module="lbtest", server_id=SERVER_ID)
@@ -521,8 +521,8 @@ class Proto:
 
 @posix
 def test_the_protocol_counts_each_request_in_the_step_that_hands_it_off(pages):
-    with short_dir() as directory:
-        proto = Proto(directory)
+    with short_dir() as socket_dir:
+        proto = Proto(socket_dir)
         try:
             conn = proto.connect()
             proto.prove(conn)
@@ -542,8 +542,8 @@ def test_the_protocol_counts_each_request_in_the_step_that_hands_it_off(pages):
 
 @posix
 def test_after_the_decision_only_the_promised_request_is_handed_off(pages):
-    with short_dir() as directory:
-        proto = Proto(directory)
+    with short_dir() as socket_dir:
+        proto = Proto(socket_dir)
         promised = proto.connect()
         proto.prove(promised)
         idle = proto.connect()
@@ -570,8 +570,8 @@ def test_after_the_decision_only_the_promised_request_is_handed_off(pages):
 
 @posix
 def test_after_the_decision_a_proof_is_answered_503_with_connection_close(pages):
-    with short_dir() as directory:
-        proto = Proto(directory)
+    with short_dir() as socket_dir:
+        proto = Proto(socket_dir)
         conn = proto.connect()
         proto.prove(conn)
         proto.stop.request("a test")
@@ -598,8 +598,8 @@ def test_serve_with_signals_off_installs_no_handler_and_puts_none_back():
 
     before = signal.signal(signal.SIGTERM, mine)
     try:
-        with short_dir() as directory:
-            sock, _ = unix_listener(directory)
+        with short_dir() as socket_dir:
+            sock, _ = unix_listener(socket_dir)
 
             async def main():
                 should_exit = asyncio.Event()
@@ -620,9 +620,9 @@ def test_serve_with_signals_off_installs_no_handler_and_puts_none_back():
 
 @posix
 def test_a_second_serve_with_signals_off_leaves_the_first_ones_signal_handling():
-    with short_dir() as directory:
-        first, _ = unix_listener(directory)
-        second = bind_unix(os.path.join(directory, "gateway.sock"))
+    with short_dir() as socket_dir:
+        first, _ = unix_listener(socket_dir)
+        second = bind_unix(os.path.join(socket_dir, "gateway.sock"))
         before = signal.getsignal(signal.SIGTERM)
 
         async def main():
@@ -711,8 +711,8 @@ def counted_reads(monkeypatch, answers=None):
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="a peer uid on Unix sockets")
 def test_peer_gives_every_request_on_a_unix_connection_this_processs_uid(monkeypatch):
     reads = counted_reads(monkeypatch)
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         served = Served(peer_app(), [sock], peer=True)
         try:
             conn = raw_connect(path)
@@ -803,9 +803,9 @@ def test_peer_gives_none_on_tcp():
 ])
 def test_without_peer_the_scope_has_no_peer_key(transport, monkeypatch):
     reads = counted_reads(monkeypatch)
-    with short_dir() as directory:
+    with short_dir() as socket_dir:
         if transport == "unix":
-            sock, address = unix_listener(directory)
+            sock, address = unix_listener(socket_dir)
         else:
             sock = bind_tcp(0)
             address = sock.getsockname()
@@ -828,8 +828,8 @@ def test_two_connections_at_once_each_see_only_their_own_peer(monkeypatch):
     counted_reads(monkeypatch, answers=[1001, 1002])
     servers = []
     states = []
-    with short_dir() as directory:
-        sock, path = unix_listener(directory)
+    with short_dir() as socket_dir:
+        sock, path = unix_listener(socket_dir)
         served = Served(peer_app(states), [sock], inner=True, peer=True,
                         on_server=servers.append)
         try:

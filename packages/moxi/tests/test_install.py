@@ -151,39 +151,39 @@ def test_tool_command_refuses_an_unknown_receipt_key(tmp_path):
 
 # -- the environment -----------------------------------------------------------------------
 
-def test_environment_refuses_the_system_python(monkeypatch):
+def test_env_refuses_the_system_python(monkeypatch):
     monkeypatch.setattr(sys, "base_prefix", sys.prefix)
     with pytest.raises(InstallError, match="system Python"):
-        install.environment()
+        install.install_env()
 
 
-def test_environment_refuses_an_editable_moxi(monkeypatch):
+def test_env_refuses_an_editable_moxi(monkeypatch):
     monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
     monkeypatch.setattr(install, "_direct_url", lambda name: {
         "url": "file:///w/moxi", "dir_info": {"editable": True}})
     with pytest.raises(InstallError, match="editable"):
-        install.environment()
+        install.install_env()
 
 
-def test_environment_tells_a_tool_environment_by_its_receipt(monkeypatch, tmp_path):
+def test_env_tells_a_tool_env_by_its_receipt(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
     monkeypatch.setattr(sys, "prefix", str(tmp_path))
     monkeypatch.setattr(install, "_direct_url", lambda name: None)
-    assert install.environment().kind == install.PLAIN
+    assert install.install_env().kind == install.PLAIN
     (tmp_path / "uv-receipt.toml").write_text('[tool]\nrequirements = [{ name = "moxi" }]\n')
-    env = install.environment()
+    env = install.install_env()
     assert env.kind == install.TOOL
     assert env.receipt["tool"]["requirements"] == [{"name": "moxi"}]
 
 
-def test_environment_runs_fresh_processes_on_moxi_paths_python(monkeypatch, tmp_path):
+def test_env_runs_fresh_processes_on_moxi_paths_python(monkeypatch, tmp_path):
     import moxi.paths
 
     monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
     monkeypatch.setattr(sys, "prefix", str(tmp_path))
     monkeypatch.setattr(install, "_direct_url", lambda name: None)
     monkeypatch.setattr(moxi.paths, "python", lambda: tmp_path / "Scripts" / "python.exe")
-    assert install.environment().python == str(tmp_path / "Scripts" / "python.exe")
+    assert install.install_env().python == str(tmp_path / "Scripts" / "python.exe")
 
 
 def test_installed_source_reads_direct_url(site):
@@ -248,7 +248,7 @@ class Fake:
         self.receipt = list(receipt)
         if kind == install.TOOL:
             self._write_receipt()
-        monkeypatch.setattr(install, "environment", self.environment)
+        monkeypatch.setattr(install, "install_env", self.install_env)
         monkeypatch.setattr(install, "run", self.run)
         monkeypatch.setattr(install, "snapshot", self.snapshot)
         monkeypatch.setattr(install, "run_settle", self.run_settle)
@@ -257,13 +257,13 @@ class Fake:
                             lambda name, *a, **k: "/fake/uv" if name == "uv"
                             else real_which(name, *a, **k))
 
-    def environment(self):
+    def install_env(self):
         receipt = None
         if self.kind == install.TOOL:
             import tomllib
 
             receipt = tomllib.loads((self.prefix / "uv-receipt.toml").read_text())
-        return install.Environment(self.kind, self.prefix, "/fake/python", receipt)
+        return install.InstallEnv(self.kind, self.prefix, "/fake/python", receipt)
 
     def snapshot(self, python):
         assert python == "/fake/python"
@@ -271,14 +271,14 @@ class Fake:
         importlib.invalidate_caches()
         return cli.describe()
 
-    def run_settle(self, python, module, *, replace=False, skills=None):
+    def run_settle(self, python, module, *, replace=False, install_skills=None):
         from moxi import _settle, files, paths
 
         # The install holds the core lock while it settles each module.
         files._descriptor(paths.core_lock())
         self.setups.append(module)
         self.replaces.append(replace)
-        self.skills.append(skills)
+        self.skills.append(install_skills)
         if module in self.interrupt:
             return _settle.Outcome(_settle.INTERRUPTED)
         return _settle.Outcome(1 if module in self.fail_setup else 0)
@@ -531,7 +531,7 @@ def test_install_a_distribution_that_is_no_module(fake, capsys):
     assert code == 1 and "no installed distribution declares the Moxi module" in err
 
 
-def test_install_in_a_plain_environment(site, tmp_path, monkeypatch, capsys):
+def test_install_in_a_plain_env(site, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     fake = Fake(site, tmp_path, monkeypatch, kind=install.PLAIN)
     code, _, err = moxi_install(capsys, "comms", "--with", "cache")
@@ -541,7 +541,7 @@ def test_install_in_a_plain_environment(site, tmp_path, monkeypatch, capsys):
     assert fake.runs[1][-1] == "moxi-comms[cache]"
 
 
-def test_install_in_a_plain_environment_keeps_a_direct_source(site, tmp_path, monkeypatch,
+def test_install_in_a_plain_env_keeps_a_direct_source(site, tmp_path, monkeypatch,
                                                              capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     fake = Fake(site, tmp_path, monkeypatch, kind=install.PLAIN)
@@ -636,7 +636,7 @@ def test_a_second_install_waits_for_the_first(fake, capsys):
     assert f"waiting for another install or uninstall (pid {holder.pid}) to finish" in err
 
 
-def test_plain_environment_without_uv_uses_pip(monkeypatch):
+def test_plain_env_without_uv_uses_pip(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
     assert install._plain_command([Req("moxi-comms", ["cache"])]) == [
         sys.executable, "-m", "pip", "install", "moxi-comms[cache]"]
@@ -687,6 +687,21 @@ def test_a_from_for_another_distribution_does_not_pass_the_gate(fake, capsys):
     code, _, err = moxi_install(capsys, "extra", "--from",
                                 "moxi-turns @ git+https://h/turns")
     assert code == 3 and "not a first-party Moxi module" in err
+
+
+def test_an_unreleased_entry_is_refused_unless_from_gives_its_source(fake, capsys,
+                                                                    monkeypatch):
+    import moxi.catalogue as catalogue
+
+    marked = catalogue.Catalogue(1, (catalogue.Entry("turns", "moxi-turns", "Turns.",
+                                                     unreleased=True),), "shipped")
+    monkeypatch.setattr(catalogue, "load", lambda env=None: marked)
+    code, _, err = moxi_install(capsys, "turns", "--none")
+    assert code == 3 and fake.runs == []
+    assert "turns is not on PyPI yet; install it from a checkout with --from" in err
+    code, _, err = moxi_install(capsys, "turns", "--none", "--from",
+                                "moxi-turns @ git+https://h/turns")
+    assert code == 0, err
 
 
 def test_an_unlisted_module_already_installed_runs_its_setup_again(fake, capsys):

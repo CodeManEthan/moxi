@@ -16,7 +16,7 @@ from moxi_ui import cli
 from moxi_ui.cli import Refused
 
 
-def task(state="inactive", enabled=True, last=None):
+def task(state="inactive", *, enabled=True, last=None):
     return UnitState("ui", "shell", "daemon", "schtasks", state, last=last, enabled=enabled)
 
 
@@ -69,7 +69,7 @@ class World:
         monkeypatch.setattr(cli, "lock_held", lambda: False)
         monkeypatch.setattr(cli, "_port_taken", lambda port: False)
         monkeypatch.setattr(cli, "_written_port", lambda port: None)
-        monkeypatch.setattr(cli, "_stored_environment", lambda: {})
+        monkeypatch.setattr(cli, "_stored_env", lambda: {})
         monkeypatch.setattr(cli, "_open_browser", lambda url: self.opened.append(url) or True)
         monkeypatch.setattr(cli, "POLL", 0.001)
         monkeypatch.setattr(cli, "STATUS_POLL", 0.0)
@@ -87,8 +87,8 @@ class World:
         state = self.probes.pop(0) if len(self.probes) > 1 else self.probes[0]
         return state, (UP if state == "up" else None)
 
-    def ensure(self, environ=None):
-        return cli.ensure_shell(8460, environ=environ or {}, say=self.said.append)
+    def ensure(self, env=None):
+        return cli.ensure_shell(8460, env=env or {}, say=self.said.append)
 
 
 # --- the Windows logon task ---------------------------------------------------------------
@@ -328,10 +328,10 @@ def test_a_tagged_home_opens_through_its_own_socket(monkeypatch, tmp_path):
     (tmp_path / "link").symlink_to(home)
     monkeypatch.chdir(tmp_path)
     for spelling in (str(home), str(tmp_path / "link"), "h"):
-        environ = {**_plain(), "MOXI_HOME": spelling}
-        assert units.environment("ui", environ) == {"MOXI_HOME": os.path.realpath(home)}
+        env = {**_plain(), "MOXI_HOME": spelling}
+        assert units.unit_env("ui", env) == {"MOXI_HOME": os.path.realpath(home)}
         world = World(monkeypatch, [socket_unit("active")], probes=("down",))
-        assert world.ensure(environ) is None and world.spawned == []
+        assert world.ensure(env) is None and world.spawned == []
 
 
 def test_the_fix_line_names_only_the_socket_units_the_core_gives(monkeypatch, tmp_path):
@@ -348,25 +348,25 @@ def test_the_fix_line_names_only_the_socket_units_the_core_gives(monkeypatch, tm
     assert "after stopping the shell's socket units" in str(caught.value)
 
 
-def test_on_windows_the_stored_environment_counts(monkeypatch, tmp_path):
+def test_on_windows_the_stored_env_counts(monkeypatch, tmp_path):
     moved = str(tmp_path / "elsewhere")
-    environ = {**_plain(), "MOXI_UI_HOME": moved}
+    env = {**_plain(), "MOXI_UI_HOME": moved}
     world = World(monkeypatch, [task("active")], platform="win32")
     with pytest.raises(Refused, match="MOXI_UI_HOME") as caught:
-        world.ensure(environ)
+        world.ensure(env)
     assert "moxi ui stop" in str(caught.value)
     world = World(monkeypatch, [task("active")], platform="win32")
-    monkeypatch.setattr(cli, "_stored_environment", lambda: {"Moxi_Ui_Home": moved})
-    world.ensure(environ)
+    monkeypatch.setattr(cli, "_stored_env", lambda: {"Moxi_Ui_Home": moved})
+    world.ensure(env)
 
 
 def test_on_windows_a_tagged_homes_task_runs_with_its_home(monkeypatch, tmp_path):
     """The task's gate sets the home it was written from over the stored environment's."""
-    environ = {**_plain(), "MOXI_HOME": str(tmp_path / "h")}
+    env = {**_plain(), "MOXI_HOME": str(tmp_path / "h")}
     world = World(monkeypatch, [task("active")], platform="win32")
-    monkeypatch.setattr(cli, "_stored_environment",
+    monkeypatch.setattr(cli, "_stored_env",
                         lambda: {"MOXI_HOME": str(tmp_path / "other")})
-    world.ensure(environ)
+    world.ensure(env)
 
 
 # --- the spawn rule and the opener -------------------------------------------------------
@@ -387,9 +387,9 @@ def test_the_shell_is_spawned_as_python_dash_p_from_its_runtime_dir(monkeypatch)
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
 def test_off_linux_the_browser_gets_a_redirect_file_with_no_ticket(monkeypatch, platform):
     world = World(monkeypatch, platform=platform)
-    directory = Layout("ui").state_dir() / "open"
-    directory.mkdir(parents=True)
-    stale = directory / "0000000000000000.html"
+    redirect_dir = Layout("ui").state_dir() / "open"
+    redirect_dir.mkdir(parents=True)
+    stale = redirect_dir / "0000000000000000.html"
     stale.write_text("old")
     os.utime(stale, (time.time() - 120, time.time() - 120))
     url = "http://127.0.0.1:8460/signin?n=0123456789abcdef#t=" + "s" * 43
@@ -397,9 +397,9 @@ def test_off_linux_the_browser_gets_a_redirect_file_with_no_ticket(monkeypatch, 
     (opened,) = world.opened
     assert opened.startswith("file://") and "s" * 43 not in opened
     assert not stale.exists()
-    (page,) = directory.iterdir()
+    (page,) = redirect_dir.iterdir()
     assert stat.S_IMODE(page.stat().st_mode) == 0o600
-    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(redirect_dir.stat().st_mode) == 0o700
     assert url in page.read_text()
 
 
@@ -449,7 +449,7 @@ def test_signout_with_no_shell_clears_the_store_holding_page_lock(monkeypatch, c
     assert cli.main(["signout"]) == 0
     assert seen == [True] and "signed out" in capsys.readouterr().out
     # A shell starting holds the lock: nothing is cleared, and the exit is 75.
-    with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout_s=0):
         assert cli.main(["signout"]) == 75
     assert seen == [True] and "starting or stopping" in capsys.readouterr().err
 

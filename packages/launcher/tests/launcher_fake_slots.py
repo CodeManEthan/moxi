@@ -1,6 +1,6 @@
-"""A stand-in for slots' API, as the launcher calls it: `supported`, `show`, `create`
-(which makes slots), `start` (which claims a slot and starts the command there), `respawn` (which starts it in the slot's
-ended run pane), and the screen calls `read_screen` and
+"""A stand-in for slots' API, as the launcher calls it: `supported`, `list_slots`, `show`,
+`create` (which makes slots), `start` (which claims a slot and starts the command there),
+`respawn` (which starts it in the slot's ended run pane), and the screen calls `read_screen` and
 `answer_screen`, with slots' errors and result shapes, field for field (`test_slot` holds
 them against slots' own when slots is installed).
 
@@ -15,9 +15,14 @@ The script's keys, each with its default:
   "hold": null, "label": ..., "last": {"at": ..., "label": ..., "meta": {...}}}}`), any
   other `Slot` field given by name. A listed slot has a registry row (`created` is a time)
   unless it gives `"created": null`, a session of a slot's name with no row, which slots
-  reads not launchable. A slot not listed reads None, except the slot a `start`
-  placed, which reads occupied with the pane's id and pid, and `dead_status` as the pane's
-  exit status.
+  reads not launchable. A slot not listed reads None. A `start` or a `respawn` writes
+  the slot it placed here and saves the script, so another process reads it taken:
+  `{"state": "occupied", "launchable": false, "label": ..., "meta": {...}}`, `meta` the
+  caller's, read back as the slot's `last`. The process that placed it also reads the
+  pane's id and pid, and `dead_status` as the pane's exit status.
+- `list`: `ok` (`list_slots` gives every slot of `slots` in number order, those with
+  `"created": null` under `unregistered`) or `error` (it gives `ok` false and why, as
+  slots does when it can't read them; it never raises).
 - `show`: `ok`, `try-again` (raises `TryAgain`), `error` (raises `TmuxError`), `registry`
   (raises `RegistryError`) or `usage` (raises `UsageError`).
 - `start`: `ok`, `refused` (raises `Refused` from `refused`: `reason`, `words`, and
@@ -31,6 +36,8 @@ The script's keys, each with its default:
 - `respawn`: as `start`, for `respawn`, which names its slot and reuses its run pane;
   `refused` raises `Refused` from `refused` (`live-pane`, `missing`, `held`).
 - `placed`: the slot a start that names none takes (1).
+- `start_wait_s`: the seconds `start` waits before it places anything (0), so a launch's
+  row stays `spawning` that long.
 - `exec`: `started`, `failed` or `unconfirmed`, with `exec_line` and `dead_status`
   (null while the pane lives).
 - `run`: true to really run the command, detached, with the env and cwd it was given; its
@@ -53,6 +60,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -132,12 +140,21 @@ class Slot:
 CREATED = 1880000000.0
 
 
-def make_slot(number: int, state: str, launchable: bool = False, **fields) -> Slot:
+def make_slot(number: int, state: str, *, launchable: bool = False, **fields) -> Slot:
     """A registered `Slot` with every other field not given empty."""
     blank = {"name": None, "hold": None, "idle": False, "attached": 0, "label": None,
              "pane_id": None, "window_id": None, "pane_pid": None, "current_command": None,
              "dead_status": None, "last": None, "created": CREATED}
     return Slot(number=number, state=state, launchable=launchable, **{**blank, **fields})
+
+
+@dataclass(frozen=True)
+class Listing:
+    ok: bool
+    why: str = ""
+    slots: tuple[Slot, ...] = ()
+    unregistered: tuple[Slot, ...] = ()
+    drift: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -193,15 +210,15 @@ CLAUDE_EXIT_DIALOG = Screen(
     phrases=("Background work is running", "will stop when you exit"),
     option="Exit and stop tasks", move=False, then="ended",
     items=Items(after="will stop when you exit", kinds=("shell", "monitor")))
-CLAUDE_TRUST_FOLDER = Screen(
-    name="CLAUDE_TRUST_FOLDER",
+CLAUDE_TRUST_DIR = Screen(
+    name="CLAUDE_TRUST_DIR",
     phrases=("Accessing workspace:", "Enter to confirm"),
     option="Yes, I trust this folder", move=True, then="gone")
 CLAUDE_DEV_CHANNELS = Screen(
     name="CLAUDE_DEV_CHANNELS",
     phrases=("Loading development channels", "Enter to confirm"),
     option="I am using this for local development", move=True, then="gone")
-SCREENS = {"CLAUDE_TRUST_FOLDER": CLAUDE_TRUST_FOLDER,
+SCREENS = {"CLAUDE_TRUST_DIR": CLAUDE_TRUST_DIR,
            "CLAUDE_DEV_CHANNELS": CLAUDE_DEV_CHANNELS,
            "CLAUDE_EXIT_DIALOG": CLAUDE_EXIT_DIALOG}
 
@@ -237,12 +254,12 @@ def script() -> dict:
 
 
 def record(call: str, **detail) -> None:
-    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as out:
-        out.write(json.dumps({"call": call, **detail}, default=str) + "\n")
+    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": call, **detail}, default=str) + "\n")
 
 
-def calls(directory: Path, name: str | None = None) -> list[dict]:
-    path = Path(directory) / "calls.jsonl"
+def calls(slots_dir: Path, name: str | None = None) -> list[dict]:
+    path = Path(slots_dir) / "calls.jsonl"
     if not path.exists():
         return []
     found = [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -255,25 +272,57 @@ def supported() -> Support:
     return Support(plan["ok"], plan.get("why", ""))
 
 
+def _listed(key, entry: dict, plan: dict) -> Slot:
+    """The slot the script lists under `key`. One a start wrote reads its `meta` back as
+    its `last`, and, in the process that placed it, the pane it was given."""
+    fields = dict(entry)
+    fields["hold"] = Hold(**entry["hold"]) if entry.get("hold") else None
+    fields["last"] = Last(**entry["last"]) if entry.get("last") else None
+    number = int(key) if str(key).isdigit() else fields.pop("number", 1)
+    if "meta" in fields:
+        fields["last"] = Last(1.0, fields.get("label"), fields.pop("meta"))
+        placed = _turns.placed.get(str(key))
+        if placed is not None:
+            fields.update(pane_id="%7", window_id="@3", pane_pid=placed["pid"],
+                          dead_status=plan.get("dead_status"))
+    return make_slot(number, fields.pop("state"), launchable=fields.pop("launchable"), **fields)
+
+
+def list_slots() -> Listing:
+    record("list_slots")
+    plan = script()
+    if plan.get("list", "ok") == "error":
+        return Listing(ok=False, why="tmux list-panes failed")
+    found = sorted((_listed(key, entry, plan) for key, entry in plan.get("slots", {}).items()
+                    if str(key).isdigit()), key=lambda slot: slot.number)
+    return Listing(ok=True, slots=tuple(s for s in found if s.created is not None),
+                   unregistered=tuple(s for s in found if s.created is None))
+
+
 def show(slot):
     record("show", slot=slot)
     plan = script()
     how = plan.get("show", "ok")
     _raise(how, "list-panes")
     entry = plan.get("slots", {}).get(str(slot))
-    if entry is not None:
-        fields = dict(entry)
-        fields["hold"] = Hold(**entry["hold"]) if entry.get("hold") else None
-        fields["last"] = Last(**entry["last"]) if entry.get("last") else None
-        number = int(slot) if str(slot).isdigit() else fields.pop("number", 1)
-        return make_slot(number, fields.pop("state"), fields.pop("launchable"), **fields)
-    placed = _turns.placed.get(str(slot))
-    if placed is not None:
-        return make_slot(
-            int(slot), "occupied", label=placed["label"],
-            last=Last(1.0, placed["label"], placed["meta"]), pane_id="%7",
-            window_id="@3", pane_pid=placed["pid"], dead_status=plan.get("dead_status"))
-    return None
+    return None if entry is None else _listed(slot, entry, plan)
+
+
+def _save(plan: dict) -> None:
+    """Write the script whole, so a reader in another process never sees half of it."""
+    path = _dir() / "script.json"
+    part = path.with_name(f".script.{os.getpid()}.tmp")
+    part.write_text(json.dumps(plan))
+    os.replace(part, path)
+
+
+def _place(plan: dict, number, label, meta, pid: int) -> None:
+    """Record that `number` was placed: in the script, for every process, and here with
+    the pane's pid."""
+    plan.setdefault("slots", {})[str(number)] = {
+        "state": "occupied", "launchable": False, "label": label, "meta": meta}
+    _save(plan)
+    _turns.placed[str(number)] = {"pid": pid}
 
 
 def _raise(how: str, tmux_call: str) -> None:
@@ -303,7 +352,7 @@ def create(numbers=None, *, count=1, name=None) -> list[int]:
     listed = plan.setdefault("slots", {})
     for number in made:
         listed[str(number)] = {"state": "free", "launchable": True}
-    (_dir() / "script.json").write_text(json.dumps(plan))
+    _save(plan)
     return made
 
 
@@ -323,6 +372,7 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
     if how == "try-again":
         raise TryAgain("the slots lock was not had in 10 s")
     _raise(how, "new-window")
+    time.sleep(plan.get("start_wait_s", 0))
     number = slot if slot is not None else plan.get("placed", 1)
     pid = plan.get("pane_pid", 4343)
     if plan.get("run"):
@@ -330,7 +380,7 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, start_new_session=True)
         pid = child.pid
-    _turns.placed[str(number)] = {"label": label, "meta": meta, "pid": pid}
+    _place(plan, number, label, meta, pid)
     verdict = plan.get("exec", "started")
     return Placed(number, "%7", "@3", verdict,
                   plan.get("exec_line", "exec" if verdict == "started" else "taken"),
@@ -354,7 +404,7 @@ def respawn(slot, argv, *, env, cwd, label, meta=None, hold=None) -> Placed:
         raise TryAgain("the slots lock was not had in 10 s")
     _raise(how, "respawn-pane")
     pid = plan.get("pane_pid", 4343)
-    _turns.placed[str(slot)] = {"label": label, "meta": meta, "pid": pid}
+    _place(plan, slot, label, meta, pid)
     verdict = plan.get("exec", "started")
     return Placed(slot, "%7", "@3", verdict,
                   plan.get("exec_line", "exec" if verdict == "started" else "taken"),
@@ -375,12 +425,12 @@ def read_screen(slot, screens) -> Seen:
                 frame.get("why", ""), (), bool(frame.get("dead", False)), "%7")
 
 
-def answer_screen(slot, screen, wait=5) -> Answer:
-    record("answer_screen", slot=slot, screen=screen_name(screen), wait=wait)
+def answer_screen(slot, screen, wait_s=5) -> Answer:
+    record("answer_screen", slot=slot, screen=screen_name(screen), wait=wait_s)
     answers = script().get("answers") or [{"outcome": "gone"}]
     answer = _nth(answers, _turns.answers)
     _turns.answers += 1
-    seen = Seen(screen, False, answer.get("why", ""), (), bool(answer.get("dead", False)),
-                "%7")
+    seen = Seen(screen, full=False, why=answer.get("why", ""),
+                dead=bool(answer.get("dead", False)), pane_id="%7")
     return Answer(answer["outcome"], screen, answer.get("why", ""), seen,
                   answer.get("capture"), tuple(answer.get("keys", ())))

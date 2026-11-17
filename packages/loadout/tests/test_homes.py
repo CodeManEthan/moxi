@@ -18,33 +18,33 @@ from moxi_loadout import gitpiece, harness_row, homes, install, ledger, pagejob,
 
 
 @pytest.fixture
-def lo(folder):
-    return make(folder)
+def lo(loadout_dir):
+    return make(loadout_dir)
 
 
-def make(folder: Path) -> Path:
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.manifest(folder, "[user]\n")
-    return folder
+def make(loadout_dir: Path) -> Path:
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, "[user]\n")
+    return loadout_dir
 
 
 def page(monkeypatch):
     """This process as a page job runs: loadout's marker set to the page job's value."""
-    monkeypatch.setenv(homes.MARKER, homes.PAGE_JOB)
+    monkeypatch.setenv(homes.CALLER_ENV, homes.PAGE_JOB)
 
 
 def end(job: str) -> dict:
     return json.loads(pagejob.end_path(job).read_text())
 
 
-def refused(job: str, folder: Path) -> str:
+def refused(job: str, loadout_dir: Path) -> str:
     """The one line job `job` refused with, having written nothing."""
     record = end(job)
     assert record["exit"] == 3 and record["outcome"] is None, record
     [line] = record["lines"]
     assert not (kit.claude() / "review").exists()
-    assert "review" not in (folder / "loadout.toml").read_text()
+    assert "review" not in (loadout_dir / "loadout.toml").read_text()
     return line
 
 
@@ -69,19 +69,19 @@ def ui_as(monkeypatch, state: str):
 # -- the page job ---------------------------------------------------------------------------
 
 def test_a_job_refuses_while_only_the_terminal_sets_moxi_home_and_runs_once_the_shell_does(
-        folder, monkeypatch, tmp_path, terminal_record):
+        loadout_dir, monkeypatch, tmp_path, terminal_record):
     # The user sets MOXI_HOME in the terminal's rc file only, and installed there.
     monkeypatch.delenv("MOXI_LOADOUT_HOME", raising=False)
     there = tmp_path / "m"
     monkeypatch.setenv("MOXI_HOME", str(there))
-    make(folder)
+    make(loadout_dir)
     terminal_record()
     theirs = paths.Layout("loadout").state_dir()
     # The browser shell has no MOXI_HOME.
     monkeypatch.delenv("MOXI_HOME")
     page(monkeypatch)
     assert pagejob.run("j1", ["add", "skill", "review", "--user"]) == 3
-    line = refused("j1", folder)
+    line = refused("j1", loadout_dir)
     assert (f"loadout's state folder here is {paths.Layout('loadout').state_dir()}, but the "
             f"last run in a terminal used {theirs}") in line
     assert "Moxi's state folder" in line
@@ -89,11 +89,11 @@ def test_a_job_refuses_while_only_the_terminal_sets_moxi_home_and_runs_once_the_
     # Once the shell has it, the job agrees and acts on the terminal's ledger.
     monkeypatch.setenv("MOXI_HOME", str(there))
     assert pagejob.run("j2", ["add", "skill", "review", "--user"]) == 0
-    assert os.readlink(kit.claude() / "review") == str(folder / "skills" / "review")
+    assert os.readlink(kit.claude() / "review") == str(loadout_dir / "skills" / "review")
     assert ledger.read()["placed"]
 
 
-def test_a_job_refuses_when_only_moxis_own_state_folder_and_settings_file_differ(
+def test_a_job_refuses_when_only_moxis_own_state_dir_and_settings_file_differ(
         lo, monkeypatch, tmp_path, terminal_record):
     # loadout's own folders are pinned in both; MOXI_HOME is set in the terminal only.
     assert os.environ.get("MOXI_LOADOUT_HOME")
@@ -107,7 +107,7 @@ def test_a_job_refuses_when_only_moxis_own_state_folder_and_settings_file_differ
     assert f"MOXI_HOME to {tmp_path / 'm'}" in line
 
 
-def test_a_job_refuses_when_a_harness_rows_folder_differs(
+def test_a_job_refuses_when_a_harness_rows_dir_differs(
         lo, monkeypatch, tmp_path, terminal_record):
     # The opencode row loadout adds is written under ~, so HOME moves it.
     assert harness_row.add(say=lambda line: None) == "added"
@@ -133,6 +133,19 @@ def test_a_job_under_another_harness_home_is_refused(
     line = refused("j1", lo)
     assert f"{label} here is {tmp_path / 'elsewhere'}" in line
     assert f"{variable} to " in line and "moxi ui stop" in line
+    assert ledger.read() == before
+
+
+def test_a_job_setting_opencode_config_dir_the_terminal_lacked_is_refused(
+        lo, monkeypatch, tmp_path, terminal_record):
+    terminal_record()
+    before = ledger.read()
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    page(monkeypatch)
+    assert pagejob.run("j1", ["add", "skill", "review", "--user"]) == 3
+    line = refused("j1", lo)
+    assert f"OpenCode's home here is {tmp_path / 'elsewhere'}" in line
+    assert "Take OPENCODE_CONFIG_DIR out of the browser shell's environment" in line
     assert ledger.read() == before
 
 
@@ -167,7 +180,7 @@ def test_a_job_with_no_record_is_refused_with_the_step_that_makes_one(lo, monkey
     assert "Type moxi modules in a terminal of your own" in line
 
 
-def test_a_job_reading_a_project_by_key_compares_projects_folders(
+def test_a_job_reading_a_project_by_key_compares_project_dirs(
         lo, monkeypatch, tmp_path, terminal_record):
     assert modules.available("projects") and os.environ.get("MOXI_PROJECTS_HOME")
     terminal_record()
@@ -255,11 +268,11 @@ def test_the_missing_cli_note_names_the_lasting_path_fix_only_with_ui(lo, monkey
 
 # -- loadout records nothing ----------------------------------------------------------------
 
-def test_setup_and_install_leave_the_ledger_without_homes_or_git(folder, monkeypatch):
-    monkeypatch.delenv(homes.MARKER, raising=False)
+def test_setup_and_install_leave_the_ledger_without_homes_or_git(loadout_dir, monkeypatch):
+    monkeypatch.delenv(homes.CALLER_ENV, raising=False)
     assert setup.setup(say=lambda line: None) == 0
     assert not {"homes", "git"} & set(ledger.read())
-    make(folder)
+    make(loadout_dir)
     assert install.install().code == 0
     assert not {"homes", "git"} & set(ledger.read())
 
@@ -276,7 +289,7 @@ def test_the_next_ledger_write_drops_an_older_releases_homes_and_git(lo):
 
 
 def test_the_git_hooks_child_install_carries_no_marker():
-    assert homes.MARKER not in gitpiece.clean_env()
+    assert homes.CALLER_ENV not in gitpiece.clean_env()
 
 
 # -- the places -----------------------------------------------------------------------------
@@ -295,7 +308,7 @@ def test_the_places_follow_the_mapping_not_this_process(lo, monkeypatch, tmp_pat
     poison = tmp_path / "poison"
     for name in [n for n in honest if terminal.in_set(n) and n != "PATH"]:
         monkeypatch.setenv(name, str(poison / name))
-    for name in ("MOXI_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+    for name in ("MOXI_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR"):
         monkeypatch.setenv(name, str(poison / name))
     got = places(honest)
     assert got == expected

@@ -79,7 +79,7 @@ def test_teardown_refuses_on_an_unreadable_store(fake, too_new):
 
 @LINUX
 def test_teardown_gives_a_wrapped_timer_back(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     from moxi_services import acts
 
     assert acts.add_adopted("backup", "backup.timer", enable=False).code == 0
@@ -94,7 +94,7 @@ def test_teardown_gives_a_wrapped_timer_back(fake):
 
 @LINUX
 def test_teardown_refuses_on_a_wrapped_timer_it_cant_give_back(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     from moxi_services import acts
 
     assert acts.add_adopted("backup", "backup.timer", enable=True).code == 0
@@ -107,7 +107,7 @@ def test_teardown_refuses_on_a_wrapped_timer_it_cant_give_back(fake):
 
 
 def test_teardown_leaves_other_adopted_units_alone(fake):
-    fake.foreign["site.service"] = Unit("daemon", True, active=True)
+    fake.foreign["site.service"] = Unit("daemon", enabled=True, active=True)
     add(**adopted("site", kind="daemon", unit="site.service"))
     lifecycle.teardown()
     assert fake.acts() == [] and store.get("site") is not None

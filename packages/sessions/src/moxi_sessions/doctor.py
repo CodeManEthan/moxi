@@ -15,7 +15,7 @@ switch is on, or a setting holds a value that isn't one. It never changes a sett
 
 The `guard` row is the transcript-read guard's (`moxi_sessions.readguard`):
 
-* `off`: neither `guard.transcript_read` nor turns' `guards.on` turns it on.
+* `off`: neither `guard.transcript_read` nor turns' `guards.run` turns it on.
 * `ok`: it is on and turns is installed to enforce it; the detail names what turned it on
   and the roots it keeps agents out of.
 * `warn`: it is on and turns is absent, so nothing enforces it; or turns' guard loader
@@ -50,7 +50,7 @@ def _why(exc: OSError) -> str:
     return exc.strerror or str(exc)
 
 
-def _absent(harness: str, path: Path, configured: bool) -> Row | None:
+def _absent(harness: str, path: Path, *, configured: bool) -> Row | None:
     """The row for a root that does not exist, or None when it exists."""
     name, what = NAMES[harness]
     try:
@@ -66,7 +66,7 @@ def _absent(harness: str, path: Path, configured: bool) -> Row | None:
     return Row(MODULE, name, "off", f"no {what} at {path}, and no config key names one")
 
 
-def _directory(harness: str, path: Path, detail: str) -> Row:
+def _dir_row(harness: str, path: Path, detail: str) -> Row:
     name, what = NAMES[harness]
     if not path.is_dir():
         return Row(MODULE, name, "warn", f"the {what} {path} is not a directory")
@@ -81,7 +81,7 @@ def _directory(harness: str, path: Path, detail: str) -> Row:
 def _codex(path: Path, detail: str) -> Row:
     from . import codex
 
-    row = _directory(CODEX, path, detail)
+    row = _dir_row(CODEX, path, detail)
     if row.state != "ok":
         return row
     imports = codex.read_imports(codex.imports_path(path))
@@ -115,11 +115,11 @@ def check(harness: str) -> Row:
         return Row(MODULE, name, "warn",
                    f"the {what} cannot be named: the config file cannot be read ({exc})",
                    "moxi config sessions")
-    row = _absent(harness, origin.path, origin.configured)
+    row = _absent(harness, origin.path, configured=origin.configured)
     if row is not None:
         return row
     if harness == CLAUDE:
-        return _directory(CLAUDE, origin.path, origin.detail)
+        return _dir_row(CLAUDE, origin.path, origin.detail)
     if harness == CODEX:
         return _codex(origin.path, origin.detail)
     return _opencode(origin.path, origin.detail)
@@ -158,7 +158,7 @@ def guard_row(env=None) -> Row:
     found, problem = _in_turns(GUARD_ID, env) if turns else (None, None)
     by = [f"sessions' {SWITCH}"] if switched else []
     if found is not None and "list" in found.by:
-        by.append("turns' guards.on")
+        by.append("turns' guards.run")
     if not by:
         return Row(MODULE, "guard", "off",
                    "the transcript-read guard is off; turn it on with: moxi config set "

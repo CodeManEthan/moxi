@@ -75,17 +75,17 @@ def run(ctx):
     machine = settings.read()
     if not machine.reinstall_on_commit:
         return link.Outcome.ok()
-    folder = machine.source
-    if not _holds(link, ctx.root, folder):
+    loadout_dir = machine.source
+    if not _holds(link, ctx.root, loadout_dir):
         return link.Outcome.ok()
     span = _span(link, ctx.root, ctx.event)
     if span is None:
         return link.Outcome.ok()
     # The path git reads keeps the folder's case as it is on disk: normcase lowercases on
     # Windows, and git's pathspec matches case exactly even where the file system doesn't.
-    rel = os.path.relpath(os.path.realpath(folder), os.path.realpath(ctx.root))
+    rel = os.path.relpath(os.path.realpath(loadout_dir), os.path.realpath(ctx.root))
     paths = () if rel == os.curdir else (rel,)
-    if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):
+    if not link.changes(ctx.root, rev_range=span, paths=paths, timeout_s=GIT_SECONDS):
         return link.Outcome.ok()
     failure = _install()
     if failure is None:
@@ -108,15 +108,15 @@ def _real(path) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
-def _holds(link, root: str, folder) -> bool:
-    """Whether `root` is the top of the work tree that holds `folder`."""
-    real_root, real_folder = _real(root), _real(folder)
-    if real_folder != real_root and not real_folder.startswith(
+def _holds(link, root: str, loadout_dir) -> bool:
+    """Whether `root` is the top of the work tree that holds `loadout_dir`."""
+    real_root, real_loadout_dir = _real(root), _real(loadout_dir)
+    if real_loadout_dir != real_root and not real_loadout_dir.startswith(
             real_root.rstrip(os.sep) + os.sep):
         return False
-    if not os.path.isdir(folder):
+    if not os.path.isdir(loadout_dir):
         return False
-    done = link.git(folder, "rev-parse", "--show-toplevel", timeout=GIT_SECONDS)
+    done = link.git(loadout_dir, "rev-parse", "--show-toplevel", timeout_s=GIT_SECONDS)
     top = done.stdout.strip()
     return done.returncode == 0 and bool(top) and _real(top) == real_root
 
@@ -132,8 +132,8 @@ def _span(link, root: str, event: str) -> tuple[str, str] | None:
     parent = _verify(link, root, "HEAD^")
     if parent is not None:
         return (parent, "HEAD")
-    done = link.git(root, "hash-object", "-t", "tree", "--stdin", input=b"",
-                    timeout=GIT_SECONDS)
+    done = link.git(root, "hash-object", "-t", "tree", "--stdin", stdin_data=b"",
+                    timeout_s=GIT_SECONDS)
     tree = done.stdout.strip()
     if done.returncode != 0 or not tree:
         raise RuntimeError(f"git can't give the empty tree: {done.stderr.strip()}")
@@ -142,7 +142,7 @@ def _span(link, root: str, event: str) -> tuple[str, str] | None:
 
 def _verify(link, root: str, rev: str) -> str | None:
     done = link.git(root, "rev-parse", "-q", "--verify", f"{rev}^{{commit}}",
-                    timeout=GIT_SECONDS)
+                    timeout_s=GIT_SECONDS)
     found = done.stdout.strip()
     return found if done.returncode == 0 and found else None
 
@@ -151,7 +151,7 @@ def _head(link, root: str) -> str | None:
     import subprocess
 
     try:
-        done = link.git(root, "rev-parse", "--short", "HEAD", timeout=GIT_SECONDS)
+        done = link.git(root, "rev-parse", "--short", "HEAD", timeout_s=GIT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if done.returncode != 0:
@@ -175,7 +175,7 @@ def _install() -> str | None:
 
     argv = [os.fspath(paths.python()), "-m", "moxi_loadout", "install"]
     try:
-        done = proc.run(argv, timeout=INSTALL_SECONDS, env=clean_env())
+        done = proc.run(argv, timeout_s=INSTALL_SECONDS, env=clean_env())
     except subprocess.TimeoutExpired:
         return f"took longer than {INSTALL_SECONDS:.0f} s and was stopped"
     except OSError as exc:

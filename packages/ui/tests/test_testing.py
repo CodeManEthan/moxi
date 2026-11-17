@@ -4,6 +4,7 @@ contract and width checks in a browser."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from moxi_dev.testing import short_dir, wait_for
+from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -71,7 +73,8 @@ def test_the_test_shell_serves_the_fixture_and_reaches_its_page_server(ui_shell)
     status, view = session.get("/m/ui/api/modules")
     modules = {m["name"]: m for m in view["modules"]}
     assert status == 200 and modules["fixture"]["mounted"]
-    assert {c["name"] for c in modules["fixture"]["components"]} == {"page", "block", "tag"}
+    assert {c["name"] for c in modules["fixture"]["components"]} == {
+        "page", "block", "row-one", "row-two", "tag"}
     assert [r["name"] for r in modules["fixture"]["refused"]] == ["later"]
     before = fixture_kit.acts(ui_shell)
     status, answer = session.post("/m/fixture/api/add", {"by": 2})
@@ -103,9 +106,9 @@ def test_a_shells_env_reaches_its_page_servers(ui_shells, fixture_site):
     assert shell.env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert shell.session().get("/m/fixture/api/summary")[0] == 200
     pid = shell.wait_server("fixture", "running")["pid"]
-    environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
-    assert b"GIT_CONFIG_NOSYSTEM=1" in environ
-    assert f"HOME={shell.home}".encode() in environ
+    proc_env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    assert b"GIT_CONFIG_NOSYSTEM=1" in proc_env
+    assert f"HOME={shell.home}".encode() in proc_env
 
 
 def test_a_shell_reads_the_record_under_the_test_kits_anchor(fence, tmp_path, monkeypatch):
@@ -162,7 +165,7 @@ def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_co
     with pytest.raises(AssertionError, match="did not place"):
         ui_component_check(ui_page, "fixture", "later")
     with pytest.raises(AssertionError, match="--moxi-warn reaches no colour"):
-        ui_component_check(ui_page, "fixture", "block", tokens=("warn",))
+        ui_component_check(ui_page, "fixture", "block", tokens=("warn",), token_ms=1000)
     ui_width_check(ui_page)
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui", route="settings")
@@ -175,7 +178,16 @@ def _pushed(page, held, without=()):
         urls = [r.url for r in page.requests() if "/m/ui/api/push?" in r.url]
         return urls[-1] if urls else ""
     wait_for(lambda: all(t in last() for t in held) and not any(t in last() for t in without),
-             10, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
+             WAIT_S, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
+
+
+def _settings_backdrop(page):
+    """Open the Settings page as the backdrop a component is placed beside, and wait until it
+    has read every listed module: a read still out at the placement would count against the
+    component."""
+    page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    view = page.locator("#moxi-panel > moxi-ui-page moxi-ui-settings")
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
 
 
 @pytest.mark.browser
@@ -185,7 +197,7 @@ def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_a
     # holds whenever a component subscribes. `elsewhere` stands for another module with a
     # component on the page: its topics are no topic of the fixture's. The settings panel
     # holds no fixture topic, so placing the fixture's block reopens the stream.
-    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    _settings_backdrop(ui_page)
     ui_page.evaluate("""async () => {
       const {subscribe} = await import("/m/ui/client.js");
       subscribe("elsewhere", "held", () => {});
@@ -214,7 +226,7 @@ def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
         ui_page, ui_component_check, monkeypatch):
     # Without a page's recent requests (Playwright before 1.56), a topic the page held
     # before the placement counts against the component, and the failure says why.
-    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    _settings_backdrop(ui_page)
     ui_page.evaluate("""async () => {
       const {subscribe} = await import("/m/ui/client.js");
       subscribe("elsewhere", "held", () => {});
@@ -355,3 +367,64 @@ def test_the_testing_extra_needs_a_platformdirs_that_reads_the_windows_overrides
 
     wanted = [line for line in requires("moxi-ui") or [] if line.startswith("platformdirs")]
     assert wanted == ["platformdirs>=4.11.3; (sys_platform == 'win32') and extra == 'testing'"]
+
+
+#: A browser's install directory, as Playwright names it: `chromium-1248`,
+#: `chromium_headless_shell-1248`, `firefox-1555`, `webkit-2370`.
+_INSTALL_DIR = re.compile(r"[a-z_]+-[0-9]+")
+
+
+def _browsers_dir(executable: str | os.PathLike) -> Path:
+    """The directory Playwright installs its browsers in, found from one browser's
+    executable: the parent of the nearest ancestor named `<name>-<digits>`. On Linux that
+    is three levels up; on macOS the executable sits deeper, inside an `.app` bundle."""
+    for parent in Path(executable).parents:
+        if _INSTALL_DIR.fullmatch(parent.name):
+            return parent.parent
+    raise AssertionError(f"no `<name>-<digits>` directory above {executable}")
+
+
+@pytest.mark.parametrize("executable", [
+    "/home/u/.cache/ms-playwright/chromium_headless_shell-1248/chrome-linux/headless_shell",
+    "/home/u/.cache/ms-playwright/firefox-1555/firefox/firefox",
+    "/Users/u/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-mac-arm64/"
+    "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "/Users/u/Library/Caches/ms-playwright/webkit-2370/pw_run.sh",
+])
+def test_the_browsers_dir_is_found_from_a_linux_or_a_macos_executable(executable):
+    assert _browsers_dir(executable) == Path(executable.split("/ms-playwright/")[0],
+                                             "ms-playwright")
+
+
+def test_a_path_with_no_install_dir_above_it_is_refused():
+    with pytest.raises(AssertionError, match="no `<name>-<digits>` directory"):
+        _browsers_dir("/usr/bin/chromium")
+
+
+@pytest.mark.browser
+def test_a_failed_browser_test_keeps_its_trace_where_ui_traces_says(tmp_path, ui_browser):
+    # The trace directory is outside the inner run's fence, as a repository directory is
+    # in CI: the plugin makes it before any test is fenced, and the teardown that keeps
+    # the trace makes nothing.
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "conftest.py").write_text('pytest_plugins = ["moxi_dev.testing"]\n')
+    (run_dir / "test_fails.py").write_text(textwrap.dedent("""
+        from types import SimpleNamespace
+
+        def test_a_page_that_fails(ui_contexts):
+            context = ui_contexts(SimpleNamespace(url="http://127.0.0.1:9/"), sign_in=False)
+            context.new_page().set_content("<p>here</p>")
+            assert False, "fails on purpose"
+    """))
+    traces_dir = tmp_path / "traces"
+    browsers_dir = _browsers_dir(ui_browser.browser_type.executable_path)
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "--ui-browser", ui_browser.browser_type.name,
+                           "--ui-traces", str(traces_dir), str(run_dir)],
+                          cwd=run_dir, capture_output=True, text=True, timeout=120,
+                          env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_dir)})
+    assert done.returncode == 1, done.stdout + done.stderr
+    summary = done.stdout.strip().splitlines()[-1]
+    assert "1 failed" in summary and "error" not in summary, done.stdout
+    assert [p.suffix for p in traces_dir.iterdir()] == [".zip"]

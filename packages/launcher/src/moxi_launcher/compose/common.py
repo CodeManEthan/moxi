@@ -32,36 +32,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from moxi import files, names, paths
+from moxi import files, modules, names, paths
 
 from .. import catalog, store
+from ..listeners import RELAUNCH_ENV, REQUEST_ENV
 
 #: The first line of the identity block.
 HEADER = "--- LAUNCH IDENTITY (stamped at launch) ---"
 _WIDTH = len("start posture: ")
 
-#: The launch's stamp: the request id of the launch that started the session.
-REQUEST = "MOXI_LAUNCHER_REQUEST"
-#: turns' grant of session commands to the one launch it is stamped into.
-TURNS_COMMANDS = "MOXI_TURNS_COMMANDS"
 #: The commands every launch with turns grants; `commands(values)` adds those its
 #: recycle rows need.
 COMMANDS = ("exit",)
-#: usage's context mark, set from the `warn_at` row.
-USAGE_WARN_AT = "MOXI_USAGE_WARN_AT"
-#: usage's crossing mark for recycle at limit, set from `limit_at` when
-#: `recycle_at_limit` is not off.
-USAGE_CROSSING_AT = "MOXI_USAGE_CROSSING_AT"
 #: The launch's keep-warm and recycle-on-expiry options, read by cache's timer.
-KEEP_WARM = "MOXI_LAUNCHER_KEEP_WARM"
-RECYCLE_ON_EXPIRY = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
-#: The run id of a relaunch whose first turn carries its handoff.
-RELAUNCH = "MOXI_LAUNCHER_RELAUNCH"
+KEEP_WARM_ENV = "MOXI_LAUNCHER_KEEP_WARM"
+RECYCLE_ON_EXPIRY_ENV = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
 #: The identity block's line on a keep-warm launch.
 KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
                   "piece of work you hand out, and release it when the work is done")
-#: notes' directory, set from the `notes_dir` row.
-NOTES_DIR = "MOXI_NOTES_DIR"
 #: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
 #: name but those in `CLAUDE_KEEP`, and the agent marker. A Claude Code session sets
 #: `CLAUDE*` names in what it starts, and new ones come with new versions, so the scrub
@@ -115,6 +103,15 @@ CODEX_KEEP = frozenset({
 
 #: The two classes of the keep-lists' names and the provider names, for a replay.
 RECORDED, CREDENTIAL = "recorded", "credential"
+
+
+def _stamp(env: dict[str, str], module: str, interface: int, name: str, value: str) -> None:
+    """Stamp `value` under the environment name an optional module exports as `name`.
+    Nothing is stamped when the module can't be loaded here: only it reads the variable,
+    and a replayed row may still carry a value for a module removed since."""
+    found = modules.load(module, interface=interface)
+    if found.ok and found.api is not None:
+        env[getattr(found.api, name)] = value
 
 #: Each name of the keep-lists (`CLAUDE_KEEP`, `CODEX_KEEP`), and each provider name a
 #: recorded switch needs that the scrub never touches, classed once. A name is a
@@ -255,14 +252,14 @@ class Context:
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags, and
     `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
-    for a resume). `windows` picks the command line limit.
+    for a resume). `is_windows` picks the command line limit.
 
     A replay of a stored launch sets the rest. `posture` is the start posture the
     identity block shows in place of the values' own (a relaunch's), which the values,
     and so the new row's `values_json`, never carry; None keeps the values' posture.
     `resume` says the session id is one the launch resumes, not one minted for it.
     `relaunched` marks a relaunch, whose handoff header says so. `extra_stamps` are
-    stamps the replay adds to the option rows' own (`RELAUNCH`).
+    stamps the replay adds to the option rows' own (`RELAUNCH_ENV`).
     """
 
     request_id: str
@@ -395,7 +392,7 @@ def seat_text(block: str, instructions: str | None) -> str:
     return block
 
 
-def agent_role(role: str | None, found: bool | None) -> str | None:
+def agent_role(role: str | None, *, found: bool | None) -> str | None:
     """The block's agent role line: the role, marked when it was asked for and did not
     resolve."""
     if not role:
@@ -416,7 +413,7 @@ def write_prompt(prompt_file: PromptFile) -> None:
 
 # -- the opening prompt -----------------------------------------------------------------
 
-def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = None,
+def first_turn(by: str, *, brief: str | None = None, handoff: str | None = None,
                handoff_text: str | None = None, posture: str | None = None,
                relaunched: bool = False) -> str | None:
     """The text of a launch's first turn, or None when it owes none: the first turn's own
@@ -425,7 +422,7 @@ def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = No
     never read as a flag or a subcommand; a relaunch's says it was relaunched."""
     from .. import first
 
-    text = first.text(actor=actor, brief=brief, handoff=handoff or None,
+    text = first.text(by=by, brief=brief, handoff=handoff or None,
                       handoff_text=(handoff_text or "") if handoff else None,
                       relaunched=relaunched)
     if text is None or not posture:
@@ -482,8 +479,8 @@ def scratch_root_problem(root: Path | None = None) -> str | None:
         st = os.lstat(root)
     except FileNotFoundError:
         return None
-    except OSError as error:
-        return f"{root} can't be read: {error}"
+    except OSError as exc:
+        return f"{root} can't be read: {exc}"
     if stat.S_ISLNK(st.st_mode):
         return f"{root} is a symbolic link"
     if not stat.S_ISDIR(st.st_mode):
@@ -498,15 +495,15 @@ def scratch_root_problem(root: Path | None = None) -> str | None:
 
 # -- the child's environment ------------------------------------------------------------
 
-def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = frozenset(),
-          *, windows: bool = os.name == "nt") -> dict[str, str]:
+def scrub(env: Mapping[str, str], session_env: frozenset[str] | set[str] = frozenset(),
+          *, is_windows: bool = os.name == "nt") -> dict[str, str]:
     """A copy of `environ` without any session's stamps.
 
     Removes every `CLAUDE*` name but the user's configuration and sign-in
     (`CLAUDE_KEEP`), `AI_AGENT`, and each name in `session_env`, the modules'
     `SESSION_ENV` keys, where a key ending in `_` is a prefix.
     """
-    norm = str.upper if windows else (lambda name: name)
+    norm = str.upper if is_windows else (lambda name: name)
     claude = tuple(norm(p) for p in SCRUB_PREFIXES)
     keep = {norm(n) for n in CLAUDE_KEEP}
     prefixes = tuple(norm(n) for n in session_env if n.endswith("_"))
@@ -518,7 +515,7 @@ def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = f
         return (name in names or name.startswith(prefixes)
                 or (name.startswith(claude) and name not in keep))
 
-    return {name: value for name, value in environ.items() if not scrubbed(name)}
+    return {name: value for name, value in env.items() if not scrubbed(name)}
 
 
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
@@ -538,11 +535,11 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     and the crossing mark when it recycles at its limit. A row at `off` stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
-        env[KEEP_WARM] = "on"
+        env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
-        env[RECYCLE_ON_EXPIRY] = str(values["recycle_on_expiry"])
+        env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
     if values.get("recycle_at_limit") in ("relaunch", "compact") and values.get("limit_at"):
-        env[USAGE_CROSSING_AT] = str(values["limit_at"])
+        _stamp(env, "usage", 1, "CROSSING_AT_ENV", str(values["limit_at"]))
     return env
 
 
@@ -556,24 +553,24 @@ def stamps(request_id: str, *, turns: bool = False, additions: Additions | None 
     `options` the option rows' stamps and any a replay adds."""
     env: dict[str, str] = {}
     if turns:
-        env[TURNS_COMMANDS] = ",".join(granted)
+        _stamp(env, "turns", 2, "COMMANDS_ENV", ",".join(granted))
     if additions is not None:
         env.update(additions.env)
     if warn_at:
-        env[USAGE_WARN_AT] = str(warn_at)
+        _stamp(env, "usage", 1, "WARN_AT_ENV", str(warn_at))
     if notes_dir:
-        env[NOTES_DIR] = str(notes_dir)
+        _stamp(env, "notes", 1, "NOTES_DIR_ENV", str(notes_dir))
     env.update(options or {})
-    env[REQUEST] = request_id
+    env[REQUEST_ENV] = request_id
     return env
 
 
-def environment(environ: Mapping[str, str], composition: Composition,
+def child_env(caller_env: Mapping[str, str], composition: Composition,
                 session_env: frozenset[str] | set[str] = frozenset(), *,
-                windows: bool = os.name == "nt") -> dict[str, str]:
+                is_windows: bool = os.name == "nt") -> dict[str, str]:
     """The whole environment the child gets: `environ` scrubbed, then the launch's
     stamps."""
-    env = scrub(environ, session_env, windows=windows)
+    env = scrub(caller_env, session_env, is_windows=is_windows)
     env.update(composition.env)
     return env
 
@@ -604,12 +601,12 @@ TERMINAL_NAMES = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
 #: built from the core's own constants.
 _HARNESS = names.HARNESS.upper() + "_"
 _LOCATOR = re.compile(re.escape(_HARNESS) + "[A-Z0-9_]+_(?:" + "|".join(
-    re.escape(n) for n in (*paths.LOCATORS, paths.DEVICE.removeprefix(_HARNESS))) + ")")
+    re.escape(n) for n in (*paths.LOCATORS, paths.DEVICE_ENV.removeprefix(_HARNESS))) + ")")
 
 
 def locator(name: str) -> bool:
     """Whether `name` is one of the core's locators."""
-    return name in (paths.HOME, paths.DEVICE) or bool(_LOCATOR.fullmatch(name))
+    return name in (paths.HOME_ENV, paths.DEVICE_ENV) or bool(_LOCATOR.fullmatch(name))
 
 
 def env_class(name: str) -> str | None:
@@ -620,13 +617,13 @@ def env_class(name: str) -> str | None:
     return RECORDED if name.startswith(RECORDED_PREFIXES) else None
 
 
-def _short(name: str, windows: bool) -> bool:
+def _short(name: str, *, is_windows: bool) -> bool:
     return (name in BASE_NAMES or name.startswith(BASE_PREFIXES)
-            or (windows and name in WINDOWS_BASE_NAMES))
+            or (is_windows and name in WINDOWS_BASE_NAMES))
 
 
-def base_env(environ: Mapping[str, str], *,
-             windows: bool = os.name == "nt") -> dict[str, str | None]:
+def base_env(env: Mapping[str, str], *,
+             is_windows: bool = os.name == "nt") -> dict[str, str | None]:
     """What a launch records of its child's environment `environ`: the value of each name
     of the recorded class that is set (the short list, `BASE_NAMES` and `BASE_PREFIXES`;
     the core's locators; the names `ENV_CLASS` classes recorded; on Windows
@@ -634,26 +631,26 @@ def base_env(environ: Mapping[str, str], *,
     value, which is never recorded. Each is kept under the name as `environ` spells it.
     Windows reads names without case, so there they are matched so too."""
     out: dict[str, str | None] = {}
-    for name, value in environ.items():
-        key = name.upper() if windows else name
+    for name, value in env.items():
+        key = name.upper() if is_windows else name
         kind = env_class(key)
         if kind == CREDENTIAL:
             out[name] = None
-        elif kind == RECORDED or _short(key, windows) or locator(key):
+        elif kind == RECORDED or _short(key, is_windows=is_windows) or locator(key):
             out[name] = value
     return out
 
 
-def short_env(environ: Mapping[str, str], *,
-              windows: bool = os.name == "nt") -> dict[str, str]:
+def short_env(env: Mapping[str, str], *,
+              is_windows: bool = os.name == "nt") -> dict[str, str]:
     """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`, and on Windows
     the names a process there needs to start (`WINDOWS_BASE_NAMES`): the base of a replay
     of a row made before the base was recorded."""
-    norm = str.upper if windows else (lambda name: name)
-    return {name: value for name, value in environ.items() if _short(norm(name), windows)}
+    norm = str.upper if is_windows else (lambda name: name)
+    return {name: value for name, value in env.items() if _short(norm(name), is_windows=is_windows)}
 
 
-def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
+def replay_env(base: Mapping[str, str | None], caller_env: Mapping[str, str],
                pass_env: Sequence[str] = (), *,
                terminal: bool = False) -> dict[str, str]:
     """The environment a replay's child is built from, before the scrub and the stamps:
@@ -664,8 +661,8 @@ def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
     `environ` comes in."""
     env = {name: value for name, value in base.items() if value is not None}
     if terminal:
-        env.update({name: environ[name] for name in TERMINAL_NAMES if name in environ})
-    env.update({name: environ[name] for name in pass_env if name in environ})
+        env.update({name: caller_env[name] for name in TERMINAL_NAMES if name in caller_env})
+    env.update({name: caller_env[name] for name in pass_env if name in caller_env})
     return env
 
 
@@ -693,7 +690,7 @@ def encode(value: object) -> str:
 
 def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
                 brief: str | None = None, env: Mapping[str, str] | None = None,
-                prompt: str | None = None, windows: bool = os.name == "nt") -> None:
+                prompt: str | None = None, is_windows: bool = os.name == "nt") -> None:
     """Refuse a launch past a limit: `store.TooLarge` for a brief, `values_json` or
     `argv_json` past the launch log's cap, `TooLong` for a command line past the
     system's. A `values_json` refusal names its largest value too, which is the one to
@@ -706,7 +703,7 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
                 largest = max(((key, len(encode(value).encode("utf-8")))
                                for key, value in values.items()), key=lambda kv: kv[1])
             raise store.TooLarge(name, size, largest)
-    if windows:
+    if is_windows:
         line = subprocess.list2cmdline(list(argv))
         if len(line) + 1 > WINDOWS_LINE:
             raise TooLong("the command line", len(line) + 1, WINDOWS_LINE, "characters")
@@ -720,14 +717,14 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
 
 
 __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL",
-           "ENV_CLASS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "NOTES_DIR",
-           "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY",
-           "RELAUNCH", "RELAUNCHED", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
-           "TERMINAL_NAMES", "TURNS_COMMANDS", "USAGE_CROSSING_AT", "USAGE_WARN_AT",
+           "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
+           "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY_ENV",
+           "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
+           "TERMINAL_NAMES",
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
            "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
-           "env_class", "environment", "first_turn", "identity_block", "locator",
+           "env_class", "child_env", "first_turn", "identity_block", "locator",
            "no_credentials", "option_stamps", "prompt_path", "replay_env", "scratch_dir",
            "scratch_root", "scratch_root_problem", "scrub", "seat_text", "short_env",
            "stamps", "write_prompt"]

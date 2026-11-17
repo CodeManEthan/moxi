@@ -95,7 +95,7 @@ class Spawned:
     """A stand-in for `proc.spawn` that records each call, and runs the launch job in
     this process when `run` is set."""
 
-    def __init__(self, run: bool = False):
+    def __init__(self, *, run: bool = False):
         self.calls: list[dict] = []
         self.run = run
         self.threads: list[threading.Thread] = []
@@ -588,8 +588,8 @@ EVERY_ROW = [(harness, name, layer)
 def _resolved(request) -> tuple:
     try:
         found = presets.resolve(request, available=slots.links)
-    except catalog.Refused as refused:
-        return ("refused", type(refused).__name__, str(refused))
+    except catalog.Refused as exc:
+        return ("refused", type(exc).__name__, str(exc))
     return dict(found.values), dict(found.sources), sorted(found.chosen)
 
 
@@ -690,7 +690,8 @@ def _presets_names(module) -> set[str]:
 
 def test_no_route_or_handler_names_a_writer_of_the_presets_file():
     readers = {"read", "check", "layered", "harness_of", "Request", "Presets", "Preset",
-               "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS"}
+               "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS", "mode_of",
+               "off_posture_rows", "SHIPPED", "TYPED", "LEFT_OUT", "dir_place"}
     for module in (page, pagehandlers):
         text = Path(module.__file__).read_text(encoding="utf-8")
         assert "presets.toml" not in text and "presets.path" not in text, module.__name__
@@ -1087,3 +1088,20 @@ def test_the_sweep_takes_an_old_request_file():
     os.utime(path, (old, old))
     swept = targets.sweep(keep_days=90)
     assert path.name in swept.removed and not path.exists()
+
+
+@pytest.mark.parametrize(("pinned", "more"), [
+    ('target = "slot"', ""), ('target = "slot"\nslot = "7"', " --leave-out slot"),
+    ('target = "headless"', "")])
+def test_a_terminal_launchs_command_names_the_terminal_where_the_defaults_pin_another_target(
+        work, tmp_path, monkeypatch, pinned, more):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    write_presets(f"[defaults]\n{pinned}\n")
+    # What the box on the shell's home sends, empty, for a launch in the user's terminal.
+    said = previewed({"values": {"harness": "claude", "cwd": str(work), "target": "terminal"},
+                      "leave_out": ["brief", "slot"]})
+    assert said["refused"] == [] and said["target"] == "terminal"
+    assert said["command"] == f"moxi launcher run --cwd={work} --target=terminal{more}"
+    # Pasted, the command starts in the terminal: the pinned target does not take it.
+    _, composition = command_line_preview(said["command"].split()[3:])
+    assert composition.target == "terminal"

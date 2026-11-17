@@ -130,7 +130,7 @@ def test_the_users_pathspec_variables_change_nothing(root, var):
 
 
 def test_a_blob_over_max_mb_is_left_out(root):
-    configure(max_mb=1)
+    configure(max_mib=1)
     write(root, "big.md", "x" * (1024 * 1024 + 10))
     write(root, "clean.md", "fine\n")
     sh(root, "add", "big.md", "clean.md")

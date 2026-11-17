@@ -124,6 +124,36 @@ def see_only(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
 
 
+def released_catalogue_text() -> str:
+    """The shipped catalogue as the core release after its modules' first releases ships
+    it: one version higher, with no `unreleased` mark."""
+    import re
+    from importlib.resources import files
+
+    text = (files("moxi") / "catalogue.toml").read_text(encoding="utf-8")
+    text = text.replace("unreleased = true\n", "")
+    return re.sub(r"(?m)^version = ([0-9]+)$",
+                  lambda found: f"version = {int(found.group(1)) + 1}", text)
+
+
+@pytest.fixture(autouse=True)
+def _released_catalogue(monkeypatch):
+    """Every listed module as released: the shipped catalogue marks the modules not on the
+    index yet, and the install and uninstall tests install listed names from it. A test of
+    the mark, or of the shipped copy itself, reads its own."""
+    import moxi.catalogue as catalogue
+
+    real = catalogue.load
+
+    def load(env=None):
+        found = real(env)
+        return catalogue.Catalogue(found.version, tuple(
+            catalogue.Entry(e.name, e.distribution, e.summary) for e in found.entries),
+            found.source)
+
+    monkeypatch.setattr(catalogue, "load", load)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_core_roots(tmp_path_factory, monkeypatch):
     """The core's own roots, uv's tool directory and the user site point into tmp, so
@@ -147,7 +177,7 @@ def default_home(_no_real_core_roots, monkeypatch) -> None:
 
     import moxi.paths
 
-    monkeypatch.delenv(moxi.paths.HOME, raising=False)
+    monkeypatch.delenv(moxi.paths.HOME_ENV, raising=False)
     for name in list(os.environ):
         if (name.startswith("MOXI_")
                 and name.endswith(tuple(f"_{suffix}" for suffix in moxi.paths.LOCATORS))):
@@ -204,10 +234,10 @@ def drop_modules(packages: set[str]) -> None:
 WINDOWS = sys.platform == "win32"
 
 #: The form a skill folder takes under `skills.form = link`.
-FOLDER_LINK = "junction" if WINDOWS else "link"
+DIR_LINK = "junction" if WINDOWS else "link"
 
 
-def link_folder(link: Path, target: Path) -> None:
+def link_dir(link: Path, target: Path) -> None:
     """Make `link` a link to the folder `target`: a symlink, or on Windows a directory
     junction, which needs no privilege there."""
     if WINDOWS:
@@ -506,9 +536,10 @@ class PipeRaw:
 
         if err == _winapi.ERROR_IO_PENDING:
             ms = max(0, int(timeout * 1000))
-            if _winapi.WaitForMultipleObjects([ov.event], False, ms) != _winapi.WAIT_OBJECT_0:
+        if _winapi.WaitForMultipleObjects(
+                [ov.event], False, ms) != _winapi.WAIT_OBJECT_0:  # noqa: FBT003 -- Win32 API arguments are positional
                 ov.cancel()
-        n, err = ov.GetOverlappedResult(True)
+        n, err = ov.GetOverlappedResult(True)  # noqa: FBT003 -- Win32 API argument is positional
         return n, err == _winapi.ERROR_OPERATION_ABORTED
 
     def send(self, data: bytes) -> None:

@@ -37,6 +37,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from moxi import exit as codes
+from moxi.log import LOG_FILE_ENV
 
 from . import places, support, tmux
 from .errors import TmuxError, TryAgain
@@ -58,20 +59,20 @@ DAEMON = "server"
 SCRIPT = "moxi-slots-server"
 
 
-def clean_env(environ: Mapping[str, str]) -> dict[str, str]:
+def clean_env(env: Mapping[str, str]) -> dict[str, str]:
     """The server's environment: `KEEP` and every `LC_*` from `environ`, nothing else.
     Every pane starts from it, so nothing of the caller's reaches one."""
-    return {k: v for k, v in environ.items() if k in KEEP or k.startswith("LC_")}
+    return {k: v for k, v in env.items() if k in KEEP or k.startswith("LC_")}
 
 
-def user_conf(environ: Mapping[str, str]) -> str | None:
+def user_conf(env: Mapping[str, str]) -> str | None:
     """The user's usual tmux config, as tmux finds it: the first of `~/.tmux.conf`,
     `$XDG_CONFIG_HOME/tmux/tmux.conf` and `~/.config/tmux/tmux.conf` that exists."""
-    home = environ.get("HOME") or ""
+    home = env.get("HOME") or ""
     candidates = []
     if home:
         candidates.append(os.path.join(home, ".tmux.conf"))
-    if xdg := environ.get("XDG_CONFIG_HOME"):
+    if xdg := env.get("XDG_CONFIG_HOME"):
         candidates.append(os.path.join(xdg, "tmux", "tmux.conf"))
     if home:
         candidates.append(os.path.join(home, ".config", "tmux", "tmux.conf"))
@@ -86,7 +87,7 @@ def quote(text: str) -> str:
     return f'"{escaped}"'
 
 
-def config_text(conf: str | None, environ: Mapping[str, str]) -> str:
+def config_text(conf: str | None, env: Mapping[str, str]) -> str:
     """`server.conf`: the user's config (or `conf`), then the options slots relies on."""
     lines = ["# Written by moxi-slots-server at each start; an edit here is lost.",
              "# Put your own settings in the file the slots setting tmux_conf names, or",
@@ -95,22 +96,22 @@ def config_text(conf: str | None, environ: Mapping[str, str]) -> str:
         sources = [conf]
     else:
         sources = [SYSTEM_CONF]
-        if found := user_conf(environ):
+        if found := user_conf(env):
             sources.append(found)
     lines += [f"source-file -q {quote(path)}" for path in sources]
     lines += [f"set {scope} {name} {value}" for scope, name, value in OPTIONS]
     return "\n".join(lines) + "\n"
 
 
-def sweep_launch_files(directory: Path | None = None,
+def sweep_launch_files(launch_dir: Path | None = None,
                        older_than: float | None = None) -> list[Path]:
     """Remove the launch files in `directory` (the runtime `launch/`), those older than
     `older_than` seconds when given; return what was removed. A launch file holds a
     launch's environment, so none is kept past its use."""
-    directory = places.launch_dir() if directory is None else directory
+    launch_dir = places.launch_dir() if launch_dir is None else launch_dir
     removed = []
     try:
-        entries = list(os.scandir(directory))
+        entries = list(os.scandir(launch_dir))
     except OSError:
         return removed
     now = time.time()
@@ -203,7 +204,7 @@ def ensure(*, wait: float = START_WAIT) -> int:
 
     places.runtime_dir(create=True)
     try:
-        with files.lock(places.server_lock(), timeout=LOCK_WAIT):
+        with files.lock(places.server_lock(), timeout_s=LOCK_WAIT):
             if (pid := tmux.ping()) is not None:
                 return pid
             return _start(wait)
@@ -220,7 +221,7 @@ def _start(wait: float) -> int:
     except FileNotFoundError as exc:
         raise TmuxError(f"the slots server cannot be started: {exc}") from None
     env = tmux.client_env()
-    env["MOXI_LOG_FILE"] = str(places.server_log())
+    env[LOG_FILE_ENV] = str(places.server_log())
     started = proc.spawn([script], detached=True, output=places.server_log(), env=env)
     deadline = time.monotonic() + wait
     while True:

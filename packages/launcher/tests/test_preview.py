@@ -6,7 +6,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,10 +18,12 @@ from moxi_dev.testing import wait_for
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
-from moxi_launcher import api, compose, first, handoffs, presets
+from moxi_launcher import api, compose, first, handoffs, names, presets
 from moxi_launcher.compose import Additions, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+#: The time a test names its launch at.
+NOW = datetime(2026, 11, 8, 12, 45)
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class Resolved:
 class FakeTurns:
     """turns' API as the launcher calls it: the launch additions, counted."""
 
+    COMMANDS_ENV = "MOXI_TURNS_COMMANDS"
     calls: list = field(default_factory=list)
 
     def launch_additions(self, harness, *, cwd, env, session_id=None, commands=()):
@@ -96,7 +100,7 @@ def test_the_context_reads_the_files_a_launch_names(tmp_path):
               "brief_file": str(tmp_path / "brief.md"),
               "instructions_file": str(tmp_path / "seat.md"),
               "handoff": str(tmp_path / "h.md")}
-    got = compose.context(values, request_id="r1", session_id=SID, actor="ann",
+    got = compose.context(values, request_id="r1", session_id=SID, by="ann",
                           modules=frozenset())
     assert (got.brief, got.instructions, got.handoff_text) == (
         "the brief", "the seat", "the handoff")
@@ -112,28 +116,28 @@ def test_a_file_the_launch_names_that_cant_be_read_is_refused(tmp_path):
                         request_id="r1", modules=frozenset())
 
 
-def test_the_context_names_the_handoff_folder_only_with_a_key(tmp_path):
+def test_the_context_names_the_handoff_dir_only_with_a_key(tmp_path):
     values = {"harness": "claude", "cwd": str(tmp_path)}
     none = compose.context(values, request_id="r1", modules=frozenset())
     assert none.handoff_dir is None
     seat = compose.context(values, request_id="r1", modules=frozenset(),
                            preset_kind="seat", preset_name="lead")
-    assert seat.handoff_dir == str(handoffs.own_folder(create=False))
+    assert seat.handoff_dir == str(handoffs.own_handoffs_dir(create=False))
     # An identity counts as the key only with comms.
     ignored = compose.context({**values, "identity": "planner"}, request_id="r1",
                               modules=frozenset())
     assert ignored.handoff_dir is None
 
 
-def test_the_context_never_makes_the_launchers_own_handoff_folder(tmp_path):
+def test_the_context_never_makes_the_launchers_own_handoff_dir(tmp_path):
     """Neither preview nor a launch's compose makes it: a launch makes it with its other
     files, after its row."""
     values = {"harness": "claude", "cwd": str(tmp_path)}
-    folder = handoffs.own_folder(create=False)
+    handoff_dir = handoffs.own_handoffs_dir(create=False)
     for create in (False, True):
         got = compose.context(values, request_id="r1", modules=frozenset(),
                               project_key="moxi", create=create)
-        assert got.handoff_dir == str(folder) and not folder.exists()
+        assert got.handoff_dir == str(handoff_dir) and not handoff_dir.exists()
 
 
 def test_the_context_asks_whether_comms_resumes_a_codex_thread_only_for_a_resume(
@@ -243,7 +247,7 @@ def test_the_context_says_whether_the_agent_role_resolved(monkeypatch):
     assert (found.role_found, missing.role_found) == (True, False)
 
 
-def test_the_host_script_is_looked_for_in_this_environment():
+def test_the_host_script_is_looked_for_in_this_env():
     try:
         expected = str(compose.paths.script(compose.HOST))
     except FileNotFoundError:
@@ -282,35 +286,37 @@ def test_preview_composes_what_resolve_returns(monkeypatch):
     # A stand-in for the presets resolver, which comes with the presets module.
     seen = []
 
-    def resolve(request, environ=None):
+    def resolve(request, env=None):
         seen.append(request)
         return Resolved({"harness": "claude", "cwd": "/work", "model": "opus"},
                         chosen=frozenset({"model"}))
 
     monkeypatch.setattr(api, "_resolve", resolve)
     monkeypatch.setattr(compose, "installed", lambda: frozenset())
+    monkeypatch.setattr(names, "now", lambda: NOW)
     got = api.preview(Request())
     assert seen == [Request()]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file",
         str(Layout("launcher").state_dir() / "runs" / "r1.prompt.md"),
-        "--model", "opus", "--permission-mode", "default"]
+        "--model", "opus", "-n", "work-opus-Nov-08 12:45", "--permission-mode", "default"]
     assert got.target == "terminal" and got.mode == "interactive"
     # It starts nothing and writes nothing of the launcher's.
     assert not (Layout("launcher").state_dir() / "runs").exists()
 
 
+#: Each names its session, so the preview and the composer are given the same values.
 CONTRACT_REQUESTS = [
-    {"harness": "claude", "cwd": "/work", "model": "opus", "brief": "b"},
-    {"harness": "claude", "cwd": "/work", "target": "headless", "brief": "b"},
-    {"harness": "codex", "cwd": "/work", "target": "headless", "brief": "b"},
-    {"harness": "codex", "cwd": "/work", "trust_cwd": True},
+    {"harness": "claude", "cwd": "/work", "model": "opus", "brief": "b", "name": "one"},
+    {"harness": "claude", "cwd": "/work", "target": "headless", "brief": "b", "name": "two"},
+    {"harness": "codex", "cwd": "/work", "target": "headless", "brief": "b", "name": "three"},
+    {"harness": "codex", "cwd": "/work", "trust_cwd": True, "name": "four"},
 ]
 
 
 @pytest.mark.parametrize("values", CONTRACT_REQUESTS)
 def test_preview_shows_the_argv_build_composes_for_the_launch(monkeypatch, values):
-    monkeypatch.setattr(api, "_resolve", lambda request, environ=None: Resolved(dict(values)))
+    monkeypatch.setattr(api, "_resolve", lambda request, env=None: Resolved(dict(values)))
     monkeypatch.setattr(compose, "installed", lambda: frozenset())
     shown = api.preview(Request())
     composed = compose.build(Request(), Resolved(dict(values)), create=True)
@@ -351,7 +357,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
     if with_turns:
         fake = tmp_path / "fake-turns"
         fake.mkdir()
-        monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+        monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
         monkeypatch.setenv("LAUNCHER_FAKE_TURNS", str(fake))
     if typed.get("target") == "slot":
         slots = tmp_path / "fake-slots"
@@ -377,7 +383,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
         wait_for(lambda: log.exists() and log.read_text().strip(), timeout=60)
 
 
-def test_a_scratch_launch_works_in_a_folder_named_by_its_request_id(tmp_path):
+def test_a_scratch_launch_works_in_a_dir_named_by_its_request_id(tmp_path):
     import tempfile
 
     # One parent per user, so no other user owns it.
@@ -414,6 +420,7 @@ def write_presets(text: str) -> None:
 
 def test_preview_resolves_through_presets(tmp_path, monkeypatch):
     monkeypatch.setattr(compose, "installed", lambda: frozenset())
+    monkeypatch.setattr(names, "now", lambda: NOW)
     write_presets(f"""
 [defaults]
 permission_mode = "acceptEdits"
@@ -431,14 +438,15 @@ add_dir = ["{tmp_path}"]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file", prompt_file,
         "--model", "opus", "--effort", "high", "--add-dir", str(tmp_path),
-        "--permission-mode", "acceptEdits"]
+        "-n", f"{tmp_path.name}-opus-Nov-08 12:45", "--permission-mode", "acceptEdits"]
     assert "handoff dir:" in got.prompt_file.text      # the seat's name is its key
     assert got.values["mode"] == "interactive" and got.values["off_posture"] is False
     resolved = presets.resolve(request)
-    assert got.argv == compose.build(request, resolved, create=True).argv
+    named = replace(resolved, values={**resolved.values, "name": got.values["name"]})
+    assert got.argv == compose.build(request, named, create=True).argv
 
 
-def test_preview_of_a_scratch_codex_launch_names_the_scratch_folder():
+def test_preview_of_a_scratch_codex_launch_names_the_scratch_dir():
     request = SimpleNamespace(**vars(presets.Request(
         typed={"harness": "codex", "scratch": True, "target": "headless", "brief": "b"})),
         request_id="r9", session_id=None, actor="ann")

@@ -59,7 +59,7 @@ def passed(monkeypatch):
 
 def test_systemds_sockets_are_taken_with_their_names_and_the_variables_go(passed):
     env = passed.systemd()
-    got = listen.take(1, environ=env, platform="linux")
+    got = listen.take(1, env=env, platform="linux")
     try:
         assert got.inherited and got.port == passed.port
         assert got.fd_names == UNITS[:passed.count]
@@ -80,7 +80,7 @@ def test_only_the_ipv4_socket_passed_refuses_localhost_where_ipv6_loopback_exist
     monkeypatch.setattr("moxi_ui.loopback.transport._no_ipv6_loopback", lambda: False)
     if passed.count == 2:
         os.close(FIRST + 1)
-    got = listen.take(1, environ=passed.systemd(count=1), platform="linux")
+    got = listen.take(1, env=passed.systemd(count=1), platform="linux")
     try:
         assert got.inherited and got.names == frozenset({"127.0.0.1"})
         assert got.fd_names == ("moxi-ui-shell.socket",)
@@ -92,12 +92,12 @@ def test_passed_sockets_never_read_the_port(passed):
     def unread():
         raise AssertionError("the port was read")
 
-    got = listen.take(unread, environ=passed.systemd(), platform="linux")
+    got = listen.take(unread, env=passed.systemd(), platform="linux")
     try:
         assert got.inherited and got.port == passed.port
     finally:
         got.close()
-    got = listen.take(lambda: 0, environ={}, platform="linux")
+    got = listen.take(lambda: 0, env={}, platform="linux")
     try:
         assert not got.inherited
     finally:
@@ -146,7 +146,7 @@ def test_another_socket_on_ipv6_loopback_leaves_localhost_refused(tmp_path):
 
 
 def test_a_name_count_that_does_not_match_names_none(passed):
-    got = listen.take(1, environ=passed.systemd(names="a:b:c"), platform="linux")
+    got = listen.take(1, env=passed.systemd(names="a:b:c"), platform="linux")
     try:
         assert got.inherited and got.fd_names == ()
     finally:
@@ -155,7 +155,7 @@ def test_a_name_count_that_does_not_match_names_none(passed):
 
 def test_variables_for_another_process_are_dropped_and_the_shell_binds(passed):
     env = passed.systemd(pid=1)
-    got = listen.take(0, environ=env, platform="linux")
+    got = listen.take(0, env=env, platform="linux")
     try:
         assert not got.inherited and got.fd_names == () and got.port != passed.port
         assert env == {"OTHER": "kept"}
@@ -164,7 +164,7 @@ def test_variables_for_another_process_are_dropped_and_the_shell_binds(passed):
 
 
 def test_with_nothing_passed_the_shell_binds_its_own():
-    got = listen.take(0, environ={}, platform="linux")
+    got = listen.take(0, env={}, platform="linux")
     try:
         assert not got.inherited and len(got.sockets) >= 1
     finally:
@@ -178,7 +178,7 @@ def test_a_passed_socket_that_is_not_a_loopback_listener_is_refused(monkeypatch)
     plain.close()
     monkeypatch.setattr(listen, "_FIRST_FD", FIRST)
     with pytest.raises(listen.NotLoopback, match="not listening"):
-        listen.take(1, environ={"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": "1"},
+        listen.take(1, env={"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": "1"},
                     platform="linux")
     with pytest.raises(OSError):  # take closed it
         os.fstat(FIRST)
@@ -206,7 +206,7 @@ def test_launchds_sockets_are_taken_by_key(passed):
     if passed.count == 2:
         keys["Listeners-1"] = [FIRST + 1]
     activate = _launchd(keys)
-    got = listen.take(1, environ={}, activate=activate, platform="darwin")
+    got = listen.take(1, env={}, activate=activate, platform="darwin")
     try:
         assert got.inherited and got.port == passed.port and got.fd_names == ()
         assert len(got.sockets) == passed.count and "localhost" in got.names
@@ -217,7 +217,7 @@ def test_launchds_sockets_are_taken_by_key(passed):
 
 def test_a_process_launchd_did_not_start_binds_its_own():
     activate = _launchd({"Listeners": errno.ESRCH})
-    got = listen.take(0, environ={}, activate=activate, platform="darwin")
+    got = listen.take(0, env={}, activate=activate, platform="darwin")
     try:
         assert not got.inherited and activate.asked == ["Listeners"]
     finally:
@@ -227,4 +227,4 @@ def test_a_process_launchd_did_not_start_binds_its_own():
 def test_a_launchd_key_that_cannot_be_taken_is_refused(passed):
     activate = _launchd({"Listeners": [FIRST], "Listeners-1": errno.EALREADY})
     with pytest.raises(listen.NotLoopback, match="Listeners-1"):
-        listen.take(1, environ={}, activate=activate, platform="darwin")
+        listen.take(1, env={}, activate=activate, platform="darwin")

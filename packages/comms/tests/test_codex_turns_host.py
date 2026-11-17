@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 import pytest
-from conftest import clock_reads_warm, cursor_of, wait_until
+from conftest import LIVE_S, clock_reads_warm, cursor_of, wait_until
 
 from fake_codex import calls, control_call, events, install
 
@@ -106,9 +106,9 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
     records.mkdir()
     proc = wrapper(spawn, records, tmp_path)
     try:
-        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 20), \
+        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, LIVE_S), \
             proc.stdout.read() if proc.poll() is not None else "no binding"
-        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].session_id, 20)
+        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].session_id, LIVE_S)
         # The launch opens its thread with an injected item, not a turn, so the mail
         # starts the thread's first turn.
         assert calls(records, "thread/inject_items") and not calls(records, "turn/start")
@@ -116,10 +116,10 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
                              name="main", scope="proj-a")
         assert code == 0, out
         mid = out.split()[1]
-        assert wait_until(lambda: digest_with(records, mid), 20), calls(records)
+        assert wait_until(lambda: digest_with(records, mid), LIVE_S), calls(records)
         assert cursor_of(IDENTITY) != mid, "not before the turn ends"
         control_call(records, {"op": "complete"})
-        assert wait_until(lambda: cursor_of(IDENTITY) == mid, 15)
+        assert wait_until(lambda: cursor_of(IDENTITY) == mid, LIVE_S)
     finally:
         output = stop(proc)
     assert proc.returncode == 0, output
@@ -154,9 +154,9 @@ def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
          "--config", str(config)],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
-        assert wait_until(lambda: calls(records, "thread/start"), 20), \
+        assert wait_until(lambda: calls(records, "thread/start"), LIVE_S), \
             proc.stdout.read() if proc.poll() is not None else "thread/start did not arrive"
-        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 10)
+        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, LIVE_S)
         params = calls(records, "thread/start")[0]["params"]
         assert params["cwd"] == str(work)
         assert params["approvalPolicy"] == "never"
@@ -170,17 +170,19 @@ def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
         # A launch with no window gets the injected item too, with no mail sent, so its
         # thread has a rollout that a later `thread/resume` can load; and the daemon has
         # its id. No turn runs.
-        assert wait_until(lambda: calls(records, "thread/inject_items"), 10)
+        assert wait_until(lambda: calls(records, "thread/inject_items"), LIVE_S)
         thread_id = calls(records, "thread/inject_items")[0]["params"]["threadId"]
         assert wait_until(
-            lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, 10)
+            lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, LIVE_S)
         assert proc.poll() is None
     finally:
         output = stop(proc)
     assert proc.returncode == 0, output
-    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, 5)
-    assert wait_until(lambda: any(row["event"] == "app-server-exit"
-                                  for row in events(records)), 5)
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, LIVE_S)
+    # The host stops its app-server and waits for it before it exits, so once the
+    # wrapper has exited 0 the app-server's exit is written, or it never will be (the
+    # host killed it). It is checked once.
+    assert any(row["event"] == "app-server-exit" for row in events(records))
 
 
 def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
@@ -194,15 +196,15 @@ def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
     first = wrapper(spawn, records, tmp_path)
     try:
         # Once the item is in, the thread has a rollout, which `thread/resume` needs.
-        assert wait_until(lambda: calls(records, "thread/inject_items"), 20), \
+        assert wait_until(lambda: calls(records, "thread/inject_items"), LIVE_S), \
             first.stdout.read() if first.poll() is not None else "no injected item"
         thread_id = calls(records, "thread/inject_items")[0]["params"]["threadId"]
         assert wait_until(
-            lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, 10)
+            lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, LIVE_S)
     finally:
         output = stop(first)
     assert first.returncode == 0, output
-    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, 10)
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, LIVE_S)
     first_launch = codex_threads.read_meta(IDENTITY)["launch"]
 
     env = dict(os.environ)
@@ -218,16 +220,16 @@ def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
         cwd=str(tmp_path / "work"), env=env, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True)
     try:
-        assert wait_until(lambda: calls(records, "thread/resume"), 20), \
+        assert wait_until(lambda: calls(records, "thread/resume"), LIVE_S), \
             second.stdout.read() if second.poll() is not None else "no thread/resume"
         assert calls(records, "thread/resume")[0]["params"]["threadId"] == thread_id
         assert len(calls(records, "thread/start")) == 1, "no new thread"
-        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 10)
+        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, LIVE_S)
         binding = rig.daemon.bindings[IDENTITY]
         assert (binding.session_id, binding.new_session) == (thread_id, False)
         record = wait_until(lambda: (lambda r: r if r.get("launch") != first_launch
                                      else None)(codex_threads.read_meta(IDENTITY) or {}),
-                            10)
+                            LIVE_S)
         assert record["thread_id"] == thread_id and record["layer_one"], record
         # The first launch ran no turn: the resumed thread reads as one with none yet.
         assert rig.daemon.bindings[IDENTITY].turned is False, \

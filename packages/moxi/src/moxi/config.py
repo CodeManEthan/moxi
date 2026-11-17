@@ -1,6 +1,6 @@
 """One config file per module, born declared, read through this module.
 
-A program changes the file through this module (`set`, `unset`, `add_item`,
+A program changes the file through this module (`set_value`, `unset`, `add_item`,
 `remove_item`), which checks each change against the schema before it writes. A person
 may also edit the file by hand; one that no longer reads raises `ConfigError`, naming the
 file, when it is next read.
@@ -51,6 +51,32 @@ and `[local] retain_days = 7`. A key's fields:
 A `path` expands `~` and is refused when relative. A key holds no keys: declaring one
 under another key's path is refused when the schema is read.
 
+Page fields
+-----------
+
+A live key may also carry page fields, which say how the settings page shows it. Nothing
+else reads them: they never change what a key is or how it is read. Each is optional:
+
+    label      the plain words the row leads with; one line, at most 60 characters
+    line       the one sentence under the row; one line, at most 160 characters
+    common     a bool: true shows the key before the rest; at most seven keys of a schema
+    group      the sub-head the key sits under; one line, at most 40 characters
+    unit       the word after an int's or a float's field: one word or two, at most 20
+               characters
+    choices    on an enum, a table from each of some or all of its values to the words
+               shown for it
+    pick       a bool, on an enum: true shows its values as a pick list
+    hurts      a change that can hurt, on a bool or a list: `when` ("on" or "off" on a
+               bool, "add" or "remove" on a list), `says` and `confirm` (one line each),
+               and on a bool `stays`, true when holding the value `when` names is itself
+               the harm, so the warning stays while the key holds it
+    terminal   on a bool turned on and off at the terminal: `on` and `off`, each the one
+               command that turns it so; the page shows the value and does not change it
+    elsewhere  one line naming the other page the key is edited on; the page leaves the
+               key out
+
+A retired key carries none of them.
+
 A switch table is a `table` key with `items = "bool"`, `read = "use"`, no `env` and
 `default = {}`. Each of its entries is a switch of its own, named `<table key>.<entry>`
 (the entry is lower-case letters, digits, `-` and `_`), and a missing entry reads false.
@@ -77,7 +103,7 @@ turns bad and reporting the error once per change of the file.
 Changing
 --------
 
-`set`, `unset`, `add_item` and `remove_item` change one key of a module's config file
+`set_value`, `unset`, `add_item` and `remove_item` change one key of a module's config file
 (what `moxi config set` and `moxi config unset` run): the key must be declared and live,
 the value is coerced to the key's type, and the file is edited through
 `moxi.files.edit_toml` under its lock, keeping comments and order. Before anything is
@@ -113,7 +139,14 @@ import sys
 
 TYPES = ("bool", "int", "float", "string", "enum", "path", "list", "table")
 READS = ("start", "use")
-FIELDS = ("type", "default", "doc", "read", "values", "env", "retired", "needs", "items")
+#: The fields a key may carry for the settings page; nothing else reads them (see "Page
+#: fields" above).
+PAGE_FIELDS = ("label", "line", "common", "group", "unit", "choices", "pick", "hurts",
+               "terminal", "elsewhere")
+FIELDS = ("type", "default", "doc", "read", "values", "env", "retired", "needs",
+          "items") + PAGE_FIELDS
+#: The most keys one schema may mark `common`.
+COMMON_MAX = 7
 #: The item types a `list` or `table` key may declare as its `items`.
 ITEMS = ("str", "int", "bool", "float")
 
@@ -121,7 +154,7 @@ DEFAULT = "default"
 FILE = "file"
 ENV = "env"
 
-#: The history of every change `set`, `unset`, `add_item` and `remove_item` make, in the
+#: The history of every change `set_value`, `unset`, `add_item` and `remove_item` make, in the
 #: core's state directory.
 HISTORY = "settings.jsonl"
 #: How long a change waits for the config file's lock, in seconds.
@@ -199,19 +232,32 @@ class _Frozen:
         return f"{type(self).__name__}({inner})"
 
     def __reduce__(self):
-        return (type(self), self._fields())
+        return (_rebuilt, (type(self), self._fields()))
+
+
+def _rebuilt(cls, fields):
+    """A `_Frozen` record of class `cls` holding `fields`, in its slots' order: how a copy
+    or an unpickled record is made, whatever its constructor takes by keyword only."""
+    record = cls.__new__(cls)
+    for name, value in zip(cls.__slots__, fields):
+        object.__setattr__(record, name, value)
+    return record
 
 
 class Key(_Frozen):
-    """One declared key."""
+    """One declared key. Its page fields are None when the schema does not give them."""
 
     __slots__ = ("name", "type", "default", "doc", "read", "values", "env", "retired",
-                 "needs", "items")
+                 "needs", "items") + PAGE_FIELDS
 
-    def __init__(self, name, type, default, doc, read, values=None, env=None,
-                 retired=None, needs=None, items=None):
-        for field, value in zip(self.__slots__, (name, type, default, doc, read, values,
-                                                 env, retired, needs, items)):
+    def __init__(self, name, value_type, default, doc, read, values=None, env=None,
+                 retired=None, needs=None, items=None, *, label=None, line=None,
+                 common=None, group=None, unit=None, choices=None, pick=None, hurts=None,
+                 terminal=None, elsewhere=None):
+        for field, value in zip(self.__slots__, (name, value_type, default, doc, read, values,
+                                                 env, retired, needs, items, label, line,
+                                                 common, group, unit, choices, pick, hurts,
+                                                 terminal, elsewhere)):
             object.__setattr__(self, field, value)
 
 
@@ -256,6 +302,11 @@ class Schema:
                               "correct the schema's TOML") from None
         keys: dict = {}
         _walk_schema(data, "", source, keys)
+        common = [key.name for key in keys.values() if key.common]
+        if len(common) > COMMON_MAX:
+            raise SchemaError(source, None, f"marks {len(common)} keys common "
+                              f"({', '.join(common)}), more than {COMMON_MAX}",
+                              f"mark at most {COMMON_MAX} keys common")
         return cls(keys, source)
 
     @classmethod
@@ -423,14 +474,14 @@ def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
     """
     from pathlib import Path
 
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     if path is None:
         from .paths import _layout
 
-        path = _layout(module).config_file(environ)
+        path = _layout(module).config_file(effective_env)
     else:
         path = Path(path)
-    return _settings(module, schema, path, _parsed(path), environ)
+    return _settings(module, schema, path, _parsed(path), effective_env)
 
 
 class Config:
@@ -521,23 +572,23 @@ def _parsed(path) -> dict | None:
     return result
 
 
-def _settings(module, schema, path, data, environ) -> Settings:
+def _settings(module, schema, path, data, env) -> Settings:
     schema.check_env(module)
     from_file: dict = {}
     if data is not None:
-        _walk_file(data, "", schema, path, from_file, environ)
+        _walk_file(data, "", schema, path, from_file, env)
     values: dict = {}
     sources: dict = {}
     for key in schema.live():
-        raw = environ.get(key.env) if key.env else None
+        raw = env.get(key.env) if key.env else None
         if raw:
-            values[key.name] = _from_env(key, raw, environ)
+            values[key.name] = _from_env(key, raw, env)
             sources[key.name] = ENV
         elif key.name in from_file:
             values[key.name] = _copied(from_file[key.name])
             sources[key.name] = FILE
         else:
-            values[key.name] = _default_value(key, environ)
+            values[key.name] = _default_value(key, env)
             sources[key.name] = DEFAULT
     return Settings(module, path, schema, _MappingProxy(values), _MappingProxy(sources))
 
@@ -551,7 +602,7 @@ def _copied(value):
     return value
 
 
-def _walk_file(table, prefix, schema, path, out, environ) -> None:
+def _walk_file(table, prefix, schema, path, out, env) -> None:
     fix_unknown = "remove it, or check its spelling against the module's schema"
     for name, value in table.items():
         dotted = f"{prefix}{name}"
@@ -559,12 +610,12 @@ def _walk_file(table, prefix, schema, path, out, environ) -> None:
         if key is not None:
             if key.retired is not None:
                 raise ConfigError(path, dotted, "is retired", key.retired)
-            out[dotted] = _check_value(key, value, path, environ)
+            out[dotted] = _check_value(key, value, path, env)
         elif schema.is_group(dotted):
             if not isinstance(value, dict):
                 raise ConfigError(path, dotted, "is a table of settings, not a value",
                                   f"write it as [{dotted}] with its keys under it")
-            _walk_file(value, f"{dotted}.", schema, path, out, environ)
+            _walk_file(value, f"{dotted}.", schema, path, out, env)
         else:
             raise ConfigError(path, dotted, "is not a setting of this module", fix_unknown)
 
@@ -579,7 +630,7 @@ def _item_ok(kind, value) -> bool:
     return isinstance(value, str)
 
 
-def _check_value(key, value, path, environ):
+def _check_value(key, value, path, env):
     """`value` as key `key`'s type, or `ConfigError`."""
     kind = key.type
     ok = True
@@ -603,7 +654,7 @@ def _check_value(key, value, path, environ):
         raise ConfigError(path, key.name, f"is {value!r}, which it cannot be",
                           f"set it to one of {', '.join(map(repr, key.values))}")
     if kind == "path":
-        return _path(key, value, path, environ)
+        return _path(key, value, path, env)
     if key.items is not None and kind in ("list", "table"):
         return _check_items(key, value, path)
     return value
@@ -625,7 +676,7 @@ def _check_items(key, value, path):
     return {k: float(v) for k, v in value.items()} if kind == "float" else value
 
 
-def _path(key, value, source, environ):
+def _path(key, value, source, env):
     from pathlib import Path
 
     from .paths import _expanduser
@@ -634,14 +685,14 @@ def _path(key, value, source, environ):
         return None
     # `check_text` reads no environment of its own, but its `~` is still this process's
     # home, as `load` without an `env` expands it.
-    expanded = Path(_expanduser(value, os.environ if environ is _NO_ENV else environ))
+    expanded = Path(_expanduser(value, os.environ if env is _NO_ENV else env))
     if not expanded.is_absolute():
         raise ConfigError(source, key.name, f"is the relative path {value!r}",
                           "give an absolute path, or one starting with ~")
     return expanded
 
 
-def _from_env(key, raw, environ):
+def _from_env(key, raw, env):
     where = f"environment variable {key.env}"
     kind = key.type
     if kind == "bool":
@@ -657,12 +708,12 @@ def _from_env(key, raw, environ):
         except ValueError:
             raise ConfigError(where, key.name, f"is {raw!r}, not {_a(kind)}",
                               f"set it to {_a(kind)}") from None
-    return _check_value(key, raw, where, environ)
+    return _check_value(key, raw, where, env)
 
 
-def _default_value(key, environ):
+def _default_value(key, env):
     if key.type == "path":
-        return _path(key, key.default, "schema", environ)
+        return _path(key, key.default, "schema", env)
     if key.type in ("list", "table"):
         return _copied(key.default)
     return key.default
@@ -740,7 +791,11 @@ def _key(name, spec, source) -> Key:
     if retired is not None:
         if not isinstance(retired, str) or not retired.strip():
             raise bad("has an empty retired", "say what to do now instead")
-        return Key(name=name, type=spec.get("type"), default=spec.get("default"),
+        shown = [field for field in PAGE_FIELDS if field in spec]
+        if shown:
+            raise bad(f"is retired but has {', '.join(shown)}",
+                      "remove the page fields; a retired key is not shown")
+        return Key(name=name, value_type=spec.get("type"), default=spec.get("default"),
                    doc=spec.get("doc", ""), read=spec.get("read"), retired=retired)
 
     for required in ("type", "default", "doc", "read"):
@@ -788,8 +843,9 @@ def _key(name, spec, source) -> Key:
         if items not in ITEMS:
             raise bad(f"has items {items!r}", f"use one of {', '.join(ITEMS)}")
 
-    key = Key(name=name, type=kind, default=spec["default"], doc=doc, read=read,
-              values=values, env=env, needs=needs, items=items)
+    key = Key(name=name, value_type=kind, default=spec["default"], doc=doc, read=read,
+              values=values, env=env, needs=needs, items=items,
+              **_page_fields(spec, kind, values, bad))
     try:
         _check_value(key, key.default, source, os.environ)
     except ConfigError as exc:
@@ -797,9 +853,122 @@ def _key(name, spec, source) -> Key:
     return key
 
 
+#: The longest each one-line page field may be, in characters (None: no limit but one line).
+_PAGE_TEXT = {"label": 60, "line": 160, "group": 40, "unit": 20, "elsewhere": None}
+#: The direction of change a `hurts` may name, by the key's type.
+_HURTS_WHEN = {"bool": ("on", "off"), "list": ("add", "remove")}
+
+
+def _one_line(value) -> bool:
+    return (isinstance(value, str) and bool(value.strip()) and "\n" not in value
+            and "\r" not in value)
+
+
+def _page_fields(spec, kind, values, bad) -> dict:
+    """The page fields `spec` gives a live key of type `kind`, checked; `bad(problem, fix)`
+    makes the refusal."""
+    found: dict = {}
+    for field, most in _PAGE_TEXT.items():
+        if field not in spec:
+            continue
+        text = spec[field]
+        if not _one_line(text):
+            raise bad(f"has {field} {text!r}, which is not one line of text",
+                      f"give {field} as one line")
+        if most is not None and len(text) > most:
+            raise bad(f"has a {field} of {len(text)} characters, more than {most}",
+                      f"shorten {field} to {most} characters or fewer")
+        found[field] = text
+    if "unit" in found:
+        if kind not in ("int", "float"):
+            raise bad(f"has unit but is {_a(kind)}",
+                      "remove unit; only an int or a float has a unit")
+        if len(found["unit"].split()) > 2:
+            raise bad(f"has the unit {found['unit']!r}, more than two words",
+                      "give the unit in one word or two")
+    for field in ("common", "pick"):
+        if field in spec:
+            if not isinstance(spec[field], bool):
+                raise bad(f"has {field} {spec[field]!r}, not a bool",
+                          f"set {field} to true or false")
+            found[field] = spec[field]
+    if "pick" in found and kind != "enum":
+        raise bad(f"has pick but is {_a(kind)}", "remove pick; only an enum has a pick list")
+    if "choices" in spec:
+        found["choices"] = _choices(spec["choices"], kind, values, bad)
+    if "hurts" in spec:
+        found["hurts"] = _hurts(spec["hurts"], kind, bad)
+    if "terminal" in spec:
+        found["terminal"] = _terminal(spec["terminal"], kind, bad)
+    return found
+
+
+def _choices(choices, kind, values, bad) -> dict:
+    if kind != "enum":
+        raise bad(f"has choices but is {_a(kind)}",
+                  "remove choices; only an enum's values have words")
+    if not isinstance(choices, dict) or not choices:
+        raise bad("has choices that are not a table of words",
+                  "give choices as a table from each value to its words")
+    for value, words in choices.items():
+        if value not in values:
+            raise bad(f"has choices for {value!r}, which is not one of its values",
+                      f"name only its values: {', '.join(map(repr, values))}")
+        if not _one_line(words):
+            raise bad(f"has choices {words!r} for {value!r}, which is not one line of "
+                      "text", "give each value's words as one line")
+    return dict(choices)
+
+
+def _hurts(hurts, kind, bad) -> dict:
+    if kind not in _HURTS_WHEN:
+        raise bad(f"has hurts but is {_a(kind)}",
+                  "remove hurts; only a change of a bool or a list can hurt")
+    fields = ("when", "says", "confirm", "stays")
+    if not isinstance(hurts, dict):
+        raise bad("has hurts that is not a table", f"give hurts as a table of "
+                  f"{', '.join(fields)}")
+    unknown = sorted(frozenset(hurts) - frozenset(fields))
+    if unknown:
+        raise bad(f"has unknown hurts field(s) {', '.join(unknown)}",
+                  f"use only {', '.join(fields)}")
+    wanted = _HURTS_WHEN[kind]
+    if hurts.get("when") not in wanted:
+        raise bad(f"has hurts.when {hurts.get('when')!r}",
+                  f"on {_a(kind)} give {' or '.join(map(repr, wanted))}")
+    for field in ("says", "confirm"):
+        if not _one_line(hurts.get(field)):
+            raise bad(f"has hurts.{field} {hurts.get(field)!r}, which is not one line of "
+                      "text", f"give hurts.{field} as one line")
+    stays = hurts.get("stays", False)
+    if not isinstance(stays, bool):
+        raise bad(f"has hurts.stays {stays!r}, not a bool",
+                  "set hurts.stays to true or false")
+    if stays and kind != "bool":
+        raise bad(f"has hurts.stays but is {_a(kind)}",
+                  "remove hurts.stays; only a bool's value held can hurt")
+    return {"when": hurts["when"], "says": hurts["says"], "confirm": hurts["confirm"],
+            "stays": stays}
+
+
+def _terminal(terminal, kind, bad) -> dict:
+    if kind != "bool":
+        raise bad(f"has terminal but is {_a(kind)}",
+                  "remove terminal; only a bool is turned on and off at the terminal")
+    if not isinstance(terminal, dict) or set(terminal) != {"on", "off"}:
+        raise bad("has a terminal that is not a table of on and off",
+                  "give terminal the command that turns it on and the one that turns "
+                  "it off: { on = \"...\", off = \"...\" }")
+    for state in ("on", "off"):
+        if not _one_line(terminal[state]):
+            raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "
+                      "of text", f"give terminal.{state} as one command on one line")
+    return {"on": terminal["on"], "off": terminal["off"]}
+
+
 # -- changing a module's settings ------------------------------------------------------
 
-def set(module: str, key: str, value, *, by: str) -> list:
+def set_value(module: str, key: str, value, *, by: str) -> list:
     """Set `key` of module `module`'s config file to `value`, coerced to the key's type.
 
     A switch table's entry is set by its name, `<table key>.<entry>`, to a bool. When
@@ -813,7 +982,7 @@ def set(module: str, key: str, value, *, by: str) -> list:
 
 def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
-    table's entry then reads false). Returns the units applied, as `set` does. A key the
+    table's entry then reads false). Returns the units applied, as `set_value` does. A key the
     file does not hold changes nothing: no file is made or written and no history line is
     added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
@@ -821,7 +990,7 @@ def unset(module: str, key: str, *, by: str) -> list:
 
 
 def apply_units(module: str, key: str, *, say=print) -> list:
-    """After a `set` or `unset` of `key`: when it is the switch of one or more of the
+    """After a `set_value` or `unset` of `key`: when it is the switch of one or more of the
     module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), or the key a socket
     daemon's `start` names (`{"login": key}`), plan and apply those daemons' units and
     nothing else of the module, under the core lock, and return
@@ -957,8 +1126,9 @@ def _schema_of(module: str) -> tuple:
                        "module", 3)
     try:
         schema = schema_for(found)
-    except ConfigError as exc:
-        raise _refused(exc.file, exc.problem, exc.fix, 3) from None
+    except SchemaError as exc:
+        exc.exit_code = 3
+        raise
     if schema is None:
         raise _refused(module, "declares no settings", "nothing to set", 3)
     return schema, found.config_check
@@ -1051,7 +1221,7 @@ def _toml_value(text, path, key, kind):
 
 
 def _coerce(target, entry, name, value, path, text):
-    """Step 3 for `set`: `value` as key `target`'s type (or as a switch entry's bool).
+    """Step 3 for `set_value`: `value` as key `target`'s type (or as a switch entry's bool).
     `text` is True for a value given on the command line."""
     kind = target.type
     if entry is not None:
@@ -1243,7 +1413,7 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
         _check_file(module, schema, check, "", path, key)
         return False
     try:
-        with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
+        with files.edit_toml(path, timeout_s=LOCK_TIMEOUT) as doc:
             if op == "set":
                 _drafted(module, schema, check, [(target, entry, new)], doc, path, key)
             else:
@@ -1348,7 +1518,7 @@ def _item(value, *, inline=False):
         for v in value:
             array.append(_item(v, inline=True))
         if any(isinstance(v, dict) for v in value):
-            array.multiline(True)
+            array.multiline(multiline=True)
         return array
     if isinstance(value, dict) and inline:
         table = tomlkit.inline_table()
@@ -1367,7 +1537,8 @@ def _check_file(module, schema, check, text, path, key) -> None:
     try:
         _read_text(module, schema, text, path)
     except SchemaError as exc:
-        raise _refused(exc.file, exc.problem, exc.fix, 3, exc.key) from None
+        exc.exit_code = 3
+        raise
     if check is None:
         return
     import importlib
@@ -1418,8 +1589,8 @@ def _check_config(module: str, schema: Schema, check) -> None:
     _check_file(module, schema, check, text, path, None)
 
 
-__all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
-           "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
-           "is_entry_name", "schema_for", "check_text", "load", "Config", "set", "unset",
-           "add_item", "remove_item", "history", "set_many", "draft_text",
+__all__ = ["TYPES", "READS", "FIELDS", "PAGE_FIELDS", "COMMON_MAX", "ITEMS", "DEFAULT",
+           "FILE", "ENV", "HISTORY", "ConfigError", "SchemaError", "Key", "Schema", "Settings",
+           "is_switch_table", "is_entry_name", "schema_for", "check_text", "load", "Config",
+           "set_value", "unset", "add_item", "remove_item", "history", "set_many", "draft_text",
            "ConfigChanged"]

@@ -114,7 +114,7 @@ def test_a_new_set_is_one_add_then_keep(w):
 def test_a_changed_port_changes_the_set_and_not_the_service(w):
     w.module(shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
-    config.set("demo", "port", 8471, by="test")
+    config.set_value("demo", "port", 8471, by="test")
     plan = w.plan()
     assert plan[("shell", "socket")].action == "change"
     assert plan[("shell", "socket")].dropped == ()
@@ -220,9 +220,9 @@ def test_a_failed_stop_names_the_steps_left_undone_and_they_work(w):
 def test_the_stop_record_takes_every_socket_unit_first_in_unit_order(w):
     w.module(shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
-    record: list = []
-    units.stop("demo", ["shell"], record=record)
-    assert [e.unit for e in record] == [f"{STEM}.socket", f"{STEM}-1.socket",
+    stopped: list = []
+    units.stop("demo", ["shell"], stopped=stopped)
+    assert [e.unit for e in stopped] == [f"{STEM}.socket", f"{STEM}-1.socket",
                                         f"{STEM}.service"]
 
 
@@ -475,7 +475,7 @@ def test_a_switch_form_start_follows_its_key_and_config_set_applies_it_without_a
     assert units.switched_daemons("demo", "shell.enabled") == ["shell"]
 
     w.sup.calls.clear()
-    applied = config.set("demo", "shell.enabled", True, by="test")
+    applied = config.set_value("demo", "shell.enabled", value=True, by="test")
     assert "demo: applying units for shell.enabled" in capsys.readouterr().out
     assert [(a.change.kind, a.change.action, a.ok) for a in applied] == [
         ("daemon", "change", True), ("socket", "keep", True)]

@@ -25,6 +25,20 @@ export interface Projects {
   projects: Project[];
 }
 
+/** A project as the page's list gives it: whether its root is a directory now, null when
+ * the page server can't say in time. */
+export interface Listed extends Project {
+  exists: boolean | null;
+}
+
+/** `/api/projects` as the page reads it: every project, the page server's home folder (null
+ * when nothing places one) and whether notes is installed. */
+export interface Listing {
+  projects: Listed[];
+  home: string | null;
+  notes_installed: boolean;
+}
+
 /** `/api/project`: one project. */
 export interface One {
   project: Project;
@@ -88,6 +102,22 @@ export interface RemoveStatus {
   fix: string | null;
   sentences: string[];
   exit_code: number | null;
+}
+
+/** One thing a remove would be refused with now: projects' own (the associated agents) or a
+ * contribution's sentence, which carries its own fix; `fix` is set only for a
+ * contribution that won't load, whose `sentence` is the reason. */
+export interface Refusal {
+  module: string;
+  sentence: string;
+  fix: string | null;
+}
+
+/** `/api/remove-check`: the project's key as stored, and what a remove would be refused
+ * with now, empty when nothing would. */
+export interface RemoveCheck {
+  key: string;
+  refusals: Refusal[];
 }
 
 /**
@@ -160,6 +190,20 @@ export function parseProjects(data: unknown): Projects | null {
   return { projects: data.projects.map(project) };
 }
 
+const isMaybeBool = (value: unknown): value is boolean | null => value === null || typeof value === "boolean";
+
+/** `/api/projects`' value with the page's fields, or null when it isn't one. */
+export function parseListing(data: unknown): Listing | null {
+  if (!isObj(data) || !Array.isArray(data.projects) || !isStrOrNull(data.home)
+      || typeof data.notes_installed !== "boolean") return null;
+  const projects: Listed[] = [];
+  for (const item of data.projects) {
+    if (!isObj(item) || !isProject(item) || !isMaybeBool(item.exists)) return null;
+    projects.push({ ...project(item), exists: item.exists });
+  }
+  return { projects, home: data.home, notes_installed: data.notes_installed };
+}
+
 /** `/api/project`'s value, or null when it isn't one. */
 export function parseOne(data: unknown): One | null {
   if (!isObj(data) || !isProject(data.project)) return null;
@@ -205,6 +249,17 @@ export function parseRemoveStatus(data: unknown): RemoveStatus | null {
   return { job: data.job, project: data.project, created: data.created, state: data.state,
            key: data.key, reason: data.reason, fix: data.fix, sentences: [...data.sentences],
            exit_code: data.exit_code };
+}
+
+/** `/api/remove-check`'s value, or null when it isn't one. */
+export function parseRemoveCheck(data: unknown): RemoveCheck | null {
+  if (!isObj(data) || !isStr(data.key) || !Array.isArray(data.refusals)) return null;
+  const refusals: Refusal[] = [];
+  for (const one of data.refusals) {
+    if (!isObj(one) || !isStr(one.module) || !isStr(one.sentence) || !isStrOrNull(one.fix)) return null;
+    refusals.push({ module: one.module, sentence: one.sentence, fix: one.fix });
+  }
+  return { key: data.key, refusals };
 }
 
 /** The text an answer gives: its `refused`, `conflict` or `error`. */

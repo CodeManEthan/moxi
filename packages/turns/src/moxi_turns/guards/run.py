@@ -3,10 +3,10 @@
 The endpoint (the Claude endpoint, or a Codex host) loads the guards that are on at its
 start and at each `ready`, and builds one harness's **table** from them: per guard its id,
 its patterns for that harness, `who`, `match`, `match_flags`, whether it has a judge, its
-`deny`, `wants`, `on_error` and its deadline clamped to `guards.max_wait_ms`. A guard that
-names no pattern for the harness is not in that harness's table. The Claude runner gets
-the table over the leg and matches in its own process; a host matches here, with
-`decide`.
+`deny`, `wants`, `on_error`, its deadline clamped to `guards.max_wait_ms` and its `step`.
+A guard that names no pattern for the harness is not in that harness's table. The Claude
+runner gets the table over the leg and matches in its own process; a host matches here,
+with `decide`.
 
 **Matching.** A guard covers a call when one of its patterns matches the tool name (the
 whole name; `*` matches any run of characters, every other character only itself), `who`
@@ -14,7 +14,12 @@ matches (`main`: no agent id, `agents`: an agent id, `any`: both; an empty id is
 loop's), and every `match` regex finds its input field, which must be a string. The
 decision for a call: no covering guard lets it run with no trip; else the first covering
 data-only guard, in table order, refuses it with its `deny`; else the covering judge
-guards are asked, in table order.
+guards are asked, in table order. Only the entries of the step at hand are matched: a
+call-step entry at a tool call, an ask-step entry at a permission ask.
+
+**The ask step.** An ask is judged the same way, with the call's `permission_mode`. Only a
+refusal reaches the harness: an `Allow` reads as None (logged once per guard), and
+neither allow lines nor break lines are carried, since no tool result follows an ask.
 
 **Judging.** Each guard's judge runs on a lane of its own with at most `GUARD_WORKERS`
 threads. A call's deadline starts when the ask arrives and covers the wait for a thread
@@ -120,6 +125,8 @@ class Entry:
     found: Found | None = field(default=None, repr=False, compare=False)
     _names: tuple[re.Pattern, ...] = field(default=(), repr=False, compare=False)
     _match: Mapping[str, re.Pattern] = field(default_factory=dict, repr=False, compare=False)
+    #: `call` or `ask`: the step it runs at.
+    step: str = "call"
 
     @classmethod
     def of(cls, guard_id: str, data: Mapping[str, Any], *, found: Found | None = None,
@@ -135,7 +142,8 @@ class Entry:
                    tuple(data.get("wants") or ()), data.get("on_error") or "allow",
                    int(data.get("deadline_ms") or 1), tuple(by), found,
                    tuple(glob_regex(p) for p in calls),
-                   {k: re.compile(v, rx) for k, v in (match or {}).items()})
+                   {k: re.compile(v, rx) for k, v in (match or {}).items()},
+                   data.get("step") or "call")
 
     def to_leg(self) -> dict[str, Any]:
         """The entry as the leg carries it: plain JSON."""
@@ -143,9 +151,9 @@ class Entry:
                 "match": dict(self.match) if self.match else None,
                 "match_flags": self.match_flags, "judge": self.judge, "deny": self.deny,
                 "wants": list(self.wants), "on_error": self.on_error,
-                "deadline_ms": self.deadline_ms}
+                "deadline_ms": self.deadline_ms, "step": self.step}
 
-    def covers(self, tool: str, agent_id: str | None, input: Mapping[str, Any]) -> bool:
+    def covers(self, tool: str, agent_id: str | None, tool_input: Mapping[str, Any]) -> bool:
         """Whether this guard covers the call (the module's docstring has the rule)."""
         if not any(p.fullmatch(tool) for p in self._names):
             return False
@@ -154,7 +162,7 @@ class Entry:
         if self.who == "agents" and not agent_id:
             return False
         for name, rx in self._match.items():
-            value = input.get(name) if isinstance(input, Mapping) else None
+            value = tool_input.get(name) if isinstance(tool_input, Mapping) else None
             if not isinstance(value, str) or rx.search(value) is None:
                 return False
         return True
@@ -171,7 +179,7 @@ def entry_for(on, harness: str, max_wait_ms: int) -> Entry | None:
     return Entry.of(on.id, {
         "calls": patterns, "who": g.who, "match": g.match, "match_flags": g.match_flags,
         "judge": g.judge is not None, "deny": g.deny, "wants": g.wants,
-        "on_error": g.on_error, "deadline_ms": g.deadline(max_wait_ms)},
+        "on_error": g.on_error, "deadline_ms": g.deadline(max_wait_ms), "step": g.step},
         found=on.found, by=on.by)
 
 
@@ -191,9 +199,9 @@ class Decision:
 
 
 def decide(entries: Iterable[Entry], tool: str, agent_id: str | None,
-           input: Mapping[str, Any]) -> Decision:
-    """The decision for one call against a table."""
-    covering = [e for e in entries if e.covers(tool, agent_id, input)]
+           tool_input: Mapping[str, Any], step: str = "call") -> Decision:
+    """The decision for one call against a table, by the entries of `step`."""
+    covering = [e for e in entries if e.step == step and e.covers(tool, agent_id, tool_input)]
     ids = tuple(e.id for e in covering)
     for e in covering:
         if not e.judge:
@@ -233,6 +241,7 @@ class Answer:
 @dataclass(frozen=True)
 class _Outcome:
     allow: str | None = None        # an Allow's line
+    allowed: bool = False           # it answered Allow
     deny: str | None = None         # a Deny's reason
     why: str | None = None          # a break's reason
     clean: bool = True
@@ -243,7 +252,7 @@ def _judged(answer: object) -> _Outcome:
         return _Outcome()
     if isinstance(answer, Allow):
         if answer.line is None or (isinstance(answer.line, str) and answer.line):
-            return _Outcome(allow=answer.line)
+            return _Outcome(allow=answer.line, allowed=True)
         return _Outcome(why=f"it answered Allow with a line that is {type(answer.line).__name__}, "
                             "not text", clean=False)
     if isinstance(answer, Deny):
@@ -282,7 +291,7 @@ class _Lane:
 
 # -- the runner --------------------------------------------------------------------------
 
-#: `() -> (guards.on, guards.max_wait_ms)`.
+#: `() -> (guards.run, guards.max_wait_ms)`.
 Settings = Callable[[], "tuple[list[str], int]"]
 #: `(text, key, fix) -> None` and `(key) -> None`: the doctor's record and clear.
 Record = Callable[[str, str, "str | None"], None]
@@ -320,6 +329,8 @@ class GuardRunner:
         #: Guards whose doctor record may stand: unknown at start (an earlier endpoint's
         #: record), so the first clean judge of each clears once.
         self._clean: set[str] = set()
+        #: Guards whose Allow at the ask step was logged.
+        self._allowed_at_ask: set[str] = set()
         self._records = _Recorder(record or _doctor_record, clear or _doctor_clear)
 
     # -- the table ---------------------------------------------------------------------
@@ -338,7 +349,7 @@ class GuardRunner:
         return [e.to_leg() for e in self.entries]
 
     def reload(self) -> list[dict[str, Any]]:
-        """Read `guards.on`, the switches and `guards.max_wait_ms` again, load what they
+        """Read `guards.run`, the switches and `guards.max_wait_ms` again, load what they
         name, and make the table. Returns it in the leg's form. Never raises."""
         try:
             on, max_wait = self._settings()
@@ -416,13 +427,14 @@ class GuardRunner:
 
     # -- asking ------------------------------------------------------------------------
 
-    def ask(self, call: ToolCall, ids: Iterable[str]) -> Answer:
+    def ask(self, call: ToolCall, ids: Iterable[str], step: str = "call") -> Answer:
         """Judge `call` by the guards `ids` names, each bounded by its deadline from now.
-        An id not on the table (it changed at a `ready`) is skipped. Never raises."""
+        An id not on the table (it changed at a `ready`), or of another step, is skipped.
+        Never raises."""
         t0 = self._clock()
         wanted = list(dict.fromkeys(i for i in ids if isinstance(i, str)))
         with self._cond:
-            chosen = [e for e in self._entries if e.id in wanted]
+            chosen = [e for e in self._entries if e.id in wanted and e.step == step]
             dead = dict(self._dead)
             closed = self._closed
         for i in wanted:
@@ -469,7 +481,7 @@ class GuardRunner:
             except concurrent.futures.TimeoutError:
                 outcomes[gid] = _Outcome(
                     why=f"it took longer than {by_id[gid].deadline_ms} ms", clean=False)
-        return self._answer(call, chosen, outcomes)
+        return self._answer(call, chosen, outcomes, step)
 
     def _start(self, lane: _Lane, e: Entry, call: ToolCall,
                deadline: float) -> concurrent.futures.Future:
@@ -519,7 +531,7 @@ class GuardRunner:
         return _judged(answer)
 
     def _answer(self, call: ToolCall, chosen: list[Entry],
-                outcomes: dict[str, _Outcome]) -> Answer:
+                outcomes: dict[str, _Outcome], step: str = "call") -> Answer:
         deny: str | None = None
         lines: list[str] = []
         broken: list[str] = []
@@ -535,20 +547,38 @@ class GuardRunner:
                     deny = deny if deny is not None else break_deny(e.id, o.why)
                 else:
                     broken.append(break_line(e.id, o.why))
-                self._broke(e, call, o.why, denied)
+                self._broke(e, call, o.why, denied=denied, step=step)
                 continue
             if e.judge:
                 self._judged_clean(e.id)
             if o.deny is not None and deny is None:
                 deny = o.deny
-            elif o.allow:
-                lines.append(o.allow)
+            elif o.allow is not None or o.allowed:
+                if step == "ask":
+                    self._allow_at_ask(e.id)
+                elif o.allow:
+                    lines.append(o.allow)
+        if step == "ask":
+            return Answer(deny, (), (), tuple(breaks))
         return Answer(deny, tuple(lines), tuple(broken), tuple(breaks))
+
+    def _allow_at_ask(self, guard_id: str) -> None:
+        """An `Allow` at the ask step reads as None: logged once per guard."""
+        with self._cond:
+            if guard_id in self._allowed_at_ask:
+                return
+            self._allowed_at_ask.add(guard_id)
+        log.warning("guards: %s answered Allow at the ask step, which approves nothing; "
+                    "the ask was left to the harness", guard_id)
 
     # -- records -----------------------------------------------------------------------
 
-    def _broke(self, e: Entry, call: ToolCall, why: str, denied: bool) -> None:
-        what = "was refused" if denied else "ran unchecked"
+    def _broke(self, e: Entry, call: ToolCall, why: str, *, denied: bool,
+               step: str = "call") -> None:
+        if step == "ask":
+            what = "was refused" if denied else "was left to the person"
+        else:
+            what = "was refused" if denied else "ran unchecked"
         log.warning("guards: %s could not check a %s call (%s); it %s", e.id, call.tool, why,
                     what)
         with self._cond:

@@ -1,6 +1,167 @@
 # Changelog
 
+## Unreleased
+
+- Every setting carries page fields, which `moxi config comms show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  the unit of each wait, age and replay limit. No setting is shown first and none is
+  grouped, so the page lists them all. comms needs moxi 0.1.9 or later.
+- `moxi_comms.api.send`, `check`, `send_as` and `delete` close the record they opened
+  before they return; before, its connection stayed open until the garbage collector
+  found it.
+- Waiting mail is no longer skipped when an OpenCode or Codex adapter reconnects to the
+  daemon. The daemon hands mail that waited for the agent as soon as it answers the
+  reconnect, and the adapter could try to deliver it before it had switched to the new
+  connection. It then dropped the message, which did not arrive until the agent's next
+  reconnect or relaunch while newer mail went through. The adapter now holds delivery
+  until the new connection is in place. The same applies to interrupt mail that reaches
+  a Codex agent mid turn while it reconnects: it is no longer dropped, and goes into the
+  running turn once the new connection is in place.
+- An OpenCode or Codex adapter no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The adapter then said comms was
+  offline, tried to bind the name it already held, was refused, and stopped delivering
+  mail to its agent. A close from a connection the adapter has already replaced now
+  changes nothing.
+- An OpenCode or Codex adapter that registers again in place (`reregister`) no longer
+  races its own reconnect loop. While it waited for the daemon to drop its old
+  connection, the loop could bind the name first, and the register then failed after
+  five seconds as "already bound" though the adapter was bound. Or the loop was refused
+  by the old connection, and the adapter then counted the name as lost and dropped every
+  message the daemon handed it until it registered again. The reconnect loop now waits
+  until the register is done.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
+- comms' page in the browser UI shell, `/m/comms/`, is rebuilt around the agents: one
+  row per agent name, ordered by what it needs from you (an ask for your reply, mail no
+  session takes, a warm session nothing keeps warm, then the rest by their newest
+  message), each opened in place with its mail in the books, what it waits on and a
+  send box that checks how a message would go before `Send` and can take a message back;
+  under them today's messages, earlier days on `Show`, and threads opened in place; and
+  `Other names` for the names with nothing waiting. Opening something writes the page's
+  address (`agent/`, `reply/`, `thread/`, `mail/`, `others`). The README's "In the
+  browser" says what each part shows and what launcher, cache and sessions add.
+- comms has a row on Home in the browser UI shell, the `mail` component
+  (`<moxi-comms-mail>`, order 200). When mail waits for names no live session holds it
+  says so on one line, `3 messages waiting · curator and scout aren't running`, the count
+  heavy, with `since 14:02` (the oldest message's time, with its weekday or date when it
+  came on an earlier day) at the right, and the row needs the user (20 on Home's scale).
+  Past three names it reads `curator, scout and 3 more aren't running`. With nothing
+  waiting, or the daemon down, there is no row. It reads `/api/mail` when it is shown
+  and every 30 s while the window is visible, and is a link to comms' page. It shows
+  no message text.
+- `moxi_comms.api.roster()` now carries the mail waiting per name: `Roster.waiting`, one
+  `Waiting(qualified, count, oldest)` for each name with mail queued, as the daemon's
+  `agents` answer holds it (`oldest` in epoch seconds).
+- comms' page server has a new read, `GET /api/mail`: `{state, detail, waiting}`, where
+  `waiting` lists `{qualified, name, count, since}` for each name with mail waiting that
+  no live session holds, newest `since` last. `name` is the part before `@`, or the
+  qualified name when two names listed share it. `state` and `detail` are as
+  `/api/roster`'s. It is the one route of comms the phone's gateway serves; it carries
+  names, counts and times, and no message text.
+- `moxi_comms.api.RosterRow` has a new field, `cache`: a live name's cache as the
+  daemon's `session` answer reads it, a `CacheFact(kind, until)` with `kind` `warm` or
+  `cold` and `until` when it goes cold or went cold (epoch seconds, rounded to the whole
+  second); None for a standing row, any other read, and every row on a box without the
+  cache module. `moxi comms agents --json` prints it on each row, `{kind, until}` or
+  null.
+- `moxi_comms.api.roster_rows()` takes `with_roster=True` and then returns `(rows,
+  roster)`, the `Roster` the rows were joined from, from the one `agents` call.
+- comms' page server's `/api/roster` carries `today`, the server's local date
+  (`YYYY-MM-DD`), and, with its `roster` topic, `waiting`: `{qualified, count, since}`
+  for every name with mail queued, bound or not, oldest `since` first. Each row carries
+  `cache`, `{kind, until}` or null, as `RosterRow`'s.
+- comms' page server has a new read, `GET /api/messages?day=&before=&limit=`: one day's
+  messages (today by default; an earlier day is read back from the message id `before`),
+  newest first, at most `limit` (12 by default, at most 500), each with its author and
+  tier, recipients, posture, reply, text, whether it was withdrawn, and each recipient's
+  row in the delivery books (`waiting`, `handed`, `in_digest`, or why it left:
+  `withdrawn`, `expired`, `reserved`); `more`, how many of the day's are left; and
+  `earlier`, how many messages came before the day and the cursor that reads the newest
+  of them. Message ids are strings. It reads comms' record and books on connections that
+  can't write and asks the daemon nothing, so it answers with the daemon down; a store
+  comms' daemon has not yet moved or migrated answers `state` `error`. The phone's
+  gateway does not reach it.
+- comms' page server has a new read, `GET /api/mail-state`, from the delivery books and
+  the record's last day, asking the daemon nothing: `queued`, each name's waiting and
+  in-session rows with the authors of the waiting ones (each `{qualified, is_operator}`,
+  `is_operator` true for the operator, by the name `operator` or one the directory gives
+  him); `owed`, the verified `[reply-once]` asks to the operator that no later message
+  of his answers; `asks`, the open `[reply-once]` asks between agents, with whether the
+  awaited name has read it; `last`, each name's newest message; and `operator_names`,
+  the names that are the operator (`operator` and each the directory gives him), which
+  the page makes no agent row of. An ask is answered by the rule the daemon's
+  `awaiting` uses, now one shared function: a later message to the asker threaded to the
+  ask, or with any posture but `[no reply]`.
+- comms' page server has a new read, `GET /api/queue?name=`: the messages one name has
+  a row for in the delivery books' queue, waiting or in its session, oldest first, at
+  most 50, each in `/api/messages`' shape with that name's row first; `more`, how many
+  rows are left. It asks the daemon nothing.
+- comms' page server has a new read, `GET /api/thread?a=&b=&before=&after=&oldest=&limit=`:
+  the messages between two names (by one, with a recipient tag naming the other), or
+  every message by or to one name without `b`, oldest first, in `/api/messages`' shape:
+  the newest `limit` (6 by default, at most 100) below the message id `before`, with
+  `earlier`, how many of theirs came before and the oldest one's time, and
+  `count_today`. With `after`, the newest message id the page holds, it reads only the
+  messages above it and adds `changed`: for the messages from `oldest` (the oldest id
+  the page holds; from the first when it is left out) to `after`, the two names' rows
+  in the delivery books, or, with one name, every row of that name's messages. The page
+  sends `oldest` on every refresh, so a refresh reads only the rows of the messages it
+  shows, however large the books grow. `oldest` without `after`, or above it, is
+  refused. It asks the daemon nothing.
+- comms' page server has two acts, `POST /api/check` and `POST /api/send`, which take
+  `{to, text, posture, held, reply_to}` (one address, at most 16,000 characters, a
+  posture always given) and run `moxi comms send --check` and `moxi comms send` as the
+  operator's lane, with `--new-name`. The operator is `MOXI_COMMS_OPERATOR` in the page
+  server's environment, else the directory's one operator; with neither the act refuses
+  with `operator-unknown`. Each answers `{outcome, message_id, recipients, refusal}`:
+  each recipient's `delivery` and `cold_at`, and the refusal's `code`, never the verb's
+  text. Neither is reachable through the phone's gateway.
+- comms' page server has a third act, `POST /api/take-back` with `{message_id}`, which
+  runs `moxi comms remove` as the operator: `{outcome, withdrawn, delivered, expired,
+  refusal}`, the refusal its `code` only; an id that is not all digits is refused with
+  `message-id-shape`. It is not reachable through the phone's gateway.
+- The connector's status and tools no longer say `offline` while another binding holds
+  its identity: the close of a bind the daemon refused could land after the link had
+  noted the name held, and turned the state to `offline` until the next try. Only the
+  binding's own connection now changes the link's state when it closes.
+- Waiting mail is no longer skipped when a Claude session's comms shim reconnects to the
+  daemon. The daemon hands mail that waited for the session as soon as it answers the
+  reconnect, and a turn ending, the idle tick, or interrupt mail steered into a running
+  turn could make the shim inject it before it had switched to the new connection. The
+  shim then dropped the message, which did not arrive until the session's next
+  reconnect or relaunch while newer mail went through. The shim now holds that mail
+  until the new connection is in place, and injects it at the next idle tick or turn
+  end.
+- A Claude session's comms shim no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The shim then said comms was
+  offline, tried to bind the name it already held, read the refusal as another session
+  holding it, and stayed offline for the rest of the session. A close from a connection
+  the shim has already replaced now changes nothing.
+
 ## 0.3.0 (2026-11-08)
+
+- Config keys `connector.wait_default` and `connector.wait_max` are now
+  `connector.wait_default_s` and `connector.wait_max_s`. An old key, set in the config
+  file, is refused, naming the new one.
+- `moxi comms delete` is now `moxi comms remove`, with no alias; the MCP tool `delete`
+  and the daemon method `delete` are now `remove`.
+- `moxi-comms-opencode --ready-wait` and `--notice-hold` are now `--ready-wait-s` and
+  `--notice-hold-s`.
+- The connector's `send_and_wait` input `wait_seconds` is now `wait_s`; the `session`
+  answer's and the connector read result's `age_seconds` are now `age_s`.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_comms.api.attributed`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.check`: `deadline` is now `timeout_s`; `moxi_comms.api.delete`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.identity_state`: `deadline` is now
+  `timeout_s`; `moxi_comms.api.owner`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.roster`: `deadline` is now `timeout_s`; `moxi_comms.api.roster_rows`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.send`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.send_as`: `deadline` is now `timeout_s`; `moxi_comms.api.session`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.session_of`: `deadline` is now
+  `timeout_s`; `moxi_comms.cache.Clock`: `age_seconds` is now `age_s`;
+  `moxi_comms.cache.Clock`: `ttl_seconds` is now `ttl_s`.
 
 The first public release on PyPI.
 

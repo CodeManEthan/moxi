@@ -43,7 +43,7 @@ def a_daemon(name: str = "web", **extra) -> None:
 
 
 class Gathers:
-    """A gather in place of the page's: each call recorded with its `health`, blocking
+    """A gather in place of the page's: each call recorded with its `check_health`, blocking
     while `gate` is clear, raising while `raises` is set."""
 
     def __init__(self):
@@ -54,8 +54,8 @@ class Gathers:
         self.raises: Exception | None = None
         self.value = {"state": "up", "detail": None, "rows": [], "problems": []}
 
-    def __call__(self, *, health: bool = False):
-        self.calls.append(health)
+    def __call__(self, *, check_health: bool = False):
+        self.calls.append(check_health)
         self.inside.set()
         assert self.gate.wait(30)
         if self.raises is not None:
@@ -221,8 +221,8 @@ def test_the_health_pass_runs_each_check_under_services_own_limit_a_few_at_a_tim
         return real(found, **kwargs)
 
     monkeypatch.setattr(pagehandlers.verdict, "views", views)
-    pagehandlers.gather(health=True)
-    assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,
+    pagehandlers.gather(check_health=True)
+    assert seen == {"check_health": True, "status_seconds": pagehandlers.STATUS_SECONDS,
                     "health_seconds": pagehandlers.state.HEALTH_SECONDS,
                     "health_at_once": pagehandlers.HEALTH_AT_ONCE}
 
@@ -295,9 +295,9 @@ def test_a_gather_runs_on_a_thread_of_its_own_never_the_bases(monkeypatch, gathe
     names = []
     real = gathers.__call__
 
-    def gather(*, health=False):
+    def gather(*, check_health=False):
         names.append(threading.current_thread().name)
-        return real(health=health)
+        return real(check_health=check_health)
 
     monkeypatch.setattr(pagehandlers, "gather", gather)
 

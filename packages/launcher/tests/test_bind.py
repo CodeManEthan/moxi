@@ -98,7 +98,7 @@ def ended_pid() -> int:
 
 def launch_row(conn, *, rid="r1", identity="coder", scope="moxi", pid=None,
                harness="claude", session_id=SID, brief=None):
-    store.insert(conn, request_id=rid, actor="ann", harness=harness, target="terminal",
+    store.insert(conn, request_id=rid, by="ann", harness=harness, target="terminal",
                  cwd="/work", values={}, argv=["moxi", "comms", harness], env={},
                  posture="", identity=identity, scope=scope, brief=brief,
                  session_id=session_id if harness == "claude" else None)
@@ -114,9 +114,9 @@ def row(conn, rid="r1"):
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def settle(conn, fake_comms, monkeypatch, **kw):
@@ -419,13 +419,13 @@ def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monke
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
     return SimpleNamespace(plan=lambda **keys: script.write_text(json.dumps(keys)))
 
 

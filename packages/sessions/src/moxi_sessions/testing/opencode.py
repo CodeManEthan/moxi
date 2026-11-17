@@ -7,7 +7,7 @@
     a.step_start()
     a.reasoning("which suite?")
     a.tool("bash", {"command": "pytest -q"}, output="3 passed")
-    a.step_finish(input=900, output=40, cache_read=1200)
+    a.step_finish(input_tokens=900, output=40, cache_read=1200)
     a.complete()
     path = db.write()
 
@@ -91,12 +91,12 @@ _TOTALS = {"tokens_input": "input", "tokens_output": "output",
            "tokens_reasoning": "reasoning"}
 
 
-def tokens(*, input: int = 0, output: int = 0, reasoning: int = 0, cache_read: int = 0,
+def tokens(*, input_tokens: int = 0, output: int = 0, reasoning: int = 0, cache_read: int = 0,
            cache_write: int = 0) -> dict:
     """A `tokens` object as OpenCode writes one: the five classes apart, and `total`
     adding all five."""
-    return {"total": input + output + reasoning + cache_read + cache_write,
-            "input": input, "output": output, "reasoning": reasoning,
+    return {"total": input_tokens + output + reasoning + cache_read + cache_write,
+            "input": input_tokens, "output": output, "reasoning": reasoning,
             "cache": {"write": cache_write, "read": cache_read}}
 
 
@@ -141,7 +141,7 @@ class OpenCodeDb:
         self.rows[table][row["id"]] = row
         self._dirty[(table, row["id"])] = None
 
-    def session(self, *, title: str = "a session", directory: str = "/work/project",
+    def session(self, *, title: str = "a session", work_dir: str = "/work/project",
                 parent: str | None = None, agent: str | None = "build",
                 model: tuple[str, str] | None = MODEL, raw_model: Any = ...,
                 version: str = VERSION, revert: str | None = None,
@@ -158,7 +158,7 @@ class OpenCodeDb:
                 {"id": model[1], "providerID": model[0], "variant": "default"},
                 separators=(",", ":"))
         row = {"id": sid, "project_id": "global", "parent_id": parent, "slug": "a-session",
-               "directory": directory, "title": title, "version": version, "cost": 0,
+               "directory": work_dir, "title": title, "version": version, "cost": 0,
                "tokens_input": 0, "tokens_output": 0, "tokens_reasoning": 0,
                "tokens_cache_read": 0, "tokens_cache_write": 0, "revert": revert,
                "agent": agent, "model": raw_model, "time_created": ms, "time_updated": ms,
@@ -400,18 +400,18 @@ class OpenCodeAssistant(OpenCodeMessage):
     def step_start(self, *, at: float | None = None) -> str:
         return self.part({"type": "step-start"}, at=at)
 
-    def step_finish(self, *, input: int = 0, output: int = 0, reasoning: int = 0,
+    def step_finish(self, *, input_tokens: int = 0, output: int = 0, reasoning: int = 0,
                     cache_read: int = 0, cache_write: int = 0, cost: float = 0,
                     reason: str = "stop", at: float | None = None) -> str:
         """Finish the open step with its tokens and cost, and add them to the message's
         and the session's totals, as OpenCode does when a step ends."""
-        used = tokens(input=input, output=output, reasoning=reasoning,
+        used = tokens(input_tokens=input_tokens, output=output, reasoning=reasoning,
                       cache_read=cache_read, cache_write=cache_write)
         pid = self.part({"reason": reason, "type": "step-finish", "tokens": used,
                          "cost": cost}, at=at)
         data = self.data
         total = data.get("tokens") or tokens()
-        merged = tokens(input=total["input"] + input, output=total["output"] + output,
+        merged = tokens(input_tokens=total["input"] + input_tokens, output=total["output"] + output,
                         reasoning=total["reasoning"] + reasoning,
                         cache_read=total["cache"]["read"] + cache_read,
                         cache_write=total["cache"]["write"] + cache_write)

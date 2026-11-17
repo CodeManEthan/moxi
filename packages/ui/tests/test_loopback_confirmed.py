@@ -32,7 +32,7 @@ PACKAGE = "lbconfirmed"
 HANDLERS = '''
 import asyncio
 
-from moxi_ui.loopback.server import Accepted, Conflict, Refused
+from moxi_ui.loopback.server import Accepted, BadRequest, Conflict, Refused
 
 STATE = {}
 CALLS = []
@@ -47,6 +47,8 @@ async def act(call):
         raise Conflict("busy elsewhere")
     elif mode == "refused":
         raise Refused("not that one")
+    elif mode == "bad":
+        raise BadRequest("n", "too many")
     elif mode == "boom":
         raise RuntimeError("the act broke")
     elif mode == "dict":
@@ -311,6 +313,7 @@ def test_two_requests_with_one_key_sent_together_run_the_handler_once(h):
     ("accept", 202, {"status": "/api/status?job=1"}),
     ("conflict", 409, {"conflict": "busy elsewhere"}),
     ("refused", 422, {"refused": "not that one"}),
+    ("bad", 400, {"error": "too many: n"}),
     ("boom", 500, None),
     ("dict", 500, None),
 ])

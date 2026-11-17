@@ -67,7 +67,8 @@ def _errors(page) -> list[str]:
 def test_a_panel_whose_first_script_fetch_fails_is_placed_on_one_more_try(ui_page):
     fetched = _fail_first(ui_page.context, "/m/fixture/page.js")
     said = _errors(ui_page)
-    ui_page.locator("#moxi-menu a[data-module=fixture]").click()
+    ui_page.locator("#moxi-pages-button").click()
+    ui_page.locator("#moxi-pages a[data-module=fixture]").click()
     panel = ui_page.locator(PANEL)
     expect(panel.get_by_test_id("route")).to_have_text("Route: ")
     expect(ui_page.locator(MESSAGE)).to_have_count(0)
@@ -79,7 +80,7 @@ def test_a_panel_whose_first_script_fetch_fails_is_placed_on_one_more_try(ui_pag
 def test_a_home_block_whose_first_script_fetch_fails_is_placed_on_one_more_try(ui_page):
     fetched = _fail_first(ui_page.context, "/m/fixture/block.js")
     said = _errors(ui_page)
-    ui_page.reload()
+    ui_page.goto("/m/ui/modules")
     block = ui_page.locator(BLOCK)
     expect(block.locator("moxi-fixture-block").get_by_test_id("count")).to_have_text(
         re.compile(r"^Count: \d+$"))
@@ -101,7 +102,7 @@ def test_a_home_block_whose_script_names_a_failure_shows_its_state_with_no_retry
         failing_shell, ui_contexts):
     page = ui_contexts(failing_shell).pages[0]
     fetches = _fetches(page, "/m/fixture/block.js")
-    page.reload()
+    page.goto("/m/ui/modules")
     block = page.locator(BLOCK)
     expect(block.locator(".warn")).to_have_text("fixture's block could not be shown.",
                                                 timeout=START_MS)
@@ -117,7 +118,8 @@ def test_a_panel_whose_script_names_a_failure_shows_it_with_no_retry(failing_she
                                                                      ui_contexts):
     page = ui_contexts(failing_shell).pages[0]
     fetches = _fetches(page, "/m/fixture/page.js")
-    page.locator("#moxi-menu a[data-module=fixture]").click()
+    page.locator("#moxi-pages-button").click()
+    page.locator("#moxi-pages a[data-module=fixture]").click()
     message = page.locator(MESSAGE)
     expect(message.locator("h1")).to_have_text("fixture's page server did not start",
                                                timeout=START_MS)

@@ -121,6 +121,15 @@ deadline or timeout that fired from one that never did (a 0.3 s timeout that mus
 in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
 timed test where it falls, like any other.
 
+`MOXI_TEST_TIMED_SLACK=<factor>`, read once from the environment pytest starts with, is
+how much slower than the machine that set the budgets this one may be: a finite number
+of at least 1, else the run stops; unset, 1. `timed_slack()` returns it, inside a fenced
+test too. In a `timed` test, every upper bound on a wall-clock measurement of the run
+itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied by
+`timed_slack()`. Lower bounds (a wait that must have happened), ratios between two
+measurements of the same run and counts are left alone: a slower machine slows both
+sides of a ratio. A test marked `timed` follows this rule whenever it is marked.
+
 Selection. Five variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
 
@@ -167,6 +176,7 @@ import dataclasses
 import functools
 import ipaddress
 import json
+import math
 import ntpath
 import os
 import re
@@ -184,6 +194,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from moxi.paths import ANCHOR_HOME_ENV
 
 #: How often a served server looks for its shutdown request, in seconds.
 SHUTDOWN_POLL = 0.05
@@ -224,6 +235,9 @@ DURATIONS_ENV = "MOXI_TEST_DURATIONS"
 #: `hold` or `only`: what a run does with the `timed` tests (module doc, Selection).
 TIMED_ENV = "MOXI_TEST_TIMED"
 TIMED_MODES = ("hold", "only")
+#: A factor of at least 1 for every upper bound of a `timed` test (module doc, Timed
+#: tests).
+TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 
@@ -256,9 +270,7 @@ HARNESS_HOMES = {
     "CODEX_HOME": ".codex",
 }
 
-#: The core's stand-in for the account's own folder, which places its anchor; only test
-#: kits set it (module doc).
-ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"
 
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
@@ -625,18 +637,18 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
             env[key] = str(home if rel == "." else home / rel)
         env["HOMEDRIVE"], env["HOMEPATH"] = ntpath.splitdrive(str(home))
         env["TEMP"] = env["TMP"] = str(short)
-    env[ANCHOR_HOME] = env["LOCALAPPDATA"] if WINDOWS else str(home)
+    env[ANCHOR_HOME_ENV] = env["LOCALAPPDATA"] if WINDOWS else str(home)
     return env
 
 
-def _uv_dirs(environ: Mapping[str, str], home: str, *,
-             windows: bool | None = None) -> dict[str, str]:
+def _uv_dirs(env: Mapping[str, str], home: str, *,
+             is_windows: bool | None = None) -> dict[str, str]:
     """uv's cache and installed-Python directories, as uv finds them from `environ`;
-    `windows` is `WINDOWS` unless given."""
+    `is_windows` is `WINDOWS` unless given."""
     def given(key: str) -> str | None:
-        return environ.get(key) or None
+        return env.get(key) or None
 
-    if WINDOWS if windows is None else windows:
+    if WINDOWS if is_windows is None else is_windows:
         local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
         roaming = given("APPDATA") or os.path.join(home, "AppData", "Roaming")
         cache = os.path.join(local, "uv", "cache")
@@ -688,9 +700,33 @@ def pytest_configure(config: pytest.Config) -> None:
     # Read once, from the environment this process started with: a pytest run inside a
     # test (pytester's in-process run) already sees the fenced one.
     _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
+    _SESSION.setdefault("timed_slack", _timed_slack(os.environ))
     _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     _install()
+
+
+def _timed_slack(env: Mapping[str, str]) -> float:
+    """The factor `env` sets for timed bounds: 1.0 when unset; a value that is not a
+    finite number of at least 1 stops the run."""
+    raw = env.get(TIMED_SLACK_ENV, "").strip()
+    if not raw:
+        return 1.0
+    try:
+        factor = float(raw)
+    except ValueError:
+        factor = math.nan
+    if not math.isfinite(factor) or factor < 1:
+        raise pytest.UsageError(f"{TIMED_SLACK_ENV} is a finite number of at least 1, or "
+                                f"unset; it is {raw!r}")
+    return factor
+
+
+def timed_slack() -> float:
+    """What every upper bound on a wall-clock measurement in a `timed` test is multiplied
+    by: `MOXI_TEST_TIMED_SLACK` as this run started with it, 1.0 when unset (module doc,
+    Timed tests)."""
+    return _SESSION.get("timed_slack", 1.0)
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -728,30 +764,30 @@ class Selection:
 _SELECTION = pytest.StashKey[Selection]()
 
 
-def selection(environ: Mapping[str, str]) -> Selection:
+def selection(env: Mapping[str, str]) -> Selection:
     """The selection the environment asks for; `pytest.UsageError` for a bad value."""
-    tiers = environ.get(TIERS_ENV, "").strip()
+    tiers = env.get(TIERS_ENV, "").strip()
     if tiers not in ("", "all"):
         raise pytest.UsageError(f"{TIERS_ENV} is 'all' or unset; it is {tiers!r}")
     changed: tuple[str, ...] = ()
-    where = environ.get(CHANGED_ENV, "")
+    where = env.get(CHANGED_ENV, "")
     if where:
         try:
             text = Path(where).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise pytest.UsageError(f"{CHANGED_ENV}: can't read {where} ({exc})") from exc
         changed = tuple(path for path in text.split("\0") if path)
-    names = [name.strip() for name in environ.get(FINDING_ENV, "").split(",")]
+    names = [name.strip() for name in env.get(FINDING_ENV, "").split(",")]
     names = [name for name in names if name]
     bad = [name for name in names if not FINDING_NAME.fullmatch(name)]
     if bad:
         raise pytest.UsageError(f"{FINDING_ENV} names findings as L<n>, comma-separated; "
                                 f"{', '.join(map(repr, bad))} is not one")
-    timed = environ.get(TIMED_ENV, "").strip()
+    timed = env.get(TIMED_ENV, "").strip()
     if timed not in ("", *TIMED_MODES):
         raise pytest.UsageError(f"{TIMED_ENV} is {' or '.join(map(repr, TIMED_MODES))} or "
                                 f"unset; it is {timed!r}")
-    left_out = [tier.strip() for tier in environ.get(LEAVE_OUT_ENV, "").split(",")]
+    left_out = [tier.strip() for tier in env.get(LEAVE_OUT_ENV, "").split(",")]
     left_out = [tier for tier in left_out if tier]
     bad = [tier for tier in left_out if tier not in LIFTABLE]
     if bad:
@@ -1037,7 +1073,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     _GUARD.active = True
     try:
         yield Fence(home=home, runtime=runtime, short=short, env=dict(env),
-                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME]))
+                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME_ENV]))
     finally:
         late = _GUARD.breaches[_GUARD.reported:]
         _GUARD.restore(outer)
@@ -1131,11 +1167,11 @@ def can_symlink() -> bool:
 
     Only Windows' "a required privilege is not held" reads as no. Any other error is
     raised, `FenceError` among them, so a fence refusal is never taken for no."""
-    with tempfile.TemporaryDirectory(prefix="mx-link-") as folder:
+    with tempfile.TemporaryDirectory(prefix="mx-link-") as temp_dir:
         try:
-            os.symlink(os.path.join(folder, "target"), os.path.join(folder, "link"))
-        except OSError as error:
-            if getattr(error, "winerror", None) != _ERROR_PRIVILEGE_NOT_HELD:
+            os.symlink(os.path.join(temp_dir, "target"), os.path.join(temp_dir, "link"))
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != _ERROR_PRIVILEGE_NOT_HELD:
                 raise
             return False
     return True
@@ -1208,16 +1244,16 @@ def param_id(value: object) -> str:
     return type(value).__qualname__
 
 
-def console_script(directory: str | os.PathLike[str], name: str,
+def console_script(script_dir: str | os.PathLike[str], name: str,
                    source: str | None = None) -> Path:
-    """Write a stand-in for console script `name` into `directory` and return its path.
+    """Write a stand-in for console script `name` into `script_dir` and return its path.
 
     It has the name this system finds a console script by, so `moxi.paths.script(name)`
-    finds it when the scripts directory is `directory`, and so does a PATH lookup
-    (`shutil.which`) when `directory` is on PATH; and it runs. On POSIX it is `name`, a
+    finds it when the scripts directory is `script_dir`, and so does a PATH lookup
+    (`shutil.which`) when `script_dir` is on PATH; and it runs. On POSIX it is `name`, a
     `/bin/sh` script with mode 0o755. On Windows it is `name.cmd`, a batch file: an
     installer writes `name.exe`, which a test can't write as text, and `.cmd` is on every
-    `PATHEXT`. A test that needs the path uses the one returned, never `directory / name`.
+    `PATHEXT`. A test that needs the path uses the one returned, never `script_dir / name`.
 
     With no `source` it does nothing and exits 0. With `source`, Python code, it runs
     that code under this interpreter, with the stand-in's arguments in `sys.argv[1:]`,
@@ -1228,7 +1264,7 @@ def console_script(directory: str | os.PathLike[str], name: str,
     if WINDOWS:
         if source is not None and "%" in python:
             raise ValueError(f"can't quote {python!r} for cmd.exe")
-        path = Path(directory, f"{name}.cmd")
+        path = Path(script_dir, f"{name}.cmd")
         # `-x` makes Python skip the first line, the one cmd.exe runs; `call` reads
         # Python's exit status after it ran, not when cmd.exe read the line.
         head = ("@exit /b 0" if source is None
@@ -1236,7 +1272,7 @@ def console_script(directory: str | os.PathLike[str], name: str,
         path.write_bytes(f"{head}\r\n{source or ''}".replace("\r\n", "\n")
                          .replace("\n", "\r\n").encode())
         return path
-    path = Path(directory, name)
+    path = Path(script_dir, name)
     if source is None:
         path.write_text("#!/bin/sh\n")
     else:
@@ -1296,10 +1332,11 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
+__all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
            "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
-           "MARKERS", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
-           "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "MARKERS", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
+           "TIERS_ENV", "TIMED", "TIMED_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES",
+           "WINDOWS_KEPT_ENV",
            "console_script", "fence", "findings_of", "param_id", "selection", "served",
-           "short_dir", "terminal_record", "touches_match", "uv_env", "wait_for",
+           "short_dir", "terminal_record", "timed_slack", "touches_match", "uv_env", "wait_for",
            "write_sqlite"]

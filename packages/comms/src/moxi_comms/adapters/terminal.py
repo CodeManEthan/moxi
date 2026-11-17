@@ -135,8 +135,8 @@ class Terminal:
             if self.saved is not None:
                 termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)
             os.write(self.fd, RESTORE_SCREEN)
-        except (OSError, termios.error) as e:
-            self.log.warning("could not take the terminal back: %s", e)
+        except (OSError, termios.error) as exc:
+            self.log.warning("could not take the terminal back: %s", exc)
 
 
 __all__ = ["ENTER_ALT_SCREEN", "LEAVE_ALT_SCREEN", "SHOW_CURSOR", "RESTORE_SCREEN",

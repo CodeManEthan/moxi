@@ -43,7 +43,7 @@ def seed(env: dict[str, str]) -> dict[str, str]:
     t = ClaudeTranscript(claude)
     for n in range(TURNS):
         t.user(f"turn {n}")
-        req = t.request(usage_block=usage(input=3, cache_read=900, output=40))
+        req = t.request(usage_block=usage(input_tokens=3, cache_read=900, output=40))
         req.thinking("which file?")
         call = req.tool_use("Read", {"file_path": "/work/project/notes.md"})
         t.tool_result(call, "the notes, which the page never sends")
@@ -80,12 +80,12 @@ def seed(env: dict[str, str]) -> dict[str, str]:
     s = db.session(title="opencode work")
     s.user("opencode turn")
     a = s.assistant()
-    a.step(text="opencode done", input=900, output=40)
+    a.step(text="opencode done", input_tokens=900, output=40)
     a.complete()
     kid = s.child(title="look into it")
     kid.user("look")
     k = kid.assistant()
-    k.step(text="looked", input=5, output=3)
+    k.step(text="looked", input_tokens=5, output=3)
     k.complete()
     db.write()
     return {"opencode": s.id, "opencode_child": kid.id}

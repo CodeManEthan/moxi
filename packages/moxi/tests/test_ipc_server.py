@@ -26,8 +26,8 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="Unix sockets; the Windows pipe server is built apart")
 
 
-def req(id, method, params=None, **extra) -> bytes:
-    obj = {"jsonrpc": "2.0", "id": id, "method": method, **extra}
+def req(request_id, method, params=None, **extra) -> bytes:
+    obj = {"jsonrpc": "2.0", "id": request_id, "method": method, **extra}
     if params is not None:
         obj["params"] = params
     return json.dumps(obj).encode() + b"\n"
@@ -79,7 +79,7 @@ def holder(lock_path, hold_for: float | None = None) -> subprocess.Popen:
 
 # -- the socket, the lock and closing ---------------------------------------------------------
 
-def test_serve_makes_a_private_directory_and_a_0600_socket(serving, sock_dir):
+def test_serve_makes_a_private_dir_and_a_0600_socket(serving, sock_dir):
     address = sock_dir / "new" / "a.sock"
     srv = serving(echo, address=str(address))
     assert stat.S_ISSOCK(os.lstat(address).st_mode)
@@ -95,7 +95,7 @@ def mode(path) -> int:
     return stat.S_IMODE(os.lstat(path).st_mode)
 
 
-def test_serve_refuses_an_open_directory_of_the_users_and_leaves_it(serving, sock_dir):
+def test_serve_refuses_an_open_dir_of_the_users_and_leaves_it(serving, sock_dir):
     (sock_dir / "s").mkdir()
     os.chmod(sock_dir / "s", 0o775)
     with pytest.raises(OSError, match=str(sock_dir / "s")):
@@ -104,7 +104,7 @@ def test_serve_refuses_an_open_directory_of_the_users_and_leaves_it(serving, soc
     assert os.listdir(sock_dir / "s") == []
 
 
-def test_serve_uses_a_closed_directory_of_the_users_as_it_is(serving, sock_dir):
+def test_serve_uses_a_closed_dir_of_the_users_as_it_is(serving, sock_dir):
     (sock_dir / "s").mkdir()
     os.chmod(sock_dir / "s", 0o755)
     srv = serving(echo)
@@ -114,7 +114,7 @@ def test_serve_uses_a_closed_directory_of_the_users_as_it_is(serving, sock_dir):
     assert raw.json()["result"] == {"method": "go", "params": None}
 
 
-def test_serve_refuses_a_linked_directory_and_leaves_it(serving, sock_dir):
+def test_serve_refuses_a_linked_dir_and_leaves_it(serving, sock_dir):
     (sock_dir / "real").mkdir(mode=0o700)
     os.symlink(sock_dir / "real", sock_dir / "s")
     with pytest.raises(OSError, match="symbolic link"):
@@ -122,14 +122,14 @@ def test_serve_refuses_a_linked_directory_and_leaves_it(serving, sock_dir):
     assert os.listdir(sock_dir / "real") == []
 
 
-def test_serve_refuses_a_directory_another_user_owns(serving):
+def test_serve_refuses_a_dir_another_user_owns(serving):
     if os.lstat("/").st_uid == os.getuid():
         pytest.skip("the root directory is this user's")
     with pytest.raises(OSError, match="not this user"):
         serving(echo, address="/x.sock")
 
 
-def test_serve_makes_a_modules_runtime_directory_private(serving, sock_dir, monkeypatch):
+def test_serve_makes_a_modules_runtime_dir_private(serving, sock_dir, monkeypatch):
     from moxi import paths
 
     monkeypatch.setenv("MOXI_DEMO_RUNTIME_DIR", str(sock_dir / "rt"))
@@ -140,7 +140,7 @@ def test_serve_makes_a_modules_runtime_directory_private(serving, sock_dir, monk
     assert mode(runtime) == 0o700
 
 
-def test_serve_makes_the_short_hashed_directory_private(serving, sock_dir, monkeypatch):
+def test_serve_makes_the_short_hashed_dir_private(serving, sock_dir, monkeypatch):
     from moxi import paths
 
     monkeypatch.setattr(paths, "_SHORT_ROOT", str(sock_dir))
@@ -151,7 +151,7 @@ def test_serve_makes_the_short_hashed_directory_private(serving, sock_dir, monke
     assert mode(short) == 0o700
 
 
-def test_a_directory_named_like_a_module_is_not_its_runtime_directory(serving, sock_dir):
+def test_a_dir_named_like_a_module_is_not_its_runtime_dir(serving, sock_dir):
     (sock_dir / "demo").mkdir()
     os.chmod(sock_dir / "demo", 0o775)
     with pytest.raises(OSError):
@@ -169,7 +169,7 @@ def test_close_removes_the_socket_before_it_lets_the_lock_go(serving):
     srv.call(srv.server.close)
     assert seen == [False]
     assert not os.path.lexists(address)
-    with files.lock(f"{address}.lock", timeout=0):
+    with files.lock(f"{address}.lock", timeout_s=0):
         pass
     assert ipc.sweep(address) == "absent"
 
@@ -229,7 +229,7 @@ def test_a_file_that_is_not_a_socket_is_left_alone(sock_dir):
     with pytest.raises(FileExistsError):
         ServerThread(address, echo)
     assert address.read_text() == "mine"
-    with files.lock(f"{address}.lock", timeout=0):
+    with files.lock(f"{address}.lock", timeout_s=0):
         pass
 
 
@@ -301,7 +301,7 @@ def test_async_with_closes_the_server(sock_dir):
 
 
 @pytest.mark.parametrize("options", [
-    {"max_line": 0}, {"queue": 0}, {"queue": True}, {"write_deadline": 0},
+    {"max_line": 0}, {"queue": 0}, {"queue": True}, {"write_timeout_s": 0},
 ])
 def test_serve_refuses_bad_options(sock_dir, options):
     with pytest.raises(ValueError):
@@ -625,7 +625,7 @@ def test_a_stuck_peer_is_dropped_at_the_write_deadline_and_others_go_on(serving,
     def on_close(conn):
         closed[conn.peer.pid] = time.monotonic()
 
-    srv = serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)
+    srv = serving(handler, write_timeout_s=deadline, queue=1000, on_close=on_close)
     stuck = Raw(srv.address)
     stuck.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
     stuck.send(req(1, "flood"))

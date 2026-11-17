@@ -11,7 +11,7 @@
     moxi services remove ID
     moxi services start|stop|restart ID...
     moxi services enable|disable ID...
-    moxi services watch [ID...] [--every SECONDS] [--json]
+    moxi services watch [ID...] [--every-s SECONDS] [--json]
 
 `ID` is `<module>/<name>` for a module's daemon or timer, and `services/<name>` or a
 bare `<name>` for one the user added or adopted. The read verbs (`list`, `show`,
@@ -72,12 +72,12 @@ def worst(codes_: Sequence[int]) -> int:
 
 # --- splitting a command line -----------------------------------------------------------
 
-def split_command(text: str, *, windows: bool | None = None) -> list[str]:
+def split_command(text: str, *, is_windows: bool | None = None) -> list[str]:
     """Split `text` into an argument list as this system's command lines are split:
     `shlex.split` on POSIX, the rules of Windows' `CommandLineToArgvW` there. Raises
     `Usage` (exit 2) on an empty command or unbalanced quotes."""
-    windows = sys.platform == "win32" if windows is None else windows
-    if windows:
+    is_windows = sys.platform == "win32" if is_windows is None else is_windows
+    if is_windows:
         argv = _split_windows(text)
     else:
         try:
@@ -169,8 +169,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str, *, reads: bool = False) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")
+    def verb(name: str, help_text: str, *, reads: bool = False) -> argparse.ArgumentParser:
+        p = verbs.add_parser(name, help=help_text, description=help_text[0].upper() + help_text[1:] + ".",
+                             allow_abbrev=False)
         if reads:
             p.add_argument("--json", action="store_true", help="print JSON")
         return p
@@ -210,20 +211,20 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verb("remove", "remove a row you added or adopted")
     p.add_argument("id", metavar="ID")
 
-    for name, help in (("start", "start a daemon, or run a timer now"),
+    for name, verb_help in (("start", "start a daemon, or run a timer now"),
                        ("stop", "stop a daemon until the next login or start, or end a "
                                 "timer's run"),
                        ("restart", "stop, then start"),
                        ("enable", "turn rows on: a daemon running and starting at login, "
                                   "a timer's schedule armed"),
                        ("disable", "turn rows off")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("ids", nargs="+", metavar="ID")
 
     p = verb("watch", "print a line whenever a row's verdict changes, until interrupted",
              reads=True)
     p.add_argument("ids", nargs="*", metavar="ID")
-    p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",
+    p.add_argument("--every-s", type=float, default=WATCH_EVERY, metavar="SECONDS",
                    help=f"seconds between reads (default {WATCH_EVERY:g})")
 
     _PARSERS[prog] = parser
@@ -294,7 +295,7 @@ def _add(args, out) -> int:
                         "command services writes, not an adopted unit, which keeps its own",
                         None)
         enable = True if args.enable else False if args.disable else None
-        outcome = acts.add_adopted(args.name, args.unit, enable=enable, timer=args.timer,
+        outcome = acts.add_adopted(args.name, args.unit, enable=enable, is_timer=args.timer,
                                    health=health, project=args.project,
                                    launches_session=args.launches_session, doc=args.doc)
     else:
@@ -308,7 +309,7 @@ def _add(args, out) -> int:
             if not args.cwd:
                 raise Usage("--cwd is empty; name a directory", None)
             cwd = os.path.abspath(os.path.expanduser(args.cwd))
-        outcome = acts.add_written(args.name, args.command, timer=args.timer,
+        outcome = acts.add_written(args.name, args.command, is_timer=args.timer,
                                    every=args.every, at=_commas(args.at),
                                    days=_commas(args.days), cwd=cwd, health=health,
                                    project=args.project,
@@ -409,7 +410,7 @@ def _view_json(view: View) -> dict:
 
 def _list(args, out) -> int:
     found = _all_rows(args.project, args.kind)
-    seen = views(found, health=args.health)
+    seen = views(found, check_health=args.health)
     if args.json:
         print(json.dumps([_view_json(v) for v in seen], indent=2), file=out)
         return codes.OK
@@ -468,8 +469,8 @@ def _process(pid: int | None) -> dict | None:
             started = proc.create_time()
             rss = proc.memory_info().rss
             cpu = proc.cpu_times()
-        return {"pid": pid, "uptime_seconds": round(max(0.0, time.time() - started), 1),
-                "rss_bytes": int(rss), "cpu_seconds": round(cpu.user + cpu.system, 2)}
+        return {"pid": pid, "uptime_s": round(max(0.0, time.time() - started), 1),
+                "rss_bytes": int(rss), "cpu_s": round(cpu.user + cpu.system, 2)}
     except Exception:  # noqa: BLE001 - a process gone or unreadable shows nothing
         return None
 
@@ -490,7 +491,7 @@ def _duration(seconds: float) -> str:
 
 def _show(args, out) -> int:
     row = acts.resolve(args.id)
-    view = views([row], health=True)[0]
+    view = views([row], check_health=True)[0]
     st = view.st
     process = _process(st.pid) if (row.kind == "daemon" and st is not None
                                    and st.state == "active") else None
@@ -545,9 +546,9 @@ def _show(args, out) -> int:
     if view.health is not None:
         put("checked", f"{view.health[0]}: {view.health[1]}")
     if process is not None:
-        put("process", f"pid {process['pid']}, up {_duration(process['uptime_seconds'])}, "
+        put("process", f"pid {process['pid']}, up {_duration(process['uptime_s'])}, "
                        f"{process['rss_bytes'] / 1048576:.1f} MiB resident, "
-                       f"{process['cpu_seconds']:g} s of CPU")
+                       f"{process['cpu_s']:g} s of CPU")
     elif st is not None and st.pid:
         put("pid", st.pid)
     if row.kind == "timer":
@@ -594,8 +595,8 @@ def _watch_rows(idents: Sequence[str], noted: dict[str, str]) -> tuple[list, lis
 
 
 def _watch(args, out) -> int:
-    if args.every <= 0:
-        raise Usage("--every takes a number of seconds above 0", None)
+    if args.every_s <= 0:
+        raise Usage("--every-s takes a number of seconds above 0", None)
     for ident in args.ids:
         acts.resolve(ident)  # an unknown id is refused before the first read
     seen: dict[str, tuple[str, str]] = {}
@@ -608,7 +609,7 @@ def _watch(args, out) -> int:
                 found, gone = _watch_rows(args.ids, noted)
                 now = _clock()
                 fresh = last_health is None or now - last_health >= WATCH_HEALTH
-                current = views(found, health=fresh, known_health=None if fresh
+                current = views(found, check_health=fresh, known_health=None if fresh
                                 else checked)
                 if fresh:
                     checked = {v.row.id: v.health for v in current if v.health is not None}
@@ -617,21 +618,21 @@ def _watch(args, out) -> int:
                     key = (view.verdict.state, view.verdict.reason)
                     if seen.get(view.row.id) != key:
                         seen[view.row.id] = key
-                        _watch_line(out, args.json, view.row.id, view)
+                        _watch_line(out, as_json=args.json, ident=view.row.id, view=view)
                 here = {v.row.id for v in current}
                 for ident in [i for i in seen if i not in here] + gone:
                     if ident in seen:
                         del seen[ident]
-                        _watch_line(out, args.json, ident, None)
+                        _watch_line(out, as_json=args.json, ident=ident, view=None)
             except ServicesError as exc:
                 print(f"{time.strftime('%H:%M:%S')} {exc.reason}", file=sys.stderr)
             out.flush()
-            _sleep(args.every)
+            _sleep(args.every_s)
     except KeyboardInterrupt:
         return codes.OK
 
 
-def _watch_line(out, as_json: bool, ident: str, view: View | None) -> None:
+def _watch_line(out, *, as_json: bool, ident: str, view: View | None) -> None:
     if as_json:
         found = {"at": _iso(time.time()), "id": ident}
         if view is None:

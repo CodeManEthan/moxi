@@ -172,8 +172,8 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
             return client.call("agents")
         finally:
             client.close()
-    except Exception as e:                                  # noqa: BLE001
-        log.warning("roster for layer one unavailable: %s", e)
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("roster for layer one unavailable: %s", exc)
         return None
 
 
@@ -183,7 +183,7 @@ def _turns_find(pid: int, timeout: float):
     Imported at the call: `import moxi_turns` loads nothing."""
     import moxi_turns as turns
 
-    return turns.wait_ready(pid=pid, timeout=timeout)
+    return turns.wait_ready(pid=pid, timeout_s=timeout)
 
 
 class HostGone(RuntimeError):
@@ -472,7 +472,7 @@ class CodexAdapter(HarnessAdapter):
             reloader.join(RELOAD_JOIN)
 
     # ------------------------------------------------------------------ comms' tools
-    def tool_token_registered(self, served: bool) -> None:
+    def tool_token_registered(self, *, served: bool) -> None:
         """A registration the daemon answered: when it serves the tools, the host's
         server list is reloaded, now or once the session is found."""
         if not served:
@@ -515,9 +515,9 @@ class CodexAdapter(HarnessAdapter):
                 self.log.info("the codex host of %s offers no mcp.reload; its servers are "
                               "not reloaded", self.agent.qualified)
                 return
-            answer = session.mcp_reload(timeout=RELOAD_WAIT)
-        except Exception as e:                              # noqa: BLE001
-            self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, e)
+            answer = session.mcp_reload(timeout_s=RELOAD_WAIT)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, exc)
             return
         self.reloads.append(answer)
         self.log.info("mcp.reload for %s: reloaded %s, servers %s", self.agent.qualified,
@@ -728,10 +728,13 @@ class CodexAdapter(HarnessAdapter):
     def flush(self) -> str | None:
         """Plain mail goes only at a boundary: no turn runs and no plain digest waits
         for its turn. While a turn runs, interrupt mail goes into it by `steer` when the
-        session offers it (`flush_interrupt`); the rest waits for the turn's end."""
+        session offers it (`flush_interrupt`); the rest waits for the turn's end. A steer
+        holds, as the base's flush does, while catch-up is arriving or the adapter is
+        offline (a new binding's client is not installed yet)."""
         with self._lock:
             if self.turn_open:
-                steer = (not self.replaying and self.can_inject() and self._can_steer()
+                steer = (not self.replaying and not self.offline and self.can_inject()
+                         and self._can_steer()
                          and any(self._steerable(p) for p in self.queue))
                 if not steer:
                     return None
@@ -780,7 +783,7 @@ class CodexAdapter(HarnessAdapter):
             session_id = self.mirror_session()
             for p in batch:
                 self.reply_ledger.open(p, directors, session_id, now)
-        self.delivered(text, high, identity, len(batch), receipt)
+        self.on_delivered(text, high, identity, len(batch), receipt)
         return text
 
     def deliver(self, text: str, high: int, identity, count: int):
@@ -805,10 +808,10 @@ class CodexAdapter(HarnessAdapter):
                 delivery = session.steer(text, ref=ref)
             else:
                 delivery = session.deliver(text, ref=ref)
-        except Exception as e:                              # noqa: BLE001
-            self.log.warning("the hand-in of digest %s failed: %s", ref, e)
-            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(e).__name__}: "
-                                            f"{e}"), ref)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.warning("the hand-in of digest %s failed: %s", ref, exc)
+            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(exc).__name__}: "
+                                            f"{exc}"), ref)
         hand.delivery = delivery
         self.log.info("handed digest %s to turns by %s as delivery %s", ref,
                       "steer" if steer else "deliver", delivery.id)
@@ -832,9 +835,9 @@ class CodexAdapter(HarnessAdapter):
                     return
                 self._stop.wait(self.wait_retry)
                 continue
-            except Exception as e:                          # noqa: BLE001
+            except Exception as exc:                          # noqa: BLE001
                 self.log.exception("waiting on digest %s failed", hand.ref)
-                value = HandInFailed(f"the wait failed: {type(e).__name__}: {e}")
+                value = HandInFailed(f"the wait failed: {type(exc).__name__}: {exc}")
             if (type(value).__name__ == "Refused" and hand.steer and not hand.fell_back
                     and value.reason in STEER_FALLBACK):
                 if self._fall_back(hand, value.reason):
@@ -855,9 +858,9 @@ class CodexAdapter(HarnessAdapter):
                       hand.ref, reason)
         try:
             hand.delivery = session.deliver(hand.text, ref=hand.ref)
-        except Exception as e:                              # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             hand.delivery = _Unsent(HandInFailed(f"the hand-in failed: "
-                                                 f"{type(e).__name__}: {e}"), hand.ref)
+                                                 f"{type(exc).__name__}: {exc}"), hand.ref)
         return True
 
     def _on_result(self, hand: Hand, value) -> None:
@@ -878,7 +881,7 @@ class CodexAdapter(HarnessAdapter):
                          len(hand.ids))
         self.report_turn_end(unhandled=hand.ids)
 
-    def delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
+    def on_delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
         if self._daemon is not None:
             self.notify_injected(identity, high, text)
         log.info("injected %d message(s) for %s through %s as digest %s",

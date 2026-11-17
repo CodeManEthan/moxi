@@ -17,6 +17,8 @@ import os
 import threading
 import time
 
+from conftest import LIVE_S
+
 from moxi_comms import claimfile
 from moxi_comms.claimhold import ClaimHolder
 from moxi_comms.client import DaemonClient
@@ -181,7 +183,7 @@ class World:
             s.stop()
 
 
-def wait_for(pred, timeout=3.0):
+def wait_for(pred, timeout=LIVE_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():
@@ -250,11 +252,11 @@ class RegisterDrop:
                         drop.fired.set()
                 try:
                     resp = super().bind(**kw)
-                except BaseException as e:
+                except BaseException as exc:
                     # Not answered (under load a fresh connection can be closed before
                     # its register goes out): that is the before-the-answer case, which
                     # the arm retries. The drop stays armed for the register that is.
-                    drop.unanswered.append(repr(e))
+                    drop.unanswered.append(repr(exc))
                     drop.point = point
                     raise
                 try:
@@ -266,13 +268,13 @@ class RegisterDrop:
                         # answered, and the arm's main thread goes on only once the
                         # reader thread has run its close handler
                         daemon = drop.rig.daemon
-                        assert wait_for(lambda: id(daemon) not in drop.booting, 10.0)
+                        assert wait_for(lambda: id(daemon) not in drop.booting, LIVE_S)
                         daemon.stop()
                     elif point == "after_answer_drop":
                         # the connection drops under a daemon that stays up; the daemon
                         # has dropped the binding before the arm goes on
                         self.close()
-                    assert self.closed.wait(5.0), "the close handler never ran"
+                    assert self.closed.wait(LIVE_S), "the close handler never ran"
                     if point == "after_answer_drop":
                         q = resp["identity"]["qualified"]
                         assert wait_for(lambda: q not in drop.rig.daemon.bindings)

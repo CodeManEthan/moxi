@@ -39,10 +39,10 @@ def _args(tmp_path, *flags) -> dict:
     return launch_args(["--cwd", str(tmp_path), *flags])
 
 
-def _roster_flags(roots, *, network=True):
+def _roster_flags(roots, *, allow_network=True):
     return ["--option", "agents.enabled=false",
             "--option", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}",
-            "--option", f"sandbox_workspace_write.network_access={str(network).lower()}"]
+            "--option", f"sandbox_workspace_write.network_access={str(allow_network).lower()}"]
 
 
 # Today's roster shapes: the flags comms' wrapper passes for each row, and the options
@@ -56,7 +56,7 @@ ROSTER_ROWS = {
                                         "network_access": True}}}),
     "roots, a model and the network off": (
         ["--sandbox", "workspace-write", "--model", "gpt-sample",
-         *_roster_flags(["/srv/row", "/srv/record"], network=False)],
+         *_roster_flags(["/srv/row", "/srv/record"], allow_network=False)],
         {"sandbox": "workspace-write", "model": "gpt-sample", "config": {
             "agents": {"enabled": False},
             "sandbox_workspace_write": {"writable_roots": ["/srv/row", "/srv/record"],
@@ -195,7 +195,7 @@ def test_an_options_file_the_host_refuses_exits_2(tmp_path, capsys, options, wor
     assert words in capsys.readouterr().err
 
 
-def test_missing_files_and_folders_are_usage_errors(tmp_path):
+def test_missing_files_and_dirs_are_usage_errors(tmp_path):
     with pytest.raises(UsageError, match="not a directory"):
         launch_args(["--cwd", str(tmp_path / "nowhere")])
     with pytest.raises(UsageError, match="--options-file"):
@@ -208,9 +208,9 @@ def test_missing_files_and_folders_are_usage_errors(tmp_path):
 
 # -- the settings check ------------------------------------------------------------------
 
-def _options(tmp_path, roots=(), *, network=True):
+def _options(tmp_path, roots=(), *, allow_network=True):
     return _args(tmp_path, "--sandbox", "workspace-write",
-                 *_roster_flags([str(r) for r in roots], network=network))["options"]
+                 *_roster_flags([str(r) for r in roots], allow_network=allow_network))["options"]
 
 
 @pytest.mark.parametrize(("reported", "reason"), [
@@ -227,7 +227,7 @@ def test_the_check_names_each_mismatch(tmp_path, reported, reason):
     assert reason in verify_options(options, answer, tmp_path)
 
 
-def test_the_check_counts_the_working_directory_as_writable(tmp_path):
+def test_the_check_counts_the_working_dir_as_writable(tmp_path):
     options = _options(tmp_path, [tmp_path])
     answer = {"sandbox": {"type": "workspaceWrite", "networkAccess": True,
                           "writableRoots": []}}
@@ -468,7 +468,7 @@ def test_a_host_spawned_with_a_lifeline_is_found_by_pid_and_ends_with_the_pipe(r
     host = rig.spawn("--no-window", "--sandbox", "workspace-write",
                      *_roster_flags([str(rig.work)]), "--model", "gpt-sample",
                      "--instructions-file", str(instructions), lifeline="fd", env=env)
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     try:
         assert session.pid == session.endpoint_pid == host.pid
         assert session.harness == "codex" and session.session_id
@@ -495,7 +495,7 @@ def test_a_host_spawned_with_a_lifeline_is_found_by_pid_and_ends_with_the_pipe(r
 @LINUX
 def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
     host = rig.spawn("--no-window", lifeline="stdin")
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     server = rig.app_server()
     session.close()
     time.sleep(0.5)
@@ -509,7 +509,7 @@ def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
 @LINUX
 def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig):
     host = rig.spawn("--no-window", stdin=subprocess.PIPE)
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     thread = session.session_id
     assert session.facts().ready.source == "startup"
     # A turn runs (the stub ends it), so the later load is a resume, not a start.
@@ -523,7 +523,7 @@ def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig)
     assert "the Codex host was stopped (SIGTERM)" in host.out.read_text()
 
     again = rig.spawn("--no-window", "--resume", thread, stdin=subprocess.DEVNULL)
-    session = turns_client.wait_ready(pid=again.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=again.pid, timeout_s=WAIT)
     try:
         assert session.session_id == thread
         assert session.facts().ready.source == "resume"
@@ -541,7 +541,7 @@ def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig)
 @LINUX
 def test_the_app_server_ends_when_its_host_is_killed(rig):
     host = rig.spawn("--no-window")
-    turns_client.wait_ready(pid=host.pid, timeout=WAIT).close()
+    turns_client.wait_ready(pid=host.pid, timeout_s=WAIT).close()
     server = rig.app_server()
     host.kill()
     host.wait()

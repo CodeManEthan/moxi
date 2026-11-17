@@ -10,11 +10,13 @@
 </head>
 <body>
 <div id="moxi-shell">
-<header class="moxi-bar">
+<header class="moxi-top">
 <a class="moxi-brand" href="/m/ui/" data-module="ui" data-route="">Moxi</a>
-<button id="moxi-menu-button" class="moxi-menu-button" type="button" aria-expanded="false" aria-controls="moxi-menu">Menu</button>
-<nav id="moxi-menu" class="moxi-menu" aria-label="Panels"><ul></ul></nav>
+<button id="moxi-pages-button" class="moxi-pages-button" type="button" aria-expanded="false" aria-controls="moxi-pages"></button>
+<a id="moxi-settings" class="moxi-settings" href="/m/ui/settings" data-module="ui" data-route="settings">Settings</a>
 </header>
+<nav id="moxi-pages" class="moxi-pages" aria-label="Pages" hidden></nav>
+<p id="moxi-reads" class="moxi-reads" hidden>This phone reads only here.</p>
 <p id="moxi-notice" class="moxi-notice" role="alert" hidden>This browser is signed out of Moxi. Run <code>moxi ui open</code> to sign in again.</p>
 <p id="moxi-status" class="moxi-status" role="status" hidden></p>
 <p id="moxi-band" class="moxi-band" role="status" hidden></p>

@@ -256,7 +256,7 @@ def _lift_peer(app: Callable[..., Any]) -> Callable[..., Any]:
     sees another connection's peer or a value of its own making.
     """
 
-    async def lifted(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_lifted(scope: dict[str, Any], receive: Callable[..., Any],
                      send: Callable[..., Any]) -> None:
         if scope.get("type") == "http":
             state = dict(scope.get("state") or {})
@@ -264,7 +264,7 @@ def _lift_peer(app: Callable[..., Any]) -> Callable[..., Any]:
             scope = {**scope, "state": state, PEER: {"uid": uid}}
         await app(scope, receive, send)
 
-    return lifted
+    return on_lifted
 
 
 #: `struct xucred`'s head on macOS: `cr_version` and `cr_uid`, then the groups.
@@ -727,8 +727,8 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
     module = args.module
     try:
         runtime = Layout(module).runtime_dir(create=True)
-    except OSError as err:
-        log.error("the runtime directory is refused: %s", err)
+    except OSError as exc:
+        log.error("the runtime directory is refused: %s", exc)
         return codes.REFUSED
     os.chdir(runtime)
 
@@ -742,16 +742,16 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
         # The server_id is minted with the runtime file, under the lock; the page is
         # loaded and its handlers resolved before that, so a refused page writes nothing.
         inner = app(page, module=module, server_id="starting", version=version)
-    except (PageLoadError, PageError) as err:
-        log.error("the page of %s is refused: %s", module, " ".join(str(err).split()))
+    except (PageLoadError, PageError) as exc:
+        log.error("the page of %s is refused: %s", module, " ".join(str(exc).split()))
         return codes.REFUSED
     idle_s = args.idle_s if args.idle_s is not None else float(page.idle_s)
 
     held = contextlib.ExitStack()
     try:
-        held.enter_context(files.lock(runtime / "page.lock", timeout=LOCK_WAIT))
-    except files.LockTimeout as err:
-        log.warning("another page server holds the lock: %s", err)
+        held.enter_context(files.lock(runtime / "page.lock", timeout_s=LOCK_WAIT))
+    except files.LockTimeout as exc:
+        log.warning("another page server holds the lock: %s", exc)
         return codes.TEMPFAIL
 
     tcp = args.tcp or sys.platform == "win32"
@@ -765,9 +765,9 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
             address = socket_path(module, "page")
             sock = bind_unix(address)
             transport, port = "unix", None
-    except NotPrivate as err:
+    except NotPrivate as exc:
         held.close()
-        log.error("the socket's directory is refused: %s", err)
+        log.error("the socket's directory is refused: %s", exc)
         return codes.REFUSED
     except BaseException:
         held.close()
@@ -811,8 +811,8 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
         # this process's output.
         os.dup2(2, 1)
         sys.stdout = sys.stderr
-    except OSError as err:
-        log.error("the ready line could not be written: %s", err)
+    except OSError as exc:
+        log.error("the ready line could not be written: %s", exc)
         finish(codes.ERROR)
 
     if not args.no_lifeline:

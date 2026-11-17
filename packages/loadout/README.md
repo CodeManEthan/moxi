@@ -33,8 +33,17 @@ and `moxi loadout status` says what has drifted.
    run. `status` notes both.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
-   own file, which `moxi loadout global off` takes out exactly) or `if-absent` (placed
-   only where a harness has none). `global show --diff` previews the next install.
+   own file, which `moxi loadout global remove` takes out exactly) or `if-absent` (placed
+   only where a harness has none). Text for one harness goes beside it in
+   `global.claude.md`, `global.codex.md` or `global.opencode.md`: each harness reads
+   `global.md` and its own part, never another's. Claude gets an `@` line per file; Codex
+   and OpenCode get one marked block in their `AGENTS.md`, rewritten by each install; in
+   `if-absent` a harness with a part gets a generated file of both. OpenCode's `AGENTS.md`
+   is under `OPENCODE_CONFIG_DIR` when that is set, else `XDG_CONFIG_HOME/opencode` or
+   `~/.config/opencode`; while it exists OpenCode doesn't read Claude's
+   `~/.claude/CLAUDE.md`, so text for OpenCode goes in `global.md` or its part. Use absolute paths for
+   `@` imports in the global text, since a relative one resolves against the file Claude
+   reads. `global show --diff` previews the next install and names each harness's parts.
 6. No placement lands where git would commit it. In a project tree it writes a
    `.gitignore` of its own, which ignores itself, before it places anything there; where
    a `.gitignore` of yours would leave a target committed, the target is not placed and
@@ -92,43 +101,104 @@ the `moxi` command and lists the other modules.
 The loadout folder is the `source` setting (`moxi config set loadout source DIR`); empty,
 it is a folder in loadout's data directory (`moxi paths loadout`). Setup writes an example
 manifest into an empty folder, every item commented out; the same file is
-[`example/loadout.toml`](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/src/moxi_loadout/example/loadout.toml)
+[`example/loadout.toml`](https://github.com/CodeManEthan/moxi/blob/moxi-loadout-v0.1.4/packages/loadout/src/moxi_loadout/example/loadout.toml)
 in the package. Take the `#` off an item, put the item's files in the folder
 (`skills/<name>/SKILL.md`, `agents/<name>.md`, `global.md`), then run
 `moxi loadout install`.
 
+## What a write keeps
+
+No write of loadout's destroys bytes it can't show it wrote. Before an install, a
+`--replace`, a removal, `enable`, `disable`, `add` or a global verb goes over a file, or an
+entry in a file it shares with you, whose bytes aren't what loadout last wrote there, it
+keeps those bytes in the core's `displaced/` folder, in Moxi's data folder, as
+`<stamp>/<harness>/<file name>` (mode 0600). Nothing in loadout or Moxi deletes there: a
+copy stays until you delete it.
+
+- **A generated agent file** (the Codex and OpenCode forms of an agent) that was edited by
+  hand, or has no loadout header, reads `modified`. Every install leaves it; only a
+  `--replace` naming it writes it, after keeping it. A generated file that is a link is
+  refused and left as it is.
+- **A placement.** What stands where loadout places something, an edited copy, or a file
+  saved over loadout's link is moved aside by the core's placer, which says so on its own
+  line (`moved <it> to <copy>`).
+- **An entry in a harness's file** (Claude Code's `settings.json` and `.claude.json`,
+  Codex's `hooks.json` and `config.toml`, OpenCode's `opencode.json`, a managed global
+  file), when you edited it or loadout didn't write it (one you had before loadout
+  included): the whole file is kept before the write, and before the `claude` or `codex`
+  command runs for an MCP server. Codex's rules file is kept the same way. The rest of the
+  file is carried into the new one value for value; what a write can change there is its
+  layout and spelling, and a duplicate key's earlier value. Those exact bytes are in the
+  rolling backup every rewrite of a harness file takes, `backups/<harness>/` in loadout's
+  data folder: it is what keeps them, and it is pruned to the newest `backups.keep` of
+  each file.
+
+`loadout.toml` is outside the rule: each verb that writes it changes the one value it
+names and keeps every other byte, comments and order included. So are the three writes
+loadout hands to their owners, each guarded by that owner: repo's git hook pieces, the
+OpenCode row in the core's harness table, and the core's `skills.harnesses` key.
+
+A run names every copy it kept, `kept a copy of <target> at <copy>` (with `--json`,
+`kept`, each with `how` and `back`), and how to put it back:
+
+- a copy loadout wrote before writing the target: `cp <copy> <target>` puts the file back
+  as it was. An agent file then reads `modified` again and loadout leaves it; a harness
+  file comes back whole, so later changes to it go too.
+- moved aside with loadout's placed there: turn the item off there first (`moxi loadout
+  disable <id> --user` or `--project=<section>`), then `mv <copy> <target>`.
+- moved aside on a removal: `mv <copy> <target>`.
+
+On Windows the commands are `copy` and `move`. `moxi loadout install --help` says the
+same.
+
 ## The page
 
 With the `ui` extra (`moxi-ui`, the browser UI shell), loadout has a page in the shell,
-at `/m/loadout/`, and a block on the shell's home that counts the items that aren't ok
-and links to the page. An item counts once, however many of its harnesses aren't ok.
+at `/m/loadout/`, and a block on the shell's home that counts the items that
+aren't ok and links to the page. An item counts once, however many of its harnesses
+aren't ok. The page draws no colour of warning: what needs you rises to the top and is
+set heavier.
 
-- **Items.** Each section of the manifest, its own items first and then the module skills
-  it took over, with one cell per harness: the item's state, why, and a switch that runs
-  `moxi loadout enable` or `disable` for that harness. Add and Remove run `moxi loadout
-  add` and `remove`; the add form also offers each project that has no section yet. Rows
-  that belong to no listed item show under "Other rows". The notes `status` gives show
-  above the items.
-- **Install.** Runs `moxi loadout install` for every section, the user section or one
-  project section.
-- **Replace.** A row that `moxi loadout install --replace` would fix offers Replace,
-  which runs that command for the row once you confirm on the shell's sheet. Those are
-  the rows where something else stands in the way and the ones edited by hand since
-  loadout wrote them. A `would-commit` row whose path holds a copy the project's git
-  tracks is one: the copy is moved aside, so git shows it deleted, and the row reads
-  `would-commit` until you commit that.
-- **The global instruction file.** The mode, and what the next install does to each
-  global file, with its diff. Managed and Only where absent run `moxi loadout global
-  mode`. Turn off runs `moxi loadout global off` once you confirm on the sheet.
+- **Placed** says what needs you, one line per problem: the item and one word for its
+  state (`changed`, `in the way`, `not placed`, `out of date`, `would be committed`,
+  `can't be read`), its section, harnesses and why, then the fix with its act, Install
+  or Replace. A section that can't be placed (named by a project key without projects) is
+  one problem, with the path to name it by when loadout recorded one. Install all runs a
+  whole install. The counts say how many items each harness gets and how many are
+  placed.
+- **Folder** names your loadout folder and, in a git work tree, the files git hasn't
+  committed; with repo, that a commit places them again. Its settings are a link away.
+- **The items**: Your items with the global file, a group per module whose skills you
+  took over, then each project section, with a column per harness. A section past twelve
+  items folds by kind. Open an item for where each harness has it and why, its notes,
+  Turn off or Turn on per harness (Turn on for every harness when it is off through
+  `@*`), Replace where something stands in the way, and Remove from the section, which
+  leaves its files in the folder. Open the global file for its mode, each harness's file
+  and what the next install changes there, with the diff, and Turn off.
+- **Replace** opens in place and says what it would do before it does it: what it moves
+  aside or keeps, and where, the diff between what is there and what loadout writes, what
+  else the run changes, and what the diff leaves out. Every Replace keeps what it
+  replaces (see "What a write keeps").
+- **Not listed**: the skills and agents in your folder that no section lists, each with
+  Add, which lists it in a section and places it at once. Add something by its name
+  instead, always there, takes a kind, a name and a section: a hook, a permission rule,
+  an MCP server, or an item another section lists already.
+- With projects installed, `/m/loadout/project/<key>` shows only what that project's
+  sessions load: its own section and your items, with a menu of every project and a link
+  to the project's page.
 
 Each change runs the same `moxi loadout` command you would run in a terminal, in a
-process of its own, and the page shows the command and how it ended under "Last change".
-The page runs one change at a time: every control is off while one runs. Closing or
-reloading the page doesn't stop a change. The tab keeps the change it follows, so after a
-reload, or another page and back, the page follows it again and keeps every control off
-until it ends; a new tab doesn't, and `moxi loadout status` shows where things stand. When the shell runs as a service,
-a change still running when the service stops, by `moxi ui stop` or because nothing has
-used the shell for a while, stops with it; run it again.
+process of its own, and a line under the act then says the command and how it ended,
+with Show for its lines and rows, and, open, each copy it kept with the command that
+puts it back. The page runs one change at a time: every control that starts a change is
+off while one runs. Replace and Add still open, so you can read what they would do, and
+their own button waits. Closing or reloading the page doesn't stop a change. The tab
+keeps the change it follows, so after a reload, or another page and back, the page
+follows it again and keeps those controls off until it ends; a new tab doesn't, and `moxi loadout status` shows where
+things stand. When the shell runs as a service, a change still running when the service
+stops, by `moxi ui stop` or because nothing has used the shell for a while, stops with
+it; run it again. The page reads again when it is shown, after each change and every
+minute.
 
 A change from the page refuses before it writes anything when the shell would read or
 write somewhere other than your last `moxi` command in a terminal did. Moxi itself keeps a
@@ -137,21 +207,26 @@ own check, every folder the change touches: loadout's data and state folders and
 file, Moxi's state folder and settings file, each harness row's skills and agents
 folders, Claude Code's, Codex's and OpenCode's homes, projects' or repo's folders when the
 change reads them, and your home folder. It also refuses when your terminal found git and
-the shell's `PATH` doesn't: without git, nothing could check what git would commit. The
-line names each variable to set and its value. Set them where the shell gets them at every
-login (a file under `~/.config/environment.d/`, then `systemctl --user daemon-reload` and
-`moxi ui stop`, on Linux; your LaunchAgent environment on macOS or your user environment
-variables on Windows, then log out and back in), or run the command in a terminal. With
-no record yet, the line says to type `moxi modules` in a terminal of your own, which
-makes one. `moxi loadout status` and the home's block show the same comparison as a note,
-which changes neither the exit code nor the count; in a terminal, the note says what the
-page does, and it shows only when the browser UI is installed.
+the shell's `PATH` doesn't: without git, nothing could check what git would commit. While
+the two differ, the page says so first and shows each change as the command to run in a
+terminal, with Copy. The line names each variable to set and its value. Set them where
+the shell gets them at every login (a file under `~/.config/environment.d/`, then
+`systemctl --user daemon-reload` and `moxi ui stop`, on Linux; your LaunchAgent
+environment on macOS or your user environment variables on Windows, then log out and back
+in), or run the command in a terminal. With no record yet, the line says to type `moxi
+modules` in a terminal of your own, which makes one. `moxi loadout status` and the
+home's block show the same comparison as a note, which changes neither the exit code nor
+the count; in a terminal, the note says what the page does, and it shows only when the
+browser UI is installed.
 
 MCP servers are added through the `claude` and `codex` CLIs, so the page needs them on
 the shell's `PATH`. Without one, a change from the page does what the terminal does
 without it: the servers that need it stand, each with a note naming the fix, and the
 rest is written.
 
+The page is for the browser on this machine: none of its routes is offered through the
+shell's gateway, so the phone doesn't reach it.
+
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-loadout-v0.1.4/packages/loadout/LICENSE).

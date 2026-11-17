@@ -4,6 +4,7 @@ other placement left as it was."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import loadout_kit as kit
 import pytest
@@ -13,11 +14,11 @@ from moxi_loadout.planner import Resolution, Scope
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.agent(folder / "agents" / "helper.md", "helper", "tools: Read, Grep\n")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.agent(loadout_dir / "agents" / "helper.md", "helper", "tools: Read, Grep\n")
+    return loadout_dir
 
 
 def states(outcome) -> dict:
@@ -157,10 +158,10 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
     assert set(states(install.status()).values()) == {"ok"}
 
 
-def test_a_project_item_from_the_folder_copied_is_not_the_projects_own(lo, tmp_path):
+def test_a_project_item_from_the_loadout_dir_is_not_the_projects_own(lo, tmp_path):
     from moxi import config
 
-    config.set("moxi", "skills.form", "copy", by="test")
+    config.set_value("moxi", "skills.form", "copy", by="test")
     root = project(tmp_path)
     kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\nagents = ["helper"]\n')
     assert install.install().code == 0
@@ -215,19 +216,29 @@ def test_an_occupant_is_blocked_until_replace_moves_it_aside(lo):
     assert out.code == 3 and any("nothing of loadout's" in line for line in out.lines)
 
 
-def test_a_hand_edited_generated_agent_is_left_until_replaced(lo):
+def test_a_hand_edited_generated_agent_is_left_until_replaced_then_kept(lo):
+    from moxi_loadout import stores
+
     kit.manifest(lo, '[user]\nagents = ["helper"]\n')
     install.install()
     toml = kit.codex_agents() / "helper.toml"
-    with open(toml, "a", encoding="utf-8") as f:
-        f.write("# my edit\n")
+    with open(toml, "a", encoding="utf-8") as fh:
+        fh.write("# my edit\n")
+    edited = toml.read_bytes()
     out = install.status()
     assert states(out)[("agent", "helper", "codex", "user")] == "modified"
     assert [r.replaceable for r in out.rows if r.state == "modified"] == [True]
+    assert out.kept == []
     assert install.install().code == 3
     assert "# my edit" in toml.read_text()
-    assert install.install(replace=["agent:helper@codex"]).code == 0
+    out = install.install(replace=["agent:helper@codex"])
+    assert out.code == 0
     assert "# my edit" not in toml.read_text()
+    [kept] = out.kept
+    generated = stores.generated_dir() / "codex" / "helper.toml"
+    assert (kept["target"], kept["how"], kept["id"]) == (str(generated), "copied",
+                                                         "agent:helper@codex")
+    assert Path(kept["copy"]).read_bytes() == edited
 
 
 def test_a_dropped_agents_generated_file_is_deleted_unless_edited(lo):
@@ -243,8 +254,8 @@ def test_a_dropped_agents_generated_file_is_deleted_unless_edited(lo):
     # An edited one stays, with a note naming it.
     kit.manifest(lo, '[user]\nagents = ["helper"]\n')
     assert install.install().code == 0
-    with open(generated, "a", encoding="utf-8") as f:
-        f.write("# my edit\n")
+    with open(generated, "a", encoding="utf-8") as fh:
+        fh.write("# my edit\n")
     kit.manifest(lo, '[user]\n')
     out = install.install()
     assert out.code == 0, out.text()
@@ -300,7 +311,7 @@ def test_a_lost_ledger_still_removes_nothing_it_carries(lo):
     assert os.path.lexists(kit.claude() / "review")
 
 
-def test_a_moved_folder_updates_its_links(lo, tmp_path):
+def test_a_moved_loadout_dir_updates_its_links(lo, tmp_path):
     import shutil
 
     kit.manifest(lo, '[user]\nskills = ["review"]\n')

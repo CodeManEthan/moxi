@@ -52,7 +52,7 @@ def _ok(**extra):
      "required attribute"),
 ])
 def test_a_component_breaking_a_rule_is_refused_with_the_reason(name, decl, reason):
-    placed, refused = check_components("usage", {name: decl}, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", {name: decl}, has_page=True, assets=ASSETS)
     assert placed == [] and reason in refused[0]["reason"]
 
 
@@ -60,17 +60,73 @@ def test_good_components_are_placed_and_a_module_without_a_page_places_none():
     decl = {"page": _ok(script="page.js", place="page"),
             "today": _ok(home=True, future_field=1,
                          attributes={"day": {"type": "enum", "values": ["a", "b"]}})}
-    placed, refused = check_components("usage", decl, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", decl, has_page=True, assets=ASSETS)
     assert refused == [] and [c["element"] for c in placed] == ["moxi-usage-page",
                                                                  "moxi-usage-today"]
     assert placed[1]["url"] == "/m/usage/today.js" and placed[1]["attributes"][0]["values"] == ["a", "b"]
-    assert check_components("usage", decl, page=True, assets=None)[0] == []
-    placed, refused = check_components("usage", decl, page=False, assets=ASSETS)
+    assert check_components("usage", decl, has_page=True, assets=None)[0] == []
+    placed, refused = check_components("usage", decl, has_page=False, assets=ASSETS)
     assert placed == [] and "declares no PAGE" in refused[0]["reason"]
 
 
+def _one(decl, name="today"):
+    placed, refused = check_components("usage", {name: decl}, has_page=True, assets=ASSETS)
+    assert refused == []
+    return placed[0]
+
+
+def test_a_page_keeps_its_group_and_order_and_a_wrong_one_reads_as_the_default():
+    def page(**extra):
+        return _one(_ok(script="page.js", place="page", **extra), name="page")
+
+    kept = page(group="daily", order=0)
+    assert (kept["group"], kept["order"], kept["home_as"]) == ("daily", 0, None)
+    assert (page(order=999)["order"], page(group="setup")["group"]) == (999, "setup")
+    absent = page()
+    assert (absent["group"], absent["order"]) == ("setup", 500)
+    for group in ("Daily", "dayly", "", 3, None, ["daily"]):
+        assert page(group=group, order=7)["group"] == "setup"
+    for order in (-1, 1000, 2.0, "10", True, None, [1]):
+        assert page(group="daily", order=order)["order"] == 500
+
+
+@pytest.mark.parametrize("home_as", ["main", "row"])
+def test_a_home_block_keeps_its_home_as_and_order(home_as):
+    kept = _one(_ok(home=True, home_as=home_as, order=10))
+    assert (kept["home_as"], kept["order"], kept["group"]) == (home_as, 10, None)
+    assert _one(_ok(home=True, home_as=home_as))["order"] == 500
+    assert _one(_ok(home=True, home_as=home_as, order="first"))["order"] == 500
+
+
+def test_a_component_the_fields_do_not_apply_to_carries_none():
+    plain = _one(_ok(home=True, group="daily", order=3))
+    assert (plain["home_as"], plain["group"], plain["order"]) == (None, None, None)
+    assert _one(_ok(home=True, home_as=None))["home_as"] is None
+
+
+@pytest.mark.parametrize("decl, reason", [
+    (_ok(home=True, home_as="side"), "its home_as is 'side'"),
+    (_ok(home=True, home_as=True), "its home_as is True"),
+    (_ok(home=True, home_as=["row"]), "its home_as is"),
+    (_ok(home_as="row"), "not a block placed at home"),
+    (_ok(home=False, home_as="main"), "not a block placed at home"),
+    (_ok(home=True, home_as="row", place="inline"), "not a block placed at home"),
+])
+def test_a_home_as_that_does_not_fit_refuses_the_component(decl, reason):
+    placed, refused = check_components("usage", {"today": decl}, has_page=True, assets=ASSETS)
+    assert placed == [] and reason in refused[0]["reason"]
+
+
+def test_the_modules_shape_sends_the_three_fields():
+    from moxi_ui.page import _COMPONENT
+
+    row = _one(_ok(home=True, home_as="row", order=900))
+    assert set(row) == set(_COMPONENT.items)
+    assert {"home_as", "group", "order"} <= set(_COMPONENT.items)
+
+
 def _fake_run(listing, exports, calls):
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         calls.append((argv, cwd, env))
         out = listing if argv[3] == "moxi" else {m: exports[m] for m in argv[4:]}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
@@ -122,10 +178,10 @@ def test_a_failed_refresh_is_run_again_on_a_look_with_a_growing_wait(tmp_path, m
     now = [100.0]
     answers = []
 
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         answer = answers.pop(0) if answers else "ok"
         if answer == "slow":
-            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout)
+            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout_s)
         out = listing if argv[3] == "moxi" else {"usage": {"ok": True, "export": export}}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
 
@@ -233,7 +289,7 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         assert {row["module"] for row in data["servers"]} >= {"snone", "sntwo"}
         assert data["shell"]["budget"] == {"rss": "80M", "fds": 64}
         assert _get(port, "/m/ui/api/servers", browser)[0] == 403
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             found = health.probe(wait=2)
         assert found.state == "running" and health.shell_row(found).state in ("ok", "warn")
         status, _ = call(info, "POST", "/m/ui/api/stop", {})
@@ -286,7 +342,7 @@ def test_a_held_lock_with_no_file_is_starting_never_another_program(site, monkey
     seen = _no_connect(monkeypatch)
     _units(monkeypatch, [SimpleNamespace(module="ui", name="shell", kind="socket",
                                          state="active", detail="", backend="systemd")])
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "starting" and health.shell_row(found).state == "warn" and seen == []
 
@@ -326,7 +382,7 @@ def test_a_held_lock_reads_a_runtime_file_whose_start_is_off_the_pids_and_compar
     called = []
     monkeypatch.setattr(health, "_servers", lambda found, timeout: called.append(found) or {
         "shell": {"pid": os.getpid(), "port": 8460}, "servers": []})
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "running" and [c.server_id for c in called] == [info.server_id]
 
@@ -344,7 +400,7 @@ def test_the_lock_is_tried_before_the_runtime_file_is_read(site, monkeypatch, he
     _units(monkeypatch, [])
     _no_connect(monkeypatch)
     if held:
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             health.probe(wait=0.1)
     else:
         health.probe(wait=0.1)
@@ -404,9 +460,12 @@ def test_the_announcement_declares_the_shell_its_page_and_components():
     shell = found.daemons["shell"]
     assert "win32" in shell["platforms"] and shell["socket"]["setting"] == "port"
     assert found.health == {"shell": "moxi_ui.health:check"} and not found.budgets
-    placed, refused = check_components("ui", found.components, page=True,
-                                       assets=["page.js", "servers.js"])
-    assert refused == [] and {c["element"] for c in placed} == {"moxi-ui-page", "moxi-ui-servers"}
+    placed, refused = check_components("ui", found.components, has_page=True,
+                                       assets=["page.js", "servers.js", "health.js"])
+    assert refused == [] and {c["element"] for c in placed} == {
+        "moxi-ui-page", "moxi-ui-servers", "moxi-ui-health"}
+    health = next(c for c in placed if c["name"] == "health")
+    assert (health["home_as"], health["order"]) == ("row", 900)
     assert {route.path for route in PAGE.routes} >= {"/api/servers", "/api/stop", "/api/modules"}
 
 
@@ -416,7 +475,7 @@ def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket():
 
     changes = units.plan("ui")
     assert [c.kind for c in changes] == ["daemon"]
-    assert "moxi-ui-serve" in changes[0].text and "--restart" in changes[0].text
+    assert "moxi-ui-shell" in changes[0].text and "--restart" in changes[0].text
 
 
 def test_the_modules_value_holds_only_declared_keys():

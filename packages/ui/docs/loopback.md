@@ -110,12 +110,23 @@ PAGE = lb.Page(
   added but `returns` doesn't declare is dropped and logged. A `null` is sent only for a
   key declared with `nullable=True`. A `null` for any other key, or a value of the wrong
   type, is refused rather than cut, and the request gets a 500.
+- An `Out` may carry a mark, which only the gateway acts on, on the way to the phone:
+  `redact` sends `null`, `path` sends a handle that shows the path's last segment, and
+  `scrub` sends the text with each host path in it cut to its last folder name
+  (`hooks /home/me/code/app` reaches the phone as `hooks app`, and `run:/home/me/bin/x`
+  as `run:x`). `path` and `scrub` go on a string. A path `scrub` finds starts with `/` or
+  `~` at the start of a word or after `:` or `=`, and runs to the next whitespace: one
+  with a space in it is cut at the space and the rest of it is sent, and a path glued to
+  other text (`"/srv/x"`, `(/srv/x)`), a relative path, a variable and a drive-letter path
+  are sent as they are. Mark a value `redact` when it may hold a path in another form.
 - Handlers are `"package.module:function"` strings, so the shell and tests read the table
   without importing handler code. A handler is `def fn(call) -> dict` or
   `async def fn(call) -> dict`. A plain `def` runs on a worker thread. `call` carries the
   checked `query` and `body`, the module name, and `busy(name)`, which holds the idle exit
   while work runs. A handler may return `Accepted(status_path)` (202), or raise
-  `Conflict(text)` (409) or `Refused(text)` (422). Anything else it raises is a 500.
+  `Conflict(text)` (409), `Refused(text)` (422) or `BadRequest(key, reason)` (400, for a
+  body its `Field`s can't refuse alone, such as two lists of unequal length; it names the
+  key, never the value). Anything else it raises is a 500.
 - `assets` names one flat directory of static files in the page module's package. That is
   the package whose code builds the `Page`, so a page built by a helper in another package
   names its own with `Page(..., package="moxi_usage")`; without it the base looks in the
@@ -131,9 +142,8 @@ PAGE = lb.Page(
 
 ### Confirmed acts
 
-An act that changes something the user should confirm twice, such as stopping a service
-or removing a project, is declared as a confirmed act. It runs at most once for each key
-its caller sends:
+An act that changes something the user should confirm twice, such as stopping a service,
+is declared as a confirmed act. It runs at most once for each key its caller sends:
 
 ```python
 Route("/api/status", "read", "moxi_usage.pagehandlers:status",

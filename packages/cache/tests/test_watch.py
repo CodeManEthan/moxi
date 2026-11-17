@@ -68,7 +68,7 @@ def sessions() -> Path:
 
 def make(fake, sessions, **kw) -> watch.Watcher:
     return watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,
-                         sessions=sessions, **kw)
+                         session_files_dir=sessions, **kw)
 
 
 def poke(sessions: Path) -> None:
@@ -154,7 +154,7 @@ def test_a_tick_writes_a_record_for_each_live_session(root, sessions):
     assert a == {"v": 1, "session": A, "harness": "claude", "pid": 11, "kind": "warm",
                  "last_request": pytest.approx(1_800_000_000.0 - 120), "ttl": 3600,
                  "read_at": 1_800_000_000.0, "seen_at": 1_800_000_000.0, "code": None,
-                 "warn_before": 900, "stale_after": 30}
+                 "warn_before": 900, "stale_after": 30, "asks": None}
     b = rec(B)
     assert (b["kind"], b["code"], b["last_request"], b["ttl"]) == ("unknown", "no-record",
                                                                    None, None)
@@ -166,9 +166,9 @@ UNSAFE = ["../escape", "a/b", "..", "sub/../../up", "/abs"]
 
 def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, sessions,
                                                                       caplog):
-    directory = tmp_path / "rt" / "cache" / "clock"
+    records_dir = tmp_path / "rt" / "cache" / "clock"
     fake = Fake([entry(11, A)] + [entry(20 + i, s) for i, s in enumerate(UNSAFE)])
-    w = make(fake, sessions, directory=directory)
+    w = make(fake, sessions, records_dir=records_dir)
     before = {p for p in tmp_path.rglob("*")}
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         live = w.tick()
@@ -176,10 +176,10 @@ def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, 
         w.tick()
     assert live == [watch.Live(11, A)]
     assert set(fake.reads) == {A}              # an unsafe id is never read either
-    assert sorted(p.name for p in directory.iterdir()) == [f"{A}.json"]
+    assert sorted(p.name for p in records_dir.iterdir()) == [f"{A}.json"]
     made = {p for p in tmp_path.rglob("*")} - before
-    assert made <= {directory, directory.parent, directory.parent.parent,
-                    directory / f"{A}.json"}
+    assert made <= {records_dir, records_dir.parent, records_dir.parent.parent,
+                    records_dir / f"{A}.json", records_dir.parent / records.READING_NAME}
     lines = [r.getMessage() for r in caplog.records]
     assert len(lines) == 1
     assert all(repr(s) in lines[0] for s in UNSAFE)
@@ -188,12 +188,12 @@ def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, 
 
 @pytest.mark.parametrize("session", UNSAFE)
 def test_write_record_refuses_an_id_that_cannot_name_a_file(tmp_path, session):
-    directory = tmp_path / "clock"
-    directory.mkdir()
+    records_dir = tmp_path / "clock"
+    records_dir.mkdir()
     record = {"v": records.VERSION, "session": session}
     before = set(tmp_path.rglob("*"))
     with pytest.raises(ValueError):
-        watch.write_record(directory, record)
+        watch.write_record(records_dir, record)
     assert set(tmp_path.rglob("*")) == before
 
 
@@ -235,7 +235,7 @@ def test_a_fresh_session_with_no_transcript_is_read_once_a_transcript_appears(ro
     def read(harness, session, *, now):
         fake_read.append(session)
         return Clock("fresh")
-    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, sessions=sessions)
+    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, session_files_dir=sessions)
     w.tick()
     w.tick()
     assert fake_read == [A]
@@ -271,7 +271,7 @@ def test_a_clear_moves_the_record_to_the_new_id(root, sessions):
     assert rec(A) is None and rec(C)["pid"] == 11
 
 
-def test_the_list_is_asked_every_third_tick_or_when_the_sessions_folder_changes(sessions):
+def test_the_list_is_asked_every_third_tick_or_when_the_sessions_dir_changes(sessions):
     fake = Fake([entry(11, A)])
     w = make(fake, sessions)
     for _ in range(4):
@@ -286,13 +286,13 @@ def test_the_list_is_asked_every_third_tick_or_when_the_sessions_folder_changes(
 
 
 def test_a_restart_removes_records_of_sessions_no_longer_live(sessions):
-    directory = records.record_dir()
-    directory.mkdir(parents=True)
-    (directory / f"{B}.json").write_text("{}")
-    (directory / f".{A}.123.tmp").write_text("partial")
-    (directory / "notes.txt").write_text("left alone")
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True)
+    (records_dir / f"{B}.json").write_text("{}")
+    (records_dir / f".{A}.123.tmp").write_text("partial")
+    (records_dir / "notes.txt").write_text("left alone")
     make(Fake([entry(11, A)]), sessions).tick()
-    assert sorted(p.name for p in directory.iterdir()) == [f"{A}.json", "notes.txt"]
+    assert sorted(p.name for p in records_dir.iterdir()) == [f"{A}.json", "notes.txt"]
 
 
 def test_one_record_per_session_when_two_pids_list_it(sessions):
@@ -347,6 +347,200 @@ def test_no_list_ever_read_writes_nothing(sessions):
     fake = Fake(watch.AgentsUnreadable("no claude on PATH"))
     assert make(fake, sessions).tick() == []
     assert not records.record_dir().exists()
+
+
+# --- the reading ----------------------------------------------------------------------------
+
+def reading_file() -> dict | None:
+    path = records.reading_path()
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def test_a_tick_with_sessions_writes_the_reading_with_listed_at_at_the_tick(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    doc = reading_file()
+    assert list(doc) == list(records.READING_FIELDS)
+    assert doc == {"v": 1, "pid": os.getpid(), "tick_at": fake.t, "listed_at": fake.t,
+                   "stale_after": w.stale_after}
+    assert records.reading() == doc
+    fake.t += 10
+    w.tick()                                   # the list is not asked again, but held
+    assert fake.calls == 1
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, fake.t)
+
+
+def test_a_tick_with_no_live_session_moves_listed_at_too(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    fake.doc = []
+    fake.t += 10
+    poke(sessions)
+    assert w.tick() == []
+    assert rec(A) is None
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, fake.t)
+
+
+def test_a_halted_tick_moves_tick_at_and_not_listed_at(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    listed = fake.t
+    fake.doc = {"agents": []}
+    for _ in range(2):
+        fake.t += 10
+        poke(sessions)
+        w.tick()
+        assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, listed)
+    fake.doc = [entry(11, A)]
+    fake.t += 10
+    w.tick()
+    assert reading_file()["listed_at"] == fake.t
+
+
+def test_a_tick_that_cannot_list_moves_tick_at_and_not_listed_at(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    listed = fake.t
+    fake.doc = watch.AgentsUnreadable("`claude agents --json` exited 1")
+    fake.t += 10
+    poke(sessions)
+    w.tick()
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, listed)
+
+
+def test_a_watcher_that_never_listed_writes_a_reading_with_listed_at_null(sessions):
+    fake = Fake(watch.AgentsUnreadable("no claude on PATH"))
+    w = make(fake, sessions)
+    w.tick()
+    assert reading_file() == {"v": 1, "pid": os.getpid(), "tick_at": fake.t,
+                              "listed_at": None, "stale_after": w.stale_after}
+    assert not records.record_dir().exists()
+
+
+def test_a_tick_that_raises_still_writes_its_reading(sessions):
+    def broken(harness, session, *, now):
+        raise RuntimeError("the clock broke")
+
+    fake = Fake([entry(11, A)])
+    w = watch.Watcher(agents=fake.agents, read=broken, now=fake.now, session_files_dir=sessions)
+    with pytest.raises(RuntimeError):
+        w.tick()
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, None)
+
+
+def test_the_reading_carries_the_stale_after_the_records_carry(root, sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.stale_after = 45
+    w.tick()
+    assert reading_file()["stale_after"] == rec(A)["stale_after"] == 45
+
+
+def test_a_failed_reading_write_is_logged_once_per_change_and_the_tick_goes_on(
+        tmp_path, sessions, caplog):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions, reading=blocker / "watch.json")
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        assert w.tick() == [watch.Live(11, A)]
+        fake.t += 10
+        w.tick()
+    assert rec(A)["seen_at"] == fake.t          # the records are written all the same
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 1 and "cannot write the watcher's reading" in lines[0]
+    blocker.unlink()
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        fake.t += 10
+        w.tick()
+        written = blocker / "watch.json"
+        assert json.loads(written.read_text())["tick_at"] == fake.t
+        written.unlink()
+        blocker.rmdir()
+        blocker.write_text("")
+        fake.t += 10
+        w.tick()
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 2                      # said again after it had been cleared
+
+
+def test_the_reading_is_no_file_under_clock(root, sessions):
+    fake = Fake([entry(11, A), entry(12, B)])
+    w = make(fake, sessions)
+    for _ in range(2):
+        w.tick()
+        fake.t += 10
+    assert records.reading_path().parent == records.record_dir().parent
+    assert sorted(p.name for p in records.record_dir().iterdir()) == [f"{A}.json",
+                                                                      f"{B}.json"]
+    assert [r["session"] for r in api.clock_records()] == [A, B]
+    assert sorted(p.name for p in records.reading_path().parent.iterdir()) == [
+        records.DIR_NAME, records.READING_NAME]
+
+
+def test_a_stand_in_dir_puts_the_reading_beside_it(tmp_path, sessions):
+    records_dir = tmp_path / "rt" / "cache" / "clock"
+    make(Fake([entry(11, A)]), sessions, records_dir=records_dir).tick()
+    assert records.reading(tmp_path / "rt" / "cache" / "watch.json")["listed_at"] is not None
+    assert not records.reading_path().exists()
+
+
+def test_the_reading_stays_when_the_watcher_stops(own_roots, sessions):
+    stop = threading.Event()
+
+    class Once(watch.Watcher):
+        def _tick(self):
+            stop.set()
+            return super()._tick()
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
+    w = Once(agents=lambda: [], session_files_dir=sessions)
+    assert watch.run(watcher=w, stop=stop) == 0
+    assert records.reading() == {"v": 1, "pid": os.getpid(), "tick_at": w.tick_at,
+                                 "listed_at": w.tick_at, "stale_after": 3}
+
+
+@pytest.mark.parametrize("text", [
+    None,
+    '{"v": 1, "pid": 7, "tick_at": 1800000000.0, "listed_at": 18',
+    "not json",
+    "[]",
+    '{"v": 2, "pid": 7, "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "stale_after": 30}',
+    '{"v": 1, "pid": "7", "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": true, "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": null, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "listed_at": "1.0", "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "listed_at": null, "stale_after": Infinity}',
+    '{"v": 1, "pid": 7, "tick_at": 1e999, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1' + "0" * 400 + ', "listed_at": null, "stale_after": 30}',
+], ids=["absent", "cut", "not-json", "a-list", "version", "missing-key", "pid-string",
+        "pid-bool", "tick-null", "listed-string", "infinite", "overflowing-float",
+        "overflowing-int"])
+def test_reading_is_none_for_an_absent_cut_or_malformed_file(text):
+    path = records.reading_path()
+    if text is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    assert records.reading() is None
+
+
+def test_reading_keeps_its_fields_alone():
+    path = records.reading_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"v": 1, "pid": 7, "tick_at": 10, "listed_at": None,
+                                "stale_after": 30, "more": "x"}))
+    assert records.reading() == {"v": 1, "pid": 7, "tick_at": 10, "listed_at": None,
+                                 "stale_after": 30}
+    assert records.reading(path) == records.reading()
+
+
+def test_an_unreadable_reading_is_none(tmp_path):
+    (tmp_path / "watch.json").mkdir()
+    assert records.reading(tmp_path / "watch.json") is None
 
 
 def test_a_reader_and_the_segment_agree_on_the_record(root, sessions):
@@ -412,9 +606,9 @@ def test_a_config_change_reaches_every_record_within_one_tick(own_roots, root, s
             note()
             write_cache_config(own_roots, text)
         return step
-    write_cache_config(own_roots, "[watch]\ntick = 10\n")
-    stop = Steps([change("[segment]\nwarn_before = 1800\n[watch]\ntick = 25\n"),
-                  change("[segment]\nwarn_before = 120\n"),
+    write_cache_config(own_roots, "[watch]\ntick_s = 10\n")
+    stop = Steps([change("[segment]\nwarn_before_s = 1800\n[watch]\ntick_s = 25\n"),
+                  change("[segment]\nwarn_before_s = 120\n"),
                   note])
     assert watch.run(watcher=w, stop=stop) == 0
     assert seen == [
@@ -427,7 +621,7 @@ def test_a_config_change_reaches_every_record_within_one_tick(own_roots, root, s
 
 
 def test_stale_after_is_three_effective_ticks(own_roots, sessions):
-    write_cache_config(own_roots, "[watch]\ntick = 0\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     fake = Fake([entry(11, A)])
     w = make(fake, sessions)
     stop = Steps([])
@@ -441,14 +635,86 @@ def test_a_new_watcher_writes_the_defaults(sessions):
     assert (rec(A)["warn_before"], rec(A)["stale_after"]) == (900, 30)
 
 
+# --- what the timer asks ----------------------------------------------------------------------
+
+def test_a_record_carries_what_the_timer_asks_about_its_session(sessions):
+    fake = Fake([entry(11, A), entry(12, B)])
+    asked = []
+
+    def asking(session, pid):
+        asked.append((session, pid))
+        return ("launcher.keep-warm",) if session == A else ()
+
+    w = make(fake, sessions, asking=asking)
+    w.tick()
+    assert asked == [(A, 11), (B, 12)]
+    assert rec(A)["asks"] == ["launcher.keep-warm"] and rec(B)["asks"] == []
+    assert w.current[A]["asks"] == ["launcher.keep-warm"]
+    assert list(rec(A)) == list(records.FIELDS)
+
+
+def test_a_watcher_with_no_timer_writes_asks_as_null(sessions):
+    make(Fake([entry(11, A)]), sessions).tick()
+    assert "asks" in rec(A) and rec(A)["asks"] is None
+
+
+def first_tick_records(own_roots, sessions, t) -> dict:
+    """The records `watch.run` writes at its first tick, with the timer `t`."""
+    stop = threading.Event()
+    seen = {}
+
+    class Once(watch.Watcher):
+        def _tick(self):
+            stop.set()
+            live = super()._tick()
+            seen.update({s: rec(s) for s in (A, B)})
+            return live
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
+    w = Once(agents=lambda: [entry(11, A), entry(12, B)], session_files_dir=sessions)
+    assert watch.run(watcher=w, stop=stop, timer=t) == 0
+    return seen
+
+
+def test_the_first_tick_after_run_starts_carries_asks(own_roots, sessions, tmp_path):
+    from moxi_cache import timer
+
+    exe = tmp_path / "bin" / "verb"
+    exe.parent.mkdir()
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    subs = [timer.check({"name": name, "at": -900, "run": [str(exe)], **extra},
+                        source=timer.CONFIG, resolve=timer.resolve_config_argv0)
+            for name, extra in (("plain", {}), ("needs-v", {"requires_env": {"V": "*"}}))]
+    t = timer.Timer(modules=subs, process_env={11: {"V": "x"}, 12: {}}.get,
+                    spawn=lambda argv: None, log_file=tmp_path / "timer.jsonl")
+    seen = first_tick_records(own_roots, sessions, t)
+    assert seen[A]["asks"] == ["needs-v", "plain"]
+    assert seen[B]["asks"] == ["plain"]
+
+
+def test_a_timer_whose_first_load_raises_gives_asks_null(own_roots, sessions, tmp_path,
+                                                          caplog):
+    from moxi_cache import timer
+
+    class Failing(timer.Timer):
+        def reload(self):
+            raise OSError("config unreadable")
+
+    t = Failing(modules=[], spawn=lambda argv: None, log_file=tmp_path / "timer.jsonl")
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        seen = first_tick_records(own_roots, sessions, t)
+    assert "asks" in seen[A] and seen[A]["asks"] is None
+    assert "the timer's first load failed (OSError: config unreadable)" in caplog.text
+
+
 def test_write_record_replaces_whole(tmp_path):
-    directory = tmp_path / "records"
-    directory.mkdir()
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
     r = {"session": A, "v": 1}
-    watch.write_record(directory, {"session": A, "v": 0})
-    path = watch.write_record(directory, r)
+    watch.write_record(records_dir, {"session": A, "v": 0})
+    path = watch.write_record(records_dir, r)
     assert json.loads(path.read_text()) == r
-    assert [p.name for p in directory.iterdir()] == [f"{A}.json"]
+    assert [p.name for p in records_dir.iterdir()] == [f"{A}.json"]
 
 
 # --- running ---------------------------------------------------------------------------------
@@ -462,7 +728,7 @@ def test_run_ticks_until_stopped(sessions):
             ticks.append(1)
             stop.set()
             return []
-    assert watch.run(watcher=Once(agents=lambda: [], sessions=sessions), stop=stop) == 0
+    assert watch.run(watcher=Once(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert ticks == [1]
 
 
@@ -477,14 +743,14 @@ def test_run_keeps_going_after_a_failed_tick(own_roots, sessions, caplog):
                 raise RuntimeError("boom")
             stop.set()
             return []
-    write_cache_config(own_roots, "[watch]\ntick = 1\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
-        assert watch.run(watcher=Flaky(agents=lambda: [], sessions=sessions), stop=stop) == 0
+        assert watch.run(watcher=Flaky(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert len(count) == 2 and "boom" in caplog.text
 
 
 def test_run_refuses_to_start_on_a_config_in_error(own_roots, capsys):
-    write_cache_config(own_roots, "[watch]\ntick = 'ten'\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 'ten'\n")
     assert watch.run(stop=threading.Event()) == 2
     assert "refuses the start" in capsys.readouterr().err
 
@@ -494,13 +760,13 @@ def test_a_tick_below_one_second_ticks_every_second(own_roots, sessions, caplog)
 
     from moxi_cache.settings import MODULE, schema
 
-    write_cache_config(own_roots, "[watch]\ntick = 0\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     config = Config(MODULE, schema())
     config.start()
-    w = watch.Watcher(agents=lambda: [], sessions=sessions)
+    w = watch.Watcher(agents=lambda: [], session_files_dir=sessions)
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         assert watch._interval(config, w) == 1.0
-    assert "watch.tick is 0" in caplog.text
+    assert "watch.tick_s is 0" in caplog.text
 
 
 def test_main_takes_no_arguments(capsys):

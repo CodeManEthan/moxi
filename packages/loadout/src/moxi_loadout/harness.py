@@ -14,9 +14,16 @@ places (`moxi.paths.home`):
   loadout owns), `AGENTS.md`, and `config.toml` (its MCP servers, read only: the `codex`
   CLI writes them). That Codex reads `hooks.json` and the rules file is taken from its
   binary, not yet confirmed by a run.
-- OpenCode: `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`: `opencode.json` and
-  `AGENTS.md`. The shapes follow OpenCode's published config schema, not yet confirmed
-  by a run.
+- OpenCode: `$OPENCODE_CONFIG_DIR` when set, else `$XDG_CONFIG_HOME/opencode`, else
+  `~/.config/opencode`, as OpenCode resolves it: `opencode.json` and `AGENTS.md`. A run of
+  OpenCode 1.19.5 confirmed the `AGENTS.md` facts: it reads the XDG one; with the variable
+  set it reads the one under it instead, and not the XDG one even when the variable's has
+  none; and it doesn't read `~/.claude/CLAUDE.md` while its own `AGENTS.md` exists, even
+  empty (a dangling link counts as absent). The `opencode.json` shapes follow OpenCode's
+  published config schema, not yet confirmed by a run. Its skills and agents folders (the
+  opencode row in the core's harness table) keep the XDG form, `opencode_xdg_home`:
+  OpenCode reads skills and agents from the XDG folder and from `$OPENCODE_CONFIG_DIR`
+  both, so the XDG row reaches it either way.
 
 A `Doc` is one harness file read once, and `write(doc, harness, keep)` the one write per
 file: both are the core's (`moxi.harnessfile`), which Claude's other writers share, with
@@ -48,18 +55,26 @@ GLOBAL_NAMES = {"claude": "CLAUDE.md", "codex": "AGENTS.md", "opencode": "AGENTS
 def claude_json(env: Mapping[str, str] | None = None) -> Path:
     """Claude's MCP file: in Claude's folder when `CLAUDE_CONFIG_DIR` is set, else in the
     home folder. Its `~` reads as `settings.json`'s does."""
-    if _environ(env).get("CLAUDE_CONFIG_DIR"):
+    if _env(env).get("CLAUDE_CONFIG_DIR"):
         return claude_home(env) / ".claude.json"
     return _home(env) / ".claude.json"
 
 
 def codex_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CODEX_HOME")
+    given = _env(env).get("CODEX_HOME")
     return Path(given) if given else _home(env) / ".codex"
 
 
 def opencode_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("XDG_CONFIG_HOME")
+    """Where OpenCode reads its `AGENTS.md` and `opencode.json`."""
+    given = _env(env).get("OPENCODE_CONFIG_DIR")
+    return Path(given) if given else opencode_xdg_home(env)
+
+
+def opencode_xdg_home(env: Mapping[str, str] | None = None) -> Path:
+    """OpenCode's folder under the XDG config home, which its skills and agents folders
+    stay under whatever `OPENCODE_CONFIG_DIR` says."""
+    given = _env(env).get("XDG_CONFIG_HOME")
     return (Path(given) if given else _home(env) / ".config") / "opencode"
 
 
@@ -75,7 +90,7 @@ def settings_file(harness: str) -> Path | None:
             "opencode": opencode_home() / "opencode.json"}.get(harness)
 
 
-def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     return os.environ if env is None else env
 
 
@@ -120,10 +135,14 @@ class Doc(harnessfile.Doc):
             raise Refused(line) from None
 
 
-def write(doc: Doc, harness: str, keep: int, *, remove_empty: bool = False) -> str | None:
+def write(doc: Doc, harness: str, keep: int, *, remove_empty: bool = False,
+          keep_copy=None) -> str | None:
     """Write `doc` back once, or remove it when `remove_empty` and nothing is left in it.
-    Returns None when written, else the line saying why not."""
-    line = harnessfile.write(doc, _backups(harness), keep, remove_empty=remove_empty)
+    With `keep_copy`, `keep_copy(path, now)` is called first with the bytes just read
+    again and checked; when it raises `OSError` nothing is written. Returns None when
+    written, else the line saying why not."""
+    line = harnessfile.write(doc, _backups(harness), keep, remove_empty=remove_empty,
+                             keep_copy=keep_copy)
     if line == f"{doc.path} changed since it was read":
         return f"{doc.path} changed while planning; run install again"
     return line
@@ -142,5 +161,5 @@ def _backups(harness: str) -> Path:
 
 
 __all__ = ["HARNESSES", "GLOBAL_NAMES", "claude_home", "claude_json", "codex_home",
-           "opencode_home", "home", "settings_file", "global_file", "rules_file", "Refused",
+           "opencode_home", "opencode_xdg_home", "home", "settings_file", "global_file", "rules_file", "Refused",
            "Doc", "write", "backup"]

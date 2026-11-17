@@ -4,15 +4,15 @@
 `pane_in_mode` and width, in one tmux call) and says which of `screens` is there and
 whether it fully matches (see `screens` for the rule). It sends nothing.
 
-`answer_screen(slot, screen, wait)` presses the screen's keys, and only those: Up and
+`answer_screen(slot, screen, wait_s)` presses the screen's keys, and only those: Up and
 Down toward the option on a screen that allows them, then Enter on the option. There is
 no other way to send a key or text into a pane: a session is typed into only through
 its own channel.
 
-1. With `wait=0` it reads once. With `wait` above 0 it reads every 250 ms until the pane
+1. With `wait_s=0` it reads once. With `wait_s` above 0 it reads every 250 ms until the pane
    is dead (`ended-without-screen`), the screen has fully matched on two reads at least
    0.5 s apart with the marker on the same row (the trust warning drops keys while it
-   opens), or `wait` runs out (`mismatch`). A caller passing `wait=0` has seen the
+   opens), or `wait_s` runs out (`mismatch`). A caller passing `wait_s=0` has seen the
    screen with `read_screen` at least 0.5 s before.
 2. The rule for keys: every key is decided on a settled read, and a read is settled only
    once the previous key has visibly taken effect. The first read is settled by step 1.
@@ -21,7 +21,7 @@ its own channel.
    that read decides the next key. A read that does not fully match, inside that window,
    is a frame being drawn: the reads go on. Each key's settle bound is 2 s; a spent one
    ends the call `mismatch` with `why` starting `not-settled`, and so does a key there
-   is too little of `wait` left to settle. Enter goes only on a settled read with the
+   is too little of `wait_s` left to settle. Enter goes only on a settled read with the
    marker on the option. On a screen that allows moving, one Up or Down toward the
    option is sent per settled read, at most one per row between the first marked row
    and the option; a marker that moves away from the option ends the call `mismatch`.
@@ -32,9 +32,9 @@ its own channel.
    (`ended`, else `not-ended`); one whose `then` is `gone` needs the screen to leave
    within 5 s with the pane still live (`gone`, else `mismatch`).
 
-`wait` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
+`wait_s` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
 its own bound. One call presses Enter at most once, and every key follows a read taken
-after the screen appeared. With `wait=0` on a screen that takes Enter alone (the exit
+after the screen appeared. With `wait_s=0` on a screen that takes Enter alone (the exit
 dialog), the call is one read and at most Enter, back to back.
 
 A `mismatch` saves the screen's region, plain and with its escape sequences, as one
@@ -129,7 +129,7 @@ class TmuxPane:
     def ended(self, timeout: float) -> bool:
         from .launch import wait_ended
 
-        return wait_ended(self.number, pane_id=self.pane_id, timeout=timeout).ended
+        return wait_ended(self.number, pane_id=self.pane_id, timeout_s=timeout).ended
 
     def ansi(self) -> str:
         result = tmux.attempt("capture-pane", "-p", "-e", "-t", self.pane_id)
@@ -317,7 +317,7 @@ def _screens(screens) -> tuple[Screen, ...]:
         return (screens,)
     if isinstance(screens, (str, bytes)) or not isinstance(screens, Sequence) \
             or not screens or not all(isinstance(s, Screen) for s in screens):
-        raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_FOLDER, "
+        raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_DIR, "
                          "CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG)")
     return tuple(screens)
 
@@ -325,16 +325,18 @@ def _screens(screens) -> tuple[Screen, ...]:
 def _seen(held: Match | None, frame: Frame | None, pane_id: str | None,
           screens: Sequence[Screen]) -> Seen:
     if frame is None:
-        return Seen(None, False, "the run pane is gone", (), True, pane_id)
+        return Seen(None, full=False, why="the run pane is gone", rows=(), dead=True,
+                    pane_id=pane_id)
     if held is None or not held.present:
         names = ", ".join(s.name for s in screens)
         found = None if held is None else held.rows
-        return Seen(None, False, f"none of {names} is on the pane", found or (),
-                    frame.dead, pane_id)
+        return Seen(None, full=False, why=f"none of {names} is on the pane",
+                    rows=found or (), dead=frame.dead, pane_id=pane_id)
     if frame.dead:
-        return Seen(held.screen, False, "the pane has ended; its last frame is not "
-                                        "answered", held.rows, True, pane_id)
-    return Seen(held.screen, held.full, held.why, held.rows, False, pane_id)
+        return Seen(held.screen, full=False,
+                    why="the pane has ended; its last frame is not answered",
+                    rows=held.rows, dead=True, pane_id=pane_id)
+    return Seen(held.screen, held.full, held.why, held.rows, dead=False, pane_id=pane_id)
 
 
 def read_screen(slot: int | str, screens) -> Seen:
@@ -343,7 +345,7 @@ def read_screen(slot: int | str, screens) -> Seen:
     screens = _screens(screens)
     number, pane_id = _run_pane(slot)
     if pane_id is None:
-        return Seen(None, False, f"slot {number} has no run pane")
+        return Seen(None, full=False, why=f"slot {number} has no run pane")
     frame = TmuxPane(number, pane_id).read()
     held = None if frame is None else find(screens, frame.text, frame.width,
                                            in_mode=frame.in_mode)
@@ -352,20 +354,20 @@ def read_screen(slot: int | str, screens) -> Seen:
     return _seen(held, frame, pane_id, screens)
 
 
-def answer_screen(slot: int | str, screen: Screen, wait: float = 5) -> Answer:
+def answer_screen(slot: int | str, screen: Screen, wait_s: float = 5) -> Answer:
     """Answer `screen` on the slot's run pane by its keys, after a full match; see the
     module's text for the steps. Returns an `Answer` and never raises for what it found
     on the pane."""
     if not isinstance(screen, Screen):
-        raise UsageError("screen is one Screen (CLAUDE_TRUST_FOLDER, CLAUDE_DEV_CHANNELS, "
+        raise UsageError("screen is one Screen (CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, "
                          "CLAUDE_EXIT_DIALOG)")
-    if isinstance(wait, bool) or not isinstance(wait, (int, float)) or wait < 0:
-        raise UsageError(f"wait is a number of seconds, not {wait!r}")
+    if isinstance(wait_s, bool) or not isinstance(wait_s, (int, float)) or wait_s < 0:
+        raise UsageError(f"wait_s is a number of seconds, not {wait_s!r}")
     number, pane_id = _run_pane(slot)
     if pane_id is None:
         return Answer("no-pane", screen, f"slot {number} has no run pane")
     pane = TmuxPane(number, pane_id)
-    done = drive(pane, screen, float(wait))
+    done = drive(pane, screen, float(wait_s))
     seen = None
     if done.frame is not None or done.outcome == "no-pane":
         seen = _seen(done.match, done.frame, pane_id, (screen,))
@@ -396,29 +398,29 @@ def _region_rows(text: str, width: int) -> list[str]:
 def save_mismatch(screen: Screen, why: str, frame: Frame, ansi: str) -> Path:
     """Save the region of a mismatched screen, plain and with escape sequences, as one
     file in the `mismatches` store; keep the last `KEEP`. Returns the file's path."""
-    directory = files.private_dir(places.mismatches_dir())
+    mismatches_dir = files.private_dir(places.mismatches_dir())
     record = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "screen": screen.name, "why": why, "width": frame.width,
               "plain": _region_rows(frame.text, frame.width),
               "ansi": _region_rows(ansi, frame.width)}
-    path = directory / f"{time.time_ns():020d}-{screen.name.lower()}.json"
+    path = mismatches_dir / f"{time.time_ns():020d}-{screen.name.lower()}.json"
     files.atomic_write(path, json.dumps(record, indent=1, ensure_ascii=False) + "\n")
-    prune(directory)
+    prune(mismatches_dir)
     return path
 
 
-def prune(directory: Path | None = None, keep: int = KEEP) -> list[str]:
+def prune(mismatches_dir: Path | None = None, keep: int = KEEP) -> list[str]:
     """Remove all but the newest `keep` saved regions; returns the names removed."""
-    directory = places.mismatches_dir() if directory is None else directory
+    mismatches_dir = places.mismatches_dir() if mismatches_dir is None else mismatches_dir
     try:
-        names = sorted(e.name for e in os.scandir(directory)
+        names = sorted(e.name for e in os.scandir(mismatches_dir)
                        if e.name.endswith(".json") and e.is_file(follow_symlinks=False))
     except FileNotFoundError:
         return []
     gone = names[:-keep] if keep > 0 else names
     for name in gone:
         try:
-            os.remove(directory / name)
+            os.remove(mismatches_dir / name)
         except FileNotFoundError:
             pass
     return gone

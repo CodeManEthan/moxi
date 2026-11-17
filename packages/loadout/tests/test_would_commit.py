@@ -40,10 +40,10 @@ def states(outcome) -> dict:
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    return loadout_dir
 
 
 @pytest.fixture
@@ -81,11 +81,11 @@ def test_outside_a_work_tree_nothing_is_written(lo, tmp_path):
 
 
 def test_an_ignore_file_whose_header_is_gone_becomes_the_users(tmp_path):
-    folder = tmp_path / "skills"
+    skills_dir = tmp_path / "skills"
     data: dict = {"entries": []}
-    assert ignores.write(str(folder), ["review"], data, "user", say=lambda line: None) \
+    assert ignores.write(str(skills_dir), ["review"], data, "user", say=lambda line: None) \
         is None
-    path = folder / ".gitignore"
+    path = skills_dir / ".gitignore"
     mine = "/review\n/notes\n"   # the user folded loadout's line into their own
     path.write_text(mine)
     assert ignores.state(path) == "theirs"
@@ -104,10 +104,10 @@ def test_an_ignore_file_whose_header_is_gone_becomes_the_users(tmp_path):
 def test_the_ignore_file_is_written_before_the_placement(app):
     out = install.install()
     assert out.code == 0, out.text()
-    for folder in (app / ".claude" / "skills", app / ".agents" / "skills"):
-        assert (folder / "review").is_symlink()
-        assert ignores.state(folder / ".gitignore") == "ours"
-        assert ignores.listed(folder / ".gitignore") == {"review"}
+    for skills_dir in (app / ".claude" / "skills", app / ".agents" / "skills"):
+        assert (skills_dir / "review").is_symlink()
+        assert ignores.state(skills_dir / ".gitignore") == "ours"
+        assert ignores.listed(skills_dir / ".gitignore") == {"review"}
     assert untracked(app) == []
     files = set(ignores.records(ledger.read()))
     assert files == {str(app / ".claude" / "skills" / ".gitignore"),
@@ -123,15 +123,15 @@ def test_the_last_placement_takes_its_ignore_file_with_it(app, lo):
     kit.skill(lo / "skills", "deploy")
     kit.manifest(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
     assert install.install().code == 0
-    folder = app / ".claude" / "skills"
-    assert ignores.listed(folder / ".gitignore") == {"review", "deploy"}
+    skills_dir = app / ".claude" / "skills"
+    assert ignores.listed(skills_dir / ".gitignore") == {"review", "deploy"}
     kit.manifest(lo, f'[project."{app}"]\nskills = ["deploy"]\n')
     assert install.install().code == 0
-    assert ignores.listed(folder / ".gitignore") == {"deploy"}
-    assert ignores.state(folder / ".gitignore") == "ours"
+    assert ignores.listed(skills_dir / ".gitignore") == {"deploy"}
+    assert ignores.state(skills_dir / ".gitignore") == "ours"
     kit.manifest(lo, "[user]\n")
     assert install.install().code == 0
-    assert not os.path.lexists(folder / ".gitignore")
+    assert not os.path.lexists(skills_dir / ".gitignore")
     assert ignores.records(ledger.read()) == {}
     assert untracked(app) == []
 
@@ -139,18 +139,18 @@ def test_the_last_placement_takes_its_ignore_file_with_it(app, lo):
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
 def test_a_gitignore_of_the_users_is_left_and_the_target_not_placed(app):
-    folder = app / ".claude" / "skills"
-    folder.mkdir(parents=True)
-    (folder / ".gitignore").write_text("/other\n")
+    skills_dir = app / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".gitignore").write_text("/other\n")
     before = install.status()
     assert states(before)[("skill", "review", "claude")][0] == "would-commit"
     out = install.install()
     assert out.code == 3
     state, reason = states(out)[("skill", "review", "claude")]
     assert state == "would-commit"
-    assert f"add /review to {folder / '.gitignore'}" in reason
-    assert not os.path.lexists(folder / "review")
-    assert (folder / ".gitignore").read_text() == "/other\n"
+    assert f"add /review to {skills_dir / '.gitignore'}" in reason
+    assert not os.path.lexists(skills_dir / "review")
+    assert (skills_dir / ".gitignore").read_text() == "/other\n"
     # Codex's folder has no ignore file, so loadout writes its own there and places.
     assert (app / ".agents" / "skills" / "review").is_symlink()
 
@@ -158,13 +158,13 @@ def test_a_gitignore_of_the_users_is_left_and_the_target_not_placed(app):
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
 def test_a_users_rule_that_covers_the_target_is_enough(app):
-    folder = app / ".claude" / "skills"
-    folder.mkdir(parents=True)
-    (folder / ".gitignore").write_text("/review\n")
+    skills_dir = app / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".gitignore").write_text("/review\n")
     out = install.install()
     assert out.code == 0, out.text()
-    assert (folder / "review").is_symlink()
-    assert (folder / ".gitignore").read_text() == "/review\n"
+    assert (skills_dir / "review").is_symlink()
+    assert (skills_dir / ".gitignore").read_text() == "/review\n"
 
 
 @pytest.mark.slow
@@ -212,9 +212,9 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     root = work_tree(tmp_path / "app")
     kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\n'
                      f'[skill.review]\nharnesses = ["codex"]\n')
-    folder = root / ".agents" / "skills" / "review"
-    folder.mkdir(parents=True)
-    (folder / "SKILL.md").write_text("theirs\n")
+    skill_dir = root / ".agents" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("theirs\n")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "a skill")
     out = install.install()
@@ -226,8 +226,8 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     assert row.as_json()["replaceable"] is True
     out = install.install(replace=["skill:review@codex"])
     assert out.code == 0, out.text()
-    assert folder.is_symlink()
-    assert ignores.listed(folder.parent / ".gitignore") == {"review"}
+    assert skill_dir.is_symlink()
+    assert ignores.listed(skill_dir.parent / ".gitignore") == {"review"}
 
 
 @pytest.mark.slow
@@ -283,7 +283,7 @@ def test_status_reads_a_target_still_to_place_as_missing(app):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_user_folder_in_a_work_tree_takes_an_ignore_file(lo):
+def test_a_user_skills_dir_in_a_work_tree_takes_an_ignore_file(lo):
     import shutil
 
     work_tree(kit.claude().parent)

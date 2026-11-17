@@ -104,7 +104,7 @@ def test_the_chain_resolves_a_listed_roles_credential(listed, tmp_path):
         "FROM-THE-ENVIRONMENT"
 
 
-def test_the_roles_are_read_from_the_environment_a_caller_passes(tmp_path):
+def test_the_roles_are_read_from_the_env_a_caller_passes(tmp_path):
     """`owner_for_role(role, env=...)` reads the config file under the roots that env
     names, as every other reader of the config does."""
     other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}

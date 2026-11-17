@@ -148,10 +148,10 @@ class Response:
     goes back to the pool. Use it as `async with`. `cut` is true once a drain ended it.
     """
 
-    def __init__(self, module: str, server: Server, *, stream: bool):
+    def __init__(self, module: str, server: Server, *, streaming: bool):
         self.module = module
         self.server = server
-        self.stream = stream
+        self.stream = streaming
         self.status = 0
         self.headers: list[tuple[bytes, bytes]] = []
         self.cut = False
@@ -180,10 +180,10 @@ class Response:
         while not self._complete:
             try:
                 event = await self._event()
-            except (OSError, h11.RemoteProtocolError) as err:
+            except (OSError, h11.RemoteProtocolError) as exc:
                 if self.cut:
                     return
-                raise UpstreamBroken(f"{self.module}'s answer broke off: {err!r}") from None
+                raise UpstreamBroken(f"{self.module}'s answer broke off: {exc!r}") from None
             if isinstance(event, h11.Data):
                 if event.data:
                     yield bytes(event.data)
@@ -243,8 +243,8 @@ class Response:
         assert conn is not None and connection is not None
         try:
             head = connection.send(h11.Request(method=method, target=target, headers=headers))
-        except h11.LocalProtocolError as err:
-            raise _NotSent(f"the request can't be framed: {err}") from None
+        except h11.LocalProtocolError as exc:
+            raise _NotSent(f"the request can't be framed: {exc}") from None
         try:
             conn.writer.write(head)
             if isinstance(body, (bytes, bytearray)):
@@ -260,8 +260,8 @@ class Response:
         except h11.LocalProtocolError:
             # The browser's body did not match its own Content-Length.
             raise BrowserGone("the browser's body ended short of its length") from None
-        except OSError as err:
-            raise _NoAnswer(f"sending to {self.module} failed: {err!r}") from None
+        except OSError as exc:
+            raise _NoAnswer(f"sending to {self.module} failed: {exc!r}") from None
 
     async def _event(self) -> Any:
         conn, connection = self.conn, self._h11
@@ -280,8 +280,8 @@ class Response:
                 if isinstance(event, h11.InformationalResponse):
                     continue
                 break
-        except (OSError, h11.RemoteProtocolError) as err:
-            raise _NoAnswer(f"{self.module} gave no answer: {err!r}") from None
+        except (OSError, h11.RemoteProtocolError) as exc:
+            raise _NoAnswer(f"{self.module} gave no answer: {exc!r}") from None
         if not isinstance(event, h11.Response):
             raise _NoAnswer(f"{self.module} closed the connection with no answer")
         self.status = event.status_code
@@ -305,11 +305,11 @@ class Client:
     async def request(self, module: str, method: str, target: str, *,
                       headers: Iterable[tuple[bytes, bytes]] = (),
                       body: bytes | AsyncIterable[bytes] = b"", act: bool = False,
-                      stream: bool = False) -> Response:
+                      streaming: bool = False) -> Response:
         """Send one request to `module`'s server and return its `Response` once the
         answer's head is in. `target` is the upstream path and query. `headers` are the
         browser's; only the allowlist of them is sent. `act` sends it on a newly proved
-        connection within 0.25 s of the proof; `stream` gives it a connection of its own,
+        connection within 0.25 s of the proof; `streaming` gives it a connection of its own,
         no read deadline, and the drain's cut.
 
         Raises `UpstreamError` with the browser's answer when the server gave none, and
@@ -319,19 +319,19 @@ class Client:
         browser = list(headers)
         retry_unsent = True
         retry_sent = method == "GET" and isinstance(body, (bytes, bytearray))
-        pooled = not act and not stream
+        pooled = not act and not streaming
         while True:
             server = await self._ensure(module)
-            response = Response(module, server, stream=stream)
+            response = Response(module, server, streaming=streaming)
             try:
-                response.use = server.use(stream=stream, close=response._cut)
+                response.use = server.use(streaming=streaming, close=response._cut)
                 await response._connect(pooled=pooled, act=act)
-            except (NotOurServer, OSError, _NotSent) as err:
+            except (NotOurServer, OSError, _NotSent) as exc:
                 # Nothing but a proof went out: drop the server and start one more.
                 response._discard()
                 self.starters.lost(server)
                 if retry_unsent:
-                    _log.info("%s: %s; starting again and sending once more", module, err)
+                    _log.info("%s: %s; starting again and sending once more", module, exc)
                     retry_unsent = False
                     continue
                 raise UpstreamError(502, {"error": "unreachable", "module": module,
@@ -345,23 +345,23 @@ class Client:
                            method, body)
             try:
                 await response._send(method, target, sent, body)
-                if stream:
+                if streaming:
                     await response._head()
                 else:
                     async with asyncio.timeout(FIRST_BYTE_WITHIN):
                         await response._head()
-            except _NotSent as err:
+            except _NotSent as exc:
                 response._discard()
                 raise UpstreamError(502, {"error": "unreachable", "module": module,
-                                          "log": self.starters.log}) from err
-            except _NoAnswer as err:
+                                          "log": self.starters.log}) from exc
+            except _NoAnswer as exc:
                 response._discard()
                 if retry_sent:
-                    _log.info("%s: %s; sending the GET once more", module, err)
+                    _log.info("%s: %s; sending the GET once more", module, exc)
                     retry_sent = False
                     pooled = False
                     continue
-                _log.warning("%s: %s; the module may have acted", module, err)
+                _log.warning("%s: %s; the module may have acted", module, exc)
                 raise UpstreamError(502, {"error": "upstream", "module": module,
                                           "log": self.starters.log}) from None
             except TimeoutError:
@@ -376,8 +376,8 @@ class Client:
     async def _ensure(self, module: str) -> Server:
         try:
             return await self.starters.ensure(module)
-        except StartFailed as failure:
-            raise UpstreamError(502, failure.body()) from None
+        except StartFailed as start_exc:
+            raise UpstreamError(502, start_exc.body()) from None
         except ServerGone:
             raise UpstreamError(503, {"error": "stopping", "module": module}) from None
 
@@ -420,7 +420,7 @@ async def _streamed(receive: Callable[..., Any]) -> AsyncIterator[bytes]:
             return
 
 
-async def _disconnected(receive: Callable[..., Any]) -> None:
+async def _on_disconnected(receive: Callable[..., Any]) -> None:
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":
@@ -487,11 +487,11 @@ class Proxy:
                 body = _streamed(receive)
             response = await self.client.request(
                 module, method, target.decode("ascii"), headers=headers, body=body,
-                act=entry.kind == "act", stream=entry.stream)
+                act=entry.kind == "act", streaming=entry.stream)
         except BrowserGone:
             return
-        except UpstreamError as err:
-            await _answer(send, self.failed(err))
+        except UpstreamError as exc:
+            await _answer(send, self.failed(exc))
             return
         async with response:
             await _relay(response, receive, send)
@@ -509,14 +509,14 @@ async def _relay(response: Response, receive: Callable[..., Any],
         try:
             async for chunk in response.chunks():
                 await send({"type": "http.response.body", "body": chunk, "more_body": True})
-        except UpstreamBroken as err:
-            _log.warning("%s", err)
+        except UpstreamBroken as exc:
+            _log.warning("%s", exc)
             return False
         await send({"type": "http.response.body", "body": b""})
         return True
 
     pumping = asyncio.ensure_future(pump())
-    watching = asyncio.ensure_future(_disconnected(receive))
+    watching = asyncio.ensure_future(_on_disconnected(receive))
     try:
         await asyncio.wait({pumping, watching}, return_when=asyncio.FIRST_COMPLETED)
     finally:

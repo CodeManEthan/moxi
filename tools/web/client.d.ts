@@ -27,8 +27,16 @@ export interface ComponentInfo {
     doc: string;
     contract: number;
     place: "page" | "block" | "inline";
-    /** Whether the shell's home view may place it. */
+    /** Whether the shell's own views may place it. */
     home: boolean;
+    /** Where Home places a `home` block: its one main spot or a row under it. Null for a
+     * block of the modules view and for a component that is no home block. */
+    home_as: "main" | "row" | null;
+    /** A page's group in the band of pages; null on a component that is no page. */
+    group: "daily" | "setup" | null;
+    /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
+     * row's place among rows. Null on any other component. */
+    order: number | null;
     attributes: AttributeInfo[];
 }
 /** An answer from `api`. `status` is 0 when no answer came (a network failure). `data`
@@ -75,6 +83,8 @@ export interface FieldEntry {
     named_by?: string[];
     /** When a change applies. */
     mark?: string;
+    /** The shell refuses a write to the entry for this run: it is shown off. */
+    locked?: boolean;
 }
 /**
  * One field of `<moxi-ui-form>`, in `moxi.config.Key`'s shape: the settings view gives it
@@ -116,6 +126,8 @@ export interface FieldDescriptor {
      * listed; `reason` then says why. */
     declarations?: string | null;
     reason?: string | null;
+    /** The shell refuses a write to the key for this run: it is shown off, still readable. */
+    locked?: boolean;
     /** A catalog row: may be given more than once (a list control). */
     repeatable?: boolean;
     /** A catalog row: a switch plus an optional value. */
@@ -173,9 +185,30 @@ export interface FormElement extends HTMLElement {
     /** The values `moxi-submit` would send now. */
     values(): Record<string, FormValue>;
 }
+/**
+ * `<moxi-ui-row>`, the two-line row of a list, defined by this script. It draws what its
+ * attributes carry and nothing for one that is unset:
+ *
+ * - line one: `name`; `where`, dim, after it; `fact` at the right end, dim, or in the text
+ *   colour at weight 600 with `fact-heavy`. When the line is too narrow the name and
+ *   where are cut before the fact is.
+ * - line two, a middle dot between each two phrases: `lead` (dim, or weight 600 with
+ *   `lead-heavy`); `lead-more`; `time` and `rest` as one phrase, with `You:` before the
+ *   rest when `said-by` is `you`, the rest dim or in the text colour with `rest-strong`;
+ *   `tail`. The slot `acts` is the line's right end.
+ * - line three: `note`.
+ * - `open`: the default slot's content shows under the lines.
+ * - `toggles`: the lines show a pointer, and a click on them outside `acts` sends
+ *   `moxi-row-toggle`, which bubbles and carries no detail. Line one is the tab stop, a
+ *   button whose `aria-expanded` follows `open`; Enter or Space on it sends the event
+ *   too. The row does not open itself: the page sets `open`.
+ */
+export interface RowElement extends HTMLElement {
+}
 declare global {
     interface HTMLElementTagNameMap {
         "moxi-ui-form": FormElement;
+        "moxi-ui-row": RowElement;
     }
 }
 /** Whether this page came through the gateway, on the phone. A component hides there what
@@ -236,9 +269,28 @@ export declare function subscribe(module: string, topic: string, fn: (data: any)
  */
 export declare function place(host: Element, module: string, name: string, attrs?: Record<string, string>): Promise<Element | null>;
 /** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
- * document, with a new history entry. */
+ * document, with a new history entry. While a page holds (`holdLeave`), it asks that page
+ * first and moves only when the page says go. */
 export declare function navigate(module: string, route?: string): void;
-/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
- * from the `ui` setting `theme.mode`. For the settings view, after it writes that
- * setting. */
-export declare function setTheme(mode: ThemeMode): void;
+/**
+ * Holds the page shown in place while it has changes not saved. Every move off it (a link
+ * in the shell, `navigate`, Back and Forward) then calls `ask(go)` and does nothing else;
+ * the page asks in its own words and calls `go()` to leave, which releases the hold and
+ * makes the move. The shell's own redraw on a modules or session event waits for the
+ * release, and a load of another document gets the browser's own prompt. One page holds
+ * at a time. Gives the function that releases the hold: call it when no change is left
+ * and in `disconnectedCallback`.
+ */
+export declare function holdLeave(ask: (go: () => void) => void): () => void;
+/**
+ * Writes the page's own address, `route` relative to `/m/<module>/`, in place of the
+ * current history entry, keeping its state, so Back leaves the page. The shell takes the
+ * page as still the one placed: it neither draws it again nor asks it. Throws a TypeError
+ * for a module whose panel is not the one shown, or a route that leaves `/m/<module>/`.
+ */
+export declare function setAddress(module: string, route?: string): void;
+/** Sets the shell document's theme mode and, when `name` is given, its theme, until the
+ * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
+ * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
+ * settings view, after it writes either setting. */
+export declare function setTheme(mode: ThemeMode, name?: string): void;

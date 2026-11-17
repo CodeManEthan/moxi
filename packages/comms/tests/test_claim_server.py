@@ -228,7 +228,7 @@ def test_a_held_name_still_says_another_session_holds_it(rig):
         srv.stop()
 
 
-def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
+def test_a_claim_socket_outside_comms_runtime_dir_is_never_asked(
         rig, servers, tmp_path):
     """A claim socket from the environment must lie inside RUNTIME/comms: one stamped by
     another copy of comms, or by hand, is refused naming the variable and the directory,

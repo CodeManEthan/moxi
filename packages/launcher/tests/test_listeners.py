@@ -1,5 +1,5 @@
 """The listeners turns calls, against session events shaped like turns' `SessionEvent`:
-the claim, the ready recorder, the Codex seat listener and the handoff pointer, a session
+the claim, the ready recorder, the Codex seat listener and the handoff lines, a session
 started from inside a launched one among them."""
 
 from __future__ import annotations
@@ -106,9 +106,9 @@ def dead() -> str:
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def stamp(request_id, **more):
@@ -116,7 +116,7 @@ def stamp(request_id, **more):
 
 
 def launch_claude(conn, request_id="r1", **overrides):
-    args = {"request_id": request_id, "actor": "someone", "harness": "claude",
+    args = {"request_id": request_id, "by": "someone", "harness": "claude",
             "target": "slot", "cwd": "/work", "values": {"mode": "interactive"},
             "argv": ["claude"], "env": stamp(request_id), "posture": "operator",
             "session_id": CLAUDE_ID, "preset_kind": "seat", "preset_name": "lead"}
@@ -125,7 +125,7 @@ def launch_claude(conn, request_id="r1", **overrides):
 
 
 def launch_codex(conn, request_id="c1", mode="host", values=None, **overrides):
-    args = {"request_id": request_id, "actor": "someone", "harness": "codex",
+    args = {"request_id": request_id, "by": "someone", "harness": "codex",
             "target": "slot", "cwd": "/work", "values": {"mode": mode, **(values or {})},
             "argv": ["moxi-turns-codex-host"], "env": stamp(request_id), "posture": "go",
             "preset_kind": "seat", "preset_name": "builder"}
@@ -397,14 +397,14 @@ def test_of_two_endpoints_claiming_at_once_exactly_one_wins(conn):
     won = []
 
     def race(name):
-        mine = store.connect()
+        conn = store.connect()
         try:
             barrier.wait()
-            if store.claim(mine, "c1", harness="codex", session_id=None,
+            if store.claim(conn, "c1", harness="codex", session_id=None,
                            endpoint=name) is not None:
                 won.append(name)
         finally:
-            mine.close()
+            conn.close()
 
     threads = [threading.Thread(target=race, args=(n,)) for n in (PARENT, NESTED)]
     for t in threads:
@@ -422,14 +422,14 @@ def test_of_two_endpoints_reclaiming_at_once_exactly_one_wins(conn, dead):
     won = []
 
     def race(name):
-        mine = store.connect()
+        conn = store.connect()
         try:
             barrier.wait()
-            if store.claim(mine, "r1", harness="claude", session_id=CLAUDE_ID,
+            if store.claim(conn, "r1", harness="claude", session_id=CLAUDE_ID,
                            endpoint=name) is not None:
                 won.append(name)
         finally:
-            mine.close()
+            conn.close()
 
     # Both alive, as a reclaiming endpoint is, so the loser can't take it from the winner.
     parent = proc.identity(os.getppid())
@@ -450,14 +450,14 @@ def test_a_codex_seat_gets_its_identity_block_and_instructions(conn, endpoint):
     launch_codex(conn, values={"instructions": "Build what the brief says."},
                  project_key="moxi", identity="builder", scope="moxi", posture="go")
     text = listen_codex.answer(start("codex", THREAD_ID, "c1"))
-    folder = handoffs.own_folder()
+    handoff_dir = handoffs.own_handoffs_dir()
     assert text == "\n".join([
         "--- LAUNCH IDENTITY (stamped at launch) ---",
         f"session id:    {THREAD_ID}",
         "project cwd:   /work",
         "project key:   moxi",
         "identity:      builder@moxi",
-        f"handoff dir:   {folder}",
+        f"handoff dir:   {handoff_dir}",
         "start posture: go",
     ]) + "\n\nBuild what the brief says."
 
@@ -492,8 +492,8 @@ def test_a_claude_session_gets_no_codex_instructions(conn, endpoint):
 # -- the handoff pointer -------------------------------------------------------------------
 
 
-def handoff(key, date="2026-10-29", count=1, folder=None):
-    path = (folder or handoffs.own_folder()) / handoffs.file_name(key, date, count)
+def handoff(key, date="2026-10-29", count=1, handoff_dir=None):
+    path = (handoff_dir or handoffs.own_handoffs_dir()) / handoffs.file_name(key, date, count)
     path.write_text("where the work is\n", encoding="utf-8")
     return path
 
@@ -509,17 +509,52 @@ def test_a_seat_is_pointed_to_its_newest_waiting_handoff_once(conn, endpoint):
     assert listen_handoff.answer(start("claude", CLEARED_ID, "r2")) is None
 
 
-@pytest.mark.parametrize("source", ["resume", "clear", "compact"])
-def test_the_pointer_answers_only_at_startup(conn, endpoint, source):
+@pytest.mark.parametrize("source", ["clear", "compact"])
+def test_the_lines_answer_not_at_a_clear_or_compaction(conn, endpoint, source):
     launch_claude(conn)
     handoff("lead")
+    handoff("planner")
     assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1", source=source)) is None
     assert store.picked(conn, "lead") == []
+
+
+def test_a_resume_of_a_held_launch_is_pointed_and_marks_the_handoff_picked(conn, endpoint):
+    launch_claude(conn)
+    waiting = handoff("lead")
+    other = handoff("planner", "2026-10-28")
+    text = listen_handoff.answer(start("claude", CLAUDE_ID, "r1", source="resume"))
+    assert text == (f"Handoff waiting: {waiting} (2026-10-29). Read it before other work.\n"
+                    f"Another seat's handoff: {other} (planner, 2026-10-28)")
+    assert store.picked(conn, "lead") == [str(waiting)]
+    assert store.picked(conn, "planner") == []
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1", source="resume")) == (
+        f"Another seat's handoff: {other} (planner, 2026-10-28)")
+
+
+def test_other_seats_lines_follow_the_pointer_newest_first_and_mark_nothing(conn, endpoint):
+    launch_claude(conn)
+    own = handoff("lead", "2026-10-20")
+    others = [handoff(f"seat{n}", f"2026-10-2{n}") for n in range(7, 0, -1)]
+    lines = listen_handoff.answer(start("claude", CLAUDE_ID, "r1")).split("\n")
+    assert lines[0] == f"Handoff waiting: {own} (2026-10-20). Read it before other work."
+    assert lines[1:6] == [f"Another seat's handoff: {path} (seat{n}, 2026-10-2{n})"
+                          for path, n in zip(others, range(7, 2, -1))]
+    assert lines[6:] == ["\u2026 and 2 more"]
+    assert all(store.picked(conn, f"seat{n}") == [] for n in range(1, 8))
+
+
+def test_a_seat_with_nothing_of_its_own_still_gets_other_seats_lines(conn, endpoint):
+    launch_claude(conn)
+    other = handoff("planner")
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) == (
+        f"Another seat's handoff: {other} (planner, 2026-10-29)")
+    assert store.picked(conn, "lead") == [] and store.picked(conn, "planner") == []
 
 
 def test_a_relaunch_gets_no_pointer(conn, endpoint):
     launch_claude(conn)
     handoff("lead")
+    handoff("planner")
     event = start("claude", CLAUDE_ID, "r1", MOXI_LAUNCHER_RELAUNCH="1")
     assert listen_handoff.answer(event) is None
 
@@ -527,6 +562,7 @@ def test_a_relaunch_gets_no_pointer(conn, endpoint):
 def test_a_headless_launch_gets_no_pointer(conn, endpoint):
     launch_claude(conn, target="headless")
     handoff("lead")
+    handoff("planner")
     assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
     assert store.picked(conn, "lead") == []
 
@@ -535,6 +571,7 @@ def test_a_nested_session_gets_no_pointer_and_marks_nothing(conn, endpoint):
     launch_claude(conn)
     listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
     handoff("lead")
+    handoff("planner")
     endpoint(NESTED)
     assert listen_handoff.answer(start("claude", NESTED_ID, "r1")) is None
     assert store.picked(conn, "lead") == []
@@ -568,6 +605,17 @@ def test_a_session_started_by_hand_is_shown_its_handoff_and_never_marks_it(conn,
     assert store.picked(conn, "planner") == []
 
 
+def test_a_session_started_by_hand_gets_other_seats_lines_at_a_resume(conn, endpoint):
+    waiting = handoff("planner")
+    other = handoff("lead", "2026-10-28")
+    event = Event("start", "claude", "hand-1", {"MOXI_COMMS_NAME": "planner"},
+                  source="resume")
+    assert listen_handoff.answer(event) == (
+        f"Handoff waiting: {waiting} (2026-10-29). Read it before other work.\n"
+        f"Another seat's handoff: {other} (lead, 2026-10-28)")
+    assert store.picked(conn, "planner") == [] and store.picked(conn, "lead") == []
+
+
 def test_a_session_by_hand_reads_no_store_it_would_have_to_make(endpoint):
     waiting = handoff("planner")
     event = Event("start", "codex", "thr", {"MOXI_COMMS_NAME": "planner"},
@@ -576,12 +624,22 @@ def test_a_session_by_hand_reads_no_store_it_would_have_to_make(endpoint):
     assert not store.path().exists()
 
 
-def test_a_session_without_a_key_gets_no_pointer(conn, endpoint):
+def test_a_session_without_a_key_gets_every_waiting_handoff_as_another_seats(conn,
+                                                                            endpoint):
     launch_claude(conn, preset_kind=None, preset_name=None)
-    handoff("lead")
-    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
+    lead = handoff("lead")
+    planner = handoff("planner", "2026-10-28")
+    lines = [f"Another seat's handoff: {lead} (lead, 2026-10-29)",
+             f"Another seat's handoff: {planner} (planner, 2026-10-28)"]
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) == "\n".join(lines)
     assert listen_handoff.answer(Event("start", "claude", "x", {"PWD": "/work"},
-                                       source="startup")) is None
+                                       source="resume")) == "\n".join(lines)
+    assert store.picked(conn, "lead") == [] and store.picked(conn, "planner") == []
+
+
+def test_a_session_without_a_key_in_an_empty_handoff_dir_gets_nothing(conn, endpoint):
+    launch_claude(conn, preset_kind=None, preset_name=None)
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
 
 
 def test_the_key_of_a_project_launch_is_its_project_key(conn, endpoint):
@@ -597,13 +655,13 @@ def stand_in_notes(monkeypatch, tmp_path):
     folder. It wraps the fixtures' own `available` and `load`, so a projects read still
     fails the test."""
     calls = []
-    folder = tmp_path / "notes" / "code" / "alpha" / "handoffs"
+    handoff_dir = tmp_path / "notes" / "code" / "alpha" / "handoffs"
 
     def handoffs_dir(path, *, create=False, override=None):
         calls.append((path, create, override))
         if create:
-            folder.mkdir(parents=True, exist_ok=True)
-        return folder
+            handoff_dir.mkdir(parents=True, exist_ok=True)
+        return handoff_dir
 
     found = SimpleNamespace(state=modules.PRESENT, reason="",
                             api=SimpleNamespace(handoffs_dir=handoffs_dir))
@@ -611,14 +669,14 @@ def stand_in_notes(monkeypatch, tmp_path):
     monkeypatch.setattr(modules, "available", lambda name: name == "notes" or available(name))
     monkeypatch.setattr(modules, "load", lambda name, *, interface=None: (
         found if name == "notes" else load(name, interface=interface)))
-    return SimpleNamespace(calls=calls, folder=folder)
+    return SimpleNamespace(calls=calls, handoff_dir=handoff_dir)
 
 
-def test_with_notes_a_launched_seat_is_pointed_into_notes_folder(conn, endpoint,
+def test_with_notes_a_launched_seat_is_pointed_into_notes_dir(conn, endpoint,
                                                                  stand_in_notes):
     launch_claude(conn, cwd="/work/alpha")
-    stand_in_notes.folder.mkdir(parents=True)
-    waiting = handoff("lead", folder=stand_in_notes.folder)
+    stand_in_notes.handoff_dir.mkdir(parents=True)
+    waiting = handoff("lead", handoff_dir=stand_in_notes.handoff_dir)
     handoff("lead", "2026-10-30")  # the launcher's own folder is not where it looks
     text = listen_handoff.answer(start("claude", CLAUDE_ID, "r1"))
     assert text == f"Handoff waiting: {waiting} (2026-10-29). Read it before other work."
@@ -626,10 +684,10 @@ def test_with_notes_a_launched_seat_is_pointed_into_notes_folder(conn, endpoint,
     assert store.picked(conn, "lead") == [str(waiting)]
 
 
-def test_with_notes_a_session_by_hand_is_pointed_into_notes_folder(conn, endpoint,
+def test_with_notes_a_session_by_hand_is_pointed_into_notes_dir(conn, endpoint,
                                                                    stand_in_notes):
-    stand_in_notes.folder.mkdir(parents=True)
-    waiting = handoff("planner", folder=stand_in_notes.folder)
+    stand_in_notes.handoff_dir.mkdir(parents=True)
+    waiting = handoff("planner", handoff_dir=stand_in_notes.handoff_dir)
     event = Event("start", "claude", "hand-1",
                   {"MOXI_COMMS_NAME": "planner", "PWD": "/work/alpha"}, source="startup")
     assert str(waiting) in listen_handoff.answer(event)
@@ -644,5 +702,5 @@ def test_a_codex_seat_gets_both_answers(conn, endpoint):
     assert str(waiting) in listen_handoff.answer(start("codex", THREAD_ID, "c1"))
 
 
-def test_the_own_folder_is_the_handoffs_store():
-    assert handoffs.own_folder() == Layout("launcher").data_dir() / "handoffs"
+def test_the_own_dir_is_the_handoffs_store():
+    assert handoffs.own_handoffs_dir() == Layout("launcher").data_dir() / "handoffs"

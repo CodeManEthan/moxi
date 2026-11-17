@@ -42,7 +42,7 @@ def rollout(sessions) -> CodexRollout:
 
 def test_a_request_maps_its_token_classes(rollout):
     turn = rollout.turn("model-a", context_window=200000)
-    rid = rollout.request(token_usage(input=1200, cached=1000, cache_write=0, output=40,
+    rid = rollout.request(token_usage(input_tokens=1200, cached=1000, cache_write=0, output=40,
                                       reasoning=15))
     [req] = of(read(rollout.write()), Request)
     assert req.request_id == rid
@@ -151,11 +151,11 @@ def test_a_record_mode_token_count_gives_limits_and_no_request(rollout):
 def test_a_legacy_rollout_s_requests_come_from_token_count(sessions, version):
     r = CodexRollout(sessions, cli_version=version)
     turn = r.turn("model-old")
-    r.request(token_usage(input=500, cached=100, output=20))     # counted
+    r.request(token_usage(input_tokens=500, cached=100, output=20))     # counted
     r.token_count(info=None)                                   # null info: none
-    r.request(token_usage(input=500, cached=100, output=20))     # counted
+    r.request(token_usage(input_tokens=500, cached=100, output=20))     # counted
     r.token_count(info=r.info)                                   # a repeat: none
-    r.request(token_usage(input=0, cached=0, output=0, reasoning=0))  # zero: none
+    r.request(token_usage(input_tokens=0, cached=0, output=0, reasoning=0))  # zero: none
     path = r.write()
     reqs = of(read(path), Request)
     count_lines = [n for n, line in enumerate(r.lines, 1) if '"token_count"' in line]
@@ -173,7 +173,7 @@ def test_legacy_requests_come_through_the_request_filter(sessions):
     r.turn()
     r.request()
     r.user("more")
-    r.request(token_usage(input=2000))
+    r.request(token_usage(input_tokens=2000))
     path = r.write()
     whole = of(read(path), Request)
     assert len(whole) == 2
@@ -183,7 +183,7 @@ def test_legacy_requests_come_through_the_request_filter(sessions):
 def test_an_unlisted_version_reads_in_record_mode(sessions):
     r = CodexRollout(sessions, cli_version="0.154.0-alpha.6.2", imported=True)
     r.turn()
-    r.token_count(info={"last_token_usage": token_usage(input=0, cached=0, output=0),
+    r.token_count(info={"last_token_usage": token_usage(input_tokens=0, cached=0, output=0),
                         "model_context_window": None}, limits=None)
     r.token_count(info={"last_token_usage": token_usage(), "model_context_window": None},
                   limits=None)
@@ -468,7 +468,7 @@ def every_kind_rollout(root, version="0.153.0") -> CodexRollout:
     r.tool_output(call)
     r.request()
     r.settings(provider="other")
-    r.request(token_usage(input=3000), limits=None)
+    r.request(token_usage(input_tokens=3000), limits=None)
     r.token_count(info=None)
     r.token_count(info=r.info)
     r.add_raw("{broken")
@@ -477,7 +477,7 @@ def every_kind_rollout(root, version="0.153.0") -> CodexRollout:
     r.compaction("context_compacted")
     r.turn_end()
     r.turn("model-b", context_window=128000)
-    r.request(token_usage(input=0, cached=0, output=0, reasoning=0))
+    r.request(token_usage(input_tokens=0, cached=0, output=0, reasoning=0))
     r.abort()
     r.rollback()
     r.compaction("compaction")

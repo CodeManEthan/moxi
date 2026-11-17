@@ -114,7 +114,7 @@ def test_reply_obeys_the_send_boundary_and_threads(rig):
     # names the one holder of that seat at the message's timestamp, and the display
     # agrees with them. Two independent facts, so the same `verified` a live frame gets:
     # a chosen agent that has merely stopped being live is still attributed for words it
-    # provably said. `test_custody.py` pins the edges.
+    # provably said. `test_attributed_read.py` pins a sender that has since unbound.
     assert "replying to planner@proj-a (chosen, verified)" in out
     wait_for_queue(planner, 1)
     assert planner.queue[0]["reply_to"] == mid

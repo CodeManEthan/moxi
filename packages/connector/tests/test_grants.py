@@ -263,25 +263,26 @@ def test_the_doctor_reads_the_grants_with_the_origin_it_reads(config_file, monke
 
 
 def _snap(view):
-    return doctor.Snapshot(True, 8452, "", None, ORIGIN, {"providers": [], "tools": []},
-                           None, None, None, view)
+    return doctor.Snapshot(switch=True, port=8452, public_url="", address=None,
+                           origin=ORIGIN, answer={"providers": [], "tools": []},
+                           error=None, last_check=None, last_call=None, grants=view)
 
 
 # -- the switch-off rule ------------------------------------------------------------------
 
-def test_off_revokes_every_grant(config_file, applied, no_tunnel, capsys):
+def test_disable_revokes_every_grant(config_file, applied, no_tunnel, capsys):
     config_file("enabled = true\n")
     store = grants.Store()
     a, b = made(store), made(store)
-    assert cli.main(["off"]) == 0
+    assert cli.main(["disable"]) == 0
     data = grants.Store().view()["grants"]
-    assert data[a]["revoked_by"] == data[b]["revoked_by"] == "off"
+    assert data[a]["revoked_by"] == data[b]["revoked_by"] == "disable"
     assert cli.REVOKED_ALL in capsys.readouterr().out
 
 
-def test_off_with_no_grants_file_writes_none(config_file, applied, no_tunnel):
+def test_disable_with_no_grants_file_writes_none(config_file, applied, no_tunnel):
     config_file("enabled = true\n")
-    assert cli.main(["off"]) == 0
+    assert cli.main(["disable"]) == 0
     assert not grants.Store().exists()
 
 
@@ -290,9 +291,9 @@ def test_a_stop_with_the_switch_off_revokes_and_a_restart_with_it_on_keeps(confi
     store = grants.Store()
     gid = made(store)
     oauth = OAuth(grants.Store(), _log(), redirect_uris=CALLBACKS)
-    run(oauth.stopping(True))
+    run(oauth.stopping(switch_on=True))
     assert not grants.Store().grant(gid)["revoked"]
-    run(oauth.stopping(False))
+    run(oauth.stopping(switch_on=False))
     assert grants.Store().grant(gid)["revoked_by"] == "stop"
 
 

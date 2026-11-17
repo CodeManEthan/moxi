@@ -23,6 +23,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import modules
 from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejob
@@ -30,8 +31,7 @@ from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejo
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
-KEY = "K" * 43
-OTHER_KEY = "L" * 43
+JOB = "0f" * 16
 
 
 def loopback():
@@ -55,16 +55,14 @@ def served():
     return LB.guard(inner, lambda: profile)
 
 
-async def _send(app, method: str, path: str, *, query: str = "", body: dict | None = None,
-                key: str | None = None) -> tuple[int, dict | None]:
+async def _send(app, method: str, path: str, *, query: str = "",
+                body: dict | None = None) -> tuple[int, dict | None]:
     headers = [(b"host", b"127.0.0.1:%d" % PORT), (b"x-moxi-token", TOKEN.encode())]
     raw = b""
     if method == "POST":
         headers.append((b"content-type", b"application/json"))
         raw = json.dumps(body or {}).encode()
         headers.append((b"content-length", str(len(raw)).encode()))
-    if key is not None:
-        headers.append((b"idempotency-key", key.encode()))
     scope = {
         "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1", "server": ("127.0.0.1", PORT),
@@ -101,9 +99,8 @@ def read(path: str, query: str = "") -> dict:
     return body
 
 
-def post(path: str, body: dict | None = None, *, key: str | None = None,
-         app=None) -> tuple[int, dict | None]:
-    return asyncio.run(_send(app or served(), "POST", path, body=body, key=key))
+def post(path: str, body: dict | None = None, *, app=None) -> tuple[int, dict | None]:
+    return asyncio.run(_send(app or served(), "POST", path, body=body))
 
 
 def printed(argv: list[str]):
@@ -115,12 +112,12 @@ def printed(argv: list[str]):
 
 
 @pytest.fixture
-def lo(folder):
+def lo(loadout_dir):
     """A configured loadout folder with one skill, listed for the user."""
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.manifest(folder, '[user]\nskills = ["review"]\n')
-    return folder
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, '[user]\nskills = ["review"]\n')
+    return loadout_dir
 
 
 @pytest.fixture
@@ -159,13 +156,12 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     exported = LB.export(page.PAGE)
     routes = {r["path"]: r for r in exported["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/status", "/api/list", "/api/global", "/api/projects", "/api/drift", "/api/job"}
+        "/api/status", "/api/view", "/api/list", "/api/global", "/api/folder", "/api/projects",
+        "/api/drift", "/api/job", "/api/replace-preview"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
-        "/api/install", "/api/replace", "/api/global-off"}
-    assert {p for p, r in routes.items() if r.get("confirmed")} == {
-        "/api/replace", "/api/global-off"}
-    assert all(routes[p]["status"] == "/api/job" for p in ("/api/replace", "/api/global-off"))
+        "/api/install", "/api/replace", "/api/global-remove"}
+    assert not any(r.get("confirmed") for r in routes.values())
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
@@ -187,22 +183,99 @@ def _marks(shape: dict, at: str = "") -> dict[str, str]:
 
 
 def test_every_value_that_can_hold_a_path_carries_a_mark():
-    marks: dict[str, str] = {}
-    for route in LB.export(page.PAGE)["routes"]:
-        for key, shape in route["returns"].items():
-            marks.update({f"{route['path']} {k}": v for k, v in _marks(shape, key).items()})
+    marks = _all_marks()
     paths = {k for k, v in marks.items() if v == "path"}
     assert paths == {
         "/api/status rows[].target", "/api/job outcome.rows[].target",
         "/api/list manifest", "/api/list sections[].root", "/api/global files[].file",
-        "/api/projects projects[].root"}
+        "/api/global files[].parts[]",
+        "/api/projects projects[].root",
+        "/api/view home", "/api/view folder", "/api/view manifest",
+        "/api/view sections[].root", "/api/view rows[].target",
+        "/api/view global.files[].file", "/api/view global.files[].parts[]",
+        "/api/view global.source", "/api/view sections[].refused.last_root",
+        "/api/folder unlisted[].source", "/api/status kept[].target",
+        "/api/status kept[].copy", "/api/job outcome.kept[].target",
+        "/api/job outcome.kept[].copy", "/api/replace-preview target",
+        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
                  "/api/list sections[].name", "/api/global files[].diff",
                  "/api/projects reason", "/api/drift note", "/api/job lines[]",
-                 "/api/job argv[]", "/api/job outcome.lines[]"):
+                 "/api/job argv[]", "/api/job outcome.lines[]",
+                 "/api/view problem", "/api/view lines[]", "/api/view notes[]",
+                 "/api/view note", "/api/view sections[].name", "/api/view items[].scope",
+                 "/api/view items[].source", "/api/view rows[].scope",
+                 "/api/view rows[].name", "/api/view rows[].reason",
+                 "/api/view global.files[].diff", "/api/view sections[].refused.line",
+                 "/api/view items[].what.event", "/api/view items[].what.matcher",
+                 "/api/view items[].what.command", "/api/view items[].what.url",
+                 "/api/view items[].what.allow[]", "/api/view items[].what.ask[]",
+                 "/api/view items[].what.deny[]", "/api/folder detail",
+                 "/api/folder uncommitted[]", "/api/folder unlisted[].name",
+                 "/api/status kept[].id", "/api/status kept[].back",
+                 "/api/job outcome.kept[].id", "/api/job outcome.kept[].back",
+                 "/api/replace-preview problem", "/api/replace-preview diff"):
         assert marks[said] == "redact", said
+    plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
+             "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
+             "/api/view items[].disabled[]", "/api/view rows[].kind",
+             "/api/view rows[].harness", "/api/view rows[].state",
+             "/api/view rows[].replaceable", "/api/view rows[].form",
+             "/api/view rows[].edited", "/api/view rows[].covers[]",
+             "/api/view rows[].prior", "/api/view rows[].applies",
+             "/api/view rows[].ignores", "/api/view resolved_all", "/api/view global.mode",
+             "/api/view global.chosen", "/api/view global.files[].harness",
+             "/api/view global.files[].changes", "/api/view global.files[].placed",
+             "/api/view global.files[].state", "/api/view global.files[].form",
+             "/api/view sections[].refused.cause", "/api/view items[].module",
+             "/api/view item_notes[].kind", "/api/view item_notes[].name",
+             "/api/view item_notes[].harness", "/api/view item_notes[].code",
+             "/api/projects cause", "/api/folder state", "/api/folder more",
+             "/api/folder unlisted[].kind", "/api/folder reinstalls",
+             "/api/status kept[].how", "/api/job outcome.kept[].how",
+             "/api/replace-preview case", "/api/replace-preview tracked",
+             "/api/replace-preview others", "/api/replace-preview label",
+             "/api/replace-preview lines", "/api/replace-preview skipped[].why"}
+    assert not plain & set(marks)
+
+
+#: Every mark the routes gave before this page read `/api/view`, copied from `page.py` as it
+#: was then: no field may carry a weaker one now.
+EARLIER_MARKS = {
+    "/api/drift note": "redact", "/api/drift problem": "redact",
+    "/api/global files[].diff": "redact", "/api/global files[].file": "path",
+    "/api/global files[].parts[]": "path", "/api/global problem": "redact",
+    "/api/job argv[]": "redact", "/api/job lines[]": "redact",
+    "/api/job outcome.lines[]": "redact", "/api/job outcome.notes[]": "redact",
+    "/api/job outcome.rows[].name": "redact", "/api/job outcome.rows[].reason": "redact",
+    "/api/job outcome.rows[].scope": "redact", "/api/job outcome.rows[].target": "path",
+    "/api/list items[].scope": "redact", "/api/list items[].source": "redact",
+    "/api/list manifest": "path", "/api/list problem": "redact",
+    "/api/list sections[].name": "redact", "/api/list sections[].root": "path",
+    "/api/projects projects[].root": "path", "/api/projects reason": "redact",
+    "/api/status lines[]": "redact", "/api/status notes[]": "redact",
+    "/api/status problem": "redact", "/api/status rows[].name": "redact",
+    "/api/status rows[].reason": "redact", "/api/status rows[].scope": "redact",
+    "/api/status rows[].target": "path",
+}
+STRENGTH = {None: 0, "path": 1, "redact": 2}
+
+
+def _all_marks() -> dict[str, str]:
+    marks: dict[str, str] = {}
+    for route in LB.export(page.PAGE)["routes"]:
+        for key, shape in route["returns"].items():
+            marks.update({f"{route['path']} {k}": v for k, v in _marks(shape, key).items()})
+    return marks
+
+
+def test_no_field_carries_a_weaker_mark_than_it_did():
+    marks = _all_marks()
+    weaker = {k: (v, marks.get(k)) for k, v in EARLIER_MARKS.items()
+              if STRENGTH[marks.get(k)] < STRENGTH[v]}
+    assert weaker == {}
 
 
 def test_the_page_names_kinds_modes_and_states_as_loadout_does():
@@ -288,9 +361,77 @@ def test_drift_counts_the_items_not_ok_and_notes_a_difference_without_counting_i
     assert body["note"] in read("/api/status")["notes"]
 
 
+def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
+                                                     terminal_record):
+    from moxi import paths, place
+
+    terminal_record()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (lo / "global.md").write_text("Be kind.\n")
+    kit.agent(lo / "agents" / "helper.md", "helper")
+    kit.manifest(lo, '[global]\nmode = "managed"\n[user]\nskills = ["review"]\n'
+                     f'[project."{proj}"]\nagents = ["helper"]\n')
+    built = []
+    real = install._plan
+
+    def counted(*a, **kw):
+        built.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(install, "_plan", counted)
+    body = read("/api/view")
+    assert len(built) == 1
+    assert body["problem"] is None
+    status = read("/api/status")
+    facts = ("form", "edited", "covers", "prior", "applies", "ignores")
+    assert [{k: v for k, v in r.items() if k not in facts} for r in body["rows"]] == \
+        status["rows"]
+    assert {k: body[k] for k in ("lines", "notes", "counts")} == {
+        k: status[k] for k in ("lines", "notes", "counts")}
+    by = {(r["kind"], r["name"], r["harness"], r["scope"]): r for r in body["rows"]}
+    assert {k: by[("skill", "review", "claude", "user")][k] for k in facts} == {
+        "form": "link", "edited": False, "covers": None, "prior": False,
+        "applies": "section", "ignores": False}
+    assert body["resolved_all"] is True
+    assert any(r["scope"] == str(proj) for r in body["rows"])
+    listed = read("/api/list")
+    assert [{k: v for k, v in s.items() if k != "refused"} for s in body["sections"]] == \
+        listed["sections"]
+    assert [s["refused"] for s in body["sections"]] == [None, None]
+    assert [{k: v for k, v in i.items() if k not in ("module", "what")}
+            for i in body["items"]] == listed["items"]
+    assert [(i["module"], i["what"]) for i in body["items"]] == [(None, None)] * 2
+    assert body["manifest"] == listed["manifest"] == str(lo / "loadout.toml")
+    shown = read("/api/global")
+    assert body["global"]["source"] == str(lo / "global.md")
+    assert {k: v for k, v in body["global"].items() if k not in ("source", "files")} == {
+        k: v for k, v in shown.items() if k not in ("problem", "files")}
+    assert [{k: v for k, v in f.items() if k != "form"} for f in body["global"]["files"]] \
+        == shown["files"]
+    assert {f["form"] for f in body["global"]["files"]} <= {"line", "block", "instructions"}
+    assert body["global"]["chosen"] and body["global"]["files"]
+    assert body["item_notes"] == []
+    assert body["note"] == read("/api/drift")["note"] is None
+    assert body["harnesses"] == list(place.harnesses()[0])
+    assert "claude" in body["harnesses"]
+    assert body["home"] == str(paths.home())
+    assert body["folder"] == str(lo)
+
+
+def test_view_notes_a_difference_from_the_terminal_in_the_pages_words(
+        lo, monkeypatch, tmp_path, terminal_record):
+    terminal_record()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
+    body = read("/api/view")
+    assert "; or run the command in a terminal." in body["note"]
+    assert body["note"] == read("/api/drift")["note"]
+    assert body["note"] in body["notes"]
+
+
 def test_a_manifest_that_does_not_read_is_each_reads_problem(lo):
     kit.manifest(lo, "[user]\nnonsense = 1\n")
-    for path in ("/api/status", "/api/list", "/api/global", "/api/drift"):
+    for path in ("/api/status", "/api/view", "/api/list", "/api/global", "/api/drift"):
         body = read(path)
         assert "loadout.toml" in body["problem"] and "nonsense" in body["problem"], path
 
@@ -332,8 +473,212 @@ def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
     start = time.monotonic()
     body = read("/api/status")
-    assert time.monotonic() - start < 15
+    assert time.monotonic() - start < 15 * timed_slack()
     assert body["problem"] is None
+
+
+# -- the folder ---------------------------------------------------------------------------
+
+def git(cwd, *args) -> str:
+    done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                           "-c", "init.defaultBranch=main", "-C", str(cwd), *args],
+                          capture_output=True, text=True, check=True, timeout=30)
+    return done.stdout
+
+
+@pytest.fixture
+def tree(tmp_path):
+    """A loadout folder two levels inside a git work tree, its one skill committed."""
+    root = tmp_path / "work"
+    root.mkdir()
+    git(root, "init", "-q")
+    loadout_dir = kit.configure(root / "dots" / "loadout")
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, '[user]\nskills = ["review"]\n')
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    return loadout_dir
+
+
+def test_source_dir_outside_a_work_tree_names_no_uncommitted_files(site, lo):
+    assert read("/api/folder") == {"state": "ok", "detail": None, "uncommitted": None,
+                                   "more": 0, "unlisted": [], "reinstalls": False}
+
+
+def test_source_dir_in_a_clean_work_tree_has_nothing_uncommitted(site, tree):
+    body = read("/api/folder")
+    assert (body["state"], body["uncommitted"], body["more"]) == ("ok", [], 0)
+
+
+def test_source_dir_names_each_uncommitted_file_relative_to_it(site, tree):
+    (tree / "skills" / "review" / "SKILL.md").write_text("changed\n")
+    kit.skill(tree / "skills", "fresh")
+    (tree / "skills" / "fresh" / "notes").mkdir()
+    (tree / "skills" / "fresh" / "notes" / "a.md").write_text("a\n")
+    (tree.parent.parent / "elsewhere.md").write_text("not the folder's\n")
+    body = read("/api/folder")
+    assert body["state"] == "ok" and body["more"] == 0
+    assert sorted(body["uncommitted"]) == ["skills/fresh/SKILL.md", "skills/fresh/notes/a.md",
+                                           "skills/review/SKILL.md"]
+
+
+def test_source_dir_names_a_renamed_file_by_its_new_path(site, tree):
+    git(tree, "mv", "loadout.toml", "renamed.toml")
+    assert read("/api/folder")["uncommitted"] == ["renamed.toml"]
+
+
+def test_source_dir_names_twenty_files_and_counts_the_rest(site, tree):
+    for n in range(23):
+        (tree / f"note-{n:02}.md").write_text(f"{n}\n")
+    body = read("/api/folder")
+    assert body["uncommitted"] == [f"note-{n:02}.md" for n in range(20)]
+    assert body["more"] == 3
+
+
+def test_source_dir_read_writes_nothing_to_the_index(site, tree):
+    index = tree.parent.parent / ".git" / "index"
+    before = index.read_bytes()
+    os.utime(tree / "loadout.toml", (1_000_000_000, 1_000_000_000))  # git would refresh it
+    read("/api/folder")
+    assert index.read_bytes() == before
+
+
+@pytest.mark.timed
+@pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
+def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monkeypatch, tmp_path):
+    stalled = tmp_path / "stalled-bin"
+    stalled.mkdir()
+    (stalled / "git").write_text("#!/bin/sh\nexec sleep 60\n")
+    (stalled / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
+    start = time.monotonic()
+    body = read("/api/folder")
+    assert time.monotonic() - start < 15 * timed_slack()
+    assert body["state"] == "error" and body["detail"] == pagehandlers.GIT_SLOW
+    assert (body["uncommitted"], body["more"]) == (None, 0)
+
+
+def test_source_dir_whose_git_fails_says_so_in_a_line_with_no_path(site, lo, monkeypatch):
+    (lo / ".git").mkdir()  # a work tree git can't read
+    body = read("/api/folder")
+    assert body["state"] == "error" and body["detail"] == pagehandlers.GIT_FAILED
+    assert str(lo) not in body["detail"]
+    assert body["uncommitted"] is None
+
+
+def test_source_dir_names_the_skills_and_agents_no_section_lists(site, lo, tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    kit.skill(lo / "skills", "spare")
+    kit.skill(lo / "skills", "held")
+    (lo / "skills" / "empty").mkdir()
+    kit.skill(lo / "skills", ".hidden")
+    kit.skill(lo / "skills", "bad name")
+    kit.agent(lo / "agents" / "helper.md", "helper")
+    kit.agent(lo / "agents" / "loose.md", "loose")
+    (lo / "agents" / "readme.txt").write_text("not an agent\n")
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{proj}"]\n'
+                     'skills = ["held"]\nagents = ["helper"]\n')
+    assert read("/api/folder")["unlisted"] == [
+        {"kind": "skill", "name": "spare", "source": str(lo / "skills" / "spare")},
+        {"kind": "agent", "name": "loose", "source": str(lo / "agents" / "loose.md")}]
+
+
+def test_source_dir_lists_nothing_unlisted_when_the_manifest_does_not_read(site, lo):
+    kit.skill(lo / "skills", "spare")
+    kit.manifest(lo, "[user]\nnonsense = 1\n")
+    body = read("/api/folder")
+    assert (body["state"], body["unlisted"]) == ("ok", [])
+
+
+REPO_API = '''
+import os
+
+
+class Failure(Exception):
+    def __init__(self, text, *, lines=None):
+        super().__init__(text)
+        self.text, self.lines = text, list(lines or [])
+
+
+def status(path=None):
+    pieces = [p for p in os.environ.get("FAKE_REPO_PIECES", "").split(",") if p]
+    return [{"root": path, "pieces": [{"id": p, "enabled": True} for p in pieces]}]
+'''
+
+
+@pytest.mark.parametrize("pieces, setting, reinstalls", [
+    ("loadout/reinstall-commit,loadout/reinstall-merge", "true", True),
+    ("loadout/reinstall-commit,loadout/reinstall-merge", "false", False),
+    ("loadout/reinstall-commit", "true", False),
+])
+def test_source_dir_reinstalls_only_with_repo_the_setting_and_both_pieces(
+        site, tree, monkeypatch, pieces, setting, reinstalls):
+    from moxi import config
+
+    assert read("/api/folder")["reinstalls"] is False  # no repo
+    site.module("repo", API="'moxi_repo.api'", files={"api.py": REPO_API})
+    modules.reset()
+    monkeypatch.setenv("FAKE_REPO_PIECES", pieces)
+    config.set_value("loadout", "reinstall_on_commit", setting, by="test")
+    assert read("/api/folder")["reinstalls"] is reinstalls
+
+
+def test_source_dir_with_settings_that_do_not_read_is_an_error(site, lo, monkeypatch):
+    from moxi.config import ConfigError
+
+    from moxi_loadout import settings
+
+    def broken():
+        raise ConfigError("loadout.toml", "source", "bad value", "set it again")
+
+    monkeypatch.setattr(settings, "read", broken)
+    body = read("/api/folder")
+    assert body["state"] == "error" and "bad value" in body["detail"]
+    assert (body["uncommitted"], body["unlisted"], body["reinstalls"]) == (None, [], False)
+
+
+# -- the replace preview --------------------------------------------------------------------
+
+def test_replace_preview_answers_what_a_replace_would_do(lo):
+    from moxi_loadout import displaced, preview
+
+    kit.claude().mkdir(parents=True, exist_ok=True)
+    for path in kit.claude().iterdir():
+        path.unlink()
+    kit.skill(kit.claude(), "review", "mine\n")
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude&section=user")
+    target = kit.claude() / "review"
+    assert answer["problem"] is None
+    assert (answer["case"], answer["target"], answer["kept_in"]) == (
+        "moves", str(target), str(displaced.root()))
+    assert answer == {"problem": None, **preview.replace_preview("skill:review@claude", "user")}
+    assert "-mine" in answer["diff"]
+
+
+def test_replace_preview_of_a_row_not_replaceable_has_no_case(lo):
+    assert install.install().code == 0
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude")
+    assert (answer["case"], answer["target"], answer["lines"]) == (None, None, 0)
+
+
+@pytest.mark.parametrize("query", ["id=not-an-id", "id=skill%3Areview%40claude%40x",
+                                   "id=.%2Frelative"])
+def test_replace_preview_refuses_what_the_verb_would(lo, query):
+    status, body = get("/api/replace-preview", query)
+    assert status == 422, body
+
+
+def test_replace_preview_that_fails_says_so(lo, monkeypatch):
+    from moxi_loadout import preview
+
+    def boom(*a, **kw):
+        raise RuntimeError("secret /home/path")
+
+    monkeypatch.setattr(preview, "replace_preview", boom)
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude")
+    assert answer["case"] is None and "RuntimeError" in answer["problem"]
+    assert "/home/path" not in answer["problem"]
 
 
 # -- projects -------------------------------------------------------------------------------
@@ -373,6 +718,8 @@ def list_projects(kind=None):
         raise Busy("the projects store stayed locked")
     if error == "unreadable":
         raise Unreadable("the projects store can't be read; move it aside")
+    if error == "other":
+        raise OSError("a secret detail")
     return [Project("alpha", "/srv/alpha"), Project("beta", "/srv/beta")]
 '''
 
@@ -380,20 +727,29 @@ def list_projects(kind=None):
 def test_projects_absent_is_the_pickers_reason(site):
     from moxi_loadout import projects_link
 
-    assert read("/api/projects") == {"projects": [], "reason": projects_link.ABSENT}
+    assert read("/api/projects") == {"projects": [], "reason": projects_link.ABSENT,
+                                     "cause": "absent"}
 
 
-@pytest.mark.parametrize("error, reason", [
-    (None, None),
-    ("busy", "projects is busy; try again"),
-    ("unreadable", "projects can't be read: the projects store can't be read; move it aside"),
+def test_projects_that_wont_load_is_an_error(site):
+    site.module("projects", API="'moxi_projects.missing'")
+    body = read("/api/projects")
+    assert body["cause"] == "error" and "can't be loaded" in body["reason"]
+
+
+@pytest.mark.parametrize("error, reason, cause", [
+    (None, None, None),
+    ("busy", "projects is busy; try again", "busy"),
+    ("unreadable", "projects can't be read: the projects store can't be read; move it aside",
+     "unreadable"),
+    ("other", "projects couldn't be listed (OSError)", "error"),
 ])
-def test_projects_lists_by_key_or_says_why_not(site, monkeypatch, error, reason):
+def test_projects_lists_by_key_or_says_why_not(site, monkeypatch, error, reason, cause):
     site.module("projects", API="'moxi_projects.api'", files={"api.py": PROJECTS_API})
     if error:
         monkeypatch.setenv("FAKE_PROJECTS_ERROR", error)
     body = read("/api/projects")
-    assert body["reason"] == reason
+    assert (body["reason"], body["cause"]) == (reason, cause)
     assert body["projects"] == ([] if error else [{"key": "alpha", "root": "/srv/alpha"},
                                                   {"key": "beta", "root": "/srv/beta"}])
 
@@ -439,14 +795,18 @@ def test_an_act_starts_its_verb_as_a_job_and_answers_202(lo, spawned, path, body
     ("/api/enable", {"id": "skill:review@claude", "user": True, "project": "alpha"},
      "not both"),
     ("/api/install", {"projects": ["sub/dir"]}, "by an absolute path"),
-    ("/api/replace", {"replace": []}, "name what to replace"),
-    ("/api/replace", {"replace": ["skills/review"]}, "name a path absolutely"),
+    ("/api/replace", {"replace": " ", "job": JOB}, "name what to replace"),
+    ("/api/replace", {"replace": "skills/review", "job": JOB}, "name a path absolutely"),
+    ("/api/replace", {"replace": "skill:review@claude", "user": True, "project": "alpha",
+                      "job": JOB}, "not both"),
+    ("/api/replace", {"replace": "skill:review@claude", "job": "K" * 32}, "32 hex"),
+    ("/api/replace", {"replace": "skill:review@claude", "job": JOB.upper()}, "32 hex"),
+    ("/api/global-remove", {"job": "x"}, "32 hex"),
 ])
 def test_an_act_the_verb_would_misread_is_refused_before_anything_is_written(
         lo, spawned, path, body, says):
     before = (lo / "loadout.toml").read_bytes()
-    key = KEY if path == "/api/replace" else None
-    status, answer = post(path, body, key=key)
+    status, answer = post(path, body)
     assert status == 422, answer
     assert says in answer["refused"]
     assert spawned == []
@@ -462,7 +822,7 @@ def test_a_relative_section_the_manifest_names_exactly_goes_as_its_root(lo, spaw
     assert verb_of(spawned[0]) == ["install", f"--project={root}"]
 
 
-def test_global_mode_off_is_only_the_confirmed_act(lo, spawned):
+def test_global_mode_off_is_only_global_remove(lo, spawned):
     status, answer = post("/api/global-mode", {"mode": "off"})
     assert status == 400 and spawned == []
 
@@ -491,44 +851,69 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
     assert read("/api/job", f"job={job_of(answer)}")["state"] == "running"
 
 
-# -- confirmed acts -------------------------------------------------------------------------
+# -- the acts named by the job the page minted ----------------------------------------------
 
 @pytest.mark.parametrize("path, body, verb", [
-    ("/api/replace", {"replace": ["skill:review@claude", "/srv/alpha/.claude/skills/x"],
-                      "projects": ["alpha"]},
-     ["install", "--replace=skill:review@claude", "--replace=/srv/alpha/.claude/skills/x",
-      "--project=alpha"]),
-    ("/api/global-off", {}, ["global", "off"]),
+    ("/api/replace", {"replace": "skill:review@claude", "project": "alpha", "job": JOB},
+     ["install", "--replace=skill:review@claude", "--project=alpha"]),
+    ("/api/replace", {"replace": "/srv/alpha/.claude/skills/x", "user": True, "job": JOB},
+     ["install", "--replace=/srv/alpha/.claude/skills/x", "--user"]),
+    # A row a whole run applies (the global file's part): no section.
+    ("/api/replace", {"replace": "global:global@claude", "job": JOB},
+     ["install", "--replace=global:global@claude"]),
+    ("/api/global-remove", {"job": JOB}, ["global", "remove"]),
 ])
-def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, verb):
-    status, answer = post(path, body, key=KEY)
-    assert (status, answer) == (202, {"status": f"/api/job?job={KEY}"})
-    assert spawned == [pagejob.command(KEY, verb)]
+def test_a_named_act_runs_its_verb_and_nothing_else_as_the_job_it_names(
+        lo, spawned, path, body, verb):
+    status, answer = post(path, body)
+    assert (status, answer) == (202, {"status": f"/api/job?job={JOB}"})
+    assert spawned == [pagejob.command(JOB, verb)]
 
 
-def test_a_confirmed_act_needs_its_key(lo, spawned):
-    status, _ = post("/api/global-off", {})
+@pytest.mark.parametrize("path, body", [
+    ("/api/replace", {"replace": "skill:review@claude", "user": True}),
+    ("/api/global-remove", {}),
+])
+def test_a_named_act_needs_its_job(lo, spawned, path, body):
+    status, _ = post(path, body)
     assert status == 400 and spawned == []
 
 
-def test_a_confirmed_repeat_gets_the_first_answer_and_starts_nothing_more(lo, spawned):
-    app = served()
-    first = post("/api/global-off", {}, key=KEY, app=app)
-    assert post("/api/global-off", {}, key=KEY, app=app) == first
+@pytest.mark.parametrize("path, body", [
+    ("/api/replace", {"replace": ["skill:review@claude"], "job": JOB}),
+    ("/api/replace", {"replace": "skill:review@claude", "confirmed": True, "job": JOB}),
+    ("/api/global-remove", {"job": JOB, "status": "/api/job"}),
+])
+def test_a_named_act_takes_no_list_and_no_confirmation(lo, spawned, path, body):
+    status, _ = post(path, body)
+    assert status == 400 and spawned == []
+
+
+def test_a_repeat_finds_the_job_it_started(lo, spawned):
+    body = {"replace": "skill:review@claude", "user": True, "job": JOB}
+    first = post("/api/replace", body)
+    assert first[0] == 202
+    # Each post is a new app, as the page server after a restart.
+    assert post("/api/replace", body) == first
+    assert post("/api/global-remove", {"job": "1" * 32}) != first
+    assert len(spawned) == 2
+
+
+def test_the_same_job_with_another_body_is_refused(lo, spawned):
+    assert post("/api/replace", {"replace": "skill:review@claude", "job": JOB})[0] == 202
+    status, answer = post("/api/replace", {"replace": "skill:review@codex", "job": JOB})
+    assert status == 422 and "other arguments" in answer["refused"]
+    status, answer = post("/api/global-remove", {"job": JOB})
+    assert status == 422 and "other arguments" in answer["refused"]
     assert len(spawned) == 1
 
 
-def test_a_key_sent_with_another_body_is_refused(lo, spawned):
-    app = served()
-    assert post("/api/replace", {"replace": ["skill:review@claude"]}, key=KEY, app=app)[0] == 202
-    status, _ = post("/api/replace", {"replace": ["skill:review@codex"]}, key=KEY, app=app)
-    assert status == 422 and len(spawned) == 1
-
-
-def test_a_repeat_while_the_first_still_runs_is_409(lo, monkeypatch):
+def test_two_presses_at_once_start_one_job(lo, monkeypatch):
     entered, release = threading.Event(), threading.Event()
+    spawned: list[list[str]] = []
 
     def spawn(argv, *, cwd, output):
+        spawned.append(argv)
         entered.set()
         release.wait(30)
         return os.getpid()
@@ -537,28 +922,18 @@ def test_a_repeat_while_the_first_still_runs_is_409(lo, monkeypatch):
 
     async def both():
         app = served()
-        first = asyncio.create_task(_send(app, "POST", "/api/global-off", body={}, key=KEY))
+        body = {"job": JOB}
+        first = asyncio.create_task(_send(app, "POST", "/api/global-remove", body=body))
         while not entered.is_set():
             await asyncio.sleep(0.01)
         try:
-            second = await _send(app, "POST", "/api/global-off", body={}, key=KEY)
+            second = await _send(app, "POST", "/api/global-remove", body=body)
         finally:
             release.set()
         return await first, second
 
     first, second = asyncio.run(both())
-    assert first[0] == 202 and second[0] == 409
-
-
-def test_a_retry_after_a_restart_finds_its_job(lo, spawned):
-    body = {"replace": ["skill:review@claude"]}
-    first = post("/api/replace", body, key=KEY)
-    assert first[0] == 202
-    # A new app is the page server after a restart: its key map is empty.
-    assert post("/api/replace", body, key=KEY) == first
-    assert len(spawned) == 1
-    status, answer = post("/api/replace", {"replace": ["skill:review@codex"]}, key=KEY)
-    assert status == 422 and "other arguments" in answer["refused"]
+    assert first == second == (202, {"status": f"/api/job?job={JOB}"})
     assert len(spawned) == 1
 
 
@@ -579,6 +954,33 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
     assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
     assert 'skills = ["review", "lint"]' in (lo / "loadout.toml").read_text()
+
+
+def test_a_job_names_what_its_run_kept_and_how_to_put_it_back(lo, spawned, terminal_record):
+    terminal_record()
+    kit.claude().mkdir(parents=True)
+    kit.skill(kit.claude(), "review", "mine\n")
+    target = kit.claude() / "review"
+    status, answer = post("/api/replace", {"replace": "skill:review@claude", "user": True,
+                                           "job": JOB})
+    assert status == 202
+    job = job_of(answer)
+    assert pagejob.run(job, verb_of(spawned[0])) == 0
+    [kept] = read("/api/job", f"job={job}")["outcome"]["kept"]
+    assert (kept["target"], kept["how"], kept["id"]) == (str(target), "replaced",
+                                                         "skill:review@claude")
+    assert kept["back"].endswith(f"mv {kept['copy']} {target}")
+    assert read("/api/status")["kept"] == []
+
+
+def test_a_job_recorded_before_outcomes_named_what_they_kept_reads_none_kept(lo, spawned):
+    status, answer = post("/api/install", {})
+    job = job_of(answer)
+    end = pagejob.end_path(job)
+    os.makedirs(os.path.dirname(end), exist_ok=True)
+    Path(end).write_text(json.dumps({"exit": 0, "lines": [], "outcome": {
+        "rows": [], "lines": [], "notes": [], "counts": {}, "exit": 0}}))
+    assert read("/api/job", f"job={job}")["outcome"]["kept"] == []
 
 
 def test_a_refused_job_reads_done_with_its_line(lo, spawned):
@@ -603,3 +1005,10 @@ def test_a_job_whose_process_is_gone_reads_interrupted(lo, monkeypatch):
 def test_an_id_that_names_no_job_is_refused(lo):
     assert get("/api/job", "job=nothing-here")[0] == 422
     assert get("/api/job", "job=..%2Fx")[0] == 422
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_loadout import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("setup", 10)

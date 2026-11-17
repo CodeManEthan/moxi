@@ -44,17 +44,40 @@ export interface DayRow extends RowSums {
   model: string | null;
 }
 
-/** A row of `/api/sessions`. */
-export interface SessionRow extends RowSums {
+/** The whole prompt of a session's newest request, and the window it ran against (null
+ * when neither the harness nor the model table gives one). */
+export interface Context {
+  tokens: number;
+  window: number | null;
+}
+
+/** What names one session, wherever an answer names one. The id is for addresses and
+ * requests; a session is shown by its name, folder and start. */
+export interface SessionRef {
   harness: string;
   /** Null when the row has no session view. */
   session_id: string | null;
-  title: string | null;
+  /** The name typed for the session; null when it has none. */
+  name: string | null;
+  /** The folder of the session's record, else the one the index stored. */
+  folder: string | null;
+  /** When the session started, epoch seconds. With `known` false it is the session's
+   * earliest request in the index; with `known` null it is null. */
+  started: number | null;
+  /** True when the session's record was found, false when it is gone, null when it
+   * was not looked for. */
+  known: boolean | null;
+}
+
+/** A row of `/api/sessions`. */
+export interface SessionRow extends RowSums, SessionRef {
   cwd: string | null;
   project: string | null;
   models: string[];
   first_ts: number | null;
   last_ts: number | null;
+  /** The newest request's whole prompt against its window; null when it was not read. */
+  context: Context | null;
 }
 
 /** A row of `/api/session`: one agent's use of one model. */
@@ -143,9 +166,24 @@ export interface TermsRow extends RowSums {
   split: SplitItem[];
 }
 
+/** What caching saved over a terms answer, in dollars but for the two token counts:
+ * the cache reads at the input price, less what they cost and what the writes cost
+ * over the input price. */
+export interface Saving {
+  input_tokens: number;
+  read_tokens: number;
+  reads_at_input: number;
+  reads_cost: number;
+  write_extra: number;
+  /** Zero or less when caching did not pay. */
+  saved: number;
+}
+
 /** `/api/terms`' total. */
 export interface TermsTotal extends Sums {
   split: SplitItem[];
+  /** Null with no cache read, or with a group holding cache tokens that has no price. */
+  saving: Saving | null;
 }
 
 /** A row of `/api/requests`: one request, `n` its place on the request axis. */
@@ -251,13 +289,22 @@ export interface Report<R, T extends Sums = Sums> {
   unpriced_models: string[];
   rules: string[];
   index: IndexFacts;
-  /** `/api/daily`'s `by`. */
+  /** `/api/daily`'s, `/api/terms`' and `/api/projects`' `by`. */
   by?: string;
-  /** `/api/sessions`' `top` and the rows past it. */
+  /** `/api/sessions`' paging: the most rows asked, those skipped, all the range holds
+   * and those after the rows sent. */
   top?: number;
+  skip?: number;
+  count?: number;
   more?: number;
-  /** `/api/cost`'s day, `YYYY-MM-DD` in the page server's zone. */
+  /** The page server's day, `YYYY-MM-DD` in its own zone. */
   today?: string;
+  /** `/api/projects`' home folder; null when it cannot be said. */
+  home?: string | null;
+  /** `/api/session`'s context, as a sessions row carries it. */
+  context?: Context | null;
+  /** `/api/session`'s session; null when no one harness holds a session of that id. */
+  ref?: SessionRef | null;
 }
 
 /** One transcript lane of `/api/status`. */
@@ -277,6 +324,8 @@ export interface Lane {
 
 /** `/api/status`: the lanes and the index's totals. */
 export interface Status {
+  /** The page server's day, `YYYY-MM-DD`. */
+  today?: string;
   lanes: Lane[];
   total: {
     files: number;
@@ -298,12 +347,20 @@ export interface Window {
   state: string;
   window_minutes: number | null;
   reason: string | null;
+  slot?: string | null;
+  source?: string | null;
+  session_id?: string | null;
+  plan_type?: string | null;
   used_percent: number | null;
   /** ISO 8601 times in UTC. */
   resets_at: string | null;
   observed_at: string | null;
   full_at: string | null;
+  /** When the window opened; null when the readings do not say. */
+  opened?: string | null;
   projection: string | null;
+  /** How many readings the fill time was fitted to. */
+  fit?: number;
   note: string | null;
   dollars: { name: string; value: number }[];
   unknown: string[];
@@ -311,9 +368,51 @@ export interface Window {
 
 /** `/api/limits` without `now`, and the topic `limits`. */
 export interface Limits {
+  /** The page server's day, `YYYY-MM-DD`; null from an answer that carried none. */
+  today: string | null;
   rows: Window[];
   pull: { tried: boolean; ok: boolean; reason: string | null; via: string | null; added: number } | null;
   notes: string[];
+}
+
+/** One reading of a plan window. */
+export interface Reading {
+  /** ISO 8601 in UTC. */
+  at: string;
+  used_percent: number | null;
+}
+
+/** A session's part of an opened window. */
+export interface UsedRow extends SessionRef {
+  requests: number;
+  cost: number | null;
+}
+
+/** `/api/window`: one fresh plan window, its period's readings and who used it. */
+export interface OpenedWindow {
+  now: number;
+  today: string;
+  harness: string;
+  limit_id: string;
+  window_minutes: number;
+  resets_at: string;
+  used_percent: number;
+  opened: string | null;
+  /** `first` is null when the period's earliest reading is `last`; `last.session` is
+   * the session the reading came from, null when it names none. */
+  readings: { count: number; first: Reading | null;
+              last: Reading & { session: SessionRef | null } } | null;
+  /** Null for a limit that is not the harness's main one, with no known start, and
+   * with no index to read. `rows` are the ten dearest. */
+  used: { since: string; count: number; requests: number; cost: number | null; complete: boolean;
+          rows: UsedRow[] } | null;
+}
+
+/** `/api/restart-point`: exactly one of `tokens` and `reason` is null. */
+export interface RestartPoint {
+  model: string;
+  tokens: number | null;
+  reason: string | null;
 }
 
 /** The topic `index`: a pass this page server started began or ended. */
@@ -371,8 +470,28 @@ export function parseLimits(data: unknown): Limits | null {
   const rows = data.rows.filter((row): row is Record<string, unknown> =>
     isRow(row) && typeof row.label === "string" && typeof row.state === "string");
   if (rows.length !== data.rows.length) return null;
-  return { rows: rows as unknown as Window[], pull: isRow(data.pull) ? data.pull as Limits["pull"] : null,
+  return { today: typeof data.today === "string" ? data.today : null,
+           rows: rows as unknown as Window[], pull: isRow(data.pull) ? data.pull as Limits["pull"] : null,
            notes: data.notes.filter((note): note is string => typeof note === "string") };
+}
+
+/** `/api/window`'s value, or null. */
+export function parseWindow(data: unknown): OpenedWindow | null {
+  if (!isRow(data) || typeof data.harness !== "string" || typeof data.limit_id !== "string") return null;
+  if (!isNum(data.window_minutes) || typeof data.resets_at !== "string" || !isNum(data.used_percent)) return null;
+  if (typeof data.today !== "string" || !isNum(data.now)) return null;
+  if (data.readings !== null && !(isRow(data.readings) && isRow(data.readings.last))) return null;
+  if (data.used !== null && !(isRow(data.used) && isList(data.used.rows) && data.used.rows.every(isRow))) return null;
+  return data as unknown as OpenedWindow;
+}
+
+/** `/api/restart-point`'s value, or null. */
+export function parseRestartPoint(data: unknown): RestartPoint | null {
+  if (!isRow(data) || typeof data.model !== "string") return null;
+  const tokens = data.tokens ?? null;
+  const reason = data.reason ?? null;
+  if (!isNumOrNull(tokens) || (reason !== null && typeof reason !== "string")) return null;
+  return { model: data.model, tokens: tokens as number | null, reason };
 }
 
 /** The topic `index`'s value, or null. */
@@ -473,6 +592,13 @@ export class Feed<V> {
     this.#onChange = onChange;
     this.#wait = wait;
     this.#clock = clock;
+  }
+
+  /** Starts the feed with `value`, read before under other arguments, which it shows
+   * until its own first read answers. */
+  hold(value: V | null): this {
+    this.value = value;
+    return this;
   }
 
   /** The server's time now in epoch seconds: this browser's clock until a body gave `now`. */

@@ -125,12 +125,12 @@ def strip(headers: Iterable[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
 def mark(inner: Callable[..., Any]) -> Callable[..., Any]:
     """`inner`, noting on the request that the check passed it on to the router."""
 
-    async def marked(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_marked(scope: dict[str, Any], receive: Callable[..., Any],
                      send: Callable[..., Any]) -> None:
         _note(scope)["routed"] = True
         await inner(scope, receive, send)
 
-    return marked
+    return on_marked
 
 
 def _view(scope: Mapping[str, Any]) -> RequestView:
@@ -152,7 +152,7 @@ def watch(inner: Callable[..., Any], profile: Callable[[], Any], audit: Audit, *
     """The gateway's outer layer inside the provider check: strips the proxy headers, then
     writes each request's audit row once it is answered."""
 
-    async def watched(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_watched(scope: dict[str, Any], receive: Callable[..., Any],
                       send: Callable[..., Any]) -> None:
         if scope.get("type") != "http":
             await inner(scope, receive, send)
@@ -177,7 +177,7 @@ def watch(inner: Callable[..., Any], profile: Callable[[], Any], audit: Audit, *
             except Exception:  # noqa: BLE001 - a row that can't be written never fails a request
                 _log.exception("the gateway's audit row can't be written")
 
-    return watched
+    return on_watched
 
 
 def _row(scope: Mapping[str, Any], note: Mapping[str, Any], status: int, ms: int,
@@ -216,13 +216,14 @@ def _module_of(raw: str) -> str | None:
 # --- the document -----------------------------------------------------------------------------
 
 
-def document(mount: Mount, mode: str | None = None) -> Static:
+def document(mount: Mount, mode: str | None = None, name: str | None = None) -> Static:
     """The gateway's shell document: the desktop's, its root carrying `data-gateway`,
     `data-gateway-acts` and, while acts aren't mounted, `data-gateway-reason`, as they stand
     now, and its head linking the manifest."""
     mode = config.theme_mode() if mode is None else mode
-    data = _document.body(mode)
-    root = b'<html lang="en" data-theme="%s">' % mode.encode("ascii")
+    name = config.theme_palette() if name is None else name
+    data = _document.body(mode, name)
+    root = _document.root(mode, name)
     attributes = b' data-gateway="on" data-gateway-acts="%s"' % (b"on" if mount.mounted else b"off")
     if not mount.mounted and mount.reason:
         attributes += b' data-gateway-reason="%s"' % mount.reason.encode("ascii")
@@ -284,7 +285,7 @@ class GatewayRouter:
 
     def build(self, mount: Mount) -> Table:
         """The gateway's table for `mount`, from the exports mounted now."""
-        return gateway_table(self.mounts(), entries=self.entries(mount), problem=_refused)
+        return gateway_table(self.mounts(), entries=self.entries(mount), problem=_on_refused)
 
     def refusals(self) -> dict[str, str]:
         """The modules mounted now that the gateway leaves out, module to why."""
@@ -400,9 +401,9 @@ class GatewayRouter:
         try:
             response = await self.client.request(module, "GET", target,
                                                  headers=scope.get("headers") or ())
-        except UpstreamError as err:
-            body = redact(err.body, ERROR_SHAPE, self.key())
-            return _json(err.status, body)
+        except UpstreamError as exc:
+            body = redact(exc.body, ERROR_SHAPE, self.key())
+            return _json(exc.status, body)
         async with response:
             body = b""
             try:
@@ -416,6 +417,6 @@ class GatewayRouter:
             return self._redacted(response.status, downstream(response.headers), body, returns)
 
 
-def _refused(module: str, text: str) -> None:
+def _on_refused(module: str, text: str) -> None:
     _log.warning("%s gets no gateway mount: %s", module, text)
 

@@ -115,7 +115,7 @@ def test_at_a_terminal_each_question_is_asked_and_the_answers_written(tmp_path):
 
 
 @posix
-def test_a_no_to_git_init_leaves_the_folder_alone_and_writes_nothing_in_it():
+def test_a_no_to_git_init_leaves_the_dir_alone_and_writes_nothing_in_it():
     root = home() / "notes"
     root.mkdir()
     code, out = run(Keyboard("", "n", ""))

@@ -14,6 +14,9 @@ that has cache as an optional module reaches this module only through
 * `Clock`: what `read` gives back.
 * `clock_records()`: every clock record the watcher keeps, as written, for display
   (`moxi cache timers` and cache's page both list them through it).
+* `asking(environ)`: the names of the timer subscriptions a watcher started now would ask
+  about a process with this environment, the list it would write as a clock record's
+  `asks`; None where a process's environment can't be read. Starts nothing, writes nothing.
 * `segment(session_id, now=None)` and `Segment`: a Claude session's status line segment,
   from the watcher's clock record (`moxi_cache.segment`). Imported on first use, so loading
   this module does not load the segment module, which a renderer loads inside its audit
@@ -69,9 +72,9 @@ def read(harness, session_id, *, now=None, projects_root=None, turned=True,
                      projects_root=projects_root, turned=turned, cache_source=cache_source,
                      new_session=new_session, agent_model=agent_model, bound_at=bound_at,
                      store=store)
-    except Exception as e:                                         # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 -- any read failure becomes an unknown result
         return unknown(_clock.READ_FAILED,
-                       f"the cache read failed ({type(e).__name__}: {e})")
+                       f"the cache read failed ({type(exc).__name__}: {exc})")
 
 
 def _read(harness, session_id, *, now, projects_root, turned, cache_source, new_session,
@@ -85,8 +88,8 @@ def _read(harness, session_id, *, now, projects_root, turned, cache_source, new_
         else:
             try:
                 table = _table.load_table()
-            except _table.TableError as e:
-                return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({e})")
+            except _table.TableError as exc:
+                return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({exc})")
             drift = store.view(table)
             judged = store.judged(session_id) if session_id else None
         result = codex.read(session_id, cache_source=cache_source, turned=turned,
@@ -123,6 +126,23 @@ def clock_records() -> list[dict]:
     return sorted(found, key=lambda record: record["session"])
 
 
+def asking(env) -> tuple[str, ...] | None:
+    """What a watcher started now would write as `asks` for a process whose environment is
+    `env`: the sorted names of the subscriptions the timer's own check (`timer.load`)
+    accepts at the inputs as they are now, the installed modules' and cache's config's as
+    `moxi cache timers` reads them, whose `requires_env` `env` meets (`timer.env_met`).
+    None where `timer.env_checkable()` is false. It starts no process and writes no file.
+    """
+    from . import timer as _timer
+    from .cli import _config_entries
+
+    if not _timer.env_checkable():
+        return None
+    entries, _ = _config_entries()
+    loaded = _timer.load(entries)
+    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, env)))
+
+
 def __getattr__(name):
     if name in ("segment", "Segment"):
         from . import segment as _segment
@@ -131,12 +151,12 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def projects_root(environ=None) -> str:
+def projects_root(env=None) -> str:
     """Claude Code's projects root, `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`, by the
-    environment `environ` (a session's own); with None, the root for a session that stated
+    environment `env` (a session's own); with None, the root for a session that stated
     none. sessions' rule, re-exported."""
-    return str(_sessions_projects_root(environ))
+    return str(_sessions_projects_root(env))
 
 
 __all__ = ["read", "KINDS", "CODES", "MISSING", "open_store", "projects_root", "Clock",
-           "HARNESSES", "clock_records", "segment", "Segment"]
+           "HARNESSES", "clock_records", "asking", "segment", "Segment"]

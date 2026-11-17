@@ -2,9 +2,10 @@
 
 Keys: `git_hooks.mode`, the mode a repo gets when it pins none (`auto`, `config` or
 `shim`); `commit_rules.everywhere`, whether `git-hooks add` and `refresh` register the
-commit-rules piece in each repo they touch; `commit_rules.tag_patterns`, the tag patterns
-that piece starts with in a repo where it is first registered. Every value scoped to one
-repo lives in that repo's git config instead.
+commit-rules piece in each repo they touch; `commit_proof.everywhere`, the same for the
+commit-proof piece; `commit_rules.tag_patterns`, the tag patterns the commit-rules piece
+starts with in a repo where it is first registered. Every value scoped to one repo lives
+in that repo's git config instead.
 """
 
 from __future__ import annotations

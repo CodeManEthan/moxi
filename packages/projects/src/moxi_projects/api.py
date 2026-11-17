@@ -1,4 +1,4 @@
-"""The projects read API, interface 1: the list of named places, read in process.
+"""The projects read API, interfaces 1 and 2: the list of named places, read in process.
 
 A module that takes projects as optional reaches this through the core, `available()`
 first and `load()` only on yes:
@@ -9,13 +9,19 @@ first and `load()` only on yes:
         ...  # the feature is off
     project = found.api.get(key)
 
-Four calls:
+Interface 1 is four calls:
 
 - `list_projects(kind=None)`: every project, by key, optionally of one kind.
 - `get(key)`: one project, its key matched ignoring case; `NotFound` when there is none.
 - `for_path(path)`: the project a directory is in, or None.
 - `kinds()`: the kinds a project may have, built in and contributed, with every
   contribution that won't load named. It never raises.
+
+Interface 2 is interface 1 and one more call; a module that calls it loads projects with
+`interface=2`, so an older projects reads as absent:
+
+- `for_paths(paths)`: for many paths at once, the key of the project each is in, or
+  None, by `for_path`'s rules, with one read of the store.
 
 A missing store is an answer, not an error: no projects, `NotFound`, None. A store this
 code can't read raises `Unreadable` (with the reason and the fix); one written by a newer
@@ -35,7 +41,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import moxi.store
 
@@ -348,27 +354,60 @@ def for_path(path: str) -> Project | None:
     Raises `Unreadable` (or its `TooNew` and `Busy`).
     """
     rows = _rows()
-    if not rows or "\0" in os.fspath(path):
+    if not rows:
         return None
+    row = _lookup(_Index(rows), path)
+    return _project(row) if row else None
+
+
+def for_paths(paths: Iterable[str]) -> dict[str, str | None]:
+    """For each path in `paths`, the key of the project it is in, or None (interface 2).
+
+    One read of the store and one index for every path, then `for_path`'s rules for each
+    path in turn, so the answer for a path is the key `for_path` would give it. The
+    answer is keyed by each path as given; a path given twice is one entry. No rows
+    answers None for every path without touching any of them. `paths` is a collection of
+    paths, never one path: a bare string raises `TypeError`.
+
+    Raises `Unreadable` (or its `TooNew` and `Busy`).
+    """
+    if isinstance(paths, (str, bytes)):
+        raise TypeError("for_paths takes a collection of paths; for_path takes one")
+    wanted = [os.fspath(path) for path in paths]
+    rows = _rows()
+    if not rows:
+        return dict.fromkeys(wanted)
     index = _Index(rows)
+    out: dict[str, str | None] = {}
+    for path in wanted:
+        if path not in out:
+            row = _lookup(index, path)
+            out[path] = row[0] if row else None
+    return out
+
+
+# --- path lookup ------------------------------------------------------------------------
+
+def _lookup(index: _Index, path: str) -> tuple | None:
+    """The row of the project `path` is in, by `for_path`'s rules, or None."""
+    if "\0" in os.fspath(path):
+        return None
     path = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(path))))
     best = index.deepest(path)
     top, top_depth = _work_tree_top(path)
     if top is None:
-        return _project(best[2]) if best else None
+        return best[2] if best else None
     if best is not None and best[0] <= top_depth:
-        return _project(best[2])
+        return best[2]
     main = _main_work_tree(top)
     if main is not None:
         rel = os.path.relpath(path, top)
         moved = os.path.normpath(os.path.join(main, rel))
         found = index.deepest(moved)
         if found is not None:
-            return _project(found[2])
-    return _project(best[2]) if best else None
+            return found[2]
+    return best[2] if best else None
 
-
-# --- path lookup ------------------------------------------------------------------------
 
 def _identity(path: str) -> tuple[int, int] | None:
     """`(st_dev, st_ino)`, or None for a path that can't be statted or has no inode."""
@@ -498,4 +537,4 @@ def _main_work_tree(top: str) -> str | None:
 
 
 __all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Project", "Kind",
-           "Kinds", "DEFAULT_KIND", "list_projects", "get", "for_path", "kinds"]
+           "Kinds", "DEFAULT_KIND", "list_projects", "get", "for_path", "for_paths", "kinds"]

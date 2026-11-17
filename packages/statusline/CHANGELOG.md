@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0 (2026-11-08)
+## 0.1.0 (unreleased)
 
-The first release.
+The first version.
 
 - `moxi-statusline-render`, the command Claude Code runs for its status line: base fields
   from Claude's input (`dir`, `branch`, `model`, `effort`, `context`, `session`,

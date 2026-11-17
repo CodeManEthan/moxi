@@ -240,21 +240,21 @@ class ClaudeAdapter:
     def look(self) -> bool:
         """One look for the session's endpoint. True when one was found, its stops
         handled and its watch begun."""
-        T = self.turns
-        s = T.find(pid=self.harness_pid)
+        t = self.turns
+        s = t.find(pid=self.harness_pid)
         if s is None:
             return False
         try:
             stops = s.handle_stops(self._on_stop)
-        except T.TurnsError as e:
+        except t.TurnsError as exc:
             log.info("the session's endpoint did not take this adapter as its stop "
-                     "handler (%s); looking again", e)
+                     "handler (%s); looking again", exc)
             _close(s)
             return False
         try:
             watch = s.watch()
-        except T.TurnsError as e:
-            log.info("the session's endpoint did not start a watch (%s); looking again", e)
+        except t.TurnsError as exc:
+            log.info("the session's endpoint did not start a watch (%s); looking again", exc)
             _close(stops, s)
             return False
         facts = watch.facts
@@ -271,7 +271,7 @@ class ClaudeAdapter:
             self._learn_session(facts.session_id or s.session_id)
             if facts.turn_number > 0:
                 self.shim.note_turned()
-            self.shim.notify_endpoint(True)
+            self.shim.notify_endpoint(present=True)
         threading.Thread(target=self._watch, args=(watch, generation), daemon=True,
                          name="comms-claude-watch").start()
         log.info("found the session's endpoint at %s (session %s, %s)", s.dir,
@@ -310,27 +310,27 @@ class ClaudeAdapter:
 
     # ------------------------------------------------------------------ events
     def _watch(self, watch, generation: int) -> None:
-        T = self.turns
+        t = self.turns
         reason = "the watch ended"
         try:
             for event in watch:
                 if self._stop.is_set() or generation != self._generation:
                     return
-                if isinstance(event, T.Gone):
+                if isinstance(event, t.Gone):
                     reason = event.reason
                     break
                 self._on_event(event)
-        except Exception as e:                                     # noqa: BLE001
+        except Exception as exc:                                     # noqa: BLE001
             log.exception("the watch of the session's endpoint failed")
-            reason = f"the watch failed: {type(e).__name__}: {e}"
+            reason = f"the watch failed: {type(exc).__name__}: {exc}"
         self._endpoint_gone(generation, reason)
 
     def _current(self, session_id) -> bool:
         return not session_id or session_id == self.shim.session_id
 
     def _on_event(self, event) -> None:
-        T = self.turns
-        if isinstance(event, T.Ready):
+        t = self.turns
+        if isinstance(event, t.Ready):
             # A start, resume, clear or compaction. A `clear` lowers `turned` for the new
             # id, and empties the debts the running context never saw; the daemon releases
             # held mail by its source.
@@ -343,7 +343,7 @@ class ClaudeAdapter:
                 log.info("ready %s: %d owed repl(ies) left the ledger with the context",
                          event.source, gone)
             self.shim.notify_ready(event.source)
-        elif isinstance(event, T.TurnStarted):
+        elif isinstance(event, t.TurnStarted):
             with self._lock:
                 self.turn_open = True
                 refs = [self.hands[r.ref].digest for r in event.deliveries
@@ -356,13 +356,13 @@ class ClaudeAdapter:
                          latency, ", ".join(f"ref {r.ref}" for r in event.deliveries)
                          or "no delivery")
             self.shim.notify_activity(None, ref=refs or None)
-        elif isinstance(event, T.TurnSteered):
+        elif isinstance(event, t.TurnSteered):
             with self._lock:
                 hand = self.hands.get(event.delivery.ref)
             if hand is not None:
                 log.info("turn %s took the steered digest %s", event.turn_id, hand.digest)
                 self.shim.notify_activity(None, ref=[hand.digest])
-        elif isinstance(event, T.TurnEnded):
+        elif isinstance(event, t.TurnEnded):
             self._turn_ended(event)
 
     def _turn_ended(self, event) -> None:
@@ -405,20 +405,20 @@ class ClaudeAdapter:
     def _handover(self, text: str, digest, *, steer: bool = False) -> None:
         """The shim's hand-over: one digest to the endpoint, named by its id. Called from
         a flush, under the adapter's lock. Never raises."""
-        T = self.turns
+        t = self.turns
         s = self.session
         ref = None if digest is None else str(digest)
         if s is None:
-            d = _Unsent(T.Refused(GONE), ref)
+            d = _Unsent(t.Refused(GONE), ref)
         else:
             try:
                 if steer and self._can_steer():
                     d = s.steer(text, ref=ref)
                 else:
                     d = s.deliver(text, ref=ref)
-            except Exception as e:                                 # noqa: BLE001
-                log.warning("the hand-in of digest %s failed: %s", digest, e)
-                d = _Unsent(T.Lost(f"the hand-in failed: {type(e).__name__}: {e}"), ref)
+            except Exception as exc:                                 # noqa: BLE001
+                log.warning("the hand-in of digest %s failed: %s", digest, exc)
+                d = _Unsent(t.Lost(f"the hand-in failed: {type(exc).__name__}: {exc}"), ref)
         hand = Hand(ref, digest, text, d, steer=steer)
         log.info("handed digest %s to turns by %s as delivery %s", digest,
                  "steer" if steer else "deliver", d.id)
@@ -435,17 +435,17 @@ class ClaudeAdapter:
         first: refused `idle` or `loading` it falls back to `deliver`, once; taken, it
         waits for its turn's end. An unknown outcome is waited on, never replayed; a
         timeout keeps the digest open and waits again."""
-        T = self.turns
+        t = self.turns
         while True:
             d = hand.delivery
             try:
                 if hand.steer and not hand.fell_back:
                     value = d.wait_started(None)
-                    if isinstance(value, T.Refused) and value.reason in STEER_FALLBACK:
+                    if isinstance(value, t.Refused) and value.reason in STEER_FALLBACK:
                         if self._fall_back(hand, generation, value.reason):
                             continue
                         return
-                    if isinstance(value, T.Started):
+                    if isinstance(value, t.Started):
                         value = d.wait_ended(None)
                 else:
                     value = d.wait_ended(None)
@@ -454,16 +454,16 @@ class ClaudeAdapter:
                     return
                 self._stop.wait(self.wait_retry)
                 continue
-            except Exception as e:                                 # noqa: BLE001
+            except Exception as exc:                                 # noqa: BLE001
                 log.exception("waiting on digest %s failed", hand.digest)
-                value = T.Lost(f"the wait failed: {type(e).__name__}: {e}")
+                value = t.Lost(f"the wait failed: {type(exc).__name__}: {exc}")
             break
         self._on_result(hand, value, generation)
 
     def _fall_back(self, hand: Hand, generation: int, reason: str) -> bool:
         """A steer refused `idle` or `loading`: `deliver` the same text with the same
         ref, once. False when the hand settled or the endpoint went meanwhile."""
-        T = self.turns
+        t = self.turns
         with self._lock:
             if not self._live(hand, generation):
                 return False
@@ -472,19 +472,19 @@ class ClaudeAdapter:
                      hand.digest, reason)
             try:
                 hand.delivery = s.deliver(hand.text, ref=hand.ref)
-            except Exception as e:                                 # noqa: BLE001
-                hand.delivery = _Unsent(T.Lost(f"the hand-in failed: {type(e).__name__}: "
-                                               f"{e}"), hand.ref)
+            except Exception as exc:                                 # noqa: BLE001
+                hand.delivery = _Unsent(t.Lost(f"the hand-in failed: {type(exc).__name__}: "
+                                               f"{exc}"), hand.ref)
             hand.fell_back = True
         return True
 
     def _on_result(self, hand: Hand, result, generation: int) -> None:
-        T = self.turns
+        t = self.turns
         with self._lock:
             if self.hands.get(hand.ref) is not hand:
                 return                 # settled already, by its turn's end on the watch
             del self.hands[hand.ref]
-            if isinstance(result, T.Ended):
+            if isinstance(result, t.Ended):
                 handled = result.outcome == ANSWER
                 log.info("digest %s: its turn ended %s; it is %s", hand.digest,
                          result.outcome, "handled" if handled else "unhandled")
@@ -495,10 +495,10 @@ class ClaudeAdapter:
                     self.shim._send_turn(answered=handled)
                 return
             reason = getattr(result, "reason", "")
-            gone = ((isinstance(result, T.Lost) and not result.untied)
-                    or (isinstance(result, T.Refused) and reason == GONE))
+            gone = ((isinstance(result, t.Lost) and not result.untied)
+                    or (isinstance(result, t.Refused) and reason == GONE))
             log.info("digest %s %s (%s): it is unhandled", hand.digest,
-                     "was refused" if isinstance(result, T.Refused) else "was lost", reason)
+                     "was refused" if isinstance(result, t.Refused) else "was lost", reason)
             if hand.boundary:
                 self.shim._complete_turn(failed=True)
             else:
@@ -524,7 +524,7 @@ class ClaudeAdapter:
             if hands:
                 self.shim._send_turn()
             self.shim._clear_block()
-            self.shim.notify_endpoint(False)
+            self.shim.notify_endpoint(present=False)
         _close(*held)
         if not self._stop.is_set():
             log.info("the session's endpoint went away (%s); looking again", reason)
@@ -657,14 +657,14 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
         return moxi_exit.TEMPFAIL
     if shim.tool_token is None:
         shim.layer_form = layer_one_form(os.environ)
-        shim.tool_token = ToolToken.from_environ()
+        shim.tool_token = ToolToken.from_env()
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
         adapter.start()
-    except Exception as e:                                  # noqa: BLE001
-        log.warning("the launch of this session failed: %s", e)
-        word = word_for(e)
-        say(word, str(e))
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("the launch of this session failed: %s", exc)
+        word = word_for(exc)
+        say(word, str(exc))
         shim.stop(remove_claim_file=True)
         return exit_of(word)
     if say(BOUND) is False:

@@ -143,9 +143,9 @@ def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow
     if empty:
         # Created a moment ago by a write that hasn't set it up yet. `connect` would
         # switch an empty file to WAL, which is a write.
-        return _not_set_up(where, strict)
+        return _not_set_up(where, strict=strict)
     try:
-        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except moxi.store.StoreError as exc:
         if not os.path.exists(where):
             return []
@@ -155,7 +155,7 @@ def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow
     try:
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         if version == 0:
-            return _not_set_up(where, strict)
+            return _not_set_up(where, strict=strict)
         if version > VERSION:
             raise TooNew(where, version, VERSION)
         if version not in READS:
@@ -172,7 +172,7 @@ def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow
         conn.close()
 
 
-def _not_set_up(where: str, strict: bool) -> list[UserRow]:
+def _not_set_up(where: str, *, strict: bool) -> list[UserRow]:
     if strict:
         raise Unreadable(f"the services store {where} is not set up yet: a write made it "
                          "and has not finished", "try again in a moment; if it stays, "
@@ -210,7 +210,7 @@ def writing(where: str | None = None) -> Iterator[sqlite3.Connection]:
     an `sqlite3.IntegrityError`, a store check the write broke, which is raised as it is)."""
     where = where or path()
     try:
-        conn = moxi.store.connect(where, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, timeout_s=TIMEOUT)
     except (moxi.store.StoreError, sqlite3.Error, OSError) as exc:
         raise unreadable(where, exc) from exc
     try:
@@ -252,7 +252,7 @@ def migrate_existing(where: str | None = None) -> bool:
     except OSError as exc:
         raise unreadable(where, exc) from exc
     try:
-        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except (moxi.store.StoreError, sqlite3.Error, OSError) as exc:
         raise unreadable(where, exc) from exc
     try:
@@ -324,13 +324,12 @@ def _set(conn: sqlite3.Connection, name: str, by: str, column: str, value) -> Us
     return fetch(conn, name)
 
 
-def set_enabled(conn: sqlite3.Connection, name: str, enabled: bool, *, by: str) -> UserRow:
+def set_enabled(conn: sqlite3.Connection, name: str, *, enabled: bool, by: str) -> UserRow:
     """Set a row's flag. Raises `Refused` when there is no such row."""
     return _set(conn, name, by, "enabled", int(bool(enabled)))
 
 
-def set_removing(conn: sqlite3.Connection, name: str, removing: bool = True, *,
-                 by: str) -> UserRow:
+def set_removing(conn: sqlite3.Connection, name: str, *, removing: bool = True, by: str) -> UserRow:
     """Mark a row as being removed (its written unit is then no longer declared), or
     clear the mark. Raises `Refused` when there is no such row."""
     return _set(conn, name, by, "removing", int(bool(removing)))

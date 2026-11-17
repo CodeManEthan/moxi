@@ -94,7 +94,7 @@ BUSY_RETRY = 5
 STATE_EVENT = "moxi.state"
 #: The shell's own topics, under the module name `ui`.
 OWN_MODULE = "ui"
-OWN_TOPICS = frozenset({"servers", "modules"})
+OWN_TOPICS = frozenset({"servers", "modules", "checks"})
 #: Fields of a `/servers` row left out of `ui.servers`, since they change every second.
 _VOLATILE = frozenset({"uptime_s", "failed_for_s", "sample", "open"})
 
@@ -181,16 +181,18 @@ def gateway_topics(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[st
 
 def own_shapes() -> dict[str, dict[str, Any]]:
     """The shapes of the shell's own topics (export data): `ui.servers`, its rows without
-    the volatile fields, and `ui.modules`, the modules view."""
+    the volatile fields, `ui.modules`, the modules view, and `ui.checks`, the kept doctor
+    run."""
     from moxi_ui.loopback.api import Out
 
-    from .page import MODULES_SHAPE, SERVER_ROW
+    from .page import CHECKS_SHAPE, MODULES_SHAPE, SERVER_ROW
 
     assert isinstance(SERVER_ROW.items, Mapping)
     row = Out("table", items={key: value for key, value in SERVER_ROW.items.items()
                               if key not in _VOLATILE})
     return {"servers": out_data(Out("table", items={"servers": Out("list", items=row)})),
-            "modules": out_data(Out("table", items=dict(MODULES_SHAPE)))}
+            "modules": out_data(Out("table", items=dict(MODULES_SHAPE))),
+            "checks": out_data(Out("table", items=dict(CHECKS_SHAPE)))}
 
 
 def _frame(name: str, data: bytes) -> bytes:
@@ -294,7 +296,7 @@ class _Upstream:
 
     # -- the union ----------------------------------------------------------------------
 
-    def changed(self) -> None:
+    def on_changed(self) -> None:
         """The union may have changed: apply it 50 ms after the last change."""
         if self.timer is not None:
             self.timer.cancel()
@@ -365,12 +367,12 @@ class _Upstream:
                 target = f"{route[0]}?topics={','.join(sorted(topics))}"
                 try:
                     response = await self.push.client.request(
-                        self.module, "GET", target, headers=_ACCEPT, stream=True)
-                except UpstreamError as err:
-                    if err.status == 503 and err.body.get("error") == "stopping":
+                        self.module, "GET", target, headers=_ACCEPT, streaming=True)
+                except UpstreamError as exc:
+                    if exc.status == 503 and exc.body.get("error") == "stopping":
                         self.set_state("down", "the shell is stopping")
                         return
-                    self.set_state("down", _detail(err))
+                    self.set_state("down", _detail(exc))
                     await self._wait(failures)
                     failures += 1
                     continue
@@ -412,8 +414,8 @@ class _Upstream:
                     self._event(name, data)
         except UpstreamBroken:
             return "stream lost"
-        except ValueError as err:
-            _log.warning("%s's stream: %s; it is opened again", self.module, err)
+        except ValueError as exc:
+            _log.warning("%s's stream: %s; it is opened again", self.module, exc)
             return "event too large"
         return "cut" if response.cut else "stopped"
 
@@ -476,16 +478,16 @@ class Push:
         for module, upstream in list(self._upstreams.items()):
             if old.get(module, ("",))[0] != self._routes.get(module, ("",))[0]:
                 upstream.reroute = True
-            upstream.changed()
+            upstream.on_changed()
         for stream in self._streams:
             for module in stream.by_module:
                 self._tell_dropped(stream, module)
                 if (module != OWN_MODULE and module not in self._upstreams
                         and self._exported(stream, module)):
-                    self._upstream_for(module).changed()
+                    self._upstream_for(module).on_changed()
 
     def publish(self, topic: str, value: Any) -> None:
-        """Set the shell's own topic `ui.<topic>` (`servers` or `modules`) to `value`,
+        """Set the shell's own topic `ui.<topic>` (one of `OWN_TOPICS`) to `value`,
         a JSON-able value, and send it to every stream that asked for it."""
         if topic not in OWN_TOPICS:
             raise KeyError(topic)
@@ -527,8 +529,8 @@ class Push:
         policy = "page" if key is None else "gateway"
         try:
             asked = read_topics(scope.get("query_string") or b"")
-        except BadTopics as err:
-            await _answer(send, 400, {"error": str(err)}, policy=policy)
+        except BadTopics as exc:
+            await _answer(send, 400, {"error": str(exc)}, policy=policy)
             return
         if self.closing:
             await _answer(send, 503, {"error": "stopping"}, policy=policy)
@@ -543,7 +545,7 @@ class Push:
                         "headers": response_headers(extra=[("Content-Type", "text/event-stream")],
                                                     policy=policy)})
             writing = asyncio.ensure_future(self._write(stream, send))
-            watching = asyncio.ensure_future(_disconnected(receive))
+            watching = asyncio.ensure_future(_on_disconnected(receive))
             try:
                 await asyncio.wait({writing, watching}, return_when=asyncio.FIRST_COMPLETED)
             finally:
@@ -653,14 +655,14 @@ class Push:
                     stream.put((STATE_EVENT, module), _state_frame(module, *upstream.state))
             self._tell_dropped(stream, module)
             if exported:
-                self._upstream_for(module).changed()
+                self._upstream_for(module).on_changed()
 
     def _leave(self, stream: _Stream) -> None:
         self._streams.discard(stream)
         for module in stream.by_module:
             upstream = self._upstreams.get(module)
             if upstream is not None:
-                upstream.changed()
+                upstream.on_changed()
 
     def _tell_dropped(self, stream: _Stream, module: str) -> None:
         """Say once which of the topics `stream` asked of `module` it won't get."""
@@ -715,7 +717,7 @@ class Push:
             await asyncio.sleep(SERVERS_EVERY)
 
 
-async def _disconnected(receive: Callable[..., Any]) -> None:
+async def _on_disconnected(receive: Callable[..., Any]) -> None:
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":

@@ -1,89 +1,123 @@
 # Moxi's catalogue: the first-party modules `moxi install` installs by name.
 # `moxi modules --available` lists it; `moxi modules --available --refresh` fetches a newer
 # copy from the repository. Raise `version` whenever a line changes.
-version = 3
+#
+# `unreleased = true` marks a module with no released version yet (on the package index,
+# with its release tag): `moxi install` then wants `--from`. The core release after a
+# module's first release drops its mark. Every module on the workspace's not-ready list is
+# marked.
+version = 6
 
 [[module]]
 name = "cache"
 distribution = "moxi-cache"
 summary = "Know when a session's prompt cache goes cold, and act before it does"
+unreleased = true
 
 [[module]]
 name = "comms"
 distribution = "moxi-comms"
 summary = "Messages between coding-agent sessions, delivered into their turns"
+unreleased = true
 
 [[module]]
 name = "connector"
 distribution = "moxi-connector"
 summary = "An MCP server for the Claude apps: its sign-in, its address, and the tools other modules provide"
+unreleased = true
 
 [[module]]
 name = "launcher"
 distribution = "moxi-launcher"
 summary = "Launch Claude Code and Codex sessions from presets: in this terminal, headless or in a tmux slot"
+unreleased = true
 
 [[module]]
 name = "loadout"
 distribution = "moxi-loadout"
 summary = "Your own skills, agents and settings, placed for Claude Code, Codex and OpenCode"
+unreleased = true
 
 [[module]]
 name = "notes"
 distribution = "moxi-notes"
 summary = "Where each session keeps its notes, snapshots of the notes repository, and the secret checks that guard it"
+unreleased = true
 
 [[module]]
 name = "projects"
 distribution = "moxi-projects"
 summary = "A list of named places: projects, their roots, kinds and agents"
+unreleased = true
+
+[[module]]
+name = "publishing"
+distribution = "moxi-publishing"
+summary = "Keep private text out of a public git repo, and release its packages"
+unreleased = true
 
 [[module]]
 name = "repo"
 distribution = "moxi-repo"
 summary = "Git hooks run as declared pieces, and one shared committer"
+unreleased = true
+
+[[module]]
+name = "rounds"
+distribution = "moxi-rounds"
+summary = "A piece of work tracked from design to landing: its questions, rulings, builds and gates"
+unreleased = true
 
 [[module]]
 name = "secrets"
 distribution = "moxi-secrets"
 summary = "Named pattern sets for credentials and personal data, and one way to scan text for them"
+unreleased = true
 
 [[module]]
 name = "services"
 distribution = "moxi-services"
 summary = "One list of every daemon and timer on the machine, to start, stop, enable, disable and watch"
+unreleased = true
 
 [[module]]
 name = "sessions"
 distribution = "moxi-sessions"
 summary = "Read a harness's own session records: find a session, read its transcript back"
+unreleased = true
 
 [[module]]
 name = "slots"
 distribution = "moxi-slots"
 summary = "Numbered tmux sessions to launch into, on one supervised tmux server"
+unreleased = true
 
 [[module]]
 name = "statusline"
 distribution = "moxi-statusline"
 summary = "A Claude Code status line: your directory, branch, model and context, with the figures installed modules add"
+unreleased = true
 
 [[module]]
 name = "tunnel"
 distribution = "moxi-tunnel"
 summary = "An address off the machine for a loopback service, through Tailscale or a Cloudflare tunnel"
+unreleased = true
 
 [[module]]
 name = "turns"
 distribution = "moxi-turns"
 summary = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness"
+unreleased = true
 
 [[module]]
 name = "ui"
 distribution = "moxi-ui"
 summary = "The browser shell: one local web address for every module's page"
+unreleased = true
 
 [[module]]
 name = "usage"
 distribution = "moxi-usage"
 summary = "How much of each plan window is used, how full a session's context is, and what the tokens cost"
+unreleased = true

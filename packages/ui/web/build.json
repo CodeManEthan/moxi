@@ -1,5 +1,5 @@
 {
-  "entries": {"client.js": "src/client.ts", "page.js": "src/page.ts", "servers.js": "src/servers.ts",
+  "entries": {"client.js": "src/client.ts", "page.js": "src/page.ts", "servers.js": "src/servers.ts", "health.js": "src/health.ts",
               "pair.js": "src/pair.ts", "signin.js": "src/signin.ts"},
   "copy": ["shell.html", "shell.css", "pair.html", "signin.html", "offline.html", "icon-192.png",
            "icon-512.png"],

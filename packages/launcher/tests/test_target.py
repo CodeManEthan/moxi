@@ -67,14 +67,14 @@ class FakeSlots:
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, endpoint=None, target_name="slot", harness="claude",
              session_id=SID, request_id="r1"):
-    store.insert(conn, request_id=request_id, actor="someone", harness=harness,
+    store.insert(conn, request_id=request_id, by="someone", harness=harness,
                  target=target_name, cwd="/work", values={"model": "opus"},
                  argv=["claude"], env={}, posture="operator", session_id=session_id,
                  slot="3" if target_name == "slot" else None)
@@ -246,6 +246,19 @@ def test_a_slot_that_cannot_be_read_is_refused_and_the_session_closed(conn, erro
         target.find(SID, conn=conn, turns=FakeTurns(session), slots_api=FakeSlots(error=error))
     assert caught.value.exit_code == code
     assert session.closed == 1
+
+
+def test_a_find_without_the_slot_asks_slots_nothing_and_finds_the_live_session(conn):
+    launched(conn, endpoint=me())
+    session = FakeSession()
+    slots = FakeSlots(error=FakeSlots.TryAgain("lock held"))
+    found = target.find(SID, conn=conn, turns=FakeTurns(session), slots_api=slots, slot=False)
+    assert found.live and found.session is session and found.slot is None
+    assert slots.asked == [] and session.closed == 0
+    # The default asks slots, as every act does, and is refused by the same stub.
+    with pytest.raises(targets.SlotsBusy):
+        target.find(SID, conn=conn, turns=FakeTurns(FakeSession()), slots_api=slots)
+    assert slots.asked == ["3"]
 
 
 # -- the store ----------------------------------------------------------------------------

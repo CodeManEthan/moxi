@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import modules
 from moxi.config import ConfigError
@@ -62,14 +63,14 @@ class Agent:
     def __init__(self, agent_id=AGENT):
         self.t = ClaudeTranscript(Path(sessions.root("claude")), session_id=SESSION)
         self.t.user("go")
-        self.t.assistant("ok", usage=usage(input=10_000, cache_read=0, cache_write=0),
+        self.t.assistant("ok", usage=usage(input_tokens=10_000, cache_read=0, cache_write=0),
                          model=MODEL)
         self.agent_id = agent_id
         self.child = self.t.subagent(agent_id)
 
     def context(self, tokens):
         self.child.user("look")
-        self.child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,
+        self.child.assistant("found", usage=usage(input_tokens=tokens - 10, cache_read=10,
                                                   cache_write=0), model=MODEL)
         self.t.write()
 
@@ -99,16 +100,16 @@ def test_the_guard_is_declared_as_turns_reads_it():
     (g,) = GUARDS
     assert isinstance(g, turns.Guard)
     assert (g.name, g.who, g.judge, g.switch, g.on_error) == (
-        "ceiling", "agents", "moxi_usage.ceiling:judge", "ceiling.on", "allow")
+        "ceiling", "agents", "moxi_usage.ceiling:judge", "ceiling.enabled", "allow")
     assert g.calls == {"claude": ("*",), "codex": ("*",)}
     assert g.problems() == []
 
 
 def test_the_switch_passes_the_cores_check_and_is_the_install_question():
-    assert switch_problem(settings.schema(), "ceiling.on") is None
+    assert switch_problem(settings.schema(), "ceiling.enabled") is None
     found = modules.load("usage")
     assert found.ok, found.reason
-    text = found.questions["ceiling.on"]
+    text = found.questions["ceiling.enabled"]
     assert text.startswith("the worker ceiling (") and text.endswith(")")
     assert "\n" not in text
 
@@ -125,7 +126,7 @@ def test_off_with_thresholds_set_the_guard_does_not_run():
 
 
 def test_on_by_the_switch_with_both_thresholds_the_ceiling_acts():
-    write_config(THRESHOLDS + "on = true\n")
+    write_config(THRESHOLDS + "enabled = true\n")
     on = loader().load(on=[]).get("usage.ceiling")
     assert on is not None and on.by == ("switch",)
     a = started()
@@ -137,9 +138,9 @@ def test_on_by_the_switch_with_both_thresholds_the_ceiling_acts():
 
 
 @pytest.mark.parametrize("config", [
-    "[ceiling]\non = true\nwarn_tokens = 100000\n",
-    "[ceiling]\non = true\nhard_tokens = 150000\n",
-    "[ceiling]\non = true\n",
+    "[ceiling]\nenabled = true\nwarn_tokens = 100000\n",
+    "[ceiling]\nenabled = true\nhard_tokens = 150000\n",
+    "[ceiling]\nenabled = true\n",
 ])
 def test_on_with_a_threshold_at_zero_every_call_is_allowed_and_marks_warns(config):
     write_config(config)
@@ -150,17 +151,17 @@ def test_on_with_a_threshold_at_zero_every_call_is_allowed_and_marks_warns(confi
     assert not ceiling.state_dir().exists()
     row = doctor.marks_row(now=NOW)
     assert row.state == "warn"
-    assert "the worker ceiling is on (ceiling.on)" in row.detail
+    assert "the worker ceiling is on (ceiling.enabled)" in row.detail
     assert "allows every call" in row.detail
 
 
 def test_on_by_turns_list_alone_the_ceiling_acts_and_marks_warns_without_thresholds():
-    write_turns_config('[guards]\non = ["usage.ceiling"]\n')
+    write_turns_config('[guards]\nrun = ["usage.ceiling"]\n')
     on = loader().load().get("usage.ceiling")
     assert on is not None and on.by == ("list",)
     row = doctor.marks_row(now=NOW)
-    assert row.state == "warn" and "on (turns' guards.on)" in row.detail
-    write_config(THRESHOLDS)                 # ceiling.on stays false
+    assert row.state == "warn" and "on (turns' guards.run)" in row.detail
+    write_config(THRESHOLDS)                 # ceiling.enabled stays false
     assert doctor.marks_row(now=NOW).state == "ok"
     a = started()
     a.context(20_000 + HARD)
@@ -168,10 +169,10 @@ def test_on_by_turns_list_alone_the_ceiling_acts_and_marks_warns_without_thresho
 
 
 def test_marks_reads_only_ceiling_on_when_turns_is_absent(monkeypatch):
-    write_turns_config('[guards]\non = ["usage.ceiling"]\n')
+    write_turns_config('[guards]\nrun = ["usage.ceiling"]\n')
     monkeypatch.setattr(modules, "available", lambda name: name != "turns")
     assert doctor.marks_row(now=NOW).state == "ok"
-    write_config("[ceiling]\non = true\n")
+    write_config("[ceiling]\nenabled = true\n")
     assert doctor.marks_row(now=NOW).state == "warn"
 
 
@@ -312,8 +313,8 @@ def test_a_codex_agents_own_rollout_is_its_source():
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn()
     r.user("go")
-    r.request(token_usage(input=30_000, cached=0), response_id="resp_1")
-    r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")
+    r.request(token_usage(input_tokens=30_000, cached=0), response_id="resp_1")
+    r.request(token_usage(input_tokens=30_000 + HARD, cached=0), response_id="resp_2")
     r.turn_end()
     r.write()
     call = SimpleNamespace(harness="codex", session_id="0190c000-parent", agent_id=THREAD,
@@ -333,8 +334,8 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn()
     r.user("look into it")
-    r.request(token_usage(input=30_000, cached=0), response_id="resp_1")
-    r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")
+    r.request(token_usage(input_tokens=30_000, cached=0), response_id="resp_1")
+    r.request(token_usage(input_tokens=30_000 + HARD, cached=0), response_id="resp_2")
     r.write()
     parent = "0190c000-0000-7000-8000-0000000004c3"
 
@@ -371,7 +372,7 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
 
 # --- markers ----------------------------------------------------------------------------
 
-def test_markers_live_in_a_private_directory_per_agent():
+def test_markers_live_in_a_private_dir_per_agent():
     write_config(THRESHOLDS)
     a = started()
     a.context(20_000 + WARN)
@@ -383,7 +384,7 @@ def test_markers_live_in_a_private_directory_per_agent():
     assert os.stat(where.parent).st_mode & 0o777 == 0o700
 
 
-def test_making_an_agents_directory_sweeps_old_ones():
+def test_making_an_agents_dir_sweeps_old_ones():
     write_config(THRESHOLDS)
     old = ceiling.state_dir() / "old-session" / "old-agent"
     old.mkdir(parents=True)
@@ -400,7 +401,7 @@ def test_making_an_agents_directory_sweeps_old_ones():
     assert kept.exists()
 
 
-def test_an_id_that_cannot_name_a_directory_still_warns_once_and_latches_in_memory():
+def test_an_id_that_cannot_name_a_dir_still_warns_once_and_latches_in_memory():
     write_config(THRESHOLDS)
     a = started()
     a.context(20_000 + WARN)
@@ -471,7 +472,7 @@ def test_the_config_check_takes_roots_from_home_and_word_lists():
 
 
 def test_a_config_that_cannot_be_read_allows_every_call(caplog):
-    write_config(THRESHOLDS + "on = \"maybe\"\n")
+    write_config(THRESHOLDS + "enabled = \"maybe\"\n")
     a = started()
     a.context(20_000 + HARD)
     with caplog.at_level(logging.WARNING, logger="moxi.usage"):
@@ -536,4 +537,4 @@ def test_the_judge_below_the_warning_band_takes_under_two_milliseconds():
     for _ in range(50):
         assert ceiling.judge(call) is None
     per_call = (time.perf_counter() - t0) / 50 * 1000
-    assert per_call < 2.0, f"{per_call:.3f} ms per call"
+    assert per_call < 2.0 * timed_slack(), f"{per_call:.3f} ms per call"

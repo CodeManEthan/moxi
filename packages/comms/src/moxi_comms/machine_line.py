@@ -209,6 +209,13 @@ def parse(body: str) -> MachineLine | None:
                                    else None))
 
 
+def leads_with_sigil(body: str) -> bool:
+    """Whether line zero starts as a machine line does: spaces and tabs, then the sigil,
+    in any case. The parser's leading test alone; the rest of the line may still be
+    malformed."""
+    return body.partition("\n")[0].lstrip(" \t")[:len(SIGIL)].lower() == SIGIL
+
+
 def normalize_audience(value: str | None) -> str | None:
     """An audience as the wire carries it: lowercased, or None when it is not a tag.
 

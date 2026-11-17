@@ -41,7 +41,7 @@ def launch(shell, request_id: str) -> None:
     conn = store.connect(env=shell.env)
     try:
         ident = proc.identity(os.getpid())
-        store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+        store.insert(conn, request_id=request_id, by="ann", harness="claude",
                      target="headless", cwd="/work", values={}, argv=["claude"], env={},
                      posture="operator", session_id=str(uuid.uuid4()))
         store.set_state(conn, request_id, "started", pid=ident.pid,

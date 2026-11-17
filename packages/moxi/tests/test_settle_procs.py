@@ -82,7 +82,7 @@ def run():
             return None
     elif how == "switch":
         from moxi import config
-        applied = config.set("demo", "relay.enabled", True, by="setup")
+        applied = config.set_value("demo", "relay.enabled", True, by="setup")
         note("setup", applied=[[a.change.name, a.change.action, a.ok] for a in applied])
     note("setup", end=how)
 """
@@ -109,7 +109,7 @@ from moxi import files
 from settle_procs import note
 
 def _yields(event, module):
-    with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):
+    with files.lock(moxi.paths.core_lock(), nested=True, timeout_s=0):
         note("listener", **{event: module})
 
 def on_install(module, found):
@@ -160,7 +160,7 @@ class Box:
                     "XDG_DATA_HOME": str(user / ".local/share"),
                     "XDG_CACHE_HOME": str(user / ".cache"),
                     "MOXI_DEMO_DEVICE": "oldbox", "MOXITEST_SETUP": "ok"}
-        for name in ("MOXI_TEST_REAL_SUPERVISOR", files.CLAIM_VARIABLE):
+        for name in ("MOXI_TEST_REAL_SUPERVISOR", files.LOCK_FD_ENV):
             self.env.pop(name, None)
 
     def module(self, *, listener: bool = False, **names):
@@ -261,7 +261,7 @@ def wait_for(check, timeout: float = WAIT, between=None):
 def held_elsewhere() -> int | None:
     """The pid holding the core lock, or None when it is free."""
     try:
-        with files.lock(moxi.paths.core_lock(), timeout=0):
+        with files.lock(moxi.paths.core_lock(), timeout_s=0):
             return None
     except files.LockTimeout as exc:
         return exc.holder or -1
@@ -312,7 +312,7 @@ def test_a_settle_child_given_a_forged_claim_exits_1_before_any_step(box, forged
     try:
         number, keep = ("999", ()) if forged == "a closed descriptor" else (str(other),
                                                                             (other,))
-        env = {**box.env, files.CLAIM_VARIABLE: number}
+        env = {**box.env, files.LOCK_FD_ENV: number}
         with files.lock(moxi.paths.core_lock()):
             done = subprocess.run([PY, HELPER, "child", "demo"], env=env, pass_fds=keep,
                                   stdin=subprocess.DEVNULL, capture_output=True,
@@ -406,7 +406,8 @@ def test_a_standalone_core_call_waits_for_a_running_install(box, install_running
                                                             standalone):
     if standalone == "config set":
         box.module(DAEMONS=SWITCHED)
-        fn = lambda: config.set("demo", "relay.enabled", True, by="cli")  # noqa: E731
+        fn = lambda: config.set_value(  # noqa: E731
+            "demo", "relay.enabled", value=True, by="cli")
     elif standalone == "apply":
         box.module(DAEMONS=ONE)
         fn = lambda: units.apply(units.plan("demo"), say=lambda line: None)  # noqa: E731
@@ -433,7 +434,7 @@ def test_a_standalone_core_call_waits_for_a_running_install(box, install_running
 def test_remove_where_this_process_holds_the_lock_neither_blocks_nor_raises(box):
     box.installed(DAEMONS=TWO)
     results: list = []
-    with files.lock(moxi.paths.core_lock(), timeout=0):
+    with files.lock(moxi.paths.core_lock(), timeout_s=0):
         results.append(units.remove("demo", say=lambda line: None))
         box.installed(DAEMONS=TWO)
         thread, done = in_thread(lambda: units.remove("demo", say=lambda line: None))
@@ -791,8 +792,8 @@ def placing(box, monkeypatch):
     box.site.write("moxi_demo/skills/moxi-demo-send/SKILL.md", "# send\n")
     box.site.write("moxi_demo/handback.py", HANDBACK)
     box.place = place
-    box.targets = sorted(str(user / folder / "skills" / "moxi-demo-send")
-                         for folder in (".claude", ".agents"))
+    box.targets = sorted(str(user / harness_dir / "skills" / "moxi-demo-send")
+                         for harness_dir in (".claude", ".agents"))
     return box
 
 

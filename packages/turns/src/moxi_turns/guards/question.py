@@ -18,7 +18,8 @@ judge runs in the session's endpoint, whose parent is that process.
 
 The reminder: `on_prompt`, a `prompt` listener, adds one line to a prompt that asks to go
 through or answer open questions, and not in prose, when question mode is on and the
-prompt's origin is one the judge counts. So a message delivered by another module that
+prompt's origin is one the judge counts. A prompt asks for prose when it holds a word on
+`question_mode.prose_words`, case-folded (by default "prose"). So a message delivered by another module that
 says "go through the open questions" gets no reminder, since the judge would refuse the
 call it asks for. A prompt with no origin gets none either.
 """
@@ -37,6 +38,8 @@ GUARD_ID = "turns.question-mode"
 SWITCH = "guards.question_mode"
 #: turns' setting: the prompt origins that count as the person's own.
 ORIGINS_KEY = "question_mode.origins"
+#: turns' setting: the words that ask for prose, so a prompt holding one gets no reminder.
+PROSE_KEY = "question_mode.prose_words"
 #: The word a prompt must hold.
 WORD = "question"
 
@@ -64,8 +67,6 @@ REMINDER = (
     "self-contained, with your recommendation first."
 )
 
-#: A word that asks for prose.
-PROSE = frozenset(("prose",))
 _WORD = re.compile(r"[^\W_]+")
 
 
@@ -130,10 +131,11 @@ def judge(call: ToolCall) -> Deny | None:
 
 # -- the reminder ------------------------------------------------------------------------
 
-def nudges(text: object) -> bool:
+def nudges(text: object, prose_words: Iterable[str]) -> bool:
     """The prompt asks to go through or answer open questions, and not in prose: no leading
     `<` (a notice), "open question" or "open questions" as consecutive words, one of "go
-    through", "going through" or "answer" as words anywhere, and no word "prose"."""
+    through", "going through" or "answer" as words anywhere, and none of `prose_words`
+    (case-folded already) as a word."""
     if not isinstance(text, str) or text.lstrip().startswith("<"):
         return False
     words = _WORD.findall(text.casefold())
@@ -143,31 +145,35 @@ def nudges(text: object) -> bool:
     if ("go", "through") not in pairs and ("going", "through") not in pairs \
             and "answer" not in words:
         return False
-    return PROSE.isdisjoint(words)
+    return set(prose_words).isdisjoint(words)
 
 
 def is_on(settings) -> bool:
-    """Question mode is on: its id is on `guards.on`, or its switch reads true.
+    """Question mode is on: its id is on `guards.run`, or its switch reads true.
     `settings` is turns' settings, read by key."""
-    listed = settings["guards.on"] or ()
+    listed = settings["guards.run"] or ()
     return GUARD_ID in listed or settings[SWITCH] is True
 
 
 def on_prompt(event) -> str | None:
     """turns' `prompt` listener: the reminder, or None."""
-    if not nudges(getattr(event, "text", None)):
+    text = getattr(event, "text", None)
+    if not nudges(text, ()):
         return None
     from .. import config
 
     settings = config.load(getattr(event, "env", None))
     if not is_on(settings):
         return None
+    prose = [w.casefold() for w in settings[PROSE_KEY] or () if isinstance(w, str)]
+    if not nudges(text, prose):
+        return None
     if event.origin not in frozenset(o for o in settings[ORIGINS_KEY] if isinstance(o, str)):
         return None
     return REMINDER
 
 
-__all__ = ["GUARD_ID", "SWITCH", "ORIGINS_KEY", "R_SUBAGENT", "R_NOT_ASKED", "R_NOT_HERE",
+__all__ = ["GUARD_ID", "SWITCH", "ORIGINS_KEY", "PROSE_KEY", "R_SUBAGENT", "R_NOT_ASKED", "R_NOT_HERE",
            "R_LAUNCH", "REMINDER", "mentions_question", "harness_pid", "cmdline",
            "launch_args", "is_launch_prompt", "origins", "judge", "nudges", "is_on",
            "on_prompt"]

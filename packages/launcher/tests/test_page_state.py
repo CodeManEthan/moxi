@@ -37,9 +37,9 @@ def fresh_handlers(monkeypatch):
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def me() -> proc.ProcId:
@@ -51,7 +51,7 @@ def launched(conn, request_id: str, *, at: str | None = None, session_id: str | 
              started: float | None = None, target: str = "slot", **more) -> str:
     """A launch's row in `state` whose process is `pid` (started at `started`)."""
     sid = session_id or str(uuid.uuid4())
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target=target,
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target=target,
                  cwd="/work", values={"model": "opus"}, argv=["claude"], env={},
                  posture="operator", session_id=sid, slot="3" if target == "slot" else None,
                  at=at or store.now(), **more)
@@ -79,7 +79,7 @@ def ran(conn, request_id: str, outcome: str, *, kind: str = "relaunch", mode: st
     ident = me()
     run = store.insert_run(conn, kind=kind, mode=mode, request_id=request_id,
                            session_id=store.get(conn, request_id).session_id,
-                           actor="launcher", state="acting",
+                           by="launcher", state="acting",
                            job=f"proc:{ident.pid}@{ident.started:.6f}", at=at)
     store.end_run(conn, run.run_id, outcome, word=word, detail=detail)
     return store.get_run(conn, run.run_id)
@@ -389,11 +389,11 @@ def test_a_launch_log_made_after_the_stream_opened_is_seen(monkeypatch):
         try:
             seen = dict([await stream.next(3), await stream.next(3)])
             assert seen["sessions"]["sessions"] == [] and seen["launches"]["launches"] == []
-            made = store.connect()
+            conn = store.connect()
             try:
-                living(made, "r1")
+                living(conn, "r1")
             finally:
-                made.close()
+                conn.close()
             data = await stream.until("launches", lambda d: d["launches"], 3)
             assert requests(data, "launches") == ["r1"]
         finally:

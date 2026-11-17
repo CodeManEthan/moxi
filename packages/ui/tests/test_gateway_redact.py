@@ -20,7 +20,7 @@ from moxi_ui.gateway.access import OPEN_PATHS, PAGES
 from moxi_ui.gateway.acts import Acts
 from moxi_ui.gateway.mount import Mount
 from moxi_ui.gateway.router import ICONS, GatewayRouter, mark, strip, watch
-from moxi_ui.gateway.shapes import handle
+from moxi_ui.gateway.shapes import handle, redact_value, scrub
 from moxi_ui.proxy import UpstreamError
 from moxi_ui.push import Push
 from moxi_ui.router import fallback, worker_layer
@@ -96,12 +96,13 @@ class Gate:
         access.open_paths = OPEN_PATHS | ICONS
         self.state_dir = self.phone.state_dir
         self.writer = audit_mod.Audit(self.state_dir)
-        self.mount = Mount(True, None) if mounted else Mount(False, "tcp")
+        self.mount = (Mount(mounted=True, reason=None) if mounted
+                      else Mount(mounted=False, reason="tcp"))
         self.reads = Reads()
         self.push = Push(FakeStarters([{"module": "fixture", "state": "up", "log": LOG}]),
                          mounts=MOUNTS, client=FakeClient())
         self.page_answer: tuple[int, list, bytes] = (200, JSON, b"{}")
-        self.acts = Acts(mounts=lambda: MOUNTS, mounted=lambda: self.mount.mounted,
+        self.acts = Acts(mounts=lambda: MOUNTS, on_mounted=lambda: self.mount.mounted,
                          client=self.reads, audit=self.writer, key=lambda: KEY,
                          device_of=access.device_of)
         self.router = GatewayRouter(access, mounts=lambda: MOUNTS,
@@ -167,6 +168,57 @@ def test_a_gateway_read_has_its_marked_values_changed_and_nothing_else(tmp_path:
     assert b"someone" not in answer.body
 
 
+@pytest.mark.parametrize(("text", "sent"), [
+    ("/home/someone/code/proj-b", "proj-b"),
+    ("hooks /home/someone/code/proj-b", "hooks proj-b"),
+    ("hooks ~/code/proj-b", "hooks proj-b"),
+    ("spec /home/someone/a nightly", "spec a nightly"),
+    ("from /srv/a to ~/b/c", "from a to c"),
+    ("a\t/srv/x\n/srv/y", "a\tx\ny"),
+    ("guard", "guard"),
+    ("", ""),
+    ("git push", "git push"),
+    # Cut at the first space: the part after it is sent as it is.
+    ("hooks /home/someone/My Projects/x", "hooks My Projects/x"),
+    ("hooks /home/someone/code/proj-b/", "hooks proj-b"),
+    ("hooks ~someone/code/x", "hooks x"),
+    ("hooks ~someone", "hooks ~"),
+    ("hooks ~", "hooks ~"),
+    ("hooks ~/", "hooks ~"),
+    ("hooks /", "hooks /"),
+    ("hooks //", "hooks /"),
+    # A path also starts after : or =.
+    ("hooks root=/home/someone/x", "hooks root=x"),
+    ("run:/x", "run:x"),
+    ("key=/x", "key=x"),
+    ("start list: run:/home/someone/bin/ctx", "start list: run:ctx"),
+    ("start list: run:~/bin/ctx", "start list: run:ctx"),
+    ("hooks key=~someone", "hooks key=~"),
+    ("run:/", "run:/"),
+    # Any other word is a path only when it starts with / or ~.
+    ('hooks "/home/someone/x"', 'hooks "/home/someone/x"'),
+    ("hooks (/home/someone/x)", "hooks (/home/someone/x)"),
+    ("hooks code/proj-b", "hooks code/proj-b"),
+    ("hooks ../proj-b", "hooks ../proj-b"),
+    ("hooks $HOME/x", "hooks $HOME/x"),
+    ("hooks C:\\Users\\someone\\x", "hooks C:\\Users\\someone\\x"),
+    ("a/b", "a/b"),
+])
+def test_scrub_cuts_each_host_path_to_its_last_component(text: str, sent: str) -> None:
+    assert scrub(text) == sent
+
+
+def test_a_scrubbed_value_is_its_text_scrubbed_and_anything_else_passes_as_it_is() -> None:
+    out = {"type": "string", "mark": "scrub", "nullable": True, "items": None}
+    assert redact_value("hooks /home/someone/x", out, KEY) == "hooks x"
+    for value in (None, 4, True, ["/home/someone/x"], {"a": "/home/someone/x"}):
+        assert redact_value(value, out, KEY) == value
+    rows = {"type": "list", "mark": None, "nullable": False, "items": {
+        "type": "table", "mark": None, "nullable": False, "items": {"name": out}}}
+    assert redact_value([{"name": "/srv/a"}, {"name": "b"}], rows, KEY) == [
+        {"name": "a"}, {"name": "b"}]
+
+
 def test_a_read_that_isnt_json_or_is_too_large_is_a_502_and_errors_pass_as_sent(
         tmp_path: Path) -> None:
     gate = Gate(tmp_path).paired()
@@ -228,6 +280,53 @@ def test_the_shells_own_read_is_redacted_and_its_desk_routes_are_unreached(
                  "/m/fixture/api/events", "/m/plain/api/read", "/m/fixture/api/go"):
         assert gate.get(path).status == 404, path
     assert gate.reads.sent == []
+
+
+#: A kept doctor run whose rows name paths: repo names a row by its repository's root.
+KEPT = {"at": "2026-11-15T08:00:00Z", "running": False, "error": "/var/lib/someone/doctor.log",
+        "rows": [{"module": "repo", "name": "hooks /var/lib/someone/code/proj-b",
+                  "state": "warn", "detail": "/var/lib/someone/code/proj-b has no hooks",
+                  "fix": "moxi repo git-hooks add /var/lib/someone/code/proj-b"},
+                 {"module": "turns", "name": "guard", "state": "fail",
+                  "detail": "A guard could not check a call", "fix": None},
+                 {"module": "repo", "name": "spec ~/code/proj-c nightly", "state": "ok",
+                  "detail": "last commit at 08:00", "fix": None},
+                 {"module": "turns", "name": "start list: run:/var/lib/someone/bin/ctx",
+                  "state": "warn", "detail": "not a program", "fix": None}]}
+#: What the phone gets of `KEPT`.
+KEPT_ON_THE_PHONE = {**KEPT, "error": None, "rows": [
+    {"module": "repo", "name": "hooks proj-b", "state": "warn", "detail": None, "fix": None},
+    {"module": "turns", "name": "guard", "state": "fail", "detail": None, "fix": None},
+    {"module": "repo", "name": "spec proj-c nightly", "state": "ok", "detail": None,
+     "fix": None},
+    {"module": "turns", "name": "start list: run:ctx", "state": "warn", "detail": None,
+     "fix": None}]}
+
+
+def test_the_phones_checks_send_each_name_scrubbed_and_no_text_of_the_checks_own(
+        tmp_path: Path) -> None:
+    gate = Gate(tmp_path).paired()
+    gate.page_answer = (200, JSON, json.dumps(KEPT).encode())
+    answer = gate.get("/m/ui/api/checks")
+    assert answer.status == 200
+    assert answer.json() == KEPT_ON_THE_PHONE
+    assert b"someone" not in answer.body
+
+
+def test_the_phones_ui_checks_topic_sends_each_name_scrubbed() -> None:
+    async def body():
+        push = Push(FakeStarters([]), mounts=MOUNTS, client=FakeClient())
+        push.publish("checks", KEPT)
+        desk = Reader(push, ask("ui.checks")).start()
+        phone = Reader(push.gateway_app(lambda: KEY), ask("ui.checks")).start()
+        assert (await _seen(desk, "ui.checks"))["ui.checks"] == KEPT
+        assert (await _seen(phone, "ui.checks"))["ui.checks"] == KEPT_ON_THE_PHONE
+        for reader in (desk, phone):
+            reader.leave()
+            await reader.task
+        await push.aclose()
+
+    asyncio.run(asyncio.wait_for(body(), 30))
 
 
 def test_every_answer_the_router_builds_carries_the_gateway_policy(tmp_path: Path) -> None:
@@ -310,7 +409,7 @@ def test_each_request_writes_its_row_and_each_gate_its_refusal_code(tmp_path: Pa
         assert [row.get("gate") for row in by_kind.get(code, [])] == [number], code
     (read,) = [row for row in by_kind["request"] if row["path"] == "/m/fixture/api/rows"]
     assert read["status"] == 200 and read["module"] == "fixture" and read["device"]
-    assert read["session"] == gate.phone.access.store.find(
+    assert read["session"] == gate.phone.access.store.use(
         [gate.phone.cookie], gate.phone.key, need_key=True)[:12]
     assert isinstance(read["ms"], int)
     assert all(not set(row) & audit_mod.FORBIDDEN for row in rows)

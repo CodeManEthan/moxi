@@ -1,9 +1,68 @@
 # Changelog
 
+## Unreleased
+
+- `moxi-dev rename` reads a row whose file is not in the tree as dead: it applies nothing,
+  its old name is no leftover anywhere (a `name` or `kwonly` row there used to list every
+  string, attribute, keyword and cite of that spelling across the repository), and it is
+  listed on a `dead:` line with its table row, file, kind and names and why the script
+  reads no file there. The summary counts dead rows apart from `not here` ones, and the
+  comparison with `--main` takes both.
+- `MOXI_TEST_TIMED_SLACK=<factor>`, read once when pytest starts, is how much slower than
+  the machine that set the budgets this one may be; `timed_slack()` returns it (1.0 when
+  unset), inside a fenced test too. Every upper bound on a wall-clock measurement in a
+  `timed` test is multiplied by it; lower bounds, ratios and counts are not. A value that
+  is not a finite number of at least 1 stops the run.
+- The tag check reads its shapes from moxi-publishing's `ruling-tag` and `round-pointer`
+  rules, adding only the D-number and finding-id shapes, so it refuses what publishing's
+  scan refuses. It now refuses more: among others, `round` and any home and slug joined by
+  a slash, plain words included, and a memory key.
+- The release step wants a README link to a file in the repository to name the
+  package's own release tag at its current version (`.../blob/moxi-comms-v0.3.0/...`),
+  not `main`; a relative link's fix gives that form. moxi-dev now requires
+  moxi-publishing, whose tag scheme and CHANGELOG heading reader it uses.
+- The release step refuses a workspace member on neither or both of the root's
+  `[tool.moxi-publishing]` `not-ready` and `ready` lists, when the root keeps a `ready`
+  list, so a member added later never starts ready.
+
 ## 0.1.1 (2026-11-08)
+
+- `moxi-dev check` now runs Ruff's N, A and FBT rules over the repository, reports Ruff
+  in its summary, and accepts `--only ruff`. moxi-dev depends on Ruff 0.17, and the root
+  configuration excludes vendored code, ignores N818 and permits MX exception marks.
+- MX2 checks environment-variable constants for the `_ENV` suffix, one constant per
+  variable, the owning package and direct literals in source code.
+- MX3 checks the house words for environment mappings, caught exceptions, directories,
+  database connections, open files, print callbacks and actor parameters.
+- Exception marks for N, A and FBT now need ` -- <why>`, as MX marks already did.
+
+- `moxi-dev rename` can apply a real table: it is fast; reads tests, conftest and
+  scripts; resolves submodule imports, lazy `__getattr__` re-export tables and imports
+  inside functions; renames dataclass field keywords; makes `kwonly` rows work with an
+  existing star; rewrites `__all__` only in its list and backticked cites only where
+  they mean the renamed definition; refuses to write a file that would not parse. A
+  `use` row's old text may be longer than the name and changes every match on its line;
+  a `keep` row also guards a cite on its line; a keyword on a later line of a call is
+  covered by a row on that line; a keep row on a line a use row changed stays applied.
+  A relative import in a package's `__init__` resolves from the package; a parameter row
+  leaves `self.<name>` alone and reads its state from the signature; a parameter's cite
+  left unrewritten is listed only in its own file.
+- `moxi-dev rename` refuses, before writing, a row whose edit would change what a token
+  means (its new name already in the scope, a nested scope with its own old name, a
+  module-level name that is also a function local), naming the table line and the code
+  line. A row may rename a function's local out of a parameter's way.
+- `moxi-dev check`'s naming check names the house suffix in each unit hit, reads a mark
+  on a decorated function's def line, and reports an API module that does not import;
+  the refs check refuses a repeated `.refs-allow` line.
+- `renames.tsv` holds this release's renames.
 
 The first public release.
 
+- `moxi-dev check` now runs whole-tree comment-reference and public-name steps, reports
+  `refs` and `names` in its summary, and can run either step alone with `--only`.
+- Contract check 7 holds daemon and timer console scripts to their announcement keys.
+- `moxi-dev rename` applies the tab-separated identifier rename table, preserves
+  resolved imports and calls, and reports unresolved or moved old uses.
 - The README explains the tag check in plain words: what it refuses, what
   `.residue-allow` is, and what a finding, its `finding` mark and `--finding` are.
 - `moxi-dev new` writes a core requirement of `moxi>=0.1.6,<0.2`, the oldest core a

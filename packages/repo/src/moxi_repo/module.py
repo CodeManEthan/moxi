@@ -34,6 +34,7 @@ PAGE = "moxi_repo.page:PAGE"
 #: What repo offers the browser UI shell: its panel, which reads and runs nothing.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Git hooks", "contract": 1, "place": "page",
+             "group": "setup", "order": 20,
              "doc": "Each repo's git hook pieces, committer specs and open records"},
 }
 STORES = {

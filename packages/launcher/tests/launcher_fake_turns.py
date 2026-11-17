@@ -1,7 +1,9 @@
 """A stand-in for turns' API, as the launcher calls it: `launch_additions` and
 `codex_host_available` for the composer, and for the first-turn sender `wait_ready`, a
 `Session` with a plain `deliver(text, ref=)`, and the `Delivery` whose `wait_started`
-gives `Started`, `Refused` or `Lost`, or raises `TimeoutError`.
+gives `Started`, `Refused` or `Lost`, or raises `TimeoutError`. For the readers of a live
+session (Home's Sessions row), `find` gives a `Session` whose `facts()` and `agents()` the
+script states, and `close()`.
 
 The launcher reaches it through its test seam, `MOXI_LAUNCHER_TURNS=launcher_fake_turns`.
 What it does is scripted by `script.json` in the directory `LAUNCHER_FAKE_TURNS` names, read
@@ -24,12 +26,19 @@ The script's keys, each with its default:
 - `started`: the value the delivery settles to, `{"kind": "started" | "refused" | "lost",
   ...}`, or `timeout` (raises `TimeoutError`), or `raise`, or `unknown` (the endpoint holds
   no delivery with that `ref`: `Lost("unknown delivery")`).
+- `sessions`: the live sessions `find` finds, by session id, each `{harness, endpoint_pid,
+  pid, turn_open, turn_number, draft, agents: [{id, kind, state, final, description}],
+  complete}`; none by default. `harness` is `claude` unless given; `endpoint_pid` is the
+  process the launch's claim must name. `facts().agents` counts the entries busy and not
+  final, a `shell` among them only for a Codex session (turns counts background terminals
+  there), and is None when `complete` is false.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,14 +83,14 @@ def script() -> dict:
 
 
 def record(call: str, **detail) -> None:
-    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as out:
-        out.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
+    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
 
 
 #: Set by `hide`, so a launch a test runs in a process of its own (`launcher_child`) finds
 #: no turns either.
 HIDDEN = "LAUNCHER_NO_TURNS"
-#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module
+#: The launcher's seam (`moxi_launcher.first.TURNS_ENV`), named here so this module
 #: imports nothing of the launcher's.
 SEAM = "MOXI_LAUNCHER_TURNS"
 
@@ -110,8 +119,8 @@ def hide_here(setattr_=setattr) -> None:
     setattr_(modules, "available", available)
 
 
-def calls(directory: Path) -> list[dict]:
-    path = Path(directory) / "calls.jsonl"
+def calls(turns_dir: Path) -> list[dict]:
+    path = Path(turns_dir) / "calls.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -150,22 +159,93 @@ def codex_host_available():
     return bool(script().get("codex_host", True))
 
 
-def wait_ready(*, session_id=None, pid=None, timeout):
-    record("wait_ready", session_id=session_id, pid=pid, timeout=timeout)
+def wait_ready(*, session_id=None, pid=None, timeout_s):
+    record("wait_ready", session_id=session_id, pid=pid, timeout=timeout_s)
     ready = script().get("ready", "ok")
     if ready == "timeout":
-        raise TimeoutError(f"no session ready after {timeout} s")
+        raise TimeoutError(f"no session ready after {timeout_s} s")
     if ready == "error":
         raise TurnsError("the endpoint's directory can't be read")
     harness = "codex" if pid is not None else "claude"
     return Session(harness, pid or 4242, script().get("session_id", session_id))
 
 
+#: The agent states turns counts as busy.
+BUSY = ("pending", "running", "waiting")
+
+
+@dataclass(frozen=True)
+class Facts:
+    session_id: str | None
+    turn_number: int
+    turn_open: bool
+    turn: None
+    agents: int | None
+    draft: bool
+    at: float
+    stale: bool = False
+
+
+@dataclass(frozen=True)
+class Agent:
+    id: str
+    kind: str
+    state: str
+    final: bool | None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class Agents:
+    entries: tuple
+    complete: bool
+    at: float
+
+
+def find(*, session_id=None, pid=None):
+    """The live session the script's `sessions` holds under `session_id`, or None."""
+    record("find", session_id=session_id, pid=pid)
+    entry = (script().get("sessions") or {}).get(session_id)
+    if entry is None:
+        return None
+    return Session(entry.get("harness", "claude"), entry.get("pid", 4242), session_id,
+                   endpoint_pid=entry.get("endpoint_pid"))
+
+
 class Session:
-    def __init__(self, harness, pid, session_id):
+    def __init__(self, harness, pid, session_id, *, endpoint_pid=None):
         self.harness = harness
         self.pid = pid
         self.session_id = session_id
+        self.endpoint_pid = endpoint_pid
+        self.closed = False
+
+    def _entry(self) -> dict:
+        return (script().get("sessions") or {}).get(self.session_id) or {}
+
+    def facts(self):
+        entry = self._entry()
+        record("facts", session_id=self.session_id)
+        listed = self.agents(quiet=True)
+        kinds = None if self.harness == "codex" else ("subagent", "teammate")
+        busy = sum(1 for a in listed.entries if a.state in BUSY and a.final is not True
+                   and (kinds is None or a.kind in kinds))
+        return Facts(self.session_id, int(entry.get("turn_number", 0)),
+                     bool(entry.get("turn_open", False)), None,
+                     busy if listed.complete else None, bool(entry.get("draft", False)),
+                     time.time())
+
+    def agents(self, *, quiet=False):
+        entry = self._entry()
+        if not quiet:
+            record("agents", session_id=self.session_id)
+        entries = tuple(Agent(a["id"], a.get("kind", "subagent"), a.get("state", "running"),
+                              a.get("final", False), a.get("description"))
+                        for a in entry.get("agents") or ())
+        return Agents(entries, bool(entry.get("complete", True)), time.time())
+
+    def close(self):
+        self.closed = True
 
     def deliver(self, text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
                 refuse_agents=False, ref=None):

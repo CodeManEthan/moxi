@@ -44,7 +44,7 @@ def post(record, channel_id, text, username="planner"):
 
 
 def test_both_backends_expose_the_remaining_posting_contract():
-    active = {"post_as_user", "post_as_identity", "history", "get_message",
+    active = {"post_as_user", "post_as_identity", "history", "count_before", "get_message",
               "subscribe", "create_channel", "delete_channel", "register_principal"}
     retired = {"create_webhook", "resolve_secret", "execute_webhook", "webhook_channel"}
     for backend in (LocalRecord, MockRecord):
@@ -80,7 +80,7 @@ def test_a_new_record_is_created_private(tmp_path):
 
 
 @POSIX
-def test_a_record_in_a_shared_directory_opens_there_and_leaves_it_shared(tmp_path):
+def test_a_record_in_a_shared_dir_opens_there_and_leaves_it_shared(tmp_path):
     shared = tmp_path / "shared"
     shared.mkdir()
     shared.chmod(0o775)
@@ -93,7 +93,7 @@ def test_a_record_in_a_shared_directory_opens_there_and_leaves_it_shared(tmp_pat
 
 
 @POSIX
-def test_a_record_through_a_linked_directory_opens_and_leaves_the_link(tmp_path):
+def test_a_record_through_a_linked_dir_opens_and_leaves_the_link(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
     real.chmod(0o755)
@@ -109,7 +109,7 @@ def test_a_record_through_a_linked_directory_opens_and_leaves_the_link(tmp_path)
 
 
 @POSIX
-def test_a_missing_record_directory_is_made_private(tmp_path):
+def test_a_missing_record_dir_is_made_private(tmp_path):
     record = LocalRecord(tmp_path / "state" / "comms" / "record.db")
     try:
         assert (tmp_path / "state").stat().st_mode & 0o777 == 0o700
@@ -135,8 +135,8 @@ def test_an_existing_record_keeps_its_mode_and_is_not_rewritten(tmp_path):
         assert path.read_bytes() == before
     finally:
         second.close()
-    with sqlite3.connect(path) as plain:
-        assert plain.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
 def test_release_closes_the_calling_threads_connection_and_only_that(gw):

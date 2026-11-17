@@ -57,7 +57,7 @@ def test_add_makes_a_relative_root_absolute(capsys, tmp_path, monkeypatch):
     assert api.get("here").root == str(tmp_path / "here")
 
 
-def test_add_expands_the_home_directory(capsys, tmp_path, monkeypatch):
+def test_add_expands_the_home_dir(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert run(capsys, "add", "h", "--root", "~/h")[0] == 0
     assert api.get("h").root == str(tmp_path / "h")
@@ -110,7 +110,7 @@ def test_a_usage_error_from_argparse_is_exit_2(capsys):
     ("set", "gamma", "--root", ""),
     ("set", "gamma", "--notes-root", ""),
 ])
-def test_an_empty_directory_is_exit_2_not_the_working_directory(capsys, golden_copy,
+def test_an_empty_dir_is_exit_2_not_the_working_dir(capsys, golden_copy,
                                                                  tmp_path, monkeypatch,
                                                                  argv):
     monkeypatch.chdir(tmp_path)
@@ -359,7 +359,7 @@ def test_find_json_prints_the_project_or_null(capsys, golden_copy, tmp_path):
     assert run_json(capsys, "find", str(tmp_path)) is None
 
 
-def test_find_defaults_to_the_working_directory(capsys, tmp_path, monkeypatch):
+def test_find_defaults_to_the_working_dir(capsys, tmp_path, monkeypatch):
     (tmp_path / "web" / "src").mkdir(parents=True)
     assert run(capsys, "add", "web", "--root", str(tmp_path / "web"))[0] == 0
     monkeypatch.chdir(tmp_path / "web" / "src")
@@ -419,13 +419,13 @@ def test_a_newer_store_is_exit_3_on_a_read_and_a_write(capsys, golden_copy, stor
 def test_a_store_locked_past_the_wait_is_exit_75(capsys, golden_copy, store_path,
                                                  monkeypatch):
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
+    holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         code, _out, err = run(capsys, "agents", "add", "gamma", "x")
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        holder_conn.execute("ROLLBACK")
+        holder_conn.close()
     assert code == 75 and "try again" in err
 
 

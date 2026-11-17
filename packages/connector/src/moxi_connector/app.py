@@ -272,8 +272,8 @@ class Tools:
         args = dict(params.arguments or {})
         try:
             jsonschema.validate(args, dict(tool.input_schema))
-        except jsonschema.ValidationError as e:
-            return _error(f"The arguments don't fit the tool: {clean(e.message, 200)}",
+        except jsonschema.ValidationError as exc:
+            return _error(f"The arguments don't fit the tool: {clean(exc.message, 200)}",
                           "invalid-arguments")
         except jsonschema.SchemaError:
             log.error("the tool %s of %s declares a schema that doesn't read", name, module)
@@ -287,18 +287,18 @@ class Tools:
                 raise
             # The host cancelled the tool because its caller hung up; nobody reads this.
             return _error(HUNG_UP, "hung-up")
-        except Exception as e:  # noqa: BLE001 - a provider's fault stays its own
+        except Exception as exc:  # noqa: BLE001 - a provider's fault stays its own
             log.exception("the tool %s of %s failed (request %s)", name, module,
                           call.request_id)
-            return await self._failed(call, module, name, type(e).__name__)
+            return await self._failed(call, module, name, type(exc).__name__)
         if result.is_error:
             # An error answer is never the tool's work done: what it registered runs
             # with False, whatever becomes of the answer's bytes.
-            await _settle(call, False)
+            await _settle(call, written=False)
         return to_mcp(result)
 
     async def _failed(self, call: Call, module: str, name: str, why: str):
-        await _settle(call, False)
+        await _settle(call, written=False)
         await write(self.host.calllog, {
             "at": calllog.now(), "kind": "tool-error", "request": call.request_id,
             "tool": name, "provider": module, "error": why,
@@ -605,13 +605,13 @@ class Front:
             try:
                 await send(message)
             except BaseException:
-                await _settle(call, False)
+                await _settle(call, written=False)
                 raise
             if final:
                 call.sent = True
                 # uvicorn's send returns quietly once the peer is gone, so a hang-up the
                 # watcher saw first settles False here.
-                await _settle(call, not call.dropped)
+                await _settle(call, written=not call.dropped)
 
         app = self.app
         app.enter()
@@ -631,7 +631,7 @@ class Front:
             if watcher is not None:
                 watcher.cancel()
             app.leave()
-            await _settle(call, False)
+            await _settle(call, written=False)
             if keep_body:
                 call.rpc = _rpc_method(call.body)
             call.body = bytearray()
@@ -647,7 +647,7 @@ class Front:
         await write(self.host.calllog, call.row(), durable=durable, collapse=collapse)
 
 
-async def _settle(call: Call, written: bool) -> None:
+async def _settle(call: Call, *, written: bool) -> None:
     """Run each of the request's `after_answer` callbacks that hasn't run yet, with
     `written`. The first settle fixes the answer's fate; the request's end settles False,
     so a callback registered after the fate was known runs then, with False."""

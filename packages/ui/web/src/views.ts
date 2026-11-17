@@ -148,7 +148,8 @@ export interface ModuleView {
   page: boolean;
   mounted: boolean;
   export_error: string | null;
-  components: Array<{ name: string; title: string; doc: string; place: string; home: boolean; contract: number }>;
+  components: Array<{ name: string; title: string; doc: string; place: string; home: boolean; contract: number;
+                      home_as?: "main" | "row" | null; order?: number | null }>;
   refused: Array<{ name: string; reason: string }>;
 }
 
@@ -180,17 +181,55 @@ export function moduleOrder(modules: readonly ModuleView[]): ModuleView[] {
   return [...modules].sort((a, b) => rank(a) - rank(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-/** The home blocks the modules view places: each present module's `block` components
- * that ask for home, the shell's own first, then by module and name. */
+/** The blocks the modules view places: each present module's `block` components that ask
+ * for home and name no seat on Home (`home_as`), the shell's own first, then by module and
+ * name. */
 export function homeBlocks(modules: readonly ModuleView[]): Array<{ module: string; name: string; title: string }> {
   const out: Array<{ module: string; name: string; title: string }> = [];
   for (const mod of moduleOrder(modules)) {
     if (mod.state !== "present") continue;
     for (const comp of [...mod.components].sort((a, b) => (a.name < b.name ? -1 : 1))) {
-      if (comp.home && comp.place === "block") out.push({ module: mod.name, name: comp.name, title: comp.title });
+      if (comp.home && comp.place === "block" && !comp.home_as) out.push({ module: mod.name, name: comp.name, title: comp.title });
     }
   }
   return out;
+}
+
+/** A component with a seat on Home. */
+export interface HomeSeat {
+  module: string;
+  name: string;
+  title: string;
+  order: number;
+}
+
+/** The order a seat reads as when it names none. */
+const SEAT_ORDER = 500;
+
+function seats(modules: readonly ModuleView[], seat: "main" | "row"): HomeSeat[] {
+  const out: HomeSeat[] = [];
+  for (const mod of modules) {
+    if (mod.state !== "present") continue;
+    for (const comp of mod.components) {
+      if (!comp.home || comp.place !== "block" || comp.home_as !== seat) continue;
+      out.push({ module: mod.name, name: comp.name, title: comp.title,
+                 order: typeof comp.order === "number" ? comp.order : SEAT_ORDER });
+    }
+  }
+  const text = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return out.sort((a, b) => a.order - b.order || text(a.module, b.module) || text(a.name, b.name));
+}
+
+/** Home's row components, of present modules, in their fixed places: by `order`, then
+ * module, then name. */
+export function homeRows(modules: readonly ModuleView[]): HomeSeat[] {
+  return seats(modules, "row");
+}
+
+/** The piece for Home's one main spot: the main piece with the lowest `order` among
+ * present modules, ties by module name; null when none announces one. */
+export function mainPiece(modules: readonly ModuleView[]): HomeSeat | null {
+  return seats(modules, "main")[0] ?? null;
 }
 
 /** One doctor row, as `/m/ui/api/doctor` gives it. */

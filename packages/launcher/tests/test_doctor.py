@@ -1,12 +1,28 @@
-"""The launcher's doctor rows: one per harness, the `--help` diff's verdict."""
+"""The launcher's doctor rows: one per harness, the `--help` diff's verdict, and with cache
+the row that says whether cache's watcher asks about the launched sessions."""
 
 from __future__ import annotations
 
+import sqlite3
+from types import SimpleNamespace
+
+import pytest
 from moxi.doctor import Row
 
-from moxi_launcher import catalog, doctor
+from moxi_launcher import catalog, doctor, joiner, store
 
 from test_catalog import FakeHarness, expected_flags, help_text, matching
+from test_keepwarm import SID, launched
+
+NOW = 1_000_000.0
+OTHER = "22222222-2222-4222-8222-222222222222"
+THIRD = "33333333-3333-4333-8333-333333333333"
+
+
+@pytest.fixture(autouse=True)
+def no_cache(monkeypatch):
+    """cache absent unless a test hands the row an API of its own."""
+    monkeypatch.setattr(joiner, "cache_api", lambda: None)
 
 
 def rows_for(read) -> dict[str, Row]:
@@ -77,3 +93,123 @@ def test_the_announcement_names_these_rows():
 
     assert module.DOCTOR == "moxi_launcher.doctor:rows"
     assert catalog.HARNESSES == ("claude", "codex")
+
+
+# -- keep-warm.timer ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def log(tmp_path, monkeypatch):
+    """A launch log holding one launch of `SID`, where the row reads it."""
+    path = tmp_path / "launcher.db"
+    monkeypatch.setattr(store, "path", lambda env=None: path)
+    conn = store.connect(path)
+    launched(conn)
+    yield conn
+    conn.close()
+
+
+def record(session, *, asks=("launcher.keep-warm",), ago_s=1.0, stale_after=30.0,
+           keyed=True):
+    found = {"v": 1, "session": session, "harness": "claude", "seen_at": NOW - ago_s,
+             "stale_after": stale_after}
+    if keyed:
+        found["asks"] = None if asks is None else list(asks)
+    return found
+
+
+def cache(*, expected=("launcher.keep-warm",), records=(), asking=True):
+    api = SimpleNamespace(clock_records=lambda: [dict(r) for r in records], asked=[])
+    if asking:
+        def ask(env):
+            api.asked.append(dict(env))
+            return expected
+        api.asking = ask
+    return api
+
+
+def keep_warm(api) -> Row:
+    return doctor.keep_warm_row(api, now=NOW)
+
+
+def test_the_row_follows_the_harness_rows_when_cache_is_there(monkeypatch, log):
+    monkeypatch.setattr(joiner, "cache_api", lambda: cache())
+    helps = {**matching("claude"), **matching("codex")}
+    names = [row.name for row in doctor.rows(read=FakeHarness(helps))]
+    assert names == ["catalog.claude", "catalog.codex", "keep-warm.timer"]
+
+
+def test_the_row_is_absent_without_cache():
+    helps = {**matching("claude"), **matching("codex")}
+    assert "keep-warm.timer" not in rows_for(FakeHarness(helps))
+
+
+def test_a_cache_without_asking_warns_to_upgrade_it_and_offers_no_restart(log):
+    row = keep_warm(cache(asking=False, records=[record(SID, keyed=False)]))
+    assert (row.module, row.name, row.state) == ("launcher", "keep-warm.timer", "warn")
+    assert "older than 0.1.6" in row.detail and "upgrade moxi-cache" in row.detail
+    assert row.fix is None
+
+
+def test_a_system_that_cannot_read_an_env_is_off(log):
+    api = cache(expected=None, records=[record(SID, keyed=False)])
+    row = keep_warm(api)
+    assert row.state == "off" and row.fix is None
+    assert "environment can't be read" in row.detail
+    assert api.asked == [{"MOXI_LAUNCHER_REQUEST": "doctor"}]
+
+
+def test_cache_refusing_the_subscription_warns_and_points_at_its_timers(log):
+    row = keep_warm(cache(expected=("launcher.recycle-on-expiry",), records=[record(SID)]))
+    assert row.state == "warn" and row.fix == "moxi cache timers"
+    assert "does not take the launcher's keep-warm subscription" in row.detail
+
+
+def test_a_fresh_record_without_asks_of_any_session_warns_to_restart(log):
+    row = keep_warm(cache(records=[record(OTHER, keyed=False)]))
+    assert row.state == "warn" and row.fix == doctor.RESTART
+    assert row.fix.startswith("moxi services restart cache/watch, or without services ")
+    assert "started before cache was upgraded" in row.detail
+
+
+def test_a_stale_record_without_asks_says_nothing_of_the_running_watcher(log):
+    row = keep_warm(cache(records=[record(SID, keyed=False, ago_s=60.0)]))
+    assert row.state == "ok"
+
+
+def test_a_launched_session_s_record_without_the_subscription_warns_with_the_count(
+        log):
+    launched(log, request_id="r2", session_id=THIRD)
+    row = keep_warm(cache(records=[record(SID, asks=[]), record(THIRD, asks=None),
+                                   record(OTHER, asks=[])]))
+    assert row.state == "warn" and row.fix == doctor.RESTART
+    assert "does not ask about 2 launched sessions" in row.detail
+    one = keep_warm(cache(records=[record(SID, asks=["launcher.recycle-on-expiry"])]))
+    assert "does not ask about 1 launched session that" in one.detail
+
+
+def test_the_name_in_every_launched_record_is_ok(log):
+    row = keep_warm(cache(records=[record(SID), record(OTHER, asks=[])]))
+    assert row.state == "ok" and row.fix is None
+    assert row.detail == "cache's timer asks about every launched session it times"
+
+
+def test_no_record_at_all_is_ok_when_cache_takes_the_subscription(log):
+    row = keep_warm(cache())
+    assert row.state == "ok"
+    assert row.detail == ("cache takes the keep-warm subscription; no launched session is "
+                          "being timed")
+
+
+def test_no_launch_log_is_ok(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "path", lambda env=None: tmp_path / "none.db")
+    assert keep_warm(cache(records=[record(SID, asks=[])])).state == "ok"
+
+
+def test_a_launch_log_that_cannot_be_read_warns_and_names_the_error(log, monkeypatch):
+    def busy(*args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(store, "resolve", busy)
+    row = keep_warm(cache(records=[record(SID, asks=[])]))
+    assert row.state == "warn" and "disk I/O error" in row.detail

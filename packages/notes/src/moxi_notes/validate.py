@@ -142,15 +142,15 @@ def validate(*, root=None, types: _doctypes.Types | None = None) -> Report:
 def walk(root: str, excluded: dict[str, int]):
     """`(path, relative)` for every regular `*.md` file under `root`, sorted, pruning
     while walking. Each tree left out adds one to its marker in `excluded`."""
-    def unlisted(_error):
+    def on_unlisted(_error):
         excluded[UNLISTED] += 1
 
-    for folder, dirs, files in os.walk(root, onerror=unlisted, followlinks=False):
+    for current_dir, dirs, files in os.walk(root, onerror=on_unlisted, followlinks=False):
         keep = []
         for name in sorted(dirs):
             if name in VENDORED or name == GIT:
                 excluded[name] += 1
-            elif os.path.islink(os.path.join(folder, name)):
+            elif os.path.islink(os.path.join(current_dir, name)):
                 excluded[SYMLINK] += 1
             else:
                 keep.append(name)
@@ -158,7 +158,7 @@ def walk(root: str, excluded: dict[str, int]):
         for name in sorted(files):
             if not name.endswith(".md"):
                 continue
-            path = os.path.join(folder, name)
+            path = os.path.join(current_dir, name)
             try:
                 mode = os.lstat(path).st_mode
             except OSError:
@@ -197,8 +197,8 @@ def _read(path: str, relative: str, types: _doctypes.Types) -> Note:
 
 def _check(note: Note, types: _doctypes.Types, top: list[_doctypes.DocType]) -> None:
     try:
-        with open(note.path, "rb") as handle:
-            text = handle.read().decode("utf-8", errors="replace")
+        with open(note.path, "rb") as fh:
+            text = fh.read().decode("utf-8", errors="replace")
     except OSError as exc:
         note.findings.append((UNREADABLE_FRONTMATTER,
                               f"the file can't be read: {exc.strerror or exc}"))

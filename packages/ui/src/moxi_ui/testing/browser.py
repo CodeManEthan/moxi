@@ -14,10 +14,16 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from . import WAIT_MS
+
 #: The width every page and component lays out down to, in CSS px.
 PHONE_WIDTH = 360
 #: Milliseconds a placed component has to render into its shadow root.
-RENDER_MS = 5000
+RENDER_MS = WAIT_MS
+#: Milliseconds a rendered component has to show each token it takes in a colour, unless
+#: the check is given its own: a part drawn from data (a pushed topic's first value) comes
+#: after the first render.
+TOKEN_MS = WAIT_MS
 #: Seconds with no new request after which a component is taken to have settled.
 QUIET_S = 0.3
 #: The longest a component is given to settle, in seconds.
@@ -236,23 +242,36 @@ def _allowed(url: str, origin: str, modules: Sequence[str], held: set[str]) -> b
     return False
 
 
+def _reaches(page: Any, mark: str, token: str, token_ms: int) -> bool:
+    """Whether changing `token` on the placed component's host changes a colour it shows,
+    probed again until it does or `token_ms` has passed."""
+    deadline = time.monotonic() + token_ms / 1000
+    while not page.evaluate(_function(_JS_TOKEN), [mark, token, list(_PROBES), _COLOURS]):
+        if time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(50)
+    return True
+
+
 def check_component(page: Any, module: str, name: str,
                     attrs: Mapping[str, str] | None = None, *,
                     tokens: Sequence[str] = ("accent",), allow: Sequence[str] = (),
-                    keep: bool = False) -> ComponentCheck:
+                    keep: bool = False, token_ms: int = TOKEN_MS) -> ComponentCheck:
     """The contract check on `module`'s component `name`, placed with `attrs` through
     `client.js`'s `place()` on the shell's document in `page`.
 
     It passes when the shell places the component; it renders into an open shadow root
-    within 5 s; it adds no style sheet to the document; each of `tokens` (theme token
-    names without `--moxi-`, `accent` by default) reaches at least one colour in its shadow
-    tree, so changing the token on its host changes what it shows; and every request its
-    browser context made from the placement until it settled went to the shell's own
-    origin, under `/m/<module>/` (or `/m/<m>/` for each `m` of `allow`, the modules whose
-    components it places in turn), or to the push channel for `<module>`'s, `allow`'s
-    and the shell's own topics. The push channel is one stream for the whole page, which
-    reopens with every topic the page holds when a component subscribes, so a topic the
-    page held before the placement is not counted against the component.
+    within `RENDER_MS` (20 s); it adds no style sheet to the document; each of `tokens`
+    (theme token names without `--moxi-`, `accent` by default) reaches at least one colour
+    in its shadow tree within `token_ms` of that (`TOKEN_MS`, 20 s, unless given), so
+    changing the token on its host changes what it shows (a part the component draws once
+    its data arrives counts); and every request its browser context made from the
+    placement until it settled went to the shell's own origin, under `/m/<module>/` (or
+    `/m/<m>/` for each `m` of `allow`, the modules whose components it places in turn), or
+    to the push channel for `<module>`'s, `allow`'s and the shell's own topics. The push
+    channel is one stream for the whole page, which reopens with every topic the page
+    holds when a component subscribes, so a topic the page held before the placement is
+    not counted against the component.
 
     The component is removed after the check, unless `keep`, when `locator` is the
     element still in the page.
@@ -283,9 +302,9 @@ def check_component(page: Any, module: str, name: str,
                                  "or its script did not load or define its element")
         try:
             page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)
-        except Exception as err:  # noqa: BLE001 - Playwright's TimeoutError, named below
+        except Exception as exc:  # noqa: BLE001 - Playwright's TimeoutError, named below
             raise AssertionError(f"{placed['tag']} rendered nothing into an open shadow "
-                                 f"root in {RENDER_MS / 1000:g}s") from err
+                                 f"root in {RENDER_MS / 1000:g}s") from exc
         shape = page.evaluate(_JS_SHAPE, mark)
         if not shape["defined"]:
             raise AssertionError(f"{placed['tag']} is not a defined custom element")
@@ -294,9 +313,10 @@ def check_component(page: Any, module: str, name: str,
                                  "component's styles belong in its shadow root")
         reached = []
         for token in tokens:
-            if not page.evaluate(_function(_JS_TOKEN), [mark, token, list(_PROBES), _COLOURS]):
+            if not _reaches(page, mark, token, token_ms):
                 raise AssertionError(f"--moxi-{token} reaches no colour of {placed['tag']}: "
-                                     "changing it on the host changed nothing it shows")
+                                     "changing it on the host changed nothing it shows "
+                                     f"in {token_ms / 1000:g}s")
             reached.append(token)
         deadline = time.monotonic() + SETTLE_S
         while time.monotonic() - stamp[0] < QUIET_S and time.monotonic() < deadline:

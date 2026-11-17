@@ -70,7 +70,7 @@ def rows() -> list[Row]:
                            f"moxi repo git-hooks remove {quote_arg(root)}"))
             continue
         try:
-            status = api._status_of(repo, True, version, good)
+            status = api._status_of(repo, in_index=True, version=version, good=good)
         except (api.Failure, OSError) as exc:
             out.append(Row(MODULE, name, "fail", f"its git config can't be read: "
                            f"{getattr(exc, 'text', exc)}"))
@@ -149,7 +149,7 @@ def _version_of(path: str):
     from moxi import proc
 
     try:
-        done = proc.run([path, "version"], timeout=10)
+        done = proc.run([path, "version"], timeout_s=10)
     except Exception:  # noqa: BLE001 - a git that can't say is reported as having none
         return None
     if done.returncode != 0:
@@ -267,7 +267,7 @@ def _named(paths: list[str]) -> str:
 def _cadence_rows(repo, label: str, name: str, spec: dict, item: dict, changed: list[str],
                   now: float) -> list[Row]:
     root = str(repo.root)
-    interval = float(spec["min_interval"] or 0)
+    interval = float(spec["min_interval_s"] or 0)
     left = set(item["left"])
     waiting = [p for p in changed if p not in left
                and any(_covers(sp, p) for sp in spec["paths"])]

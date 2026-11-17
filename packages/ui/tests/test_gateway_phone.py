@@ -67,7 +67,7 @@ class World:
         return {"gateway.enabled": True, "gateway.port": self.port, "port": 1}
 
     def tunnel(self):
-        return TunnelRead(self.address, True)
+        return TunnelRead(self.address, current=True)
 
 
 async def _route(scope, receive, send):
@@ -94,11 +94,11 @@ class Loop:
 @pytest.fixture
 def env(tmp_path_factory):
     root = tempfile.mkdtemp(prefix="gw", dir=tmp_path_factory.getbasetemp())
-    environ = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),
+    shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),
                "XDG_STATE_HOME": os.path.join(root, "s")}
-    os.makedirs(environ["XDG_RUNTIME_DIR"], mode=0o700)
-    Layout("ui").runtime_dir(environ, create=True)
-    return environ
+    os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
+    Layout("ui").runtime_dir(shell_env, create=True)
+    return shell_env
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ def served(env):
     gw = Gateway(layout, parts=access.parts(Parts(table=table, router=_route)), kind="tcp",
                  system="linux", settings=world.settings, extra=lambda: True,
                  tunnel=world.tunnel, find_uid=lambda name: os.getuid(),
-                 remove=lambda: None, environ=env, tick_s=0.05)
+                 remove=lambda: None, env=env, tick_s=0.05)
     holder["gw"] = gw
     gw.start()
     loop.run(gw.tick())
@@ -273,7 +273,7 @@ def test_the_desktop_mints_a_pairing_url_lists_and_revokes_devices(served):
 def test_the_desktop_pairing_refuses_with_no_address_or_no_gateway(served):
     served.gw.address = None
     shell = SimpleNamespace(gateway=served.gw, phone=served.access, layout=Layout("ui"))
-    with pytest.raises(Refused, match="moxi ui gateway on"):
+    with pytest.raises(Refused, match="moxi ui gateway enable"):
         _at_desk(shell, desk.pair)
     with pytest.raises(Refused, match="no gateway"):
         _at_desk(SimpleNamespace(gateway=None, phone=None), desk.pair)

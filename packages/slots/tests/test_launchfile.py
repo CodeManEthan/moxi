@@ -32,17 +32,18 @@ def pane(state: PaneState):
     return read
 
 
-ALIVE = PaneState(True, False, None, "slot-1", "@1")
-DEAD3 = PaneState(True, True, 3, "slot-1", "@1")
-DEAD127 = PaneState(True, True, 127, "slot-1", "@1")
-GONE = PaneState(False)
+ALIVE = PaneState(exists=True, dead=False, dead_status=None, session="slot-1", window_id="@1")
+DEAD3 = PaneState(exists=True, dead=True, dead_status=3, session="slot-1", window_id="@1")
+DEAD127 = PaneState(exists=True, dead=True, dead_status=127,
+                    session="slot-1", window_id="@1")
+GONE = PaneState(exists=False)
 
 
 def launch_file(text: str | None = None):
     path = launchfile.write(["true"], {"SECRET": "x"}, "/")
     if text is not None:
-        with open(path, "w") as f:
-            f.write(text + "\n")
+        with open(path, "w") as fh:
+            fh.write(text + "\n")
     return path
 
 

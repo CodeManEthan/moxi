@@ -76,9 +76,14 @@ class Header:
     * `harness`, `session_id`, `agent_id`: whose records these are.
     * `cwd`, `title`, `version`: the session's directory, its title and the harness's
       version as written (Claude's `version`, Codex line 1's `cli_version`, OpenCode's
-      session `version`). Claude Code and Codex write no title in the head of a file:
-      Claude's titles come as `title` markers among the records, so `title` is unknown for
-      both.
+      session `version`). `title` is OpenCode's alone. Codex writes no title. Claude Code
+      writes a name the session was given as `custom-title` lines, which can stand among a
+      file's first lines and anywhere after them: they come as `title` markers among the
+      records, the header does not read them, and `claude_head_name` reads the newest one
+      in a file's head.
+    * `started`: when the session started, in epoch seconds: the time of the first of a
+      Claude file's first lines that has one, Codex line 1's `timestamp`, OpenCode's
+      `time_created`.
     * `parent`: the session this one came from: a Claude subagent's parent session, an
       OpenCode child's parent, a forked Codex thread's `forked_from_id` (a spawned
       thread's parent when line 1 has no `forked_from_id`); else None.
@@ -101,6 +106,7 @@ class Header:
     cwd: Any = UNKNOWN
     title: Any = UNKNOWN
     version: Any = UNKNOWN
+    started: Any = UNKNOWN
     parent: Any = None
     entrypoint: Any = UNKNOWN
     labels: Mapping[str, Any] | None = None
@@ -119,7 +125,7 @@ class Header:
         out: dict[str, Any] = {}
         unknown = []
         for name in ("harness", "session_id", "agent_id", "cwd", "title", "version",
-                     "parent", "entrypoint", "labels", "codex_source", "meta"):
+                     "started", "parent", "entrypoint", "labels", "codex_source", "meta"):
             value = getattr(self, name)
             if value is UNKNOWN:
                 unknown.append(name)
@@ -141,8 +147,8 @@ class Header:
         return out
 
 
-def _head_entries(handle: BinaryIO, end: int, lines: int = HEAD_LINES):
-    """The decoded entries of a file's first lines, up to `end` and the head's bounds."""
+def _head_lines(handle: BinaryIO, end: int, lines: int = HEAD_LINES):
+    """A file's first lines as written, up to `end` and the head's bounds."""
     handle.seek(0)
     offset = 0
     stop = min(end, HEAD_BYTES)
@@ -155,6 +161,12 @@ def _head_entries(handle: BinaryIO, end: int, lines: int = HEAD_LINES):
         offset += len(data)
         if not data.endswith(b"\n") and offset < end:
             return                       # a line longer than the head's bound
+        yield data
+
+
+def _head_entries(handle: BinaryIO, end: int, lines: int = HEAD_LINES):
+    """The decoded entries of a file's first lines, up to `end` and the head's bounds."""
+    for data in _head_lines(handle, end, lines):
         entry = claude.parse_line(data)
         if entry is not None:
             yield entry
@@ -187,27 +199,68 @@ def sidecar_labels(path: str | Path) -> dict[str, Any]:
 
 def claude_header(source: Source, handle: BinaryIO, end: int) -> Header:
     """A Claude transcript's header from its head: the first `cwd`, `version`,
-    `entrypoint` and `sessionId` the first lines write, and a subagent's sidecar."""
+    `entrypoint` and `sessionId` the first lines write, the first time one of them is
+    stamped with, and a subagent's sidecar."""
     found: dict[str, Any] = {}
     for entry in _head_entries(handle, end):
         for key in ("cwd", "version", "entrypoint", "sessionId"):
             if key not in found and isinstance(entry.get(key), str):
                 found[key] = entry[key]
-        if len(found) == 4:
+        if "started" not in found:
+            stamp = claude.parse_timestamp(entry.get("timestamp"))
+            if stamp is not None:
+                found["started"] = stamp
+        if len(found) == 5:
             break
     session_id = source.session_id if source.session_id is not None else found.get(
         "sessionId", UNKNOWN)
     subagent = source.agent_id is not None
     return Header(harness=CLAUDE, session_id=session_id, agent_id=source.agent_id,
                   cwd=found.get("cwd", UNKNOWN), version=found.get("version", UNKNOWN),
+                  started=found.get("started", UNKNOWN),
                   parent=session_id if subagent else None,
                   entrypoint=found.get("entrypoint", UNKNOWN),
                   labels=sidecar_labels(source.path) if subagent else None)
 
 
+def claude_named_head(handle: BinaryIO, end: int) -> tuple[str | None, bool]:
+    """One read of the first lines a header reads, for a Claude transcript's name:
+    `(name, complete)`.
+
+    `name` is the name those lines give the session: their newest `custom-title` line,
+    or None when they hold none. A title Claude Code made up itself (`ai-title`) is not a
+    name. A name written only past the head is not found here; it comes as a `title`
+    marker among the records.
+
+    `complete` is true when the head's bounds, not the file's end at `end`, stopped the
+    read. Claude Code writes a transcript by adding lines at its end, and no transcript
+    sessions has read had a line changed where it stood; on that, a complete head is
+    taken to read the same as the file grows. One the file's end stopped can still gain
+    lines, a name among them. A caller that keeps a head checks that the file is the
+    same one and no smaller before it relies on this."""
+    name = None
+    count = size = 0
+    for data in _head_lines(handle, end):
+        count += 1
+        size += len(data)
+        if b'"custom-title"' not in data:
+            continue
+        entry = claude.parse_line(data)
+        if (entry is not None and entry.get("type") == "custom-title"
+                and isinstance(entry.get("customTitle"), str) and entry["customTitle"]):
+            name = entry["customTitle"]
+    return name, count >= HEAD_LINES or size >= HEAD_BYTES or size < end
+
+
+def claude_head_name(handle: BinaryIO, end: int) -> str | None:
+    """The name a Claude transcript's head gives its session, or None
+    (`claude_named_head`)."""
+    return claude_named_head(handle, end)[0]
+
+
 #: The `session_meta` facts a Codex header carries in `meta`.
-META_FACTS = ("history_mode", "originator", "cli_version", "source", "model_provider",
-              "context_window", "forked_from_id")
+META_FACTS = ("timestamp", "history_mode", "originator", "cli_version", "source",
+              "model_provider", "context_window", "forked_from_id")
 
 
 def codex_head(handle: BinaryIO, end: int) -> codex.Head:
@@ -250,6 +303,7 @@ def codex_header(source: Source, head: codex.Head,
         facts["unlisted_keys"] = tuple(k for k in meta if k not in codex.META_KEYS)
     forked = meta.get("forked_from_id") if meta is not None else None
     spawn = codex.spawn_link(meta) if meta is not None else UNKNOWN
+    started = claude.parse_timestamp(meta.get("timestamp")) if meta is not None else None
     if not isinstance(forked, str) and spawn is not None and spawn is not UNKNOWN:
         forked = spawn.parent_thread_id
     return Header(
@@ -257,6 +311,7 @@ def codex_header(source: Source, head: codex.Head,
         agent_id=source.agent_id,
         cwd=meta.get("cwd", UNKNOWN) if meta is not None else UNKNOWN,
         version=meta.get("cli_version", UNKNOWN) if meta is not None else UNKNOWN,
+        started=UNKNOWN if started is None else started,
         parent=forked if isinstance(forked, str) else None,
         codex_source=meta.get("source", UNKNOWN) if meta is not None else UNKNOWN,
         meta=facts, import_marks=codex.import_marks(head, imports, thread_id=thread),
@@ -271,7 +326,8 @@ def opencode_header(source: Source, row: Any) -> Header:
                       agent_id=source.agent_id)
     return Header(harness=OPENCODE, session_id=row.id,
                   agent_id=row.id if row.parent_id is not None else None,
-                  cwd=row.directory, title=row.title, version=row.version,
+                  cwd=row.work_dir, title=row.title, version=row.version,
+                  started=UNKNOWN if row.time_created is None else row.time_created,
                   parent=row.parent_id, session_row=row)
 
 
@@ -290,8 +346,8 @@ ROOT_KEYS = {CLAUDE: "claude.projects", CODEX: "codex.sessions",
              OPENCODE: "opencode.database"}
 
 
-def _home(environ: Mapping[str, str]) -> str:
-    return environ.get("HOME") or str(Path.home())
+def _home(env: Mapping[str, str]) -> str:
+    return env.get("HOME") or str(Path.home())
 
 
 def _expand(value: str, home: str) -> Path:
@@ -300,44 +356,44 @@ def _expand(value: str, home: str) -> Path:
     return Path(value)
 
 
-def codex_root(environ: Mapping[str, str] | None = None) -> Path:
+def codex_root(env: Mapping[str, str] | None = None) -> Path:
     """Codex's sessions root: `${CODEX_HOME:-~/.codex}/sessions` over `environ`. With
     None, config `codex.sessions` when it is set, else the rule over this process's
     environment. Raises `moxi.config.ConfigError` when the config file cannot be read."""
-    if environ is None:
+    if env is None:
         configured = _configured(CODEX)
         if configured is not None:
             return configured
-        environ = os.environ
-    home = _home(environ)
-    base = environ.get("CODEX_HOME")
+        env = os.environ
+    home = _home(env)
+    base = env.get("CODEX_HOME")
     return (_expand(base, home) if base else Path(home) / ".codex") / "sessions"
 
 
-def opencode_root(environ: Mapping[str, str] | None = None) -> Path:
+def opencode_root(env: Mapping[str, str] | None = None) -> Path:
     """OpenCode's database: `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db` over
     `environ`. With None, config `opencode.database` when it is set, else the rule over
     this process's environment. A caller that knows the database its OpenCode server uses
     (`opencode db path` under the server's environment) hands that in instead."""
-    if environ is None:
+    if env is None:
         configured = _configured(OPENCODE)
         if configured is not None:
             return configured
-        environ = os.environ
-    home = _home(environ)
-    data = environ.get("XDG_DATA_HOME")
+        env = os.environ
+    home = _home(env)
+    data = env.get("XDG_DATA_HOME")
     base = _expand(data, home) if data else Path(home) / ".local" / "share"
     return base / "opencode" / "opencode.db"
 
 
-def root(harness: str, environ: Mapping[str, str] | None = None) -> Path:
+def root(harness: str, env: Mapping[str, str] | None = None) -> Path:
     """The harness's root (see `claude.projects_root`, `codex_root`, `opencode_root`)."""
     if harness == CLAUDE:
-        return claude.projects_root(environ)
+        return claude.projects_root(env)
     if harness == CODEX:
-        return codex_root(environ)
+        return codex_root(env)
     if harness == OPENCODE:
-        return opencode_root(environ)
+        return opencode_root(env)
     raise ValueError(f"{harness!r} is not a harness sessions reads")
 
 
@@ -394,5 +450,6 @@ def root_origin(harness: str) -> RootOrigin:
 
 
 __all__ = ["HEAD_LINES", "HEAD_BYTES", "Source", "Header", "unpack", "sidecar_labels",
-           "file_header", "claude_header", "codex_header", "codex_head", "opencode_header",
+           "file_header", "claude_header", "claude_head_name", "claude_named_head",
+           "codex_header", "codex_head", "opencode_header",
            "codex_root", "opencode_root", "root", "root_origin", "RootOrigin", "ROOT_KEYS"]

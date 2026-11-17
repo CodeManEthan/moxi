@@ -1,6 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Every setting carries page fields, which `moxi config notes show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  a unit on the largest file and the snapshot interval, and words for each way a
+  commit handles a secret. notes needs moxi 0.1.9 or later.
+- A notes repo whose git dir isn't a folder named `.git` (made with
+  `git init --separate-git-dir`, or backed by a bare `notes.git`) still has no private
+  allowlist, but while no private file is there its judges apply the public
+  `.secrets-allow` and the doctor's `allowlist` row passes. A private file put there is
+  refused as before: no allowance applies and the row fails.
+
 ## 0.1.1 (2026-11-08)
+
+- Config keys `max_mb`, `snapshot.interval` and `snapshot.auto` are now `max_mib`,
+  `snapshot.interval_minutes` and `snapshot.session_end`. An old key, set in the config
+  file, is refused, naming the new one.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_notes.api.Resolution`: the keyword `dir` is now
+  `notes_dir` (the attribute is still `dir`).
 
 The first public release.
 

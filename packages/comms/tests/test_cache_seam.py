@@ -146,7 +146,7 @@ def test_a_read_maps_the_kind_to_its_harness_and_carries_cache_s_fields():
     write_transcript(sid, age=60)
     clock = cache.clock_state("claude-shim", sid)
     assert clock.kind == cache.WARM and isinstance(clock, cache.Clock)
-    assert clock.ttl_seconds == 3600 and clock.ttl_source == "config"
+    assert clock.ttl_s == 3600 and clock.ttl_source == "config"
     missing = cache.clock_state("claude-shim", "")
     assert (missing.kind, missing.code) == (cache.UNKNOWN, "no-session-yet")
 
@@ -163,7 +163,7 @@ def test_the_5_minute_tier_is_read_from_the_transcript():
                                                   "ephemeral_1h_input_tokens": 0}
     write_transcript(sid, lines=[line])
     clock = cache.clock_state("claude-shim", sid)
-    assert (clock.kind, clock.ttl_seconds, clock.ttl_source) == (cache.COLD, 300, "tier")
+    assert (clock.kind, clock.ttl_s, clock.ttl_source) == (cache.COLD, 300, "tier")
 
 
 def test_a_read_never_raises(monkeypatch):

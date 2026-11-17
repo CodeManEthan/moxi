@@ -6,10 +6,12 @@ or it takes everything out. `teardown()`, in order:
 
 1. **Plan, and refuse first.** Every removal is planned and nothing is written yet: each
    harness entry in the ledger (`moxi_loadout.entries` over an empty manifest), the
-   managed global part as `global off` takes it out, loadout's ignore files, its
-   placements. When an entry, an ignore file or a generated agent file was changed since
-   loadout wrote it, or a harness file that holds loadout's entries doesn't read, or the
-   CLI that removes an MCP server is missing while the server is there, it raises
+   managed global part as `global remove` takes it out, loadout's ignore files, its
+   placements. When an entry, an ignore file or a generated agent or global file was
+   changed since loadout wrote it, a harness global file is one real file with another
+   harness's (or is another harness's part), a harness file that holds loadout's entries
+   doesn't read, or the CLI that removes an MCP server is missing while the server is
+   there, it raises
    `moxi.modules.Refused` naming each with its fix: nothing is removed and the uninstall
    exits 3.
 2. **The harness entries.** MCP servers through their CLIs first, then each harness file
@@ -53,7 +55,7 @@ def teardown(*, say: Callable[[str], object] = print) -> int | str:
     from moxi import files, paths
 
     try:
-        with files.lock(paths.core_lock(), nested=True, timeout=CORE_WAIT):
+        with files.lock(paths.core_lock(), nested=True, timeout_s=CORE_WAIT):
             return _teardown(say)
     except files.LockTimeout as exc:
         return f"loadout: {exc}; run {AGAIN} again when the other install is done"
@@ -70,10 +72,11 @@ def _teardown(say) -> int | str:
     except ledger.LedgerError as exc:
         raise modules.Refused(f"uninstall refused; nothing was removed: {exc}") from None
     machine = _machine()
-    folders = _folders(data, machine)
+    loadout_dirs = _loadout_dirs(data, machine)
     run = _plan(data, machine)
 
-    problems = _changed(run) + _unreadable(run) + _ignore_files(data) + _generated(data)
+    problems = (_changed(run) + _crossed(run) + _unreadable(run) + _ignore_files(data)
+                + _generated(data))
     if problems:
         raise modules.Refused(
             "uninstall refused; nothing was removed. Changed since loadout wrote it, or "
@@ -86,10 +89,10 @@ def _teardown(say) -> int | str:
         if a.op in ("add", "update", "remove") and not a.done:
             failed.append(f"loadout: {_label(a.record)} was not removed from "
                           f"{a.record.get('file')}")
-        elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, folders):
+        elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, loadout_dirs):
             how = "reads" if a.record.get("kind") in _GLOBAL_KINDS else "runs from"
             say(f"loadout: {_label(a.record)} stays in {a.record.get('file')}, as it was "
-                f"there before loadout; it {how} {_runs_from(a.record, folders)}")
+                f"there before loadout; it {how} {_runs_from(a.record, loadout_dirs)}")
 
     try:
         _hand_back(data, say)
@@ -131,7 +134,7 @@ def _keep(machine) -> int:
     return 10 if machine is None else machine.backups_keep
 
 
-def _folders(data: dict, machine) -> list[str]:
+def _loadout_dirs(data: dict, machine) -> list[str]:
     """The loadout folders a harness entry may run from: the one the last install read,
     and the configured one."""
     out = []
@@ -146,8 +149,8 @@ def _plan(data: dict, machine):
     (the user's first, or gone already), or left as changed or unreadable."""
     from moxi_loadout import entries, manifest, stores
 
-    folder = stores.default_source() if machine is None else machine.source
-    run = entries.plan(manifest.empty(stores.manifest_path(folder)), folder, data)
+    loadout_dir = stores.default_source() if machine is None else machine.source
+    run = entries.plan(manifest.empty(stores.manifest_path(loadout_dir)), loadout_dir, data)
     for a in run.actions:
         if a.op == "stand" and a.record is not None and a.record.get("kind") == "mcp" \
                 and a.reason.startswith("no ") and entries.mcp_there(a.record) is False:
@@ -168,6 +171,12 @@ def _changed(run) -> list[str]:
         out.append(f"{_label(r)} in {r.get('file')} was edited since loadout wrote it: "
                    f"{fix}")
     return out
+
+
+def _crossed(run) -> list[str]:
+    """Each harness global file the real-path rule leaves blocked: one real file with
+    another harness's, or another harness's part or generated file."""
+    return [r.reason for r in run.rows if r.kind == "global" and r.state == "blocked"]
 
 
 def _unreadable(run) -> list[str]:
@@ -199,9 +208,9 @@ def _ignore_files(data: dict) -> list[str]:
 
 
 def _generated(data: dict) -> list[str]:
-    """Each generated agent file edited by hand, which a purge would lose. One no
+    """Each generated agent or global file edited by hand, which a purge would lose. One no
     placement uses any more has no `--replace` to name: deleting it is the fix."""
-    from moxi_loadout import convert, install, stores
+    from moxi_loadout import convert, globalfile, install, stores
 
     root = stores.generated_dir()
     used = install.generated_in_use(data)
@@ -209,6 +218,13 @@ def _generated(data: dict) -> list[str]:
     for top, _, names in os.walk(root):
         for name in sorted(names):
             path = Path(top) / name
+            if globalfile.is_generated(path):
+                if globalfile.generated_state(path) == "modified":
+                    h = path.stem
+                    out.append(f"{path} was edited by hand: copy the edit into the global "
+                               f"file or its part, then run moxi loadout install --replace "
+                               f"global:global@{h}")
+                continue
             if convert.state(path) != "modified":
                 continue
             if os.path.realpath(path) not in used:
@@ -242,18 +258,19 @@ def _ident(record: dict) -> str | None:
     return text
 
 
-#: The kinds of entry that bring the global file into a harness: Claude's `@` line,
-#: OpenCode's `instructions` path, the Codex block.
+#: The kinds of entry that bring the global file into a harness: Claude's `@` line, the
+#: Codex and OpenCode block, and OpenCode's `instructions` path, which an older install
+#: wrote and a record may still hold.
 _GLOBAL_KINDS = ("global-line", "instructions", "global-block")
 
 
-def _runs_from(record: dict, folders: list[str]) -> str | None:
+def _runs_from(record: dict, loadout_dirs: list[str]) -> str | None:
     """The loadout folder a kept entry names (a hook's script, an MCP server's, the
     global file a global entry brings in), or None."""
     if record.get("kind") not in ("hook", "mcp", "opencode-mcp") + _GLOBAL_KINDS:
         return None
     texts = list(_strings(record.get("written")))
-    return next((f for f in folders if any(f in t for t in texts)), None)
+    return next((f for f in loadout_dirs if any(f in t for t in texts)), None)
 
 
 def _strings(value):

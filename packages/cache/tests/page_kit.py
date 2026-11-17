@@ -1,5 +1,6 @@
-"""What cache's tests through a test shell share: the clock records the shell's page server
-reads, the chip placed on the shell's document, and a short wait.
+"""What cache's tests through a test shell share: the clock records and the watcher's
+reading the shell's page server reads, the chip placed on the shell's document, and a
+short wait.
 
 A test shell keeps its files under a home of its own, so its page server reads its records
 from that home's runtime directory, never from the test's (`own_roots`) or the user's.
@@ -28,9 +29,9 @@ def record_dir(shell: Any) -> Path:
 def put(shell: Any, record: dict, text: str | None = None) -> None:
     """Write `record` (or `text` in its place) as its session's record, as the watcher
     does: whole, by a rename."""
-    directory = record_dir(shell)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{record['session']}.json"
+    records_dir = record_dir(shell)
+    records_dir.mkdir(parents=True, exist_ok=True)
+    path = records_dir / f"{record['session']}.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record) if text is None else text)
     os.replace(tmp, path)
@@ -38,10 +39,33 @@ def put(shell: Any, record: dict, text: str | None = None) -> None:
 
 def clear(shell: Any) -> None:
     """Remove every record, so a test starts from none."""
-    directory = record_dir(shell)
-    if directory.is_dir():
-        for path in directory.iterdir():
+    records_dir = record_dir(shell)
+    if records_dir.is_dir():
+        for path in records_dir.iterdir():
             path.unlink()
+
+
+def put_reading(shell: Any, *, now: float | None = None, tick: float = 1,
+                listed: float | None = 1, stale_after: float = 30,
+                text: str | None = None) -> dict:
+    """Write the watcher's reading (or `text` in its place) as the watcher does: whole, by
+    a rename. It ticked `tick` seconds before `now` and listed Claude's sessions `listed`
+    seconds before it (never, with None). Returns the reading as the page server sends
+    it."""
+    now = time.time() if now is None else now
+    sent = {"tick_at": now - tick, "listed_at": None if listed is None else now - listed,
+            "stale_after": stale_after}
+    path = shell.runtime_dir("cache") / "watch.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(".watch.json.tmp")
+    tmp.write_text(json.dumps({"v": 1, "pid": 4242, **sent}) if text is None else text)
+    os.replace(tmp, path)
+    return sent
+
+
+def clear_reading(shell: Any) -> None:
+    """Remove the watcher's reading, as if no watcher of this build had run."""
+    (shell.runtime_dir("cache") / "watch.json").unlink(missing_ok=True)
 
 
 def record(session: str, *, now: float | None = None, age: float = 60, ttl: float = 3600,

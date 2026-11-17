@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { chipView, NO_RECORD, pageView, SERVER_ERROR, WATCHER_STOPPED } from "../src/views.ts";
+import { chipView, NO_RECORD, SERVER_ERROR, WATCHER_STOPPED } from "../src/views.ts";
 
 const NOW = 10_000;
 const row = (extra) => ({ session: "s1", harness: "claude", kind: "warm", last_request: NOW - 60,
@@ -52,22 +52,4 @@ test("a server error and a failed request are both 'cache ?'", () => {
 
 test("a 404 draws nothing", () => {
   assert.equal(chipView({ ...up([]), gone: true }, "s1", NOW).state, "gone");
-});
-
-test("the page: loading, empty, rows, every row dim, error and failure", () => {
-  assert.equal(pageView({ loading: true, gone: false, failure: null, value: null }, null).state, "loading");
-  assert.equal(pageView(up([]), NOW).state, "empty");
-  const rows = pageView(up([row(), row({ session: "s2" })]), NOW);
-  assert.equal(rows.state, "up");
-  assert.equal(rows.rows.length, 2);
-  assert.equal(rows.stopped, false);
-  const stopped = pageView(up([row({ seen_at: 0 }), row({ session: "s2", seen_at: 0 })]), NOW);
-  assert.equal(stopped.stopped, true);
-  const some = pageView(up([row({ seen_at: 0 }), row({ session: "s2", kind: "fresh", seen_at: 0 })]), NOW);
-  assert.equal(some.stopped, false);
-  const error = pageView({ loading: false, gone: false, failure: null, value: { state: "error", detail: "d", clocks: [] } }, NOW);
-  assert.deepEqual([error.state, error.detail, error.rows], ["error", "d", []]);
-  const failed = pageView({ ...up([row()]), failure: { status: 0, why: "no answer" } }, NOW);
-  assert.deepEqual([failed.state, failed.detail, failed.rows.length], ["failed", "no answer", 1]);
-  assert.equal(pageView({ ...up([row()]), gone: true }, NOW).state, "gone");
 });

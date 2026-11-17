@@ -4,7 +4,7 @@
 verdict is made from its records; a caller that decides about a cache calls `api.read`.**
 A record can lag the transcript by a tick, so it is not evidence.
 
-At each tick (`watch.tick`, 10 s by default):
+At each tick (`watch.tick_s`, 10 s by default):
 
 1. Every third tick, and whenever a file in Claude Code's sessions folder
    (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`) is added, removed or rewritten, it runs
@@ -18,11 +18,21 @@ At each tick (`watch.tick`, 10 s by default):
 3. It writes `RUNTIME/cache/clock/<session>.json` by atomic replace (`records`), with
    `seen_at` at this tick whether it read or not, and removes the record of a session that
    left the live list. Every record it writes carries `warn_before` (the effective
-   `segment.warn_before`) and `stale_after` (three times the effective tick), both in
+   `segment.warn_before_s`) and `stale_after` (three times the effective tick), both in
    seconds, from the config as read at this tick, so a config change reaches every record
    within one tick (`records`). The tick that sets `stale_after` is the one the watcher
-   then waits, so a fresh record never shows dim.
-4. It runs the timer's work for the tick (`timer`) over the records it wrote.
+   then waits, so a fresh record never shows dim. Every record also carries `asks`, the
+   timer's subscriptions this watcher will ask about the session (`Timer.asking`), or
+   null while the timer has loaded nothing.
+4. After every tick, whatever it wrote, it replaces its reading, `RUNTIME/cache/watch.json`
+   (`records`), through `moxi.files.atomic_write`: `tick_at` is this tick, and `listed_at`
+   moves to it only at a tick that held the live list and was not halted, one with no live
+   session included. A write that fails is logged once per change and the tick goes on.
+   The reading is not under `clock/`, so no listing of the records sees it.
+5. It runs the timer's work for the tick (`timer`) over the records it wrote.
+
+Before the first tick, `run` loads the timer's subscriptions once (`Timer.reload`), so the
+first tick's records carry `asks` too.
 
 A session id is used in a path only after the reader's own check (`records.record_path`):
 an id it refuses, such as one holding `/` or `..`, gets no record and one log line.
@@ -30,7 +40,9 @@ an id it refuses, such as one holding `/` or `..`, gets no record and one log li
 A shape of `claude agents --json` it does not know stops its writes, with one log line
 naming the shape, until the shape is one it knows again; the records then stand still and
 show dim. When the list cannot be read at all (no `claude`, an exit, a timeout), the tick
-writes nothing and the next tick asks again. Each log line is written once per change of
+writes no record and the next tick asks again. Either way the reading's `tick_at` moves
+and its `listed_at` stands still, so a reader can tell a watcher that runs and cannot list
+from one that stopped. Each log line is written once per change of
 what it says. Codex and OpenCode sessions get no records.
 
 The watcher runs in the foreground (`moxi cache watch`, or this script), or as a unit of
@@ -53,6 +65,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from moxi.config import Config, ConfigError
+from moxi.files import atomic_write
 from moxi_sessions.api import find
 
 from . import api, records
@@ -117,14 +130,14 @@ def parse_agents(doc) -> list[Live]:
     return live
 
 
-def claude_binary(environ=None) -> str | None:
+def claude_binary(env=None) -> str | None:
     """`claude` on PATH, else at the installer's place, `~/.local/bin/claude`. A user
     service's PATH often lacks the second."""
-    environ = os.environ if environ is None else environ
-    found = shutil.which("claude", path=environ.get("PATH"))
+    env = os.environ if env is None else env
+    found = shutil.which("claude", path=env.get("PATH"))
     if found:
         return found
-    home = environ.get("HOME") or str(Path.home())
+    home = env.get("HOME") or str(Path.home())
     fallback = Path(home) / ".local" / "bin" / "claude"
     return str(fallback) if os.access(fallback, os.X_OK) else None
 
@@ -139,33 +152,33 @@ def run_agents(timeout: float = AGENTS_TIMEOUT):
                               capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise AgentsUnreadable(f"`claude agents --json` took over {timeout:g}s") from None
-    except OSError as e:
-        raise AgentsUnreadable(f"`claude agents --json` could not run ({e})") from None
+    except OSError as exc:
+        raise AgentsUnreadable(f"`claude agents --json` could not run ({exc})") from None
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
         raise AgentsUnreadable(f"`claude agents --json` exited {proc.returncode}"
                                + (f": {detail[-1]}" if detail else ""))
     try:
         return json.loads(proc.stdout)
-    except ValueError as e:
-        raise AgentsUnreadable(f"`claude agents --json` printed no JSON ({e})") from None
+    except ValueError as exc:
+        raise AgentsUnreadable(f"`claude agents --json` printed no JSON ({exc})") from None
 
 
-def sessions_dir(environ=None) -> Path:
+def sessions_dir(env=None) -> Path:
     """Claude Code's sessions folder, `${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`."""
-    environ = os.environ if environ is None else environ
-    config = environ.get("CLAUDE_CONFIG_DIR")
+    env = os.environ if env is None else env
+    config = env.get("CLAUDE_CONFIG_DIR")
     if config:
         return Path(config) / "sessions"
-    home = environ.get("HOME") or str(Path.home())
+    home = env.get("HOME") or str(Path.home())
     return Path(home) / ".claude" / "sessions"
 
 
-def sessions_stamp(directory: Path):
+def sessions_stamp(sessions_dir: Path):
     """What the sessions folder holds now: each `.json` file's name, size and
     modification time. None when the folder cannot be read."""
     try:
-        with os.scandir(directory) as entries:
+        with os.scandir(sessions_dir) as entries:
             found = []
             for entry in entries:
                 if not entry.name.endswith(".json"):
@@ -193,22 +206,23 @@ class Seen:
 
 
 def make_record(session: str, seen: Seen, now: float, *, warn_before: float,
-                stale_after: float) -> dict:
+                stale_after: float, asks: Sequence[str] | None) -> dict:
     clock = seen.clock
     return {"v": records.VERSION, "session": session, "harness": "claude", "pid": seen.pid,
             "kind": clock.kind, "last_request": seen.last_request,
-            "ttl": clock.ttl_seconds, "read_at": seen.read_at, "seen_at": now,
-            "code": clock.code, "warn_before": warn_before, "stale_after": stale_after}
+            "ttl": clock.ttl_s, "read_at": seen.read_at, "seen_at": now,
+            "code": clock.code, "warn_before": warn_before, "stale_after": stale_after,
+            "asks": None if asks is None else list(asks)}
 
 
-def write_record(directory: Path, record: dict) -> Path:
+def write_record(records_dir: Path, record: dict) -> Path:
     """Replace one record whole: a reader sees the old file or the new, never part.
     Raises `ValueError` for a session id the reader would refuse (`records.record_path`),
     so no id names a path outside `directory`."""
-    path = records.record_path(record["session"], directory)
+    path = records.record_path(record["session"], records_dir)
     if path is None:
         raise ValueError(f"session id {record['session']!r} cannot name a record file")
-    tmp = directory / f".{record['session']}.{os.getpid()}.tmp"
+    tmp = records_dir / f".{record['session']}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(record, fh)
         fh.write("\n")
@@ -219,8 +233,12 @@ def write_record(directory: Path, record: dict) -> Path:
 class Watcher:
     """The watcher's state and its tick. Every outside effect can be replaced for tests:
     `agents` (the live list), `read` (the clock), `now`, `projects_root` (where
-    transcripts are found), `directory` (where records go) and `sessions` (the folder
-    whose changes ask for the list again).
+    transcripts are found), `records_dir` (where records go), `session_files_dir` (the folder whose
+    changes ask for the list again), `reading` (the reading's file; by default
+    `watch.json` beside `records_dir`, which is `records.reading_path()` for the default
+    directory) and `asking` (what the timer asks about a session and its pid, written as
+    the record's `asks`; `run` sets it to its timer's `Timer.asking`, and by default it
+    gives None).
 
     `warn_before` and `stale_after` are what the next tick writes into every record;
     `run` sets them from the config before each tick. They start at the keys' defaults."""
@@ -229,21 +247,28 @@ class Watcher:
                  read: Callable[..., Clock] = api.read,
                  now: Callable[[], float] = time.time,
                  projects_root: Callable[[], str] | None = None,
-                 directory: Path | None = None, sessions: Path | None = None):
+                 records_dir: Path | None = None, session_files_dir: Path | None = None,
+                 reading: Path | None = None,
+                 asking: Callable[[str, int], Sequence[str] | None] | None = None):
         self.agents = agents
+        self.asking = asking or (lambda session, pid: None)
         self.read = read
         self.now = now
         self.projects_root = projects_root or (lambda: api.projects_root(None))
-        self.directory = records.record_dir() if directory is None else Path(directory)
-        self.sessions = sessions_dir() if sessions is None else Path(sessions)
-        self.warn_before = default("segment.warn_before")
-        self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick"))
+        self.records_dir = records.record_dir() if records_dir is None else Path(records_dir)
+        self.session_files_dir = sessions_dir() if session_files_dir is None else Path(session_files_dir)
+        self.reading = (self.records_dir.parent / records.READING_NAME if reading is None
+                        else Path(reading))
+        self.warn_before = default("segment.warn_before_s")
+        self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
         self.ticks = 0
         #: The records this tick wrote, by session id, for the timer; None when the tick
         #: wrote nothing because the live list could not be read or has a shape it does
         #: not know.
         self.current: dict[str, dict] | None = None
         self.tick_at: float | None = None
+        #: The newest tick that held the live list and was not halted; None until one.
+        self.listed_at: float | None = None
         self.live: list[Live] | None = None
         self.seen: dict[str, Seen] = {}
         self._stamp = None
@@ -265,10 +290,16 @@ class Watcher:
     # -- the tick ------------------------------------------------------------------------
 
     def tick(self) -> list[Live]:
-        """One tick. Returns the live sessions it wrote records for."""
+        """One tick, then the reading. Returns the live sessions it wrote records for."""
+        try:
+            return self._tick()
+        finally:
+            self._write_reading()
+
+    def _tick(self) -> list[Live]:
         now = self.tick_at = self.now()
         self.current = None
-        stamp = sessions_stamp(self.sessions)
+        stamp = sessions_stamp(self.session_files_dir)
         if self._ask or self.ticks % AGENTS_EVERY == 0 or stamp != self._stamp:
             self._stamp = stamp
             if not self._refresh():
@@ -277,33 +308,47 @@ class Watcher:
         self.ticks += 1
         if self._halted or self.live is None:
             return []
-        self.directory.mkdir(parents=True, exist_ok=True)
+        self.records_dir.mkdir(parents=True, exist_ok=True)
         current: dict[str, dict] = {}
         for live in self.live:
             seen = self._observe(live, now)
             record = current[live.session] = make_record(
                 live.session, seen, now, warn_before=self.warn_before,
-                stale_after=self.stale_after)
+                stale_after=self.stale_after, asks=self.asking(live.session, live.pid))
             try:
-                write_record(self.directory, record)
+                write_record(self.records_dir, record)
                 self.say("write", None)
-            except OSError as e:
-                self.say("write", f"cannot write the clock record of {live.session}: {e}")
+            except OSError as exc:
+                self.say("write", f"cannot write the clock record of {live.session}: {exc}")
         self.current = current
+        self.listed_at = now
         return list(self.live)
+
+    def _write_reading(self) -> None:
+        """Replace the reading whole with this tick's. Nothing to write before a first
+        tick time."""
+        if self.tick_at is None:
+            return
+        doc = {"v": records.READING_VERSION, "pid": os.getpid(), "tick_at": self.tick_at,
+               "listed_at": self.listed_at, "stale_after": self.stale_after}
+        try:
+            atomic_write(self.reading, json.dumps(doc) + "\n")
+            self.say("reading", None)
+        except OSError as exc:
+            self.say("reading", f"cannot write the watcher's reading {self.reading}: {exc}")
 
     def _refresh(self) -> bool:
         """Ask for the live list. False when this tick writes nothing."""
         try:
             listed = parse_agents(self.agents())
-        except AgentsUnreadable as e:
+        except AgentsUnreadable as exc:
             self._ask = True
-            self.say("agents", f"{e}; no clock record is written until it can be read")
+            self.say("agents", f"{exc}; no clock record is written until it can be read")
             return False
-        except ShapeError as e:
+        except ShapeError as exc:
             self._ask = True
             self._halted = True
-            self.say("agents", f"`claude agents --json` printed {e}, a shape the watcher "
+            self.say("agents", f"`claude agents --json` printed {exc}, a shape the watcher "
                                "does not know; it writes no clock record until it does")
             return False
         self._ask = False
@@ -312,7 +357,7 @@ class Watcher:
         unique: dict[str, Live] = {}
         unsafe: list[str] = []
         for live in listed:
-            if records.record_path(live.session, self.directory) is None:
+            if records.record_path(live.session, self.records_dir) is None:
                 unsafe.append(live.session)
                 continue
             unique.setdefault(live.session, live)
@@ -328,11 +373,11 @@ class Watcher:
     def _remove_others(self, keep: set[str]) -> None:
         """Remove the record of every session not in `keep`, and stray temporary files."""
         try:
-            entries = list(self.directory.iterdir())
+            entries = list(self.records_dir.iterdir())
         except FileNotFoundError:
             return
-        except OSError as e:
-            self.say("remove", f"cannot list {self.directory}: {e}")
+        except OSError as exc:
+            self.say("remove", f"cannot list {self.records_dir}: {exc}")
             return
         for path in entries:
             stray = path.name.startswith(".") and path.name.endswith(".tmp")
@@ -342,8 +387,8 @@ class Watcher:
                 path.unlink()
             except FileNotFoundError:
                 pass
-            except OSError as e:
-                self.say("remove", f"cannot remove {path}: {e}")
+            except OSError as exc:
+                self.say("remove", f"cannot remove {path}: {exc}")
 
     def _observe(self, live: Live, now: float) -> Seen:
         """Find and stat one session's transcript; read its clock when it changed."""
@@ -355,8 +400,8 @@ class Watcher:
             try:
                 found = find("claude", live.session, root=self.projects_root())
                 seen.path = Path(found.hits[0].source.path) if found.found else None
-            except (ConfigError, OSError) as e:
-                self.say("root", f"cannot find transcripts: {e}")
+            except (ConfigError, OSError) as exc:
+                self.say("root", f"cannot find transcripts: {exc}")
                 seen.path = None
         stat = None
         if seen.path is not None:
@@ -368,28 +413,28 @@ class Watcher:
         if seen.clock is None or stat != seen.stat or seen.clock.kind == UNKNOWN:
             clock = self.read("claude", live.session, now=now)
             seen.clock, seen.stat, seen.read_at = clock, stat, now
-            seen.last_request = (now - clock.age_seconds
-                                 if clock.age_seconds is not None else None)
+            seen.last_request = (now - clock.age_s
+                                 if clock.age_s is not None else None)
         return seen
 
 
 # --- running it ---------------------------------------------------------------------------
 
 def _interval(config: Config, watcher: Watcher) -> int:
-    """The effective tick: `watch.tick`, at least `MIN_TICK`."""
-    tick = config.use("watch.tick")
+    """The effective tick: `watch.tick_s`, at least `MIN_TICK`."""
+    tick = config.use("watch.tick_s")
     if tick < MIN_TICK:
-        watcher.say("tick", f"watch.tick is {tick}; the watcher ticks every {MIN_TICK}s")
+        watcher.say("tick", f"watch.tick_s is {tick}; the watcher ticks every {MIN_TICK}s")
         return MIN_TICK
     watcher.say("tick", None)
     return tick
 
 
-def _thresholds(config: Config, watcher: Watcher) -> int:
+def _set_thresholds(config: Config, watcher: Watcher) -> int:
     """Read the config once for this tick: set what the tick writes into every record
     and return the tick it then waits, the same read that set `stale_after`."""
     interval = _interval(config, watcher)
-    watcher.warn_before = config.use("segment.warn_before")
+    watcher.warn_before = config.use("segment.warn_before_s")
     watcher.stale_after = records.STALE_TICKS * interval
     return interval
 
@@ -397,34 +442,41 @@ def _thresholds(config: Config, watcher: Watcher) -> int:
 def run(*, watcher: Watcher | None = None, stop: threading.Event | None = None,
         config: Config | None = None, timer: _timer.Timer | None = None) -> int:
     """Tick until `stop` is set (SIGTERM or SIGINT in the foreground), with the timer's
-    work after each tick. Returns the exit code: 0 on a stop, 2 when the config refuses
-    the start."""
+    work after each tick. The timer loads its subscriptions once before the first tick and
+    the watcher writes `Timer.asking` into its records. Returns the exit code: 0 on a stop,
+    2 when the config refuses the start."""
     config = config or Config(MODULE, schema(),
-                              report=lambda e: log.warning("cache's config: %s", e))
+                              report=lambda config_exc: log.warning("cache's config: %s", config_exc))
     try:
         config.start()
-    except ConfigError as e:
-        print(f"moxi-cache-watch: cache's config refuses the start: {e}", file=sys.stderr)
+    except ConfigError as exc:
+        print(f"moxi-cache-watch: cache's config refuses the start: {exc}", file=sys.stderr)
         return 2
     watcher = watcher or Watcher()
     timer = timer or _timer.Timer(config_entries=lambda: config.use(_timer.CONFIG_KEY))
     stop = stop or threading.Event()
-    log.info("watching live Claude sessions; records under %s", watcher.directory)
+    log.info("watching live Claude sessions; records under %s", watcher.records_dir)
+    watcher.asking = timer.asking
     try:
+        try:
+            timer.reload()
+        except Exception as exc:                                    # noqa: BLE001
+            watcher.say("timer-error", f"the timer's first load failed "
+                                       f"({type(exc).__name__}: {exc})")
         while not stop.is_set():
-            interval = _thresholds(config, watcher)
+            interval = _set_thresholds(config, watcher)
             try:
                 watcher.tick()
                 watcher.say("tick-error", None)
-            except Exception as e:                                # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- one failed tick must not stop the watcher
                 watcher.current = None
-                watcher.say("tick-error", f"a tick failed ({type(e).__name__}: {e})")
+                watcher.say("tick-error", f"a tick failed ({type(exc).__name__}: {exc})")
             try:
                 timer.tick(watcher.current, watcher.tick_at)
                 watcher.say("timer-error", None)
-            except Exception as e:                                # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- one timer failure must not stop the watcher
                 watcher.say("timer-error", f"the timer's tick failed "
-                                           f"({type(e).__name__}: {e})")
+                                           f"({type(exc).__name__}: {exc})")
             stop.wait(interval)
     finally:
         timer.close()

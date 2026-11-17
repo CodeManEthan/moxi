@@ -10,6 +10,8 @@ with the reason, and the TCP tests show what the phone gets instead: the desk po
 
 from __future__ import annotations
 
+import json
+import re
 import socket
 import threading
 import time
@@ -18,14 +20,16 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import expect
 
-import phone_kit
+from moxi_ui.checks import CHECKS_FILE
 from moxi_ui.loopback.api import response_headers
-from moxi_ui.testing.phone import HOST, ORIGIN, PhoneBridge, set_gateway
+from moxi_ui.testing import WAIT_MS
+from moxi_ui.testing.phone import (HOST, ORIGIN, PhoneBridge, free_port, gateway_shell,
+                                   pair_page, set_gateway, wait_hold)
+from moxi_ui.testing.shell import TestShell
 from squatter import Squatter
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
 
-WAIT_MS = 5000
 #: The browser tests that need the socket endpoint, which no system's probe result names.
 SOCKET_TESTS = (
     "the phone's confirmed-act sheet shows the gateway's echo and acts once on a double tap",
@@ -314,10 +318,33 @@ def _engine(ui_browser) -> str:
     return ui_browser.browser_type.name
 
 
+#: The doctor run the gateway shell kept: one failing check, one warning, one that
+#: passes. Their details and fixes hold what the phone must not get.
+#: The root a kept row's name holds, which the phone shows as its last folder name only.
+PATH_NAMED = "/var/lib/someone/code/proj-b"
+KEPT_ROWS = [
+    {"module": "ui", "name": "shell", "state": "ok", "detail": "The shell answers", "fix": None},
+    {"module": "projects", "name": "roots", "state": "warn",
+     "detail": "The project proj-a points at /srv/proj-a, which doesn't exist",
+     "fix": "moxi projects set proj-a --root DIR"},
+    {"module": "turns", "name": "guard", "state": "fail",
+     "detail": "A guard could not check a call", "fix": "moxi config set turns guard.strict false"},
+    # Named by a path, as repo names a row by its repository's root.
+    {"module": "repo", "name": f"hooks {PATH_NAMED}", "state": "warn",
+     "detail": "Its hooks aren't installed", "fix": f"moxi repo git-hooks add {PATH_NAMED}"},
+]
+
+
 @pytest.fixture(scope="module")
 def gw(tmp_path_factory, fixture_site):
-    """A gateway-mode shell holding its TCP endpoint, and the bridge to it."""
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    """A gateway-mode shell holding its TCP endpoint, and the bridge to it. It kept a
+    doctor run (`KEPT_ROWS`) and runs none."""
+    home = tmp_path_factory.mktemp("gw")
+    state = TestShell(home, gateway=True).state_dir("ui")
+    state.mkdir(parents=True, exist_ok=True)
+    (state / CHECKS_FILE).write_text(json.dumps({
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rows": KEPT_ROWS, "error": None}))
+    shell = gateway_shell(home, [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     try:
         yield shell, bridge
@@ -347,21 +374,6 @@ def phones(ui_browser, tmp_path_factory):
             browser.close()
 
 
-def _pair(context, shell, *, passkey: bool = False):
-    """Pair through the desk's QR link; the page ends on the signed-in shell document."""
-    status, data = shell.session().post("/m/ui/api/gateway/pair")
-    assert status == 200, data
-    page = context.pages[0] if context.pages else context.new_page()
-    page.goto(data["url"])
-    expect(page).to_have_title("Moxi: pair this phone")
-    page.get_by_role("button", name="Continue").click()
-    name = "Create a passkey" if passkey else "Pair without a passkey"
-    page.get_by_role("button", name=name).click()
-    page.wait_for_url(ORIGIN + "/m/ui/")
-    page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
-    return page
-
-
 def _authenticator(context, page):
     cdp = context.new_cdp_session(page)
     cdp.send("WebAuthn.enable")
@@ -380,7 +392,7 @@ def _violations(page) -> list[str]:
 
 def test_the_phone_page_is_a_secure_context_and_the_worker_controls_it(gw, phones):
     shell, bridge = gw
-    page = _pair(phones(bridge), shell)
+    page = pair_page(phones(bridge), shell)
     assert page.evaluate("() => isSecureContext") is True
     assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
     assert page.evaluate("async () => (await import('/m/ui/client.js')).gateway()") is True
@@ -390,18 +402,18 @@ def test_a_passkey_pairs_and_signs_in_again_after_a_restart(
         ui_browser, tmp_path_factory, fixture_site, phones):
     if _engine(ui_browser) != "chromium":
         pytest.skip("passkeys run in Chromium only, against its CDP virtual authenticator")
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     try:
         context = phones(bridge)
         page = context.new_page()
         cdp, authenticator = _authenticator(context, page)
-        _pair(context, shell, passkey=True)
+        pair_page(context, shell, passkey=True)
         held = cdp.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})
         assert len(held["credentials"]) == 1 and held["credentials"][0]["rpId"] == HOST
         shell.stop()
         shell.start()
-        phone_kit.wait_hold(shell, shell.gateway_port)
+        wait_hold(shell, shell.gateway_port)
         page.goto("/m/ui/")
         expect(page).to_have_title("Moxi: sign in")
         page.get_by_role("button", name="Sign in with a passkey").click()
@@ -419,7 +431,7 @@ def test_the_manifest_installs_and_no_policy_is_violated(ui_browser, gw, phones)
     context = phones(bridge)
     page = context.new_page()
     errors = _violations(page)
-    _pair(context, shell)
+    pair_page(context, shell)
     assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
     page.reload()
     page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
@@ -432,7 +444,7 @@ def test_the_manifest_installs_and_no_policy_is_violated(ui_browser, gw, phones)
 
 def test_on_tcp_the_phones_act_shows_the_desk_pointer_and_sends_nothing(gw, phones):
     shell, bridge = gw
-    page = _pair(phones(bridge), shell)
+    page = pair_page(phones(bridge), shell)
     sent: list[str] = []
     page.on("request", lambda r: sent.append(r.url) if "/gw/act/" in r.url
             or "/api/phone-act" in r.url else None)
@@ -454,7 +466,7 @@ def test_on_tcp_the_phones_act_shows_the_desk_pointer_and_sends_nothing(gw, phon
 def test_the_fixture_panel_hides_its_desk_only_acts_and_fits_360_px(gw, phones,
                                                                    ui_width_check):
     shell, bridge = gw
-    page = _pair(phones(bridge), shell)
+    page = pair_page(phones(bridge), shell)
     page.set_viewport_size({"width": 360, "height": 740})
     ui_width_check(page, module="fixture")
     panel = page.locator("moxi-fixture-page")
@@ -463,19 +475,112 @@ def test_the_fixture_panel_hides_its_desk_only_acts_and_fits_360_px(gw, phones,
     expect(panel.get_by_role("button", name="Add one")).to_have_count(0)
 
 
+def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_only_line(
+        gw, phones, ui_width_check):
+    shell, bridge = gw
+    page = pair_page(phones(bridge), shell)
+    page.set_viewport_size({"width": 360, "height": 740})
+    home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
+    row = home.get_by_role("button", name=re.compile("Health"))
+    # The counts alone: the worst check's sentence can hold a path.
+    expect(row.locator(".fact")).to_have_text("1 check failing, 2 warnings")
+    expect(row.locator(".time")).to_have_text(re.compile(r"^checked \d\d?:\d\d"))
+    # No spot and no sentence: the rows start under the shell's line, which says the
+    # phone only reads and sits first under the top line.
+    expect(home.locator(".spot")).to_have_count(0)
+    expect(home.get_by_text("Nothing needs you.")).to_have_count(0)
+    reads = page.locator("#moxi-reads")
+    expect(reads).to_have_text("This phone reads only here.")
+    expect(home).not_to_contain_text("This phone reads only")
+    top, line = page.locator(".moxi-top").bounding_box(), reads.bounding_box()
+    rows = home.locator(".rows").bounding_box()
+    assert top["y"] + top["height"] <= line["y"] and line["y"] + line["height"] <= rows["y"] < 100
+    assert line["x"] + 18 == rows["x"] + 2, "the line starts where the rows' labels do"
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    row.click()
+    health = home.locator("moxi-ui-health")
+    checks = health.locator(".check")
+    # Each check's module and name, a path in the name cut to its last folder name.
+    expect(checks).to_have_text([re.compile(r"^\s*turns · guard\s*failing\s*$"),
+                                 re.compile(r"^\s*projects · roots\s*warning\s*$"),
+                                 re.compile(r"^\s*repo · hooks proj-b\s*warning\s*$")])
+    expect(home).not_to_contain_text("/var/lib/someone")
+    for row_ in KEPT_ROWS:
+        expect(home).not_to_contain_text(row_["detail"])
+        if row_["fix"]:
+            expect(home).not_to_contain_text(row_["fix"])
+    expect(health.locator(".foot")).to_contain_text("Every other check passes")
+    expect(health.get_by_role("link", name="All checks on Modules")).to_be_visible()
+    expect(health.get_by_role("button")).to_have_count(0)
+    ui_width_check(page)
+    # A fixture row that reports shows here as at the desk.
+    expect(home.locator("moxi-fixture-row-one")).to_be_attached()
+    page.evaluate("""() => window.dispatchEvent(new CustomEvent("moxi-fixture-row", {detail: {
+      row: "row-one", report: {parts: [{text: "2 running"}], time: "read 19:08"}}}))""")
+    expect(home.locator(".entry[data-row='fixture.row-one'] .fact")).to_have_text("2 running")
+    ui_width_check(page)
+    # The line stays on every page the phone opens.
+    page.locator("#moxi-pages-button").click()
+    page.locator("#moxi-pages a[data-module=fixture]").click()
+    expect(page.locator("#moxi-panel > moxi-fixture-page")).to_be_attached()
+    expect(reads).to_be_visible()
+    assert reads.bounding_box() == line
+
+
+def test_on_the_phone_settings_is_hidden_and_its_address_says_where_settings_are_changed(gw, phones):
+    shell, bridge = gw
+    page = pair_page(phones(bridge), shell)
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    page.goto(ORIGIN + "/m/ui/settings/ui")
+    panel = page.locator("#moxi-panel > moxi-ui-page")
+    expect(panel.locator("[data-line=desk]")).to_have_text(
+        "Settings are changed at the desk, on the computer's Moxi page.")
+    # The one line and the way Home: no list, no rows, nothing that changes a setting.
+    expect(panel.locator("moxi-ui-settings")).to_have_count(0)
+    expect(panel.locator("p")).to_have_count(1)
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    # The top line names the place the line sends the phone to.
+    expect(page.locator("#moxi-pages-button")).to_have_text(re.compile(r"^Home\s*▾$"))
+
+def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_hidden(
+        gw, phones):
+    shell, bridge = gw
+    page = pair_page(phones(bridge), shell)
+    home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
+    health = home.get_by_role("button", name=re.compile("Health"))
+    expect(health.locator(".fact")).to_have_text("1 check failing, 2 warnings")
+    button, band = page.locator("#moxi-pages-button"), page.locator("#moxi-pages")
+    names = band.locator("a")
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    button.focus()
+    page.keyboard.press("Enter")
+    expect(band).to_be_visible()
+    page.keyboard.press("Tab")
+    expect(names.first).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(button).to_be_focused()
+    expect(band).to_be_visible()
+    # From the last name the band closes and Tab goes on into the page: Home's first row.
+    names.last.focus()
+    page.keyboard.press("Tab")
+    expect(band).to_be_hidden()
+    expect(button).to_have_attribute("aria-expanded", "false")
+    expect(health).to_be_focused()
+
+
 def test_code_holding_a_real_session_gets_a_404_on_every_act_path(gw, phones):
     shell, bridge = gw
-    page = _pair(phones(bridge), shell)
+    page = pair_page(phones(bridge), shell)
     assert page.evaluate(ACT_PATHS) == [200, 404, 404, 404, 404, 404]
 
 
 def test_the_offline_page_for_a_stopped_shell_the_off_answer_and_no_answer(
         tmp_path_factory, fixture_site, phones):
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     try:
         context = phones(bridge)
-        page = _pair(context, shell)
+        page = pair_page(context, shell)
         assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
         set_gateway(shell, enabled=False)  # the entry stays: the off answer
         assert page.evaluate(OFF) == 503  # the shell's next tick turns the gateway off
@@ -496,7 +601,7 @@ def test_the_offline_page_for_a_stopped_shell_the_off_answer_and_no_answer(
 
 def test_a_planted_worker_is_replaced_at_the_next_update_check(
         tmp_path_factory, fixture_site, phones):
-    port = phone_kit.free_port()
+    port = free_port()
     home = tmp_path_factory.mktemp("gw")
     bridge = PhoneBridge(home, port).start()
     squat = Squatter(port).start()
@@ -507,7 +612,7 @@ def test_a_planted_worker_is_replaced_at_the_next_update_check(
         expect(page).to_have_title("planted", timeout=30_000)
     finally:
         squat.stop()
-    shell = phone_kit.gateway_shell(home, fixture_site, port=port)
+    shell = gateway_shell(home, [fixture_site], port=port)
     try:
         page.goto("/m/ui/")
         expect(page).to_have_title("squatter")  # the planted worker takes this one
@@ -529,7 +634,7 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
     after. The phone keeps a live session throughout, so no sign-in page clears the cache:
     the bridge sends the phone to the squatter while the shell runs, which the phone can't
     tell from a squatter holding the port."""
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     squat = CachingSquatter().start()
 
@@ -539,7 +644,7 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
 
     try:
         context = phones(bridge)
-        page = _pair(context, shell)
+        page = pair_page(context, shell)
         assert page.evaluate(UNREGISTER) is True
         page.goto("about:blank")
         answer(squat.port)
@@ -589,7 +694,9 @@ def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_mo
     Firefox ends the replaced worker at once and drops a fetch it is sent then. The modules
     list is held until `/sw.js` is asked for, and a little more, so the panel's script is
     fetched near that moment; loads go on until one has it dropped. The shell finds the script fine and tries
-    once more, and every load's panel is placed.
+    once more, and every load's panel is placed. The held modules list itself is often
+    dropped by the swap too; the client reads it once more, so no load ever says ui is not
+    installed.
 
     The swap's moment moves with the machine's load, so a busy machine may see no drop in
     all the loads. That run skips, saying so: it never took the retry, and the rows in
@@ -597,11 +704,11 @@ def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_mo
     if _engine(ui_browser) != "firefox":
         pytest.skip("only Firefox ends a replaced worker at once and drops what it is sent; "
                     "Chromium keeps it until its fetches finish")
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     relay = HoldingRelay(shell.gateway_port).start()
     bridge = PhoneBridge(shell.home, relay.port).start()
     try:
-        page = _pair(phones(bridge), shell)
+        page = pair_page(phones(bridge), shell)
         dropped: list[str] = []
         page.on("console", lambda msg: dropped.append(msg.text)
                 if "moxi: ui's page could not load" in msg.text else None)
@@ -633,7 +740,7 @@ def test_an_offline_page_and_client_js_planted_in_cache_storage_never_run(
     name and another. None of them runs on the real gateway, on its off answer, or with
     nothing answering; the offline page and its script come from the worker's own bytes,
     with the gateway's headers."""
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     squat = StoringSquatter().start()
 
@@ -642,7 +749,7 @@ def test_an_offline_page_and_client_js_planted_in_cache_storage_never_run(
         bridge.cut()
 
     try:
-        page = _pair(phones(bridge), shell)
+        page = pair_page(phones(bridge), shell)
         assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
         answer(squat.port)
         page.goto("/m/ui/")

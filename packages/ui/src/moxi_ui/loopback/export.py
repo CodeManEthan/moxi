@@ -65,8 +65,8 @@ def load_page(module: str) -> Page:
         page_module = importlib.import_module(name)
     except PageError:
         raise
-    except Exception as err:  # noqa: BLE001 - any failure of the module's import
-        raise PageLoadError(f"importing {name} failed: {type(err).__name__}: {err}") from None
+    except Exception as exc:  # noqa: BLE001 - any failure of the module's import
+        raise PageLoadError(f"importing {name} failed: {type(exc).__name__}: {exc}") from None
     try:
         page = getattr(page_module, attr)
     except AttributeError:
@@ -81,8 +81,8 @@ def _one(module: str) -> dict:
 
     try:
         return {"ok": True, "export": export(load_page(module))}
-    except Exception as err:  # noqa: BLE001 - every refusal is reported, never raised
-        reason = str(err) or type(err).__name__
+    except Exception as exc:  # noqa: BLE001 - every refusal is reported, never raised
+        reason = str(exc) or type(exc).__name__
         return {"ok": False, "error": " ".join(reason.split())}
 
 

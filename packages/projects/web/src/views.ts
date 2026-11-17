@@ -2,7 +2,8 @@
 // no DOM so the Node tests can read it. Every string here goes into the page as text.
 
 import { saidOf } from "./feed.ts";
-import type { Added, Failure, Kind, Kinds, One, Project, Projects, RemoveStatus, Where } from "./feed.ts";
+import { kindName } from "./words.ts";
+import type { Added, Failure, Kind, Kinds, One, Project, Projects } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
 export interface FeedState<V> {
@@ -263,28 +264,6 @@ export function emptyForm(kind: string): AddForm {
 
 // -- the page -------------------------------------------------------------------------------
 
-/** What the page or a form says after an act: a tone and its lines. */
-export type Said = AddSaid;
-
-/** The page's list as it is drawn. */
-export interface ListView {
-  /** `loading`, `up` (projects listed), `empty` (none, or none of the kind), `failed` (the
-   * read failed; the last list read is kept), or `gone` (projects went away). */
-  state: "loading" | "up" | "empty" | "failed" | "gone";
-  projects: Project[];
-  line: string | null;
-}
-
-/** The page's list, read with the kind filter `kind` (null for every kind). */
-export function listView(data: FeedState<Projects>, kind: string | null): ListView {
-  const projects = data.value?.projects ?? [];
-  if (data.gone) return { state: "gone", projects: [], line: null };
-  if (data.failure !== null) return { state: "failed", projects, line: failureLine(data.failure) };
-  if (data.loading || data.value === null) return { state: "loading", projects: [], line: null };
-  if (projects.length === 0) return { state: "empty", projects, line: emptyLine(kind) };
-  return { state: "up", projects, line: null };
-}
-
 /** One choice of a kind menu: the value sent, and the label shown. */
 export interface KindChoice {
   value: string;
@@ -293,195 +272,13 @@ export interface KindChoice {
 
 /** A kind a project has that no installed module declares: kept as a label. */
 function undeclared(name: string): KindChoice {
-  return { value: name, label: `${name} (no installed module declares it)` };
+  return { value: name, label: `${kindName(name)} (no installed module declares it)` };
 }
 
-/** The kind filter's choices: every kind, then each kind listed, then any kind a listed
- * project has that no module declares, then the filter itself if it is none of those.
- * While the kinds are unknown, a project's kind is offered by its name alone. */
-export function filterChoices(kinds: Kinds | null, projects: readonly Project[], current: string): KindChoice[] {
-  const choices: KindChoice[] = [{ value: "", label: "Every kind" }];
-  const seen = new Set<string>([""]);
-  for (const kind of kinds?.found ?? []) {
-    choices.push({ value: kind.name, label: kindLabel(kind) });
-    seen.add(kind.name);
-  }
-  for (const name of [...projects.map((project) => project.kind), current]) {
-    if (seen.has(name)) continue;
-    choices.push(kinds === null ? { value: name, label: name } : undeclared(name));
-    seen.add(name);
-  }
-  return choices;
-}
-
-/** The edit form's kind menu for a project of kind `current`: each kind listed, and the
- * project's own when no module declares it. */
+/** The Projects page's kind menus for a project of kind `current`: each kind listed, in
+ * the page's kind words, and the project's own when no module declares it. */
 export function kindChoices(kinds: Kinds | null, current: string): KindChoice[] {
-  const choices = (kinds?.found ?? []).map((kind) => ({ value: kind.name, label: kindLabel(kind) }));
+  const choices = (kinds?.found ?? []).map((kind) => ({ value: kind.name, label: kindName(kind.name) }));
   if (!choices.some((choice) => choice.value === current)) choices.push(undeclared(current));
   return choices;
-}
-
-/** The fields the page shows for `project`: the card's, and its notes root when it has one. */
-export function projectFields(project: Project): Field[] {
-  const fields = cardFields(project);
-  if (project.notes_root !== null) fields.push({ name: "notes_root", label: "Notes root", value: project.notes_root });
-  return fields;
-}
-
-/** The line under the store and the git: why they are shown. */
-export const WHERE_LINE = "These are the browser shell's, which can differ from your terminal's. "
-  + "Before each change the page compares the folders it would read and write with the last "
-  + "run in a terminal, and refuses while they differ.";
-/** The git line when the page server finds none. */
-export const NO_GIT = "none on this server's PATH, so create is refused for a kind made with git";
-
-/** The store and git line as it is drawn. */
-export interface WhereView {
-  /** `loading`, `up`, `failed` (the read failed, the last value kept) or `gone`. */
-  state: "loading" | "up" | "failed" | "gone";
-  store: string | null;
-  /** The git a create would run, or null for none (with `up`) or not known. */
-  git: string | null;
-  /** The line a change would be refused with now, as the server last said it, or null. */
-  note: string | null;
-  line: string | null;
-}
-
-/** The store file and the git the page server acts with, as `/api/where` gives them. */
-export function whereView(data: FeedState<Where>): WhereView {
-  const store = data.value?.store ?? null;
-  const git = data.value?.git ?? null;
-  const note = data.value?.note ?? null;
-  if (data.gone) return { state: "gone", store: null, git: null, note: null, line: null };
-  if (data.failure !== null) return { state: "failed", store, git, note, line: failureLine(data.failure) };
-  if (data.loading || data.value === null) {
-    return { state: "loading", store: null, git: null, note: null, line: null };
-  }
-  return { state: "up", store, git, note, line: null };
-}
-
-/** The edit form, as typed. */
-export interface EditForm {
-  root: string;
-  kind: string;
-  notesRoot: string;
-}
-
-/** The edit form for `project`, as it stands. */
-export function editForm(project: Project): EditForm {
-  return { root: project.root, kind: project.kind, notesRoot: project.notes_root ?? "" };
-}
-
-/** The open project's edit form, with the project it was opened from. */
-export interface Editing {
-  /** The project as it stood when the form was opened or last started again: what a save
-   * is told apart from, so it sends only what the user changed. */
-  base: Project;
-  form: EditForm;
-  /** The project has changed since, under a form the user has typed in. */
-  stale: boolean;
-}
-
-/** The line a stale edit form shows. */
-export const STALE_LINE = "This project has changed since you opened the form. Save sends only "
-  + "what you changed here; close the project and open it again to start from what is stored now.";
-
-function sameForm(a: EditForm, b: EditForm): boolean {
-  return a.root === b.root && a.kind === b.kind && a.notesRoot === b.notesRoot;
-}
-
-/** The edit form opened from `project`. */
-export function editing(project: Project): Editing {
-  return { base: project, form: editForm(project), stale: false };
-}
-
-/** Whether the user has typed in the form: it differs from the project it was opened from. */
-export function touched(state: Editing): boolean {
-  return !sameForm(state.form, editForm(state.base));
-}
-
-/**
- * The edit form once its project has been read again as `project`. A form the user hasn't
- * typed in, or one that now matches what is stored, starts again from `project`. Any other
- * keeps the user's values and the project it was opened from, and is stale while
- * `project`'s fields differ from that one's: a save then still sends only what the user
- * changed, never the old values of the rest.
- */
-export function reread(state: Editing, project: Project): Editing {
-  const now = editForm(project);
-  if (!touched(state) || sameForm(state.form, now)) return editing(project);
-  return { ...state, stale: !sameForm(now, editForm(state.base)) };
-}
-
-/**
- * `/api/set`'s body for `form`, opened from `base`, naming only the fields the user
- * changed from `base`, as `moxi projects set KEY --root ... --kind ... --notes-root ...`
- * would; null when none did. The diff is against the project as it stood when the form
- * was opened, not as last read, so a field changed elsewhere since and not here is left
- * as it is stored. An empty root is left as it is (a root can't be cleared). The notes
- * root is sent only while notes is installed: an emptied one is cleared
- * (`--no-notes-root`). A path is sent as typed, so the server refuses a relative one or
- * one starting with `~`.
- */
-export function editBody(base: Project, form: EditForm, { notes }: { notes: boolean }):
-    Record<string, string | boolean> | null {
-  const body: Record<string, string | boolean> = { key: base.key };
-  if (form.root !== "" && form.root !== base.root) body.root = form.root;
-  if (form.kind !== "" && form.kind !== base.kind) body.kind = form.kind;
-  if (notes) {
-    if (form.notesRoot === "" && base.notes_root !== null) body.no_notes_root = true;
-    else if (form.notesRoot !== "" && form.notesRoot !== base.notes_root) body.notes_root = form.notesRoot;
-  }
-  return Object.keys(body).length > 1 ? body : null;
-}
-
-/** `/api/set`'s body that makes `name` the lead, as `moxi projects set KEY --lead NAME`. */
-export function leadBody(key: string, name: string): { key: string; lead: string } {
-  return { key, lead: name.trim() };
-}
-
-/** `/api/set`'s body that clears the lead, as `moxi projects set KEY --no-lead`. */
-export function clearLeadBody(key: string): { key: string; no_lead: true } {
-  return { key, no_lead: true };
-}
-
-/** The body of `/api/agents-add` and `/api/agents-remove`. */
-export function agentBody(key: string, name: string): { key: string; name: string } {
-  return { key, name: name.trim() };
-}
-
-/** What a set's or an agents act's answer came to, `line` saying what was done. */
-export function actSaid(acted: Acted<{ notes?: string[] }>, line: string): Said {
-  if (acted.outcome === "done") return { tone: "ok", lines: [line, ...(acted.value.notes ?? [])] };
-  if (acted.outcome === "refused") return { tone: "error", lines: [acted.text] };
-  return { tone: "warn", lines: [acted.text] };
-}
-
-/** The confirm sheet's lines for removing `project`: the command, and what stays. */
-export function removeSheet(project: Project): string[] {
-  return [
-    `moxi projects remove ${project.key}`,
-    `Takes the project ${project.key} off the list. Its root, ${project.root}, and every file in it stay as they are.`,
-  ];
-}
-
-/** The status path a remove's 202 gave, relative to projects' page, or null when it is
- * not the remove status route. */
-export function removeStatusPath(status: unknown): string | null {
-  if (typeof status !== "string") return null;
-  const path = status.replace(/^\/+/, "");
-  return /^api\/remove-status\?job=[A-Za-z0-9_-]+$/.test(path) ? path : null;
-}
-
-/** What a remove came to, as its status link gives it: removed, or refused with each
- * sentence and the fix. */
-export function removedSaid(status: RemoveStatus): Said {
-  if (status.state === "removed") {
-    return { tone: "ok", lines: [`Removed ${status.key}. Its root and its files are left as they were.`] };
-  }
-  const lines = [...status.sentences];
-  if (lines.length === 0 && status.reason !== null) lines.push(status.reason);
-  if (status.fix !== null) lines.push(`fix: ${status.fix}`);
-  return { tone: "error", lines };
 }

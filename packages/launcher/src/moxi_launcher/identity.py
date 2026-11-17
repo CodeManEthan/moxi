@@ -128,10 +128,10 @@ def check(name: str, scope: str | None, comms: Any) -> Refused | None:
     named = shown(name, scope)
     try:
         state = ask(name, scope, comms)
-    except ValueError as error:
-        return IdentityRefused(named, str(error))
-    except daemon_errors(comms) as error:
-        return CommsUnanswered(named, str(error))
+    except ValueError as exc:
+        return IdentityRefused(named, str(exc))
+    except daemon_errors(comms) as exc:
+        return CommsUnanswered(named, str(exc))
     if state.state == "offline":
         return CommsOffline(getattr(state, "qualified", None) or named,
                             getattr(state, "reason", None))

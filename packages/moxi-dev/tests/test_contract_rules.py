@@ -461,6 +461,27 @@ def test_console_scripts_are_named_moxi_module_part(repo):
     assert len(repo.findings("7")) == 3
 
 
+def test_daemon_and_timer_scripts_are_named_from_their_keys(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-serve": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
+    repo.src("module.py", announcement(
+        DAEMONS="{'shell': {'command': 'moxi-alpha-serve'}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m', "
+               "'switch': 'sweep.enabled'}}"))
+    found = repo.findings("7")
+    assert len(found) == 1
+    assert "daemon 'shell' uses console script 'moxi-alpha-serve'" in found[0]
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-shell": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
+    repo.src("module.py", announcement(
+        DAEMONS="{'shell': {'command': 'moxi-alpha-shell'}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m', "
+               "'switch': 'sweep.enabled'}}"))
+    assert repo.findings("7") == []
+
+
 @pytest.mark.parametrize("target", ["moxi.cli:main", "moxi_alpha.module:main"])
 def test_a_module_never_declares_the_moxi_script(repo, target):
     """Only the core declares moxi, whatever a module's line points at."""
@@ -498,6 +519,9 @@ def test_an_announcement_may_leave_any_name_out(repo):
 
 
 def test_every_new_name_present_is_held_to_load_s_checks(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-relay": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
     repo.src("module.py", announcement(
         DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'restart': 'always'}}",
         TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m'}}",
@@ -515,6 +539,9 @@ def test_every_new_name_present_is_held_to_load_s_checks(repo):
 
 
 def test_every_new_name_that_keeps_the_contract_passes(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-relay": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
     repo.src("module.py", announcement(
         ANNOUNCES="1",
         DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'stop': 'process', "
@@ -613,10 +640,10 @@ SKILL_RULE = ("is not a Moxi skill name: a skill Moxi ships is named moxi-<name>
               "most")
 
 
-def skill(repo, name, text=None, *, folder="skills"):
+def skill(repo, name, text=None, *, skills_dir="skills"):
     body = f"---\nname: {name}\ndescription: A skill.\n---\n\n# {name}\n" if text is None \
         else text
-    return repo.src(f"{folder}/{name}/SKILL.md", body)
+    return repo.src(f"{skills_dir}/{name}/SKILL.md", body)
 
 
 @pytest.fixture
@@ -635,7 +662,7 @@ def test_a_skill_named_moxi_name_with_its_name_line_passes(skilled):
     assert skilled.findings() == []
 
 
-def test_dot_folders_pycache_and_plain_files_in_skills_are_not_skills(skilled):
+def test_dot_dirs_pycache_and_plain_files_in_skills_are_not_skills(skilled):
     skilled.src("skills/__pycache__/x.pyc", "")
     skilled.src("skills/.x/notes.txt", "")
     skilled.src("skills/README.md", "the skills\n")
@@ -643,7 +670,7 @@ def test_dot_folders_pycache_and_plain_files_in_skills_are_not_skills(skilled):
     assert skilled.findings() == []
 
 
-def test_a_skill_whose_folder_is_not_a_skill_name_fails_naming_it(skilled):
+def test_a_skill_whose_dir_is_not_a_skill_name_fails_naming_it(skilled):
     skill(skilled, "handoff")
     assert skilled.findings("7") == [
         f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
@@ -660,7 +687,7 @@ def test_a_skill_with_no_skill_md_or_another_name_fails_naming_it(skilled):
         "src/moxi_alpha/skills/moxi-handoff:0: is a skill folder with no SKILL.md"]
 
 
-def test_a_skills_folder_declared_and_missing_or_a_file_fails(repo):
+def test_a_skills_dir_declared_and_missing_or_a_file_fails(repo):
     repo.src("module.py", announcement(SKILLS="'skills'"))
     assert repo.findings("7") == [
         "src/moxi_alpha/module.py:0: SKILLS names 'skills', and src/moxi_alpha/skills does "
@@ -671,16 +698,16 @@ def test_a_skills_folder_declared_and_missing_or_a_file_fails(repo):
         "file, not a folder"]
 
 
-def test_no_skills_declared_reads_no_skills_folder(repo):
+def test_no_skills_declared_reads_no_skills_dir(repo):
     skill(repo, "handoff")
     assert repo.findings() == []
 
 
 def test_a_skills_path_in_parts_resolves_beside_the_announcement(repo):
     repo.src("module.py", announcement(SKILLS="'./data/skills/'"))
-    skill(repo, "moxi-handoff", folder="data/skills")
+    skill(repo, "moxi-handoff", skills_dir="data/skills")
     assert repo.findings() == []
-    skill(repo, "bad", folder="data/skills")
+    skill(repo, "bad", skills_dir="data/skills")
     assert [f.split(":")[0] for f in repo.findings("7")] == ["src/moxi_alpha/data/skills/bad"]
 
 
@@ -688,13 +715,13 @@ def test_a_skills_path_with_a_backslash_fails(repo):
     # importlib.resources reads data\skills as one name on POSIX, so the install would
     # look for a folder that isn't there.
     repo.src("module.py", announcement(SKILLS="'./data\\\\skills/'"))
-    skill(repo, "moxi-handoff", folder="data/skills")
+    skill(repo, "moxi-handoff", skills_dir="data/skills")
     assert repo.findings("7") == [
         "src/moxi_alpha/module.py:0: SKILLS names './data\\\\skills/', which has a "
         "backslash; write the path with /, which resolves the same on every platform"]
 
 
-def test_the_skills_folder_is_in_the_package_that_holds_the_announcement(repo):
+def test_the_skills_dir_is_in_the_package_that_holds_the_announcement(repo):
     """As `importlib.resources` reads it: beside an announcement module, in the package it
     is part of, and inside an announcement that is a package itself."""
     repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
@@ -705,13 +732,13 @@ def test_the_skills_folder_is_in_the_package_that_holds_the_announcement(repo):
     assert repo.findings("7") == [
         "src/moxi_alpha/ann/module.py:0: SKILLS names 'skills', and "
         "src/moxi_alpha/ann/skills does not exist"]
-    skill(repo, "moxi-handoff", folder="ann/skills")
+    skill(repo, "moxi-handoff", skills_dir="ann/skills")
     assert repo.findings() == []
     repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
                                            entry_points={"alpha": "moxi_alpha.ann"}))
     repo.src("ann/__init__.py", announcement(SKILLS="'skills'"))
     assert repo.findings() == []
-    skill(repo, "handoff", folder="ann/skills")
+    skill(repo, "handoff", skills_dir="ann/skills")
     assert [f.split(":")[0] for f in repo.findings("7")] == [
         "src/moxi_alpha/ann/skills/handoff"]
 
@@ -747,7 +774,7 @@ def test_a_skill_md_the_name_cannot_be_read_from_fails(skilled, text, line, prob
 
 @pytest.mark.parametrize("value", ["'moxi-handoff\"", "moxi-handoff # the skill",
                                    "\"'moxi-handoff'\"", "''", "Moxi-Handoff"])
-def test_a_name_written_otherwise_is_not_the_folder_name(skilled, value):
+def test_a_name_written_otherwise_is_not_the_dir_name(skilled, value):
     skill(skilled, "moxi-handoff", f"---\nname: {value}\n---\n")
     found = skilled.findings("7")
     assert len(found) == 1 and "its name: is the folder's name, moxi-handoff" in found[0]
@@ -790,7 +817,7 @@ def test_staged_reads_the_skills_from_the_index(skilled):
         f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
 
 
-def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
+def test_staged_a_skills_dir_missing_or_a_file_in_the_index_fails(repo):
     repo.src("module.py", announcement(SKILLS="'skills'"))
     repo.git("init", "-q")
     repo.git("add", ".")
@@ -820,9 +847,9 @@ def staged_and_disk(repo):
     return repo.findings("7", staged=True), repo.findings("7")
 
 
-def test_a_symlinked_skill_folder_is_counted_staged_as_on_disk(skilled):
+def test_a_symlinked_skill_dir_is_counted_staged_as_on_disk(skilled):
     # A misnamed link to a skill whose name: is its own folder's.
-    skill(skilled, "moxi-link", folder="extra")
+    skill(skilled, "moxi-link", skills_dir="extra")
     link(skilled, "skills/badlink", "../extra/moxi-link")
     staged, disk = staged_and_disk(skilled)
     assert staged == disk == [
@@ -832,7 +859,7 @@ def test_a_symlinked_skill_folder_is_counted_staged_as_on_disk(skilled):
 
 
 def test_a_well_named_symlinked_skill_passes_staged_and_on_disk(skilled):
-    skill(skilled, "moxi-linked", folder="extra")
+    skill(skilled, "moxi-linked", skills_dir="extra")
     link(skilled, "skills/moxi-linked", "../extra/moxi-linked")
     assert staged_and_disk(skilled) == ([], [])
 
@@ -850,10 +877,10 @@ def test_a_symlinked_skill_md_is_read_staged_and_on_disk(skilled):
     assert skilled.findings(staged=True) == skilled.findings() == []
 
 
-def test_a_symlinked_skills_folder_is_read_staged_and_on_disk(repo):
+def test_a_symlinked_skills_dir_is_read_staged_and_on_disk(repo):
     repo.src("module.py", announcement(SKILLS="'skills'"))
-    skill(repo, "moxi-handoff", folder="data/skills")
-    skill(repo, "handoff", folder="data/skills")
+    skill(repo, "moxi-handoff", skills_dir="data/skills")
+    skill(repo, "handoff", skills_dir="data/skills")
     link(repo, "skills", "data/skills")
     staged, disk = staged_and_disk(repo)
     assert staged == disk == [
@@ -863,7 +890,7 @@ def test_a_symlinked_skills_folder_is_read_staged_and_on_disk(repo):
 def test_a_symlink_the_index_cannot_follow_fails_staged(skilled):
     skilled.git("init", "-q")
     # The target is on disk but not staged, so the commit wouldn't carry it.
-    skill(skilled, "moxi-gone", folder="extra")
+    skill(skilled, "moxi-gone", skills_dir="extra")
     link(skilled, "skills/moxi-gone", "../extra/moxi-gone")
     skilled.git("add", "src/moxi_alpha/skills", "src/moxi_alpha/module.py", "pyproject.toml")
     assert skilled.findings() == []

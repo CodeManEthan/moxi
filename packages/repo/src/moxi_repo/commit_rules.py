@@ -3,14 +3,17 @@
 It runs on commit-msg, fail closed, order 10, and is in no repo until someone adds it:
 
     moxi repo git-hooks add PATH repo/commit-rules \\
-        --set refused-trailer=KEY --set tag-pattern=REGEX
+        --set refused-trailer=KEY --set tag-pattern=REGEX --set 'rule=TEXT'
 
-Its two settings live in that repo's git config, each with any number of values:
+Its three settings live in that repo's git config, each with any number of values:
 
 - `refused-trailer`: trailer keys this repo refuses, matched ignoring case;
 - `tag-pattern`: regular expressions (Python's `re`) a tag matches. With none, there is no
   tag check. A repo that has none when the piece is first added to it starts with the
   module config's `commit_rules.tag_patterns`; later changes to that config change no repo.
+- `rule`: the repo's own rules for a committer, free text, one line each. The piece
+  checks none of them; `moxi repo rules` prints them under the lines it makes from the
+  other two settings (`rule_lines`).
 
 What it checks, refusing with the rule named:
 
@@ -43,12 +46,13 @@ COMMIT_RULES = {
     "fail": "closed",
     "order": 10,
     "doc": "Check a commit message's trailer shape, and refuse tags in its subject and body.",
-    "settings": {"refused-trailer": "multi", "tag-pattern": "multi"},
+    "settings": {"refused-trailer": "multi", "tag-pattern": "multi", "rule": "multi"},
 }
 
 PIECE_ID = "repo/commit-rules"
 REFUSED_TRAILER = "refused-trailer"
 TAG_PATTERN = "tag-pattern"
+RULE = "rule"
 
 #: The separator git reads between a trailer's key and value when `trailer.separators`
 #: sets none.
@@ -76,17 +80,28 @@ def commit_msg(ctx) -> Outcome:
     return Outcome.ok()
 
 
+#: The git config `git_settings` reads, as a `--get-regexp` pattern.
+_GIT_SETTINGS = r"core\.comment(char|string)|trailer\..*"
+
+
 def git_settings(ctx) -> tuple[str, list[str], str]:
     """What the repo's git config says, in one `git config` call: the comment prefix
     (`core.commentString` or `core.commentChar`, the last one set wins; `#` when neither
     is set or it is `auto`), the trailer keys its `trailer.*` config names (each
     `trailer.<key>.*` and each `trailer.<name>.key` value), and `trailer.separators`."""
-    done = ctx.git("config", "--get-regexp", r"^(core\.comment(char|string)|trailer\..*)$")
-    prefix, configured, separators = "#", [], SEPARATORS
+    done = ctx.git("config", "-z", "--get-regexp", f"^({_GIT_SETTINGS})$", binary=True)
     if done.returncode != 0:
-        return prefix, configured, separators
-    for line in done.stdout.splitlines():
-        name, _, value = line.partition(" ")
+        return _read_settings([])
+    from moxi_repo.run import parse_config
+
+    return _read_settings(parse_config(done.stdout))
+
+
+def _read_settings(pairs) -> tuple[str, list[str], str]:
+    """`git_settings` from `(key, value)` config pairs, keys as git prints them."""
+    prefix, configured, separators = "#", [], SEPARATORS
+    for name, value in pairs:
+        value = value or ""
         if name in ("core.commentchar", "core.commentstring"):
             if value and value != "auto":
                 prefix = value
@@ -98,6 +113,36 @@ def git_settings(ctx) -> tuple[str, list[str], str]:
             if var == "key" and value.strip():
                 configured.append(value.strip().rstrip(separators + " \t"))
     return prefix, configured, separators
+
+
+def commit_rules_problems(root, text: str) -> list[str]:
+    """Every rule of this piece that `text`, a commit message, breaks in the repo at
+    `root`, read with the settings the piece has in that repo's git config and the repo's
+    comment and trailer config; empty when the piece is not registered there, or is
+    disabled. For a check that judges a commit after it was made (a push guard reading the
+    commits it sends) by the rules its commit-msg event applied. Every line of `text` is
+    read: git strips comment lines and cuts at a scissors line only while a message is
+    edited, so in a made commit those lines are the message's own. One `git config`
+    call."""
+    from moxi_repo.gitrun import git
+    from moxi_repo.run import PIECE_PREFIX, enabled, parse_config, pieces_of, settings_of
+
+    section = re.escape(PIECE_PREFIX + PIECE_ID + ".")
+    done = git(root, "config", "-z", "--get-regexp",
+               f"^({section}.*|{_GIT_SETTINGS})$", binary=True)
+    if done.returncode not in (0, 1):
+        raise OSError(f"git config failed in {root}: {done.stderr.strip()}")
+    pairs = parse_config(done.stdout) if done.returncode == 0 else []
+    piece = pieces_of(pairs).get(PIECE_ID)
+    if piece is None or not enabled(piece):
+        return []
+    settings = settings_of(piece)
+    _comment, configured, separators = _read_settings(
+        [(k, v) for k, v in pairs if not k.startswith(PIECE_PREFIX)])
+    # No comment prefix: nothing is skipped and no line reads as the scissors line.
+    return check_message(text, refused=settings.get(REFUSED_TRAILER, ()),
+                         patterns=settings.get(TAG_PATTERN, ()), comment="",
+                         root=str(root), configured=configured, separators=separators)
 
 
 def comment_prefix(ctx) -> str:
@@ -117,6 +162,20 @@ def pattern_problem(pattern: str) -> str | None:
         return (f"{pattern!r} matches the empty string, so it would check nothing; "
                 "make it match at least one character")
     return None
+
+
+def rule_lines(settings: dict[str, list[str]]) -> list[str]:
+    """What `moxi repo rules` prints for this piece in a repo with these settings: the
+    trailer keys it refuses on one line, a line for each tag pattern, then each of the
+    repo's own `rule` values as written. An empty value gives no line."""
+    lines = []
+    refused = [key for key in settings.get(REFUSED_TRAILER, ()) if key]
+    if refused:
+        lines.append(f"- trailers this repo refuses: {', '.join(refused)}")
+    lines += [f"- no text matching: {pattern}" for pattern in settings.get(TAG_PATTERN, ())
+              if pattern]
+    lines += [f"- {rule}" for rule in settings.get(RULE, ()) if rule]
+    return lines
 
 
 def check_message(text: str, *, refused=(), patterns=(), comment: str = "#",
@@ -344,4 +403,4 @@ def _trailer_block(paragraphs, shape: _Shape, known: set[str]
 
 
 __all__ = ["COMMIT_RULES", "PIECE_ID", "check_message", "commit_msg", "git_settings",
-           "pattern_problem"]
+           "pattern_problem", "rule_lines"]

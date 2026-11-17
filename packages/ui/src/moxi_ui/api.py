@@ -6,9 +6,9 @@ module whose page is optional reaches it at the point of use, through the `ui` e
 already declares:
 
     found = moxi.modules.load("ui", interface=2)
-    found.api.check(places, *, programs=None, page=True) -> str | None
+    found.api.check(places, *, programs=None, for_page=True) -> str | None
 
-* `check(places, *, programs=None, page=True)`: None when the folders `places(env)`
+* `check(places, *, programs=None, for_page=True)`: None when the folders `places(env)`
   resolves from this process's environment agree with those it resolves from the core's
   record of the user's last run in a terminal, else the one line to refuse with
   (`moxi_ui.terminal`).

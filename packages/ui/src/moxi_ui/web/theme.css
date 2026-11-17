@@ -1,7 +1,53 @@
 /* The shared theme, written by `npm run build` from packages/ui/web/tokens.json.
-   Light: calm-workbench. Dark: midnight-neon. */
+   The default theme, plain: light plain-day, dark plain-night.
+   midnight-neon: light calm-workbench, dark midnight-neon. */
 :root {
   color-scheme: light dark;
+  --moxi-bg: light-dark(#fafaf8, #151515);
+  --moxi-bg-sunken: light-dark(#f3f3f1, #1f1f1f);
+  --moxi-bg-raised: light-dark(#fafaf8, #151515);
+  --moxi-bg-hover: light-dark(#f1f1ef, #232323);
+  --moxi-border: light-dark(#dbdbd9, #323231);
+  --moxi-border-strong: light-dark(#8c8c8a, #747472);
+  --moxi-text: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-text-dim: light-dark(#6d6d6b, #999997);
+  --moxi-text-faint: light-dark(#6d6d6b, #999997);
+  --moxi-accent: light-dark(#2d55cf, #93adff);
+  --moxi-accent-soft: light-dark(#e6eaf4, #22242c);
+  --moxi-on-accent: light-dark(#ffffff, #10131c);
+  --moxi-error: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-error-soft: light-dark(#f1f1ef, #232323);
+  --moxi-danger: light-dark(#b03c06, #ff9e6b);
+  --moxi-warn: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-warn-soft: light-dark(#f1f1ef, #232323);
+  --moxi-ok: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-live: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-live-soft: light-dark(#f1f1ef, #232323);
+  --moxi-launching: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-launching-soft: light-dark(#f1f1ef, #232323);
+  --moxi-selected: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-selected-soft: light-dark(#f1f1ef, #232323);
+  --moxi-attention: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-attention-soft: light-dark(#f1f1ef, #232323);
+  --moxi-add-soft: light-dark(#f1f1ef, #232323);
+  --moxi-del-soft: light-dark(#f1f1ef, #232323);
+  --moxi-series-1: light-dark(#1d1d1b, #e4e4e0);
+  --moxi-series-2: light-dark(#454543, #bfbfbb);
+  --moxi-series-3: light-dark(#646462, #a2a29f);
+  --moxi-series-4: light-dark(#7a7a78, #8d8d8b);
+  --moxi-series-5: light-dark(#838381, #7c7c7a);
+  --moxi-series-6: light-dark(#8c8c8a, #747472);
+  --moxi-radius: 6px;
+  --moxi-radius-lg: 10px;
+  --moxi-gap: 12px;
+  --moxi-font-sans: "Adwaita Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --moxi-font-mono: "Adwaita Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --moxi-font-size: 15px;
+  --moxi-font-size-sm: 13px;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme-name="midnight-neon"] {
   --moxi-bg: light-dark(#f6f4f1, #0a0918);
   --moxi-bg-sunken: light-dark(#efece7, #0f0d22);
   --moxi-bg-raised: light-dark(#fffefd, #141228);
@@ -13,8 +59,10 @@
   --moxi-text-faint: light-dark(#686170, #8f88b4);
   --moxi-accent: light-dark(#5a3ccf, #a78bfa);
   --moxi-accent-soft: light-dark(#efebfc, #211a44);
+  --moxi-on-accent: light-dark(#ffffff, #0a0918);
   --moxi-error: light-dark(#a63a26, #ff7461);
   --moxi-error-soft: light-dark(#fcede9, #2b1424);
+  --moxi-danger: light-dark(#a63a26, #ff7461);
   --moxi-warn: light-dark(#94520f, #ff9f45);
   --moxi-warn-soft: light-dark(#fcf0e3, #2a1b14);
   --moxi-ok: light-dark(#2a7049, #5ee6b5);
@@ -34,13 +82,4 @@
   --moxi-series-4: light-dark(#a8820f, #7b6ff0);
   --moxi-series-5: light-dark(#2a7049, #5ee6b5);
   --moxi-series-6: light-dark(#6c6572, #ffd25e);
-  --moxi-radius: 6px;
-  --moxi-radius-lg: 10px;
-  --moxi-gap: 12px;
-  --moxi-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --moxi-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --moxi-font-size: 14px;
-  --moxi-font-size-sm: 12px;
 }
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { color-scheme: dark; }

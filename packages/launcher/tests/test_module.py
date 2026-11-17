@@ -29,7 +29,7 @@ def test_the_launcher_loads_present(found):
 
 def test_it_declares_its_optional_links_as_extras(found):
     assert set(found.optional) == {"turns", "comms", "slots", "projects", "ui", "notes",
-                                   "cache", "usage"}
+                                   "cache", "usage", "sessions"}
     extras = set(metadata.distribution("moxi-launcher").metadata.get_all("Provides-Extra"))
     assert set(found.optional) == extras
 
@@ -38,14 +38,15 @@ def test_it_reserves_the_console_name(found):
     assert found.reserved_names == ("console",)
 
 
-def test_it_ships_its_skills_folder(found):
+def test_it_ships_its_skills_dir(found):
     assert found.skills == "skills"
 
 
-def test_its_doctor_target_answers_with_rows(found):
-    from moxi_launcher import doctor
+def test_its_doctor_target_answers_with_rows(found, monkeypatch):
+    from moxi_launcher import doctor, joiner
 
     assert found.doctor == "moxi_launcher.doctor:rows"
+    monkeypatch.setattr(joiner, "cache_api", lambda: None)
     rows = list(doctor.rows(read=lambda argv: None))
     assert [(row.name, row.state) for row in rows] == [("catalog.claude", "off"),
                                                        ("catalog.codex", "off")]

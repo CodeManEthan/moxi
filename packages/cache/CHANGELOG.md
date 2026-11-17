@@ -1,17 +1,90 @@
 # Changelog
 
-## 0.1.5 (2026-11-08)
+## 0.1.7 (unreleased)
 
 - The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
   gone. `moxi cache segment` installs the core's hook, which refuses the same things.
-- cache needs moxi 0.1.8 or later, for that hook.
+- cache needs moxi 0.1.11 or later, for that hook.
 - `Segment` is a plain class, not a dataclass, so loading the segment module no longer
   loads `dataclasses`. It keeps its fields, equality, hash, `coloured()` and `as_dict()`,
   and still refuses assignment, now with a plain `AttributeError` (`dataclasses`'
   `FrozenInstanceError` was one).
 
+## 0.1.6 (unreleased)
+
+- Every setting carries page fields, which `moxi config cache show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  the unit of each time in seconds. cache needs moxi 0.1.9 or later.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_cache.api.asking`: `environ` is now `env`.
+- Each clock record carries `asks`: the names of the timer's subscriptions the watcher
+  that wrote it will ask about the session when their window comes, by the environment
+  the session's process started with. It is null while the watcher's timer has loaded
+  nothing. The record format's version stays 1 and `asks` is optional, so a record
+  without it, from an older watcher, is still a record.
+- The watcher loads the timer's subscriptions once before its first tick, so the first
+  tick's records carry `asks` too.
+- The timer reads a session's process environment once per process while the session is
+  live, and again each tick only for one it can't read. It reads none when no loaded
+  subscription has a `requires_env`.
+- `api.asking(environ)` says what a watcher started now would put in `asks` for a process
+  with that environment, by the timer's own check of the installed modules' and the
+  config's subscriptions. It gives None where a process's environment can't be read, and
+  starts nothing.
+- A watcher already running when cache updates to 0.1.6 writes no `asks` until it
+  restarts on 0.1.6.
+
+## 0.1.5 (unreleased)
+
+- The watcher writes its reading, `watch.json` beside the clock records, after every
+  tick: when it last ticked, when it last listed Claude Code's live sessions (null until
+  it has) and the records' `stale_after`. The file stays when the watcher stops.
+- A watcher already running when cache updates to 0.1.5 writes no reading until it
+  restarts on 0.1.5. Until then the page and `moxi cache doctor` judge the watcher by the
+  clock records, as before.
+- `moxi cache doctor`'s watcher line leads with what the reading says: the watcher is
+  reading, running but not listing Claude's sessions since a time, or stopped at a time.
+  With no reading file the line is as before.
+- The page server's `/api/clocks` and its topic carry the watcher's reading and the
+  server's local date (`today`); the topic publishes when the date changes.
+- Two new reads on the page server, neither the gateway's. `GET /api/names` names every
+  session with a clock record, in the records' order, through sessions'
+  `session_facts`: its typed name, folder and start, and whether sessions holds it, with
+  the server's date and the account's home folder. `GET /api/session?session=` sends the
+  model of one session with a clock record, through sessions' `session_opened`, and
+  nothing else it read. A read that raises answers `error` or a null model, and is
+  logged once per class.
+- cache's page is redrawn. Each session is a row named as the Sessions page names it,
+  never by its id, in two groups, `N warm` and `N cold`: warm rows say `warm until` a
+  time, soonest first, and cold rows `cold since` a time, most recent first, each with
+  its last request under it. Sessions whose record holds no clock time sit behind one
+  line, `N with no cache reading`, that shows and hides them, each saying what its
+  record says and its code. A row opens in place to its times to the second, the time
+  left or since, the lifetime in words, a `Read` line when its record is old, its
+  harness, model, start and folder, a `Sessions` link when sessions holds it, and
+  `Copy id`. Any number of rows stay open across a refresh.
+- The page's foot says when the records were last read and links to cache's settings.
+  A Watcher row above the groups says when the watcher is running but not listing
+  Claude's sessions, when it stopped, or that there is no reading yet, with the command
+  that starts it and `Copy`. The empty state is said only when a fresh reading backs it.
+  The names that could not be read, a failed read and the page server's error are each
+  one line at the end of the page, and the rows last read stay.
+- The page no longer has its own heading, places no chip, and draws no colour for bad
+  news: no green, amber or red, no accent bar and no bordered rows. The chip itself is
+  unchanged and still offered to other pages.
+- cache needs moxi-sessions 0.2.8 or later, for `session_facts`.
+
 ## 0.1.4 (2026-11-08)
 
+- Config keys `claude.ttl_seconds`, `watch.tick` and `segment.warn_before` are now
+  `claude.ttl_s`, `watch.tick_s` and `segment.warn_before_s`. An old key, set in the
+  config file, is refused, naming the new one.
+- `moxi cache read --json` prints each session's `age_s` and `ttl_s` where it printed
+  `age_seconds` and `ttl_seconds`.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_cache.api.Clock`: `age_seconds` is now `age_s`;
+  `moxi_cache.api.Clock`: `ttl_seconds` is now `ttl_s`; `moxi_cache.api.projects_root`:
+  `environ` is now `env`.
 - A lifetime row's `ruling` key is now `basis`: the stated reason a number is counted
   where the source doesn't promise it. A row in your config that still says `ruling` is
   read as `basis`; a row that says both is refused. `Row.ruling` is now `Row.basis`.

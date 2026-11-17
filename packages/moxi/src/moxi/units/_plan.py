@@ -61,7 +61,7 @@ from pathlib import Path
 from . import _backend
 from ._backend import RenderError, Schedule, Socket, Spec, UnitRef
 from ._declare import digest, merge, switch_problem, switch_value
-from ._home import environment, locators_set
+from ._home import unit_env, locators_set
 from ._types import DeclarationError, Declarations, UnitChange
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -122,7 +122,7 @@ def plan(module: str, *, only: Iterable[str] | None = None,
         return _refuse_all(module, declared, marked, wanted, "editable", reason)
 
     own = frozenset(path for refs in marked.values() for ref in refs for path in ref.paths)
-    planner = _Planner(found, impl, env, environment(module), own)
+    planner = _Planner(found, impl, env, unit_env(module), own)
     out: list[UnitChange] = []
     for kind, name, entry in declared:
         refs = marked.pop(name, [])
@@ -160,14 +160,14 @@ def _refuse_all(module, declared, marked, wanted, cause, reason) -> list[UnitCha
 class _Planner:
     """The per-unit half of `plan`, holding what one module's units share."""
 
-    def __init__(self, found, impl, env, environ=None, own=frozenset()):
+    def __init__(self, found, impl, env, unit_env=None, own=frozenset()):
         self.found = found
         #: The files `marked()` gives this module here: this home's own.
         self.own = frozenset(own)
         self.module = found.name
         self.impl = impl
         self.env = env
-        self.environment = tuple(sorted((environ or {}).items()))
+        self.unit_env = tuple(sorted((unit_env or {}).items()))
         self._schema: list = []
         self._ipv6: list[bool] = []
         self._socket_files: list = []
@@ -245,7 +245,7 @@ class _Planner:
                     memory_high=entry.get("memory_high"),
                     memory_swap_max=entry.get("memory_swap_max"),
                     schedule=_schedule(entry) if kind == "timer" else None, socket=socket,
-                    environment=self.environment)
+                    env=self.unit_env)
         try:
             rendered = self.impl.render(spec)
         except RenderError as exc:

@@ -70,7 +70,7 @@ def core(timeout: float | None = WAIT) -> Iterator[None]:
     if holds_core():
         yield
         return
-    with files.lock(paths.core_lock(), nested=True, timeout=timeout):
+    with files.lock(paths.core_lock(), nested=True, timeout_s=timeout):
         _local.core = True
         try:
             yield
@@ -94,7 +94,7 @@ def tunnel(timeout: float | None = WAIT) -> Iterator[None]:
         raise files.LockTimeout(path, os.getpid())
     try:
         left = None if timeout is None else max(0.0, timeout - (time.monotonic() - start))
-        with files.lock(path, timeout=left):
+        with files.lock(path, timeout_s=left):
             _local.tunnel = True
             try:
                 yield

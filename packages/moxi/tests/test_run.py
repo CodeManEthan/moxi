@@ -212,9 +212,9 @@ def test_the_gate_and_moxi_config_agree_in_every_state(demo, key):
     if key == "rows.backup":
         write_config(demo, "[rows]\nother = true\n")
         assert both(key) == (False, False)                      # no entry
-    config.set("demo", key, "yes", by="cli")
+    config.set_value("demo", key, "yes", by="cli")
     assert both(key) == (True, True)
-    config.set("demo", key, "no", by="cli")
+    config.set_value("demo", key, "no", by="cli")
     assert both(key) == (False, False)
     config.unset("demo", key, by="cli")
     assert both(key) == (False, False)                          # unset
@@ -260,7 +260,7 @@ def test_unreadable_exits_3_with_one_line(demo, capsys):
 
 
 def test_on_runs_the_command_and_exits_with_its_code(demo):
-    config.set("demo", "snapshot.enabled", True, by="cli")
+    config.set_value("demo", "snapshot.enabled", value=True, by="cli")
     code = run.main(["--if", "demo.snapshot.enabled", "--record", "demo/snapshot", "--",
                      *py("import time, sys; time.sleep(0.2); sys.exit(4)")])
     assert code == 4
@@ -352,7 +352,7 @@ def test_log_rolls_past_its_cap(demo, monkeypatch):
 
 
 @POSIX
-def test_the_logs_missing_directories_are_each_made_0700(tmp_path):
+def test_the_logs_missing_dirs_are_each_made_0700(tmp_path):
     shared = tmp_path / "shared"
     shared.mkdir()
     os.chmod(shared, 0o775)
@@ -514,7 +514,7 @@ def test_condition_off_writes_off_and_exits_1(demo):
 
 
 def test_condition_on_writes_the_stamp_and_exits_0(demo):
-    config.set("demo", "rows.backup", True, by="cli")
+    config.set_value("demo", "rows.backup", value=True, by="cli")
     assert run.main(COND) == 0
     assert lines() == []
     held = json.loads(stamp().read_text())
@@ -540,7 +540,7 @@ def test_condition_removes_a_stale_stamp_first(demo):
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
                     reason="POSIX permission bits; root writes anyway")
 def test_condition_that_cannot_write_its_stamp_is_not_started_and_255(demo):
-    config.set("demo", "rows.backup", True, by="cli")
+    config.set_value("demo", "rows.backup", value=True, by="cli")
     units = stamp().parent
     units.mkdir(parents=True)
     units.chmod(0o500)
@@ -609,7 +609,7 @@ def test_an_off_run_is_counted_once(demo, monkeypatch):
 
 
 def test_an_on_run_is_counted_once_as_systemd_runs_the_pair(demo):
-    config.set("demo", "rows.backup", True, by="cli")
+    config.set_value("demo", "rows.backup", value=True, by="cli")
     assert gate(*COND).returncode == 0
     env = {**os.environ, "SERVICE_RESULT": "exit-code", "EXIT_CODE": "exited",
            "EXIT_STATUS": "4"}

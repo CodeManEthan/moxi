@@ -91,8 +91,8 @@ def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: floa
         value = delivery.wait_started(wait_s)
     except TimeoutError:
         verdict, words = "unconfirmed", f"no answer within {wait_s:g} s"
-    except Exception as error:  # noqa: BLE001  (a note that fails is a note not taken)
-        verdict, words = "failed", _words(error)
+    except Exception as exc:  # noqa: BLE001  (a note that fails is a note not taken)
+        verdict, words = "failed", _words(exc)
     else:
         kind = getattr(value, "KIND", type(value).__name__.lower())
         verdict = "taken" if kind == "started" else kind
@@ -174,14 +174,14 @@ def _send(conn: sqlite3.Connection, run: store.Run, comms: Any, to: Sequence[str
     while True:
         try:
             result = comms.send_as(MODULE, SENDER, list(to), body)
-        except Exception as error:  # noqa: BLE001  (a send that raises is recorded)
+        except Exception as exc:  # noqa: BLE001  (a send that raises is recorded)
             return _record(conn, run, "notice-refused", to, body, "error",
-                           _words(error), fallback)
+                           _words(exc), fallback=fallback)
         outcome = getattr(result, "outcome", None)
         refusal = getattr(result, "refusal", None)
         code = getattr(refusal, "code", None)
         if outcome == "sent":
-            return _record(conn, run, "notice", to, body, "sent", None, fallback,
+            return _record(conn, run, "notice", to, body, "sent", None, fallback=fallback,
                            message_id=getattr(result, "message_id", None))
         if outcome == "refused" and code == NAME_RESERVED and clock() < deadline:
             sleep(RESERVED_RETRY_S)
@@ -192,13 +192,13 @@ def _send(conn: sqlite3.Connection, run: store.Run, comms: Any, to: Sequence[str
             continue
         why = getattr(refusal, "text", None) or code or outcome
         if outcome == "offline":
-            return _record(conn, run, "notice", to, body, "offline", why, fallback)
+            return _record(conn, run, "notice", to, body, "offline", why, fallback=fallback)
         return _record(conn, run, "notice-refused", to, body, "refused",
-                       f"{code}: {why}" if code and why != code else why, fallback)
+                       f"{code}: {why}" if code and why != code else why, fallback=fallback)
 
 
 def _record(conn: sqlite3.Connection, run: store.Run, kind: str, to: Sequence[str],
-            body: str, verdict: str, why: str | None, fallback: bool,
+            body: str, verdict: str, why: str | None, *, fallback: bool,
             **more: Any) -> str:
     detail: dict[str, Any] = {"verdict": verdict, "to": list(to), "fallback": fallback,
                               "text": body}

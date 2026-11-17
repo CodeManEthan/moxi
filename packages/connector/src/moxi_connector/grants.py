@@ -27,7 +27,7 @@ and writes the whole file atomically (`moxi.files.update`). The writers and thei
 - `moxi connector revoke <id>`: that grant's revoked mark;
 - `moxi connector revoke --all`: every grant's revoked mark, and the removal of every
   client;
-- `moxi connector off`: every grant's revoked mark.
+- `moxi connector disable`: every grant's revoked mark.
 
 A reader (`Store.view`) keeps the file's parsed form and reads it again whenever its
 mtime, size or inode changes, so a revoke from the command line takes effect on the next
@@ -183,8 +183,8 @@ class Store:
                 data = parse(self.path.read_bytes()) if stamp != (0, 0, 0) else empty()
             except FileNotFoundError:
                 data = empty()
-            except (OSError, ValueError) as e:
-                log.error("the grants file can't be read, so every token is refused: %s", e)
+            except (OSError, ValueError) as exc:
+                log.error("the grants file can't be read, so every token is refused: %s", exc)
                 data = empty()
             self._index(data)
             self._data, self._stamp = data, stamp
