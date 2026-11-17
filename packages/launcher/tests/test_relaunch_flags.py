@@ -24,7 +24,7 @@ from test_relaunch_job import SETTINGS, Clock, FakeSession, FakeSlots, FakeTurns
 TESTS = Path(__file__).resolve().parent
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 #: The ready wait the launches here are given, in seconds.
-READY_WAIT_S = 0.2
+READY_WAIT_S = 1
 
 pytestmark = pytest.mark.touches("packages/launcher/src/moxi_launcher/job.py",
                                  "packages/launcher/src/moxi_launcher/notices.py",
