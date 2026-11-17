@@ -40,11 +40,15 @@ stored again: each write returns the number of new rows.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
+
+# The window names and rules live in `windows`, which the status line segment loads alone;
+# they are imported back here so callers find them where they always have.
+from .windows import (CLAUDE, CLAUDE_KINDS, CODEX, CODEX_LIMIT, FIVE_HOUR, PLAN_LIMIT,
+                      SEVEN_DAY, _finite, _SCOPED_WEEK, claude_window, percent)
 
 if TYPE_CHECKING:
     import sqlite3
@@ -54,30 +58,14 @@ if TYPE_CHECKING:
 #: The store's file name, under usage's state directory.
 FILE = "readings.db"
 
-CLAUDE = "claude"
-CODEX = "codex"
-
 ROLLOUT = "rollout"
 APP_SERVER = "app-server"
 SESSION_USAGE = "session-usage"
-
-#: A Codex reading that names no limit id is the account's main limit, `codex`; Claude's
-#: plan windows are limit `plan`.
-CODEX_LIMIT = "codex"
-PLAN_LIMIT = "plan"
-
-FIVE_HOUR = 300
-SEVEN_DAY = 10_080
 
 #: What `percentUsed` in a `$.session.usage()` result is multiplied by to make 0-100.
 #: turns' one live check found it already on 0-100, so it is read as given.
 PERCENT_SCALE = 1.0
 
-#: Claude's rate-limit kinds whose window is known: kind -> (limit id, minutes).
-#: `seven_day_<scope>` is limit `<scope>`, 7 days: a per-model weekly cap is a limit of
-#: its own, not a second slot of the plan's.
-CLAUDE_KINDS = {"five_hour": (PLAN_LIMIT, FIVE_HOUR), "seven_day": (PLAN_LIMIT, SEVEN_DAY)}
-_SCOPED_WEEK = "seven_day_"
 _CLAUDE_NAMED = frozenset({"kind", "percentUsed", "resetsAt"})
 
 DAY = 86_400.0
@@ -396,15 +384,6 @@ def claude_readings(rate_limits: Any, *, observed_at: float,
     return one_per_window(out)
 
 
-def claude_window(kind: str) -> tuple[str, int | None]:
-    """A Claude rate-limit kind's `(limit_id, window_minutes)`."""
-    if kind in CLAUDE_KINDS:
-        return CLAUDE_KINDS[kind]
-    if kind.startswith(_SCOPED_WEEK) and len(kind) > len(_SCOPED_WEEK):
-        return kind[len(_SCOPED_WEEK):], SEVEN_DAY
-    return kind, None
-
-
 def one_per_window(found: list[Reading]) -> list[Reading]:
     """Readings of one report with one per window: of two with the same window, the one
     with the higher percent (a known percent above an unknown one), else the first."""
@@ -427,18 +406,6 @@ def _said(value: Any) -> Any:
     from moxi_sessions.api import UNKNOWN
 
     return None if value is UNKNOWN else value
-
-
-def _finite(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
-
-
-def percent(value: Any) -> float | None:
-    """A percentage as a float, or None. A bool is not a number."""
-    return _finite(value)
 
 
 def _minutes(value: Any) -> int | None:

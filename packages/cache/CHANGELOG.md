@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.7 (unreleased)
+
+- The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
+  gone. `moxi cache segment` installs the core's hook, which refuses the same things.
+- cache needs moxi 0.1.11 or later, for that hook.
+- `Segment` is a plain class, not a dataclass, so loading the segment module no longer
+  loads `dataclasses`. It keeps its fields, equality, hash, `coloured()` and `as_dict()`,
+  and still refuses assignment, now with a plain `AttributeError` (`dataclasses`'
+  `FrozenInstanceError` was one).
+- `Segment`'s `dim` is keyword-only: `Segment(text, band, age_s, ttl_s, dim=True)`.
+- `records.Watching` is a plain class, not a dataclass, for the same reason: the segment
+  module imports `records`. It keeps its fields, equality, hash and repr, and refuses
+  assignment with a plain `AttributeError`.
+
 ## 0.1.6 (unreleased)
 
 - Every setting carries page fields, which `moxi config cache show --json` prints and

@@ -14,6 +14,10 @@ It reads from three roots, one per harness:
 - OpenCode's database, `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db`, which it
   opens read only and reads only the session, message and part tables of.
 
+For Claude Code and Codex it can also read archive folders, older transcripts kept
+outside the harness's root (see [Archive folders](#archive-folders)), only for a caller
+that asks for them.
+
 It finds a session's records, asking each root in turn and saying for each whether it held
 the session, held none, could not be read, or was not asked because the id is not one; only
 a root that was read and held none counts as a miss. It lists every source under a root with
@@ -104,10 +108,13 @@ way), and it adds four commands:
 
 - `moxi sessions find SESSION [--harness claude|codex|opencode] [--root PATH] [--json]`
   prints where a session's records are, or every root it looked in and why each held none,
-  and exits 1 then. `--root` adds a root to look in after the usual one (for OpenCode, a
-  database).
+  and exits 1 then. It looks in the live root, then the harness's archive folders, then
+  each `--root` (for OpenCode, a database). When no folder holds the session and an
+  archive folder didn't answer, it says the session is unknown, names the folder, and
+  exits 1.
 - `moxi sessions root [--json]` prints the root each harness is read from and where that
-  root came from: a config key, an environment variable, or the harness's default.
+  root came from: a config key, an environment variable, or the harness's default; and
+  each archive folder, without testing it.
 - `moxi sessions list [--harness H] [--since TIME] [--folder PATH] [--limit N] [--text]
   [--json]` prints the main sessions of the three harnesses, newest change first, 30
   unless `--limit` asks for another number. Each line is a session: when it started, when
@@ -125,8 +132,13 @@ way), and it adds four commands:
   in UTC, in the form `--around` takes. A message shows as its text, cut at 64 KiB with
   the cut said; a tool call as one line naming the tool and what it was called on, cut at
   160 characters; a tool result as its size and whether it failed. No flag prints more of
-  a tool's input than that line, or any of a tool's output. A session no root holds, or
-  a source that can't be read, exits 1 with the reason.
+  a tool's input than that line, or any of a tool's output. Without `--harness` it reads
+  the session from whichever harness's live root holds it, and asks the archive folders
+  only when none does; when more than one harness holds it, it names them and exits 2 for
+  `--harness` to choose. With `--harness` it asks that harness's live root, then its
+  archive folders. A session no folder holds, or a source that can't be read, exits 1
+  with the reason. A session no folder holds while an archive folder didn't answer is
+  unknown: the read says so, names the folder, and exits 1.
 
 With `--json`, each command prints one JSON object that starts with the shape version.
 `read --json` holds the same rows the page is sent, under `records`, with the header and
@@ -312,6 +324,66 @@ read, or `cleanupPeriodDays` is not a whole number of days, 1 or more. Neither c
 Three settings name a root when it is not the usual one: `claude.projects`,
 `codex.sessions` and `opencode.database`. `moxi config sessions` shows them.
 
+## Archive folders
+
+A harness deletes or moves old transcripts, so you may keep copies elsewhere: copied out
+before Claude Code's cleanup, or on another machine's disk. Name those folders in
+sessions' config and sessions reads them after the live root:
+
+    moxi config set sessions claude.archives '["/mnt/old/claude-projects"]'
+    moxi config set sessions codex.archives '["/mnt/old/codex-sessions"]'
+
+Each folder is laid out as the harness lays out its root: Claude Code's
+`<project>/<session>.jsonl` (subagent files beside it as usual), Codex's
+`YYYY/MM/DD/rollout-...jsonl`. They are read in the order named, after the live root, and a
+session an earlier folder holds is read from that folder only, whatever the copies' times.
+OpenCode has no archive key: its records are one database the harness keeps. None is
+configured by default.
+
+**sessions never writes, creates, moves, renames, deletes or locks anything in an archive
+folder, and never changes a mode there.** It opens files there read only. Claude Code
+can't resume a session from an archive folder, and nothing cleans one but you.
+
+**Offline is not gone.** A folder answers when it can be listed within `archives.answer_wait_s`
+(5 seconds by default; raise it for a slow link). Before a call asks archive folders,
+sessions tests every one it will ask together, one child process each, and waits for all
+of them at most once, however many don't answer. A folder that is absent, isn't a
+directory, fails, or doesn't answer in time is offline: a read skips it and says so, and it
+is never read as holding no session. A process keeps each folder's answer for a minute.
+Once a folder has answered, its listing and reads run in the calling process, and a mount
+that stops answering partway can hang that call; the wait doesn't bound that.
+
+Only a caller that asks pays that wait:
+
+- `moxi sessions read` asks the archives only when no live root holds the session, and
+  `moxi sessions find` asks them when the live root doesn't hold it.
+- Through the API, `find(harness, session, include_archives=True)` asks the live root,
+  then each archive folder; `find` without it and `sources` ask the live root only, as
+  before. `corpus(harness, since=None, heads=True)` lists every folder of a harness, the
+  live root and then each archive folder, one `Listing` each, for a caller that walks
+  them all.
+- Every other reader (the sessions page, the list, other modules' own lookups) reads the
+  live root only. A session only in an archive folder is refused by the page, which names
+  the root it asked.
+
+What the API says of a folder: a probe of one that doesn't answer is `unreadable: <why>`,
+never `miss`; `Found.unknown` is true when no folder asked holds the session and one
+didn't answer; a `corpus` listing of one is `ok=False` with its reason, never an empty
+listing. A `corpus` listing records in `unreadable`, at any depth, a directory it can't
+list, a file it can't open, and an entry it listed and then found gone, since a mount that
+drops partway often shows as files not found. It marks a folder whose top level holds no
+entry `empty`, since a disk that isn't mounted can leave its mount point an empty
+directory, and `archive_answers(folders, fresh=True)` says the same of a folder now. A live
+root that doesn't exist is `absent` and the archive folders are listed; a live root that
+exists and can't be listed lists none of them, since which of their sessions it holds is
+not known. Every Codex folder is read with the live root's imports file.
+
+Setup prints each archive folder and whether it answers now; `moxi doctor sessions` has an
+`archives` row, `off` with none configured, `ok` when each answers, and `warn` naming each
+that doesn't, with the fix "make it answer, or take it off
+`claude.archives`/`codex.archives`". `retention()` names each harness's archive folders in
+`archive_dirs` without touching them.
+
 ## The transcript-read guard
 
 With turns installed (the `turns` extra), sessions offers turns a guard,
@@ -325,7 +397,10 @@ When it is on, turns refuses, before it runs, an agent's call that names a path 
 transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claude Code or
 Codex. A shell command is split into simple commands, each judged on its own, and one is
 refused when one of its words is such a path. The refusal points the agent to `moxi
-sessions read <session>`. The roots are each harness's root, the configured one included.
+sessions read <session>`. The roots are each harness's root, the configured one included,
+and each archive folder. An archive folder is compared by its path as written, with a
+trailing `/`, `//`, `.` and `x/..` folded by the text alone, and is never resolved, so
+judging a call touches no archive folder.
 
 A simple command that runs this environment's own `moxi sessions` passes whatever paths it
 names. The command after it on the same line is judged on its own, so `moxi sessions root;
@@ -349,6 +424,8 @@ The guard is a nudge, not a boundary. Its known gaps:
   `**/projects/*.jsonl`.
 - A shell's `-c` script is read only when the options before it are short ones:
   `bash -l -c '...'` and `bash -lc '...'` are read, `bash --login -c '...'` is not.
+- A path that reaches an archive folder through a symbolic link passes, since the guard
+  compares an archive folder by its written path and never resolves it.
 - OpenCode's root is its database file, so the `opencode.db-wal` and `opencode.db-shm`
   files beside it are not under it.
 - The doctor's `ok` means the switch is on and turns is installed. It doesn't check that
@@ -509,12 +586,17 @@ extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
 
 ## Interfaces
 
-`moxi_sessions.api` offers interfaces 2, 3, 4 and 5. Interface 3 is interface 2 plus
+`moxi_sessions.api` offers interfaces 2 to 6. Interface 3 is interface 2 plus
 `retention()` and `Retention`; a module that calls them loads sessions with
 `interface=3`. Interface 4 is interface 3 plus the list's reads: `sessions_list`,
 `sessions_more`, `sessions_newest`, `session_dirs` and `session_opened`; a module
 that calls them loads sessions with `interface=4`. Interface 5 is interface 4 plus
-`session_facts`; a module that calls it loads sessions with `interface=5`.
+`session_facts`; a module that calls it loads sessions with `interface=5`. Interface 6
+is interface 5 plus the archive folders: `corpus`, `find`'s `include_archives`,
+`Found.unknown`, a listing's `is_archive`, `absent`, `empty` and `shadowed`,
+`archive_dirs`, `archive_answers`, `ArchiveAnswer`, and `Retention`'s `archive_dirs`; a
+module that calls them loads sessions with `interface=6`. Every call of interface 5
+behaves as it did.
 
 ## License
 

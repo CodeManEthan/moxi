@@ -23,6 +23,16 @@ def test_installed_and_present_read_metadata_and_import_nothing(site):
     assert "moxi_alpha" not in sys.modules
 
 
+def test_the_site_installs_a_new_version_in_place_of_the_old(site):
+    site.module("alpha", version="0.1.0")
+    site.module("beta")
+    (site.root / "Moxi.Alpha-0.0.9.egg-info").mkdir()
+    site.module("alpha", version="0.2.0")
+    infos = sorted(p.name for p in site.root.iterdir() if p.name.endswith("-info"))
+    assert infos == ["moxi_alpha-0.2.0.dist-info", "moxi_beta-0.1.0.dist-info"]
+    assert modules.load("alpha").version == "0.2.0"
+
+
 def test_load_reads_the_announcement(site):
     site.write("moxi_alpha/api.py", "def hello():\n    return 'hi'\n")
     site.module("alpha", INTERFACES="frozenset({1, 2})", API="'moxi_alpha.api'",
@@ -245,3 +255,83 @@ def test_importing_the_core_loads_no_metadata_machinery():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True)
     assert out.stdout.split() == ["False", "False"]
+
+
+# -- announced: the record without the API ---------------------------------------------------
+
+def test_announced_reads_the_announcement_and_imports_no_api(site):
+    site.write("moxi_alpha/api.py", "VALUE = 7\n")
+    site.module("alpha", API="'moxi_alpha.api'", SEGMENT="'moxi_alpha.segment'")
+    found = modules.announced("alpha")
+    assert found.state == PRESENT and found.reason == ""
+    assert (found.distribution, found.target, found.package) == (
+        "moxi-alpha", "moxi_alpha.module", "moxi_alpha")
+    assert (found.api_name, found.segment, found.api) == (
+        "moxi_alpha.api", "moxi_alpha.segment", None)
+    assert "moxi_alpha.module" in sys.modules
+    assert "moxi_alpha.api" not in sys.modules
+
+
+def test_announced_and_load_share_one_record(site):
+    site.write("moxi_alpha/api.py", "VALUE = 7\n")
+    site.module("alpha", API="'moxi_alpha.api'")
+    first = modules.announced("alpha")
+    loaded = modules.load("alpha")
+    assert loaded.api.VALUE == 7 and loaded == first
+    # After a load the API module is imported, and announced still hands back no API.
+    assert modules.announced("alpha").api is None
+
+
+def test_announced_does_not_see_an_api_that_fails_to_import(site):
+    site.write("moxi_alpha/api.py", "import not_a_module_anywhere\n")
+    site.module("alpha", API="'moxi_alpha.api'", SEGMENT="'moxi_alpha.segment'")
+    assert modules.announced("alpha").state == PRESENT
+    assert modules.load("alpha").state == BROKEN
+
+
+def test_announced_for_an_absent_module(site):
+    found = modules.announced("nothere")
+    assert found.state == ABSENT and "nothere" in found.reason
+    assert found.segment is None and found.api is None
+
+
+def test_announced_for_a_broken_announcement(site):
+    site.write("moxi_alpha/__init__.py", "")
+    site.write("moxi_alpha/module.py", "raise RuntimeError('half written')\n")
+    site.distribution("moxi-alpha", entry_points={"alpha": "moxi_alpha.module"})
+    found = modules.announced("alpha")
+    assert found.state == BROKEN and "half written" in found.reason
+    assert found.segment is None
+
+
+def test_announced_for_an_announcement_that_fails_its_check(site):
+    site.module("alpha", SEGMENT="'not a dotted name'")
+    found = modules.announced("alpha")
+    assert found.state == BROKEN and "SEGMENT" in found.reason
+    assert found.segment is None
+
+
+def test_announced_never_raises(site, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("metadata unreadable")
+
+    monkeypatch.setattr(modules, "_read_text", boom)
+    site.module("alpha")
+    found = modules.announced("alpha")
+    assert found.state == BROKEN and "metadata unreadable" in found.reason
+    assert found.segment is None
+
+
+def test_announced_in_a_fresh_process_imports_no_api_and_no_metadata_machinery(site):
+    site.write("moxi_alpha/api.py", "VALUE = 7\n")
+    site.module("alpha", API="'moxi_alpha.api'", SEGMENT="'moxi_alpha.segment'")
+    code = ("import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from moxi import modules\n"
+            "found = modules.announced('alpha')\n"
+            "print(found.state, found.segment)\n"
+            "print(*sorted(m for m in ('moxi_alpha.api', 'moxi_alpha.segment', "
+            "'importlib.metadata', 'json', 'dataclasses') if m in sys.modules))\n")
+    out = subprocess.run([sys.executable, "-c", code, str(site.root)], capture_output=True,
+                         text=True, check=True)
+    assert out.stdout.splitlines() == ["present moxi_alpha.segment", ""]

@@ -1,15 +1,25 @@
 """Finding records: one session's (`find`), every source under a root (`sources`), and a
 session's subagents (`subagents`), for Claude Code, Codex and OpenCode alike.
 
-**`find(harness, session_id, *, root=None)`** asks each root in turn for the session and
-stops at the first that holds it. Every root asked is a `Probe` with its outcome: `hit`
+**`find(harness, session_id, *, root=None, include_archives=False)`** asks each root in
+turn for the session and stops at the first that holds it. Every root asked is a `Probe` with its outcome: `hit`
 (with what it found), `miss` (the root was read and holds none), `unreadable: <why>` (the
 root could not be read: an absent or unmounted root is this, never a miss) or `refused:
 <why>` (the id is not one the search looks up, so nothing was looked at). Only `miss` says
 the record is absent. A Claude root holds one transcript per session; a Codex root can hold
 several rollout files for one thread, and `find` returns each of them, a compressed one
 (`.jsonl.zst`) marked `compressed`, for the caller to choose from; OpenCode's database is
-asked for the session's row.
+asked for the session's row. With no root it asks the live root only, unless the caller
+asks for archives by name: `include_archives=True` asks the live root, then each archive
+folder of the harness in order (`moxi_sessions.archives`), testing those folders together
+first, once, only when the live root doesn't hold the session. A folder that doesn't
+answer is `unreadable: <why>`, never `miss`, and `Found.unknown` says the session may be
+there.
+
+**`corpus(harness, *, since=None, heads=True)`** lists every folder of a harness, the live
+root and then its archive folders in order, one `Listing` each. A later folder's listing
+leaves out every source whose session id an earlier folder holds, whatever its time, and
+counts them in `shadowed`. See `corpus`.
 
 **`sources(harness, *, root=None, modified_since=None, heads=True)`** lists every source
 under a root, for a caller that walks a whole corpus. Each file source carries its reuse
@@ -29,7 +39,9 @@ A listing entry from `sources` or `subagents` carries the file's size when it wa
 a read of the entry stops there, so the listing and the records read under it agree.
 
 Each root is the one the caller hands in, else the harness's configured or default root
-(`source.root`). No search reaches a root its caller did not give or configure.
+(`source.root`), and with `include_archives` or `corpus` the archive folders sessions'
+config names. No search reaches a root its caller did not give or configure. Nothing here
+writes in any root; an archive folder is opened read only, as a live root is.
 """
 
 from __future__ import annotations
@@ -41,7 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import claude, codex
+from . import archives, claude, codex
 from .errors import Unreadable
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN
 from .source import (WORKFLOW_DIR, Header, Source, claude_header, codex_head,
@@ -121,7 +133,8 @@ class Probe:
 class Found:
     """What `find` found: every root it asked, in order, and the hits of the one that held
     the session. `found` is false when no root did; only a probe whose outcome is `miss`
-    says a root holds no record of the session."""
+    says a root holds no record of the session. `unknown` is true when no root held it and
+    at least one couldn't be read or didn't answer: the session may be there."""
 
     harness: str
     session_id: str
@@ -138,9 +151,15 @@ class Found:
     def found(self) -> bool:
         return bool(self.hits)
 
+    @property
+    def unknown(self) -> bool:
+        return not self.found and any(probe.outcome.startswith(UNREADABLE)
+                                      for probe in self.probes)
+
     def as_dict(self) -> dict[str, Any]:
         return {"harness": self.harness, "session_id": self.session_id,
-                "found": self.found, "hits": [hit.as_dict() for hit in self.hits],
+                "found": self.found, "unknown": self.unknown,
+                "hits": [hit.as_dict() for hit in self.hits],
                 "probes": [probe.as_dict() for probe in self.probes]}
 
 
@@ -191,7 +210,8 @@ def _probe_opencode(database: Path, session_id: str) -> Probe:
 _PROBES = {CLAUDE: _probe_claude, CODEX: _probe_codex, OPENCODE: _probe_opencode}
 
 
-def find(harness: str, session_id: str, *, root: Any = None) -> Found:
+def find(harness: str, session_id: str, *, root: Any = None,
+         include_archives: bool = False) -> Found:
     """Where `harness` keeps `session_id`'s records.
 
     `root` is one root or several, asked in order until one holds the session: Claude
@@ -199,8 +219,17 @@ def find(harness: str, session_id: str, *, root: Any = None) -> Found:
     harness's configured or default root (`source.root`), and raises
     `moxi.config.ConfigError` when the config file cannot be read. Never raises for what a
     root holds or whether it can be read: each is a probe's outcome.
+
+    `include_archives` (with no `root`) asks the harness's archive folders after the live
+    root, in config order, when the live root doesn't hold the session. Those folders are
+    tested together first (`archives.archive_answers`), one wait at most; a folder that doesn't
+    answer is probed as `unreadable: <why>`, and the search goes on to the next. Without
+    it no archive folder is asked and no test starts. Raises ValueError when `root` is
+    given too.
     """
     _harness(harness)
+    if include_archives and root is not None:
+        raise ValueError("find takes a root or include_archives, not both")
     roots = _roots(harness, root)
     why = _refused(session_id)
     if why is not None:
@@ -210,7 +239,19 @@ def find(harness: str, session_id: str, *, root: Any = None) -> Found:
         probe = _PROBES[harness](each, session_id)
         probes.append(probe)
         if probe.hit:
-            break
+            return Found(harness, session_id, tuple(probes))
+    if include_archives:
+        asked_dirs = archives.archive_dirs(harness)
+        said = archives.archive_answers(asked_dirs) if asked_dirs else {}
+        for archive_dir in asked_dirs:
+            answer = said[archive_dir]
+            if not answer.ok:
+                probes.append(Probe(archive_dir, f"{UNREADABLE}: {answer.reason}"))
+                continue
+            probe = _PROBES[harness](Path(archive_dir), session_id)
+            probes.append(probe)
+            if probe.hit:
+                break
     return Found(harness, session_id, tuple(probes))
 
 
@@ -252,7 +293,12 @@ class Listing:
     could not be listed at all, and `reason` says why. `unreadable` holds `(path,
     reason)` for each directory or file under the root that could not be read; the
     listing went on past it. `imports` is the Codex imports file as read once for the
-    listing (`codex.Imports`), else None. Iterating a listing gives its entries."""
+    listing (`codex.Imports`), else None. Iterating a listing gives its entries.
+
+    From `corpus` only: `is_archive` marks an archive folder (the live root is not one);
+    `absent` marks a root that does not exist (`ok` false); `empty` marks a root listed
+    whose top level holds no entry at all; `shadowed` counts the sources left out because
+    an earlier folder holds their session. `ok` speaks of the top level only."""
 
     harness: str
     root: str
@@ -261,6 +307,10 @@ class Listing:
     entries: tuple[Listed, ...] = ()
     unreadable: tuple[tuple[str, str], ...] = ()
     imports: Any = None
+    is_archive: bool = False
+    absent: bool = False
+    empty: bool = False
+    shadowed: int = 0
 
     def __iter__(self) -> Iterator[Listed]:
         return iter(self.entries)
@@ -281,35 +331,63 @@ def _root_unlistable(root: Path, what: str) -> str | None:
         return f"{what} unreadable: {exc.strerror or exc}"
 
 
-class _Walk:
-    """One listing's walk: the directories it could not list, and the stat of each file."""
+#: How a `corpus` listing names an entry it listed and then found gone.
+GONE = "listed, then not found"
 
-    def __init__(self, root: Path, modified_since: float | None):
+
+class _Walk:
+    """One listing's walk: the directories it could not list, and the stat of each file.
+
+    For `corpus`, `gone_is_error` records an entry listed and then found gone, since a
+    mount that drops partway often shows as files not found; `held` collects the session
+    id of every source the walk names, whatever its time; and a source whose session is
+    in `shadow` is counted in `shadowed` and left out without a stat."""
+
+    def __init__(self, root: Path, modified_since: float | None, *,
+                 gone_is_error: bool = False, shadow: frozenset[str] = frozenset()):
         self.root = root
         self.since_ns = (None if modified_since is None
                          else int(modified_since * 1_000_000_000))
         self.unreadable: list[tuple[str, str]] = []
+        self.gone_is_error = gone_is_error
+        self.shadow = shadow
+        self.held: set[str] = set()
+        self.shadowed = 0
 
     def rel(self, path: str | Path) -> str:
         return Path(path).relative_to(self.root).as_posix()
 
-    def entries(self, target_dir: Path) -> list[os.DirEntry]:
-        """`directory`'s entries by name, or none when it cannot be listed (noted)."""
+    def _gone(self, path: str | Path) -> None:
+        if self.gone_is_error:
+            self.unreadable.append((self.rel(path), GONE))
+
+    def entries(self, target_dir: Path, *, listed: bool = False) -> list[os.DirEntry]:
+        """`directory`'s entries by name, or none when it cannot be listed (noted). A
+        directory that isn't there is noted only when it was `listed` (an entry of a
+        listing, not a place looked in by name) and gone counts as an error."""
         try:
             with os.scandir(target_dir) as it:
                 return sorted(it, key=lambda e: e.name)
         except FileNotFoundError:
+            if listed:
+                self._gone(target_dir)
             return []
         except OSError as exc:
             self.unreadable.append((self.rel(target_dir), exc.strerror or str(exc)))
             return []
 
-    def stat(self, entry: os.DirEntry) -> os.stat_result | None:
-        """The file's one stat, or None when it is gone, unreadable (noted) or older
-        than `modified_since`."""
+    def stat(self, entry: os.DirEntry, session_id: str | None = None) -> os.stat_result | None:
+        """The file's one stat, or None when it is gone, unreadable (noted), older than
+        `modified_since`, or of a session in `shadow` (counted)."""
+        if session_id is not None:
+            if session_id in self.shadow:
+                self.shadowed += 1
+                return None
+            self.held.add(session_id)
         try:
             st = entry.stat()
         except FileNotFoundError:
+            self._gone(entry.path)
             return None
         except OSError as exc:
             self.unreadable.append((self.rel(entry.path), exc.strerror or str(exc)))
@@ -325,6 +403,7 @@ class _Walk:
             with open(source.path, "rb") as fh:
                 return read(source, fh, size)
         except FileNotFoundError:
+            self._gone(source.path)
             return None
         except OSError as exc:
             self.unreadable.append((self.rel(source.path), exc.strerror or str(exc)))
@@ -353,12 +432,13 @@ def _listed(source: Source, kind: str, walk: _Walk, st: os.stat_result, *,
 
 
 def _claude_agents(walk: _Walk, agents_dir: Path, session_id: str,
-                   workflow_id: str | None, *, heads: bool) -> Iterator[Listed]:
-    for entry in walk.entries(agents_dir):
+                   workflow_id: str | None, *, heads: bool,
+                   listed: bool = False) -> Iterator[Listed]:
+    for entry in walk.entries(agents_dir, listed=listed):
         matched = AGENT_FILE.match(entry.name)
         if not matched or not _is_file(entry):
             continue
-        st = walk.stat(entry)
+        st = walk.stat(entry, session_id)
         if st is None:
             continue
         source = Source(CLAUDE, entry.path, session_id, matched.group(1))
@@ -372,12 +452,12 @@ def _claude_sources(root: Path, walk: _Walk, *, heads: bool) -> list[Listed]:
     for project in walk.entries(root):
         if not _is_dir(project):
             continue
-        for entry in walk.entries(Path(project.path)):
+        for entry in walk.entries(Path(project.path), listed=True):
             matched = SESSION_FILE.match(entry.name)
             if matched:
                 if not _is_file(entry):
                     continue
-                st = walk.stat(entry)
+                st = walk.stat(entry, matched.group(1))
                 if st is None:
                     continue
                 source = Source(CLAUDE, entry.path, matched.group(1))
@@ -391,7 +471,7 @@ def _claude_sources(root: Path, walk: _Walk, *, heads: bool) -> list[Listed]:
             for run in walk.entries(subagents / "workflows"):
                 if WORKFLOW_DIR.match(run.name) and _is_dir(run):
                     out.extend(_claude_agents(walk, Path(run.path), entry.name, run.name,
-                                              heads=heads))
+                                              heads=heads, listed=True))
     return out
 
 
@@ -405,17 +485,17 @@ def _codex_sources(root: Path, walk: _Walk, *, heads: bool,
     for year in walk.entries(root):
         if not _is_dir(year):
             continue
-        for month in walk.entries(Path(year.path)):
+        for month in walk.entries(Path(year.path), listed=True):
             if not _is_dir(month):
                 continue
-            for day in walk.entries(Path(month.path)):
+            for day in walk.entries(Path(month.path), listed=True):
                 if not _is_dir(day):
                     continue
-                for entry in walk.entries(Path(day.path)):
+                for entry in walk.entries(Path(day.path), listed=True):
                     matched = codex.NAME_RE.match(entry.name)
                     if not matched or not _is_file(entry):
                         continue
-                    st = walk.stat(entry)
+                    st = walk.stat(entry, matched.group("thread").lower())
                     if st is None:
                         continue
                     compressed = matched.group("zst") is not None
@@ -486,6 +566,119 @@ def sources(harness: str, *, root: str | Path | None = None,
     entries.sort(key=lambda e: e.rel_path)
     return Listing(harness, str(path), ok=True, entries=tuple(entries),
                    unreadable=tuple(walk.unreadable), imports=imports)
+
+
+# --- corpus -------------------------------------------------------------------------------
+
+def _since_of(since: Any, archive_dir: str) -> float | None:
+    if not since:
+        return None
+    for key, value in since.items():
+        if str(key) == archive_dir and value is not None:
+            return float(value)
+    return None
+
+
+def _top(path: Path) -> tuple[bool | None, str | None]:
+    """Whether `path`'s top level holds no entry, or why it can't be listed. `(None,
+    None)` when it does not exist."""
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, f"unreadable: {exc.strerror or exc}"
+    try:
+        with os.scandir(path) as it:
+            return next(it, None) is None, None
+    except NotADirectoryError:
+        return None, "is not a directory"
+    except OSError as exc:
+        return None, f"unreadable: {exc.strerror or exc}"
+
+
+def _list_dir(harness: str, path: Path, *, since: float | None, heads: bool,
+                 imports: Any, shadow: frozenset[str], is_archive: bool) -> tuple[Listing, set[str]]:
+    """One folder of a corpus, listed in this process, and the sessions it holds."""
+    what = ("archive folder" if is_archive else
+            "projects root" if harness == CLAUDE else "sessions root")
+    empty, why = _top(path)
+    if why is not None:
+        return Listing(harness, str(path), ok=False, reason=f"{what} {why}",
+                       is_archive=is_archive), set()
+    if empty is None:
+        return Listing(harness, str(path), ok=False, reason=f"{what} does not exist",
+                       is_archive=is_archive, absent=True), set()
+    walk = _Walk(path, since, gone_is_error=True, shadow=shadow)
+    if harness == CLAUDE:
+        entries = _claude_sources(path, walk, heads=heads)
+    else:
+        entries = _codex_sources(path, walk, heads=heads, imports=imports)
+    entries.sort(key=lambda e: e.rel_path)
+    return Listing(harness, str(path), ok=True, entries=tuple(entries),
+                   unreadable=tuple(walk.unreadable), imports=imports,
+                   is_archive=is_archive, empty=empty, shadowed=walk.shadowed), walk.held
+
+
+def corpus(harness: str, *, since: Any = None, heads: bool = True) -> tuple[Listing, ...]:
+    """Every folder of `harness`: its live root, then its archive folders in the order
+    sessions' config names them, one `Listing` each.
+
+    * A later folder's listing leaves out every source whose session id an earlier folder
+      holds, whatever that source's time, and counts them in its `shadowed`; such a
+      session is read from the earlier folder only.
+    * `since` maps a folder (its path as the listing names it, `Listing.root`) to the epoch
+      seconds of its last walk: that folder lists only sources modified at or after it. A
+      folder it doesn't name is listed whole. `heads` is as `sources` takes it.
+    * The archive folders are tested together first (`archives.archive_answers`), at most one
+      `archives.answer_wait_s` however many don't answer. One that doesn't answer is `ok=False`
+      with the reason, never an empty listing. The live root is not tested.
+    * A live root that does not exist is `absent` (`ok=False`), holds nothing, and the
+      archive folders are listed. A live root that exists and can't be listed lists none
+      of the archive folders (each `ok=False`), since which of their sessions it holds is
+      not known.
+    * A listing records in `unreadable`, at any depth, a directory it can't list, a file
+      it can't stat or open, and an entry it listed and then found gone. `empty` marks a
+      folder whose top level holds no entry at all.
+    * Every Codex folder is read with the live root's imports file, Codex's own record of
+      the threads it imported.
+    * OpenCode has no archive folders: its one listing is `sources("opencode")`'s.
+
+    Raises `moxi.config.ConfigError` when sessions' config cannot be read. Writes nothing
+    in any folder.
+    """
+    _harness(harness)
+    live = default_root(harness)
+    if harness == OPENCODE:
+        return (_opencode_sources(live, _since_of(since, str(live))),)
+    asked_dirs = archives.archive_dirs(harness)
+    imports = codex.read_imports(codex.imports_path(live)) if harness == CODEX else None
+    first, held = _list_dir(harness, live, since=_since_of(since, str(live)),
+                               heads=heads, imports=imports, shadow=frozenset(),
+                               is_archive=False)
+    out = [first]
+    if not first.ok and not first.absent:
+        why = (f"not asked: the live root {live} could not be listed, so which of this "
+               "folder's sessions it holds is not known")
+        out.extend(Listing(harness, archive_dir, ok=False, reason=why, is_archive=True)
+                   for archive_dir in asked_dirs)
+        return tuple(out)
+    said = archives.archive_answers(asked_dirs) if asked_dirs else {}
+    shadow = set(held)
+    for archive_dir in asked_dirs:
+        answer = said[archive_dir]
+        if not answer.ok:
+            out.append(Listing(harness, archive_dir, ok=False,
+                               reason=f"archive folder offline: {answer.reason}",
+                               is_archive=True))
+            continue
+        listing, held = _list_dir(harness, Path(archive_dir),
+                                     since=_since_of(since, archive_dir), heads=heads,
+                                     imports=imports, shadow=frozenset(shadow),
+                                     is_archive=True)
+        out.append(listing)
+        shadow |= held
+    return tuple(out)
 
 
 # --- subagents ------------------------------------------------------------------------------
@@ -761,6 +954,6 @@ def subagents(source: Any) -> SubagentListing:
     return _claude_subagents(source)
 
 
-__all__ = ["find", "sources", "subagents", "Found", "Probe", "Hit", "Listing", "Listed",
+__all__ = ["find", "sources", "corpus", "subagents", "Found", "Probe", "Hit", "Listing", "Listed",
            "SubagentListing", "Subagent", "HIT", "MISS", "UNREADABLE", "REFUSED", "LISTED",
-           "NONE", "UNSUPPORTED"]
+           "NONE", "UNSUPPORTED", "GONE"]
