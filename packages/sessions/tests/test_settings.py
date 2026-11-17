@@ -31,7 +31,7 @@ def test_show_json_gives_every_key_a_label_and_four_first(capsys):
     assert keys["claude.projects"]["line"] == "Not set: the folder Claude Code itself uses."
     assert keys["guard.transcript_read_escapes"]["label"] == "Commands the guard lets through"
     assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == {
-        "list.recent_s": "seconds"}
+        "archives.answer_wait_s": "seconds", "list.recent_s": "seconds"}
     for key in keys.values():
         assert key["group"] is None and key["choices"] is None and key["pick"] is False
         assert key["terminal"] is None and key["elsewhere"] is None

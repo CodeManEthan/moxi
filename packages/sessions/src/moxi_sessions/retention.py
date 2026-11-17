@@ -13,6 +13,11 @@ each harness's setting as it is set and changes nothing:
   `archived_sessions/` beside the sessions root, where sessions doesn't read.
 * OpenCode: sessions reads no retention setting for it.
 
+For Claude Code and Codex it also names the archive folders sessions' config gives
+(`claude.archives`, `codex.archives`) in `archive_dirs` and a line, without touching them:
+what a folder holds stays as long as whoever keeps it keeps it, and sessions never changes
+it.
+
 Each harness's answer is a `Retention`, with `lines` that a setup prints and `brief`, the
 doctor's words. The files are found over the environment (this process's unless one is
 handed in), not through sessions' root keys: a configured root moves where sessions reads,
@@ -25,7 +30,7 @@ import json
 import os
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +58,8 @@ class Retention:
     * `reason`: why the file could not be read or parsed, else None.
     * `archive` and `archived`: Codex's archive folder and the rollouts in it now (None
       when it can't be listed); None for the others.
+    * `archive_dirs`: the archive folders sessions' config names for the harness, in the
+      order read; none for OpenCode. Named, never opened.
     * `warn`: true when something here takes transcripts from sessions that the user may
       not expect: a file that can't be read, Codex's compression switched on, or a
       `cleanupPeriodDays` that is not a whole number of days, 1 or more.
@@ -70,6 +77,7 @@ class Retention:
     brief: str
     archive: str | None = None
     archived: int | None = None
+    archive_dirs: tuple[str, ...] = ()
 
 
 def _home(env: Mapping[str, str]) -> str:
@@ -214,12 +222,42 @@ def _opencode() -> Retention:
                      brief="OpenCode: no setting read")
 
 
+#: How the lines name a harness that has archive folders.
+_LABELS = {CLAUDE: "Claude Code", CODEX: "Codex"}
+
+
+def _with_archives(item: Retention) -> Retention:
+    """`item` with the archive folders sessions' config names for its harness, named and
+    never opened."""
+    from moxi.config import ConfigError
+
+    from .archives import archive_dirs
+
+    label = _LABELS[item.harness]
+    try:
+        asked_dirs = archive_dirs(item.harness)
+    except ConfigError as exc:
+        return replace(item, warn=True, lines=(*item.lines, (
+            f"{label}: sessions' config can't be read, so its archive folders are not "
+            f"known: {exc}")), brief=f"{item.brief}; archive folders not known")
+    if not asked_dirs:
+        return item
+    many = len(asked_dirs) != 1
+    return replace(item, archive_dirs=asked_dirs, lines=(*item.lines, (
+        f"{label}: sessions also reads {len(asked_dirs)} archive folder{'s' if many else ''} "
+        f"after the live root, in this order: {', '.join(asked_dirs)}. What an archive "
+        "folder holds stays as long as whoever keeps it keeps it; sessions never "
+        "writes, moves or deletes anything there.")),
+        brief=f"{item.brief}; {len(asked_dirs)} archive folder{'s' if many else ''}")
+
+
 def retention(env: Mapping[str, str] | None = None) -> tuple[Retention, ...]:
     """Each harness's retention as set, Claude Code, Codex, OpenCode in that order, over
-    `env` (this process's when None). Reads two small files and lists one folder;
-    writes nothing."""
+    `env` (this process's when None), with the archive folders sessions' config names.
+    Reads two small files and lists one folder; opens no archive folder and writes
+    nothing."""
     env = os.environ if env is None else env
-    return (_claude(env), _codex(env), _opencode())
+    return (_with_archives(_claude(env)), _with_archives(_codex(env)), _opencode())
 
 
 def lines(env: Mapping[str, str] | None = None) -> list[str]:
