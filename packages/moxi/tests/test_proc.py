@@ -279,6 +279,82 @@ def test_an_fd_child_keeps_stdin_free_and_hears_the_close(tmp_path):
     child.stdout.close()
 
 
+# A parent that forks a holder of the lifeline's write end and then execs into the child
+# with `exec_env`, as a wrapper that becomes its harness does. It prints the holder's pid.
+EXECS = """
+    import os, signal, sys, time
+    from moxi import proc
+    read_end, write_end = os.pipe()
+    holder = os.fork()
+    if holder == 0:
+        os.close(read_end)
+        while True:
+            time.sleep(60)
+    os.close(write_end)
+    print(holder, flush=True)
+    env = proc.exec_env(read_end, {**os.environ, "ONLY": "yes"})
+    os.execve(sys.executable, [sys.executable, sys.argv[1]], env)
+"""
+
+EXECED = """
+    import os, threading
+    from moxi import proc
+    closed = threading.Event()
+    kind = proc.lifeline_kind()
+    proc.lifeline(on_close=closed.set)
+    print(kind, os.environ.get("ONLY"), proc.LIFELINE_ENV in os.environ, flush=True)
+    print("closed", closed.wait(30), flush=True)
+"""
+
+
+@POSIX
+def test_an_execd_child_holds_the_lifeline_and_ends_when_its_holder_is_killed(tmp_path):
+    import signal
+
+    child = subprocess.Popen([PY, script(tmp_path, "execs.py", EXECS),
+                              script(tmp_path, "execed.py", EXECED)],
+                             stdout=subprocess.PIPE)
+    holder = int(child.stdout.readline())
+    try:
+        assert child.stdout.readline() == b"fd yes False\n"
+        time.sleep(0.2)
+        assert child.poll() is None
+        os.kill(holder, signal.SIGKILL)
+        assert child.stdout.readline() == b"closed True\n"
+        assert child.wait(timeout=30) == 0
+    finally:
+        try:
+            os.kill(holder, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.stdout.close()
+
+
+@POSIX
+def test_exec_env_names_the_fd_and_leaves_the_given_env_alone(monkeypatch):
+    monkeypatch.setenv(proc.LIFELINE_ENV, "0")
+    read_end, write_end = os.pipe()
+    try:
+        assert not os.get_inheritable(read_end)
+        given = {"PATH": "p", proc.LIFELINE_ENV: "9"}
+        env = proc.exec_env(read_end, given)
+        assert os.get_inheritable(read_end)
+        assert env[proc.LIFELINE_ENV] == str(read_end)
+        assert env["PATH"] == "p" and _mark.STARTED_BY_ENV in env
+        assert given == {"PATH": "p", proc.LIFELINE_ENV: "9"}
+        assert proc.exec_env(read_end)[proc.LIFELINE_ENV] == str(read_end)
+        assert os.environ[proc.LIFELINE_ENV] == "0"
+    finally:
+        os.close(read_end)
+        os.close(write_end)
+
+
+def test_exec_env_refuses_on_windows(monkeypatch):
+    monkeypatch.setattr(proc, "_WINDOWS", True)
+    with pytest.raises(OSError):
+        proc.exec_env(5)
+
+
 def test_the_default_close_interrupts_the_main_thread(tmp_path):
     interrupted = """
         import signal, sys, time
