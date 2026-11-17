@@ -16355,3 +16355,10 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="write the stamp a sync
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--take", metavar="NAME=DIR", action="append", default=[],	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="after each run, merge host NAME's results from DIR/NAME; may "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	python = _need([uv, "python", "find", "--system", check.PYTHON], base, source).strip()	keep	find	find
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	return set(json.loads(held.read_text())) if held.exists() else set()	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	return {"PATH": str(fakes.bin_dir), "HOME": str(tmp_path / "home"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert set(data) == {"format", "machine", "source", "has_git", "record_dir", "slack",	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	and row["args"][:2] != ["python", "find"]	keep	find	find
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
