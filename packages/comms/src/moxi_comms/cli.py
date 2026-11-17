@@ -800,6 +800,9 @@ def cmd_reserved(args, ctx: Context) -> int:
     except KeyError:
         ctx.say(f"{args.name} isn't reserved for a module; nothing was changed")
         return moxi_exit.REFUSED
+    except reserved.Refused as exc:
+        ctx.say(f"{exc}; nothing was changed")
+        return moxi_exit.REFUSED
     except LockTimeout as exc:
         ctx.say(f"another comms process holds the reserved names' lock ({exc}); nothing "
                 "was changed. Try again in a moment")

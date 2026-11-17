@@ -167,3 +167,39 @@ def test_a_state_root_it_cannot_write_or_read_is_a_row(no_device, mode):
     assert device.startswith("none set yet (" if mode else "ERROR: "), device
     assert sorted(p.name for p in no_device.iterdir()) == ["moxi"]
     assert list((no_device / "moxi").iterdir()) == []
+
+
+# --------------------------------------------------------------------------- send-only tokens
+
+def test_a_programs_name_whose_token_this_process_cant_read_says_renew_where_it_sends(
+        tmp_path):
+    from moxi_comms import reserved, secrets
+    from moxi_comms.tokens import TokenStore
+
+    store = TokenStore(tmp_path / "tokens")
+    reserved.register("ticker", chain=secrets.build(["store"], store=store))
+    assert reserved.token_rows(chain=secrets.build(["store"], store=store)) == []
+    (row,) = reserved.token_rows(chain=secrets.build(["env"], env={}))
+    assert row.state == "warn"
+    assert "a program registered it, and sends under it from its own" in row.detail
+    assert row.fix.startswith("moxi comms send-only renew ticker, run where ticker sends")
+
+
+def test_a_stale_copy_of_a_programs_token_is_named_by_the_step_that_holds_it(tmp_path):
+    """Renewing from the shell the doctor runs in would take the token from the program;
+    removing the stale copy is the cure."""
+    from test_secrets import FakeKeychain
+
+    from moxi_comms import reserved, secrets
+    from moxi_comms.tokens import TokenStore
+
+    store, keychain = TokenStore(tmp_path / "tokens"), FakeKeychain()
+    reserved.register("ticker", chain=secrets.build(["store"], store=store))
+    keychain.set_password(secrets.KEYCHAIN_SERVICE, "send-only:comms/send-only/ticker",
+                          "an-old-token")
+    (row,) = reserved.token_rows(chain=secrets.build(["keychain", "store"], store=store,
+                                                     keychain=keychain))
+    assert row.detail.startswith("the keychain (service moxi-comms, user "
+                                 "send-only:comms/send-only/ticker) holds a stale token "
+                                 "for ticker")
+    assert row.fix == "remove that stale copy; renew ticker only where it sends from"
