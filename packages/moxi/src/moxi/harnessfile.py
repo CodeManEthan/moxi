@@ -143,11 +143,11 @@ def backup(path: Path, backups: Path, data: bytes, keep: int) -> Path:
     """Keep `data`, file `path`'s bytes before a write, as `backups/<stamp>-<name>` (the
     folder made private, the file 0600), and prune that name's backups to the newest
     `keep`."""
-    folder = private_dir(backups)
+    backup_dir = private_dir(backups)
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f"{time.time_ns() % 10**9:09d}"
-    out = folder / f"{stamp}-{path.name}"
+    out = backup_dir / f"{stamp}-{path.name}"
     atomic_write(out, data, mode=0o600)
-    mine = sorted(p for p in folder.iterdir() if p.name.endswith("-" + path.name))
+    mine = sorted(p for p in backup_dir.iterdir() if p.name.endswith("-" + path.name))
     for old in mine[:-keep] if keep > 0 else []:
         try:
             old.unlink()

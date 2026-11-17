@@ -66,15 +66,15 @@ def test_moxi_config_set_runs_the_check():
     """The installed announcement names the check, so the core's setter refuses a change
     the check refuses and writes nothing."""
     with pytest.raises(config.ConfigError) as caught:
-        config.set("statusline", "show", ["row", "dir"], by="test")
+        config.set_value("statusline", "show", ["row", "dir"], by="test")
     assert "'row' first" in caught.value.problem
     assert not config_file().exists()
-    config.set("statusline", "show", ["dir", "row", "model"], by="test")
+    config.set_value("statusline", "show", ["dir", "row", "model"], by="test")
     assert config_file().exists()
 
 
 def test_two_keys_changed_together_pass_where_one_alone_is_refused():
     with pytest.raises(config.ConfigError):
-        config.set("statusline", "context.warn_at", 90, by="test")
+        config.set_value("statusline", "context.warn_at", 90, by="test")
     config.set_many("statusline", [("context.warn_at", 90), ("context.alert_at", 95)],
                     by="test")

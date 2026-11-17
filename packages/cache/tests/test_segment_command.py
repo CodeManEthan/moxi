@@ -26,8 +26,8 @@ def child(code: str, *args, cwd=None) -> subprocess.CompletedProcess:
 
 def put_record(age=125.0, seen_ago=0.0, kind="warm", **thresholds):
     now = time.time()
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
     rec = {"v": 1, "session": SID, "harness": "claude", "pid": 1, "kind": kind,
            "last_request": now - age, "ttl": 3600, "read_at": now, "seen_at": now - seen_ago,
            "code": None, "warn_before": 900, "stale_after": 30}
@@ -35,7 +35,7 @@ def put_record(age=125.0, seen_ago=0.0, kind="warm", **thresholds):
     for name, value in thresholds.items():
         if value is None:
             del rec[name]
-    (directory / f"{SID}.json").write_text(json.dumps(rec))
+    (records_dir / f"{SID}.json").write_text(json.dumps(rec))
 
 
 def test_cache_keeps_no_render_hook_of_its_own():

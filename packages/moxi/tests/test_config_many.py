@@ -126,7 +126,7 @@ RAISED = [("context.warn_at", 90), ("context.alert_at", 95)]
 def test_two_bound_keys_move_together_where_either_alone_is_refused(demo, writes):
     made(demo)
     for key, value in RAISED:
-        refused(config.set, "demo", key, value, by="cli")
+        refused(config.set_value, "demo", key, value, by="cli")
         refused(config.set_many, "demo", [(key, value)], by="ui")
     assert demo.read_text() == COMMENTED and writes == []
     assert config.set_many("demo", RAISED, by="ui") == []
@@ -139,7 +139,7 @@ def test_two_bound_keys_move_together_where_either_alone_is_refused(demo, writes
 @pytest.mark.parametrize("changes, key, words", [
     # the module's check refuses the whole draft: no one key to name
     ([("context.warn_at", 90), ("name", "x")], None, "alert_at 70 must be above"),
-    # one change: the refusal names it, as `set`'s does
+    # one change: the refusal names it, as `set_value`'s does
     ([("context.warn_at", 90)], "context.warn_at", "alert_at 70 must be above"),
     # the module's own ConfigError keeps its key
     ([("name", "kept"), ("context.warn_at", 60)], "name", "kept back"),
@@ -218,7 +218,7 @@ def test_set_many_needs_a_by(demo):
 
 def test_one_key_writes_the_bytes_set_writes(demo):
     made(demo)
-    config.set("demo", "rows.backup", "on", by="cli")
+    config.set_value("demo", "rows.backup", "on", by="cli")
     by_set = demo.read_bytes()
     made(demo)
     config.set_many("demo", [("rows.backup", "on")], by="ui")
@@ -311,7 +311,7 @@ def test_a_file_that_is_not_toml_is_refused_alike(demo):
     made(demo, "name = \n")
     drafted = refused(config.draft_text, "demo", RAISED)
     saved = refused(config.set_many, "demo", RAISED, by="ui")
-    one = refused(config.set, "demo", "name", "x", by="cli")
+    one = refused(config.set_value, "demo", "name", "x", by="cli")
     assert "is not valid TOML" in drafted.problem
     assert drafted.problem == saved.problem == one.problem
     assert drafted.key is saved.key is one.key is None

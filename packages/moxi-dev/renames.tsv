@@ -120,7 +120,6 @@ cache	packages/cache/src/moxi_cache/records.py	finite `stale_after`; its `stale`
 cache	packages/cache/src/moxi_cache/records.py	if any(name not in doc for name in READING_FIELDS):	keep	any	any
 cache	packages/cache/src/moxi_cache/records.py	if any(name not in record for name in REQUIRED):	keep	any	any
 cache	packages/cache/src/moxi_cache/records.py	record_path	name	directory	records_dir
-cache	packages/cache/src/moxi_cache/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	both = sorted(set(a.models) & set(b.models)) or [WILDCARD]	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	extra = set(doc) - {"lifetime"}	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	if a.wildcard or b.wildcard or set(a.models) & set(b.models):	keep	set	set
@@ -422,16 +421,16 @@ cache	packages/cache/tests/test_page.py	self._gone.set()	keep	set	set
 cache	packages/cache/tests/test_page.py	self.facts, self.roots, self.opened, self.fails = facts or {}, list(roots), opened, fails	keep	opened	opened
 cache	packages/cache/tests/test_page.py	written = [case["record"] for case in CASES]	keep	record	record
 cache	packages/cache/tests/test_page.py	{"session": B, "harness": "claude", "name": None, "folder": "/work/orbit-cli",	keep	folder	folder
-cache	packages/cache/tests/test_render.py	assert set(doc) == {"text", "band", "age_s", "ttl_s", "dim"}	keep	set	set
-cache	packages/cache/tests/test_render.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-cache	packages/cache/tests/test_render.py	put_record	name	directory	records_dir
-cache	packages/cache/tests/test_render.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_segment.py	-	name	test_the_records_live_under_the_runtime_directory	test_the_records_live_under_the_runtime_dir
 cache	packages/cache/tests/test_segment.py	@pytest.mark.parametrize("bad", ["", "../x", "a/b", ".hidden", None, 7, "x" * 200])	keep	bad	bad
 cache	packages/cache/tests/test_segment.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_segment.py	put	name	directory	records_dir
 cache	packages/cache/tests/test_segment.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_segment.py	test_segment_is_none_for_a_record_naming_another_session	name	directory	records_dir
+cache	packages/cache/tests/test_segment_command.py	assert set(doc) == {"text", "band", "age_s", "ttl_s", "dim"}	keep	set	set
+cache	packages/cache/tests/test_segment_command.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_segment_command.py	put_record	name	directory	records_dir
+cache	packages/cache/tests/test_segment_command.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_settings.py	assert cli.main(["config", "cache", "show", "--json"]) == 0	keep	show	show
 cache	packages/cache/tests/test_table.py	assert (after.kind, after.ttl_seconds, after.key) == ("warm", 600, "codex openai/gpt-5.5")	use	after.ttl_seconds	after.ttl_s
 cache	packages/cache/tests/test_table.py	r.request(token_usage(input=100, cached=90))	use	input=	input_tokens=
@@ -5220,6 +5219,8 @@ loadout	packages/loadout/tests/test_entries.py	assert set(r.state for r in insta
 loadout	packages/loadout/tests/test_entries.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_entries.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_entries.py	write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_entries.py	home = Path(os.environ["HOME"])	keep	HOME	HOME
+loadout	packages/loadout/tests/test_entries.py	given = {"HOME": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}	keep	HOME	HOME
 loadout	packages/loadout/tests/test_global.py	_edited_generated_claude	name	f	fh
 loadout	packages/loadout/tests/test_global.py	and r.harness == "opencode"} == {("opencode", "stale"), ("opencode", "missing")}	keep	stale	stale
 loadout	packages/loadout/tests/test_global.py	assert any("claude's part" in line for line in out.text())	keep	any	any
@@ -5633,6 +5634,13 @@ moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal but is {_a(kind)}
 moxi	packages/moxi/src/moxi/config.py	if not isinstance(terminal, dict) or set(terminal) != {"on", "off"}:	keep	set	set
 moxi	packages/moxi/src/moxi/config.py	raise bad("has a terminal that is not a table of on and off",	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	coerced and checked as `set` checks it, all are applied in order, and the checks run once	use	`set`	`set_value`
+moxi	packages/moxi/src/moxi/config.py	`changes` is a sequence of `(key, value)` pairs, each taken as `set` takes it and	use	`set`	`set_value`
+moxi	packages/moxi/src/moxi/config.py	applied in order (a later change of a key wins). The checks `set` runs over the new	use	`set`	`set_value`
+moxi	packages/moxi/src/moxi/config.py	units applied for each key, one list, as `set` returns them. No changes write nothing	use	`set`	`set_value`
+moxi	packages/moxi/src/moxi/config.py	and `CONFIG_CHECK`, and each change prepared as `set` prepares it."""	use	`set`	`set_value`
+moxi	packages/moxi/src/moxi/config.py	_record_changes(module, keys, "set", by)	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:	use	timeout=	timeout_s=
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
@@ -5671,6 +5679,8 @@ moxi	packages/moxi/src/moxi/files.py	found: set[str] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/files.py	if not gate.acquire(timeout=max(timeout, 0)):	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/files.py	lock	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/files.py	window._take(path, name, line, max_bytes, durable)	use	durable	durable=durable
+moxi	packages/moxi/src/moxi/harnessfile.py	backup	name	folder	backup_dir
+moxi	packages/moxi/src/moxi/harnessfile.py	bytes `dumps()` gives for the file as read (None when missing), so `changed` is true	keep	changed	changed
 moxi	packages/moxi/src/moxi/home.py	_stop	kwonly	replace	replace
 moxi	packages/moxi/src/moxi/home.py	_stop	name	record	stopped
 moxi	packages/moxi/src/moxi/home.py	_tidy_label	name	folder	label_dir
@@ -5880,6 +5890,7 @@ moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/proc.py	status	name	at	position
+moxi	packages/moxi/src/moxi/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
 moxi	packages/moxi/src/moxi/run.py	"seconds": round(max(seconds, 0.0), 3), "result": result, "exit": code,	keep	round	round
 moxi	packages/moxi/src/moxi/run.py	Args.__init__	name	runtime	is_runtime
 moxi	packages/moxi/src/moxi/run.py	paths.core().runtime_dir(create=True)	keep	create	create
@@ -6103,6 +6114,17 @@ moxi	packages/moxi/tests/test_config.py	assert s["local.record"] == Path(env["HO
 moxi	packages/moxi/tests/test_config.py	assert set(s.sources.values()) == {"default"}	keep	set	set
 moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}	keep	HOME	HOME
 moxi	packages/moxi/tests/test_config.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_config_many.py	refused(config.set, "demo", key, value, by="cli")	use	config.set	config.set_value
+moxi	packages/moxi/tests/test_config_many.py	config.set("demo", "rows.backup", "on", by="cli")	use	config.set	config.set_value
+moxi	packages/moxi/tests/test_config_many.py	one = refused(config.set, "demo", "name", "x", by="cli")	use	config.set	config.set_value
+moxi	packages/moxi/tests/test_config_many.py	# one change: the refusal names it, as `set`'s does	use	`set`	`set_value`
+moxi	packages/moxi/tests/test_config_many.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config_many.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_config_many.py	([("show", "dir")], "show", "cannot be a string"),	keep	show	show
+moxi	packages/moxi/tests/test_config_many.py	("demo", "context.warn_at", "set", "ui"),	keep	set	set
+moxi	packages/moxi/tests/test_config_many.py	("demo", "context.alert_at", "set", "ui")]	keep	set	set
+moxi	packages/moxi/tests/test_config_many.py	assert all(set(r) == {"module", "key", "op", "by", "at"} for r in records)	keep	set	set
+moxi	packages/moxi/tests/test_config_many.py	changes = RAISED + [("show", ["dir", "row", "model"]), ("rows.backup", True)]	keep	show	show
 moxi	packages/moxi/tests/test_config_page.py	assert cli.main(["config", module, "show", "--json"]) == 0	keep	show	show
 moxi	packages/moxi/tests/test_config_set.py	("demo", "private_names", "set", "ui"),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	keep	set	set
@@ -6480,6 +6502,10 @@ moxi	packages/moxi/tests/test_place.py	test_remove_unlinks_deletes_copies_and_mo
 moxi	packages/moxi/tests/test_place.py	test_status_reads_missing_stale_and_modified	name	folder	skills_dir
 moxi	packages/moxi/tests/test_place.py	test_the_windows_form	name	folder	is_dir
 moxi	packages/moxi/tests/test_place.py	with pytest.raises(ValueError, match="git_seconds"):	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	assert place._folder("claude", kind, "", given) == Path(	use	place._folder	place._harness_dir
+moxi	packages/moxi/tests/test_place.py	assert place._folder("claude", "skills", "", given) == Path(folder, "skills")	use	place._folder	place._harness_dir
+moxi	packages/moxi/tests/test_place.py	@pytest.mark.parametrize(("value", "folder"), [	keep	folder	folder
+moxi	packages/moxi/tests/test_place.py	given = {"HOME": str(tmp_path / "given")}	keep	HOME	HOME
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_is_copied_with_its_note_when_symlinks_are_not_allowed	test_a_held_dir_is_copied_with_its_note_when_symlinks_are_not_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_links_relative_when_symlinks_are_allowed	test_a_held_dir_links_relative_when_symlinks_are_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_link_places_a_folder_as_a_junction_and_removes_only_the_junction	test_link_places_a_dir_as_a_junction_and_removes_only_the_junction
@@ -12416,6 +12442,180 @@ slots	packages/slots/tests/test_trampoline.py	"TERM_PROGRAM": "tmux", "SERVER_SE
 slots	packages/slots/tests/test_trampoline.py	_, err = proc.communicate(timeout=10)	keep	timeout	timeout
 slots	packages/slots/tests/test_trampoline.py	assert set(TERM_NAMES) == {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",	keep	set	set
 slots	packages/slots/tests/test_trampoline.py	test_a_launch_file_already_taken_runs_nothing	name	f	fh
+statusline	packages/statusline/src/moxi_statusline/cli.py	the config's `show`, held to the config's rules. It writes nothing.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/cli.py	sub = verbs.add_parser(verb.name, help=verb.help, description=verb.description)	keep	help	help
+statusline	packages/statusline/src/moxi_statusline/cli.py	sub.set_defaults(run=verb.run)	keep	run	run
+statusline	packages/statusline/src/moxi_statusline/cli.py	help="put the saved line back even over a line that isn't Moxi's")	keep	help	help
+statusline	packages/statusline/src/moxi_statusline/cli.py	parser.add_argument("--json", action="store_true", help="print it as JSON")	keep	help	help
+statusline	packages/statusline/src/moxi_statusline/cli.py	parser.add_argument("--show", metavar="a,b,c", type=_items,	keep	type	type
+statusline	packages/statusline/src/moxi_statusline/cli.py	help="render these items in place of the config's show")	keep	help	help
+statusline	packages/statusline/src/moxi_statusline/cli.py	parser.add_argument("--no-color", action="store_true", help="no colour")	keep	help	help
+statusline	packages/statusline/src/moxi_statusline/cli.py	if args.show is not None:	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/cli.py	problem = show_problem(args.show)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/cli.py	done = render(sample.payload(), show=args.show, color=not args.no_color)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/detect.py	`HOME` is an empty folder inside the throwaway folder, and every `XDG_*_HOME`, every	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/detect.py	two: set[int] = set()	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/detect.py	four: set[int] = set(range(1900, 2101))	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/detect.py	hm: set[str] = set()	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/detect.py	words = set(taken)	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/detect.py	numbers: set[int] = set()	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	folder = own("dir", self.folder)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	paths_ = [("dir", self.folder), (None, self.root), (None, self.home),	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	if marker.find(text):	keep	find	find
+statusline	packages/statusline/src/moxi_statusline/detect.py	for at in marker.find(text):	keep	find	find
+statusline	packages/statusline/src/moxi_statusline/detect.py	"""The run's environment: `base` with `HOME` set to `home`, and every `XDG_*_HOME`,	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/detect.py	out["HOME"] = home	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/detect.py	out, _ = proc.communicate(data, timeout=limit)	keep	timeout	timeout
+statusline	packages/statusline/src/moxi_statusline/detect.py	proc.communicate(timeout=1.0)	keep	timeout	timeout
+statusline	packages/statusline/src/moxi_statusline/detect.py	"""Make `folder` a repository on `branch`. False without `git`, or when it fails."""	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	os.mkdir(drawn.folder, 0o700)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	repo = _git(drawn.folder, drawn.branch, environ)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	code, out = run(line, data, cwd=drawn.folder, env=environ, limit=limit)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/doctor.py	- `show`: each module item of `show` has a segment behind it: the module is present and	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/doctor.py	show = list(settings.load()["show"])	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/doctor.py	show = list(settings.schema().keys["show"].default)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/doctor.py	return Row(MODULE, "show", "ok", "every module item in show has a segment")	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/doctor.py	return Row(MODULE, "show", "warn",	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/fields.py	`row` is no field: in `show` it starts the second row.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/fields.py	#: The base fields, by the name `show` gives them. They are read before module names.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/fields.py	#: Every name `show` reads as something other than a module.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/module.py	#: The whole check of the config file's text: the schema, then the rules of `show` and the	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	1. **Switch** to Moxi's line, set up to show the same: `show` is the pieces found, in their	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	default `show`. The old line is kept for `moxi statusline restore`.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	#: The item of `show` a piece becomes, when not its own name.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	"""`segments` in the order the default `show` gives them, then the rest by name."""	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	return known + sorted(s for s in set(segments) if s not in known)	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/offers.py	and whether limits were found with usage not installed. `show` is None when nothing	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/offers.py	found becomes an item: the switch then takes the default `show`."""	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/page.py	`changes` is a table of the keys a draft changes, each only when it does: `show`,	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/page.py	#: The longest `show` list, item name or separator a body takes.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable	nullable
+statusline	packages/statusline/src/moxi_statusline/page.py	"show": _TEXTS,	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/page.py	#: Claude Code's `statusLine`: `set`, whether it has one; `command`, its command (null	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/page.py	"set": lb.Out("bool"),	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/page.py	"ms": lb.Out("float", nullable=True),	keep	nullable	nullable
+statusline	packages/statusline/src/moxi_statusline/page.py	return lb.Field("int", required=False, max=NUMBER_MAX)	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	CHANGES = lb.Field("table", required=False, items={	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	"show": lb.Field("list", required=False, max=LIST_MAX,	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/page.py	"show": lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	"separator": lb.Field("string", required=False, max=SEPARATOR_MAX),	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	"color": lb.Field("bool", required=False),	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	"dir": lb.Field("table", required=False, items={"parts": _optional_int()}),	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/page.py	"context": lb.Field("table", required=False, items={"warn_at": _optional_int(),	keep	required	required
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	return moxi_paths.Layout(MODULE).runtime_dir(create=True)	keep	create	create
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	"show": list(read["show"]),	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	"set": bool(found["set"]),	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	return list(config.check_text(MODULE, settings.schema(), text)["show"])	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	if not any(line.strip() for line in alone.lines):	keep	any	any
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	return {"lines": done.lines, "ms": round(done.ms, 1), "notes": notes,	keep	round	round
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	if act.kind in ("changed", "not-moxis", "nothing-saved"):	keep	changed	changed
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	"""`POST /api/use`: Claude Code's line set to Moxi's, the config's `show` as it is."""	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/pieces.py	return first + sorted(m for m in set(modules) if m not in FIRST)	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/render.py	- `--show a,b,c`: these items in place of the config's `show`.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/render.py	__slots__ = ("show", "only", "config", "color", "help")	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/render.py	self.show = None	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/render.py	else args.show if args.show is not None else list(values["show"]))	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/render.py	color=values["color"] and args.color, home=os.environ.get("HOME"))	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/render.py	args.show = [item.strip() for item in value.split(",") if item.strip()]	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/render.py	if now is None and any(item not in RESERVED for item in items):	keep	any	any
+statusline	packages/statusline/src/moxi_statusline/settings.py	The rules: each `show` item is a base field, `row`, or spelled as a module name; at most	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/settings.py	found = show_problem(settings["show"])	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/settings.py	return config.ConfigError(file, "show", problem, fix)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/settings.py	"""`(problem, fix)` for the first rule a list of `show` items breaks, or None."""	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/setup.py	and leaves the config's `show` as it is (the default items when none is saved); no	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/setup.py	return list(schema().keys["show"].default)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/setup.py	"""Step 4, for setup (`verb` false) and for `use`. The switch keeps a saved `show`,	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/setup.py	"record", "asked_path", "default_show", "QUESTION", "DETECT_QUESTION", "KEPT",	keep	record	record
+statusline	packages/statusline/src/moxi_statusline/status.py	the items of `show` and which show nothing, modules named like a base field, and a	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	"""The status as plain data: `switch.state`'s keys, then `show` (the config's items),	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	in `folder`, default the working folder, that sets its own line)."""	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/status.py	show = list(settings.load()["show"])	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	show = list(settings.schema().keys["show"].default)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	out["show"] = show	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	elif data["set"]:	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/status.py	out.append(f"Shows: {', '.join(data['show'])}")	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/switch.py	config.set(MODULE, "show", list(show), by=by)	use	config.set	config.set_value
+statusline	packages/statusline/src/moxi_statusline/switch.py	config's `show` (`moxi.config.set`, with `by`). None leaves `show` as it is.	use	moxi.config.set	moxi.config.set_value
+statusline	packages/statusline/src/moxi_statusline/switch.py	already), `restored`, `removed`, `refused` (the settings file, or the store that	keep	refused	refused
+statusline	packages/statusline/src/moxi_statusline/switch.py	`changed` (the file changed under the act, nothing written), `not-moxis` (restore over	keep	changed	changed
+statusline	packages/statusline/src/moxi_statusline/switch.py	here), `config` (the line switched but `show` wasn't written). `lines` are what it	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/switch.py	if not doc.changed:	keep	changed	changed
+statusline	packages/statusline/src/moxi_statusline/switch.py	return Act(codes.ERROR, "refused",	keep	refused	refused
+statusline	packages/statusline/src/moxi_statusline/switch.py	return Act(codes.TEMPFAIL, "changed", [line, f"{LEFT}; run it again"], found)	keep	changed	changed
+statusline	packages/statusline/src/moxi_statusline/switch.py	return Act(codes.REFUSED, "refused", [str(exc), LEFT])	keep	refused	refused
+statusline	packages/statusline/src/moxi_statusline/switch.py	"""Set Claude Code's line to Moxi's, and when `show` is given write it as the	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/switch.py	`error` (why it can't be read, else None), `set` (whether a `statusLine` is set),	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/switch.py	out: dict = {"settings": str(settings_path(env)), "error": None, "set": False,	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/switch.py	out["set"] = current is not None	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/switch.py	"""The project settings in `folder` that set their own `statusLine`, which Claude	keep	folder	folder
+statusline	packages/statusline/tests/statusline_kit.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_browser_page.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_browser_page.py	assert any("/m/statusline/api/state" in url for url in check.requests), check.requests	keep	any	any
+statusline	packages/statusline/tests/test_cli.py	@pytest.mark.parametrize("show", ["row,dir", "dir,row,model,row,cost", "Bad-Name"])	keep	show	show
+statusline	packages/statusline/tests/test_cli.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_cli.py	assert data["show"] == ["dir", "nosuchmodule"]	keep	show	show
+statusline	packages/statusline/tests/test_compile.py	assert set(listener.present_segments()) >= {"alpha"}	keep	set	set
+statusline	packages/statusline/tests/test_contract.py	assert set(found.stores) == {"previous", "asked", "backups"}	keep	set	set
+statusline	packages/statusline/tests/test_detect.py	assert not (Path(os.environ["HOME"]) / ".cache" / "line").exists()	keep	HOME	HOME
+statusline	packages/statusline/tests/test_detect.py	script = Path(os.environ["HOME"]) / "my line.py"	keep	HOME	HOME
+statusline	packages/statusline/tests/test_detect.py	assert marker.find(data), marker	keep	find	find
+statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "37", "number").find("4137 a37f _37_ 8.37 37.5") == []	keep	find	find
+statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "37", "number").find("ctx:37% (37)") == [4, 9]	keep	find	find
+statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "ghijkl", "prefix").find("#ghijklmn xghijkl") == [1]	keep	find	find
+statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "xhigh", "word").find("xhighs xhigh_ (xhigh)") == [15]	keep	find	find
+statusline	packages/statusline/tests/test_detect.py	env = detect.sandbox({"PATH": "/bin", "HOME": "/h", "MOXI_ROOT": "x",	keep	HOME	HOME
+statusline	packages/statusline/tests/test_detect.py	assert env == {"PATH": "/bin", "HOME": "/fake", "XDG_RUNTIME_DIR": "/r",	keep	HOME	HOME
+statusline	packages/statusline/tests/test_doctor.py	assert [r.name for r in rows] == ["command", "bytecode", "sample render", "show",	keep	show	show
+statusline	packages/statusline/tests/test_doctor.py	assert [r.name for r in rows[2:]] == ["bytecode", "sample render", "show",	keep	show	show
+statusline	packages/statusline/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_fields.py	@pytest.mark.parametrize(("used", "colour"), [	keep	used	used
+statusline	packages/statusline/tests/test_offers.py	assert not any("Measured" in s for s in said)	keep	any	any
+statusline	packages/statusline/tests/test_page.py	inner = LB.app(page.PAGE, module="statusline", server_id=SERVER_ID, strict=True)	keep	strict	strict
+statusline	packages/statusline/tests/test_page.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_page.py	assert not any(route["gateway"] for route in routes.values())	keep	any	any
+statusline	packages/statusline/tests/test_page.py	"show": ["dir", "branch", "model", "effort", "context", "usage", "cache"],	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert body["values"]["show"] == ["model", "row", "dir"]	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert body["values"]["show"][0] == "dir"	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert claude == {"set": False, "command": None, "moxis": False, "here": False,	keep	set	set
+statusline	packages/statusline/tests/test_page.py	assert claude["set"] and claude["command"] == "my-line.sh" and not claude["moxis"]	keep	set	set
+statusline	packages/statusline/tests/test_page.py	status, body = post("/api/preview", draft({"show": ["model", "effort"],	keep	show	show
+statusline	packages/statusline/tests/test_page.py	status, body = post("/api/preview", draft({"show": shown, "color": False}))	keep	show	show
+statusline	packages/statusline/tests/test_page.py	({"show": ["dir", "row", "model", "row", "cost"]}, "show"),	keep	show	show
+statusline	packages/statusline/tests/test_page.py	({"show": ["row", "dir"]}, "show"),	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert body["refused"].startswith(f"{key} "), body	keep	refused	refused
+statusline	packages/statusline/tests/test_page.py	changes = {"show": ["effort", "model"], "dir": {"parts": 3}}	keep	show	show
+statusline	packages/statusline/tests/test_page.py	status, body = post("/api/save", draft({"show": ["model", "row", "dir"],	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert [(r["key"], r["by"]) for r in lines] == [("show", "ui"), ("color", "ui")]	keep	show	show
+statusline	packages/statusline/tests/test_page.py	assert "changed" in body["conflict"]	keep	changed	changed
+statusline	packages/statusline/tests/test_page.py	{"base": base, "changes": {"show": ["model"], "color": False}}),	keep	show	show
+statusline	packages/statusline/tests/test_page.py	{"base": base, "changes": {"show": ["effort"], "color": False}}))	keep	show	show
+statusline	packages/statusline/tests/test_page.py	status, body = post("/api/preview", draft({"show": ["model"]}))	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	"""The config's check: the schema, then the rules of `show`, the bands and `dir.parts`."""	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	assert list(settings["show"]) == ["dir", "branch", "model", "effort", "context",	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "Not-A-Name"]', "show", "neither a base field nor a module name"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "with space"]', "show", "neither a base field nor a module name"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "row", "model", "row", "cost"]', "show", "2 'row' items"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["row", "dir"]', "show", "'row' first"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "row"]', "show", "'row' last"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	('show = ["row"]', "show", "'row' first"),	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	assert caught.value.key == "show"	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	use	config.set	config.set_value
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	use	config.set	config.set_value
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "context.warn_at", 90, by="test")	use	config.set	config.set_value
+statusline	packages/statusline/tests/test_setup.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_setup.py	assert settings.load()["show"] == setup.default_show()	keep	show	show
+statusline	packages/statusline/tests/test_setup.py	config.set_many("statusline", [("show", SAVED)], by="ui")	keep	show	show
+statusline	packages/statusline/tests/test_setup.py	assert settings.load()["show"] == SAVED	keep	show	show
+statusline	packages/statusline/tests/test_structural.py	assert sorted(set(ours) - set(RENDER_IMPORTS)) == []	keep	set	set
+statusline	packages/statusline/tests/test_switch.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_switch.py	link.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.REFUSED and act.kind == "refused"	keep	refused	refused
+statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.TEMPFAIL and act.kind == "changed"	keep	changed	changed
+statusline	packages/statusline/tests/test_switch.py	assert state["set"] is False and state["moxis"] is False and state["saved"] is None	keep	set	set
+statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.ERROR and act.kind == "refused"	keep	refused	refused
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	CHECKS = ("orphan", "half", "renamed", "missing", "changed", "clash", "moved", "ok")	keep	changed	changed
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	_Live.__call__	name	caught	provider_exc
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	act.last = exc.record	keep	record	record
@@ -15141,6 +15341,7 @@ usage	packages/usage/src/moxi_usage/reports.py	terms	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	total = make({}) if total is None else total	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	where, args = query.where(claimed=False)	keep	claimed	claimed
 usage	packages/usage/src/moxi_usage/reports.py	window = _window(reported, _table(table).lookup(name, provider=provider, at=ts))	keep	at	at
+usage	packages/usage/src/moxi_usage/segment.py	"WARN", "ALERT", "WARN_AT", "ALERT_AT"]	keep	WARN_AT	WARN_AT
 usage	packages/usage/src/moxi_usage/settings.py	extra = sorted(set(row) - {"path", "id"})	keep	set	set
 usage	packages/usage/src/moxi_usage/settings.py	for n, row in enumerate(settings[ARCHIVE_KEY], start=1):	keep	start	start
 usage	packages/usage/src/moxi_usage/settings.py	if (prices or tiers is not None) and not {"input", "output"} <= set(prices):	keep	set	set
@@ -15753,6 +15954,8 @@ usage	packages/usage/tests/test_reports.py	source(conn, "/p/s1/subagents/agent-a
 usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_reports.py	touched: set[int] = set()	keep	set	set
+usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize("used", [True, "42", [42], float("nan"), float("inf")])	keep	used	used
+usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize(("used", "band", "colour"), [	keep	used	used
 usage	packages/usage/tests/test_settings.py	("[limits]\ncodex_pull_after_s = -1\n", "limits.codex_pull_after_s", "stale"),	keep	stale	stale
 usage	packages/usage/tests/test_settings.py	assert cli.main(["config", "usage", "show", "--json"]) == 0	keep	show	show
 usage	packages/usage/tests/test_settings.py	assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text"}	keep	set	set

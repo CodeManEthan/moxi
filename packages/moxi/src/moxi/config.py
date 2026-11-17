@@ -119,7 +119,7 @@ at}`, to the core's settings history (`history()` reads it); the line never hold
 value. Each refusal raises `ConfigError` with the problem and its fix.
 
 `set_many(module, changes, by=, base=)` sets several keys in one write: each change is
-coerced and checked as `set` checks it, all are applied in order, and the checks run once
+coerced and checked as `set_value` checks it, all are applied in order, and the checks run once
 over the whole result, so keys that must change together (a pair with a bound between
 them) change together or not at all. `draft_text(module, changes, base=)` is the same step
 with no lock and no write: it returns the text `set_many` would write and the stamp of the
@@ -1021,14 +1021,14 @@ def remove_item(module: str, key: str, item, *, by: str) -> None:
 def set_many(module: str, changes, *, by: str, base: str | None = None) -> list:
     """Set several keys of module `module`'s config file in one write.
 
-    `changes` is a sequence of `(key, value)` pairs, each taken as `set` takes it and
-    applied in order (a later change of a key wins). The checks `set` runs over the new
+    `changes` is a sequence of `(key, value)` pairs, each taken as `set_value` takes it and
+    applied in order (a later change of a key wins). The checks `set_value` runs over the new
     text run once, over the text with every change made, so two keys bound to each other
     can be moved together where either alone would be refused. Under the file's lock,
     when `base` is given and the file's stamp (see `draft_text`) is no longer `base`, it
     raises `ConfigChanged`. Any refusal writes nothing; otherwise the text is written
     once, and one history line is added per key changed, each naming `by`. Returns the
-    units applied for each key, one list, as `set` returns them. No changes write nothing
+    units applied for each key, one list, as `set_value` returns them. No changes write nothing
     and make no file, though the file is still read and checked as `draft_text` does.
     Raises `ConfigError`; a refusal of the whole text, not of one value, names no key
     unless the module's check names one.
@@ -1044,7 +1044,7 @@ def set_many(module: str, changes, *, by: str, base: str | None = None) -> list:
     schema, check, steps = _resolved(module, changes, path)
     named = _named(changes)
     try:
-        with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
+        with files.edit_toml(path, timeout_s=LOCK_TIMEOUT) as doc:
             # The lock is held, so the bytes read here are the bytes `doc` was parsed from.
             if base is not None and _stamp_of(_raw(path)) != base:
                 raise _changed(path)
@@ -1314,7 +1314,7 @@ def _named(changes) -> str | None:
 
 def _resolved(module, changes, path) -> tuple:
     """The first half of the step `set_many` and `draft_text` share: the module's schema
-    and `CONFIG_CHECK`, and each change prepared as `set` prepares it."""
+    and `CONFIG_CHECK`, and each change prepared as `set_value` prepares it."""
     schema, check = _schema_of(module)
     steps = [_prepared(schema, module, key, value, path, False) for key, value in changes]
     return schema, check, steps

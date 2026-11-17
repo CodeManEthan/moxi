@@ -260,7 +260,7 @@ def _refused(exc: harnessfile.Refused) -> Act:
 def switch(show: Sequence[str] | None = None, *, by: str,
            env: Mapping[str, str] | None = None) -> Act:
     """Set Claude Code's line to Moxi's, and when `show` is given write it as the
-    config's `show` (`moxi.config.set`, with `by`). None leaves `show` as it is.
+    config's `show` (`moxi.config.set_value`, with `by`). None leaves `show` as it is.
 
     Over another line (or none) it keeps that line in `previous.json` first. Over Moxi's
     line it only rewrites the path, and says so; at this path already, it writes nothing
@@ -304,7 +304,7 @@ def switch(show: Sequence[str] | None = None, *, by: str,
         from moxi import config
 
         try:
-            config.set(MODULE, "show", list(show), by=by)
+            config.set_value(MODULE, "show", list(show), by=by)
         except config.ConfigError as exc:
             return Act(codes.ERROR, "config",
                        [*lines, f"its items weren't written: {exc}"], found)

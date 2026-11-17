@@ -206,7 +206,7 @@ def test_claudes_built_in_folders_are_where_they_always_were(tmp_path, value, fo
     if value is not None:
         given["CLAUDE_CONFIG_DIR"] = value
     for kind in ("skills", "agents"):
-        assert place._folder("claude", kind, "", given) == Path(
+        assert place._harness_dir("claude", kind, "", given) == Path(
             folder.format(home=tmp_path / "given"), kind)
 
 
@@ -217,7 +217,7 @@ def test_claudes_built_in_folders_keep_a_tilde_when_nothing_places_a_home(
         monkeypatch, value, folder):
     monkeypatch.setattr(moxi.paths, "_account_home", lambda: None)
     given = {} if value is None else {"CLAUDE_CONFIG_DIR": value}
-    assert place._folder("claude", "skills", "", given) == Path(folder, "skills")
+    assert place._harness_dir("claude", "skills", "", given) == Path(folder, "skills")
 
 
 def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
