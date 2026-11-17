@@ -31,7 +31,7 @@ class FakeLauncher:
     def __init__(self, answers=None):
         self.answers = answers or {}
 
-    def launch_kind(self, session_id, timeout=1.0):
+    def launch_kind(self, session_id, timeout_s=1.0):
         return self.answers.get(session_id)
 
 
@@ -250,7 +250,7 @@ def test_a_search_during_a_rebuild_says_a_rebuild_is_running():
 
 def test_a_crashed_rebuilds_entry_reads_as_none_also_with_a_live_process_id():
     run()
-    with files.lock(index.rebuild_lock_path(), timeout=0):
+    with files.lock(index.rebuild_lock_path(), timeout_s=0):
         pass
     sc = state.connect()
     state.write_entry(sc, time.time() - 600, os.getpid())

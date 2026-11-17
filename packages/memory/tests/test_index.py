@@ -330,7 +330,7 @@ def test_a_child_that_finds_the_writer_lock_held_gets_writer_busy_at_once():
         pass
 
 
-def test_the_writer_lock_is_a_file_in_memorys_state_directory():
+def test_the_writer_lock_is_a_file_in_memorys_state_dir():
     from moxi_memory.settings import state_dir
 
     import fcntl
@@ -410,7 +410,7 @@ def test_a_crashed_rebuilds_entry_reads_as_none_and_the_next_child_clears_it(who
         done = subprocess.Popen([sys.executable, "-c", "pass"])
         done.wait()
         pid = done.pid  # a process id whose process has ended
-    with files.lock(index.rebuild_lock_path(), timeout=0):
+    with files.lock(index.rebuild_lock_path(), timeout_s=0):
         pass  # the lock file is there, and free, as a crash leaves it
     conn = state.connect()
     try:
@@ -446,7 +446,7 @@ def test_a_rebuild_waits_out_a_readers_moment_on_its_lock():
 
     with index.writer():
         pass
-    with files.lock(index.rebuild_lock_path(), timeout=0):
+    with files.lock(index.rebuild_lock_path(), timeout_s=0):
         pass
     fd = os.open(index.rebuild_lock_path(), os.O_RDONLY)
     fcntl.flock(fd, fcntl.LOCK_SH)  # a reader's test, caught in the middle

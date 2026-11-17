@@ -68,7 +68,7 @@ def run(ask=None, env=None):
 
 # -- a fresh environment ------------------------------------------------------------------
 
-def test_setup_and_teardown_on_a_fresh_environment_with_no_harness_roots(spawned,
+def test_setup_and_teardown_on_a_fresh_env_with_no_harness_roots(spawned,
                                                                        settings_file):
     code, said = run()
     assert code == 0
@@ -146,7 +146,7 @@ def test_auto_memory_is_offered_only_when_it_is_on(spawned, settings_file):
     assert "Bringing Claude Code's saved memories into Moxi may come later" in said
 
 
-def test_auto_memory_is_offered_where_claude_codes_folder_exists_without_settings(
+def test_auto_memory_is_offered_where_claude_codes_dir_exists_without_settings(
         spawned, settings_file):
     os.makedirs(os.path.dirname(settings_file), exist_ok=True)
     code, said = run(Asker("n"))

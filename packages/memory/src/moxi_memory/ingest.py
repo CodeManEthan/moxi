@@ -211,7 +211,7 @@ class Ingest:
             self._launcher = links.launcher()
         return self._launcher
 
-    def ask_kind(self, session_id: str, answered: bool) -> tuple[str | None, bool]:
+    def ask_kind(self, session_id: str, *, answered: bool) -> tuple[str | None, bool]:
         """The launch kind to store and whether the kind is settled."""
         link = self.launcher()
         if link.state == links.NONE:
@@ -219,7 +219,7 @@ class Ingest:
         if not link.ready:
             return None, False
         try:
-            kind = link.api.launch_kind(session_id, timeout=KIND_WAIT)
+            kind = link.api.launch_kind(session_id, timeout_s=KIND_WAIT)
         except Exception:  # noqa: BLE001 - a launcher that can't be asked settles nothing
             return None, False
         return (kind if isinstance(kind, str) and kind else None), answered
@@ -264,7 +264,7 @@ class Ingest:
         label = self.label_for(harness, main, cwd)
         kind, settled = None, False
         if row is None or row.kind is None or not row.settled:
-            kind, settled = self.ask_kind(main, self.answered(harness, main))
+            kind, settled = self.ask_kind(main, answered=self.answered(harness, main))
         table.write_read(self.sc, harness, main,
                          newest=newest if newest is not None else row.newest,
                          label=label, kind=kind, settled=settled)

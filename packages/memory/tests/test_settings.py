@@ -25,7 +25,7 @@ def test_every_key_has_its_default():
     assert read["ingest.timer"] is False
 
 
-def test_every_key_is_read_at_its_use_and_none_from_the_environment():
+def test_every_key_is_read_at_its_use_and_none_from_the_env():
     schema = settings.schema()
     keys = [key for key in schema.keys.values()]
     assert {key.name for key in keys} == {"harnesses", "index.subagents", "index.tail_chars",
@@ -60,7 +60,7 @@ def test_the_check_takes_a_good_file():
     settings.check_text('harnesses = ["codex"]\nreminder = false\n[index]\nsubagents = true\n')
 
 
-def test_the_folders_are_the_cores_for_memory():
+def test_the_dirs_are_the_cores_for_memory():
     layout = Layout("memory")
     assert settings.state_dir() == layout.state_dir()
     assert settings.cache_dir() == layout.cache_dir()

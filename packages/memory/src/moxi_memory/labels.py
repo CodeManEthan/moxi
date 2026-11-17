@@ -27,17 +27,17 @@ def project_label(cwd: str | os.PathLike | None) -> str | None:
     path = os.path.normpath(os.fspath(cwd))
     if not os.path.isabs(path):
         return None
-    folder = path
+    search_dir = path
     while True:
-        dot_git = os.path.join(folder, ".git")
+        dot_git = os.path.join(search_dir, ".git")
         if os.path.isdir(dot_git):
-            return os.path.basename(folder) or None
+            return os.path.basename(search_dir) or None
         if os.path.isfile(dot_git):
-            return _linked_label(folder, dot_git) or os.path.basename(folder) or None
-        parent = os.path.dirname(folder)
-        if parent == folder:
+            return _linked_label(search_dir, dot_git) or os.path.basename(search_dir) or None
+        parent = os.path.dirname(search_dir)
+        if parent == search_dir:
             break
-        folder = parent
+        search_dir = parent
     return os.path.basename(path) or None
 
 
@@ -46,7 +46,7 @@ def cwd_exists(cwd: str | os.PathLike | None) -> bool:
     return bool(cwd) and os.path.isdir(os.fspath(cwd))
 
 
-def _linked_label(folder: str, dot_git: str) -> str | None:
+def _linked_label(work_dir: str, dot_git: str) -> str | None:
     """The main repository folder's name for a `.git` file, or None when the file doesn't
     lead to one (a submodule's, or one that can't be read)."""
     target = _read_line(dot_git)
@@ -55,7 +55,7 @@ def _linked_label(folder: str, dot_git: str) -> str | None:
     gitdir = target[len("gitdir:"):].strip()
     if not gitdir:
         return None
-    gitdir = os.path.normpath(os.path.join(folder, gitdir))
+    gitdir = os.path.normpath(os.path.join(work_dir, gitdir))
     common = _read_line(os.path.join(gitdir, "commondir"))
     if not common:
         return None

@@ -146,7 +146,7 @@ def roots(harnesses, out: TextIO) -> int:
     return outside
 
 
-def timer_lines(outside: int, timer_on: bool, out: TextIO) -> None:
+def timer_lines(outside: int, *, timer_on: bool, out: TextIO) -> None:
     """The Codex sessions turns didn't start, and the timer that reads them."""
     if not outside:
         return
@@ -327,7 +327,7 @@ def setup(*, ask: Callable[[str], str] | None = None, out: TextIO | None = None,
         ask = _ask
     harnesses = _harnesses(env)
     outside = roots(harnesses, out)
-    timer_lines(outside, _timer_on(env), out)
+    timer_lines(outside, timer_on=_timer_on(env), out=out)
     retention_lines(harnesses, out, env)
     ok = True
     if "claude" in harnesses:

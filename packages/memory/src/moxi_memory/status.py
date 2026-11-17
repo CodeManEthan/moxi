@@ -117,7 +117,7 @@ def _sessions_alone(out: Status, env) -> None:
 
     where = state.path(env)
     try:
-        conn = store.connect(where, create=False, timeout=0.25)
+        conn = store.connect(where, create=False, timeout_s=0.25)
     except store.StoreError:
         return
     except sqlite3.Error as exc:

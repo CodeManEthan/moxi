@@ -30,7 +30,7 @@ def listed(conn, harness, sid, *, label="proj", identity=None, kind=None, newest
 
 # -- the store ------------------------------------------------------------------------
 
-def test_the_store_lives_in_memorys_state_directory(conn):
+def test_the_store_lives_in_memorys_state_dir(conn):
     from moxi.paths import Layout
 
     assert state.path() == Layout("memory").state_dir() / "state.db"
@@ -50,7 +50,8 @@ def test_a_store_that_isnt_there_is_not_made_without_create():
 def test_a_start_writes_the_row_with_its_label_and_the_time(conn):
     table.write_start(conn, "claude", "s1", "alpha", now=100.0)
     row = table.row(conn, "claude", "s1")
-    assert row == table.Row("claude", "s1", None, "alpha", None, False, 100.0, 100.0)
+    assert row == table.Row("claude", "s1", None, "alpha", None, settled=False, newest=100.0,
+                            written=100.0)
 
 
 def test_a_later_start_keeps_the_label_and_the_newest_time(conn):
@@ -121,7 +122,7 @@ def test_a_child_makes_a_row_for_a_session_no_listener_saw(conn):
     table.write_read(conn, "codex", "s1", newest=50.0, label="alpha", kind=None,
                      settled=True, now=60.0)
     assert table.row(conn, "codex", "s1") == \
-        table.Row("codex", "s1", None, "alpha", None, True, 50.0, 60.0)
+        table.Row("codex", "s1", None, "alpha", None, settled=True, newest=50.0, written=60.0)
 
 
 def test_a_child_writes_the_label_and_kind_only_where_none_is_stored(conn):

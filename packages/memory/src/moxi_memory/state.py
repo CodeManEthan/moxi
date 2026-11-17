@@ -128,7 +128,7 @@ def connect(env: Mapping[str, str] | None = None, *, timeout: float = 5.0,
     from moxi import store
 
     try:
-        conn = store.connect(path(env), timeout=timeout, create=create,
+        conn = store.connect(path(env), timeout_s=timeout, create=create,
                              check_same_thread=check_same_thread)
     except sqlite3.OperationalError as exc:
         if _is_late(exc):
@@ -303,7 +303,7 @@ def peek(env: Mapping[str, str] | None = None) -> tuple[Request | None, float | 
     from moxi import store
 
     try:
-        conn = store.connect(path(env), create=False, timeout=0.25)
+        conn = store.connect(path(env), create=False, timeout_s=0.25)
     except (store.StoreError, sqlite3.Error):
         return None, None
     try:

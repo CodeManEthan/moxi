@@ -28,20 +28,20 @@ def config(**over):
 
 
 class FakeLauncher:
-    def __init__(self, answers=None, fail=False):
+    def __init__(self, answers=None, *, fail=False):
         self.answers = answers or {}
         self.fail = fail
         self.asked = []
 
-    def launch_kind(self, session_id, timeout=1.0):
+    def launch_kind(self, session_id, timeout_s=1.0):
         self.asked.append(session_id)
         if self.fail:
             raise RuntimeError("the launch log is busy")
         return self.answers.get(session_id)
 
 
-def launcher(answers=None, fail=False):
-    return links.Link(links.READY, FakeLauncher(answers, fail))
+def launcher(answers=None, *, fail=False):
+    return links.Link(links.READY, FakeLauncher(answers, fail=fail))
 
 
 NO_LAUNCHER = links.Link(links.NONE)
@@ -249,7 +249,7 @@ def test_a_held_writer_lock_makes_a_child_exit_at_once():
     from moxi import files
 
     claude().write()
-    with files.lock(index.writer_lock_path(), timeout=0):
+    with files.lock(index.writer_lock_path(), timeout_s=0):
         began = time.monotonic()
         done = subprocess.run([str(moxi.paths.script(start.SCRIPT)), "--walk"],
                               capture_output=True, text=True, timeout=60)
@@ -580,7 +580,7 @@ def generation():
     return index.current()
 
 
-def other(mode, asked=False):
+def other(mode, *, asked=False):
     """Run a child of `mode` in another process, as a child started meanwhile is, and
     return its report as (busy, idle), and what waits in the store after it."""
     import subprocess
@@ -731,7 +731,7 @@ def test_the_tidy_leaves_a_waiting_request_and_records_the_killed_rebuild():
 
     t, _ = corpus()
     run()
-    with files.lock(index.rebuild_lock_path(), timeout=0):
+    with files.lock(index.rebuild_lock_path(), timeout_s=0):
         pass                                    # free, as a killed rebuild leaves it
     sc = state.connect()
     try:

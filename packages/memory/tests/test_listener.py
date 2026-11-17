@@ -28,9 +28,9 @@ REMINDER = "memory: search past sessions if this turn needs them."
 @pytest.fixture
 def shop(tmp_path):
     """A project folder whose label is `shop`."""
-    folder = tmp_path / "work" / "shop"
-    (folder / ".git").mkdir(parents=True)
-    return str(folder)
+    shop_dir = tmp_path / "work" / "shop"
+    (shop_dir / ".git").mkdir(parents=True)
+    return str(shop_dir)
 
 
 def event(kind="start", harness="claude", sid="me", cwd=None, env=None):
@@ -137,7 +137,7 @@ def test_the_start_line_is_the_same_for_every_harness_with_and_without_a_label(h
     assert listener.start(event(harness=harness, cwd=os.sep)) == LINE_WITHOUT_LABEL
 
 
-def test_the_start_line_takes_the_folder_from_pwd_when_the_event_has_none(shop):
+def test_the_start_line_takes_the_work_dir_from_pwd_when_the_event_has_none(shop):
     assert listener.start(event(env={"PWD": shop})) == LINE_WITH_LABEL
 
 

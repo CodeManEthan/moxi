@@ -10,7 +10,7 @@ import pytest
 from moxi_memory.labels import cwd_exists, project_label
 
 
-def test_the_nearest_folder_holding_git_names_the_project(tmp_path):
+def test_the_nearest_dir_holding_git_names_the_project(tmp_path):
     repo = tmp_path / "alpha"
     (repo / ".git").mkdir(parents=True)
     deep = repo / "src" / "pkg"
@@ -68,11 +68,11 @@ def test_a_worktree_of_a_bare_repository_takes_the_repositorys_name(tmp_path):
 
 
 @pytest.mark.parametrize("content", ["", "not a gitdir line\n", "gitdir: /no/such/dir\n"])
-def test_a_git_file_that_leads_nowhere_names_its_own_folder(tmp_path, content):
-    folder = tmp_path / "submodule"
-    folder.mkdir()
-    (folder / ".git").write_text(content)
-    assert project_label(folder / "x") == "submodule"
+def test_a_git_file_that_leads_nowhere_names_its_own_dir(tmp_path, content):
+    sub_dir = tmp_path / "submodule"
+    sub_dir.mkdir()
+    (sub_dir / ".git").write_text(content)
+    assert project_label(sub_dir / "x") == "submodule"
 
 
 def test_a_real_git_worktree_gets_its_repositorys_label(tmp_path):

@@ -353,7 +353,7 @@ def open_read(env: Mapping[str, str] | None = None, *,
             continue
         path = db_path(n, env)
         try:
-            conn = store.connect(path, create=False, timeout=lock_wait)
+            conn = store.connect(path, create=False, timeout_s=lock_wait)
         except store.StoreError:
             _unlock(fd)
             continue
@@ -461,7 +461,7 @@ def _read_entry(env):
     from . import state
 
     try:
-        conn = store.connect(state.path(env), create=False, timeout=0.25)
+        conn = store.connect(state.path(env), create=False, timeout_s=0.25)
     except (store.StoreError, sqlite3.Error):
         return None
     try:
@@ -524,7 +524,7 @@ class Writer:
 
         from . import state
 
-        with files.lock(rebuild_lock_path(self.env), timeout=wait):
+        with files.lock(rebuild_lock_path(self.env), timeout_s=wait):
             started = time.time()
             conn = state.connect(self.env)
             try:
@@ -591,13 +591,13 @@ class Writer:
         the database always finds its lock."""
         from moxi import files
 
-        with files.lock(lock_path(n, self.env), timeout=0):
+        with files.lock(lock_path(n, self.env), timeout_s=0):
             pass
 
     def _open(self, n: int, *, create: bool, timeout: float) -> sqlite3.Connection:
         from moxi import store
 
-        conn = store.connect(db_path(n, self.env), create=create, timeout=timeout)
+        conn = store.connect(db_path(n, self.env), create=create, timeout_s=timeout)
         try:
             store.migrate(conn, SCHEMA)
         except BaseException:
@@ -614,7 +614,7 @@ def writer(env: Mapping[str, str] | None = None, *, wait: float = 0) -> Iterator
     """
     from moxi import files
 
-    held = files.lock(writer_lock_path(env), timeout=wait)
+    held = files.lock(writer_lock_path(env), timeout_s=wait)
     try:
         held.__enter__()
     except files.LockTimeout as exc:
@@ -633,7 +633,7 @@ def _remove(n: int, env) -> bool:
 
     lock = lock_path(n, env)
     try:
-        with files.lock(lock, timeout=0):
+        with files.lock(lock, timeout_s=0):
             db = db_path(n, env)
             for suffix in _DB_SUFFIXES:
                 Path(f"{db}{suffix}").unlink(missing_ok=True)

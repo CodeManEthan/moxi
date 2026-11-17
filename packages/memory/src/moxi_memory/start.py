@@ -55,9 +55,9 @@ def _marker(harness: str, session_id: str):
 
     from .settings import MODULE
 
-    folder = paths.Layout(MODULE).runtime_dir(create=True) / TURNS
-    folder.mkdir(mode=0o700, exist_ok=True)
-    return folder / f"{harness}.{session_id}"
+    turns_dir = paths.Layout(MODULE).runtime_dir(create=True) / TURNS
+    turns_dir.mkdir(mode=0o700, exist_ok=True)
+    return turns_dir / f"{harness}.{session_id}"
 
 
 def _safe(harness: str, session_id: str) -> bool:
