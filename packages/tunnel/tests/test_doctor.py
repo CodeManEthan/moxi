@@ -216,16 +216,24 @@ def test_a_read_that_fails_at_once_fails_its_row_and_the_others_go_on(alpha, tai
 
 # -- the deadline ---------------------------------------------------------------------------
 
-@pytest.mark.timed
-def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked(
-        alpha, tailscale, yes):
+#: How long the quick doctor may take while tailscale hangs: only the one read's wait.
+QUICK_HUNG_S = 2.0
+#: How long the doctor with its real waits may take while tailscale hangs: the core's ten
+#: seconds.
+REAL_HUNG_S = 10.0
+#: The land-check tests' bounds are five times the timed ones, so load alone doesn't fail
+#: them and a wait that never fired does (the fake tailscale hangs for an hour).
+LOOSE = 5
+
+
+def _quick_with_tailscale_hung(alpha, tailscale, yes) -> float:
+    """Run the quick doctor while `tailscale version` hangs, check the first read fails
+    and the rest are not checked, and return how long the doctor took."""
     acts.add("alpha/connector", ask=yes)
     tailscale.edit(lambda s: s.update(hang=["version"], calls=[]))
     start = time.monotonic()
     rows = quick()
     took = time.monotonic() - start
-    # Only the one read's wait: it fired, and nothing waited after it.
-    assert took < 2.0 * timed_slack(), took
     got = by_name(rows)
     assert got["tailscale CLI"].state == "fail"
     assert got["tailscale CLI"].detail == "tailscale did not answer in 0.2 s"
@@ -236,6 +244,22 @@ def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked(
             ("warn", "not checked: tailscale did not answer"), name
     assert tailscale.calls == [["version"]]
     assert got["cloudflare in step"].state == "ok" and got["record"].state == "ok"
+    return took
+
+
+def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked(
+        alpha, tailscale, yes):
+    took = _quick_with_tailscale_hung(alpha, tailscale, yes)
+    assert took < LOOSE * QUICK_HUNG_S, took
+
+
+@pytest.mark.timed
+def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked_in_time(
+        alpha, tailscale, yes, timed_reading):
+    """As above, with only the one read's wait: it fired, and nothing waited after it."""
+    took = _quick_with_tailscale_hung(alpha, tailscale, yes)
+    timed_reading(took, QUICK_HUNG_S, "s")
+    assert took < QUICK_HUNG_S * timed_slack(), took
 
 
 def test_a_hung_serve_status_fails_the_first_entry_and_skips_the_prefs(alpha, tailscale,
@@ -284,16 +308,33 @@ def test_connects_after_the_deadline_are_not_checked(alpha, tailscale, yes):
     assert (row.state, row.detail) == ("warn", "not checked: the doctor's 8 s ran out")
 
 
-@pytest.mark.slow
-@pytest.mark.timed
-def test_with_the_real_waits_a_hung_tailscale_still_returns_inside_the_cores_ten_seconds(
-        alpha, tailscale, yes):
+def _doctor_with_status_hung(alpha, tailscale, yes) -> float:
+    """Run the doctor with its real waits while `tailscale status` hangs, check the read
+    says so, and return how long the doctor took."""
     acts.add("alpha/connector", ask=yes)
     tailscale.edit(lambda s: s.update(hang=["status"]))
     start = time.monotonic()
     got = by_name(doctor.rows())
-    assert time.monotonic() - start < 10.0 * timed_slack()
+    took = time.monotonic() - start
     assert got["logged in"].detail == "tailscale did not answer in 2 s"
+    return took
+
+
+@pytest.mark.slow
+def test_with_the_real_waits_a_hung_tailscale_still_returns_inside_the_cores_ten_seconds(
+        alpha, tailscale, yes):
+    took = _doctor_with_status_hung(alpha, tailscale, yes)
+    assert took < LOOSE * REAL_HUNG_S, took
+
+
+@pytest.mark.slow
+@pytest.mark.timed
+def test_with_the_real_waits_a_hung_tailscale_still_returns_inside_the_cores_ten_seconds_in_time(
+        alpha, tailscale, yes, timed_reading):
+    """As above, inside the core's ten seconds."""
+    took = _doctor_with_status_hung(alpha, tailscale, yes)
+    timed_reading(took, REAL_HUNG_S, "s")
+    assert took < REAL_HUNG_S * timed_slack(), took
 
 
 # -- Cloudflare -----------------------------------------------------------------------------
