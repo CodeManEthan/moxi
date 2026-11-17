@@ -16339,3 +16339,19 @@ moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run=plan)	
 moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 1})	keep	run	run
 moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 0}, take={"exit": 2})	keep	run	run
 moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert names and names <= set(sys.stdlib_module_names) | {"__future__"}	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return Path(env["HOME"]) if env.get("HOME") else Path.home()	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	required	required
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the machine the record files the runs under")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--slack", type=float, default=1.0, metavar="F",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--slack", type=float, default=1.0, metavar="F",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the machine's set factor, which every scheduled run passes "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	type=float, default=None, metavar="CPUS",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	type=float, default=None, metavar="CPUS",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the run's --idle-line (default: the verb's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="keep the record here (required for a tree with no git)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="write the stamp a synced copy of this clone is verified "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--take", metavar="NAME=DIR", action="append", default=[],	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="after each run, merge host NAME's results from DIR/NAME; may "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	python = _need([uv, "python", "find", "--system", check.PYTHON], base, source).strip()	keep	find	find
