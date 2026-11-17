@@ -169,6 +169,7 @@ meets.
 | `moxi comms whoami` | which comms identity this session holds |
 | `moxi comms send --as <name> <to> "text"` | send under a send-only name a program registered, from outside every session, with no reply |
 | `moxi comms send-only add\|renew\|remove <name>` | register a send-only name for a program (any program or service, not only a module), replace its token, or free it; inside a session, only a plain `add` of an unused name |
+| `moxi comms exit-session <name> [--scope S \| --global]` | end a headless session by its name, and wait for the name to be released |
 | `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
@@ -242,6 +243,7 @@ the detail.
   the extra: `moxi install comms --with codex`. The settings flags are the host's own
   (`--model`, `--sandbox`, `--option KEY=VALUE`); an identity listed in the config file's
   `[codex]` table launches with `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>`.
+  `--headless` runs one with no window and nobody in it (below).
 - **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
@@ -255,6 +257,36 @@ the detail.
 [opencode.agents."coder"]
 cwd  = "/home/me/src/my-project"
 ```
+
+### A headless Codex session
+
+`moxi comms codex --name <name> --headless --brief "TEXT"` (or `--brief-file F`) starts a
+Codex session with no window that holds its name like any other. The brief is its first
+turn; after that, mail sent to the name starts turns while its cache is warm, as in a
+session nobody types into. It ends by its exit rule, `--exit WHEN`, which repeats; the
+first value to fire ends it:
+
+| value | ends the session |
+|---|---|
+| `done` (the default) | once the brief's turn has answered and no mail handed to it is left unanswered |
+| `cold` | once comms reads its cache as cold, or as unreadable for five minutes |
+| `idle=<D>` | once no turn has run for D (`90m`, `2h`) |
+| `after=<D>` | D after it started, even mid-turn |
+
+`moxi comms exit-session <name>` ends one at any time. It also ends if its brief is
+refused or its turn doesn't end with an answer, if it isn't ready within five minutes,
+or if its brief's turn hasn't started five minutes after it is. When it ends, its
+adapter's log says why in one line, `headless session ended: <cause>`, and the name is
+released. Nothing holds the name after that.
+
+Mail sent once its cache is cold is held, as for any agent, and nothing in a headless
+session starts the turn that would read it: it waits for the name's next holder. With
+`idle=` or `after=` and no `cold`, the wrapper prints a warning saying so.
+
+The wrapper runs the session in your terminal's foreground, as every comms wrapper does,
+so it ends when that terminal closes. To leave it running, start it detached: through the
+Moxi launcher (`--target headless`), from a timer, or with `setsid -f moxi comms codex ...
+> LOG 2>&1`.
 
 ## In the browser
 

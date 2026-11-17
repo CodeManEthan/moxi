@@ -5,6 +5,9 @@ Codex session with a comms identity, through turns' Codex host.
                      [--model M] [--sandbox MODE | --permissions PROFILE]
                      [--option KEY=VALUE]... [--options-file F]
                      [--resume THREAD_ID] [--no-window] [--dry-run]
+    moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                     [settings flags] --headless [--exit WHEN]...
+                     (--brief TEXT | --brief-file F) [--dry-run]
 
     moxi-comms-codex IDENTITY [--config PATH] [--window] [--dry-run]
 
@@ -13,6 +16,18 @@ reads the same with or without comms. The second form is for an existing roster:
 the row IDENTITY names in the `[codex]` table of comms' config file (or of the file
 `--config` names, checked whole) and turns the row into the same flags, so there is one
 launch path. A roster launch runs with no window unless it asks for one.
+
+**A headless launch** (`--headless`, the `--name` form only) runs with no window, as
+`--no-window` does, hands the session its brief (`--brief TEXT`, or `--brief-file F`) as
+its first turn, and ends by its exit rule (`--exit WHEN`, repeatable: `done`, `cold`,
+`idle=<D>`, `after=<D>`; `done` when none is given; `headless.parse_exit`), by `moxi comms
+exit-session`, or when its host or its adapter ends. The wrapper writes the brief to
+`brief.md` (0600) in the session's runtime directory, and hands the host a lifeline whose
+other end only the adapter holds (`moxi.proc.exec_env`), so the host ends when the
+adapter does, by any death. A headless launch with `--window`, `--no-window`, `--resume`
+or a roster IDENTITY is refused, and so are `--exit`, `--brief` and `--brief-file`
+without `--headless`. A rule with `idle=` or `after=` and no `cold` gets one warning
+line: mail sent once the session's cache is cold waits for the name's next holder.
 
 A launch starts a new thread unless it is told to resume one. `--resume THREAD_ID`, in
 the `--name` form only, goes to the host with the other settings, so the host resumes
@@ -51,14 +66,16 @@ What the wrapper does, in order:
   6. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
      the line and `--instructions-file`. The host keeps this process's pid, so it is the
      session's process in the terminal, and the adapter finds its session with
-     `turns.wait_ready(pid=<that pid>)`.
+     `turns.wait_ready(pid=<that pid>)`. A headless launch's host gets the lifeline's
+     read end in `MOXI_LIFELINE_FD`.
 
 The host is this path's one caller of turns' launch additions: the wrapper calls none,
 and neither does a launcher that goes through it. The host also checks every load
 answer of a thread that names a sandbox against the sandbox it asked for. The host's
 environment is this process's, with the identity stamp and the claim socket over it and
-comms' own variables a launch didn't stamp scrubbed first; it gets no lifeline, so it
-ends with its window, its endpoint or a signal.
+comms' own variables a launch didn't stamp scrubbed first. A launch with a person gets no
+lifeline, so it ends with its window, its endpoint or a signal; a headless one also ends
+on its lifeline.
 
 What comms adds to the host's settings, so the agent can use comms from its shell:
 
@@ -107,6 +124,7 @@ from ..mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, TOKEN_ENV
 from ..paths import claim_socket, codex_threads_dir, log_dir
 from ..scoping import GLOBAL, NAME_RE, qualify
 from . import codex_roster
+from . import headless as headless_mod
 from .harness import plan_comms, plan_head
 from .session import stamp_tools, tools_endpoint, tools_off
 from .word import BOUND, FAILED, await_word, exit_of, teller, word_for
@@ -123,6 +141,8 @@ MULTI_AGENT_OFF = "agents.enabled=false"
 DEFAULT_SANDBOX = codex_roster.DEFAULT_SANDBOX
 #: Layer one's file, in the session's runtime directory.
 INSTRUCTIONS_NAME = "instructions.md"
+#: A headless launch's brief, in the session's runtime directory.
+BRIEF_NAME = "brief.md"
 
 log = logging.getLogger("comms.codex.wrapper")
 
@@ -279,6 +299,13 @@ class Launch:
     #: The thread the host resumes, as turns' parser read `--resume`, or None: the host
     #: starts a new thread.
     resume: str | None = None
+    #: A headless launch's exit rule and brief; None for a launch with a person.
+    exit_rule: headless_mod.ExitRule | None = None
+    brief: str | None = None
+
+    @property
+    def headless(self) -> bool:
+        return self.exit_rule is not None
 
     @property
     def dir(self) -> Path:
@@ -292,6 +319,10 @@ class Launch:
     @property
     def instructions(self) -> Path:
         return self.dir / INSTRUCTIONS_NAME
+
+    @property
+    def brief_path(self) -> Path:
+        return self.dir / BRIEF_NAME
 
     def log_path(self) -> Path:
         """Where the session's adapter writes its log."""
@@ -333,6 +364,13 @@ class Launch:
 
         moxi_files.atomic_write(self.instructions, text, mode=0o600)
         return self.instructions
+
+    def write_brief(self) -> Path:
+        """Write a headless launch's brief to its 0600 file in the session's directory."""
+        from moxi import files as moxi_files
+
+        moxi_files.atomic_write(self.brief_path, self.brief or "", mode=0o600)
+        return self.brief_path
 
 
 def settings_flags(args) -> list[str]:
@@ -378,6 +416,46 @@ def _named_agent(args, cwd: str) -> codex_roster.CodexAgent:
         directors=list(directors))
 
 
+def headless_plan(args) -> tuple:
+    """A headless launch's (exit rule, brief) from `args`, or (None, None) for a launch
+    with a person. Raises `Refused` for the refusals the module's docstring names."""
+    given = [flag for flag, value in (("--exit", args.exit or None),
+                                      ("--brief", args.brief),
+                                      ("--brief-file", args.brief_file))
+             if value is not None]
+    if not args.headless:
+        if given:
+            raise Refused(f"{', '.join(given)} goes with --headless; add --headless for a "
+                          "session with no window that ends by its exit rule")
+        return None, None
+    if args.identity is not None:
+        raise Refused("--headless goes with --name: a roster launch is not headless")
+    clash = [flag for flag, value in (("--window", args.window),
+                                      ("--no-window", args.no_window),
+                                      ("--resume", args.resume is not None)) if value]
+    if clash:
+        raise Refused(f"--headless runs no window and starts a new thread; drop "
+                      f"{', '.join(clash)}")
+    if (args.brief is None) == (args.brief_file is None):
+        raise Refused("--headless needs its brief, the session's first turn: give one of "
+                      "--brief TEXT or --brief-file F")
+    try:
+        rule = headless_mod.parse_exit(args.exit, harness="codex")
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    if args.brief is not None:
+        brief = args.brief
+    else:
+        try:
+            brief = Path(args.brief_file).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise Refused(f"--brief-file {args.brief_file}: can't read it ({exc})") from None
+    if not brief.strip():
+        raise Refused("the brief is empty; give the session's first turn with --brief or "
+                      "--brief-file")
+    return rule, brief
+
+
 def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     """The launch `args` asks for: its row, its host flags and their thread parameters.
     Raises `Refused`, with nothing started and nothing written.
@@ -386,6 +464,7 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     `session.tools_endpoint` does; it is asked once the launch's own settings have
     passed, since its answer is the network default. None asks nothing and reads as no
     tools."""
+    exit_rule, brief = headless_plan(args)
     if args.identity is not None:
         if args.name is not None:
             raise Refused("name the launch once: a roster IDENTITY or --name, not both")
@@ -416,8 +495,8 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
             raise Refused("--config names a roster; it goes with a roster IDENTITY")
         cwd = os.getcwd() if cwd is None else cwd
         agent = _named_agent(args, cwd)
-        source, window, settings = "the command line", not args.no_window, \
-            settings_flags(args)
+        source, window, settings = "the command line", \
+            not (args.no_window or exit_rule is not None), settings_flags(args)
     asked = launch_args(["--cwd", cwd, *settings])["options"]
     write_root, reason = codex_roster.record_write_root(agent.env(), cwd)
     tools_url, tools_why = endpoint() if endpoint is not None else (None, "")
@@ -430,7 +509,8 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     return Launch(agent=agent, source=source, cwd=cwd, flags=flags,
                   options=read["options"], window=window, write_root=write_root,
                   write_root_reason=reason, comms_path=own_comms(), tools_url=tools_url,
-                  tools_why=tools_why, resume=read["resume"])
+                  tools_why=tools_why, resume=read["resume"], exit_rule=exit_rule,
+                  brief=brief)
 
 
 def reach_note(launch: Launch) -> str | None:
@@ -477,6 +557,10 @@ def print_plan(launch: Launch, host_line: list, out=None) -> None:
         say(f"  tools      {launch.tools_url} (token in {TOKEN_ENV}, minted at launch)")
     say(f"  claim      {launch.claim_socket}")
     say(f"  adapter    log {launch.log_path()}")
+    if launch.headless:
+        say(f"  headless   no window; ends on {', '.join(launch.exit_rule.values)}, "
+            "exit-session, or its host or adapter ending")
+        say(f"  brief      {launch.brief_path} ({len(launch.brief)} chars, the first turn)")
     say("  launch     " + " ".join(host_line))
 
 
@@ -512,6 +596,18 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                            "(with --name)")
     host.add_argument("--no-window", action="store_true",
                       help="run no Codex window in this terminal")
+    nobody = ap.add_argument_group("a headless launch",
+                                   "a session nobody sits in, ended by its exit rule")
+    nobody.add_argument("--headless", action="store_true",
+                        help="no window: the brief is the first turn, mail starts turns "
+                             "while the cache is warm, and the session ends by --exit")
+    nobody.add_argument("--exit", action="append", default=[], metavar="WHEN",
+                        help="when the session ends (repeatable, the first to fire wins): "
+                             "done, cold, idle=<D>, after=<D>, D like 90m or 2h "
+                             "(default: done)")
+    nobody.add_argument("--brief", metavar="TEXT", help="the session's first turn")
+    nobody.add_argument("--brief-file", metavar="F",
+                        help="a file whose text is the session's first turn")
     roster = ap.add_argument_group("a roster launch")
     roster.add_argument("--config", metavar="PATH",
                         help="a comms config file whose [codex] table is the roster, in "
@@ -545,6 +641,8 @@ def main(argv=None, prog: str = PROG) -> int:
     note = reach_note(launch)
     if note is not None:
         print(f"{prog}: {note}", file=sys.stderr)
+    if launch.headless and launch.exit_rule.cold_gap:
+        print(f"{prog}: {headless_mod.COLD_GAP}", file=sys.stderr)
     if args.dry_run:
         return moxi_exit.OK
     refusal = _cannot_start(host, launch)
@@ -597,14 +695,21 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     # host it execs (turns' one caller of the launch additions here) both see the pair.
     stamp_tools(env, launch.tools_url)
     launch.write()
+    if launch.headless:
+        launch.write_brief()
     harness_pid = os.getpid()
     handle = pidfd_open(harness_pid)
     r, w = os.pipe()
+    # A headless host's lifeline: the adapter keeps the write end (close-on-exec, so
+    # nothing it starts holds it), the host the read end. The adapter's death closes it.
+    life_r, life_w = os.pipe() if launch.headless else (None, None)
     child = os.fork()
     if child == 0:                                         # pragma: no cover - forked
         code = 70
         try:
             os.close(r)
+            if life_r is not None:
+                os.close(life_r)
             os.setsid()
             if os.fork() == 0:
                 code = 70
@@ -616,6 +721,8 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         finally:
             os._exit(code)
     os.close(w)
+    if life_w is not None:
+        os.close(life_w)
     os.waitpid(child, 0)
     os.close(handle)
     who = launch.agent.qualified
@@ -623,6 +730,9 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         f"{prog}: waiting for the comms daemon to bind {who} (up to {ready_wait:g}s)",
         file=sys.stderr, flush=True))
     os.close(r)
+    if word is None or word[0] != BOUND:
+        if life_r is not None:
+            os.close(life_r)
     if word is None:
         print(f"{prog}: {who} was not launched: the comms daemon did not answer in "
               f"{ready_wait:g}s; try again, or run moxi comms doctor (its log: "
@@ -642,6 +752,10 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
                                              directors=launch.agent.directors,
                                              form=layer_one_form(env)))
     argv = launch.host_argv(host)
+    if life_r is not None:
+        from moxi import proc as moxi_proc
+
+        env = moxi_proc.exec_env(life_r, env)
     return exec_(str(host), argv, env)
 
 
@@ -691,11 +805,14 @@ def serve(adapter, handle: int, *, say=None) -> int:
     adapter.exit_hook = stopping.set
     adapter._on_bound = bound
     adapter._alive = lambda: not ended(handle)
+    adapter.on_headless_end = lambda cause, waiting, why: headless_mod.end(
+        handle, cause, waiting=waiting, why=why, say=log.info)
     try:
         try:
             adapter.start()
         except HostGone as exc:
             log.info("%s", exc)
+            adapter.note_host_ended()
             return 0
         except NobodyWaits as exc:
             log.warning("%s", exc)
@@ -710,6 +827,7 @@ def serve(adapter, handle: int, *, say=None) -> int:
         wait_for_exit(handle, stopping)
         log.info("the codex session of %s has ended: %s", adapter.agent.qualified,
                  adapter.gone_reason or "its host exited")
+        adapter.note_host_ended()
         return 0
     finally:
         adapter.stop()
@@ -739,7 +857,8 @@ def _adapter_process(launch: Launch, env: dict, harness_pid: int, handle: int,
     say = teller(word_fd)
     adapter = CodexAdapter(launch.agent, harness_pid=harness_pid,
                            claim_socket=launch.claim_socket, comms_path=launch.comms_path,
-                           wait_when_held=False, resume=launch.resume)
+                           wait_when_held=False, resume=launch.resume,
+                           brief=launch.brief, exit_rule=launch.exit_rule)
     try:
         return serve(adapter, handle, say=say)
     finally:
@@ -755,9 +874,9 @@ def _remove(launch: Launch) -> None:
     remove_socket(launch.claim_socket)
 
 
-__all__ = ["HOST", "Launch", "MULTI_AGENT_OFF", "NobodyWaits", "PROG", "READY_WAIT",
+__all__ = ["BRIEF_NAME", "HOST", "Launch", "MULTI_AGENT_OFF", "NobodyWaits", "PROG", "READY_WAIT",
            "Refused", "build_parser", "comms_flags", "launch_args", "main", "option",
-           "plan", "print_plan", "reach_note", "row_flags", "serve", "shell_reach_off",
+           "headless_plan", "plan", "print_plan", "reach_note", "row_flags", "serve", "shell_reach_off",
            "start", "toml_key", "toml_value"]
 
 

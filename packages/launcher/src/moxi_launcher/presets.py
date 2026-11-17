@@ -1037,6 +1037,7 @@ def resolve(request, *, presets: Presets | None = None,
     target = str(values.get("target") or "terminal")
     mode, turns, more = mode_of(harness, target, identity=identity, available=avail)
     warnings += more
+    _headless_rows(harness, target, identity, values, chosen, warnings)
     catalog.refuse_wrapper_flags(harness, identity, values.get(catalog.EXTRA) or ())
 
     links = {name for name, on in (
@@ -1053,6 +1054,61 @@ def resolve(request, *, presets: Presets | None = None,
         agents=tuple(project.agents) if project is not None else (),
         identity=identity, scope=scope, posture=str(posture), target=target,
         off_posture=off_posture, links=frozenset(links), warnings=tuple(warnings))
+
+
+#: The row holding a headless launch's exit rule; each value is one `--exit` of comms'
+#: wrapper, and none leaves comms' own default rule.
+HEADLESS_EXIT = "headless_exit"
+#: The cache-timer rows a headless launch with an identity leaves out: a keep-warm nudge
+#: would keep its cache warm and restart its idle count, and a recycle asks the session
+#: for a clear or compact.
+CACHE_TIMER_ROWS = ("keep_warm", "recycle_on_expiry")
+#: The warning of an exit rule under which mail held for a cold cache can outlast the
+#: session: it has idle= or after= and no cold.
+COLD_GAP = ("headless_exit has idle= or after= and no cold: mail sent once the session's "
+            "cache is cold waits for the name's next holder; add cold to end the session "
+            "then")
+
+
+def _headless_rows(harness: str, target: str, identity: str | None, values: dict,
+                   chosen: frozenset[str], warnings: list[str]) -> None:
+    """Settle the rows that depend on a headless launch holding a comms name.
+
+    On any other launch `headless_exit` goes back to its default, with a warning when the
+    launch chose it. On such a launch the cache-timer rows (`CACHE_TIMER_ROWS`) set to
+    anything but `off` go back to `off` with a warning, and the exit rule is checked with
+    comms' own parser (`parse_exit` in its API), so a value comms' wrapper would refuse is
+    refused here, before the detached start, in comms' words (`BadValue`). A rule with
+    `idle=` or `after=` and no `cold` adds the `COLD_GAP` warning."""
+    rule = values.get(HEADLESS_EXIT)
+    if not (identity and target == "headless"):
+        if catalog.is_set(rule):
+            if HEADLESS_EXIT in chosen:
+                warnings.append(f"{HEADLESS_EXIT} is ignored: only a headless launch with an "
+                                "identity runs under comms' headless wrapper, which takes it")
+            values[HEADLESS_EXIT] = []
+        return
+    for name in CACHE_TIMER_ROWS:
+        value = values.get(name)
+        if name in values and value not in (None, "", "off"):
+            warnings.append(f"{name} {value} is left out: a headless session with an "
+                            "identity ends by its exit rule, which the cache timer would "
+                            "work against")
+            values[name] = "off"
+    if not catalog.is_set(rule):
+        return
+    parse = getattr(comms_api(), "parse_exit", None)
+    if parse is None:
+        return
+    try:
+        parsed = parse([str(value) for value in rule], harness=harness)
+    except ValueError as exc:
+        raise BadValue(HEADLESS_EXIT, f"comms refuses {HEADLESS_EXIT} "
+                                      f"{_show(list(rule))}: {exc}",
+                       "give done, cold, idle=<D> or after=<D>, each once, D like 90m "
+                       "or 2h") from None
+    if getattr(parsed, "cold_gap", False):
+        warnings.append(COLD_GAP)
 
 
 def _one_spelling(layers, rows, values: dict, sources: dict) -> None:
@@ -1082,12 +1138,13 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     launch with turns but without turns' host installed runs as one without turns, with
     a warning. A Codex launch with an identity runs comms' Codex wrapper, which execs
     turns' host, so it is `host` and refused where the host can't start or comms has no
-    such wrapper. A headless launch with an identity is refused (`NotYet`): comms has no
-    headless wrapper to run it."""
+    such wrapper. A headless launch with an identity runs comms' wrapper with its
+    headless flags (Claude in `print` mode, Codex in `host`), and is refused (`NotYet`)
+    for a harness comms' `HEADLESS` doesn't name (`comms_headless`)."""
     avail = _avail(available)
     turns = avail("turns")
     headless = target == "headless"
-    if identity and headless:
+    if identity and headless and harness not in comms_headless(comms_api()):
         raise NotYet("identity", "a headless launch with an identity is not taken yet",
                      "it waits on comms' headless wrapper; launch in a terminal or slot, "
                      "or without an identity")
@@ -1157,6 +1214,19 @@ def comms_ends_on_bind_timeout(api: object | None) -> frozenset[str]:
     `ENDS_ON_BIND_TIMEOUT` in comms' API. Empty with no comms, and from a comms older than
     that name, whose wrappers all start the harness anyway after their wait."""
     value = getattr(api, "ENDS_ON_BIND_TIMEOUT", None) if api is not None else None
+    if value is None or isinstance(value, str):
+        return frozenset()
+    try:
+        return frozenset(str(name) for name in value)
+    except TypeError:
+        return frozenset()
+
+
+def comms_headless(api: object | None) -> frozenset[str]:
+    """The harnesses whose comms wrapper takes `--headless`, `--exit` and `--brief`, so a
+    headless launch of them may hold a comms name: `HEADLESS` in comms' API. Empty with no
+    comms, and from a comms older than that name, whose wrappers take no headless flags."""
+    value = getattr(api, "HEADLESS", None) if api is not None else None
     if value is None or isinstance(value, str):
         return frozenset()
     try:
@@ -1292,11 +1362,13 @@ def _show(value: object) -> str:
 
 
 __all__ = [
-    "Agent", "BadPreset", "CODEX_START_CEILING", "COMMS_INTERFACE", "ERROR", "KINDS",
+    "Agent", "BadPreset", "CACHE_TIMER_ROWS", "CODEX_START_CEILING", "COLD_GAP",
+    "COMMS_INTERFACE", "ERROR", "HEADLESS_EXIT", "KINDS",
     "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
-    "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "harness_of",
+    "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",
+    "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
     "projects_api", "read",
     "resolve", "roles", "schema",

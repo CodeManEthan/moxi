@@ -70,7 +70,9 @@ def test_the_verbs_that_act_stay_four():
 
     `whoami` is the one CLAIM verb: it reads this session's own claim socket and prints
     what it holds. It posts nothing, writes nothing and reaches no credential, so the
-    acting four are still four.
+    acting four are still four. `exit-session` is the other claim verb: it asks a
+    headless session's claim socket to end that session. It posts nothing and reaches
+    no credential.
 
     `claude` is the WRAPPER: it starts a Claude Code session with a comms identity and
     forks the session's adapter, which binds the name as any session binds it. The verb
@@ -93,10 +95,10 @@ def test_the_verbs_that_act_stay_four():
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "whoami",
                                 "claude", "codex", "migrate", "remove", "reserved",
-                                "send-only"}
+                                "send-only", "exit-session"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
-    claim = {"whoami"}
+    claim = {"whoami", "exit-session"}
     wrapper = {"claude", "codex"}
     store_verb = {"migrate", "reserved", "send-only"}
     # `remove` acts only on the sender's own message, taking back what it sent.
@@ -105,6 +107,7 @@ def test_the_verbs_that_act_stay_four():
             == set(sub.choices)) \
         and len(acting) == 4
     assert sub.choices["whoami"].get_default("func") is cli.cmd_whoami
+    assert sub.choices["exit-session"].get_default("func") is cli.cmd_exit_session
     assert sub.choices["migrate"].get_default("func") is cli.cmd_migrate
     assert {sub.choices[v].get_default("func") for v in reading} == {cli.cmd_help,
                                                                     cli.cmd_whois,

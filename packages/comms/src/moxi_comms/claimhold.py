@@ -13,7 +13,9 @@ from bound clears it.
 
 **Who may call each op.** What a process may send as is answered only inside the
 session that holds it (`claim`); what the session holds is answered to any local caller
-and can never be sent as (`state`). There is no other op.
+and can never be sent as (`state`). A headless session's adapter also answers `end` to
+any local caller: it ends the session, as `moxi comms exit-session` asks. An adapter
+whose claim is not headless refuses it. There is no other op.
 
 `moxi comms whoami` is here too (`whoami`), with the read of a session whose adapter is gone
 (`dead_adapter_answer`).
@@ -56,20 +58,26 @@ OLD_ADAPTER = ("this session's comms adapter is from comms 0.2 and speaks the ol
                "relaunch the session. Nothing was sent.")
 
 #: The claim socket's methods, beside the hello: `claim` answers only inside the session,
-#: `state` any local caller.
+#: `state` any local caller, and `end` any local caller of a headless session's adapter.
 CLAIM_OPS = ("claim",)
 STATE_OPS = ("state",)
-OPS = CLAIM_OPS + STATE_OPS
+END_OPS = ("end",)
+OPS = CLAIM_OPS + STATE_OPS + END_OPS
 
 #: The threads one claim socket's methods run on.
 WORKERS = 4
 
 #: The fields a current claim file may carry. Rebuilding at compatibility boundaries
 #: drops fields written by older releases without teaching live code their names.
-CLAIM_KEYS = ("name", "scope", "global", "qualified", "tier", "directors")
+#: A headless launch's claim carries `headless` (true) and `exit`, its exit rule as its
+#: `--exit` values.
+CLAIM_KEYS = ("name", "scope", "global", "qualified", "tier", "directors", "headless",
+              "exit")
 
 #: The refusal any caller outside the socket's own session gets for `claim`.
 NOT_INSIDE = ("this process is not inside the session that holds this socket's identity")
+#: The refusal `end` gets from an adapter whose claim is not headless.
+NOT_HEADLESS = "not a headless session"
 
 
 # --------------------------------------------------------------------------- lines
@@ -139,6 +147,9 @@ class ClaimHolder:
         self.token: str | None = None
         #: One register in flight: the supervisor's, or a `reregister`'s.
         self.register_lock = threading.Lock()
+        #: What `end` runs on a headless claim: the adapter's end of its session, called
+        #: on a thread of its own. None answers `end` as on a claim that is not headless.
+        self.on_end = None
         self._host: wire.Host | None = None
         self._stop = threading.Event()
         #: Closed with its file removed (`close()`): `save` writes nothing from then on,
@@ -288,6 +299,17 @@ class ClaimHolder:
                     "claim_name": (self.claim or {}).get("qualified"),
                     "lost": self.lost}
 
+    def end_answer(self) -> dict:
+        """`end`: a headless session's adapter answers `ending` and ends its session on a
+        thread of its own; any other refuses with `NOT_HEADLESS`."""
+        with self.lock:
+            headless = bool((self.claim or {}).get("headless"))
+            on_end = self.on_end
+        if not headless or on_end is None:
+            return {"ok": False, "error": NOT_HEADLESS, "not_headless": True}
+        threading.Thread(target=on_end, daemon=True, name="comms-claim-end").start()
+        return {"ok": True, "ending": True}
+
     # ------------------------------------------------------------------ membership
     def caller_sessions(self, pid) -> list:
         if pid is None:
@@ -339,6 +361,8 @@ class ClaimHolder:
         try:
             if method == "state":
                 return self.state_answer()
+            if method == "end":
+                return self.end_answer()
             if self.key not in self.caller_sessions(pid):
                 return {"ok": False, "error": NOT_INSIDE, "not_inside": True}
             return self.claim_answer()
@@ -747,8 +771,9 @@ class ClaimServer:
             self._stop.wait(next(delays))
 
 
-__all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable",
-           "STAMP_VARS", "claim_overlay", "ClaimHolder", "ClaimServer", "NOT_INSIDE",
+__all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable", "END_OPS",
+           "STAMP_VARS", "claim_overlay", "ClaimHolder", "ClaimServer", "NOT_HEADLESS",
+           "NOT_INSIDE",
            "OLD_ADAPTER", "OPS", "STATE_OPS", "call", "checked_socket",
            "dead_adapter_answer", "record_at", "remove_socket", "send_line",
            "socket_from_env", "whoami"]

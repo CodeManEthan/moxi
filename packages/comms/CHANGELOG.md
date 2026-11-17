@@ -13,6 +13,19 @@
   `api.send_as` refuses a program's name (`not-reserved`), and `moxi comms reserved
   renew` refuses one. comms.db moves to schema step 4 at its next write; a comms older
   than this one can't open it afterwards, so a downgrade needs the store's backup.
+- A Codex session can run headless: `moxi comms codex --name N --headless --brief TEXT`
+  (or `--brief-file F`) starts it with no window under its name, hands it the brief as
+  its first turn, and ends it by its exit rule, `--exit done|cold|idle=<D>|after=<D>`
+  (repeatable; `done` when none is given). Mail sent to it starts turns while its cache
+  is warm. It also ends when its brief fails, when it isn't ready within five minutes,
+  and when its brief's turn hasn't started five minutes after it is; its host ends when
+  its adapter does, by a lifeline only the adapter holds. The adapter's log names the
+  cause in one line. comms needs moxi 0.1.11 or later.
+- `moxi comms exit-session NAME [--scope S | --global]` ends a headless session by its
+  name, through its claim socket's new `end` method, and waits for the name to be
+  released. A claim file of a headless session records `headless` and `exit`.
+- comms' API names the harnesses whose wrapper takes a headless launch, `HEADLESS`
+  (`{"codex"}`), and the one parser of an exit rule, `parse_exit`.
 - Every setting carries page fields, which `moxi config comms show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, and
   the unit of each wait, age and replay limit. No setting is shown first and none is

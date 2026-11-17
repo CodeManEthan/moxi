@@ -14,7 +14,7 @@ import time
 import pytest
 
 from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
-from moxi_comms import codex_threads, owed, paths
+from moxi_comms import claimfile, codex_threads, owed, paths
 from moxi_comms.adapters.codex import CodexAdapter, HostGone, layer_one_hash
 from moxi_comms.adapters.codex_roster import CodexAgent
 
@@ -653,3 +653,376 @@ def test_a_host_that_ends_before_it_resumed_the_thread_ends_the_binding(
     assert codex_threads.read(IDENTITY) is None, "no record of a thread never loaded"
     adapter.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
+
+
+# --------------------------------------------------------------------------- headless
+
+class WatchClock:
+    """The exit watch's monotonic clock, moved by hand."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+BRIEF = "summarise the open branches"
+
+
+@pytest.fixture
+def headless(launch, monkeypatch):
+    """A headless launch of `planner@proj-a`: its exit rule, its brief, a hand-moved
+    watch clock and no watch thread, so each test steps the watch with
+    `headless_step()` and nothing steps it between (`loop=True` keeps the thread). What
+    would end the host is recorded in `.ended`."""
+
+    def build(*rule, start=True, loop=False, **kwargs):
+        from moxi_comms.adapters import headless as headless_mod
+
+        if not loop:
+            monkeypatch.setattr(CodexAdapter, "_headless_loop", lambda self: None)
+        clock = WatchClock()
+        adapter = launch(start=False, brief=BRIEF, watch_clock=clock,
+                         exit_rule=headless_mod.parse_exit(rule, harness="codex"),
+                         headless_tick_s=3600.0, **kwargs)
+        adapter.watch_time = clock
+        adapter.ended = []
+        adapter.on_headless_end = lambda cause, waiting, why: adapter.ended.append(
+            (cause, waiting, why))
+        if start:
+            adapter.start()
+        return adapter
+
+    return build
+
+
+def brief_turn_ends(adapter, outcome="answer"):
+    """The brief's turn ends `outcome`, and the adapter has seen it."""
+    assert wait_until(lambda: adapter.exit_watch.turn_running)
+    adapter.fake.end_turn(outcome)
+    assert wait_until(lambda: adapter.exit_watch.brief_outcome == outcome)
+
+
+def past_the_settle_window(adapter):
+    from moxi_comms.adapters.headless import DONE_READ_AFTER_S
+
+    adapter.watch_time.t += DONE_READ_AFTER_S
+
+
+def test_a_headless_launch_hands_in_the_brief_first_and_mail_after_its_turn(
+        rig, headless):
+    assert rig.send(IDENTITY, "waited for the bind", "--new-name",
+                    sender=dict(name="main", scope="proj-a"))[0] == 0
+    adapter = headless()
+    first = delivered(adapter.fake)[0]
+    assert (first.text, first.ref, first.steer) == (BRIEF, "brief", False)
+    send(rig, "while the brief runs")
+    assert rig.send(IDENTITY, "an interrupt while the brief runs", "--interrupt",
+                    sender=dict(name="main", scope="proj-a"))[0] == 0
+    time.sleep(0.3)
+    assert len(adapter.fake.delivered) == 1, "no mail goes in, steered or not, before " \
+                                             "the brief's turn ends"
+    brief_turn_ends(adapter)
+    rows = delivered(adapter.fake, 2)
+    assert rows[1].steer is False and "waited for the bind" in rows[1].text
+    assert "while the brief runs" in rows[1].text
+
+
+def test_the_claim_records_headless_and_the_rule(rig, headless):
+    adapter = headless("idle=5m", "cold")
+    record = claimfile.read(adapter.claims.key)
+    assert (record["claim"]["headless"], record["claim"]["exit"]) == (True,
+                                                                     ["idle=5m", "cold"])
+    assert headless_default_claim(headless)["exit"] == ["done"]
+
+
+def headless_default_claim(headless):
+    other = headless(name="writer", session=FakeSession("thread-2"))
+    return claimfile.read(other.claims.key)["claim"]
+
+
+@pytest.mark.parametrize("answer", ["refuse", ("lose", "the endpoint went away")])
+def test_a_brief_turns_refuses_or_loses_ends_the_session_at_once(rig, headless,
+                                                                 answer):
+    adapter = headless(start=False)
+    adapter.fake.script = [answer]
+    adapter.start()
+    assert wait_until(lambda: adapter.exit_watch.brief_refused is not None)
+    assert adapter.headless_step() == "brief-failed"
+    (cause, _waiting, why), = adapter.ended
+    assert cause == "brief-failed" and "the brief was not taken" in why
+    assert adapter.fake.agents_calls == 0, "no turn ran, so nothing of its runs"
+
+
+def test_the_watch_thread_steps_on_the_adapters_events(rig, headless):
+    """With its own thread, a refused brief ends the session with no step by hand, and
+    the thread ends with the adapter."""
+    adapter = headless(start=False, loop=True)
+    adapter.fake.script = ["refuse"]
+    adapter.start()
+    assert wait_until(lambda: adapter.ended)
+    assert adapter.ended[0][0] == "brief-failed"
+
+
+@pytest.mark.parametrize("outcome", ["error", "aborted", "refusal"])
+def test_a_brief_turn_that_ends_otherwise_than_answer_fails_the_brief(rig, headless,
+                                                                      outcome):
+    adapter = headless()
+    brief_turn_ends(adapter, outcome)
+    assert adapter.headless_step() is None, "it waits for the session's busy work first"
+    assert adapter.headless_step() == "brief-failed"
+    assert adapter.fake.agents_calls == 1
+    assert adapter.ended[0][0] == "brief-failed"
+    assert adapter.ended[0][2] == f"the brief's turn ended {outcome}"
+
+
+def test_a_session_not_found_within_the_ready_bound_fails_the_brief(rig, headless):
+    from moxi_comms.adapters.headless import HEADLESS_READY_WAIT_S
+
+    adapter = headless(start=False, find_step=0.01,
+                       alive=lambda: not adapter.ended)
+
+    def find(pid, timeout):
+        raise TimeoutError("not ready")
+
+    adapter._find = find
+    started = {}
+    import threading
+    runner = threading.Thread(target=lambda: started.setdefault(
+        "raised", _raises(adapter.start)), daemon=True)
+    runner.start()
+    assert wait_until(lambda: adapter.exit_watch is not None)
+    assert adapter.headless_step() is None
+    adapter.watch_time.t += HEADLESS_READY_WAIT_S
+    assert adapter.headless_step() == "brief-failed"
+    assert adapter.ended[0][2] == f"not ready within {HEADLESS_READY_WAIT_S}s"
+    runner.join(10)
+    assert started["raised"] is HostGone, "the host's end ends the look"
+    assert adapter.fake.delivered == [], "the brief was never handed in"
+
+
+def test_a_brief_turns_takes_and_never_starts_fails_within_the_bound(rig, headless):
+    from moxi_comms.adapters.headless import HEADLESS_READY_WAIT_S
+
+    adapter = headless(start=False)
+    adapter.fake.script = ["hang"]
+    adapter.start()
+    assert adapter.exit_watch.found and not adapter.exit_watch.turned
+    assert adapter.headless_step() is None
+    adapter.watch_time.t += HEADLESS_READY_WAIT_S
+    assert adapter.headless_step() == "brief-failed"
+    assert adapter.ended == [("brief-failed", 0, "the brief's turn did not start within "
+                              f"{HEADLESS_READY_WAIT_S}s")]
+    assert adapter.fake.agents_calls == 0, "no turn ran, so nothing waits on its work"
+
+
+def _raises(fn):
+    try:
+        fn()
+    except Exception as exc:                                  # noqa: BLE001
+        return type(exc)
+    return None
+
+
+def test_done_reads_after_the_settle_window_with_a_look_then_the_agents_answer(
+        rig, headless, monkeypatch):
+    looks = []
+    real = rig.daemon._on_look
+    monkeypatch.setattr(rig.daemon, "_on_look", lambda b: looks.append(b.qualified)
+                        or real(b))
+    adapter = headless()
+    brief_turn_ends(adapter)
+    adapter.watch_time.t += 5
+    assert adapter.headless_step() is None and looks == [], "no read inside the window"
+    past_the_settle_window(adapter)
+    assert adapter.headless_step() is None, "the busy work is read first"
+    assert looks == [IDENTITY], "the look went on the binding's own connection"
+    assert adapter.exit_watch.mail[1:] == (0, 0)
+    assert adapter.headless_step() == "done"
+    assert adapter.ended == [("done", 0, "")]
+
+
+def test_done_waits_for_the_turn_mail_starts(rig, headless):
+    adapter = headless()
+    assert wait_until(lambda: adapter.exit_watch.turn_running)
+    send(rig, "one more thing")
+    adapter.fake.end_turn("answer")
+    assert wait_until(lambda: len(adapter.fake.delivered) == 2)
+    assert wait_until(lambda: adapter.exit_watch.turn_running), "the mail's turn runs"
+    past_the_settle_window(adapter)
+    assert adapter.headless_step() is None and adapter.headless_step() is None
+    adapter.fake.end_turn("answer")
+    assert wait_until(lambda: not adapter.exit_watch.turn_running)
+    past_the_settle_window(adapter)
+    adapter.headless_step()
+    assert adapter.headless_step() == "done"
+
+
+def test_with_no_agents_list_nothing_is_asked_and_nothing_waits(rig, headless):
+    from fake_turns import CODEX
+
+    adapter = headless(session=FakeSession(capabilities=CODEX - {"agents"}))
+    brief_turn_ends(adapter)
+    past_the_settle_window(adapter)
+    assert adapter.headless_step() == "done"
+    assert adapter.fake.agents_calls == 0
+
+
+def test_an_automatic_cause_waits_while_the_session_lists_busy_work(rig, headless):
+    adapter = headless()
+    adapter.fake.busy = 2
+    brief_turn_ends(adapter)
+    past_the_settle_window(adapter)
+    assert adapter.headless_step() is None
+    adapter.watch_time.t += 5
+    assert adapter.headless_step() is None
+    adapter.fake.busy = None
+    adapter.watch_time.t += 5
+    assert adapter.headless_step() is None, "a list turns can't vouch for is busy"
+    adapter.fake.busy = 0
+    adapter.watch_time.t += 5
+    assert adapter.headless_step() == "done"
+    assert adapter.fake.agents_calls == 3
+
+
+@pytest.mark.parametrize("kind, cause", [("cold", "cold"), ("unknown", "cache-unreadable")])
+def test_cold_fires_on_the_daemons_read_of_the_name(rig, headless, kind, cause):
+    from moxi_comms.adapters.headless import HEADLESS_READY_WAIT_S
+
+    adapter = headless("cold")
+    adapter._read_cache_kind = lambda: kind
+    brief_turn_ends(adapter)
+    first = adapter.headless_step()
+    if kind == "unknown":
+        assert first is None
+        adapter.watch_time.t += HEADLESS_READY_WAIT_S
+        adapter.headless_step()
+    assert adapter.headless_step() == cause
+
+
+def test_cold_reads_the_daemons_session_answer(rig, headless):
+    """A warm read (the rig's clock) fires nothing; the read is the daemon's own."""
+    adapter = headless("cold")
+    brief_turn_ends(adapter)
+    assert adapter._read_cache_kind() == "warm"
+    assert adapter.headless_step() is None
+    assert adapter.exit_watch.cache_kind == "warm"
+
+
+def test_after_ends_the_session_mid_turn(rig, headless):
+    adapter = headless("after=10m")
+    assert wait_until(lambda: adapter.exit_watch.turn_running)
+    adapter.watch_time.t += 600
+    assert adapter.headless_step() == "after"
+    assert adapter.fake.agents_calls == 0
+
+
+def test_exit_session_through_the_claim_socket_ends_it_once(rig, headless):
+    adapter = headless("after=10m")
+    assert adapter.claims.end_answer() == {"ok": True, "ending": True}
+    assert wait_until(lambda: adapter.ended)
+    adapter.watch_time.t += 600
+    assert adapter.headless_step() is None, "the first cause wins"
+    assert [cause for cause, _, _ in adapter.ended] == ["exit-session"]
+
+
+def test_a_launch_with_a_person_has_no_watch_and_refuses_end(rig, launch):
+    adapter = launch()
+    assert adapter.exit_watch is None and adapter.headless_step() is None
+    assert adapter.claims.end_answer()["not_headless"] is True
+    assert "headless" not in (claimfile.read(adapter.claims.key)["claim"] or {})
+
+
+def test_an_end_asked_before_the_bind_ends_the_session_once_the_watch_starts(
+        rig, headless):
+    """The claim socket answers `end` from before the bind: the cause is kept, and the
+    session ends on it as the watch starts, since the name is held by then."""
+    adapter = headless("after=10m", start=False)
+    assert adapter.exit_watch is None
+    assert adapter.end_headless("exit-session") is True
+    assert adapter.ended == []
+    adapter.start()
+    assert [cause for cause, _, _ in adapter.ended] == ["exit-session"]
+    assert adapter.ended_cause == "exit-session"
+    assert adapter.end_headless("exit-session") is False, "it ends once"
+
+
+# ----------------------------------------------------------- serve's end of a headless host
+
+@pytest.fixture
+def served(headless, caplog):
+    """A headless adapter run by the wrapper's `serve` on a thread, over a stand-in host
+    (a child process, `serve`'s handle a pidfd on it). `.ends()` reads the end lines
+    logged so far."""
+    import logging
+    import os
+    import subprocess
+    import sys
+    import threading
+
+    from moxi_comms.adapters import codex_wrapper
+    from moxi_comms.adapters.terminal import pidfd_open
+
+    caplog.set_level(logging.INFO)
+    hosts: list = []
+    handles: list = []
+
+    def build(*rule, find=None, **kwargs):
+        host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        hosts.append(host)
+        handle = pidfd_open(host.pid)
+        handles.append(handle)
+        adapter = headless(*rule, start=False, **kwargs)
+        if find is not None:
+            adapter._find = find
+        got: dict = {}
+        runner = threading.Thread(target=lambda: got.setdefault(
+            "code", codex_wrapper.serve(adapter, handle)), daemon=True)
+        runner.start()
+        adapter.host, adapter.runner, adapter.served = host, runner, got
+        adapter.ends = lambda: [r.getMessage() for r in caplog.records
+                                if r.getMessage().startswith("headless session ended")]
+        return adapter
+
+    yield build
+    for host in hosts:
+        if host.poll() is None:
+            host.kill()
+        host.wait()
+    for handle in handles:
+        os.close(handle)
+
+
+def test_a_host_that_ends_before_its_session_is_found_logs_host_ended(rig, served):
+    def find(pid, timeout):
+        raise TimeoutError("not ready")
+
+    adapter = served(find=find, find_step=0.01)
+    assert wait_until(lambda: adapter.exit_watch is not None)
+    adapter.host.kill()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.ends() == ["headless session ended: host-ended; 0 row(s) left "
+                              "waiting for the name"]
+
+
+def test_a_host_that_ends_on_its_own_logs_host_ended(rig, served):
+    adapter = served()
+    assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)
+    adapter.host.kill()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.ends() == ["headless session ended: host-ended; 0 row(s) left "
+                              "waiting for the name"]
+
+
+def test_a_session_a_cause_ended_writes_no_second_end_line(rig, served):
+    adapter = served("after=2h")
+    assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)
+    adapter.claims.on_end()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.host.wait(10) != 0, "the cause's SIGTERM ended the host"
+    assert adapter.ends() == ["headless session ended: exit-session; 0 row(s) left "
+                              "waiting for the name"]

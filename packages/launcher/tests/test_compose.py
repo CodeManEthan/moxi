@@ -10,6 +10,8 @@ import pytest
 from moxi import modules
 
 from moxi_launcher import catalog, compose
+from moxi_launcher import first as first_mod
+from moxi_launcher import store
 from moxi_launcher.compose import Additions, Context, claude, codex, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
@@ -157,6 +159,22 @@ def test_a_headless_claude_launch_with_an_identity_waits_on_comms():
     with pytest.raises(common.NotYet, match="headless wrapper flags"):
         claude.compose(claude_values(identity="planner", target="headless"),
                        ctx(modules=frozenset({"comms"}), brief="b"))
+
+
+def test_a_headless_claude_launch_with_an_identity_runs_the_wrapper_where_comms_takes_it():
+    values = claude_values(identity="planner", scope="moxi", director=["lead"],
+                           native_name="Planner", target="headless",
+                           headless_exit=["after=2h"], extra_flags=["--verbose"])
+    got = claude.compose(values, ctx(modules=frozenset({"comms"}), comms_headless=True,
+                                     brief="b"))
+    assert got.mode == "print"
+    assert list(got.argv) == [
+        "moxi", "comms", "claude", "--name", "planner", "--scope", "moxi",
+        "--director", "lead", "--session-id", SID, "--native-name", "Planner",
+        "--headless", "--exit", "after=2h", "--brief",
+        "Brief from launcher, launched by ann\n\nb", "--",
+        "--append-system-prompt-file", PF, "--permission-mode", "default", "--verbose"]
+    assert "-p" not in got.argv and first_mod.on_argv(got.argv)
 
 
 @pytest.mark.parametrize("target", ["terminal", "slot"])
@@ -423,6 +441,57 @@ def test_a_codex_launch_with_an_identity_runs_the_wrapper_comms_offers():
     with pytest.raises(common.NotYet, match="turns' Codex host"):
         codex.compose(codex_values(identity="coder"),
                       ctx(session_id=None, modules=frozenset({"comms"}), comms_codex=True))
+
+
+HEADLESS_CODEX = {"session_id": None, "modules": frozenset({"turns", "comms"}), "host": HOST,
+                  "comms_codex": True, "comms_headless": True}
+
+
+def test_a_headless_codex_launch_with_an_identity_runs_the_wrapper_with_its_headless_flags():
+    values = codex_values(identity="coder", scope="moxi", director=["lead"], model="gpt-5",
+                          sandbox="", target="headless", headless_exit=["idle=90m", "cold"])
+    got = codex.compose(values, ctx(**HEADLESS_CODEX, brief="fix the build"))
+    assert list(got.argv) == [
+        "moxi", "comms", "codex", "--name", "coder", "--scope", "moxi",
+        "--director", "lead", "--model", "gpt-5", *UPDATE_OPTION,
+        "--headless", "--exit", "idle=90m", "--exit", "cold", "--brief", BRIEF]
+    # The brief rides the argv, so no first turn is owed, and the sender sends nothing.
+    assert got.mode == "host" and got.first is None and got.prompt == BRIEF
+    assert first_mod.on_argv(got.argv)
+    assert "--no-window" not in got.argv and "--cwd" not in got.argv
+
+
+def test_a_headless_codex_launch_with_no_exit_rule_passes_no_exit():
+    got = codex.compose(codex_values(identity="coder", target="headless"),
+                        ctx(**HEADLESS_CODEX, brief="b"))
+    assert list(got.argv[-3:]) == ["--headless", "--brief",
+                                   "Brief from launcher, launched by ann\n\nb"]
+    assert "--exit" not in got.argv
+
+
+def test_a_headless_codex_launch_with_an_identity_needs_a_brief():
+    with pytest.raises(common.NoBrief):
+        codex.compose(codex_values(identity="coder", target="headless"),
+                      ctx(**HEADLESS_CODEX))
+
+
+def test_a_headless_codex_launch_with_an_identity_needs_turns_host():
+    with pytest.raises(common.NotYet, match="turns' Codex host"):
+        codex.compose(codex_values(identity="coder", target="headless"),
+                      ctx(**{**HEADLESS_CODEX, "host": None}, brief="b"))
+
+
+def test_a_headless_codex_launch_without_an_identity_is_still_exec():
+    got = codex.compose(codex_values(target="headless"),
+                        ctx(**HEADLESS_CODEX, brief="b"))
+    assert got.mode == "exec" and got.argv[:2] == ("codex", "exec")
+
+
+def test_the_headless_brief_on_the_argv_counts_toward_its_size_limits():
+    # The first turn rides --brief, so the argv's own cap refuses one past it.
+    with pytest.raises(store.TooLarge, match="argv_json"):
+        codex.compose(codex_values(identity="coder", target="headless", handoff="/h.md"),
+                      ctx(**HEADLESS_CODEX, handoff_text="x" * store.CAP))
 
 
 THREAD = "7c6d5e4f-3a2b-4c1d-9e8f-0a1b2c3d4e5f"
