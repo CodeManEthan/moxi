@@ -71,13 +71,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from . import index, labels, links, rows, settings, state, table
+from . import folders, index, labels, links, rows, settings, state, table
 
 #: The most bytes one `records_since` call reads; a longer source is read in batches,
 #: each written with its cursor in one transaction.
@@ -90,6 +91,8 @@ RECORD = "ingest"
 COMPRESSED = "compressed"
 #: How far up a chain of subagents a child looks for the main session.
 MAX_DEPTH = 16
+#: How a probe of sessions' `find` that couldn't read its root begins.
+UNREADABLE_PROBE = "unreadable"
 
 
 @dataclass
@@ -107,6 +110,7 @@ class Report:
     unreadable: int = 0
     compressed: int = 0
     dropped: int | None = None
+    kept: int | None = None
 
     def line(self) -> str:
         if self.busy:
@@ -123,7 +127,35 @@ class Report:
             text += f", {self.compressed} compressed rollouts not read"
         if self.dropped is not None:
             text += f", {self.dropped} sessions dropped"
+        if self.kept is not None:
+            text += f", {self.kept} kept from the last index"
         return text
+
+
+@dataclass
+class Seen:
+    """One folder in one run: whether the run listed it (a live root that doesn't exist
+    and from which memory read nothing counts, as it holds nothing), whether whole, and
+    what went wrong in it: why it was offline, why it lists nothing, and each path that
+    failed with why. It answered only with none of those."""
+
+    path: str
+    is_archive: bool = False
+    listed: bool = False
+    whole: bool = False
+    absent: bool = False
+    offline: str | None = None
+    empty: str | None = None
+    errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def answered(self) -> bool:
+        return (self.listed and self.offline is None and self.empty is None
+                and not self.errors)
+
+
+#: `Ingest`'s `prior` when the run reads its own generation's records.
+_OWN = object()
 
 
 @dataclass(frozen=True)
@@ -188,8 +220,25 @@ class Ingest:
     (`sc`)."""
 
     def __init__(self, conn, sc, config, *, mode: str = "walk", fresh: bool = False,
-                 relabel: bool = False, launcher: links.Link | None = None):
+                 relabel: bool = False, launcher: links.Link | None = None,
+                 rebuilding: bool = False, prior: Any = _OWN,
+                 started: float | None = None):
+        """`rebuilding` for a rebuild's run, whose `prior` is the generation it replaces
+        (None when there is none); a walk's `prior` is `conn` itself. A run reads folder
+        records and what memory read from under a folder in `prior`."""
         self.conn = conn
+        self.prior = conn if prior is _OWN else prior
+        self.rebuilding = rebuilding
+        self.started = time.time() if started is None else started
+        self.run: dict[str, dict[str, Seen]] = {}
+        self.records: dict[str, list[folders.Folder]] = {}
+        self.began: dict[str, float] = {}
+        self.failed: dict[str, str] = {}
+        self.find_roots: dict[str, list[str]] = {}
+        self.begun: set[tuple[str, str]] = set()
+        self.broken: set[tuple[str, str]] = set()
+        self.compressed: set[tuple[str, str]] = set()
+        self._folder: Seen | None = None
         self.sc = sc
         self.harnesses = tuple(config["harnesses"])
         self.subagents = bool(config["index.include_subagents"])
@@ -201,7 +250,6 @@ class Ingest:
         self.labels: dict[tuple[str, str], str | None] = {}
         self.mains: dict[tuple[str, str], str] = {}
         self.seen: set[tuple[str, str]] = set()
-        self.unlisted: set[str] = set()
         self.report = Report(mode)
 
     # -- the launcher ------------------------------------------------------------------
@@ -270,6 +318,32 @@ class Ingest:
                          label=label, kind=kind, settled=settled)
         self.report.sessions += 1
 
+    # -- errors, and finding a session ------------------------------------------------
+
+    def _error(self, path: str, why: str, session: tuple[str, str] | None = None) -> None:
+        """An error in the folder being read: the folder didn't answer this run, and the
+        session it belongs to doesn't count as read."""
+        self.report.unreadable += 1
+        if self._folder is not None:
+            self._folder.errors.setdefault(path, why)
+        if session is not None:
+            self.broken.add(session)
+
+    def find_in(self, harness: str, session_id: str, roots: list[str] | None = None):
+        """The hits of `find` for a session: in `roots` when given, else in the folders
+        this run listed for the harness that answered its start, else the live root. A
+        folder that can't be read in it is an error in that folder."""
+        api = _api()
+        roots = roots if roots is not None else self.find_roots.get(harness)
+        found = (api.find(harness, session_id, root=roots) if roots
+                 else api.find(harness, session_id))
+        for probe in found.probes:
+            if probe.outcome.startswith(UNREADABLE_PROBE):
+                seen = self.run.get(harness, {}).get(probe.root)
+                if seen is not None:
+                    seen.errors.setdefault(probe.root, probe.outcome)
+        return found.hits
+
     # -- classifying a source ----------------------------------------------------------
 
     def header_of(self, src):
@@ -288,10 +362,9 @@ class Ingest:
             return None
         if (harness, start) in self.mains:
             return self.mains[(harness, start)]
-        api = _api()
         current = start
         for _ in range(MAX_DEPTH):
-            hit = next((h for h in api.find(harness, current).hits if not h.compressed),
+            hit = next((h for h in self.find_in(harness, current) if not h.compressed),
                        None)
             if hit is None:
                 break
@@ -353,12 +426,14 @@ class Ingest:
         label = self.label_for(src.harness, role.main, cwd)
         newest = None
         read_any = False
+        self.begun.add((src.harness, role.main))
         while True:
             try:
                 batch = api.records_since(item, cursor, kinds=rows.KINDS,
                                           max_bytes=MAX_BYTES)
-            except api.Unreadable:
-                self.report.unreadable += 1
+            except OSError as exc:   # sessions' Unreadable is one, a file gone another
+                why = getattr(exc, "reason", None) or exc.strerror or str(exc)
+                self._error(str(src.path), why, (src.harness, role.main))
                 break
             read_any = True
             got = rows.convert(batch.records, source_key=skey, main_id=role.main,
@@ -426,7 +501,8 @@ class Ingest:
         for sub in listing:
             header = self.header_of(sub.source)
             if header is None:
-                self.report.unreadable += 1
+                self._error(str(sub.source.path), "its first lines can't be read",
+                            (sub.source.harness, role.main))
                 continue
             agent = _text(sub.agent_id) or _text(sub.source.agent_id) or \
                 _text(sub.source.session_id)
@@ -456,64 +532,416 @@ class Ingest:
                 self.read_subagents(hit.source, role)
 
     def walk(self, *, full: bool = False) -> None:
-        """List each harness root and read each source that changed since the last walk
-        (with `full`, every source the roots hold)."""
-        api = _api()
-        absent: set[str] = set()
+        """List every folder of each harness through sessions' `corpus` and read each
+        source that changed since that folder's last walk (with `full`, every source),
+        then test the folders again and record each one's answer (`moxi_memory.folders`).
+        """
         for harness in self.harnesses:
-            last = index.meta_get(self.conn, f"last_walk.{harness}")
-            since = None if full or self.fresh or last is None else float(last)
-            began = time.time()
-            try:
-                listing = api.sources(harness, modified_since=since, heads=True)
-            except Exception:  # noqa: BLE001 - a root that can't be listed is skipped
-                listing = None
-            if listing is None or not listing.ok:
-                self.unlisted.add(harness)
-                if listing is not None and not os.path.lexists(listing.root):
-                    absent.add(harness)  # no root: this harness has nothing to read
+            self._walk_harness(harness, full=full or self.fresh)
+        self._folder = None
+        self._retest()
+        self._record()
+
+    def _since(self, harness: str, records: list[folders.Folder]) -> dict[str, float]:
+        """Each folder's last walk, for `corpus`: a folder never listed whole, or holding
+        a failed path no session can be named for, is left out and listed whole."""
+        since = {}
+        for rec in records:
+            if (rec.listed_whole and rec.last_walk_at is not None
+                    and all(_session_of(harness, rec.path, p) for p in rec.retry)):
+                since[rec.path] = rec.last_walk_at
+        if not records and self.prior is not None:
+            # An index written before folder records: its live root's last walk.
+            last = index.meta_get(self.prior, f"last_walk.{harness}")
+            if last is not None and index.meta_get(self.prior, "first_read") == "1":
+                since[str(_api().root(harness))] = float(last)
+        return since
+
+    def _walk_harness(self, harness: str, *, full: bool) -> None:
+        api = _api()
+        records = folders.read(self.prior, harness) if self.prior is not None else []
+        self.records[harness] = records
+        retry = {r.path: r.retry for r in records}
+        began = time.time()
+        self.began[harness] = began
+        try:
+            since = None if full else self._since(harness, records)
+            listings = api.corpus(harness, since=since, heads=True)
+        except Exception as exc:  # noqa: BLE001 - an error in every folder of the harness
+            self.failed[harness] = f"sessions can't list this harness's folders: {exc}"
+            return
+        run = self.run.setdefault(harness, {})
+        if listings:
+            self.find_roots[harness] = [listings[0].root, *(
+                each.root for each in listings[1:] if each.ok)]
+        found: list[tuple[Any, Any, Role, Seen]] = []
+        compressed = 0
+        whole_count = 0
+        read_paths: set[str] = set()
+        for listing in listings:
+            seen = Seen(listing.root, is_archive=listing.is_archive,
+                        whole=since is None or listing.root not in since)
+            run[listing.root] = seen
+            self._folder = seen
+            if not listing.ok:
+                absent = listing.absent or (not listing.is_archive
+                                            and not os.path.lexists(listing.root))
+                if absent and not listing.is_archive:
+                    seen.absent = True
+                    n = folders.held(self.prior, harness, listing.root)
+                    if n:
+                        seen.empty = _lists_nothing(n)
+                    else:
+                        seen.listed = True  # no live root: it holds nothing
+                else:
+                    seen.offline = listing.reason or "it can't be listed"
                 continue
-            mains, subs = [], []
+            seen.listed = True
+            if listing.empty:
+                n = folders.held(self.prior, harness, listing.root)
+                if n:
+                    seen.empty = _lists_nothing(n)
+            for rel, why in listing.unreadable:
+                seen.errors.setdefault(os.path.join(listing.root, rel), why)
             for entry in listing:
                 src = entry.source
+                read_paths.add(str(src.path))
                 if entry.compressed:
+                    compressed += 1
                     self.note_compressed(src)
                     if src.session_id:
                         self.seen.add((harness, src.session_id))
+                        self.compressed.add((harness, src.session_id))
                     continue
                 header = entry.header or self.header_of(src)
                 if header is None:
-                    self.report.unreadable += 1
-                    if src.agent_id is None and src.session_id:
-                        self.seen.add((harness, src.session_id))
+                    main = src.session_id if src.agent_id is None else None
+                    self._error(str(src.path), "its first lines can't be read",
+                                (harness, main) if main else None)
+                    if main:
+                        self.seen.add((harness, main))
                     continue
                 role = self.classify(src, header)
                 if role is None:
                     continue
                 if role.agent is None:
                     self.seen.add((harness, role.main))
-                    mains.append((entry, header, role))
-                elif self.subagents:
-                    subs.append((entry, header, role))
-            if since is None:
-                # A whole listing: how many sources this walk will record, so a search
-                # during the first full read can say how far it is.
-                noted = sum(1 for entry in listing if entry.compressed)
-                index.meta_set(self.conn, f"listed.{harness}",
-                               len(mains) + len(subs) + noted)
-            for entry, header, role in mains + subs:
-                reuse = _reuse(entry)
-                if not self.fresh and reuse is not None:
-                    stored = self.conn.execute(
-                        "SELECT reuse FROM sources WHERE harness = ? AND source = ?",
-                        (harness, source_key(entry.source))).fetchone()
-                    if stored is not None and stored[0] == reuse:
+                if role.agent is None or self.subagents:
+                    found.append((entry, header, role, seen))
+            if seen.whole:
+                whole_count += len(listing)
+            for path in retry.get(listing.root, ()):
+                if path not in read_paths:
+                    found += self._retry(harness, listing.root, path, seen)
+        if run and next(iter(run.values())).whole:
+            # A whole listing: how many sources this run will record, so a search
+            # during the first full read can say how far it is.
+            index.meta_set(self.conn, f"listed.{harness}",
+                           sum(1 for _, _, role, _ in found
+                               if role.agent is None or self.subagents) + compressed)
+        found.sort(key=lambda item: item[2].agent is not None)   # mains, then subagents
+        for item, header, role, seen in found:
+            self._folder = seen
+            reuse = _reuse(item)
+            if not self.fresh and reuse is not None:
+                stored = self.conn.execute(
+                    "SELECT reuse FROM sources WHERE harness = ? AND source = ?",
+                    (harness, source_key(item.source))).fetchone()
+                if stored is not None and stored[0] == reuse:
+                    continue
+            self.read_source(item, header, role, reuse=reuse)
+            if (isinstance(item, _api().Source) and self.subagents and role.agent is None
+                    and harness == "claude"):
+                self.read_subagents(item, role)
+        self._folder = None
+
+    def _retry(self, harness: str, root: str, path: str, seen: Seen) -> list:
+        """The sources of the session a path that failed at an earlier walk belongs to,
+        found in its folder again; none when the session is gone from it."""
+        session_id = _session_of(harness, root, path)
+        if session_id is None:
+            return []
+        out = []
+        for hit in self.find_in(harness, session_id, [root]):
+            if hit.compressed:
+                self.note_compressed(hit.source)
+                continue
+            header = self.header_of(hit.source)
+            if header is None:
+                self._error(str(hit.source.path), "its first lines can't be read",
+                            (harness, session_id))
+                continue
+            role = self.classify(hit.source, header)
+            if role is not None and (role.agent is None or self.subagents):
+                if role.agent is None:
+                    self.seen.add((harness, role.main))
+                out.append((hit.source, header, role, seen))
+        return out
+
+    def _retest(self) -> None:
+        """The test just before the run's decision: every archive folder that has answered
+        so far is tested again by sessions, taking no kept answer (all at once, one wait),
+        and each live root's top level is listed again. A folder that fails then, or that
+        lists nothing though memory read from it, didn't answer the run."""
+        api = _api()
+        archive_dirs = [s.path for run in self.run.values() for s in run.values()
+                        if s.is_archive and s.answered]
+        answers: dict[str, Any] = {}
+        why = None
+        if archive_dirs:
+            try:
+                answers = api.archive_answers(archive_dirs, fresh=True)
+            except Exception as exc:  # noqa: BLE001 - a test that can't run isn't an answer
+                why = f"its test before the decision couldn't run: {exc}"
+        for harness, run in self.run.items():
+            for s in run.values():
+                if not s.answered:
+                    continue
+                if s.is_archive:
+                    answer = answers.get(s.path)
+                    if answer is None or not answer.ok:
+                        s.offline = why or ("didn't answer the test before the decision: "
+                                            f"{getattr(answer, 'reason', None)}")
                         continue
-                self.read_source(entry, header, role, reuse=reuse)
-            index.meta_set(self.conn, f"last_walk.{harness}", began)
-        if all(h in absent or index.meta_get(self.conn, f"last_walk.{h}") is not None
-               for h in self.harnesses):
+                    top = "empty" if answer.empty else "entries"
+                else:
+                    top, reason = _top_now(s.path)
+                    if reason is not None:
+                        s.offline = f"couldn't be listed at the test before the decision: {reason}"
+                        continue
+                if top in ("absent", "empty"):
+                    n = folders.held(self.prior, harness, s.path)
+                    if n:
+                        s.empty = _lists_nothing(n)
+
+    def harness_answered(self, harness: str) -> bool:
+        """Whether every folder of `harness` answered this run."""
+        return harness not in self.failed and all(
+            s.answered for s in self.run.get(harness, {}).values())
+
+    def _record(self) -> None:
+        """Write each folder's answer to this run, its last walk and what failed, into
+        `meta`, and mark the first full read finished once every live root has been
+        listed whole."""
+        for harness in self.harnesses:
+            old = {r.path: r for r in self.records.get(harness, [])}
+            recs: list[folders.Folder] = []
+            if harness in self.failed:
+                paths = list(old)
+                if not paths:
+                    try:
+                        paths = [str(_api().root(harness))]
+                    except Exception:  # noqa: BLE001 - no root to name
+                        paths = []
+                for path in paths:
+                    prev = old.get(path)
+                    rec = self._carried(path, prev)
+                    rec.why, rec.errors = folders.FAILED, 1
+                    rec.first_error = (path, self.failed[harness])
+                    recs.append(rec)
+                folders.write(self.conn, harness, recs)
+                continue
+            for path, s in self.run.get(harness, {}).items():
+                prev = old.pop(path, None)
+                rec = self._carried(path, prev, is_archive=s.is_archive)
+                failed = bool(s.errors) and s.offline is None and s.empty is None
+                if (s.answered or failed) and not s.absent:
+                    # a live root that isn't there keeps no last walk, so it is listed
+                    # whole once it is
+                    rec.last_walk_at = self.began[harness]
+                    if s.whole:
+                        rec.listed_whole = True
+                if s.answered:
+                    rec.answered, rec.since_at = True, None
+                    if self.rebuilding:
+                        rec.missed_rebuild_at = None
+                elif s.offline is not None:
+                    rec.why, rec.reason = folders.OFFLINE, s.offline
+                elif s.empty is not None:
+                    rec.why, rec.reason = folders.EMPTY, s.empty
+                else:
+                    rec.why, rec.errors = folders.FAILED, len(s.errors)
+                    rec.first_error = next(iter(s.errors.items()))
+                    rec.retry = tuple(s.errors)
+                recs.append(rec)
+            if not self.rebuilding:
+                for prev in old.values():   # left until a rebuild leaves it out
+                    prev.in_config = False
+                    recs.append(prev)
+            folders.write(self.conn, harness, recs)
+            live = recs[0] if recs and not recs[0].is_archive else None
+            if live is not None and live.last_walk_at is not None:
+                index.meta_set(self.conn, f"last_walk.{harness}", live.last_walk_at)
+        lives = []
+        for harness in self.harnesses:
+            recs = folders.read(self.conn, harness)
+            first = next(iter(self.run.get(harness, {}).values()), None)
+            lives.append(harness not in self.failed and bool(recs)
+                         and not recs[0].is_archive
+                         and (recs[0].listed_whole
+                              or (first is not None and first.absent and first.answered)))
+        if all(lives):
             index.meta_set(self.conn, "first_read", 1)
+
+    def _carried(self, path: str, prev: folders.Folder | None, *,
+                 is_archive: bool | None = None) -> folders.Folder:
+        """A new record of `path` for this run, not answered, carrying from `prev` what
+        a run that didn't read the folder keeps: its last walk, whether it was listed
+        whole (a rebuild starts a live root's afresh), since when it hasn't answered, and
+        the last rebuild it missed."""
+        archive = prev.is_archive if is_archive is None and prev else bool(is_archive)
+        rec = folders.Folder(path, is_archive=archive, run_at=self.started)
+        if prev is not None:
+            rec.last_walk_at = prev.last_walk_at
+            rec.listed_whole = prev.listed_whole and (archive or not self.rebuilding)
+            rec.missed_rebuild_at = prev.missed_rebuild_at
+            if not prev.answered and prev.since_at:
+                rec.since_at = prev.since_at
+        if rec.since_at is None:
+            rec.since_at = self.started
+        if self.rebuilding:
+            rec.missed_rebuild_at = self.started
+        return rec
+
+    # -- the rebuild's keep rule -------------------------------------------------------
+
+    def take_out_broken(self) -> None:
+        """Take out of this generation what the run wrote for each session it began and
+        couldn't read to its end."""
+        from moxi import store
+
+        with store.transaction(self.conn):
+            for harness, session_id in sorted(self.broken):
+                srcs = [r[0] for r in self.conn.execute(
+                    "SELECT source FROM sources WHERE harness = ? AND session_id = ?",
+                    (harness, session_id))]
+                self.conn.executemany(
+                    "DELETE FROM secret_calls WHERE harness = ? AND source = ?",
+                    [(harness, s) for s in srcs])
+                for table_name in ("rows", "tails", "sources"):
+                    self.conn.execute(f"DELETE FROM {table_name} WHERE harness = ? "
+                                      "AND session_id = ?", (harness, session_id))
+
+    def keeping(self) -> set[str]:
+        """The harnesses with a folder that didn't answer this run, whose sessions a
+        rebuild keeps."""
+        return {h for h in self.harnesses if not self.harness_answered(h)}
+
+    def copy_kept(self) -> int:
+        """Copy from the generation this rebuild replaces each session it keeps: every
+        session of a harness with a folder that didn't answer that it didn't read whole,
+        and every session it found only as compressed rollouts, which sessions lists and
+        doesn't read. Returns how many sessions it copied.
+
+        A copy takes the session's rows, tails, sources with their cursors and secret-path
+        calls, under the rules a stored row allows: no row of a harness config
+        `harnesses` leaves out, no subagent row with `index.include_subagents` off, each
+        text redacted with today's `redact.sets` and cut to today's sizes, and each row
+        given the session table's label."""
+        from moxi import store
+
+        old = self.prior
+        if old is None:
+            return 0
+        keep = self.keeping()
+        done = self.begun - self.broken
+        copied = 0
+        for harness in self.harnesses:
+            sessions = sorted({r[0] for r in old.execute(
+                "SELECT session_id FROM rows WHERE harness = ? UNION "
+                "SELECT session_id FROM sources WHERE harness = ? "
+                "AND session_id IS NOT NULL", (harness, harness))})
+            for session_id in sessions:
+                key = (harness, session_id)
+                if key in done or not (harness in keep or key in self.compressed):
+                    continue
+                with store.transaction(self.conn):
+                    if self._copy_one(old, harness, session_id):
+                        copied += 1
+        return copied
+
+    def _copy_one(self, old, harness: str, session_id: str) -> bool:
+        row = table.row(self.sc, harness, session_id)
+        label = row.label if row is not None and row.label else None
+        sets = self.policy.sets
+        rows_out = []
+        for key, agent, label_was, when, turn, kind, text in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text FROM rows "
+                "WHERE harness = ? AND session_id = ?", (harness, session_id)):
+            if agent is not None and not self.subagents:
+                continue
+            limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
+            rows_out.append((key, harness, session_id, agent, label or label_was, when,
+                             turn, kind, rows.recut_head(text, limit, sets)))
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
+            "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+        tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
+                      rows.recut_tail(text, self.policy.tail_chars, sets))
+                     for key, label_was, when, turn, failed, text in old.execute(
+                         "SELECT key, label, time, turn_id, failed, text FROM tails "
+                         "WHERE harness = ? AND session_id = ?", (harness, session_id))]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO tails (key, harness, session_id, label, time, turn_id, "
+            "failed, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tails_out)
+        srcs = old.execute("SELECT harness, source, session_id, cursor, reuse, read "
+                           "FROM sources WHERE harness = ? AND session_id = ?",
+                           (harness, session_id)).fetchall()
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO sources (harness, source, session_id, cursor, reuse, "
+            "read) VALUES (?, ?, ?, ?, ?, ?)", srcs)
+        for _, source, *_ in srcs:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO secret_calls (harness, source, call_id) "
+                "VALUES (?, ?, ?)", old.execute(
+                    "SELECT harness, source, call_id FROM secret_calls "
+                    "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
+        return bool(rows_out or tails_out or srcs)
+
+
+def _lists_nothing(n: int) -> str:
+    return f"lists nothing, though memory read {n} source{'' if n == 1 else 's'} from it"
+
+
+def _top_now(path: str) -> tuple[str, str | None]:
+    """A live root's top level now: `absent`, `empty`, `entries` or `file` (an OpenCode
+    database), or why it can't be listed."""
+    import stat as stat_mod
+
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return "absent", None
+    except OSError as exc:
+        return "", exc.strerror or str(exc)
+    if not stat_mod.S_ISDIR(st.st_mode):
+        return "file", None
+    try:
+        with os.scandir(path) as it:
+            return ("empty" if next(it, None) is None else "entries"), None
+    except OSError as exc:
+        return "", exc.strerror or str(exc)
+
+
+_THREAD_ID = re.compile(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                        r"[0-9a-fA-F]{12})\.jsonl(?:\.zst)?$")
+
+
+def _session_of(harness: str, root: str, path: str) -> str | None:
+    """The session a failed path under `root` belongs to, or None when the path names
+    no one session (a directory above the sessions, or an OpenCode database)."""
+    rel = os.path.relpath(path, root)
+    if rel.startswith(".."):
+        return None
+    parts = rel.split(os.sep)
+    if harness == "claude" and len(parts) >= 2:
+        name = parts[1]
+        name = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+        return name if name and "." not in name else None
+    if harness == "codex":
+        match = _THREAD_ID.search(parts[-1])
+        return match.group(1).lower() if match else None
+    return None
 
 
 # -- the modes -------------------------------------------------------------------------
@@ -525,37 +953,62 @@ WAITING = "waiting"
 
 
 def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
-    """Build a new generation from every live source under the held writer lock `w`,
-    switch to it, and drop the sessions with no source from the session table."""
+    """Build a new generation from every source of every folder that answers, under the
+    held writer lock `w`; keep what can't be known gone; switch to it; and drop from the
+    session table each session it found no source for.
+
+    Its steps, in order: it reads every folder `corpus` lists; it tests the folders again
+    and decides which answered (`Ingest.walk`); it takes out of the new generation what it
+    wrote for each session it couldn't read to its end; it copies the sessions it keeps
+    from the generation it replaces, which it holds open read only under the reader's
+    shared lock until then (`Ingest.copy_kept`); it switches. A session of a harness with
+    a folder that didn't answer is unknown, not gone: the rebuild keeps it, and its row in
+    the session table, as it keeps every row of a harness config `harnesses` leaves
+    out."""
     with w.rebuilding() as started:
-        n, conn = w.new_generation()
-        sc = state.connect(env)
         try:
+            old = index.open_read(env)
+        except (index.IndexMissing, index.IndexUnreadable):
+            old = None
+        try:
+            n, conn = w.new_generation()
+            sc = state.connect(env)
             try:
-                job = Ingest(conn, sc, config, mode="relabel" if relabel else "rebuild",
-                             fresh=True, relabel=relabel, launcher=launcher)
-                job.walk(full=True)
+                try:
+                    job = Ingest(conn, sc, config, mode="relabel" if relabel else "rebuild",
+                                 fresh=True, relabel=relabel, launcher=launcher,
+                                 rebuilding=True, prior=old.conn if old else None,
+                                 started=started)
+                    job.walk(full=True)
+                    job.take_out_broken()
+                    kept = job.copy_kept()
+                finally:
+                    conn.close()
+                if old is not None:
+                    old.close()
+                    old = None
+                w.switch(n)
+                seen = set(job.seen)
+                keep = job.keeping()
+                seen.update((h, s) for h, s in sc.execute(
+                    "SELECT harness, session_id FROM sessions")
+                    if h in keep or h not in job.harnesses)
+                dropped = table.remove_unseen(sc, seen, started)
+                state.clear_unfinished(sc)
             finally:
-                conn.close()
-            w.switch(n)
-            # A harness the rebuild didn't list keeps all its rows: one it tried and
-            # couldn't list, and one config `harnesses` leaves out. Its identities and
-            # launch kinds can't be read back from a transcript.
-            seen = set(job.seen)
-            seen.update((h, s) for h, s in sc.execute(
-                "SELECT harness, session_id FROM sessions")
-                if h in job.unlisted or h not in job.harnesses)
-            dropped = table.remove_unseen(sc, seen, started)
-            state.clear_unfinished(sc)
+                sc.close()
         finally:
-            sc.close()
+            if old is not None:
+                old.close()
         conn = w.connect()
         try:
             index.meta_set(conn, "dropped", dropped)
+            index.meta_set(conn, "kept", kept)
             index.meta_set(conn, "rebuilt", started)
         finally:
             conn.close()
         job.report.dropped = dropped
+        job.report.kept = kept
     return job.report
 
 

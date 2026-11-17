@@ -104,7 +104,9 @@ class Result:
     filters. `tokens`: the query as searched. `filling`: a `Filling` while the first full
     read hasn't finished, else None. `rebuilding`: the start time of a rebuild that is
     running (seconds since the epoch; 0.0 when it hasn't written its time yet), else
-    None. `generation`: the index generation read.
+    None. `generation`: the index generation read. `unread`: the archive folders sessions'
+    config named at the last walk that no run they answered has listed whole, whose
+    sessions are not in these results.
     """
 
     hits: tuple[Hit, ...]
@@ -113,6 +115,7 @@ class Result:
     filling: Filling | None
     rebuilding: float | None
     generation: int
+    unread: tuple[str, ...] = ()
 
 
 # -- the query ------------------------------------------------------------------------
@@ -309,13 +312,16 @@ def search(query: str, *, project: str | None = None,
                     found += _hits(conn, table, match(tokens), filters, limit)
                 rows += _count(conn, table, filters)
             fill = filling(conn)
+            from . import folders
+
+            unread = tuple(folders.not_read_yet(folders.read_all(conn)))
         except sqlite3.DatabaseError as exc:
             raise IndexUnreadable(f"{reader.path}: {exc}") from None
         generation = reader.generation
     found.sort(key=lambda item: item[:4])
     hits = tuple(item[-1] for item in found[:limit])
     return Result(hits=hits, rows=rows, tokens=tokens, filling=fill,
-                  rebuilding=rebuild_at, generation=generation)
+                  rebuilding=rebuild_at, generation=generation, unread=unread)
 
 
 def stamp(epoch: float | None) -> str:

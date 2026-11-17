@@ -2,8 +2,8 @@
 
 - index: the current generation, its schema and tokenizer, rows per tier, whether the
   first full read is still filling it, a rebuild running, older generations left to
-  remove and the sessions the last rebuild dropped. `warn` with no index yet, and when a
-  rebuild was killed before it finished and none has finished since.
+  remove and the sessions the last rebuild dropped and kept. `warn` with no index yet, and
+  when a rebuild was killed before it finished and none has finished since.
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
   same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
   can't read, and a request waiting for the writer lock. A request queued behind a
@@ -11,6 +11,11 @@
   older one is a `warn` whose fix is `moxi memory ingest`, since any child that takes
   and frees the lock starts it. A failed child's message is the core's record row
   `record ingest`, not this one.
+- folders: each folder of each harness as the last run found it, from the index's
+  `meta`, testing none itself. `warn` for one that didn't answer (since when and why:
+  offline, failed during the run with its first error's path, or lists nothing), for an
+  archive folder never listed whole, and for each folder walked before that sessions'
+  config no longer names.
 - sets: memory's redaction sets load in secrets. `fail` when one can't run: every child
   stops on it.
 - start: memory is on turns' start list for each harness it reads, and its listener rows
@@ -53,7 +58,7 @@ def rows() -> Iterator[Row]:
         config = None
     harnesses = tuple(config["harnesses"]) if config else settings.HARNESSES
     checks = (("index", _index, ()), ("ingest", _ingest, (harnesses,)),
-              ("sets", _sets, (config,)), ("start", _start, (harnesses,)),
+              ("folders", _folders, (harnesses,)), ("sets", _sets, (config,)), ("start", _start, (harnesses,)),
               ("sessions", _sessions, ()), ("links", _links, ()),
               ("retention", _retention, (harnesses,)))
     for name, check, args in checks:
@@ -87,6 +92,7 @@ def _index() -> Row:
         tokenizer = index.meta_get(conn, "tokenizer")
         filling = str(index.meta_get(conn, "first_read") or "0") in ("0", "")
         dropped = index.meta_get(conn, "dropped")
+        kept = index.meta_get(conn, "kept")
         generation = r.generation
     parts = [f"generation {generation}", f"schema {schema}", f"tokenizer {tokenizer}",
              f"{tiers} messages and calls", f"{tails} result tails"]
@@ -105,6 +111,9 @@ def _index() -> Row:
     if dropped not in (None, "", 0, "0"):
         parts.append(f"the last rebuild dropped {dropped} sessions whose transcripts are "
                      "gone")
+    if kept not in (None, "", 0, "0"):
+        parts.append(f"the last rebuild kept {kept} sessions it couldn't read, from folders "
+                     "that didn't answer it or compressed rollouts")
     from . import state as store
 
     _, unfinished = store.peek()
@@ -141,12 +150,12 @@ def _ingest(harnesses) -> Row:
     parts = []
     state = "ok"
     for harness, last in walks.items():
+        root = api.root(harness)
+        if not os.path.lexists(root):
+            # a walk counts such a harness as read: it has nothing to read
+            parts.append(f"{harness}: nothing to read, no root at {root}")
+            continue
         if last is None:
-            root = api.root(harness)
-            if not os.path.lexists(root):
-                # a walk counts such a harness as read: it has nothing to read
-                parts.append(f"{harness}: nothing to read, no root at {root}")
-                continue
             parts.append(f"{harness}: no walk yet")
             state = "warn"
             continue
@@ -163,6 +172,40 @@ def _ingest(harnesses) -> Row:
         state = "warn"
     return Row(MODULE, "ingest", state, "; ".join(parts) or "no harness configured",
                "moxi memory ingest" if state == "warn" else None)
+
+
+#: The fix for a folder that didn't answer, or was never listed whole.
+FOLDER_FIX = ("make it answer, or take it off sessions' config; its sessions then leave at "
+              "the next `moxi memory reindex`")
+#: The fix for a folder walked before that sessions' config no longer names.
+REMOVED_FIX = "put it back in sessions' config, or let them go"
+
+
+def _folders(harnesses) -> Row:
+    """Each folder as the last run found it, from the index; tests no folder."""
+    from . import folders, index, status
+
+    try:
+        with index.open_read() as reader:
+            records = folders.read_all(reader.conn)
+    except (index.IndexMissing, index.IndexUnreadable):
+        return Row(MODULE, "folders", "off", "no index yet, so no folder has been walked")
+    records = status.against_config({h: records.get(h, []) for h in harnesses
+                                     if h in records})
+    lines = folders.lines(records)
+    count = sum(len(recs) for recs in records.values())
+    if not lines:
+        return Row(MODULE, "folders", "ok",
+                   f"{_plural(count, 'folder')} answered the last run" if count
+                   else "no walk yet")
+    fixes = []
+    if any(r.in_config for recs in records.values() for r in recs
+           if not r.answered or (r.is_archive and not r.listed_whole)
+           or r.missed_rebuild_at is not None):
+        fixes.append(FOLDER_FIX)
+    if any(not r.in_config for recs in records.values() for r in recs):
+        fixes.append(f"for a folder no longer named: {REMOVED_FIX}")
+    return Row(MODULE, "folders", "warn", "; ".join(lines), "; ".join(fixes) or None)
 
 
 def _waiting(now: float | None = None) -> tuple[list[str], bool]:

@@ -184,6 +184,35 @@ def keep_tail(text: str, limit: int, sets: Iterable[str]) -> str:
     return f"[... {gone} earlier characters cut] {clean[-limit:]}"
 
 
+_HEAD_CUT = re.compile(r"(.*) \[\.\.\. ([0-9]+) more characters cut\]", re.S)
+_TAIL_CUT = re.compile(r"\[\.\.\. ([0-9]+) earlier characters cut\] (.*)", re.S)
+
+
+def recut_head(text: str, limit: int, sets: Iterable[str]) -> str:
+    """A stored head-cut text redacted again with `sets` and cut to `limit`, its marker
+    counting what an earlier cut took too. For a row a rebuild copies without its
+    record."""
+    match = _HEAD_CUT.fullmatch(text)
+    body, gone = (match.group(1), int(match.group(2))) if match else (text, 0)
+    clean = redact(body, tuple(sets))
+    if clean == UNSCANNED:
+        return clean
+    gone += max(0, len(clean) - limit)
+    return f"{clean[:limit]} [... {gone} more characters cut]" if gone else clean
+
+
+def recut_tail(text: str, limit: int, sets: Iterable[str]) -> str:
+    """A stored tail redacted again with `sets` and cut to its last `limit` characters,
+    as `recut_head` does at the head."""
+    match = _TAIL_CUT.fullmatch(text)
+    body, gone = (match.group(2), int(match.group(1))) if match else (text, 0)
+    clean = redact(body, tuple(sets))
+    if clean == UNSCANNED:
+        return clean
+    gone += max(0, len(clean) - limit)
+    return f"[... {gone} earlier characters cut] {clean[-limit:]}" if gone else clean
+
+
 # -- the secret-path rule --------------------------------------------------------------
 
 @lru_cache(maxsize=65536)
@@ -376,5 +405,6 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 
 
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "TOOL", "UNSCANNED", "Policy",
-           "Row", "Tail", "Converted", "redact", "keep_head", "keep_tail", "secret_path",
+           "Row", "Tail", "Converted", "redact", "keep_head", "keep_tail", "recut_head",
+           "recut_tail", "secret_path",
            "line_id", "keys", "tier_one_message", "model_answer", "convert"]

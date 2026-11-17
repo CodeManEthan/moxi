@@ -525,19 +525,19 @@ def test_a_rebuild_marks_its_first_read_finished_only_when_every_root_was_listed
         monkeypatch):
     corpus()
     run()
-    real = api.sources
+    real = api.corpus
 
-    def sources(harness, **kw):
+    def corpus_failing(harness, **kw):
         if harness == "codex":
             raise OSError("the root can't be listed")
         return real(harness, **kw)
 
-    monkeypatch.setattr(api, "sources", sources)
+    monkeypatch.setattr(api, "corpus", corpus_failing)
     assert os.path.lexists(api.root("codex"))
     run("rebuild")
     with index.open_read() as rd:
         assert index.meta_get(rd.conn, "first_read") == "0"
-    monkeypatch.setattr(api, "sources", real)
+    monkeypatch.setattr(api, "corpus", real)
     run()                                             # a walk that lists it finishes it
     with index.open_read() as rd:
         assert index.meta_get(rd.conn, "first_read") == "1"

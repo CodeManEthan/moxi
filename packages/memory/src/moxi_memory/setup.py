@@ -2,7 +2,8 @@
 
 `setup()` is the announcement's `SETUP`. In order:
 
-1. **Roots.** Which harness roots sessions found, and how many sessions each holds. When
+1. **Roots.** Which harness roots and archive folders sessions found, how many sessions
+   each holds, and which archive folders don't answer. When
    it finds Codex sessions that turns didn't start, it says memory reads them only on a
    catch-up walk, and points at the `ingest` timer that runs one every hour: the install
    asks about the timer right after setup, and setup prints the line that turns it on.
@@ -108,8 +109,9 @@ def _outside_turns(header) -> bool:
 
 
 def roots(harnesses, out: TextIO) -> int:
-    """Print each harness's root and how many sessions it holds; return how many Codex
-    sessions turns didn't start."""
+    """Print each folder of each harness (its root, then its archive folders) and how
+    many sessions each holds, and each archive folder that doesn't answer; return how many
+    Codex sessions turns didn't start."""
     from moxi_sessions import api
 
     from .ingest import imported
@@ -118,31 +120,38 @@ def roots(harnesses, out: TextIO) -> int:
     for harness in harnesses:
         name = NAMES.get(harness, harness)
         try:
-            listing = api.sources(harness, heads=(harness == "codex"))
-        except Exception as exc:  # noqa: BLE001 - a root that can't be read is said
-            _say(out, f"{name}: its root can't be read: {exc}")
+            listings = api.corpus(harness, heads=(harness == "codex"))
+        except Exception as exc:  # noqa: BLE001 - folders that can't be read are said
+            _say(out, f"{name}: its folders can't be read: {exc}")
             continue
-        if not listing.ok:
-            _say(out, f"{name}: no sessions found ({listing.root}: {listing.reason})")
-            continue
-        count = 0
-        for entry in listing:
-            source = entry.source
-            if source.agent_id is not None:
+        for listing in listings:
+            where = (f"archive folder {listing.root}" if listing.is_archive
+                     else listing.root)
+            if not listing.ok:
+                if listing.is_archive:
+                    _say(out, f"{name}: {where} doesn't answer: {listing.reason}")
+                else:
+                    _say(out, f"{name}: no sessions found ({listing.root}: "
+                              f"{listing.reason})")
                 continue
-            header = entry.header
-            if harness == "codex":
-                if header is not None and (_spawned(header, api.UNKNOWN)
-                                           or imported(header)):
+            count = 0
+            for entry in listing:
+                source = entry.source
+                if source.agent_id is not None:
                     continue
-                if header is not None and _outside_turns(header):
-                    outside += 1
-            if harness == "opencode" and header is not None:
-                if getattr(header, "parent", None) not in (None, api.UNKNOWN):
-                    continue
-            count += 1
-        _say(out, f"{name}: {count} session{'s' if count != 1 else ''} in "
-                  f"{listing.root}")
+                header = entry.header
+                if harness == "codex":
+                    if header is not None and (_spawned(header, api.UNKNOWN)
+                                               or imported(header)):
+                        continue
+                    if header is not None and _outside_turns(header) \
+                            and not listing.is_archive:
+                        outside += 1
+                if harness == "opencode" and header is not None:
+                    if getattr(header, "parent", None) not in (None, api.UNKNOWN):
+                        continue
+                count += 1
+            _say(out, f"{name}: {count} session{'s' if count != 1 else ''} in {where}")
     return outside
 
 
@@ -166,11 +175,15 @@ def retention_lines(harnesses, out: TextIO, env=None) -> None:
     from moxi_sessions import api
 
     _say(out, "memory indexes transcripts where each harness keeps them, so nothing "
-              "outlives a harness's own cleanup. Setup changes no retention setting.")
+              "outlives a harness's own cleanup unless a copy is in an archive folder "
+              "sessions reads. Setup changes no retention setting and no archive key.")
     for item in api.retention(env):
         if item.harness in harnesses:
             for line in item.lines:
                 _say(out, line)
+    _say(out, "A session copied into an archive folder stays in memory while the folder "
+              "keeps it; sessions never changes the folder. Add one to sessions' "
+              "`claude.archives` or `codex.archives` (`moxi config sessions`).")
 
 
 # -- 3. Claude Code's auto memory -------------------------------------------------------
