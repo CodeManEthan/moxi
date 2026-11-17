@@ -41,6 +41,11 @@
   through a link, and leaves no lock file. Its refusal lines name no module. With
   `keep_copy`, the write first hands the bytes it is about to replace to the caller, and
   writes nothing when that raises `OSError`.
+- A `moxi.ipc` Unix server at the file-descriptor limit logs a failed accept once a minute
+  per errno, as one `moxi.ipc` warning naming the socket, with a count of the failures
+  held back since the last line, in place of asyncio's traceback for each failure (up to
+  101 per readiness event). `serve` puts a filter in front of the loop's exception handler
+  to do it; every other context reaches that handler as before.
 
 ## 0.1.10 (unreleased)
 
