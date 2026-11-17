@@ -52,7 +52,7 @@ class Segment:
     __slots__ = ("text", "band", "age_s", "ttl_s", "dim")
 
     def __init__(self, text: str, band: str, age_s: float, ttl_s: float,
-                 dim: bool = False) -> None:
+                 *, dim: bool = False) -> None:
         for name, value in zip(self.__slots__, (text, band, age_s, ttl_s, dim)):
             object.__setattr__(self, name, value)
 
@@ -117,7 +117,7 @@ def from_record(record: dict, now: float) -> Segment | None:
     else:
         band = WARM
     dim = now - record["seen_at"] > stale_after
-    return Segment(f"cache:{age_text(age)}", band, age, float(ttl), dim)
+    return Segment(f"cache:{age_text(age)}", band, age, float(ttl), dim=dim)
 
 
 def segment(session_id, now: float | None = None) -> Segment | None:

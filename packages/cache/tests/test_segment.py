@@ -185,9 +185,9 @@ def test_as_dict():
 
 def test_a_segment_is_a_value_that_cant_change():
     a = segment.Segment("cache:1m0s", "warm", 60.0, 3600.0)
-    b = segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, False)
+    b = segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, dim=False)
     assert a == b and hash(a) == hash(b) and len({a, b}) == 1
-    assert a != segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, True)
+    assert a != segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, dim=True)
     assert a != ("cache:1m0s", "warm", 60.0, 3600.0, False)
     assert repr(a) == ("Segment(text='cache:1m0s', band='warm', age_s=60.0, ttl_s=3600.0, "
                        "dim=False)")

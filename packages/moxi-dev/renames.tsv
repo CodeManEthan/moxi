@@ -120,6 +120,7 @@ cache	packages/cache/src/moxi_cache/records.py	finite `stale_after`; its `stale`
 cache	packages/cache/src/moxi_cache/records.py	if any(name not in doc for name in READING_FIELDS):	keep	any	any
 cache	packages/cache/src/moxi_cache/records.py	if any(name not in record for name in REQUIRED):	keep	any	any
 cache	packages/cache/src/moxi_cache/records.py	record_path	name	directory	records_dir
+cache	packages/cache/src/moxi_cache/segment.py	Segment.__init__	kwonly	dim	dim
 cache	packages/cache/src/moxi_cache/table.py	both = sorted(set(a.models) & set(b.models)) or [WILDCARD]	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	extra = set(doc) - {"lifetime"}	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	if a.wildcard or b.wildcard or set(a.models) & set(b.models):	keep	set	set
