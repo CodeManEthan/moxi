@@ -350,7 +350,8 @@ rule as its `--exit` values.
 `done`, `cold` and `idle=` count only once the brief's turn has ended with an answer. A
 brief turns refuses or loses, or whose turn ends `error`, `aborted` or `refusal`, ends the
 session (cause `brief-failed`), and so does a session the adapter has not found within
-300 seconds of the bind (a Codex start that keeps retrying, say). A turn resets `idle=`.
+300 seconds of the bind (a Codex start that keeps retrying, say), or whose brief's turn
+has not started within 300 seconds of its being found. A turn resets `idle=`.
 Before `done`, `cold`, `idle=` or a failed brief turn ends an idle session, the adapter
 asks the host for its background work (`agents`) and waits while any runs, up to an hour
 after the last turn. `after=` and `exit-session` wait for nothing.

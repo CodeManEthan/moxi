@@ -147,10 +147,25 @@ def test_an_after_shorter_than_the_ready_bound_fires_first():
     assert w.due() == "after"
 
 
-def test_a_found_session_is_past_the_ready_bound():
+def test_a_session_whose_brief_turn_started_is_past_the_ready_bound():
     w = watch("done")
+    w.on_turn_started()
     w.clock_.advance(headless.HEADLESS_READY_WAIT_S * 2)
     assert w.due() is None
+
+
+def test_the_briefs_turn_has_the_ready_bound_from_the_find():
+    """A brief turns took and never started: the session ends within the bound of its
+    being found, at once, with no wait for busy work."""
+    w = watch("done", found=False, offers_shells=True)
+    w.clock_.advance(headless.HEADLESS_READY_WAIT_S - 10)
+    w.on_found()
+    w.clock_.advance(headless.HEADLESS_READY_WAIT_S - 1)
+    assert w.due() is None
+    w.clock_.advance(1)
+    assert w.due() == "brief-failed"
+    assert w.why("brief-failed") == (
+        f"the brief's turn did not start within {headless.HEADLESS_READY_WAIT_S}s")
 
 
 @pytest.mark.parametrize("why", ["busy-turn", "the endpoint went away"])

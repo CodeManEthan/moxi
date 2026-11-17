@@ -29,8 +29,10 @@ its clock is injected and it reads nothing itself.
 - Nothing but `after=` and the ready bound runs before the brief's turn ends. `done`,
   `cold` and `idle=` are armed only when the brief's turn ends `answer`. A brief turns
   refuses or loses ends the session at once, cause `brief-failed`; so does a session the
-  adapter has not found within `HEADLESS_READY_WAIT_S` of the bind. A brief turn that
-  ends `error`, `aborted` or `refusal` ends it too, after the wait for background work.
+  adapter has not found within `HEADLESS_READY_WAIT_S` of the bind, and one whose
+  brief's turn has not started within `HEADLESS_READY_WAIT_S` of its being found. A
+  brief turn that ends `error`, `aborted` or `refusal` ends it too, after the wait for
+  background work.
 - A turn drops any cause that waits for background work, and is judged again after it.
   `idle=` and the `unknown` span count from the last turn's end. `after=` fires whatever
   runs.
@@ -55,8 +57,9 @@ from dataclasses import dataclass
 
 log = logging.getLogger("comms.headless")
 
-#: How long a headless session has to get ready, and how long its cache may read
-#: `unknown` with no turn before `cold` fires as `cache-unreadable`, in seconds.
+#: How long a headless session has to get ready, how long its brief's turn has to start
+#: once it is, and how long its cache may read `unknown` with no turn before `cold`
+#: fires as `cache-unreadable`, in seconds.
 HEADLESS_READY_WAIT_S = 300
 #: How often the adapter asks the watch for a cause when no event comes, in seconds.
 TICK_S = 5.0
@@ -191,6 +194,10 @@ class ExitWatch:
         #: When the name was bound: `after=` and the ready bound count from here.
         self.bound_at = clock()
         self.found = False
+        #: When the session was found: the brief's turn has the ready bound from here.
+        self.found_at: float | None = None
+        #: Whether any turn has started.
+        self.turned = False
         self.offers_shells = False
         #: Why the brief failed before any turn ran, once it has.
         self.brief_refused: str | None = None
@@ -215,6 +222,8 @@ class ExitWatch:
 
     # ------------------------------------------------------------------ feeds
     def on_found(self) -> None:
+        if not self.found:
+            self.found_at = self.clock()
         self.found = True
 
     def on_brief_failed(self, why: str) -> None:
@@ -224,6 +233,7 @@ class ExitWatch:
 
     def on_turn_started(self) -> None:
         self.turn_running = True
+        self.turned = True
         self.pending = None
         self.shells = None
         self.mail = None
@@ -328,6 +338,8 @@ class ExitWatch:
             return BRIEF_FAILED
         if not self.found:
             return BRIEF_FAILED if now - self.bound_at >= self.ready_wait_s else None
+        if not self.turned and self.brief_outcome is None:
+            return BRIEF_FAILED if now - self.found_at >= self.ready_wait_s else None
         if self.turn_running or self.last_turn_end is None:
             return None
         cause = self._automatic(now)
@@ -354,6 +366,8 @@ class ExitWatch:
             return f"the brief was not taken ({self.brief_refused})"
         if self.brief_outcome is not None:
             return f"the brief's turn ended {self.brief_outcome}"
+        if self.found:
+            return f"the brief's turn did not start within {self.ready_wait_s:g}s"
         return f"not ready within {self.ready_wait_s:g}s"
 
 

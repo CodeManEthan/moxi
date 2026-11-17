@@ -802,6 +802,21 @@ def test_a_session_not_found_within_the_ready_bound_fails_the_brief(rig, headles
     assert adapter.fake.delivered == [], "the brief was never handed in"
 
 
+def test_a_brief_turns_takes_and_never_starts_fails_within_the_bound(rig, headless):
+    from moxi_comms.adapters.headless import HEADLESS_READY_WAIT_S
+
+    adapter = headless(start=False)
+    adapter.fake.script = ["hang"]
+    adapter.start()
+    assert adapter.exit_watch.found and not adapter.exit_watch.turned
+    assert adapter.headless_step() is None
+    adapter.watch_time.t += HEADLESS_READY_WAIT_S
+    assert adapter.headless_step() == "brief-failed"
+    assert adapter.ended == [("brief-failed", 0, "the brief's turn did not start within "
+                              f"{HEADLESS_READY_WAIT_S}s")]
+    assert adapter.fake.agents_calls == 0, "no turn ran, so nothing waits on its work"
+
+
 def _raises(fn):
     try:
         fn()

@@ -6,9 +6,10 @@
   (or `--brief-file F`) starts it with no window under its name, hands it the brief as
   its first turn, and ends it by its exit rule, `--exit done|cold|idle=<D>|after=<D>`
   (repeatable; `done` when none is given). Mail sent to it starts turns while its cache
-  is warm. It also ends when its brief fails or it isn't ready within five minutes, and
-  its host ends when its adapter does, by a lifeline only the adapter holds. The
-  adapter's log names the cause in one line. comms needs moxi 0.1.11 or later.
+  is warm. It also ends when its brief fails, when it isn't ready within five minutes,
+  and when its brief's turn hasn't started five minutes after it is; its host ends when
+  its adapter does, by a lifeline only the adapter holds. The adapter's log names the
+  cause in one line. comms needs moxi 0.1.11 or later.
 - `moxi comms exit-session NAME [--scope S | --global]` ends a headless session by its
   name, through its claim socket's new `end` method, and waits for the name to be
   released. A claim file of a headless session records `headless` and `exit`.

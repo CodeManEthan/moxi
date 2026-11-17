@@ -272,9 +272,10 @@ first value to fire ends it:
 | `after=<D>` | D after it started, even mid-turn |
 
 `moxi comms exit-session <name>` ends one at any time. It also ends if its brief is
-refused or its turn doesn't end with an answer, or if it isn't ready within five
-minutes. When it ends, its adapter's log says why in one line, `headless session ended:
-<cause>`, and the name is released. Nothing holds the name after that.
+refused or its turn doesn't end with an answer, if it isn't ready within five minutes,
+or if its brief's turn hasn't started five minutes after it is. When it ends, its
+adapter's log says why in one line, `headless session ended: <cause>`, and the name is
+released. Nothing holds the name after that.
 
 Mail sent once its cache is cold is held, as for any agent, and nothing in a headless
 session starts the turn that would read it: it waits for the name's next holder. With
