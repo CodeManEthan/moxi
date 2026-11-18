@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The test fence keeps `MOXI_TEST_REAL_SUPERVISOR` as pytest started with it, and leaves
+  it unset when it was. Before, a fenced test lost it at call time, so every proof row on
+  a real supervisor failed with `SupervisorRefused` (or skipped, where the row read it in
+  its body) even with the variable set.
 - `moxi-dev timed` runs the timed tests on their own: a run lock first, its own
   environment (`.moxi-dev/timed-env-3.12`), one session per package with no workers and
   the idle gate, and a summary line with exit 0, 1, 3 (some test not measured) or 2. It

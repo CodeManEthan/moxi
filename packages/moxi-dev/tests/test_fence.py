@@ -126,6 +126,46 @@ def test_the_fence_clears_everything_else(monkeypatch):
         "MOXI_COMMS_HOME": "/s/comms", "MOXI_ANCHOR_HOME": "/t/home"}
 
 
+@pytest.mark.parametrize("value", ["1", "0", ""])
+def test_the_real_supervisor_opt_in_passes_the_fence_unchanged(monkeypatch, value):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    source = {"PATH": "/bin", testing.REAL_SUPERVISOR_ENV: value}
+    env = testing._fenced_env(source, PurePosixPath("/t/home"), PurePosixPath("/s/run"),
+                              PurePosixPath("/s"), [])
+    assert env[testing.REAL_SUPERVISOR_ENV] == value
+
+
+def test_the_real_supervisor_opt_in_stays_unset_when_unset(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    env = testing._fenced_env({"PATH": "/bin"}, PurePosixPath("/t/home"),
+                              PurePosixPath("/s/run"), PurePosixPath("/s"), [])
+    assert testing.REAL_SUPERVISOR_ENV not in env
+
+
+#: A fenced test that reports what it sees of the real-supervisor opt-in at call time.
+SUPERVISOR_PROBE = """
+import os
+
+
+def test_reads_the_opt_in():
+    print("opt-in:", repr(os.environ.get("MOXI_TEST_REAL_SUPERVISOR")))
+"""
+
+
+@pytest.mark.parametrize("value", ["1", None])
+def test_a_fenced_test_sees_the_real_supervisor_opt_in_as_pytest_started(
+        pytester, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(testing.REAL_SUPERVISOR_ENV, raising=False)
+    else:
+        monkeypatch.setenv(testing.REAL_SUPERVISOR_ENV, value)
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_probe=SUPERVISOR_PROBE)
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-s")
+    result.assert_outcomes(passed=1)
+    assert f"opt-in: {value!r}" in result.outlines
+
+
 def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
         monkeypatch):
     monkeypatch.setattr(testing, "WINDOWS", True)
