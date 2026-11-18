@@ -238,9 +238,39 @@ def test_a_stop_is_refused_when_more_is_in_use_than_was_shown(slots, fake, route
 
 def test_a_stop_goes_unread_when_the_unread_warning_was_confirmed(slots, fake, route):
     slots.ok, slots.why = False, "tmux did not answer"
-    status, body = post(route, {"id": SERVER, "ends": 0})
+    status, body = post(route, {"id": SERVER, "ends_unread": True})
     assert status == 202, body
     assert ended(job_of(route))["state"] == "done"
+
+
+def test_ends_zero_is_nothing_in_use_never_the_unread_confirm(slots, fake, route):
+    # 0 means "nothing in use, as read": it goes past neither an unread read nor one that
+    # finds something in use.
+    slots.ok = False
+    assert post(route, {"id": SERVER, "ends": 0}) == (
+        422, {"refused": pagehandlers.SLOTS_UNREAD})
+    slots.ok = True
+    slots.running = [Job("build")]
+    assert post(route, {"id": SERVER, "ends": 0}) == (
+        422, {"refused": pagehandlers.SLOTS_IN_USE})
+    assert not acted(fake, _act(route))
+
+
+def test_the_unread_confirm_does_not_cover_a_count_read_since(slots, fake, route):
+    # He confirmed the slots couldn't be read; they now read with something in use, which
+    # he was never shown.
+    slots.slots = [Slot(1, state="occupied", label="a")]
+    assert post(route, {"id": SERVER, "ends_unread": True}) == (
+        422, {"refused": pagehandlers.SLOTS_IN_USE})
+    slots.slots = []
+    status, body = post(route, {"id": SERVER, "ends_unread": True})
+    assert status == 202, body
+
+
+def test_a_stop_is_refused_when_it_confirms_both_a_count_and_unread(slots, fake, route):
+    assert post(route, {"id": SERVER, "ends": 2, "ends_unread": True}) == (
+        422, {"refused": pagehandlers.ENDS_ONE_CONFIRM})
+    assert slots.calls == []
 
 
 @pytest.mark.parametrize("unread", ["listing", "jobs", "slow"])
@@ -279,7 +309,7 @@ def test_a_stop_shown_a_count_is_refused_when_the_slots_can_no_longer_be_read(
 def test_a_stop_refused_unread_goes_once_the_unread_warning_is_confirmed(slots, fake, route):
     slots.ok = False
     assert post(route, {"id": SERVER, "ends": 2})[0] == 422
-    status, body = post(route, {"id": SERVER, "ends": 0})
+    status, body = post(route, {"id": SERVER, "ends_unread": True})
     assert status == 202, body
     assert ended(job_of(route))["state"] == "done"
     assert len(acted(fake, _act(route))) == 1

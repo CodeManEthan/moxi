@@ -200,9 +200,10 @@ def test_restart_goes_with_run_only(name):
 
 
 @pytest.mark.parametrize("name", ["start", "run", "enable", "disable", "remove"])
-def test_ends_goes_with_stop_and_restart_only(name):
+@pytest.mark.parametrize("field", [{"ends": 0}, {"ends_unread": True}])
+def test_ends_goes_with_stop_and_restart_only(name, field):
     a_daemon()
-    assert refused(act(name, "web", ends=0)) == pagehandlers.ENDS_STOP_ONLY
+    assert refused(act(name, "web", **field)) == pagehandlers.ENDS_STOP_ONLY
 
 
 def test_an_act_it_doesnt_know_is_refused_by_its_shape():

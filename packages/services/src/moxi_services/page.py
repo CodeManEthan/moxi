@@ -14,7 +14,8 @@
     GET  /api/ends      what a stop or restart of slots' server would end now: the
                         sessions, open slots and jobs in its slots
     POST /api/stop      `moxi services stop ID`; confirmed (202); slots' server's only
-                        when `ends` covers what runs in its slots
+                        when `ends` covers what runs in its slots, or `ends_unread`
+                        confirms they couldn't be read
     POST /api/restart   `moxi services restart ID`, a daemon; confirmed (202); slots'
                         server's as stop
     POST /api/run       a timer's run now (`start`), or with `restart` its run ended and
@@ -309,9 +310,11 @@ ENDS_MAX = 9999
 
 #: An act on one row: its id, `<module>/<name>` or a user row's bare name.
 ROW_BODY = {"id": _ID}
-#: A stop or restart. `ends` is what the warning on slots' server showed in use (0 when
-#: it said the slots couldn't be read); absent for a plain press.
-STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}
+#: A stop or restart. `ends` is what the warning on slots' server showed in use;
+#: `ends_unread` true when the warning said the slots couldn't be read. A press sends at
+#: most one of them, and neither for a plain press.
+STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX),
+             "ends_unread": _MAYBE_BOOL}
 #: A timer's run now; with `restart` a run in progress is ended first.
 RUN_BODY = {"id": _ID, "restart": _MAYBE_BOOL}
 #: The acts `/api/act` takes.
@@ -320,13 +323,15 @@ ACTS = ("start", "stop", "restart", "run", "enable", "disable", "remove")
 ACT_JOB_LENGTH = 32
 
 #: The desk's plain act: `act` on the row `id`, queued as `job`. `restart` is a run's
-#: (its run in progress ended first); `ends` a stop's or restart's, as `STOP_BODY`'s.
+#: (its run in progress ended first); `ends` and `ends_unread` a stop's or restart's, as
+#: `STOP_BODY`'s.
 ACT_BODY = {
     "act": lb.Field("enum", values=ACTS),
     "id": _ID,
     "job": lb.Field("string", max=ACT_JOB_LENGTH),
     "restart": _MAYBE_BOOL,
     "ends": lb.Field("int", required=False, max=ENDS_MAX),
+    "ends_unread": _MAYBE_BOOL,
 }
 #: An add. `command` is the command line of a written row, split as this system's shell
 #: splits it, its first word a full path; `unit` the unit an adopted row takes on, with

@@ -121,11 +121,12 @@ export function phoneActs(row: Row, actsOn: boolean): { closed: Act | null; foot
   return { closed: found.closed, foot: found.foot.filter((a) => a.name !== "remove") };
 }
 
-/** The phone's confirmed route for an act, relative to services' page, and its body. */
-export function phoneRoute(a: Act, ends: number | null = null): { path: string; body: Record<string, unknown> } {
+/** The phone's confirmed route for an act, relative to services' page, and its body, with
+ * what the slots server's confirm sends (`Confirm.sends`) on a stop or restart. */
+export function phoneRoute(a: Act, sends: Sends = {}): { path: string; body: Record<string, unknown> } {
   const body: Record<string, unknown> = { id: a.body.id };
   if (a.body.restart) body.restart = true;
-  if (ends !== null && (a.body.act === "stop" || a.body.act === "restart")) body.ends = ends;
+  if (a.body.act === "stop" || a.body.act === "restart") Object.assign(body, sends);
   const paths: Record<string, string> = {
     start: "api/start", stop: "api/stop", restart: "api/restart", run: "api/run", enable: "api/enable",
     disable: "api/disable", remove: "api/remove",
@@ -159,8 +160,13 @@ export function warned(ends: Ends | null): boolean {
   return n === null || n > 0;
 }
 
+/** What the slots server's Stop or Restart sends once its warning is confirmed: `ends`, the
+ * count it showed in use, or `ends_unread`, that it said the slots couldn't be read. Never
+ * both: `ends` 0 means nothing in use, as read. Empty for any other press. */
+export type Sends = { ends?: number; ends_unread?: true };
+
 /** An in-place confirm: its question and lines, the button that goes, the one that keeps,
- * whether it is in the warning colour, and the `ends` the press sends. */
+ * whether it is in the warning colour, and what the press sends with it. */
 export interface Confirm {
   ask: string;
   lines: { label: string | null; text: string }[];
@@ -169,8 +175,8 @@ export interface Confirm {
   go: string;
   keep: string;
   warn: boolean;
-  /** `ends` for the slots server's Stop or Restart; null for none. */
-  ends: number | null;
+  /** What the slots server's Stop or Restart sends with it; empty for any other. */
+  sends: Sends;
 }
 
 /** The slots server's confirm when the slots couldn't be read: no count is shown. */
@@ -185,7 +191,8 @@ export function slotsConfirm(a: Act, ends: Ends, phone: boolean): Confirm | null
   const verb = a.body.act === "restart" ? "Restart" : "Stop";
   if (n === null) {
     return { ask: UNREAD,
-             lines: [], command: null, go: `${verb} it anyway`, keep: "Keep it running", warn: true, ends: 0 };
+             lines: [], command: null, go: `${verb} it anyway`, keep: "Keep it running", warn: true,
+             sends: { ends_unread: true } };
   }
   if (n === 0) return null;
   const sessions = ends.sessions!;
@@ -204,7 +211,7 @@ export function slotsConfirm(a: Act, ends: Ends, phone: boolean): Confirm | null
       { label: "Stays", text: "sessions outside the slots" },
       { label: null, text: "A working session is cut off mid-turn. This cannot be taken back." },
     ],
-    command: null, go: `${verb} it and ${what}`, keep: "Keep it running", warn: true, ends: n,
+    command: null, go: `${verb} it and ${what}`, keep: "Keep it running", warn: true, sends: { ends: n },
   };
 }
 
@@ -212,7 +219,7 @@ export function slotsConfirm(a: Act, ends: Ends, phone: boolean): Confirm | null
 export function usageConfirm(row: Row, a: Act): Confirm | null {
   if (!row.launches_session || (a.name !== "run" && a.name !== "rerun")) return null;
   return { ask: `Run ${row.name} now? Its runs launch agent sessions, so this spends usage.`, lines: [],
-           command: null, go: a.name === "run" ? "Run now" : "Run again", keep: "Cancel", warn: false, ends: null };
+           command: null, go: a.name === "run" ? "Run now" : "Run again", keep: "Cancel", warn: false, sends: {} };
 }
 
 /** A word for a POSIX shell: as it is when it needs no quoting, else in single quotes. */
@@ -258,7 +265,7 @@ export function removeConfirm(row: Row): Confirm {
   lines.push({ label: null, text: row.form === "written"
     ? "Moxi keeps no copy. To have it back, add it again with this command:"
     : "Remove takes it off this list only." });
-  return { ask: `Remove ${row.name}?`, lines, command, go: "Remove", keep: "Keep it", warn: false, ends: null };
+  return { ask: `Remove ${row.name}?`, lines, command, go: "Remove", keep: "Keep it", warn: false, sends: {} };
 }
 
 /** The phone's sheet for an act: the desk's confirm without its redacted words, else

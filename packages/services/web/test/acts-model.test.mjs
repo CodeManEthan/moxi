@@ -80,7 +80,12 @@ test("the phone: no act with acts off; with them on, the desk's but Remove, thro
     { path: "api/run", body: { id: "services/backup", restart: true } }, { path: "api/stop", body: { id: "services/backup" } },
   ]);
   const stop = actsOf(r).foot[1];
-  assert.deepEqual(phoneRoute(stop, 3), { path: "api/stop", body: { id: "services/web", ends: 3 } });
+  assert.deepEqual(phoneRoute(stop, { ends: 3 }), { path: "api/stop", body: { id: "services/web", ends: 3 } });
+  assert.deepEqual(phoneRoute(stop, { ends_unread: true }),
+                   { path: "api/stop", body: { id: "services/web", ends_unread: true } });
+  // Only a stop or restart carries what a confirm sends.
+  const other = actsOf(r).foot.find((a) => a.body.act !== "stop" && a.body.act !== "restart");
+  assert.deepEqual(phoneRoute(other, { ends: 3 }).body, { id: "services/web" });
   assert.deepEqual(phoneSheet(r, stop, null), ["Stop web."]);
   const usage = of(timer, "armed", "ok", { launches_session: true });
   assert.deepEqual(phoneSheet(usage, actsOf(usage).foot[0], null),
@@ -105,18 +110,19 @@ test("the slots server's warning confirm: sessions, open slots and jobs, none, u
   assert.equal(found.go, "Stop it and end 3 sessions");
   assert.equal(found.keep, "Keep it running");
   assert.equal(found.warn, true);
-  assert.equal(found.ends, 6);
+  assert.deepEqual(found.sends, { ends: 6 });
   const noSession = slotsConfirm(restart, ends([], 1, 2), false);
   assert.equal(noSession.go, "Restart it and end what runs in it");
   assert.equal(noSession.lines[0].text, "1 open slot, 2 jobs");
-  assert.equal(noSession.ends, 3);
+  assert.deepEqual(noSession.sends, { ends: 3 });
   assert.equal(slotsConfirm(stop, ends([{ slot: 1, label: "x" }]), true).lines[0].text, "1 session");
-  // Unread: no count shown, may end sessions, in the warning colour; it sends ends 0.
+  // Unread: no count shown, may end sessions, in the warning colour; it sends its own
+  // marker, never ends 0, which means nothing in use as read.
   const unread = slotsConfirm(stop, UNREAD_ENDS, false);
   assert.equal(unread.ask, UNREAD);
   assert.equal(unread.go, "Stop it anyway");
   assert.equal(unread.warn, true);
-  assert.equal(unread.ends, 0);
+  assert.deepEqual(unread.sends, { ends_unread: true });
   assert.ok(!JSON.stringify(unread).match(/\b0 sessions\b/));
   assert.equal(slotsConfirm(restart, UNREAD_ENDS, false).go, "Restart it anyway");
   assert.equal(inUse(UNREAD_ENDS), null);

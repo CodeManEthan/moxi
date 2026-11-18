@@ -37,8 +37,9 @@ status route gives its state, lines and fix.
 - A stop or restart of slots' server (`slots/server`, by id: no other module declares
   what its daemon's stop ends) is guarded: before the 202 the handler reads through
   slots' API what the stop would end, and goes ahead only when nothing is in use, or
-  when the request's `ends`, the count the person was shown, covers what is in use now
-  (or the read did not answer and the person confirmed that warning). Else it is a 422,
+  when the request's `ends`, the count the person was shown, covers what is in use now,
+  or the read did not answer and the request's `ends_unread` confirms that warning. Else
+  it is a 422,
   `SLOTS_IN_USE`, or `SLOTS_UNREAD` for any other press the read couldn't answer: a
   count Moxi couldn't read means the stop may end sessions, never that nothing is in
   use, and a count confirmed before is no longer the one in use.
@@ -154,13 +155,17 @@ SLOTS_UNREAD = "Moxi can't read the slots, so stopping it may end sessions in th
 ENDS_SLOTS_ONLY = "only slots' server ends what runs in the slots"
 #: What an act is told when its `ends` is below 0.
 ENDS_NEGATIVE = "ends is how many the person was shown in use: 0 or more"
+#: What an act is told when it carries both `ends` and `ends_unread`.
+ENDS_ONE_CONFIRM = ("a press confirms either the count shown (ends) or that the slots "
+                    "couldn't be read (ends_unread), not both")
 #: What an enable or disable of a Moxi row is told: the page never turns one on or off.
 ON_OFF_IN_SETTINGS = "Its on and off is in Settings › {module}."
 #: What `/api/act` is told of a job id that isn't 32 hex characters.
 JOB_SHAPE = "job is 32 hex characters the page mints for each press"
-#: What `/api/act` is told of a `restart` or an `ends` its act doesn't take.
+#: What `/api/act` is told of a `restart`, an `ends` or an `ends_unread` its act doesn't
+#: take.
 RESTART_RUN_ONLY = "restart goes with run only"
-ENDS_STOP_ONLY = "ends goes with stop and restart only"
+ENDS_STOP_ONLY = "ends and ends_unread go with stop and restart only"
 
 log = logging.getLogger("moxi.services.page")
 
@@ -556,22 +561,25 @@ def in_use(read: Mapping[str, Any]) -> int | None:
     return len(read["sessions"]) + read["open"] + read["jobs"]
 
 
-def guard_slots(found, ends: int | None) -> None:
+def guard_slots(found, ends: int | None, *, ends_unread: bool = False) -> None:
     """Refuse a stop or restart of slots' server unless what it ends now is no more than
-    the person was shown. `ends` is the count the warning showed, 0 when it said the
-    slots couldn't be read, None for a plain press. A read that didn't answer counts as
-    "may end sessions", never as a number: only the unread warning's confirm (`ends` 0)
-    goes past it. A plain press, or one confirmed against a count, is told the slots
-    couldn't be read, so the page asks again with that warning. It goes ahead when the
-    read finds nothing in use, or finds at most `ends`, or did not answer and `ends` is
-    0. Any other row passes."""
+    the person was shown. `ends` is the count the warning showed, None for none;
+    `ends_unread` True when the warning said the slots couldn't be read. A plain press
+    sends neither, and `ends` 0 means nothing was in use as read. A read that didn't
+    answer counts as "may end sessions", never as a number: only `ends_unread` goes past
+    it. A plain press, or one confirmed against a count, is told the slots couldn't be
+    read, so the page asks again with that warning. It goes ahead when the read finds
+    nothing in use, or finds at most `ends`, or did not answer and `ends_unread` is
+    True. Any other row passes."""
     if not ends_slots(found):
         return
     if ends is not None and ends < 0:
         raise lb.Refused(ENDS_NEGATIVE)
+    if ends is not None and ends_unread:
+        raise lb.Refused(ENDS_ONE_CONFIRM)
     count = in_use(read_ends())
     if count is None:
-        if ends != 0:
+        if not ends_unread:
             raise lb.Refused(SLOTS_UNREAD)
         return
     if count == 0 or (ends is not None and count <= ends):
@@ -638,15 +646,16 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
                is_timer: bool | None = None) -> Any:
     """A confirmed act on one row, queued under its idempotency key (`_queue`)."""
     return _queue(call.key, act, call.body["id"], run, is_timer=is_timer,
-                  ends=call.body.get("ends"))
+                  ends=call.body.get("ends"), ends_unread=bool(call.body.get("ends_unread")))
 
 
 def _queue(job: str, act: str, ident: str, run: Callable[[str], acts.Outcome], *,
-           is_timer: bool | None = None, ends: int | None = None) -> Any:
+           is_timer: bool | None = None, ends: int | None = None,
+           ends_unread: bool = False) -> Any:
     """An act on one row, queued as `job`: `is_timer` True for an act only a timer takes,
     False for one a timer takes through `/api/run`, None for either. An enable or
     disable of a Moxi row is refused, and a stop or restart of slots' server goes only
-    as `guard_slots` lets it, with `ends`."""
+    as `guard_slots` lets it, with `ends` and `ends_unread`."""
     held = JOBS.get(job)
     if held is not None:
         if held.act == act and held.id == _canonical(ident):
@@ -663,7 +672,7 @@ def _queue(job: str, act: str, ident: str, run: Callable[[str], acts.Outcome], *
     if act in ("enable", "disable") and isinstance(found, ModuleRow):
         raise lb.Refused(ON_OFF_IN_SETTINGS.format(module=found.module))
     if act in ("stop", "restart"):
-        guard_slots(found, ends)
+        guard_slots(found, ends, ends_unread=ends_unread)
     record, _ = JOBS.submit(job, act, found.id, lambda: run(found.id))
     if record.act != act or record.id != found.id:
         raise lb.Refused(KEY_REUSED)
@@ -732,19 +741,19 @@ def act(call: Any) -> Any:
     """`POST /api/act`, the desk's one plain act: `act` on the row `id`, queued as `job`,
     32 hex characters the page mints per press. A repeat of a `job` for the same act and
     row gets the same link; for another, it is refused. `restart` goes with `run` only,
-    `ends` with `stop` and `restart` only. Each act refuses what its confirmed route
-    refuses."""
+    `ends` and `ends_unread` with `stop` and `restart` only. Each act refuses what its
+    confirmed route refuses."""
     body = call.body
     job, name = body["job"], body["act"]
     if not _is_job(job):
         raise lb.Refused(JOB_SHAPE)
     if "restart" in body and name != "run":
         raise lb.Refused(RESTART_RUN_ONLY)
-    if "ends" in body and name not in ("stop", "restart"):
+    if ("ends" in body or "ends_unread" in body) and name not in ("stop", "restart"):
         raise lb.Refused(ENDS_STOP_ONLY)
     work, is_timer = _ACTS[name]
     return _queue(job, name, body["id"], lambda i: work(i, body), is_timer=is_timer,
-                  ends=body.get("ends"))
+                  ends=body.get("ends"), ends_unread=bool(body.get("ends_unread")))
 
 
 def _is_job(job: str) -> bool:
@@ -891,7 +900,7 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
+__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_ONE_CONFIRM", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
            "HEALTH_PERIOD", "JOBS", "JOB_SHAPE", "KEY_REUSED", "ON_OFF_IN_SETTINGS",
            "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "RUNS_SHOWN", "SLOTS_IN_USE",
            "SLOTS_SERVER", "SLOTS_UNREAD", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS",
