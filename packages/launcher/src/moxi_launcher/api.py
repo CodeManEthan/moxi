@@ -232,7 +232,9 @@ class LaunchResult:
     `duplicate` is set when the request id was already in the
     launch log, so nothing was started and this is the stored row's outcome. `warnings`
     are one line each, `line` one line for the caller. `outcome` is the first turn's, when
-    the launch sent it itself."""
+    the launch sent it itself. `finding` is the code of what flagged a relaunch, whose
+    session runs on, held on a screen (`screen-not-answered`, `screen-mismatch`) or not
+    ready (`no-ready`); None when nothing did."""
 
     request_id: str
     harness: str
@@ -250,6 +252,7 @@ class LaunchResult:
     outcome: first.Outcome | None = None
     slot: str | None = None
     base: str | None = None
+    finding: str | None = None
 
 
 def launch(request, *, env: Mapping[str, str] | None = None,
@@ -680,7 +683,8 @@ def _actor(request, caller: Mapping[str, str]) -> str:
 
 def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
                 handoff_key: str | None = None) -> None:
-    """What a launch makes before its start: Claude's system prompt file, a scratch
+    """What a launch makes before its start: Claude's system prompt file and settings run
+    file, a scratch
     launch's directory (0700, never removed by the launcher), and the handoff folder its
     identity block names when it has a handoff key. The scratch folder's parent is made
     private first, which refuses one that is a link or another user's, in case one turned
@@ -696,6 +700,8 @@ def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
                         env=env)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
+    if composition.settings_file is not None:
+        common.write_settings(composition.settings_file)
 
 
 def open_hold(request_id: str, name: str, *,
@@ -801,7 +807,7 @@ def _result(composition: Composition, request_id: str, session_id: str | None,
         mode=composition.mode, reason=started.reason, pid=started.pid,
         argv=composition.argv, warnings=warnings,
         line=started.line or f"launch {request_id} {started.state}",
-        outcome=started.outcome, slot=started.slot, base=base)
+        outcome=started.outcome, slot=started.slot, base=base, finding=started.finding)
 
 
 def _stored(row: store.LaunchRow) -> LaunchResult:

@@ -194,10 +194,18 @@ class Clock:
         self.now += seconds
 
 
-def launched_result(state="started", outcome="sent", reason=None):
-    return SimpleNamespace(state=state, reason=reason, line=f"launch r2 {state}",
+def launched_result(state="started", outcome="sent", reason=None, finding=None,
+                    line=None):
+    return SimpleNamespace(state=state, reason=reason, line=line or f"launch r2 {state}",
                            outcome=None if outcome is None else SimpleNamespace(
-                               outcome=outcome), request_id="r2", base="row")
+                               outcome=outcome), request_id="r2", base="row",
+                           finding=finding)
+
+
+#: A respawned session the launch flagged: held on a screen it won't answer, or not ready.
+HELD_LINE = ("launch r2 started in slot 3; flagged screen-not-answered: held on Claude "
+             "Code's folder-trust screen")
+NOT_READY_LINE = "launch r2 started in slot 3; flagged no-ready: not ready: attach to slot 3"
 
 
 @pytest.fixture
@@ -485,6 +493,52 @@ def test_a_self_run_whose_first_turn_was_not_sent(conn):
     assert got.outcome == "first-turn-not-sent" and got.run.word == "no-ready"
 
 
+def test_a_self_run_held_on_a_screen_ends_first_turn_not_sent_naming_it(conn):
+    comms = FakeComms()
+    got = go(conn, arm(conn), comms=comms,
+             launch=launched_result(outcome=None, finding="screen-not-answered",
+                                    line=HELD_LINE))
+    assert got.outcome == "first-turn-not-sent" and got.run.word == "screen-not-answered"
+    assert got.run.detail == HELD_LINE and got.run.new_request_id == "r2"
+    assert "flagged" in got.events
+    [(_module, _name, to, text)] = comms.sent
+    assert to == ["boss"] and "folder-trust screen" in text and "slot 3" in text
+    assert "--from-record" not in text
+
+
+def test_a_self_run_whose_new_session_is_not_ready_ends_first_turn_not_sent(conn):
+    comms = FakeComms()
+    got = go(conn, arm(conn), comms=comms,
+             launch=launched_result(outcome=None, finding="no-ready", line=NOT_READY_LINE))
+    assert got.outcome == "first-turn-not-sent" and got.run.word == "no-ready"
+    assert len(comms.sent) == 1
+
+
+def test_a_directors_relaunch_flagged_ends_relaunched_and_tells_the_directors(conn):
+    comms = FakeComms()
+    got = go(conn, arm(conn, mode="director"), comms=comms,
+             launch=launched_result(outcome=None, finding="no-ready", line=NOT_READY_LINE))
+    assert got.outcome == "relaunched" and got.run.word == "no-ready"
+    assert got.run.new_request_id == "r2" and got.run.detail == NOT_READY_LINE
+    assert notices.is_flagged(got.run)
+    [(_module, _name, to, text)] = comms.sent
+    assert to == ["boss"] and "ended relaunched: no-ready" in text
+    assert "attach to its slot" in text and "--from-record" not in text
+
+
+def test_a_relaunch_with_no_finding_tells_nobody(conn):
+    comms = FakeComms()
+    got = go(conn, arm(conn, mode="director"), comms=comms)
+    assert got.outcome == "relaunched" and got.run.word is None
+    assert not notices.is_flagged(got.run) and comms.sent == []
+
+
+def test_a_relaunch_whose_new_session_exited_is_still_relaunch_failed(conn):
+    got = go(conn, arm(conn, mode="director"),
+             launch=launched_result(state="failed", outcome=None, reason="exited"))
+    assert got.outcome == "relaunch-failed" and got.run.word == "exited"
+
+
 def test_a_stop_before_the_exit_ends_the_run_stopped(conn):
     got = go(conn, arm(conn), stop=True)
     assert got.outcome == "stopped" and got.session.commands == []
@@ -687,6 +741,17 @@ def test_a_repair_of_a_director_run_keeps_its_posture(conn):
     got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
              cls=job.RepairJob)
     assert got.requests[0].posture == "with:boss" and got.requests[0].handoff is None
+
+
+def test_a_repair_flagged_by_its_launch_tells_the_directors(conn):
+    original = failed_run(conn, mode="director")
+    comms = FakeComms()
+    got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
+             cls=job.RepairJob, comms=comms,
+             launch=launched_result(outcome=None, finding="screen-not-answered",
+                                    line=HELD_LINE))
+    assert got.outcome == "relaunched" and got.run.word == "screen-not-answered"
+    assert [s[2] for s in comms.sent] == [["boss"]]
 
 
 def test_repairable_runs():

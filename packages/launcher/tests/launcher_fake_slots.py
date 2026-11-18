@@ -43,8 +43,9 @@ The script's keys, each with its default:
 - `run`: true to really run the command, detached, with the env and cwd it was given; its
   pid is the pane's. Otherwise the pane's pid is `pane_pid` (4343).
 - `frames`: what each `read_screen` sees in turn, the last repeated: `{"screen": NAME or
-  null, "full": true, "dead": false}`, NAME a screen constant's name; the read gives that
-  `Screen` itself, as slots does. `dead` is the pane's `pane_dead`. Default: no screen.
+  null, "full": true, "dead": false, "rows": [...]}`, NAME a screen constant's name; the
+  read gives that `Screen` itself, as slots does. `dead` is the pane's `pane_dead`, `rows`
+  the rows the read gives. Default: no screen.
 - `answers`: what each `answer_screen` gives in turn, the last repeated: `{"outcome": ...,
   "why": ..., "capture": ..., "keys": [...], "dead": ...}`, `outcome` one of slots' words
   (`gone`, `ended`, `not-ended`, `mismatch`, `ended-without-screen`, `no-pane`); `why` is
@@ -183,6 +184,8 @@ class Screen:
     then: str
     marker: str = "❯"
     items: Items | None = None
+    ruled: bool = True
+    answerable: bool = True
 
 
 @dataclass(frozen=True)
@@ -218,8 +221,31 @@ CLAUDE_DEV_CHANNELS = Screen(
     name="CLAUDE_DEV_CHANNELS",
     phrases=("Loading development channels", "Enter to confirm"),
     option="I am using this for local development", move=True, then="gone")
+CLAUDE_BYPASS_WARNING = Screen(
+    name="CLAUDE_BYPASS_WARNING",
+    phrases=("WARNING: Claude Code running in Bypass Permissions mode",
+             "By proceeding, you accept"),
+    option="Yes, I accept", move=True, then="gone")
+CLAUDE_THEME_PICKER = Screen(
+    name="CLAUDE_THEME_PICKER",
+    phrases=("Let's get started.",
+             "Choose the text style that looks best with your terminal"),
+    option="Dark mode", move=True, then="gone", ruled=False, answerable=False)
+CLAUDE_WELCOME = Screen(
+    name="CLAUDE_WELCOME",
+    phrases=("Welcome to Claude Code", "Security notes:", "Press Enter to continue"),
+    option="Press Enter to continue…", move=False, then="gone", ruled=False,
+    answerable=False)
+CLAUDE_CHROME_DIALOG = Screen(
+    name="CLAUDE_CHROME_DIALOG",
+    phrases=("Claude in Chrome extension detected", "Enter to confirm"),
+    option="No, keep browser tools off", move=True, then="gone", answerable=False)
 SCREENS = {"CLAUDE_TRUST_DIR": CLAUDE_TRUST_DIR,
            "CLAUDE_DEV_CHANNELS": CLAUDE_DEV_CHANNELS,
+           "CLAUDE_BYPASS_WARNING": CLAUDE_BYPASS_WARNING,
+           "CLAUDE_THEME_PICKER": CLAUDE_THEME_PICKER,
+           "CLAUDE_WELCOME": CLAUDE_WELCOME,
+           "CLAUDE_CHROME_DIALOG": CLAUDE_CHROME_DIALOG,
            "CLAUDE_EXIT_DIALOG": CLAUDE_EXIT_DIALOG}
 
 
@@ -422,7 +448,8 @@ def read_screen(slot, screens) -> Seen:
     _turns.reads += 1
     name = frame.get("screen")
     return Seen(SCREENS[name] if name else None, frame.get("full", True),
-                frame.get("why", ""), (), bool(frame.get("dead", False)), "%7")
+                frame.get("why", ""), tuple(frame.get("rows", ())),
+                bool(frame.get("dead", False)), "%7")
 
 
 def answer_screen(slot, screen, wait_s=5) -> Answer:

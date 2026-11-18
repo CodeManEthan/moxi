@@ -261,7 +261,8 @@ def test_an_unconfirmed_start_waits_for_ready_and_sends_the_first_turn(work, har
     """`unconfirmed` is never `spawn-failed`: the ready wait decides, as for `started`."""
     rig.plan(exec="unconfirmed", exec_line="taken")
     got = api.launch(request(work, brief=BRIEF))
-    assert [c["session_id"] for c in turns.calls("wait_ready")] == [SID]
+    # Asked by the startup watch, then again by the sender.
+    assert [c["session_id"] for c in turns.calls("wait_ready")] == [SID, SID]
     assert len(turns.calls("deliver")) == 1
     assert (got.state, got.exit_code) == ("first-sent", 0)
     assert "could not confirm" in got.line
@@ -507,8 +508,7 @@ def test_a_slots_failure_at_start_ends_the_row_spawn_failed_with_slots_words(
 
 def test_a_slot_launch_sends_the_first_turn_before_it_returns(work, harness, rig, turns):
     got = api.launch(request(work, brief=BRIEF))
-    [ready] = turns.calls("wait_ready")
-    assert ready["session_id"] == SID
+    assert [c["session_id"] for c in turns.calls("wait_ready")] == [SID, SID]
     [given] = turns.calls("deliver")
     assert given["ref"] == "launcher:r1" and BRIEF in given["text"]
     # The brief is the first turn, not on the slot's argv.
@@ -535,11 +535,11 @@ def test_without_turns_the_brief_is_on_the_slots_argv(work, harness, rig):
     assert got.outcome is None and got.state == "started"
 
 
-def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work, rig,
-                                                                          monkeypatch):
-    """No Codex screen is declared yet: a Codex slot launch reads no screen, even with the
-    startup settings on, and one whose session never got ready says Codex's trust prompt
-    may be waiting for a person."""
+def test_a_codex_slot_launch_answers_no_screen_and_names_the_slot_when_not_ready(
+        work, rig, monkeypatch):
+    """No Codex screen is declared: a Codex slot launch reads no screen, even with the
+    startup settings on, and one whose session never got ready names its slot. Its folder's
+    trust is settled on its argv, so the line no longer points at Codex's trust prompt."""
     screens_on()
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
     conn = store.connect()
@@ -566,18 +566,25 @@ def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work
     assert rig.calls("read_screen") == [] and rig.calls("answer_screen") == []
     assert sent == [4343]  # the pane's pid finds Codex's host
     assert started.exit_code == exits.ERROR
-    assert "folder-trust prompt" in started.line and "slot 1" in started.line
-    assert startup.screens("codex", fake, {"startup.trust_dialog": True,
-                                           "startup.dev_channels_dialog": True}) == []
+    assert "folder-trust prompt" not in started.line and "slot 1" in started.line
+    assert startup.listed("codex", fake, {"startup.trust_dialog": True,
+                                          "startup.dev_channels_dialog": True,
+                                          "startup.bypass_warning": True}) == []
 
 
 # -- startup screens, through a launch ------------------------------------------------------
 
 
-def test_with_the_settings_off_no_screen_is_read(work, harness, rig):
-    rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
+ALL = ["CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+       "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG"]
+
+
+def test_with_the_settings_off_every_screen_on_the_list_is_still_read(work, harness, rig):
     got = api.launch(request(work))
-    assert rig.calls("read_screen") == [] and got.state == "started"
+    reads = rig.calls("read_screen")
+    assert reads and all(r["screens"] == ALL for r in reads)
+    assert rig.calls("answer_screen") == []
+    assert (got.state, got.exit_code) == ("started", 0)
 
 
 def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
@@ -586,7 +593,7 @@ def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
              answers=[{"outcome": "gone"}])
     got = api.launch(request(work))
     reads = rig.calls("read_screen")
-    assert reads[0]["screens"] == ["CLAUDE_TRUST_DIR"] and reads[0]["slot"] == 1
+    assert reads[0]["screens"] == ALL and reads[0]["slot"] == 1
     [answer] = rig.calls("answer_screen")
     assert answer["screen"] == "CLAUDE_TRUST_DIR"
     # The answer is bounded by what remains of startup.wait_s, never more than 5 s.
@@ -599,11 +606,10 @@ def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
     assert (got.state, got.exit_code) == ("started", 0)
 
 
-def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
+def test_every_screen_is_watched_whatever_the_settings(work, harness, rig):
     screens_on(1, dev=True)
     api.launch(request(work))
-    assert rig.calls("read_screen")[0]["screens"] == ["CLAUDE_TRUST_DIR",
-                                                      "CLAUDE_DEV_CHANNELS"]
+    assert rig.calls("read_screen")[0]["screens"] == ALL
 
 
 def test_a_screen_slots_cant_answer_that_still_shows_fails_screen_mismatch(
@@ -653,8 +659,10 @@ def test_a_screen_not_settled_until_the_bound_runs_out_lets_the_launch_go_on(
              answers=[{"outcome": "mismatch", "why": "not-settled: the marker moved",
                        "capture": "/state/slots/mismatches/2.txt"}])
     got = api.launch(request(work))
-    # The watch ends at its bound with not-settled recorded, and the launch goes on.
-    assert (got.state, got.exit_code, got.reason) == ("started", 0, None)
+    # The watch ends at its bound with not-settled recorded, and the launch goes on,
+    # with nothing to say the session is ready.
+    assert (got.state, got.exit_code, got.reason) == ("started", 0,
+                                                      targets.READY_UNKNOWN)
     assert len(rig.calls("answer_screen")) > 1
     seen = events(kind=startup.EVENT)
     assert {e.detail["outcome"] for e in seen} == {startup.NOT_SETTLED}
@@ -686,7 +694,7 @@ def test_a_screen_not_settled_then_answered_lets_the_launch_go_on(work, harness,
     assert first_answer.detail["outcome"] == startup.NOT_SETTLED
     assert "stayed on" in first_answer.detail["why"]
     assert second.detail["outcome"] == "gone"
-    assert row().reason is None
+    assert row().reason == targets.READY_UNKNOWN
 
 
 def test_a_screen_not_settled_then_an_ended_pane_fails_exited(work, harness, rig, turns):
@@ -806,7 +814,8 @@ def conn():
     conn.close()
 
 
-TRUST = [("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR)]
+TRUST = [startup.Listed("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR, "startup.trust_dialog",
+                        answer=True)]
 SHOWING = {"screen": "CLAUDE_TRUST_DIR"}
 NONE = {"screen": None}
 
@@ -1103,25 +1112,42 @@ def test_the_keys_slots_sent_are_recorded(conn):
     assert event.detail["keys"] == ["Down", "Enter"]
 
 
-def test_the_enabled_screens_follow_the_settings():
-    on = {"startup.trust_dialog": True, "startup.dev_channels_dialog": False}
-    assert startup.screens("claude", fake, on) == [
-        ("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR)]
-    both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
-    assert startup.screens("claude", fake, both) == [
-        ("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR),
-        ("CLAUDE_DEV_CHANNELS", fake.CLAUDE_DEV_CHANNELS)]
-    off = {"startup.trust_dialog": False, "startup.dev_channels_dialog": False}
-    assert startup.screens("claude", fake, off) == []
+def settings_of(*, trust=False, dev=False, bypass=False) -> dict:
+    return {"startup.trust_dialog": trust, "startup.dev_channels_dialog": dev,
+            "startup.bypass_warning": bypass}
+
+
+def test_the_startup_list_holds_every_screen_with_its_setting():
+    got = startup.listed("claude", fake, settings_of(trust=True))
+    assert [(e.name, e.screen, e.setting, e.answer) for e in got] == [
+        ("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR, "startup.trust_dialog", True),
+        ("CLAUDE_DEV_CHANNELS", fake.CLAUDE_DEV_CHANNELS, "startup.dev_channels_dialog",
+         False),
+        ("CLAUDE_BYPASS_WARNING", fake.CLAUDE_BYPASS_WARNING, "startup.bypass_warning",
+         False),
+        ("CLAUDE_THEME_PICKER", fake.CLAUDE_THEME_PICKER, None, False),
+        ("CLAUDE_WELCOME", fake.CLAUDE_WELCOME, None, False),
+        ("CLAUDE_CHROME_DIALOG", fake.CLAUDE_CHROME_DIALOG, None, False)]
+    off = startup.listed("claude", fake, settings_of())
+    assert len(off) == 6 and not any(e.answer for e in off)
+    on = startup.listed("claude", fake, settings_of(trust=True, dev=True, bypass=True))
+    # A screen with no setting is never answered, whatever the settings say.
+    assert [e.answer for e in on] == [True, True, True, False, False, False]
+
+
+def test_slots_exit_dialog_is_never_on_the_startup_list():
+    names = [name for _, name in startup.SCREENS["claude"]]
+    assert "CLAUDE_EXIT_DIALOG" not in names
+    assert set(startup.HINTS) == set(names)
 
 
 def test_the_screens_are_read_from_slots_api_module_only():
-    both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
     elsewhere = SimpleNamespace(screens=SimpleNamespace(
         CLAUDE_TRUST_DIR=fake.CLAUDE_TRUST_DIR,
-        CLAUDE_DEV_CHANNELS=fake.CLAUDE_DEV_CHANNELS))
+        CLAUDE_DEV_CHANNELS=fake.CLAUDE_DEV_CHANNELS,
+        CLAUDE_BYPASS_WARNING=fake.CLAUDE_BYPASS_WARNING))
     with pytest.raises(AttributeError):
-        startup.screens("claude", elsewhere, both)
+        startup.listed("claude", elsewhere, settings_of(trust=True, dev=True, bypass=True))
 
 
 # -- the install questions ------------------------------------------------------------------
@@ -1139,26 +1165,30 @@ def test_without_slots_setup_asks_nothing(no_slots):
     assert not Layout("launcher").config_file().exists()
 
 
-def test_with_slots_setup_asks_the_two_questions_once(rig):
+def test_with_slots_setup_asks_the_three_questions_once(rig):
     asked, out = [], io.StringIO()
-    answers = iter([True, False])
+    answers = iter([True, False, False])
     assert startup.setup(ask=lambda q: asked.append(q) or next(answers), out=out) == 0
-    assert len(asked) == 2
+    assert len(asked) == 3
     assert "folder-trust" in asked[0] and "development-channels" in asked[1]
+    assert "bypass-permissions" in asked[2]
     from moxi_launcher import settings
 
     now = settings.current()
     assert now["startup.trust_dialog"] is True
     assert now["startup.dev_channels_dialog"] is False
+    assert now["startup.bypass_warning"] is False
     assert now.source("startup.dev_channels_dialog") == config.FILE
+    assert now.source("startup.bypass_warning") == config.FILE
     assert "moxi config set launcher startup.dev_channels_dialog true" in out.getvalue()
+    assert "moxi config set launcher startup.bypass_warning true" in out.getvalue()
     # An install again asks nothing: both were answered, and nothing is reset.
     again = []
     assert startup.setup(ask=lambda q: again.append(q) or False, out=io.StringIO()) == 0
     assert again == [] and settings.current()["startup.trust_dialog"] is True
 
 
-def test_with_nobody_at_the_keyboard_both_stay_off_and_the_lines_are_printed(
+def test_with_nobody_at_the_keyboard_all_stay_off_and_the_lines_are_printed(
         rig, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     out = io.StringIO()
@@ -1166,7 +1196,18 @@ def test_with_nobody_at_the_keyboard_both_stay_off_and_the_lines_are_printed(
     text = out.getvalue()
     assert "moxi config set launcher startup.trust_dialog true" in text
     assert "moxi config set launcher startup.dev_channels_dialog true" in text
+    assert "moxi config set launcher startup.bypass_warning true" in text
     assert not Layout("launcher").config_file().exists()
+
+
+def test_the_install_questions_say_what_each_answer_writes():
+    questions = dict(startup.QUESTIONS)
+    trust = questions["startup.trust_dialog"]
+    assert "git root" in trust and "~/.claude.json" in trust
+    assert "answers the screen if it still shows" in trust
+    bypass = questions["startup.bypass_warning"]
+    assert "Yes, I accept" in bypass and "~/.claude/settings.json" in bypass
+    assert "skipDangerousModePermissionPrompt" in bypass
 
 
 #: How the core's installer runs a `SETUP` target: import it, call it, exit with its code.
@@ -1265,7 +1306,8 @@ def test_a_slot_one_process_started_in_reads_taken_in_another(rig, tmp_path):
 #: Every name the launcher reads from slots' API module.
 USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "answer_screen",
         "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
-        "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS")
+        "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+        "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG")
 #: The shapes the launcher reads, as the fake gives them.
 SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
 
@@ -1297,10 +1339,14 @@ def test_the_launcher_reads_only_names_slots_api_has(real_slots):
     assert real_slots.__name__ == "moxi_slots.api"
     missing = [name for name in USED if not hasattr(real_slots, name)]
     assert missing == []
-    assert startup.screens("claude", real_slots, {"startup.trust_dialog": True,
-                                                  "startup.dev_channels_dialog": True}) == [
+    got = startup.listed("claude", real_slots, settings_of(trust=True, dev=True, bypass=True))
+    assert [(e.name, e.screen) for e in got] == [
         ("CLAUDE_TRUST_DIR", real_slots.CLAUDE_TRUST_DIR),
-        ("CLAUDE_DEV_CHANNELS", real_slots.CLAUDE_DEV_CHANNELS)]
+        ("CLAUDE_DEV_CHANNELS", real_slots.CLAUDE_DEV_CHANNELS),
+        ("CLAUDE_BYPASS_WARNING", real_slots.CLAUDE_BYPASS_WARNING),
+        ("CLAUDE_THEME_PICKER", real_slots.CLAUDE_THEME_PICKER),
+        ("CLAUDE_WELCOME", real_slots.CLAUDE_WELCOME),
+        ("CLAUDE_CHROME_DIALOG", real_slots.CLAUDE_CHROME_DIALOG)]
 
 
 def test_the_fakes_shapes_are_slots_own(real_slots):

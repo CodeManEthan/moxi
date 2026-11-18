@@ -210,6 +210,9 @@ def _preview(args: argparse.Namespace, prog: str) -> int:
         print(f"  {name}={shlex.quote(str(value))}")
     if composition.not_applied:
         print("not applied in this mode: " + ", ".join(composition.not_applied))
+    trust = composition.values.get("trust")
+    if isinstance(trust, dict) and trust.get("line"):
+        print(f"folder trust: {trust['line']}")
     if composition.first:
         print("first turn, sent once the session is ready:")
         for line in composition.first.splitlines():

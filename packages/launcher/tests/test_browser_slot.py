@@ -3,6 +3,10 @@ past slot session resumed from the launcher's page (the resume button, the job i
 and the new launch's row arriving by push), and a launch from the box on Home, which
 starts the fake harness in a slot and names that slot under the box.
 
+The fake harness stays running in its slot, as a session must past the launcher's startup
+watch (one that exits there fails its launch), and the shell runs the fake turns in turns'
+place, which says each session is ready, so a launch is read as started at once.
+
 slots runs on a tmux server of its own. The test shell's `MOXI_HOME` is under its own
 temporary home, slots' socket follows `MOXI_HOME`, and the server is started here on that
 socket and stopped after, so the default tmux server, and any other, is never reached.
@@ -32,14 +36,16 @@ pytestmark = [pytest.mark.browser,
 
 @pytest.fixture(scope="module")
 def harness(tmp_path_factory):
-    return kit.Harness(tmp_path_factory.mktemp("fake-harness"))
+    return kit.Harness(tmp_path_factory.mktemp("fake-harness"), stay=True)
 
 
 @pytest.fixture(scope="module")
-def ui_shell_options(harness):
-    """The shell's options, given once the fake harness is first on `PATH`."""
+def ui_shell_options(harness, tmp_path_factory):
+    """The shell's options, the fake turns in turns' place, given once the fake harness is
+    first on `PATH`."""
+    turns = kit.FakeTurns(tmp_path_factory.mktemp("fake-turns"))
     with kit.first_on_path(harness.bin):
-        yield {}
+        yield turns.options()
 
 
 @pytest.fixture(scope="module")
