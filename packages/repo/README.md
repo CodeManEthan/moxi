@@ -579,8 +579,8 @@ with the old value of any key it puts back. What you press sends that plan's dig
 the verb writes only if the plan it makes again, under the repo's lock, has the same one;
 otherwise it writes nothing and shows the new plan. A press sent twice writes nothing the second time. Before writing, the page
 checks with ui that it would write where your terminal does, as every page that writes
-does. It never disables, removes or changes a setting: those stay commands to copy and
-run in a terminal.
+does. The page doesn't disable, remove or change a setting; those are commands to copy
+and run in a terminal.
 
 Who can press them: anyone holding the page server's token, as with every page act. Any
 process running as you can already run `moxi repo git-hooks add`, so the page reaches no
