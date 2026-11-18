@@ -113,6 +113,30 @@ test("would-send: one phrase per recipient by its delivery", () => {
                "Delivered. x reads it at its next turn boundary.");
 });
 
+test("would-send to a session whose turn is open: it is working and reads it when the turn ends", () => {
+  const working = (qualified) => qualified === "reviewer@atlas";
+  const words = (delivery, open = working) => checkWords(answer("would-send", delivery), when, null, open);
+  assert.equal(words("live").text, "Delivered. reviewer is working; it reads this when its turn ends.");
+  assert.equal(words("live", () => false).text, "Delivered. reviewer reads it at its next turn boundary.");
+  assert.equal(words("live", (qualified) => qualified === "reviewer").text,
+               "Delivered. reviewer reads it at its next turn boundary.", "the recipient's own address joins");
+  // A held message says when it is read already; the open turn adds nothing to it.
+  assert.equal(words("held-flag").text, "Held until reviewer's next turn, as you chose.");
+  assert.equal(words("unbound").text, "reviewer isn't running. It waits until a session takes the name.");
+  // Two recipients: each phrase by its own session.
+  const two = { ...answer("would-send", "live"),
+                recipients: [{ qualified: "reviewer@atlas", delivery: "live", cold_at: null },
+                             { qualified: "planner", delivery: "live", cold_at: null }] };
+  assert.equal(checkWords(two, when, null, working).text,
+               "Delivered. reviewer is working; it reads this when its turn ends. "
+               + "Delivered. planner reads it at its next turn boundary.");
+  // A refusal's words stand whatever the turn.
+  assert.equal(checkWords(answer("blocked", "live"), when, null, working).heavy, "Refused: nothing would be sent.");
+  // Send's line is not the dry run's: it says nothing of the turn.
+  assert.equal(sendWords(answer("sent", "live"), at("2026-11-12T19:11:00Z"), when).text,
+               "Delivered. reviewer reads it at its next turn boundary.");
+});
+
 test("check: every other outcome leads with the refusal and offers Check again", () => {
   const cases = [
     [answer("cache-unread", "live"), "Comms can't read reviewer's cache right now, so it can't tell whether this would wake it cold. Check again in a moment."],
