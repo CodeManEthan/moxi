@@ -564,6 +564,25 @@ export function handoffOf(fields: readonly FieldDescriptor[], set: Readonly<Reco
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+/**
+ * The handoff the piece holds (as `handoffOf` reads it from `set.handoff`) once a preset is
+ * picked or applied, another or the same again: a cleared one ("") is let go, so the handoff
+ * the form is filled with for that preset, or by the user's defaults, shows and is sent. A
+ * handoff set through the `+` stays, as a brief file set there does.
+ */
+export function handoffAtPreset(handoff: string | null): string | null {
+  return handoff === "" ? null : handoff;
+}
+
+/**
+ * The handoff the piece holds once a launch started: one set through the `+` and sent with
+ * the press (`sent`) is let go, unless it was changed since, so the form's own shows again.
+ * A cleared one stays cleared until the next preset.
+ */
+export function handoffAtLaunch(handoff: string | null, sent: string | null): string | null {
+  return sent !== null && handoff === sent ? null : handoff;
+}
+
 /** The built-in tools the Options panel draws a line for, in its order. No route lists a
  * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
 export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;

@@ -110,15 +110,16 @@
 // launch that starts with it lets go of it, as it empties the box. `Handoff from a file`,
 // where the form has the row, opens a field for a handoff's path. The handoff the launch
 // sends, whether set there or filled by the user's defaults or the applied preset, is named
-// on a dim line under the box, home written `~`, with `Clear`, which sends none; the box
-// stays on, since a launch's first turn may hold a brief and a handoff. A launch that starts
-// with a handoff set there lets go of it, so the form's own shows again. `Continue the last
-// session` is offered when the menu's read of `/api/sessions`, made each time it opens, holds
-// a session of the line's place that he made and can resume now; its dim line says whether
-// it resumes in a slot or copies the resume command. A click resumes it at once through
-// `/api/resume`, with the lines under the box a launch has, in a resume's words; the box
-// keeps its text. With Scratch on the line the entry is drawn dim, not clickable, and says
-// there is none to continue.
+// on a dim line under the box, home written `~`, with `Clear`, which sends none until a
+// preset is picked or applied, when the preset's or the defaults' handoff shows again; the
+// box stays on, since a launch's first turn may hold a brief and a handoff. A launch that
+// starts with a handoff set there lets go of it, so the form's own shows again; a preset
+// leaves it set, as it leaves a brief file. `Continue the last session` is offered when the
+// menu's read of `/api/sessions`, made each time it opens, holds a session of the line's
+// place that he made and can resume now; its dim line says whether it resumes in a slot or
+// copies the resume command. A click resumes it at once through `/api/resume`, with the lines
+// under the box a launch has, in a resume's words; the box keeps its text. With Scratch on
+// the line the entry is drawn dim, not clickable, and says there is none to continue.
 //
 // Every menu opens inside the page: after a render while one is open, and on a resize, the
 // piece measures it, and shifts it left by what it passes 16 px from the page's right edge,
@@ -154,8 +155,8 @@ import {
   afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
 import {
-  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, handoffOf,
-  hasEffort, IDLE,
+  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, handoffAtLaunch,
+  handoffAtPreset, handoffOf, hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
   placeTime, resumeSent, runOf, SCRATCH, SCRATCH_PICK, SCRATCH_SAYS, SLOTS_UNREAD, STARTING, stopped, takesScratch,
@@ -940,11 +941,13 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Applies a preset, or none, and reads the form for it. The chip's choices go, since the
-   * preset gives the model and the effort; values set in the panel stay. */
+   * preset gives the model and the effort, and so does a cleared handoff, so the preset's or
+   * the defaults' shows; values set in the panel stay. */
   #apply(choice: Choice): void {
     if (sameChoice(choice, this.preset)) return;
     this.preset = choice;
     this.chosen = {};
+    this.handoff = handoffAtPreset(this.handoff);
     this.pending = null;
     void this.#readForm(this.#presetOf(choice)?.harness ? "" : this.harness);
   }
@@ -1030,9 +1033,11 @@ export class LauncherPrompt extends LitElement {
     if (this.menu === "preset") void this.#readPresets();
   }
 
-  /** Applies a preset picked in the menu, or none, and moves the line to the place it names. */
+  /** Applies a preset picked in the menu, or none, and moves the line to the place it names.
+   * The one already applied, picked again, lets go of a cleared handoff too. */
   #pickPreset(choice: Choice): void {
     this.menu = "";
+    this.handoff = handoffAtPreset(this.handoff);
     const preset = this.#presetOf(choice);
     const place = preset === null ? null : presetPlace(preset, this.#withProjects);
     if (place !== null) this.pick = place;
@@ -2011,7 +2016,7 @@ export class LauncherPrompt extends LitElement {
     if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
     if (this.#sentFile !== null && this.briefFile === this.#sentFile) this.briefFile = "";
     this.#sentFile = null;
-    if (this.#sentHandoff !== null && this.handoff === this.#sentHandoff) this.handoff = null;
+    this.handoff = handoffAtLaunch(this.handoff, this.#sentHandoff);
     this.#sentHandoff = null;
     this.options = afterLaunch(this.options, this.#sentOn);
     this.#sentOn = {};

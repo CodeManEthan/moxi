@@ -3,7 +3,8 @@ server. `Continue the last session` offers only a session the shell's own user m
 place the line names, and resumes it in a slot with the lines under the box while the box
 keeps its text; a brief from a file turns the box off and launches with that file as the
 first turn; a handoff from a file, or one a preset names, is on its line under the box,
-goes in the launch beside the box's text, and `Clear` takes it out.
+goes in the launch beside the box's text, and `Clear` takes it out until a preset is picked
+again, when that preset's handoff is back on the line and in the launch.
 
 The shell runs the fake slots in slots' place and fake `claude` and `codex` first on its
 `PATH`, so no launch or resume starts a real session.
@@ -236,5 +237,72 @@ def test_a_presets_handoff_shows_as_its_line_and_clear_takes_it_out_of_the_launc
         expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started in slot 3 · "))
         row = kit.newest_launch(shell)
         assert row.handoff_path is None, row
+    finally:
+        file.unlink()
+
+
+def pick_seat(piece, name: str):
+    piece.locator('.where [data-item="preset"] > button').click()
+    piece.locator(f'[data-menu="preset"] button[data-preset="seat:{name}"]').click()
+
+
+def launch(page, piece, shell, brief: str) -> tuple[dict, object]:
+    """Presses the button with `brief` in the box; returns the request it sent and the launch
+    row it started."""
+    piece.locator(".go:not([disabled])").wait_for()
+    piece.locator("textarea").fill(brief)
+    with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started "))
+    wait_for(lambda: kit.newest_launch(shell).brief == brief, 10, what=f"the launch row of {brief!r}")
+    return json.loads(sent.value.post_data), kit.newest_launch(shell)
+
+
+def test_a_clear_holds_over_launches_until_a_preset_is_picked_whose_handoff_then_shows_and_goes(
+        page, shell, work_dir):
+    alpha, beta, mine = (work_dir / f"{name}-handoff.md" for name in ("alpha", "beta", "mine"))
+    for path in (alpha, beta, mine):
+        path.write_text(f"{path.name}\n", encoding="utf-8")
+    file = presets.path(env=shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[seat.alpha]\nharness = "claude"\nhandoff = "{alpha}"\n'
+                    f'[seat.beta]\nharness = "claude"\nhandoff = "{beta}"\n')
+    try:
+        piece = kit.open_home(page)
+        line = piece.locator("[data-handoff]")
+        pick_seat(piece, "alpha")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
+        piece.locator(".go:not([disabled])").wait_for()
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        # Cleared, then launched with no preset change: it stays cleared, for this launch and
+        # the next.
+        for brief in ("first", "second"):
+            body, row = launch(page, piece, shell, brief)
+            assert body["seat"] == "alpha", body
+            assert "handoff" not in body["values"] and "handoff" in body["leave_out"], body
+            assert row.handoff_path is None, row
+            expect(line).to_have_count(0)
+        # Another preset picked: its handoff shows and is sent.
+        pick_seat(piece, "beta")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/beta-handoff.md")
+        body, row = launch(page, piece, shell, "third")
+        assert (body["seat"], body["values"]["handoff"]) == ("beta", str(beta)), body
+        assert row.handoff_path == str(beta), row
+        # The same preset picked again brings its handoff back after a Clear.
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        pick_seat(piece, "beta")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/beta-handoff.md")
+        # One set through the + stays over a preset change, as a brief file does.
+        menu = plus_menu(page, piece)
+        entry(menu, "Handoff from a file").click()
+        field = menu.get_by_role("textbox", name="Path to a handoff file")
+        field.fill(str(mine))
+        field.press("Enter")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/mine-handoff.md")
+        pick_seat(piece, "alpha")
+        expect(piece.locator('.where [data-item="preset"] > button')).to_contain_text("alpha")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/mine-handoff.md")
     finally:
         file.unlink()

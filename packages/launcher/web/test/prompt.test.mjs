@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  briefFileOf, buttonWords, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  briefFileOf, buttonWords, handoffAtLaunch, handoffAtPreset, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, SCRATCH_PICK, takesScratch, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -608,6 +608,36 @@ test("a handoff the defaults or a preset fill is sent unless cleared, and a clea
     assert.equal("handoff" in cleared.values, false);
     assert.equal(cleared.leave_out.includes("handoff"), true);
   }
+});
+
+test("a Clear holds until the next preset, whose handoff then shows and is sent; a launch keeps it cleared", () => {
+  const filled = (path) => [...FORM_FIELDS, field("handoff", { type: "path", value: path })];
+  const alpha = filled("/home/alice/handoffs/alpha.md");
+  const beta = filled("/home/alice/handoffs/beta.md");
+  // Cleared over alpha's handoff: none shown, the row left out.
+  let held = "";
+  assert.equal(handoffOf(alpha, { handoff: held }), null);
+  // A launch with nothing set through the + sent nothing of it, so the Clear stays.
+  held = handoffAtLaunch(held, null);
+  assert.equal(held, "");
+  const again = launchRequest(alpha, null, { ...SET, handoff: held }, SLOT_2);
+  assert.equal("handoff" in again.values, false);
+  assert.equal(again.leave_out.includes("handoff"), true);
+  // Another preset picked, or the same picked again: its handoff shows and is sent.
+  held = handoffAtPreset(held);
+  assert.equal(held, null);
+  const set = held === null ? SET : { ...SET, handoff: held };
+  assert.equal(handoffOf(beta, set), "/home/alice/handoffs/beta.md");
+  assert.equal(launchRequest(beta, null, set, SLOT_2).values.handoff, "/home/alice/handoffs/beta.md");
+  assert.equal(handoffOf(alpha, set), "/home/alice/handoffs/alpha.md");
+  // One set through the + stays over a preset change, as a brief file does, and goes after a
+  // launch that sent it, unless it was changed since.
+  assert.equal(handoffAtPreset("/srv/mine.md"), "/srv/mine.md");
+  assert.equal(launchRequest(beta, null, { ...SET, handoff: handoffAtPreset("/srv/mine.md") }, SLOT_2).values.handoff,
+               "/srv/mine.md");
+  assert.equal(handoffAtLaunch("/srv/mine.md", "/srv/mine.md"), null);
+  assert.equal(handoffAtLaunch("/srv/other.md", "/srv/mine.md"), "/srv/other.md");
+  assert.equal(handoffAtPreset(null), null);
 });
 
 test("a handoff alone, with an empty box and no brief file, is the launch's first turn", () => {
