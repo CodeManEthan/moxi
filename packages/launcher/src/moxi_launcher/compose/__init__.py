@@ -8,7 +8,9 @@ resolved values by row name, launcher rows and harness rows together; `ctx` (a `
 holds everything else a composer reads.
 
 `context(...)` gathers that `ctx` for one launch: the installed modules, the texts the
-launch names (its brief, handoff and instructions files are read here), the handoff
+launch names (its brief, handoff and instructions files are read here, and the settings
+its own `--settings` gives when it carries the bypass warning's skip key), a Codex
+launch's folder trust (`codex_trust`, which reads Codex's config), the handoff
 folder, turns' Codex host, and, for a Claude launch without comms, turns' launch
 additions, which write nothing.
 
@@ -30,10 +32,10 @@ from moxi import modules as moxi_modules
 from moxi import paths
 from moxi.paths import Layout
 
-from .. import first, handoffs, presets, slots
+from .. import catalog, codex_trust, first, handoffs, presets, slots
 from . import claude, codex, common
 from .common import (Additions, Composition, Context, NoBrief, NotYet, PromptFile,
-                     TooLong, TurnsAdditions, Unreadable, child_env, first_turn,
+                     SettingsFile, TooLong, TurnsAdditions, Unreadable, child_env, first_turn,
                      identity_block, scrub, stamps, write_prompt)
 
 MODULE = "launcher"
@@ -107,6 +109,18 @@ def context(values: Mapping[str, object], *, request_id: str,
     instructions = values.get("instructions") or _read(
         "instructions_file", values.get("instructions_file"))
 
+    user_settings = None
+    if common.skip_key_owed(harness, common.with_defaults(harness, values)):
+        given = common.settings_value(values.get(catalog.EXTRA) or ())
+        if given is not None:
+            user_settings = common.read_settings(given, str(values.get("cwd") or "."))
+
+    trust = None
+    if harness == "codex" and values.get("cwd"):
+        trust = codex_trust.settle(
+            str(values["cwd"]), child,
+            trust_cwd=bool(common.with_defaults(harness, values).get("trust_cwd")))
+
     comms = bool(values.get("identity")) and "comms" in links
     codex_comms = harness == "codex" and comms
     key = handoffs.key_of_row(SimpleNamespace(
@@ -139,7 +153,7 @@ def context(values: Mapping[str, object], *, request_id: str,
                    handoff_text=handoff_text,
                    instructions=str(instructions) if instructions else None,
                    handoff_dir=handoff_dir, role_found=role_found, additions=additions,
-                   runs_dir=str(Layout(MODULE).state_dir(env) / "runs"),
+                   user_settings=user_settings, codex_trust=trust, runs_dir=str(Layout(MODULE).state_dir(env) / "runs"),
                    moxi=moxi_command(), host=host,
                    comms_codex=codex_comms and presets.comms_codex(),
                    comms_codex_resume=(codex_comms and bool((replay or {}).get("resume"))
@@ -243,8 +257,8 @@ def _read(row: str, name: object) -> str | None:
 
 
 __all__ = ["COMPOSERS", "HOST", "LINKS", "TURNS_INTERFACE", "Additions", "Composition",
-           "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
-           "Unreadable",
+           "Context", "NoBrief", "NotYet", "PromptFile", "SettingsFile", "TooLong",
+           "TurnsAdditions", "Unreadable",
            "build", "compose", "context", "child_env", "first_turn", "host_script",
            "identity_block", "installed", "launch_additions", "moxi_command", "scrub", "stamps",
            "write_prompt"]

@@ -16,7 +16,10 @@ import pytest
 from moxi_slots import answer, places
 from moxi_slots.answer import Frame, drive, prune, save_mismatch
 from moxi_slots.model import NOT_SETTLED
-from moxi_slots.screens import CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR
+from moxi_slots.errors import UsageError
+from moxi_slots.screens import (CLAUDE_BYPASS_WARNING, CLAUDE_CHROME_DIALOG,
+                                CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_THEME_PICKER,
+                                CLAUDE_TRUST_DIR, CLAUDE_WELCOME)
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/answer.py",
                                  "packages/slots/src/moxi_slots/screens*")
@@ -116,6 +119,13 @@ def dev(**kw) -> FakeDialog:
                       ["", "  Enter to confirm · Esc to cancel"], **kw)
 
 
+def bypass(**kw) -> FakeDialog:
+    return FakeDialog(["  WARNING: Claude Code running in Bypass Permissions mode", "",
+                       "  By proceeding, you accept all responsibility.", ""],
+                      ["No, exit", "Yes, I accept"],
+                      ["", "  Enter to confirm · Esc to cancel"], **kw)
+
+
 def exit_dialog(items=("shell · sleep 600",), **kw) -> FakeDialog:
     kw.setdefault("on_enter", "die")
     return FakeDialog(["  Background work is running", "",
@@ -134,6 +144,14 @@ def test_the_trust_screen_gets_one_down_then_enter_on_the_settled_read():
     # Enter went after the redraw, on the option, with the new row held 0.3 s.
     assert marked_at_enter == 1
     assert enter_at >= down_at + pane.delay + answer.SETTLE_GAP
+
+
+def test_the_bypass_warning_gets_one_down_then_enter():
+    pane = bypass()
+    done = drive(pane, CLAUDE_BYPASS_WARNING, 5)
+    assert (done.outcome, done.why) == ("gone", "")
+    assert pane.sent() == ["Down", "Enter"]
+    assert pane.keys[-1][2] == 1
 
 
 def test_a_slow_redraw_is_waited_for_not_answered_early():
@@ -281,6 +299,18 @@ def test_a_gone_pane_is_no_pane():
         sleep = staticmethod(lambda s: None)
 
     assert drive(Gone(), CLAUDE_TRUST_DIR, 5).outcome == "no-pane"
+
+
+@pytest.mark.parametrize("screen", [CLAUDE_THEME_PICKER, CLAUDE_WELCOME,
+                                    CLAUDE_CHROME_DIALOG], ids=lambda s: s.name)
+def test_a_read_only_screen_is_refused_before_any_read(screen, monkeypatch):
+    def no_read(slot):
+        raise AssertionError("the pane was looked up")
+
+    monkeypatch.setattr(answer, "_run_pane", no_read)
+    with pytest.raises(UsageError, match=f"the {screen.name} screen is read, never "
+                                         "answered"):
+        answer.answer_screen(1, screen, wait_s=5)
 
 
 # -- the mismatches store ---------------------------------------------------------------
