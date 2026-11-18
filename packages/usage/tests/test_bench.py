@@ -1006,7 +1006,9 @@ def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds
     for e in (unstamped, stamped_off, agent):
         assert mark.on_tool(e) is None
     assert mark.floor(unstamped) == mark.floor(stamped_off) == mark.NEVER
-    # Each path's fastest batch: the code's cost, not a slow moment on the machine.
+    # Each path's fastest batch: the code's cost, not a slow moment on the machine. A timed
+    # record kept before this test took the minimum holds medians, so its older readings
+    # run higher than these and aren't compared with them.
     times = {name: per_call_ms(run, OFF_CALLS, take=min) for name, run in (
         ("unstamped", lambda: mark.on_tool(unstamped)),
         ("stamped off", lambda: mark.on_tool(stamped_off)),
