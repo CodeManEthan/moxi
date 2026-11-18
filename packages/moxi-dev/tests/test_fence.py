@@ -193,7 +193,7 @@ def test_on_windows_every_module_home_is_in_the_tests_profile_spelled_long(monke
     assert env["XDG_RUNTIME_DIR"] == env["TEMP"] + "\\run"
 
 
-def test_a_profile_dir_is_a_new_directory_in_the_tests_own_profile(fence):
+def test_a_profile_dir_is_new_and_in_the_tests_own_profile(fence):
     store = fence.profile_dir("store")
     assert store.is_dir() and store.parent == fence.home
     if testing.WINDOWS:
