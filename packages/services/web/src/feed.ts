@@ -10,6 +10,9 @@
 
 import type { ApiResult } from "/m/ui/client.js";
 
+import type { Ends } from "./acts-model.ts";
+import type { One, Run } from "./opened-model.ts";
+
 /** A verdict's states, best first. */
 export const VERDICTS = ["ok", "warn", "fail", "off"] as const;
 export type VerdictState = (typeof VERDICTS)[number];
@@ -286,6 +289,47 @@ export function parseStatus(data: unknown): Status | null {
       || !Array.isArray(data.lines) || !data.lines.every(isStrOrNull) || !isStrOrNull(data.fix)) return null;
   return { job: data.job, act: data.act, id: data.id, state: data.state as JobState, code: data.code,
            lines: [...data.lines], fix: data.fix };
+}
+
+const isNum = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+function runOf(value: unknown): Run | null {
+  if (!isObj(value) || !isStrOrNull(value.at) || !isStrOrNull(value.result) || !isIntOrNull(value.exit)
+      || !(value.seconds === null || isNum(value.seconds))) return null;
+  return { at: value.at, result: value.result, exit: value.exit, seconds: value.seconds };
+}
+
+/** `/api/row`'s value less its row, which the list already has, or null when it isn't
+ * one. */
+export function parseOne(data: unknown): One | null {
+  if (!isObj(data) || parseRow(data.row) === null || !Array.isArray(data.runs) || !isStrOrNull(data.log)
+      || !isStrOrNull(data.unit) || !Array.isArray(data.units) || !data.units.every(isStr)) return null;
+  const runs: Run[] = [];
+  for (const item of data.runs) {
+    const run = runOf(item);
+    if (run === null) return null;
+    runs.push(run);
+  }
+  const t = data.today;
+  if (t !== null && (!isObj(t) || !Number.isInteger(t.runs) || !Number.isInteger(t.failed) || !isBool(t.more))) return null;
+  const today = t === null ? null : { runs: t.runs as number, failed: t.failed as number, more: t.more as boolean };
+  return { runs, log: data.log, unit: data.unit, units: [...data.units], today };
+}
+
+/** `/api/ends`' value, or null when it isn't one. Unread counts stay null, never 0. */
+export function parseEnds(data: unknown): Ends | null {
+  if (!isObj(data) || !isBool(data.read) || !isStrOrNull(data.why) || !isIntOrNull(data.open)
+      || !isIntOrNull(data.jobs)) return null;
+  let sessions: Ends["sessions"] = null;
+  if (data.sessions !== null) {
+    if (!Array.isArray(data.sessions)) return null;
+    sessions = [];
+    for (const item of data.sessions) {
+      if (!isObj(item) || !Number.isInteger(item.slot) || !isStrOrNull(item.label)) return null;
+      sessions.push({ slot: item.slot as number, label: item.label });
+    }
+  }
+  return { read: data.read, why: data.why, sessions, open: data.open, jobs: data.jobs };
 }
 
 /** The text an answer gives: its `refused`, `conflict` or `error`. */

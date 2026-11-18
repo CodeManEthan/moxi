@@ -39,6 +39,8 @@ export interface Line {
   text: string | null;
   dim?: string | null;
   mono?: string | null;
+  /** The mono text has `Copy` beside it. */
+  copy?: boolean;
   link?: { text: string; module: string; route: string } | null;
   /** More lines under it (the runs, the details). */
   more?: string[];
@@ -130,8 +132,22 @@ function stateLine(row: Row, one: One | null, when: When): Line {
   const fix = row.verdict.fix;
   const shows = (row.verdict.state === "fail" || row.verdict.state === "warn") && fix && !fixIsAct(row, fix);
   return { label: "State", text, dim: row.state === "active" && row.pid !== null ? `pid ${row.pid}` : null,
-           mono: shows ? fix : null, more };
+           mono: shows ? fix : null, copy: Boolean(shows), more };
 }
+
+/** An adopted Windows timer, a task Task Scheduler runs: what Moxi can know of it. */
+export function adoptedTask(row: Row): boolean {
+  return row.platform === "win32" && row.form === "adopted" && row.kind === "timer";
+}
+
+export const KNOWN = "Known";
+export const NOT_KNOWN = "Not known";
+export const TASK_KNOWN = "whether the task is enabled, when it last ran, and that run's result code";
+export const TASK_NOT_KNOWN = "whether the program it started is still running, and what it printed: "
+  + "Task Scheduler keeps neither.";
+/** The advice under `Not known`, dim. */
+export const TASK_JUDGED = "It is judged as a timer. If it is meant to keep running, remove it and adopt it again "
+  + "as a program that keeps running; it is then judged by whether it runs.";
 
 /** The opened row's lines, in the drawing's order, each only when its fact is there. */
 export function openedLines(row: Row, one: One | null, ends: Ends | null, when: When, opened: Opened): Line[] {
@@ -159,7 +175,7 @@ export function openedLines(row: Row, one: One | null, ends: Ends | null, when: 
     const text = needsIt(ends, opened.phone);
     if (text !== null) lines.push({ label: "Needs it", text });
   }
-  if (desk && one?.log) lines.push({ label: "Log", text: null, mono: one.log });
+  if (desk && one?.log) lines.push({ label: "Log", text: null, mono: one.log, copy: true });
   if (desk && mine && row.argv !== null && row.argv.every((w) => w !== null)) {
     const on = row.flag === null ? null : !row.flag ? "off" : row.kind === "daemon" ? "on at login" : "on";
     lines.push({ label: "Command", text: null, mono: row.argv.join(" "),
@@ -170,13 +186,16 @@ export function openedLines(row: Row, one: One | null, ends: Ends | null, when: 
     lines.push({ label: "Switch", text: row.flag === null ? "can't be read" : row.flag ? "on" : "off", dim: row.switch,
                  link: { text: `Settings › ${row.module}`, module: "ui", route: `settings/${row.module}` } });
   }
+  if (adoptedTask(row)) {
+    lines.push({ label: KNOWN, text: TASK_KNOWN }, { label: NOT_KNOWN, text: TASK_NOT_KNOWN, more: [TASK_JUDGED] });
+  }
   const unit = one?.unit ?? null;
   if (unit !== null) {
     const how = row.form === "written" ? "a command you added; Moxi wrote the unit"
       : row.form === "adopted" ? "adopted; Moxi never writes its file"
         : row.has_switch ? `comes with ${row.module}`
           : `comes with ${row.module}${JOIN}on while ${row.module} is installed`;
-    lines.push({ label: "Unit", text: null, mono: unit, dim: how });
+    lines.push({ label: "Unit", text: null, mono: unit, copy: true, dim: how });
   }
   if (desk) {
     const more = [row.detail, row.verdict.reason, row.verdict.fix, row.id, ...(one?.units ?? [])]

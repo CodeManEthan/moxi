@@ -37,6 +37,8 @@ VERDICTS = ("ok", "warn", "fail", "off")
 STOPPED = datetime.now(timezone.utc).replace(microsecond=0)
 #: When `web` started, in seconds since the epoch: a minute ago, so it reads a time today.
 WEB_SINCE = time.time() - 60
+#: When `backup` ran, in seconds since the epoch: 15, 10 and 5 minutes ago, oldest first.
+BACKUP_RAN = [time.time() - 60 * m for m in (15, 10, 5)]
 NOT_ANSWERING = "Services' page server isn't answering"
 
 #: The fake supervisor's units, by row name.
@@ -45,7 +47,9 @@ UNITS = {"written": {
     "sync-down": {"kind": "daemon", "enabled": True, "active": False},
     "paused": {"kind": "daemon", "enabled": True, "active": False},
     "spare": {"kind": "daemon", "enabled": False, "active": False},
-    "backup": {"kind": "timer", "enabled": True},
+    "backup": {"kind": "timer", "enabled": True,
+               "runs": [{"at": f"{datetime.fromtimestamp(at, timezone.utc):%Y-%m-%dT%H:%M:%SZ}", "result": "ran",
+                         "exit": 0, "seconds": 1.9} for at in BACKUP_RAN]},
     "agent-run": {"kind": "timer", "enabled": True},
     "stopme": {"kind": "daemon", "enabled": True, "active": True},
     "lostone": {"kind": "daemon", "enabled": False, "active": False},
@@ -285,6 +289,94 @@ def test_sv2_a_running_daemon_says_since_when(seeded, ui_page):
     since = clock(ui_page, WEB_SINCE)
     expect(web).to_have_attribute("fact", re.compile(rf"^running since {since.pattern}$"))
     expect(web).not_to_have_attribute("fact-heavy", "")
+
+
+# --- the opened row ----------------------------------------------------------------------
+
+def opened(panel, ident: str, name: str):
+    """Opens the row `ident` by its `Open` and gives its opened part."""
+    item = row(panel, ident)
+    item.get_by_role("button", name=f"Open {name}", exact=True).click()
+    part = item.locator('[data-part="opened"]')
+    expect(part).to_be_visible()
+    return part
+
+
+def label(part, name: str):
+    return part.locator(f'[data-line="{name}"]')
+
+
+def test_sv3_a_timer_says_when_it_last_ran_and_opened_lists_its_runs(seeded, ui_page):
+    panel = panel_of(ui_page)
+    last = clock(ui_page, BACKUP_RAN[-1])
+    expect(row(panel, "services/backup").locator("moxi-ui-row")).to_have_attribute(
+        "fact", re.compile(rf"^last ran {last.pattern}"))
+    part = opened(panel, "services/backup", "backup")
+    state = label(part, "State")
+    expect(state.locator('[data-line="more"]').first).to_have_text("On schedule: every 5 minutes")
+    expect(state.locator('[data-line="more"]').nth(1)).to_have_text(re.compile(r"^\d+ runs? today, none failed$"))
+    runs = label(part, "Last runs").locator('[data-line="more"]')
+    # Newest first, each `<time> ok · 1.9 s`.
+    expect(runs).to_have_text([re.compile(rf"^{clock(ui_page, at).pattern} ok · 1\.9 s$") for at in reversed(BACKUP_RAN)])
+    expect(label(part, "Command").locator('[data-line="mono"]')).to_have_text("/usr/bin/true")
+    expect(label(part, "Command").locator('[data-line="dim"]')).to_have_text(" · on a schedule · on")
+    expect_path(ui_page, "/m/services/row/backup")
+
+
+def test_sv4_a_timer_whose_runs_launch_a_session_says_it_spends_usage(seeded, ui_page):
+    panel = panel_of(ui_page)
+    expect(row(panel, "services/agent-run").locator("moxi-ui-row")).to_have_attribute(
+        "where", re.compile(r"spends usage$"))
+    part = opened(panel, "services/agent-run", "agent-run")
+    expect(label(part, "Usage").locator('[data-line="text"]')).to_have_text(
+        "Its runs launch agent sessions, so they spend usage")
+    # A row whose runs launch nothing has no Usage line.
+    part = opened(panel, "services/backup", "backup")
+    expect(label(part, "Last runs")).to_have_count(1)
+    expect(label(part, "Usage")).to_have_count(0)
+
+
+def test_sv6_a_failed_daemon_opened_says_its_state_and_how_to_read_its_log(seeded, ui_shell, ui_page):
+    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    reads = []
+    ui_page.on("request", lambda request: reads.append(request.url) if "/m/services/api/row?" in request.url else None)
+    panel = panel_of(ui_page)
+    part = opened(panel, "services/queue-worker", "queue-worker")
+    one = get(ui_shell, "api/row?id=services/queue-worker")
+    expect(label(part, "State").locator('[data-line="text"]')).to_have_text("It failed and is not running.")
+    log = label(part, "Log")
+    expect(log.locator('[data-line="mono"]')).to_have_text(one["log"])
+    assert one["log"].startswith("journalctl --user -u "), one["log"]
+    log.get_by_role("button", name=f"Copy {one['log']}").click()
+    expect(log.get_by_role("button", name=f"Copy {one['log']}")).to_have_text("Copied")
+    assert ui_page.evaluate("navigator.clipboard.readText()") == one["log"]
+    unit = label(part, "Unit")
+    expect(unit.locator('[data-line="mono"]')).to_have_text(one["unit"])
+    expect(unit.locator('[data-line="dim"]')).to_have_text(" · a command you added; Moxi wrote the unit")
+    # Details are folded until asked for, and hold the row's id and its units.
+    details = label(part, "Details")
+    expect(details.locator('[data-line="more"]').first).not_to_be_visible()
+    details.locator("summary").click()
+    expect(details.locator('[data-line="more"]', has_text="services/queue-worker")).to_be_visible()
+    for ident in one["units"]:
+        expect(details.locator('[data-line="more"]', has_text=ident)).to_have_count(1)
+    # Its own read is of this row; closing drops it.
+    assert reads and all("queue-worker" in url for url in reads), reads
+    row(panel, "services/queue-worker").get_by_role("button", name="Close queue-worker", exact=True).click()
+    expect(part).to_have_count(0)
+
+
+def test_a_moxi_row_opened_links_its_module_and_settings(seeded, ui_shell, ui_page):
+    listed = get(ui_shell, "api/rows")["rows"]
+    mod = next(r for r in listed if r["form"] == "module")
+    panel = panel_of(ui_page)
+    part = opened(panel, mod["id"], mod["name"])
+    expect(label(part, "State")).to_have_count(1)
+    expect(label(part, "Command")).to_have_count(0)
+    links = part.locator('[data-part="links"] a')
+    expect(links.first).to_have_attribute("href", re.compile(rf"^/m/({mod['module']}/|ui/modules)$"))
+    if mod["has_settings"]:
+        expect(links.last).to_have_text(f"Settings › {mod['module']}")
 
 
 def test_sv7_a_project_address_shows_its_rows_alone_until_show_all(seeded, ui_shell, ui_page):

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { footLinks, lengthWords, needsIt, openedLines, runWords } from "../src/opened-model.ts";
+import {
+  footLinks, KNOWN, lengthWords, needsIt, NOT_KNOWN, openedLines, runWords, TASK_JUDGED, TASK_KNOWN, TASK_NOT_KNOWN,
+} from "../src/opened-model.ts";
 import { moduleRow, row, timer } from "./fixtures.mjs";
 
 const UTC = {
@@ -22,7 +24,10 @@ test("his running daemon's lines, in the drawing's order", () => {
   const lines = openedLines(r, one({ log: "journalctl --user -u moxi-web.service", unit: "moxi-web.service",
                                     units: ["moxi-web.service"] }), null, WHEN, DESK);
   assert.deepEqual(labels(lines), ["For", "State", "Health", "Log", "Command", "Unit", "Details"]);
-  assert.deepEqual(line(lines, "State"), { label: "State", text: "Running since 08:19.", dim: "pid 4242", mono: null, more: [] });
+  assert.deepEqual(line(lines, "State"), { label: "State", text: "Running since 08:19.", dim: "pid 4242", mono: null, copy: false,
+                                           more: [] });
+  assert.equal(line(lines, "Log").copy, true);
+  assert.equal(line(lines, "Unit").copy, true);
   assert.equal(line(lines, "Health").text, "ok: 200");
   assert.equal(line(lines, "Health").dim, "checked 11:59 · your own check, run every 30 s while this page is open");
   assert.equal(line(lines, "Health").mono, "/usr/bin/curl -f localhost");
@@ -40,6 +45,7 @@ test("a down row's State is its sentence, and a fix that isn't a foot act shows 
   assert.equal(state.mono, null);
   const missing = moduleRow({ verdict: verdict("fail", "missing", { fix: "moxi install cache" }) });
   assert.equal(line(openedLines(missing, null, null, WHEN, DESK), "State").mono, "moxi install cache");
+  assert.equal(line(openedLines(missing, null, null, WHEN, DESK), "State").copy, true);
 });
 
 test("a timer's State, Last runs and Usage", () => {
@@ -98,4 +104,21 @@ test("the phone gets only the lines whose facts reach it", () => {
                   launches_session: true });
   const lines = openedLines(r, one({ log: null, unit: "moxi-web.service" }), null, WHEN, PHONE);
   assert.deepEqual(labels(lines), ["State", "Usage", "Unit"]);
+});
+
+test("an adopted Windows timer says what Task Scheduler keeps and what it doesn't, before its Unit", () => {
+  const task = timer({ form: "adopted", platform: "win32", argv: null, doc: null, unit: "\\Backup\\PhotoSync",
+                       verdict: verdict("ok", "armed") });
+  const lines = openedLines(task, one({ unit: "\\Backup\\PhotoSync" }), null, WHEN, DESK);
+  assert.deepEqual(labels(lines), ["State", KNOWN, NOT_KNOWN, "Unit", "Details"]);
+  assert.equal(line(lines, KNOWN).text, "whether the task is enabled, when it last ran, and that run's result code");
+  assert.equal(TASK_KNOWN, line(lines, KNOWN).text);
+  assert.equal(line(lines, NOT_KNOWN).text, TASK_NOT_KNOWN);
+  assert.ok(TASK_NOT_KNOWN.endsWith("Task Scheduler keeps neither."));
+  assert.deepEqual(line(lines, NOT_KNOWN).more, [TASK_JUDGED]);
+  assert.equal(line(lines, "Unit").dim, "adopted; Moxi never writes its file");
+  // Not on another system, not for a daemon, and not for his written timer there.
+  for (const other of [{ platform: "linux" }, { kind: "daemon" }, { form: "written" }]) {
+    assert.ok(!labels(openedLines({ ...task, ...other }, null, null, WHEN, DESK)).includes(KNOWN), JSON.stringify(other));
+  }
 });

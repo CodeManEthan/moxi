@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Feed, parseProjects, parseRow, parseRows, parseStatus, RETRIES, statusPathOf } from "../src/feed.ts";
+import {
+  Feed, parseEnds, parseOne, parseProjects, parseRow, parseRows, parseStatus, RETRIES, statusPathOf,
+} from "../src/feed.ts";
 import { moduleRow, row, rows, timer } from "./fixtures.mjs";
 
 const settled = () => new Promise((done) => setImmediate(done));
@@ -165,4 +167,25 @@ test("a closed feed drops every later answer and event", async () => {
   feed.topic(rows([timer()]));
   assert.equal(feed.value, null);
   assert.equal(changes(), 0);
+});
+
+test("an opened row's own read and the slots' read parse, and a wrong field refuses the value", () => {
+  const value = { row: timer(), log: "journalctl --user -u moxi-backup.service", unit: "moxi-backup.timer",
+                  units: ["moxi-backup.timer", "moxi-backup.service"], today: { runs: 3, failed: 1, more: false },
+                  runs: [{ at: "2026-11-03T02:00:00Z", result: "ran", exit: 0, seconds: 1.9 },
+                         { at: null, result: null, exit: null, seconds: null }] };
+  assert.deepEqual(parseOne(value), { runs: value.runs, log: value.log, unit: value.unit, units: value.units,
+                                      today: value.today });
+  assert.equal(parseOne({ ...value, today: null }).today, null);
+  for (const bad of [{ row: {} }, { runs: [{ at: 1 }] }, { units: [null] }, { today: { runs: 1 } }, { log: 3 }]) {
+    assert.equal(parseOne({ ...value, ...bad }), null, JSON.stringify(bad));
+  }
+  const ends = { read: true, why: null, sessions: [{ slot: 1, label: "fix it" }, { slot: 2, label: null }], open: 1, jobs: 0 };
+  assert.deepEqual(parseEnds(ends), ends);
+  // Counts the server couldn't read stay null, never 0.
+  const unread = { read: false, why: "slots didn't answer", sessions: null, open: null, jobs: null };
+  assert.deepEqual(parseEnds(unread), unread);
+  for (const bad of [{ read: "yes" }, { sessions: [{ slot: "1" }] }, { open: 1.5 }, { sessions: {} }]) {
+    assert.equal(parseEnds({ ...ends, ...bad }), null, JSON.stringify(bad));
+  }
 });

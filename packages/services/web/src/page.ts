@@ -44,18 +44,21 @@
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, confirm, gateway, gatewayActs, installed, subscribe } from "/m/ui/client.js";
+import { api, components, confirm, gateway, gatewayActs, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import { NO_SUCH_ADDRESS, NOTHING_OPEN, parseRoute, pathToWrite, resolve } from "./address.ts";
 import type { Address } from "./address.ts";
 
-import { Feed, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
+import type { Ends } from "./acts-model.ts";
+import { Feed, parseEnds, parseOne, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
 import type { Projects, Row, Rows, Status } from "./feed.ts";
 import {
   ADD_A_SERVICE, filtered, listShape, noServiceBelongs, pageState, problemLines, PROJECT, projectKeys, READING_AFTER_MS, SHOW_ALL,
   WHAT_A_SERVICE_IS, YOURS,
 } from "./list-model.ts";
 import type { ListShape, PageState, RowView } from "./list-model.ts";
+import { footLinks, openedLines } from "./opened-model.ts";
+import type { Line, One, Opened } from "./opened-model.ts";
 import {
   addBody, addRefused, DAYS, emptyForm, outcomeSaid, shownActs, statusLost, statusSaid,
 } from "./views.ts";
@@ -135,6 +138,27 @@ const STYLES = css`
                 background: var(--moxi-bg-raised); }
   .filt .menu button { padding: 2px 12px; text-align: left; }
   .filt .menu button[aria-current="true"] { font-weight: 600; }
+  /* The opened row: a dim label at the left of each line, as the drawing has it. */
+  .det { padding: 4px 0 8px; border-top: 1px solid var(--moxi-border); margin-top: 2px; }
+  .det .r { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 0 8px; padding: 2px 0; }
+  .det .k { color: var(--moxi-text-dim); font-size: 13px; }
+  .det .f { min-width: 0; }
+  .det .d { color: var(--moxi-text-dim); }
+  .det p.d { font-size: 13px; }
+  .det code { font-size: 12px; }
+  .det .code { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+  .det details.r { display: block; }
+  .det details.r > summary { cursor: pointer; }
+  .det details.r > .f { padding-left: 84px; }
+  .det button.copy { padding: 0; margin: 0; border: 0; background: none; font: inherit; font-size: 13px; cursor: pointer; }
+  .det button.copy:hover:not(:disabled) { background: none; }
+  .det a { color: var(--moxi-text); text-decoration: none; }
+  .det a:hover { text-decoration: underline; }
+  .det .links { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 6px 0 0 84px; font-size: 13px; }
+  @media (max-width: 480px) {
+    .det .r { grid-template-columns: minmax(0, 1fr); }
+    .det details.r > .f, .det .links { padding-left: 0; }
+  }
   .yours { color: var(--moxi-text-dim); padding: 7px 0; }
   .yours button { display: block; padding: 0; margin: 0; border: 0; background: none; font: inherit;
                   color: var(--moxi-text); cursor: pointer; }
@@ -164,10 +188,22 @@ const STYLES = css`
   :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
 `;
 
+/** How long `Copied` stands in for `Copy`, in milliseconds. */
+const COPIED_MS = 1500;
+
 /** What the page last said, and where: a row's id, `ADD`, or null for the page. */
 interface Told {
   where: string | null;
   said: Said;
+}
+
+/** The opened row's own reads: `/api/row`, and `/api/ends` for slots' server. `seen` is
+ * the row as the list last gave it, so a change to it reads the row again. */
+interface OpenReads {
+  id: string;
+  seen: string;
+  one: Feed<One>;
+  ends: Feed<Ends> | null;
 }
 
 /** The job the page follows. */
@@ -216,6 +252,10 @@ export class ServicesPage extends LitElement {
   /** When the page was connected, for the first read's `Reading…`. */
   #since = Date.now();
   #readingTimer: ReturnType<typeof setTimeout> | undefined;
+  #reads: OpenReads | null = null;
+  /** The text whose `Copy` reads `Copied` for a while. */
+  #copied: string | null = null;
+  #copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readAll();
@@ -242,8 +282,10 @@ export class ServicesPage extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#rows, this.#projects, this.#job?.feed]) feed?.close();
+    for (const feed of [this.#rows, this.#projects, this.#job?.feed, this.#reads?.one, this.#reads?.ends]) feed?.close();
     this.#rows = this.#projects = null;
+    this.#reads = null;
+    clearTimeout(this.#copyTimer);
     this.#job = null;
     this.#stop?.();
     this.#stop = null;
@@ -257,6 +299,60 @@ export class ServicesPage extends LitElement {
       this.#take(this.route);
       this.#openPending();
     }
+    this.#readOpen();
+  }
+
+  /** The opened row's own reads: `/api/row` when it opens and whenever the list gives its
+   * row a new value, and `/api/ends` for slots' server when it opens. Closing it drops
+   * them. */
+  #readOpen(): void {
+    const id = this.#open;
+    const row = id === null ? undefined : this.#rows?.value?.rows.find((item) => item.id === id);
+    const reads = this.#reads;
+    if (row === undefined || !this.isConnected) {
+      if (reads !== null && (id === null || reads.id !== id)) this.#dropReads();
+      return;
+    }
+    const seen = JSON.stringify(row);
+    if (reads !== null && reads.id === row.id) {
+      if (reads.seen === seen) return;
+      reads.seen = seen;
+      void reads.one.refresh();
+      return;
+    }
+    this.#dropReads();
+    const changed = (): void => this.requestUpdate();
+    const query = `?id=${encodeURIComponent(row.id)}`;
+    const fresh: OpenReads = {
+      id: row.id, seen,
+      one: new Feed<One>(() => api("services", `api/row${query}`), parseOne, changed),
+      ends: row.ends_slots ? new Feed<Ends>(() => api("services", `api/ends${query}`), parseEnds, changed) : null,
+    };
+    this.#reads = fresh;
+    void fresh.one.refresh();
+    void fresh.ends?.refresh();
+  }
+
+  #dropReads(): void {
+    this.#reads?.one.close();
+    this.#reads?.ends?.close();
+    this.#reads = null;
+  }
+
+  /** Puts `text` on the clipboard; its `Copy` then reads `Copied` for a while. */
+  async #copy(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+    this.#copied = text;
+    clearTimeout(this.#copyTimer);
+    this.#copyTimer = setTimeout(() => {
+      this.#copied = null;
+      this.requestUpdate();
+    }, COPIED_MS);
+    this.requestUpdate();
   }
 
   protected updated(): void {
@@ -431,6 +527,14 @@ export class ServicesPage extends LitElement {
     void job.feed.refresh();
   }
 
+  /** After an act on the opened row, its own reads are read again. */
+  #readAgain(where: string): void {
+    const reads = this.#reads;
+    if (reads === null || reads.id !== where) return;
+    void reads.one.refresh();
+    void reads.ends?.refresh();
+  }
+
   #jobRead(job: Job): void {
     if (job !== this.#job || job.ended) return;
     const feed = job.feed;
@@ -439,6 +543,7 @@ export class ServicesPage extends LitElement {
     if (value !== null && value.state !== "running") {
       job.ended = true;
       this.#told = { where: job.where, said: statusSaid(job.label, value) };
+      this.#readAgain(job.where);
       if (value.state === "done" && job.where === ADD) {
         this.#form = emptyForm();
         if (this.#panel !== null) {
@@ -565,6 +670,7 @@ export class ServicesPage extends LitElement {
         ${opens ? html`<button type="button" slot="acts-one" class="do" data-action="open" aria-expanded=${open ? "true" : "false"}
           aria-label=${`${open ? "Close" : "Open"} ${row.name}`} @click=${() => this.#toggle(row.id)}>${open ? "Close" : "Open"}</button>`
           : nothing}
+        ${open ? this.#opened(row) : nothing}
       </moxi-ui-row>
       <div class="acts" data-part="acts">${(acts ? shownActs(row, this.#phone) : []).map((act) => html`
         <button type="button" class="do" data-action=${act.name} ?disabled=${busy}
@@ -572,6 +678,56 @@ export class ServicesPage extends LitElement {
           @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
       ${told !== null ? this.#saidPart(told) : nothing}
     </div>`;
+  }
+
+  /** The opened row's lines, each only when its fact is there, then its module's links. */
+  #opened(row: Row) {
+    const reads = this.#reads?.id === row.id ? this.#reads : null;
+    const opened: Opened = {
+      phone: this.#phone, usage: installed("usage"),
+      modulePage: components(row.module).some((item) => item.name === "page") ? row.module : null,
+    };
+    const lines = openedLines(row, reads?.one.value ?? null, reads?.ends?.value ?? null, { now: Date.now() / 1000 }, opened);
+    const links = footLinks(row, opened);
+    return html`<div class="det" data-part="opened">
+      ${lines.map((line) => line.label === "Details" ? this.#details(line) : this.#line(line))}
+      ${links.length ? html`<div class="links" data-part="links">${links.map((link) =>
+        this.#link(link, "module-link"))}</div>` : nothing}
+    </div>`;
+  }
+
+  /** One labelled line: its text, or its command in mono with `Copy`, then dim words and
+   * a link at the right; a command under text goes on its own line; then its more lines. */
+  #line(line: Line) {
+    const mono = line.mono ?? null;
+    const code = mono === null ? nothing : html`<span class="code"><code data-line="mono">${mono}</code>${line.copy
+      ? html`<button type="button" class="copy" data-action="copy" aria-label=${`Copy ${mono}`}
+        @click=${() => void this.#copy(mono)}>${this.#copied === mono ? "Copied" : "Copy"}</button>` : nothing}</span>`;
+    const first = line.text !== null;
+    const runs = line.label === "Last runs";
+    return html`<div class="r" data-line=${line.label}><span class="k">${line.label}</span><div class="f">
+        <p>${first ? html`<span data-line="text">${line.text}</span>` : code}${line.dim
+          ? html`<span class="d" data-line="dim"> · ${line.dim}</span>` : nothing}${line.link
+          ? html` <span class="d">·</span> ${this.#link(line.link, "line-link")}` : nothing}</p>
+        ${first && mono !== null ? html`<p>${code}</p>` : nothing}
+        ${(line.more ?? []).map((more) => html`<p class=${runs ? "" : "d"} data-line="more">${more}</p>`)}
+      </div></div>`;
+  }
+
+  /** `Details`, folded: the supervisor's words, the verdict's, the row's ids. */
+  #details(line: Line) {
+    return html`<details class="r" data-line="Details"><summary class="k">${line.label}</summary><div class="f">${
+      (line.more ?? []).map((more) => html`<p class="d" data-line="more">${more}</p>`)}</div></details>`;
+  }
+
+  /** A link to another page in the shell. */
+  #link(link: { text: string; module: string; route: string }, action: string) {
+    return html`<a href=${`/m/${link.module}/${link.route}`} data-action=${action}
+      @click=${(event: MouseEvent) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(link.module, link.route);
+      }}>${link.text}</a>`;
   }
 
   /** `Add a service`: the add form, on its way for a command, and the address says so. */
