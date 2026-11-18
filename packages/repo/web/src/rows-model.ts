@@ -3,7 +3,7 @@
 // read it.
 
 import type { PieceRow, RepoRow, Repos, SpecRow, Unindexed } from "./feed.ts";
-import { type Item, itemOrder, repoItems } from "./items-model.ts";
+import { type Item, itemOrder, leadOrder, repoItems, type Weight } from "./items-model.ts";
 import {
   byGitOrder, canRefuse, type Clock, eventWords, LOCAL, pieceName, recordSeconds, refuseWord, repoName, whenWord,
 } from "./words.ts";
@@ -108,11 +108,11 @@ export function needWords(item: Item): string | null {
   }
 }
 
-/** Line one's fact: heavy, a need's short words; else, at normal weight, `the folder is
+/** Line one's fact: heavy, the short words of the need its row leads with; else, at normal weight, `the folder is
  * gone`, `can't be read`, `no hooks` (in the list with no piece) or `not in the list` (a
  * project's repo with pieces that isn't). */
 export function factOf(repo: RepoRow, items: readonly Item[]): { fact: string | null; heavy: boolean } {
-  for (const item of items) {
+  for (const item of [...items].sort(leadOrder)) {
     if (item.weight !== "need") continue;
     const words = needWords(item);
     if (words !== null) return { fact: words, heavy: true };
@@ -137,20 +137,31 @@ export function specNews(spec: SpecRow, today: string | null, clock: Clock = LOC
   return head + last + (pushed ? ", pushed" : "");
 }
 
-/** The row's news in order: each open `piece` record's break, then each spec's line. */
-export function newsOf(repo: RepoRow, names: Map<string, string>, today: string | null, clock: Clock = LOCAL): string[] {
-  const out: string[] = [];
+/** The row's news, led by its heaviest: each open `piece` record's break, and each spec's
+ * line, ordered as their items are (`leadOrder`); a spec's line with no item comes after
+ * them, newest commit first. */
+export function newsOf(repo: RepoRow, names: Map<string, string>, today: string | null, clock: Clock = LOCAL,
+                       items: readonly Item[] = []): string[] {
+  const news: { text: string; weight: Weight | null; time: number | null }[] = [];
+  const heaviest = (of: (item: Item) => boolean): Item | undefined => [...items].filter(of).sort(leadOrder)[0];
   for (const record of repo.records) {
     if (record.kind !== "piece") continue;
     const name = record.piece === null ? "a piece" : names.get(record.piece) ?? pieceName(record.piece);
     const time = recordSeconds(record.at);
-    out.push(time === null ? `${name} broke` : `${name} broke at ${whenWord(time, today, clock)}`);
+    const text = time === null ? `${name} broke` : `${name} broke at ${whenWord(time, today, clock)}`;
+    const item = heaviest((one) => one.record === record);
+    news.push({ text, weight: item?.weight ?? "need", time: item?.time ?? time });
   }
   for (const spec of repo.specs) {
-    const line = specNews(spec, today, clock);
-    if (line !== null) out.push(line);
+    const text = specNews(spec, today, clock);
+    if (text === null) continue;
+    const item = heaviest((one) => one.spec === spec);
+    news.push({ text, weight: item?.weight ?? null, time: item === undefined ? spec.last_commit_time : item.time });
   }
-  return out;
+  const weighed = (one: { weight: Weight | null }): number => (one.weight === "need" ? 0 : one.weight === "warn" ? 1 : 2);
+  return news
+    .sort((a, b) => weighed(a) - weighed(b) || leadOrder({ weight: "need", time: a.time }, { weight: "need", time: b.time }))
+    .map((one) => one.text);
 }
 
 /** One repo's row. */
@@ -158,7 +169,7 @@ export function repoRow(repo: RepoRow, { home = null, today = null, clock = LOCA
   { home?: string | null; today?: string | null; clock?: Clock } = {}): RowView {
   const items = repoItems(repo, { home, today, clock }).sort(itemOrder);
   const { fact, heavy } = factOf(repo, items);
-  const news = newsOf(repo, shownNames(repo.pieces), today, clock);
+  const news = newsOf(repo, shownNames(repo.pieces), today, clock, items);
   const gone = repo.problems.some((problem) => problem.code === "gone");
   return {
     key: repo.root, repo, unindexed: null, name: repoName(repo, home), where: whereLine(repo), fact, factHeavy: heavy,

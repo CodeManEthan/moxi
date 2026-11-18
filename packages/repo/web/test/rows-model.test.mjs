@@ -46,7 +46,7 @@ test("the fact: a need's short words, heavy; else the quiet ones", () => {
   }
 });
 
-test("line two and the note: breaks, then each spec's line", () => {
+test("line two and the note: led by the heaviest, newest first, no time after a time", () => {
   const notes = repo({
     root: `${HOME}/notes`, pieces: [piece({ id: "notes/secret-gate", event: "pre-commit" })],
     records: [record({ piece: "notes/secret-gate", at: AT("16:40") }), record({ piece: "x/y", at: "soon" })],
@@ -54,12 +54,33 @@ test("line two and the note: breaks, then each spec's line", () => {
             spec({ name: "notes/b", remote: "origin" })],
   });
   assert.deepEqual(line(repoRow(notes, opts)), [
-    "~/notes", "secret-gate", "a piece broke", true, "secret-gate broke at 16:40",
-    "y broke · Auto-commit notes/snapshot: refused since 18:45 · last commit 18:30 · Auto-commit notes/b: last commit 18:30, pushed",
+    "~/notes", "secret-gate", "auto-commit refused", true, "Auto-commit notes/snapshot: refused since 18:45 · last commit 18:30",
+    "secret-gate broke at 16:40 · y broke · Auto-commit notes/b: last commit 18:30, pushed",
   ]);
   const quiet = repoRow(repo({ project: "atlas-api", pieces: [piece()] }), opts);
   assert.deepEqual(line(quiet), ["atlas-api", "commit-rules", null, false, null, null]);
   assert.deepEqual([quiet.open, quiet.refresh, quiet.add], [true, false, false]);
+});
+
+test("a repo leads with its heaviest item: a need before a warning, then the newest, untimed last", () => {
+  const left = problem({ code: "no-module", piece: "inkwell/prose-check", event: "pre-commit" });
+  const lead = (row) => { const drawn = repoRow(row, opts); return [drawn.fact, drawn.lead]; };
+  // A hook that refuses every commit and broke leads over an older break.
+  assert.deepEqual(lead(repo({ problems: [left], records: [
+    record({ piece: "a/old", at: AT("09:00") }), record({ piece: "inkwell/prose-check", at: AT("17:55") })] })),
+  ["refuses every commit", "prose-check broke at 17:55"]);
+  // The newest need leads: a spec refused since 18:45 over a break at 16:40.
+  assert.deepEqual(lead(repo({ records: [record({ piece: "a/b", at: AT("16:40") })],
+                               specs: [spec({ refused_since: T("18:45") })] })),
+                   ["auto-commit refused", "Auto-commit notes/snapshot: refused since 18:45 · last commit 18:30"]);
+  // A need with no time comes after a timed need, but before any warning.
+  assert.deepEqual(lead(repo({ problems: [left], records: [record({ piece: "a/b", at: AT("08:00") })] })),
+                   ["a piece broke", "b broke at 08:00"]);
+  assert.deepEqual(lead(repo({ problems: [problem({ state: "warn", detail: "late" }), left] })),
+                   ["refuses every commit", null]);
+  // A spec's line with no item comes after the news of a need, whatever its time.
+  assert.deepEqual(lead(repo({ records: [record({ piece: "a/b", at: AT("08:00") })], specs: [spec()] })),
+                   ["a piece broke", "b broke at 08:00"]);
 });
 
 test("a spec's line: refused, failed, last commit, and pushed only with a remote and nothing left", () => {
