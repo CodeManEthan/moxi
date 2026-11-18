@@ -32,6 +32,9 @@ tip as read (its head, once the branch is gone), in this order:
    folder is removed. Each removal obeys the removal rule (`removal`). A folder it keeps,
    or a branch git won't delete, is named with why in `Finished`, and the finish stands:
    a later sweep takes the folder once the rule holds.
+7. Remove CI's own refs the build pushed from the remote, where its repo's `ci` names a
+   `ref` or its check recorded pushing one, under the keep rule (`ci_refs.remove`). A
+   ref it could not remove is named with why in `Finished`, and the finish stands.
 
 The finish lock is released however the verb ends once it was taken: only while it
 still points at this finish's own blob. A refusal or a failed action after the verb
@@ -93,8 +96,8 @@ from pathlib import Path
 from moxi import exit as exits
 from moxi import proc
 
-from . import (builds, checking, finish_actions, finish_gates, finish_lock, folders,
-               gitreads, open_builds, places, questions, removal, sweeping, write)
+from . import (builds, checking, ci_refs, finish_actions, finish_gates, finish_lock,
+               folders, gitreads, open_builds, places, questions, removal, sweeping, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
@@ -181,7 +184,8 @@ class Finished:
     the log already held one), the after-append callbacks that failed, and what the
     cleanup did: the folders it `removed`, those it `kept` with why, and the branch:
     `deleted`, or why it stayed (None when the repo keeps its branches or no merge put
-    the work on the target)."""
+    the work on the target); and what became of each of CI's own `refs` the build
+    pushed."""
 
     name: str
     stage: str
@@ -194,6 +198,7 @@ class Finished:
     removed: tuple[Path, ...] = ()
     kept: tuple[removal.Kept, ...] = ()
     branch: str | None = None
+    refs: tuple = ()
 
 
 def finish(name: str, stage: str, *, by: str, settings=None,
@@ -340,11 +345,12 @@ def finish(name: str, stage: str, *, by: str, settings=None,
         released = finish_lock.release(taken)
     cleaned = _clean_up(view.state, name, build, tip, done, root, settings=settings,
                         env=env)
+    refs = ci_refs.remove(written.view.state, build, settings)
     return Finished(name=name, stage=stage, tip=tip, actions=tuple(done),
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
                     released=released, failed=written.failed, removed=cleaned.removed,
-                    kept=cleaned.kept, branch=cleaned.branch)
+                    kept=cleaned.kept, branch=cleaned.branch, refs=refs)
 
 
 def _acts(recorded: list[str], done: list[Action], build: builds.Build,
