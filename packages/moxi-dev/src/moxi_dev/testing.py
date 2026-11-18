@@ -121,8 +121,8 @@ deadline or timeout that fired from one that never did (a 0.3 s timeout that mus
 in under 0.9 s) splits in two. The land-check test carries no `timed`, keeps every
 behaviour assertion, and holds five times the bound with no factor, so a guard that never
 fired fails it and load alone doesn't. Its twin, named `<test>_in_time`, carries `timed`
-and holds the bound times `timed_slack()`. A plain `pytest`, with neither of the values below, runs a
-timed test where it falls, like any other.
+and holds the bound times `timed_slack()`. A plain `pytest`, with neither of the values
+below, runs a timed test where it falls, like any other.
 
 `MOXI_TEST_TIMED_SLACK=<factor>`, read once from the environment pytest starts with, is
 how much slower than the machine that set the budgets this one may be: a finite number
