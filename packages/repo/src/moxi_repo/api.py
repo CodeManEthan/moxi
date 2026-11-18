@@ -1009,7 +1009,7 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 
 # -- reading ------------------------------------------------------------------------------
 
-def rules(path: str | os.PathLike) -> list[str]:
+def rules(path: str | os.PathLike, *, proof: bool = True) -> list[str]:
     """What a committer in the repo at `path` must know, as the lines `moxi repo rules`
     prints: a heading naming the work tree `path` is in, then the lines of each
     registered piece in `RULE_LINES`, the commit-proof piece's `Commit-Check` line last.
@@ -1017,22 +1017,47 @@ def rules(path: str | os.PathLike) -> list[str]:
 
     The pieces and their settings are the repo's, shared by all its work trees; the
     `Commit-Check` line is for the index of the work tree `path` is in, since a linked
-    work tree has its own. A disabled piece is still registered, so its lines print."""
+    work tree has its own. A disabled piece is still registered, so its lines print.
+    With `proof` false the commit-proof piece gives no line, so nothing is written (its
+    line runs `git write-tree`)."""
     repo = _resolve(path)
     top = gitconf.work_tree(path)
     state = _state(repo)
-    found = [pid for pid in RULE_LINES if pid in state.pieces]
-    if not found:
+    if not any(pid in state.pieces for pid in RULE_LINES):
         return [f"no commit rules for {top}"]
-    lines = [f"commit rules for {top}"]
-    for pid in found:
+    return [f"commit rules for {top}", *rule_lines_of(repo, state, top=top, proof=proof)]
+
+
+def rule_lines_of(repo: Repo, state: State, *, top: Path, proof: bool = True) -> list[str]:
+    """The lines `rules` prints under its heading, from a repo and the `State` already
+    read from it: each registered piece's of `RULE_LINES`, for the work tree `top`. With
+    `proof` false the commit-proof piece gives none; then no git runs and nothing is
+    written."""
+    lines = []
+    for pid in RULE_LINES:
+        if pid not in state.pieces or (pid == COMMIT_PROOF and not proof):
+            continue
         section = state.pieces[pid]
         lines += RULE_LINES[pid](repo, settings_of(section), top=top,
                                  enabled=enabled(section))
     return lines
 
 
-def status(path: str | os.PathLike | None = None) -> list[dict]:
+def own_hooks(repo: Repo, events) -> list[str]:
+    """The git events not in `events` whose git hook in the repo's hooks dir is the user's
+    own: a runnable file named for the event that is not repo's shim. One listing of the
+    hooks dir; a sample (`pre-commit.sample`) is named for no event."""
+    try:
+        names = sorted(entry.name for entry in os.scandir(repo.hooks_dir))
+    except OSError:
+        return []
+    return [name for name in names if name in EVENTS and name not in events
+            and _runnable(repo.hooks_dir / name)
+            and shim.shim_event(repo.hooks_dir / name) is None]
+
+
+def status(path: str | os.PathLike | None = None, *, with_rules: bool = False
+           ) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
     enabled, fail policy, order, settings and whether a doctor record of it is open; its
@@ -1041,8 +1066,15 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
     after the pieces, or alone while each of them is disabled, None in launcher mode and
     when there is none), and `command`, the text git runs for it as repo wrote it (the
     config entry's command, the shim, or the launcher; None when it can't be read or
-    nothing of repo's runs); and its `records` each doctor record repo has open for it
-    (`_records.open_of`). Each of its `problems` is a `Problem`."""
+    nothing of repo's runs); its `own_hooks` (`own_hooks`); and its `records` each doctor
+    record repo has open for it (`_records.open_of`). Each of its `problems` is a
+    `Problem`.
+
+    `with_rules` adds, for each repo that can be opened, `rules`: the lines `rules` prints
+    for its main work tree under its heading, without the commit-proof piece's line, built
+    from the config already read, so no git runs for them and nothing is written (None
+    when they can't be built); and `proof`, whether the commit-proof piece is registered
+    there."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -1063,17 +1095,19 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
             else:
                 code, detail = "unreadable", _unreadable_repo(key, entry) or why
             out.append({"root": root, "common_dir": entry.get("common_dir"),
-                        "indexed": True, "pieces": [], "events": {},
+                        "indexed": True, "pieces": [], "events": {}, "own_hooks": [],
                         "records": _records.open_of(common),
                         "problems": [Problem(detail,
                                              f"moxi repo git-hooks remove {_arg(root)}",
                                              state="warn", code=code)]})
             continue
-        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good))
+        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good,
+                              with_rules=with_rules))
     return out
 
 
-def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
+def _status_of(repo: Repo, *, in_index: bool, version, good: dict,
+               with_rules: bool = False) -> dict:
     state = _state(repo)
     problems: list[Problem] = []
     listed = []
@@ -1207,11 +1241,19 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                                     f"{path}, which nothing runs, and another git hook took "
                                     f"{path.with_name(event)}; merge them or remove one",
                                     state="warn", code="left-hook-taken", event=event))
-    return {"root": str(repo.root), "common_dir": str(repo.common_dir),
-            "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
-            "git_version": gitconf.version_text(version), "mode": mode,
-            "mode_set": state.mode_set, "pieces": listed, "events": events,
-            "records": _records.open_of(repo.common_dir), "problems": problems}
+    out = {"root": str(repo.root), "common_dir": str(repo.common_dir),
+           "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
+           "git_version": gitconf.version_text(version), "mode": mode,
+           "mode_set": state.mode_set, "pieces": listed, "events": events,
+           "own_hooks": own_hooks(repo, {p["event"] for p in listed}),
+           "records": _records.open_of(repo.common_dir), "problems": problems}
+    if with_rules:
+        out["proof"] = COMMIT_PROOF in state.pieces
+        try:
+            out["rules"] = rule_lines_of(repo, state, top=repo.root, proof=False)
+        except Exception:  # noqa: BLE001 - the rest of the repo's listing still reads
+            out["rules"] = None
+    return out
 
 
 def _runnable(path: Path) -> bool:
@@ -1274,7 +1316,7 @@ def __dir__():
 
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "SEEDS", "SETTING_CHECKS",
            "RULE_LINES", "EVERYWHERE", "available", "add", "remove", "enable", "disable",
-           "refresh", "rules", "status",
+           "refresh", "rules", "rule_lines_of", "own_hooks", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
            "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

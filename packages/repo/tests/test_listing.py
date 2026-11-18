@@ -1,7 +1,7 @@
 """What a listing reads beside the text it prints: what kind of problem it names
-(`Problem.code`, its piece and event, whether a refresh fixes it) and the path of the
-user's own git hook that runs after the pieces (`existing_hook`). The text each problem
-prints is unchanged."""
+(`Problem.code`, its piece and event, whether a refresh fixes it), the path of the user's
+own git hook that runs after the pieces (`existing_hook`), and the events where only his
+own hook runs (`own_hooks`). The text each problem prints is unchanged."""
 
 from __future__ import annotations
 
@@ -246,3 +246,47 @@ def test_in_launcher_mode_the_other_tools_hook_is_not_his_own_hook(demo):
     assert event["via"] == "launcher" and event["existing"] == hook
     assert event["existing_hook"] is None
 
+
+# -- own_hooks ------------------------------------------------------------------------------
+
+def test_own_hooks_are_his_runnable_hooks_on_events_with_no_piece(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    api.add(repo, ["demo/gate"], mode="shim")
+    assert listed(repo)["own_hooks"] == []
+    hook_file(hooks / "pre-push")
+    hook_file(hooks / "post-merge", runnable=False)
+    hook_file(hooks / "commit-msg.sample")
+    hook_file(hooks / "not-an-event")
+    # The pre-commit shim is repo's, and its event has a piece anyway.
+    assert listed(repo)["own_hooks"] == ["pre-push"]
+    hook_file(hooks / "post-checkout", (hooks / "pre-commit").read_text(encoding="utf-8"))
+    assert listed(repo)["own_hooks"] == ["pre-push"]
+
+
+def test_own_hooks_skip_an_event_whose_pieces_are_off(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    hook_file(hooks / "pre-commit")
+    api.add(repo, ["demo/gate"], mode="shim")
+    api.disable(repo, "demo/gate")
+    found = listed(repo)
+    assert found["own_hooks"] == []
+    assert found["events"]["pre-commit"]["existing_hook"] == str(hooks / "pre-commit")
+
+
+def test_own_hooks_of_a_launcher_repo_are_read_in_the_hooks_dir_git_reads(demo):
+    repo = demo.repo()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    api.add(repo, ["demo/gate"], mode="shim")
+    hook_file(repo / ".githooks" / "pre-push")
+    hook_file(repo / ".git" / "hooks" / "post-merge")
+    assert listed(repo)["own_hooks"] == ["pre-push"]
+
+
+def test_a_gone_repo_has_no_own_hooks(demo):
+    repo = demo.repo()
+    api.add(repo, "demo/gate")
+    shutil.rmtree(repo)
+    [found] = api.status()
+    assert found["own_hooks"] == []
