@@ -226,10 +226,10 @@ def test_an_add_writes_the_pieces_into_git_config(demo, copy):
 
 def test_an_add_in_launcher_mode_answers_the_chain_line_he_adds(demo, copy):
     repo = demo.repo("copy/alpha-notes")
-    hook = repo / ".git" / "hooks" / "pre-commit"
-    hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    hook.chmod(0o755)
-    api.add(repo, mode="launcher")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    hook = repo / ".githooks" / "pre-commit"
+    api.add(repo, mode="shim")
     plan = plan_of("add", repo, ["demo/gate"])
     answer = sent("add", repo, plan["digest"], ["demo/gate"])
     assert answer["outcome"] == "done"
@@ -379,7 +379,8 @@ def test_with_no_terminal_record_an_act_is_refused_with_uis_line_and_no_anchor_c
         answer = sent(act, repo, plan["digest"], PIECES[act])
         assert answer["outcome"] == "refused" and answer["refusal"]["code"] is None
         text = answer["refusal"]["text"]
-        assert "refuses to write" in text and "MOXI_ANCHOR_HOME" not in text, text
+        assert text.startswith("Moxi has no record of the environment your terminal uses")
+        assert "MOXI_ANCHOR_HOME" not in text, text
     assert written(repo) == before
 
 
