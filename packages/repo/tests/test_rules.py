@@ -257,3 +257,89 @@ def test_rule_lines_skips_empty_values():
     assert rule_lines({"refused-trailer": ["", "Round"], "tag-pattern": [""],
                        "rule": ["", "a rule"]}) == [
         "- trailers this repo refuses: Round", "- a rule"]
+
+
+# -- the lines read without the proof piece's ------------------------------------------------
+
+def objects(repo) -> int:
+    """How many loose and packed objects the repo holds."""
+    counts = dict(line.split(": ", 1) for line in
+                  git(repo, "count-objects", "-v").stdout.splitlines())
+    return int(counts["count"]) + int(counts["in-pack"])
+
+
+def with_both(repo, capsys) -> None:
+    assert run(capsys, "git-hooks", "add", str(repo), PROOF)[0] == 0
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE, "--set", "refused-trailer=Round",
+               "--set", "rule=say what changed and why in plain words")[0] == 0
+
+
+def test_without_proof_the_proof_piece_gives_no_line_and_no_object_is_written(demo, capsys):
+    repo = demo.repo()
+    with_both(repo, capsys)
+    change(repo)
+    before = objects(repo)
+    assert api.rules(repo, proof=False) == [
+        f"commit rules for {repo}", "- trailers this repo refuses: Round",
+        "- say what changed and why in plain words"]
+    assert objects(repo) == before
+    # With it, as the command prints, the line writes the staged tree.
+    assert api.rules(repo)[-1] == proof_of(repo)
+    assert objects(repo) > before
+
+
+def test_the_listing_reads_the_rules_from_the_config_it_read_and_runs_no_more_git(
+        demo, capsys, monkeypatch):
+    from moxi import proc
+
+    repo = demo.repo()
+    with_both(repo, capsys)
+    change(repo)
+    before = objects(repo)
+    runs: list[list[str]] = []
+    real = proc.run
+
+    def counted(argv, *args, **kwargs):
+        runs.append(list(argv))
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(proc, "run", counted)
+    api.status(repo)  # anything read once per process is read now
+    runs.clear()
+    [plain] = api.status(repo)
+    without = list(runs)
+    runs.clear()
+    [listed] = api.status(repo, with_rules=True)
+    assert runs == without and not any("write-tree" in argv for argv in runs)
+    assert listed["rules"] == ["- trailers this repo refuses: Round",
+                               "- say what changed and why in plain words"]
+    assert listed["proof"] is True and "rules" not in plain and "proof" not in plain
+    assert objects(repo) == before
+
+
+def test_the_listings_rules_are_empty_or_name_no_proof_as_the_repo_has_them(demo, capsys):
+    repo = demo.repo()
+    [listed] = api.status(repo, with_rules=True)
+    assert (listed["rules"], listed["proof"]) == ([], False)
+    assert run(capsys, "git-hooks", "add", str(repo), PROOF)[0] == 0
+    [listed] = api.status(repo, with_rules=True)
+    assert (listed["rules"], listed["proof"]) == ([], True)
+    assert run(capsys, "git-hooks", "disable", str(repo), PROOF)[0] == 0
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE, "--set", "rule=one")[0] == 0
+    assert run(capsys, "git-hooks", "disable", str(repo), PIECE)[0] == 0
+    [listed] = api.status(repo, with_rules=True)
+    assert listed["rules"] == [DISABLED, "- one"] and listed["proof"] is True
+
+
+def test_a_listings_rules_that_cant_be_built_are_none_and_the_rest_reads(
+        demo, capsys, monkeypatch):
+    repo = demo.repo()
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE)[0] == 0
+
+    def broken(*args, **kwargs):
+        raise ValueError("no lines")
+
+    monkeypatch.setitem(api.RULE_LINES, PIECE, broken)
+    [listed] = api.status(repo, with_rules=True)
+    assert listed["rules"] is None and listed["proof"] is False
+    assert [p["id"] for p in listed["pieces"]] == [PIECE]

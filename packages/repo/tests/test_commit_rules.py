@@ -449,8 +449,9 @@ def test_everywhere_leaves_a_disabled_piece_and_a_repos_own_settings_alone(demo,
 
     git(alpha, "config", f"moxi-repo.piece.{PIECE}.order", "7")
     found = moxi.modules.load("repo")
-    for ext in moxi.modules.extensions("moxi.installs"):
-        getattr(ext.load(), "on_install")("repo", found)
+    # Only repo's listener: another module's would print its own lines.
+    [ext] = [e for e in moxi.modules.extensions("moxi.installs") if e.module == "repo"]
+    getattr(ext.load(), "on_install")("repo", found)
     out = capsys.readouterr().out
     assert out == f"rewrote {PIECE} (commit-msg, closed) in {alpha}\n"
     assert piece_config(alpha)["order"] != ["7"]
