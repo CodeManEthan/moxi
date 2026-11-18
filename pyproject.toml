@@ -67,6 +67,8 @@ dev = ["moxi-dev"]
 # check-workflow and check-job name the CI job whose success on a push to main the gate
 # wants at the tagged commit. check-job is also the check GitHub requires before main
 # moves (moxi publishing github apply), so that job runs on pushes to every branch.
+# full-jobs names, each by its exact job name, the Windows and macOS jobs that must also
+# have concluded success in that run before a tag releases.
 [tool.moxi-publishing]
 not-ready = [
     "moxi",
@@ -95,6 +97,16 @@ not-ready = [
 ready = []
 check-workflow = "ci.yml"
 check-job = "linux"
+full-jobs = [
+    "other (windows-latest)",
+    "other (macos-latest)",
+    "web (macos-latest)",
+    "web (windows-latest)",
+    "browser-other (windows-latest, chromium)",
+    "browser-other (macos-latest, chromium)",
+    "browser-other (macos-latest, webkit)",
+    "secrets-windows",
+]
 
 [tool.ruff]
 extend-exclude = ["packages/moxi/src/moxi/_vendor"]
