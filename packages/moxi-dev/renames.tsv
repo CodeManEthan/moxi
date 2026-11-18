@@ -16423,3 +16423,11 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(pare
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removeprefix("worktree ")).resolve() == want	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
+rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
+rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
