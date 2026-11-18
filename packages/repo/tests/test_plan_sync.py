@@ -7,6 +7,7 @@ named, item by item."""
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 from pathlib import Path
@@ -304,3 +305,46 @@ def test_no_verb_takes_a_repos_lock_twice(demo, monkeypatch):
         taken.clear()
         verb()
         assert sorted(taken) == sorted(set(taken)), taken
+
+
+def test_removing_everything_lets_go_of_the_lock_before_it_deletes_the_lock_file(
+        demo, monkeypatch):
+    from moxi import files
+
+    repo, other = demo.repo(), demo.repo("other")
+    for where in (repo, other):
+        api.add(where, ["demo/gate"], mode="shim")
+    there_at_release: list[bool] = []
+    lock = files.lock
+
+    @contextlib.contextmanager
+    def watching(path, **kwargs):
+        with lock(path, **kwargs):
+            yield
+            if Path(path).name == api.HOOKS_LOCK:
+                there_at_release.append(Path(path).exists())
+
+    monkeypatch.setattr(files, "lock", watching)
+    api.remove(repo)
+    assert there_at_release == [True]
+    assert not (repo / ".git" / "moxi-repo").exists()
+    there_at_release.clear()
+    assert api.teardown().cleaned == [str(other)]
+    assert there_at_release == [True]
+    assert not (other / ".git" / "moxi-repo").exists()
+
+
+def test_removing_everything_is_fine_when_the_lock_file_is_already_gone(demo, monkeypatch):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    remove_all = gitconf.remove_all
+
+    def and_another_takes_the_lock_file(where, state=None, **kwargs):
+        lines = remove_all(where, state, **kwargs)
+        (where.own_dir / api.HOOKS_LOCK).unlink()
+        return lines
+
+    monkeypatch.setattr(gitconf, "remove_all", and_another_takes_the_lock_file)
+    assert api.remove(repo).lines[-1] == f"removed repo's git hooks from {repo}"
+    assert not (repo / ".git" / "moxi-repo").exists()
+    assert not api.indexed_at(repo)

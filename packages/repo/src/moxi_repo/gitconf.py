@@ -758,11 +758,13 @@ def sync(repo: Repo, state: State, plan: SyncPlan | None = None) -> Sync:
     return out
 
 
-def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
+def remove_all(repo: Repo, state: State | None = None, *, final: bool = False,
+               keep: str | None = None) -> list[str]:
     """Remove everything repo wrote to the repo: sections, entries, shims (moving each
     `.local` back), the launcher and `<common git dir>/moxi-repo/`. `final` is repo's own
     uninstall: a moved git hook that can't go back is no longer recorded either, and its
-    line says so."""
+    line says so. `keep` names a file in `moxi-repo/` to leave, with the folder: the lock
+    the caller holds, which it removes once it has let go of it."""
     state = state or read(repo)
     lines: list[str] = []
     for event in sorted(state.entries):
@@ -778,8 +780,16 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -
     # A moved git hook that couldn't go back stays recorded, so a later `remove` (once
     # its slot is free) still moves it back; after repo's own uninstall nothing would.
     _write_moved(repo, state, set() if final else _still_moved(repo, moved, set()))
-    if repo.own_dir.exists():
+    if keep is None and repo.own_dir.exists():
         shutil.rmtree(repo.own_dir)
+    elif keep is not None and repo.own_dir.is_dir():
+        for entry in repo.own_dir.iterdir():
+            if entry.name == keep:
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink(missing_ok=True)
     return lines
 
 

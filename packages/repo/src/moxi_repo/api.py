@@ -389,6 +389,20 @@ def _hooks_lock(repo: Repo) -> Iterator[None]:
         yield
 
 
+def _remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
+    """`gitconf.remove_all` under the repo's lock (reading the State there when none is
+    given), then the lock file and its folder once the lock is let go: a file held open
+    can't be deleted on every system. A lock file another process removed first is fine,
+    and so is a folder something else wrote in meanwhile, which stays."""
+    with _hooks_lock(repo):
+        lines = gitconf.remove_all(repo, state or _state(repo), final=final,
+                                   keep=HOOKS_LOCK)
+    (repo.own_dir / HOOKS_LOCK).unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        repo.own_dir.rmdir()
+    return lines
+
+
 def _version(*, need: bool = True) -> tuple[int, int, int] | None:
     version = gitconf.git_version()
     if not need:
@@ -587,31 +601,29 @@ def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...
                     why=f"that repo is gone and {repo.root}, which was left as it is, "
                     "holds the path now")
         return report
-    with _hooks_lock(repo):
-        state = _state(repo)
+    if not piece_ids:
         try:
-            if piece_ids:
-                for pid in piece_ids:
-                    if pid not in state.pieces:
-                        raise Usage(f"{pid} is not registered in {repo.root}")
-                for pid in piece_ids:
-                    gitconf.remove_piece(repo, pid, state)
-                    _records.close_piece(repo.common_dir, pid)
-                    report.lines.append(f"removed {pid} from {repo.root}")
-                report.take(repo.root, gitconf.sync(repo, state))
-            else:
-                # This removes the lock's own folder too; the lock stays held until the
-                # block ends.
-                report.lines += gitconf.remove_all(repo, state)
+            report.lines += _remove_all(repo)
         except gitconf.GitError as exc:
             raise Failure(str(exc)) from None
-        if not piece_ids:
-            _records.close_repo(repo.common_dir)
-            _index_drop(repo.key)
-    if piece_ids:
-        _sweep(repo)
-    else:
+        _records.close_repo(repo.common_dir)
+        _index_drop(repo.key)
         report.lines.append(f"removed repo's git hooks from {repo.root}")
+        return report
+    with _hooks_lock(repo):
+        state = _state(repo)
+        for pid in piece_ids:
+            if pid not in state.pieces:
+                raise Usage(f"{pid} is not registered in {repo.root}")
+        try:
+            for pid in piece_ids:
+                gitconf.remove_piece(repo, pid, state)
+                _records.close_piece(repo.common_dir, pid)
+                report.lines.append(f"removed {pid} from {repo.root}")
+            report.take(repo.root, gitconf.sync(repo, state))
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
+    _sweep(repo)
     return report
 
 
@@ -1001,8 +1013,7 @@ def teardown() -> Teardown:
                 if repo is not None:
                     what = _removing(repo, state)
                     shims = not repo.hooks_inside and shim.our_shims(repo.hooks_dir)
-                    with _hooks_lock(repo):
-                        report.lines += gitconf.remove_all(repo, state, final=True)
+                    report.lines += _remove_all(repo, state, final=True)
                     line += f"; removed repo's {what} from {repo.common_dir} too"
                     if not repo.hooks_inside:
                         line += (f"; its hooks dir {repo.hooks_dir} is outside that git dir, "
@@ -1015,8 +1026,7 @@ def teardown() -> Teardown:
                 if left is not None:
                     outside.append((left, moved))
                 continue
-            with _hooks_lock(repo):
-                report.lines += gitconf.remove_all(repo, state, final=True)
+            report.lines += _remove_all(repo, state, final=True)
             _records.close_repo(repo.common_dir)
             _index_drop(key)
         except (gitconf.GitError, OSError, IndexUnreadable, Busy) as exc:
