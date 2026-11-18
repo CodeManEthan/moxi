@@ -259,6 +259,16 @@ test("items: needs first, oldest first, no time after a time, a gone repo last",
   assert.deepEqual(items.map((item) => item.name), ["c", "b", "d", "w", "q"]);
 });
 
+test("items: one that refuses every commit leads the needs, with no time and before timed ones", () => {
+  const later = repo({ project: "b", records: [record({ piece: "p/x", at: AT("17:00") })] });
+  const earlier = repo({ project: "c", records: [record({ piece: "p/y", at: AT("09:00") })] });
+  const refusing = repo({ project: "lumen-docs", problems: [LEFT] });
+  const quiet = repo({ project: "x", problems: [{ ...LEFT, event: "post-commit" }] });
+  const items = itemsOf(value({ repos: [later, quiet, earlier, refusing] }), { home: HOME, clock: UTC });
+  assert.deepEqual(items.map((item) => item.name), ["lumen-docs", "c", "b", "x"]);
+  assert.equal(items[0].time, null);
+});
+
 test("the verdict's words", () => {
   const need = repo({ project: "a", problems: [problem()] });
   const warn = repo({ project: "b", problems: [problem({ state: "warn" })] });

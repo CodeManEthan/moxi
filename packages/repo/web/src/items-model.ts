@@ -255,12 +255,13 @@ export function repoItems(repo: RepoRow, { home = null, today = null, clock = LO
   return out;
 }
 
-/** Needs before warnings, then by time, oldest first, an item with no time after those
- * with one; a gone repo's items last. Items that tie keep their order. */
+/** Worst first: needs before warnings, and among needs one that stops every act first, as
+ * a row leads with it (`leadOrder`); then by time, oldest first, an item with no time after
+ * those of its weight with one; a gone repo's items last. Items that tie keep their order. */
 export function itemOrder(a: Item, b: Item): number {
   const gone = Number(a.source === "gone") - Number(b.source === "gone");
   if (gone !== 0) return gone;
-  const weight = Number(a.weight === "warn") - Number(b.weight === "warn");
+  const weight = rank(a) - rank(b);
   if (weight !== 0) return weight;
   if (a.time === null || b.time === null) return Number(a.time === null) - Number(b.time === null);
   return a.time - b.time;
@@ -275,12 +276,16 @@ export function stopsEvery(item: Pick<Item, "source" | "problem">): boolean {
 /** What `leadOrder` weighs: an item's weight and time, and whether it stops every act. */
 export type Lead = Pick<Item, "weight" | "time"> & { stops?: boolean };
 
+/** An item's weight as both orders weigh it: 0 a need that stops every act, 1 any other
+ * need, 2 a warning. */
+function rank(one: Lead | Item): number {
+  return one.weight === "warn" ? 2 : ("source" in one ? stopsEvery(one) : one.stops === true) ? 0 : 1;
+}
+
 /** A repo's items as its row leads with them: by weight (a need before a warning, and
  * among needs one that stops every act first), then newest first, an item with no time
  * after those of its weight with one. Items that tie keep their order. */
 export function leadOrder(a: Lead | Item, b: Lead | Item): number {
-  const rank = (one: Lead | Item): number =>
-    one.weight === "warn" ? 2 : ("source" in one ? stopsEvery(one) : one.stops === true) ? 0 : 1;
   const weight = rank(a) - rank(b);
   if (weight !== 0) return weight;
   if (a.time === null || b.time === null) return Number(a.time === null) - Number(b.time === null);
