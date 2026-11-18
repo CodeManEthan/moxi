@@ -134,7 +134,7 @@ test("order: since-time newest first, then started newest first, then key", () =
   assert.deepEqual(ordered([e, c, f, a, d, b]).map((s) => s.key), ["b", "a", "d", "f", "c", "e"]);
 });
 
-test("groups carry their labels and leave out a group with no row", () => {
+test("groups carry their labels, come problem, idle, working, and leave out a group with no row", () => {
   const views = groupsOf([
     session({ key: "w", facts: facts({ turn_open: true }) }),
     session({ key: "p1", trouble: "t" }),
@@ -143,6 +143,13 @@ test("groups carry their labels and leave out a group with no row", () => {
   ]);
   assert.deepEqual(views.map((v) => [v.group, v.label, v.sessions.map((s) => s.key)]),
                    [["problem", "2 problems", ["p1", "p2"]], ["working", "1 working", ["w"]]]);
+  const all = groupsOf([
+    session({ key: "w", facts: facts({ turn_open: true }) }),
+    session({ key: "i" }),
+    session({ key: "p", trouble: "t" }),
+  ]);
+  assert.deepEqual(all.map((v) => [v.group, v.label, v.sessions.map((s) => s.key)]),
+                   [["problem", "1 problem", ["p"]], ["idle", "1 idle", ["i"]], ["working", "1 working", ["w"]]]);
   assert.equal(groupsOf([session({ trouble: "t" })])[0].label, "1 problem");
   assert.equal(groupsOf([session(), session({ key: "k2" })])[0].label, "2 idle");
 });

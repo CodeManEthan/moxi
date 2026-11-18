@@ -32,6 +32,7 @@ __all__ = ["full", "own_panel", "small"]
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
 SID2 = "bbbbbbbb-2222-4222-8222-222222222222"
 SID3 = "cccccccc-3333-4333-8333-333333333333"
+SID4 = "eeeeeeee-5555-4555-8555-555555555555"
 #: The reach line for `start` with launcher left out.
 START_SMALL = ("Interactive Claude Code sessions show here from their start. Codex and OpenCode "
                "sessions started by hand don't.")
@@ -193,13 +194,19 @@ def test_a_trouble_row_and_an_unread_one_are_problems_that_keep_their_state(
     unread, _ = make_endpoint(harness("/srv/work/unread", name="claude", live_fails=True,
                                       agents_complete=False), session_id=SID2)
     well, _ = make_endpoint(harness("/srv/work/well"), session_id=SID3)
-    panel.listed({key_of(linked), key_of(unread), key_of(well)})
+    busy, busy_fake = make_endpoint(harness("/srv/work/busy"), session_id=SID4)
+    panel.listed({key_of(linked), key_of(unread), key_of(well), key_of(busy)})
     linked_fake.start_turn()
+    busy_fake.start_turn()
     page, root = open_panel(panel, ui_contexts, launches=None if panel.is_small else [])
     problems = group(root, "problem")
     expect(problems.locator('[data-line="label"]')).to_have_text("2 problems")
     expect(problems.locator("moxi-ui-row")).to_have_count(2)
     expect(group(root, "idle").locator('[data-line="label"]')).to_have_text("1 idle")
+    expect(group(root, "working").locator('[data-line="label"]')).to_have_text("1 working")
+    # Problems first, then idle, then working.
+    assert root.locator("section.grp").evaluate_all("(gs) => gs.map((g) => g.dataset.group)") == [
+        "problem", "idle", "working"]
     trouble = row(root, key_of(linked))
     expect(trouble).to_have_attribute("lead", "Its link to Moxi has trouble")
     expect(trouble).to_have_attribute("lead-heavy", "")
