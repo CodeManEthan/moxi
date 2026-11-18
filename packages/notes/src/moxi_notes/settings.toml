@@ -13,10 +13,10 @@ line = "A git repo, for snapshots. ~ is your home on every OS."
 [prefix]
 type = "string"
 default = ""
-doc = "A subfolder under the root that holds the computed folders, topics and inbox, such as your user name. Empty puts them at the root."
+doc = "A subfolder under the root that holds the computed folders, topics and inbox, such as `work`. Empty puts them at the root. Notes are often pushed and shared, so pick a plain word, not your login."
 read = "use"
 label = "Subfolder for folders, topics and inbox"
-line = "Under the notes folder, such as your user name. Not set: the notes folder itself."
+line = "Under the notes folder, such as work: a plain word, not your login. Not set: the notes folder itself."
 
 [exclude]
 type = "list"
@@ -100,6 +100,16 @@ doc = "Commit a snapshot on a timer, outside agent sessions, as well."
 read = "use"
 label = "Snapshot on a timer"
 line = "Outside agent sessions, as well."
+
+[guard.home_paths]
+type = "bool"
+default = false
+doc = "Run the home-paths guard, which turns enforces: an agent's write of a file under the root (Claude Code's Write or Edit, Codex's apply_patch, OpenCode's write or edit) whose text spells your home folder or your login gets one line after it, telling it to write ~/ and session ids. It never refuses. Naming notes.home-paths on turns' guards.run runs it too. Off, nothing warns when such a note is written."
+read = "use"
+label = "Home-paths guard"
+line = "Tells an agent when a note it writes spells your home folder or your login. Off, nothing warns."
+common = true
+hurts = { when = "off", says = "turns this guard off", confirm = "From its next write, nothing tells an agent that a note it writes spells your home folder or your login, unless turns' guards.run names notes.home-paths." }
 
 # Keys an earlier notes read, kept declared so a file that still sets one is told what to
 # do rather than refused as unknown.

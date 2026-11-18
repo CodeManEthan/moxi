@@ -1,6 +1,7 @@
 """notes' setup and teardown: what `moxi install notes` and `moxi notes setup` run.
 
-`setup()` is the announcement's `SETUP`. It asks four things in turn, then writes:
+`setup()` is the announcement's `SETUP`. It asks four things in turn, previews, then
+writes:
 
 1. **Root.** Where the notes are. When that folder is in no git work tree, whether to make
    it a git repo, so notes can snapshot it. This `git init` on the root is the only one
@@ -9,11 +10,16 @@
    default), or commit a redacted copy through a git clean filter.
 3. **Push.** When the repo has remotes and no push remote is set, which one snapshots go
    to.
-4. **Preview.** It judges the working tree's tracked and untracked files as a snapshot
+4. **The home-paths guard.** Whether turns tells an agent when a note it writes spells the
+   home folder or the login (`guard.home_paths`). The default answer is yes, or the current
+   value once the config file sets it; with it off, nothing warns when such a note is
+   written, and setup says so.
+5. **Preview.** It judges the working tree's tracked and untracked files as a snapshot
    would, and prints how many hold a secret, the first ten with their rules, how many
-   commit authors the push gate would refuse, and the allowance lines that would keep the
+   commit authors the push gate would refuse, a hint naming `moxi notes home-paths` when
+   some of those files spell the home folder, and the allowance lines that would keep the
    private names it found, with the path of the private allowlist they go in.
-5. **Writes.** The settings, through `moxi.config.set_value(..., by="moxi install")`; in the
+6. **Writes.** The settings, through `moxi.config.set_value(..., by="moxi install")`; in the
    notes repo, the two git hook pieces (re-enabled if disabled), the clean filter's driver
    and attribute for `redact` or their removal for `leave-out`, and the snapshot spec.
 
@@ -55,6 +61,22 @@ Either way, a push that would carry a secret is refused.
 Choose [{default}]: """
 
 ACTIONS = ("leave-out", "redact")
+
+#: The home-paths guard's switch, and its question.
+GUARD_KEY = "guard.home_paths"
+GUARD_QUESTION = ("Tell an agent when a note it writes spells your home folder or your "
+                  "login? With it off, nothing warns when such a note is written. "
+                  "[{choices}] ")
+GUARD_OFF = ("notes: the home-paths guard is off, so nothing warns an agent whose note "
+             "spells your home folder or your login; turn it on with: moxi config set "
+             "notes guard.home_paths true")
+GUARD_ON = ("notes: the home-paths guard is on: turns tells an agent when a note it writes "
+            "spells your home folder or your login; turn it off with: moxi config set notes "
+            "guard.home_paths false")
+#: The hint the preview prints when files it found spell the home folder.
+HOME_HINT = ("notes: {count} of them spell your home folder's path. moxi notes home-paths "
+             "writes those paths as ~ and session paths as their ids: read its dry run, then "
+             "run it with --apply and commit")
 
 
 # -- what git says about the notes root -------------------------------------------------
@@ -121,7 +143,8 @@ def private_allowlist(common_dir) -> str:
 class Preview:
     """What the preview found. `found` maps each path with a finding to its findings;
     `names` and `author_names` hold `(rule, word)` pairs of private names found in files
-    and in commit authors; `problem` says why the allowlist reads as empty; `error` why
+    and in commit authors; `home_files` counts the files with a finding that spell the
+    home folder's path; `problem` says why the allowlist reads as empty; `error` why
     nothing could be judged."""
 
     judged: int = 0
@@ -129,6 +152,7 @@ class Preview:
     authors: int = 0
     names: list = field(default_factory=list)
     author_names: list = field(default_factory=list)
+    home_files: int = 0
     problem: str | None = None
     error: str | None = None
 
@@ -212,6 +236,7 @@ def preview(root, *, push: str | None = None, common_dir=None) -> Preview:
     found = Preview()
     root = os.fspath(root)
     run = _git(root)
+    home = os.path.normpath(os.path.expanduser("~"))
     try:
         settings = judge.config()
         cap = judge.max_bytes(settings)
@@ -231,6 +256,8 @@ def preview(root, *, push: str | None = None, common_dir=None) -> Preview:
             hits = moxi_secrets.scan(text, judge.SETS, path=path, allow=allow)
             if hits:
                 found.found[path] = [judge.of_hit(h) for h in hits]
+                if home in text:
+                    found.home_files += 1
                 for h in hits:
                     if h.set == "private-names":
                         _add_name(found.names, f"{h.set}/{h.rule}",
@@ -290,6 +317,8 @@ def print_preview(found: Preview, *, action: str, common_dir, out: TextIO,
         print(f"notes: {found.authors} commit {noun} a private name; the push gate "
               "refuses a push of their commits, hand commits included, until an @author "
               "allowance keeps it", file=out)
+    if found.home_files:
+        print(HOME_HINT.format(count=found.home_files), file=out)
     lines = allowance_lines(found, today or datetime.date.today().isoformat())
     if not judge.private_place_ok(common_dir):
         print(f"notes: the notes repo's git dir {common_dir} is not a folder named .git, "
@@ -413,6 +442,23 @@ def _ask_push(remotes: list[str], ask, out) -> str:
         if answer in remotes:
             return answer
     return ""
+
+
+def _ask_guard(*, current: bool, from_file: bool, ask, out) -> bool:
+    if ask is None:
+        print(GUARD_ON if current else GUARD_OFF, file=out)
+        return current
+    default = current if from_file else True
+    question = GUARD_QUESTION.format(choices="Y/n" if default else "y/N")
+    answer = default
+    for _ in range(3):
+        typed = _yes(ask(question), default=default)
+        if typed is not None:
+            answer = typed
+            break
+    if not answer:
+        print(GUARD_OFF, file=out)
+    return answer
 
 
 # -- the writes ---------------------------------------------------------------------------
@@ -555,7 +601,14 @@ def setup(*, ask: Callable[[str], str] | None = None, out: TextIO | None = None,
             if push:
                 changes["snapshot.push"] = push
 
-    # 5a. the settings, so the preview and the spec read them
+    # 4. the home-paths guard; an answer is written even when it equals the default, so
+    # the next setup asks with it as the default
+    from_file = current.source(GUARD_KEY) == "file"
+    guard = _ask_guard(current=current[GUARD_KEY], from_file=from_file, ask=ask, out=out)
+    if guard != current[GUARD_KEY] or (ask is not None and not from_file):
+        changes[GUARD_KEY] = guard
+
+    # 6a. the settings, so the preview and the spec read them
     ok = all([_set(key, value, out) for key, value in changes.items()])
     if not ok:
         return 1
@@ -568,12 +621,12 @@ def setup(*, ask: Callable[[str], str] | None = None, out: TextIO | None = None,
                   file=out)
         return 0
 
-    # 4. the preview
+    # 5. the preview
     found_now = preview(root, push=push or None, common_dir=found.common_dir)
     print_preview(found_now, action=action, common_dir=found.common_dir, out=out,
                   today=today)
 
-    # 5b. the notes repo
+    # 6b. the notes repo
     ok = _pieces(root, out)
     ok = _filter(root, action, out) and ok
     ok = _spec(out) and ok
@@ -618,5 +671,6 @@ def teardown(*, out: TextIO | None = None) -> int:
     return 0
 
 
-__all__ = ["ACTION_QUESTION", "PIECES", "Where", "where", "private_allowlist", "Preview",
+__all__ = ["ACTION_QUESTION", "GUARD_KEY", "GUARD_QUESTION", "GUARD_OFF", "GUARD_ON",
+           "HOME_HINT", "PIECES", "Where", "where", "private_allowlist", "Preview",
            "preview", "allowance_lines", "print_preview", "setup", "teardown"]
