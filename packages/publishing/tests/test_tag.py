@@ -74,31 +74,40 @@ def push(repo, *args):
     return git(repo, "push", "-q", *args, check=False)
 
 
-@pytest.mark.parametrize("ready", [True, False])
-def test_tag_push_and_ci_gate_agree(repo, names, remote, served, monkeypatch, ready):
+@pytest.mark.parametrize("case", ["ready", "not ready", "a full job red"])
+def test_tag_push_and_ci_gate_agree(repo, names, remote, served, monkeypatch, case):
     fake = served
-    release_files(repo, not_ready=[] if ready else ["proj-a"])
+    ready = case == "ready"
+    refused = {"not ready": "check 4 (ready): refused",
+               "a full job red": "check 3 (main and green): refused"}.get(case)
+    release_files(repo, not_ready=["proj-a"] if case == "not ready" else [])
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "The workspace")
     git(repo, "push", "-q", "origin", "main")
     git(repo, "config", "moxi-publishing.github", "operator/proj-a")
+    if case == "a full job red":
+        fake.full_jobs = ["other (windows-latest)"]
+        fake.green(head(repo), "secrets-windows", "failure")
     fake.green(head(repo))
     public_repo(repo, "publishing/push", sets=("main=main",))
 
     made = release.tag(str(repo), "proj-a")
     assert (made.code == 0) is ready, made.lines
     if not ready:
-        assert any("check 4 (ready): refused" in line for line in made.lines)
+        assert any(refused in line for line in made.lines)
         git(repo, "tag", "-a", "-m", "proj-a 0.1.0", "proj-a-v0.1.0")
     done = push(repo, "origin", "proj-a-v0.1.0")
     assert (done.returncode == 0) is ready, done.stderr
     if not ready:
-        assert "check 4 (ready): refused" in done.stderr
+        assert refused in done.stderr
     monkeypatch.chdir(repo)
     gated = release.ci_gate(".", "proj-a-v0.1.0")
     assert (gated.code == 0) is ready, gated.lines
     assert [line.split(":")[1] for line in gated.lines if line.startswith("check")] == [
         line.split(":")[1] for line in made.lines if line.startswith("check")]
+    if case == "a full job red":
+        for lines in (made.lines, done.stderr.splitlines(), gated.lines):
+            assert any("secrets-windows concluded failure" in line for line in lines), lines
 
 
 def test_the_push_piece_refuses_a_release_shaped_tag_that_names_no_member(
