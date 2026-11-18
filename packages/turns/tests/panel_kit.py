@@ -13,8 +13,9 @@ of this process's folders that hold a `claude`, so the page server runs the stan
 the test writes; its placed copy is in the shell's own data folder.
 
 Launcher's `running` is answered in the browser by `LauncherStub`, in launcher's declared
-shape, its entries joined to the endpoints' session ids. These tests import no other
-package's kit.
+shape, its entries joined to the endpoints' session ids: its route, and its topic on the
+shell's push stream, so a value the full install's real launcher publishes never replaces
+the stub's. These tests import no other package's kit.
 """
 
 from __future__ import annotations
@@ -231,16 +232,21 @@ def key_of(ep) -> str:
 
 
 class LauncherStub:
-    """Launcher's `running` route, answered in the browser in launcher's declared shape:
-    `sessions` is what it lists."""
+    """Launcher's `running`, answered in the browser in launcher's declared shape:
+    `sessions` is what it lists. Its route answers so, and every value of its topic the
+    push stream brings is replaced by the same, before the page reads it."""
 
     def __init__(self, page: Any, sessions: list[dict]) -> None:
         self.sessions = sessions
         page.route("**/m/launcher/api/running", self._running)
+        page.add_init_script(f"window.heldTopics = Object.assign(window.heldTopics || {{}}, "
+                             f"{{'launcher.running': {json.dumps(json.dumps(self.body()))}}});")
+
+    def body(self) -> dict:
+        return {"state": "up", "detail": None, "count": len(self.sessions), "sessions": self.sessions}
 
     def _running(self, route: Any) -> None:
-        body = {"state": "up", "detail": None, "count": len(self.sessions), "sessions": self.sessions}
-        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(self.body()))
 
 
 def launch(session_id: str | None, name: str, *, target: str = "slot", slot: str | None = "2",
@@ -255,24 +261,40 @@ def launch(session_id: str | None, name: str, *, target: str = "slot", slot: str
     }
 
 
-#: Keeps in `window.pushed` the name of each event the shell's push stream brings.
-_PUSHED = """(() => {
+#: Keeps in `window.pushed` the name of each event the shell's push stream brings, and
+#: gives the page, for each event named in `window.heldTopics`, that entry's data in place
+#: of the stream's.
+_PUSHED = r"""(() => {
   const pushed = window.pushed = [];
+  const held = window.heldTopics = window.heldTopics || {};
   const fetched = window.fetch.bind(window);
+  const frame = (text) => {
+    const found = text.match(/^event: ?(.+)$/m);
+    if (found === null) return text;
+    const name = found[1].trim();
+    pushed.push(name);
+    return Object.hasOwn(held, name) ? `event: ${name}\ndata: ${held[name]}\n\n` : text;
+  };
   window.fetch = async (input, init) => {
     const answer = await fetched(input, init);
     const url = typeof input === "string" ? input : input.url;
     if (!url.includes("/m/ui/api/push") || answer.body === null) return answer;
-    const [kept, read] = answer.body.tee();
-    (async () => {
-      const reader = read.pipeThrough(new TextDecoderStream()).getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        for (const found of value.matchAll(/^event: ?(.+)$/gm)) pushed.push(found[1].trim());
-      }
-    })().catch(() => {});
-    return new Response(kept, { status: answer.status, statusText: answer.statusText,
+    let rest = "";
+    const frames = new TransformStream({
+      transform(chunk, out) {
+        rest += chunk;
+        for (let end = rest.indexOf("\n\n"); end !== -1; end = rest.indexOf("\n\n")) {
+          out.enqueue(frame(rest.slice(0, end + 2)));
+          rest = rest.slice(end + 2);
+        }
+      },
+      flush(out) {
+        if (rest !== "") out.enqueue(rest);
+      },
+    });
+    const body = answer.body.pipeThrough(new TextDecoderStream()).pipeThrough(frames)
+      .pipeThrough(new TextEncoderStream());
+    return new Response(body, { status: answer.status, statusText: answer.statusText,
                                 headers: answer.headers });
   };
 })()"""
