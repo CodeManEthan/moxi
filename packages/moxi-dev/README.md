@@ -282,17 +282,35 @@ or over it, and a skip at any factor; any other result is kept and marked, and d
 count. `--scheduled` exits 0 with `already measured` when the record of this commit
 already settles every collected test at this run's factor.
 
-`moxi-dev timed show [REV] [--days N] [--machine NAME] [--json]` reads the record along
-REV's first-parent line (`main`) back N days (7) from REV's time, each machine on its own,
-the machine it runs on first. It prints each machine's set factor, its newest measured
-commit and how many commits behind REV it is, its newest tick, and each test's newest
-counted outcome with its reading and budget, a failure's range of commits, and the tests
-with no counted outcome. A line before the machines says how many tests this machine's own
-strict reading covers; `--machine` naming another machine leaves it out. Exit 1 when a
-test's newest counted outcome failed on any machine; 3 when some test of a machine's set
-has no counted outcome, or no machine has a complete
-run in the window; 0 otherwise. A machine with no complete run and no counted failure is
-listed and stays out of the exit.
+`moxi-dev timed show [REV] [--days N] [--machine NAME] [--package NAME] [--json]` reads
+the record along REV's first-parent line (`main`) back N days (7) from REV's time, each
+machine on its own, the machine it runs on first. It prints each machine's set factor, its
+newest measured commit and how many commits behind REV it is, its newest tick, and each
+test's newest counted outcome with its reading and budget, a failure's range of commits,
+and the tests with no counted outcome. A line before the machines says how many tests this
+machine's own strict reading covers; `--machine` naming another machine leaves it out.
+Exit 1 when a test's newest counted outcome failed on any machine; 3 when some test of a
+machine's set has no counted outcome, or no machine has a complete run in the window; 0
+otherwise. A machine with no complete run and no counted failure is listed and stays out
+of the exit.
+
+`--package NAME` reads one package's tests, as a release reads its own. NAME is the
+package's directory under `packages/` or its distribution name, as `moxi-dev timed
+--package` takes it, resolved in the workspace of the tree `show` runs in; a name naming
+no package there exits 2. Results are picked by the package each was filed under at its
+run, so after a package is renamed or moved its old name is unknown and its new name has
+nothing to read until a complete run at the new path. Every part of the reading counts
+that package's tests alone: each machine's set, its outcomes, its newest measured commit
+(its newest record holding one of the package's results, or `no result of <name> on the
+walk`), the failures that make the exit 1 and the strict line. When the set the strict
+line reads holds none of the package's tests, the line in its place is `<name> has no
+timed test collected by a complete run on the walk to <commit>; nothing to read`. The exit
+follows each machine's verdict as always: a machine whose cut set is empty has nothing
+unsettled and reads 0. So the exit is 0 when no machine collected a test of the package, 1
+when another machine's reading of it failed, and 3 when no machine has a complete run. A
+test that landed after the newest complete run isn't in its set yet, so a release reads
+that line beside the package's own `timed` marks.
+`--json` carries `package`, the name given or null.
 
 `moxi-dev timed take DIR --machine NAME` merges another machine's record, `DIR` being that
 machine's directory inside its results folder, into this clone's record under `NAME`, per

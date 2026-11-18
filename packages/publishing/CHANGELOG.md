@@ -70,3 +70,6 @@ The first version.
   missing or empty `full-jobs` refuses, naming it; a job still running refuses with "wait
   for it"; each such job's conclusion goes in the gate's notes. `moxi publishing tag`,
   the push piece and `ci gate` all read it.
+- `moxi publishing ci siblings` runs the suite with `MOXI_TEST_TIMED=hold`, over any value
+  the job had, so a release's test run holds every timed test as the land check does;
+  they run only in `moxi-dev timed`.
