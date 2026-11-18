@@ -1,10 +1,16 @@
 """The handler of repo's page.
 
-`repos` answers from `api.status()` (what `moxi repo git-hooks list --json` prints) and,
-for each repo, `api.specs(root, sweep=False)` (what `moxi repo specs --json` prints, with
-nothing written). It cuts each to the route's declared keys and adds the command lines the
-page offers to copy, each one of `moxi repo`'s own commands with the repo's path quoted as
-a person pastes it.
+`repos` answers from `api.status(with_rules=True)` (what `moxi repo git-hooks list --json`
+prints, with each repo's rules read without the commit-proof line, so nothing is written)
+and, for each repo, `api.specs(root, sweep=False)` (what `moxi repo specs --json` prints,
+with nothing written) and the branches each pushing spec has not pushed
+(`committer.unpushed`, as the doctor reads them). With projects installed it adds each
+project's repo as `git-hooks list --projects` does (`projects.with_projects`): one with
+pieces is a repo with `indexed` false, one without is in `unindexed`. It cuts each to the
+route's declared keys and adds the command lines the page offers to copy, each one of `moxi
+repo`'s own commands with the repo's path quoted as a person pastes it, the pieces
+installed modules offer and the declarations refused (`api.available()`), and the server's
+local date.
 
 It never raises. A failure of repo's own (`api.Failure`, such as an index that can't be
 read) is a 200 with `state` `error` and that failure's text, which is what the command
@@ -12,19 +18,29 @@ would print. Any other failure is `state` `error` with a fixed `detail` naming o
 exception's class; the class and its traceback are logged once. A repo whose specs alone
 can't be listed, for any reason, keeps its git hooks, with `specs_problem` saying why (for
 a failure that isn't repo's own, a fixed text naming only the exception's class, logged
-once), and the other repos are listed as usual.
+once), and the other repos are listed as usual. The offered pieces, the project repos and
+each repo's rules also fail alone: the pieces as empty lists, the project repos as an
+empty `unindexed` with only the indexed repos, the rules as null, each failure that isn't
+repo's own logged once.
+
+`within` reads the folder a copy of Moxi keeps the page's plans and acts to, from
+`MOXI_ANCHOR_HOME`.
 
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
+import os
 import threading
 import time
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-from . import api, projects
+from . import api, committer, projects
 from .run import quote_arg
 
 log = logging.getLogger("moxi.repo.page")
@@ -45,10 +61,27 @@ def _command(label: str, *words: str) -> dict[str, str]:
     return {"label": label, "command": "moxi repo " + " ".join(words)}
 
 
+def _today() -> str:
+    """The page server's local date, `YYYY-MM-DD`."""
+    return dt.date.today().isoformat()
+
+
+def _home() -> str | None:
+    """This server's home folder as `moxi.paths.home()` places it, or None when nothing
+    places one; the page writes a path under it in `~` form."""
+    from moxi import paths
+
+    try:
+        return str(paths.home())
+    except LookupError:
+        return None
+
+
 def _event(name: str, info: dict) -> dict[str, Any]:
     return {"event": name, "via": info.get("via"), "pieces": list(info.get("pieces") or []),
-            "existing": info.get("existing"), "chain_line": info.get("chain_line"),
-            "hook": info.get("hook"), "line": info.get("line")}
+            "existing": info.get("existing"), "existing_hook": info.get("existing_hook"),
+            "chain_line": info.get("chain_line"), "hook": info.get("hook"),
+            "line": info.get("line")}
 
 
 def _piece(root: str, piece: dict) -> dict[str, Any]:
@@ -68,26 +101,37 @@ def _piece(root: str, piece: dict) -> dict[str, Any]:
 def _problem(problem: Any) -> dict[str, Any]:
     return {"state": getattr(problem, "state", "fail"),
             "detail": getattr(problem, "detail", str(problem)),
-            "fix": getattr(problem, "fix", None)}
+            "fix": getattr(problem, "fix", None), "code": getattr(problem, "code", None),
+            "piece": getattr(problem, "piece", None), "event": getattr(problem, "event", None),
+            "refresh": bool(getattr(problem, "refresh", False))}
 
 
-def _spec(root: str, item: dict) -> dict[str, Any]:
+def _spec(root: str, item: dict, head: Any) -> dict[str, Any]:
+    """One spec of the repo at `root`; `head()` is the branch its work tree has checked
+    out, asked for only by a spec that pushes."""
     last = item.get("last") or {}
     commit = item.get("last_commit") or {}
     name = item["name"]
     failed = item.get("push") or {}
+    remote = (item.get("spec") or {}).get("push")
     return {
         "name": name, "saved": bool(item.get("saved")), "problem": item.get("problem"),
         "status": last.get("status"), "line": last.get("line"), "time": last.get("time"),
         "refused_since": item.get("refused_since"),
         "refused_passes": item.get("refused_passes"),
+        "error_since": item.get("error_since"), "error_passes": item.get("error_passes"),
+        "index_busy_since": item.get("index_busy_since"),
+        "index_stale": bool(item.get("index_stale")),
         "last_commit": commit.get("sha"), "last_commit_time": commit.get("time"),
-        "remote": (item.get("spec") or {}).get("push"),
+        "remote": remote,
         "pushed": [{"branch": branch, "sha": sha}
                    for branch, sha in sorted((item.get("pushed") or {}).items())],
         "push_failed": [{"branch": branch, "error": (info or {}).get("error"),
                          "failed_at": (info or {}).get("failed_at")}
                         for branch, info in sorted(failed.items())],
+        "unpushed": ([{"branch": gap["branch"], "ahead": gap["ahead"]}
+                      for gap in committer.unpushed(root, remote, failed, head=head())]
+                     if remote else []),
         "run": _command("Run", "commit", quote_arg(root), "--spec", quote_arg(name)),
         "forget": _command("Forget", "specs", "remove", quote_arg(root), quote_arg(name)),
     }
@@ -98,17 +142,21 @@ def _record(record: dict) -> dict[str, Any]:
             ("kind", "piece", "spec", "branch", "text", "fix", "at")}
 
 
-def _repo(listed: dict, found: Any) -> dict[str, Any]:
+def _repo(listed: dict) -> dict[str, Any]:
     root = listed["root"]
-    project = None
-    if found is not None:
-        project, _ = projects.key_for(found, root)
     specs: list[dict] = []
     specs_problem = None
+    branch: list[str | None] = []
+
+    def head() -> str | None:
+        if not branch:
+            branch.append(committer.head_branch(root))
+        return branch[0]
+
     if listed.get("hooks_dir") is not None:
         try:
             for repo in api.specs(root, sweep=False):
-                specs += [_spec(root, item) for item in repo["specs"]]
+                specs += [_spec(root, item, head) for item in repo["specs"]]
         except api.Failure as exc:
             specs_problem = str(exc)
         except Exception as unexpected_exc:
@@ -117,40 +165,260 @@ def _repo(listed: dict, found: Any) -> dict[str, Any]:
                              "server's log has the details")
     path = quote_arg(root)
     return {
-        "root": root, "project": project, "git_version": listed.get("git_version"),
+        "root": root, "project": listed.get("project"),
+        "indexed": bool(listed.get("indexed", True)), "git_version": listed.get("git_version"),
         "mode": listed.get("mode"), "pinned": listed.get("mode_set", "auto") != "auto",
         "events": [_event(name, info) for name, info in sorted(listed["events"].items())],
+        "own_hooks": list(listed.get("own_hooks") or []),
         "pieces": [_piece(root, piece) for piece in listed["pieces"]],
         "problems": [_problem(problem) for problem in listed["problems"]],
         "specs": specs, "specs_problem": specs_problem,
         "records": [_record(record) for record in listed.get("records") or []],
+        "rules": None if listed.get("rules") is None else list(listed["rules"]),
+        "proof": bool(listed.get("proof")),
         "commands": [_command("List", "git-hooks", "list", path),
                      _command("Refresh", "git-hooks", "refresh", path),
                      _command("Specs", "specs", path)],
     }
 
 
+def _offered() -> tuple[list[dict], list[dict]]:
+    """The pieces installed modules declare and the declarations refused; both empty when
+    they can't be read."""
+    try:
+        found = api.available()
+        offered = [{"id": piece["id"], "module": piece["module"],
+                    "name": piece["id"].partition("/")[2], "event": piece["event"],
+                    "fail": piece["fail"], "order": int(piece["order"]),
+                    "doc": piece["doc"], "settings": list(piece["settings"])}
+                   for piece in found["pieces"]]
+        refused = [{"id": pid, "why": why} for pid, why in found["refused"].items()]
+    except Exception as unexpected_exc:
+        _log_once(unexpected_exc, "listing the offered pieces failed")
+        return [], []
+    return offered, refused
+
+
+def _listed(found: Any) -> tuple[list[dict], list[dict] | None]:
+    """Each repo to show, as `api.status` lists it with its project key, and `unindexed`:
+    null without projects; each project repo with no piece, else. Raises what `status`
+    raises; a failure in adding the project repos leaves only the indexed repos, keyed,
+    and `unindexed` empty."""
+    listed = api.status(with_rules=True)
+    if found is None:
+        return projects.with_projects(listed, None)[0], None
+    indexed = len(listed)
+    try:
+        listed, _ = projects.with_projects(listed, found, add=True, with_rules=True)
+    except Exception as exc:
+        if not isinstance(exc, api.Failure):
+            _log_once(exc, "listing the project repos failed")
+        return listed[:indexed], []
+    added = listed[indexed:]
+    unindexed = [{"project": repo["project"], "root": repo["root"]}
+                 for repo in added if not repo["pieces"]]
+    return listed[:indexed] + [repo for repo in added if repo["pieces"]], unindexed
+
+
 def gather() -> dict[str, Any]:
-    """The route's value without `now`: `state`, `detail` and the repos. Never raises."""
+    """The route's value without `now`: `state`, `detail`, the repos, `today`, `home`,
+    `offered`, `refused` and `unindexed`. Never raises."""
+    offered, refused = _offered()
+    value = {"today": _today(), "home": _home(), "offered": offered, "refused": refused,
+             "unindexed": None}
     try:
         found = projects.api()
-        repos = [_repo(listed, found) for listed in api.status()]
+        value["unindexed"] = None if found is None else []
+        listed, value["unindexed"] = _listed(found)
+        repos = [_repo(repo) for repo in listed]
     except api.Failure as exc:
-        return {"state": "error", "detail": str(exc), "repos": []}
+        return {**value, "state": "error", "detail": str(exc), "repos": []}
     except Exception as unexpected_exc:
         _log_once(unexpected_exc, "listing the repos failed")
-        return {"state": "error",
+        return {**value, "state": "error",
                 "detail": f"repo's page server hit an unexpected error "
                           f"({type(unexpected_exc).__name__}); its log has the details",
                 "repos": []}
-    return {"state": "up", "detail": None, "repos": repos}
+    return {**value, "state": "up", "detail": None, "repos": repos}
+
+
+def within(env: Mapping[str, str] | None = None) -> str | None:
+    """The folder the page's plans and acts keep to, from `env` (None: this process's
+    environment): when it sets `MOXI_ANCHOR_HOME` (a copy of Moxi, as the core's
+    `anchor_set` reads it), that folder's real path, or the value as it is when it isn't a
+    full path, so every plan and act refuses; else None, which keeps to nothing."""
+    from moxi import paths, terminal
+
+    source = os.environ if env is None else env
+    if not terminal.anchor_set(source):
+        return None
+    value = next((v for k, v in source.items()
+                  if v and (k == paths.ANCHOR_HOME_ENV or (
+                      os.name == "nt" and k.upper() == paths.ANCHOR_HOME_ENV))), "")
+    return os.path.realpath(value) if os.path.isabs(value) else value
 
 
 def repos(call: Any) -> dict[str, Any]:
-    """`GET /api/repos`: every indexed repo now, with the server's `now`. A failure is a
-    200 with `state` `error`, never a 500."""
+    """`GET /api/repos`: every indexed repo now, with the server's `now` and `today`. A
+    failure is a 200 with `state` `error`, never a 500."""
     value = gather()
     return {"now": time.time(), **value}
 
 
-__all__ = ["gather", "repos"]
+# -- the plan and the acts ------------------------------------------------------------------
+
+#: What `failed` says, whatever the exception was.
+FAILED = "repo's page server hit an error; its log has the details"
+
+
+def _expand(root: str) -> str:
+    """`root` with a leading `~` (alone, or before a separator) taken as the home
+    `moxi.paths.home()` places; anything else, `~user` included, as sent."""
+    from moxi import paths
+
+    seps = ("/", "\\") if os.name == "nt" else ("/",)
+    if root != "~" and not root.startswith(tuple("~" + sep for sep in seps)):
+        return root
+    try:
+        home = str(paths.home())
+    except LookupError:
+        return root
+    return os.path.join(home, root[2:]) if len(root) > 1 else home
+
+
+def _root(text: str) -> str:
+    """The repo root a plan or an act names: `text` with `~` expanded (`_expand`). Raises
+    `api.Usage` (`not-absolute`) for any root that is then not absolute, `~user`
+    included, so the plan and the act take one root and refuse the same ones."""
+    root = _expand(text)
+    if not os.path.isabs(root):
+        raise api.Usage(f"{root} is not an absolute path", reason="not-absolute")
+    return root
+
+
+def _ids(text: str | None) -> list[str]:
+    return [part for part in (text or "").split(",") if part]
+
+
+def plan(call: Any) -> dict[str, Any]:
+    """`GET /api/plan?act=add|enable|refresh&root=&pieces=`: what the act would write in
+    the repo at `root` (`_root`: `~` expanded, and a root then not absolute is the refusal
+    `not-absolute`, as the acts refuse it), as `api.plan_add`, `plan_enable` and
+    `plan_refresh` give it, kept to `within()`. `pieces` is the piece ids joined by `,`
+    (turning on names one). A plan's refusal is its `refusal`; any other failure is
+    `state` `error` with a fixed `detail`, logged once."""
+    from moxi_repo import page
+
+    act = call.query["act"]
+    ids = _ids(call.query.get("pieces"))
+    if act == "enable" and len(ids) != 1:
+        raise page.lb.Refused("turning a piece on names one piece")
+    home = within()
+    try:
+        root = _root(call.query["root"])
+    except api.Usage as exc:
+        found = api._plan_view(None, Path(_expand(call.query["root"])))
+        found["refusal"] = {"code": exc.reason, "text": exc.text}
+        return {"state": "up", "detail": None, "plan": found}
+    try:
+        if act == "add":
+            found = api.plan_add(root, ids, within=home)
+        elif act == "enable":
+            found = api.plan_enable(root, ids[0], within=home)
+        else:
+            found = api.plan_refresh(root, within=home)
+    except Exception as exc:
+        _log_once(exc, "planning an act failed")
+        return {"state": "error", "detail": f"{FAILED} ({type(exc).__name__})", "plan": None}
+    return {"state": "up", "detail": None, "plan": found}
+
+
+def _answer(outcome: str, *, report: api.Report | None = None, plan: dict | None = None,
+            code: str | None = None, text: str | None = None) -> dict[str, Any]:
+    return {"outcome": outcome,
+            "lines": list(report.lines) if report else [],
+            "problems": [str(p) for p in report.problems] if report else [],
+            "chain": [{"event": event, "hook": hook, "line": line, "present": present}
+                      for _root, event, hook, line, present in report.chain] if report
+                     else [],
+            "plan": plan,
+            "refusal": None if text is None else {"code": code, "text": text}}
+
+
+def _places(env: Mapping[str, str]) -> dict[str, str]:
+    """Where an act's write lands that the terminal must find too: repo's index folder."""
+    from moxi import paths
+
+    return {"repo's index folder": str(paths.Layout(api.MODULE).state_dir(env))}
+
+
+def _anchor_clause() -> str:
+    """The clause ui's check ends a line with when this server's environment sets
+    `MOXI_ANCHOR_HOME`, saying to take it out. In a copy of Moxi that variable is what
+    keeps the copy's acts at home, so the page answers without it."""
+    from moxi import paths
+
+    return (f" This page's environment sets {paths.ANCHOR_HOME_ENV}, which only test kits "
+            "set; take it out of the browser shell's environment.")
+
+
+def _terminal_line() -> str | None:
+    """None when an act may write here; else ui's line that refuses it (module doc)."""
+    from moxi import modules, terminal
+
+    found = modules.load("ui", interface=3)
+    if not found.ok:
+        return (f"this page checks with ui that it writes where your terminal does, and "
+                f"can't load ui's check ({found.reason}), so it refuses to write; run the "
+                "command in a terminal")
+    try:
+        line = found.api.check(_places)
+    except ValueError as exc:
+        return (f"this page can't compare where it writes with your terminal ({exc}), so "
+                "it refuses to write; run the command in a terminal")
+    if line and terminal.anchor_set():
+        line = line.removesuffix(_anchor_clause())
+    return line
+
+
+def _act(call: Any, verb: Any) -> dict[str, Any]:
+    """Run `verb(root, expect=digest, within=within())` for an act's body, after the
+    repo is checked against `within()` and then against ui's check; answer what came of
+    it (module doc)."""
+    home = within()
+    try:
+        root = _root(call.body["root"])
+        api._resolve(root, home)  # the copy's check comes before ui's
+        line = _terminal_line()
+        if line:
+            return _answer("refused", text=line)
+        report = verb(root, expect=call.body["digest"], within=home)
+    except api.Changed as exc:
+        return _answer("changed", plan=exc.plan)
+    except api.Failure as exc:
+        return _answer("partial" if exc.partial else "refused", code=exc.reason,
+                       text=exc.text)
+    except Exception as exc:
+        _log_once(exc, "an act failed")
+        return _answer("failed", text=FAILED)
+    return _answer("nothing" if report.already else "done", report=report)
+
+
+def add(call: Any) -> dict[str, Any]:
+    """`POST /api/add` `{root, pieces, digest}`: `api.add` with the plan's digest."""
+    ids = list(call.body.get("pieces") or [])
+    return _act(call, lambda root, **kw: api.add(root, ids, **kw))
+
+
+def enable(call: Any) -> dict[str, Any]:
+    """`POST /api/enable` `{root, piece, digest}`: `api.enable` with the plan's digest."""
+    return _act(call, lambda root, **kw: api.enable(root, call.body["piece"], **kw))
+
+
+def refresh(call: Any) -> dict[str, Any]:
+    """`POST /api/refresh` `{root, digest}`: `api.refresh` of that repo with the plan's
+    digest."""
+    return _act(call, lambda root, **kw: api.refresh(root, **kw))
+
+
+__all__ = ["FAILED", "gather", "repos", "within", "plan", "add", "enable", "refresh"]

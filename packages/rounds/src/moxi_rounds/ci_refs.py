@@ -1,21 +1,22 @@
 """CI's own refs on a remote: the branches `check` pushes a build's tip to where the
-repo's `ci` names a `ref`, their removal once the build has ended, and the account of
-stale ones that `drop --leftovers --refs` gives.
+repo's `ci` names a `ref`, and the ones someone else pushes for a build's branch under
+`full_ref` (no code here pushes those); their removal once the build has ended; and the
+account of stale ones that `drop --leftovers --refs` gives.
 
 **What a build pushed** (`of_build`): each remote and branch name the records of its
-check name as pushed (`pushed` on its `check.ran` and `ci.read` events), and the one the
-setting gives its branch now, so a push that went out but was not recorded is still
-found.
+check name as pushed (`pushed` on its `check.ran` and `ci.read` events), and the one
+each template the setting names gives its branch now, so a push that went out but was
+not recorded, or that someone else made under `full_ref`, is still found.
 
 **The keep rule** (`Keep`), one rule for the removal at a build's end and for the sweep.
-A ref is kept when it is the branch name the setting's `ref` template, or the prefix the
-ref was pushed under, gives the branch of a build of that repo that has not ended, in
-any round of any project, or gives a target branch of the repo: the project's target
-(its `into`, else the branch checked out at its root, as a new build would take) and the
-target each such build recorded; and when a build that has not ended recorded pushing
-it. While any round's log, or the project's target, can't be read, every ref is kept,
-since an open build may be recorded there, or the ref may be the target's. The rule is
-read again just before each deletion.
+A ref is kept when it is the branch name a template the setting names (`ref` or
+`full_ref`), or the prefix the ref was pushed under, gives the branch of a build of that
+repo that has not ended, in any round of any project, or gives a target branch of the
+repo: the project's target (its `into`, else the branch checked out at its root, as a
+new build would take) and the target each such build recorded; and when a build that
+has not ended recorded pushing it. While any round's log, or the project's target, can't
+be read, every ref is kept, since an open build may be recorded there, or the ref may be
+the target's. The rule is read again just before each deletion.
 
 **Removal** (`remove`), run from the repo's root: `git ls-remote --heads` for each ref
 first, then `git push <remote> --delete refs/heads/<ref>` for each one there that the
@@ -26,10 +27,10 @@ a left one later is `drop --leftovers --refs --remove`. Nothing here writes a ro
 log, and nothing here undoes the finish or the drop it follows.
 
 **The account** (`account`): for each project whose `ci` names a `ref`, the remote's
-branches under the template's prefix (`git ls-remote --heads <remote>
-'refs/heads/<prefix>*'`). A ref the keep rule keeps is named with why; any other is a
-candidate, which an armed run with `remove` removes as `remove` does. It reaches the
-network, so it runs only when asked for by name.
+branches under each template's prefix, `ref`'s and `full_ref`'s, in one listing (`git
+ls-remote --heads <remote> 'refs/heads/<prefix>*' ...`). A ref the keep rule keeps is
+named with why; any other is a candidate, which an armed run with `remove` removes as
+`remove` does. It reaches the network, so it runs only when asked for by name.
 """
 
 from __future__ import annotations
@@ -96,11 +97,13 @@ def recorded(state: states.State, build: builds.Build) -> list[tuple[str, str]]:
 
 def of_build(state: states.State, build: builds.Build, settings) -> list[tuple[str, str]]:
     """Each `(remote, ref)` the build's end removes: those its records name, and the
-    one the repo's setting gives its branch now."""
+    one each template of the repo's setting gives its branch now, `ref`'s then
+    `full_ref`'s."""
     found = dict.fromkeys(recorded(state, build))
     declared = ci.declared(settings, build.repo)
     if declared is not None and declared.ref is not None and declared.remote:
-        found[(declared.remote, ci.ref_for(declared.ref, build.branch))] = None
+        for template in declared.templates:
+            found[(declared.remote, ci.ref_for(template, build.branch))] = None
     return list(found)
 
 
@@ -108,13 +111,13 @@ def of_build(state: states.State, build: builds.Build, settings) -> list[tuple[s
 
 @dataclass(frozen=True)
 class Keep:
-    """What the keep rule reads for one repo: the `template` its setting names now
-    (None for none), the branches of its builds that have not ended (`branches`, each
-    with the round and stage), its `targets`, the refs those builds recorded pushing
-    (`pushed`), and why any log, or the project's target, can't be read
-    (`unreadable`, each a reason the rule keeps every ref)."""
+    """What the keep rule reads for one repo: the `templates` its setting names now,
+    `ref`'s and `full_ref`'s (none where it names no `ref`), the branches of its builds
+    that have not ended (`branches`, each with the round and stage), its `targets`, the
+    refs those builds recorded pushing (`pushed`), and why any log, or the project's
+    target, can't be read (`unreadable`, each a reason the rule keeps every ref)."""
 
-    template: str | None
+    templates: tuple[str, ...]
     branches: Mapping[str, str]
     targets: tuple[str, ...]
     pushed: Mapping[str, str]
@@ -122,14 +125,14 @@ class Keep:
 
     def why(self, ref: str, *, prefixes: Iterable[str] = ()) -> str | None:
         """Why the keep rule keeps `ref`, pushed under the `prefixes` besides the
-        template's; None when it does not."""
+        templates'; None when it does not."""
         if self.unreadable:
             return self.unreadable[0]
         if ref in self.pushed:
             return f"a build that has not ended pushed it: {self.pushed[ref]}"
         known = dict.fromkeys(prefixes)
-        if self.template is not None:
-            known[ci.prefix_of(self.template)] = None
+        for template in self.templates:
+            known[ci.prefix_of(template)] = None
         for prefix in known:
             if not ref.startswith(prefix):
                 continue
@@ -148,7 +151,7 @@ _LOG = "a round's log can't be read, and an open build may be recorded there: "
 def keep(repo: str, settings) -> Keep:
     """The keep rule for the project `repo`, read now from every round's log."""
     declared = ci.declared(settings, repo)
-    template = None if declared is None else declared.ref
+    templates = () if declared is None or declared.ref is None else declared.templates
     homes, unresolved = folders.homes(settings)
     unreadable = [_LOG + exc.reason for exc in unresolved if isinstance(exc, SharedFolder)]
     branches: dict[str, str] = {}
@@ -177,7 +180,7 @@ def keep(repo: str, settings) -> Keep:
                 targets[build.target] = None
                 for _remote, ref in recorded(state, build):
                     pushed[ref] = f"{name} {build.stage}"
-    return Keep(template, branches, tuple(targets), pushed, tuple(unreadable))
+    return Keep(templates, branches, tuple(targets), pushed, tuple(unreadable))
 
 
 def _target(settings, repo: str) -> tuple[str | None, str | None]:
@@ -220,10 +223,10 @@ def _git(root: Path, *args: str) -> _Said:
     return _Said(done.returncode, said)
 
 
-def _listed(root: Path, remote: str, pattern: str) -> list[str] | str:
-    """The branch names under `refs/heads/` the remote lists for `pattern`, or what git
-    said when it could not list them."""
-    done = _git(root, "ls-remote", "--heads", remote, pattern)
+def _listed(root: Path, remote: str, *patterns: str) -> list[str] | str:
+    """The branch names under `refs/heads/` the remote lists for the `patterns`, or what
+    git said when it could not list them."""
+    done = _git(root, "ls-remote", "--heads", remote, *patterns)
     if done.code != 0:
         return done.said or f"git ls-remote exited {done.code}"
     names = []
@@ -296,8 +299,9 @@ class Account:
 
 
 def account(settings, *, removing: bool) -> Account:
-    """The account of every project whose `ci` names a `ref`; with `removing`, each
-    candidate is removed as `remove` removes one."""
+    """The account of every project whose `ci` names a `ref`, over the prefix of each
+    template it names; with `removing`, each candidate is removed as `remove` removes
+    one."""
     refs, unlisted = [], []
     for repo, table in settings["projects"].items():
         if not isinstance(table, Mapping) or "ci" not in table:
@@ -305,19 +309,20 @@ def account(settings, *, removing: bool) -> Account:
         declared = ci.declared(settings, repo)
         if declared is None or declared.ref is None or not declared.remote:
             continue
-        prefix = ci.prefix_of(declared.ref)
+        prefixes = tuple(ci.prefix_of(one) for one in declared.templates)
         try:
             _key, root = folders.root(repo)
         except RoundsError as exc:
             unlisted.append(f"refs of {repo} not listed: {exc.reason}")
             continue
-        listed = _listed(root, declared.remote, f"refs/heads/{prefix}*")
+        listed = _listed(root, declared.remote,
+                         *(f"refs/heads/{prefix}*" for prefix in prefixes))
         if isinstance(listed, str):
             unlisted.append(f"refs of {repo} not listed from {declared.remote}: {listed}")
             continue
         rule = keep(repo, settings)
         for ref in listed:
-            if not ref.startswith(prefix):
+            if not ref.startswith(prefixes):
                 continue
             why = rule.why(ref)
             if why is not None:

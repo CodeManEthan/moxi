@@ -5,6 +5,7 @@ an ending leave it. The record, its ledger key and the state file go together.""
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -79,12 +80,14 @@ def test_a_refusal_writes_one_record_that_counts_its_passes_and_a_good_pass_clea
     assert first.status == "refused"
     key = commit_key(repo)
     assert is_open(key) == OPEN
-    assert "refused since" in text(key) and "1 passes" in text(key)
+    # A clock time, and no count: the spec's state counts the passes.
+    assert re.search(r"\(refused since \d\d:\d\d\)$", text(key).splitlines()[0]), text(key)
+    assert state(repo)["refused_passes"] == 1
     assert "gate says no" in text(key)
     assert doctor_records()[key]["fix"].endswith(f"moxi repo specs remove {repo} demo/snap")
     moxi_repo.commit(spec(repo))
     mine = [k for k in doctor_records() if "::spec::demo/snap::" in k]
-    assert mine == [key] and "2 passes" in text(key)
+    assert mine == [key] and "pass" not in text(key).splitlines()[0]
     assert state(repo)["refused_passes"] == 2
     since = state(repo)["refused_since"]
     demo.act(gate="ok")
@@ -114,7 +117,7 @@ def test_throttled_busy_and_index_busy_passes_leave_the_record(demo):
         assert moxi_repo.commit(spec(repo)).status == "index-busy"
     finally:
         (cgd(repo) / "index.lock").unlink()
-    assert is_open(key) == OPEN and "1 passes" in text(key)
+    assert is_open(key) == OPEN and "(refused since " in text(key)
     assert moxi_repo.commit(spec(repo)).status == "committed"
     assert is_open(key) == set()
 
@@ -165,6 +168,95 @@ def test_git_index_lock_held_five_passes_in_a_row_is_recorded(demo):
         lock.unlink()
     assert moxi_repo.commit(spec(repo)).status == "committed"
     assert is_open(key) == set() and "index_busy_passes" not in state(repo)
+
+
+PREPARE = "demo_pieces.committing:prepare"
+
+
+def listed(repo: Path, name: str = "demo/snap") -> dict:
+    return {item["name"]: item for item in committer.listing(repo)}[name]
+
+
+def runs_of(repo: Path) -> dict:
+    item = listed(repo)
+    return {key: item[key] for key in ("refused_since", "refused_passes", "error_since",
+                                       "error_passes")}
+
+
+def test_an_error_lasts_through_passes_that_arent_conclusive_and_ends_on_one_that_is(
+        demo, monkeypatch, clock):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    assert moxi_repo.commit(spec(repo)).status == "committed"
+    start = clock[0]
+    write(repo, "notes/b.md")
+    monkeypatch.setenv("DEMO_PREPARE", "raise")
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "error"
+    clock[0] += 60
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "error"
+    assert runs_of(repo) == {"refused_since": None, "refused_passes": None,
+                             "error_since": start, "error_passes": 2}
+    monkeypatch.delenv("DEMO_PREPARE")
+    clock[0] += 60
+    assert moxi_repo.commit(spec(repo, min_interval_s=3600)).status == "throttled"
+    assert listed(repo)["last"]["status"] == "throttled"
+    assert runs_of(repo)["error_since"] == start and runs_of(repo)["error_passes"] == 2
+    assert moxi_repo.commit(spec(repo)).status == "committed"
+    assert runs_of(repo) == dict.fromkeys(runs_of(repo))
+    assert "error_since" not in state(repo) and "error_passes" not in state(repo)
+
+
+def test_a_clean_pass_ends_an_error(demo):
+    repo = demo.repo()
+    assert moxi_repo.commit(spec(repo, paths=tuple(f"p{i}" for i in range(70)))
+                            ).status == "error"
+    assert runs_of(repo)["error_passes"] == 1
+    assert moxi_repo.commit(spec(repo)).status == "clean"
+    assert runs_of(repo)["error_since"] is None
+
+
+def test_a_refusal_and_an_error_each_end_the_other(demo, monkeypatch, clock):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    monkeypatch.setenv("DEMO_PREPARE", "refuse")
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "refused"
+    assert runs_of(repo) == {"refused_since": clock[0], "refused_passes": 1,
+                             "error_since": None, "error_passes": None}
+    clock[0] += 60
+    monkeypatch.setenv("DEMO_PREPARE", "raise")
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "error"
+    assert runs_of(repo) == {"refused_since": None, "refused_passes": None,
+                             "error_since": clock[0], "error_passes": 1}
+    clock[0] += 60
+    monkeypatch.setenv("DEMO_PREPARE", "refuse")
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "refused"
+    assert runs_of(repo) == {"refused_since": clock[0], "refused_passes": 1,
+                             "error_since": None, "error_passes": None}
+
+
+def test_the_listing_carries_the_index_busy_run_and_turns_stale_at_the_committers_count(
+        demo, clock):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    start = clock[0]
+    lock = cgd(repo) / "index.lock"
+    lock.write_text("", encoding="utf-8")
+    try:
+        for n in range(1, committer.STALE_INDEX_PASSES + 1):
+            assert moxi_repo.commit(spec(repo)).status == "index-busy"
+            item = listed(repo)
+            assert (item["index_busy_since"], item["index_busy_passes"]) == (start, n)
+            assert item["index_stale"] is (n == committer.STALE_INDEX_PASSES)
+            clock[0] += 60
+        # The stale lock's record says when in a clock time.
+        held = text(commit_key(repo))
+        assert held.endswith(f"in a row, since {time.strftime('%H:%M', time.localtime(start))}")
+    finally:
+        lock.unlink()
+    assert moxi_repo.commit(spec(repo)).status == "committed"
+    item = listed(repo)
+    assert (item["index_busy_since"], item["index_busy_passes"], item["index_stale"]) == (
+        None, None, False)
 
 
 def test_an_error_before_the_lock_has_no_key_and_a_bad_spec_in_a_repo_has_one(demo, tmp_path):
