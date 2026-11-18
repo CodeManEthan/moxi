@@ -125,7 +125,7 @@ test("a record's fix that is a sentence around a command copies the command alon
 });
 
 const COMMIT = record({ kind: "commit", piece: null, spec: "notes/snapshot",
-                        text: "refused: drafts/private/ is never committed (refused since 18:45, 2 passes)\n  hook line",
+                        text: "refused: drafts/private/ is never committed (refused since 18:45)\n  hook line",
                         fix: "the spec's next pass that commits cleanly clears this", at: AT("18:50") });
 
 test("a refused spec reads the open commit record's words and keeps them after a throttled pass", () => {
@@ -134,7 +134,7 @@ test("a refused spec reads the open commit record's words and keeps them after a
   const item = one(repo({ root: `${HOME}/notes`, specs: [refused], records: [COMMIT] }));
   assert.deepEqual(words(item), {
     weight: "need", title: "Auto-commit notes/snapshot is refused",
-    dim: ["refused: drafts/private/ is never committed (refused since 18:45, 2 passes)", "~/notes", "refused 2 passes",
+    dim: ["refused: drafts/private/ is never committed (refused since 18:45)", "~/notes", "refused 2 passes",
           "last commit 18:30"],
     fix: { label: null, text: "Its next pass that commits clears this.", copy: null, refresh: false },
     time: "since 18:45",

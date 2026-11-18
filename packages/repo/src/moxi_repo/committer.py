@@ -409,8 +409,16 @@ def _change_state(cgd, fn: Callable[[dict], None]) -> None:
     files.update(_state_path(cgd), edit)
 
 
-def _stamp(t: float | None) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t)) if t else "unknown"
+def _clock(t: float | None) -> str:
+    """`t` as a record says it: the local clock time (`14:05`), after its day (`Nov 17`)
+    when that isn't today's."""
+    if not t:
+        return "unknown"
+    when = time.localtime(t)
+    hour = time.strftime("%H:%M", when)
+    if time.strftime("%Y-%m-%d", when) == time.strftime("%Y-%m-%d", time.localtime(_now())):
+        return hour
+    return f"{time.strftime('%b', when)} {when.tm_mday} {hour}"
 
 
 # -- saved specs --------------------------------------------------------------------------
@@ -1287,13 +1295,13 @@ def _commit_text(p: _Pass, entry: dict, *, stale: bool) -> str | None:
     if stale:
         return (f"repo: {p.name}: git's index lock {p.where.git_dir / 'index.lock'} has "
                 f"been held for {_passes(int(entry['index_busy_passes']))} in a row, since "
-                f"{_stamp(entry.get('index_busy_since'))}")
+                f"{_clock(entry.get('index_busy_since'))}")
     if not (p.status in ("refused", "error") or p.dropped or p.unjudged or p.hook_lines):
         return None
     text = p.result().line()
     if p.status == "refused":
-        text += (f" (refused since {_stamp(entry.get('refused_since'))}, "
-                 f"{_passes(int(entry.get('refused_passes', 1)))})")
+        # The count is the spec's own (`refused_passes`), said once where it shows.
+        text += f" (refused since {_clock(entry.get('refused_since'))})"
     lines = p.hook_lines[:40]
     text += "".join(f"\n  {x}" for x in lines)
     if len(p.hook_lines) > len(lines):

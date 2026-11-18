@@ -27,7 +27,10 @@
 - `moxi repo specs --json` gives a run of failing passes' start and count
   (`error_since`, `error_passes`), as for refused and index-busy passes, and
   `index_stale` once git's index lock has been held for five passes in a row. The
-  committer's records count passes in words that agree (`1 pass`, `2 passes`).
+  committer's records count passes in words that agree (`1 pass`, `2 passes`), and say
+  when in a local clock time (`since 14:05`, `since Nov 17 14:05` on an earlier day),
+  not a UTC stamp. A refused pass's record no longer counts the passes: the spec's
+  `refused_passes` does.
 
 - Every setting carries page fields, which `moxi config repo show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, and
