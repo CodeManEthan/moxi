@@ -693,7 +693,8 @@ def test_start_from_a_closed_row_reads_starting_then_running(seeded, ui_shell, u
         item.get_by_role("button", name="Start startme", exact=True).click()
         expect(drawn).to_have_attribute("fact", "starting")
         expect(panel.get_by_role("button", name="Open web", exact=True)).to_be_enabled()
-        expect(drawn).to_have_attribute("fact", re.compile(r"^running since "))
+        # The fake supervisor gives no start time, so the fact reads `running` alone.
+        expect(drawn).to_have_attribute("fact", re.compile(r"^running"))
     finally:
         ui_page.unroute("**/m/services/api/status?job=*")
     assert len(posts) == 1, posts
