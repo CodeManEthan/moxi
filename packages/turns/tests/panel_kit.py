@@ -300,16 +300,56 @@ _PUSHED = r"""(() => {
 })()"""
 
 
+# The page's copies, kept where a test can read them back. Chromium is granted the
+# clipboard; Firefox refuses a `clipboard-read` grant, so there each document wraps
+# `navigator.clipboard.writeText` to keep the last text in `window.__copied`, then calls
+# the real one. Guarded, so a second run in the same document wraps nothing.
+_KEEP_COPIED = """(() => {
+  const clipboard = navigator.clipboard;
+  if (!clipboard || clipboard.__keepsCopied) return;
+  const write = clipboard.writeText.bind(clipboard);
+  clipboard.writeText = (text) => { window.__copied = text; return write(text); };
+  clipboard.__keepsCopied = true;
+})()"""
+
+
+def _on_chromium(context: Any) -> bool:
+    return context.browser.browser_type.name == "chromium"
+
+
+def ready_copying(context: Any) -> None:
+    """Ready `context` to read back what its page copies: grant the clipboard on
+    Chromium, keep each `writeText` argument elsewhere. Read it with `copied`."""
+    if _on_chromium(context):
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        return
+    context.add_init_script(_KEEP_COPIED)
+    for page in context.pages:
+        page.evaluate(_KEEP_COPIED)
+
+
+def copied(page: Any) -> str | None:
+    """The text `page` last copied: the clipboard's on Chromium, the last `writeText`
+    argument elsewhere (None when it copied nothing)."""
+    if _on_chromium(page.context):
+        return page.evaluate("navigator.clipboard.readText()")
+    return page.evaluate("window.__copied ?? null")
+
+
 def open_panel(panel: Panel, ui_contexts, *, route: str = "", launches: list[dict] | None = None,
-               before=None, **context_args) -> tuple[Any, Any]:
+               before=None, copying: bool = False, **context_args) -> tuple[Any, Any]:
     """A signed-in page on the shell's turns panel at `route`, once the shell's push stream
     has brought the modules; with `launches`, the launcher stub serves them. `before(page)`
-    runs before the page opens (a route of its own). The page and the panel's root.
+    runs before the page opens (a route of its own). With `copying`, `copied(page)` reads
+    back what a Copy wrote, in any browser (`ready_copying`, below). The page and the panel's
+    root.
 
     The shell places the page again on a modules event when the address differs from the
     one it placed, and the page writes its address as a row opens; waiting for the stream's
     first value keeps a test from acting on a page about to be placed anew."""
     page = ui_contexts(panel.shell, **context_args).pages[0]
+    if copying:
+        ready_copying(page.context)
     page.add_init_script(_PUSHED)
     if launches is not None:
         LauncherStub(page, launches)

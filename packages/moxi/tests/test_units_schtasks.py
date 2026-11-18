@@ -23,6 +23,7 @@ from moxi.units import _backend, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._schtasks import BACKEND, NS, SchtasksBackend
+from moxi.units._types import UnitChange
 from moxi_dev.testing import console_script
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
@@ -62,7 +63,8 @@ class FakeSchtasks:
 
     A foreign task takes `/run`, `/end` and `/change` too. As on Windows, `State` follows
     `/run` and `/end` late: the read shows the change only after `lag[task]` reads (0 by
-    default) have still shown the task as it was. `/run` makes it `Running` with
+    default) have still shown the task as it was. A registered task's `/end` follows
+    `lag` and `stuck` the same way. `/run` makes it `Running` with
     `LastRunTime` `RUN_AT` and result 0x41301; `/end` makes it `Ready` with 0x41306. A
     task in `stuck` never changes after `/run` or `/end`. `after_run[task]`, when set, is
     the item the read shows once the lag has passed after `/run`, in place of `Running`.
@@ -112,7 +114,12 @@ class FakeSchtasks:
         elif verb == "/end":
             if not state["running"]:
                 return self._done(cmd, 1, "", "ERROR: The task is not running.")
-            state["running"] = False
+            if task in self.stuck:
+                pass
+            elif self.lag.get(task, 0):
+                self._pending[task] = [self.lag[task], {"running": False}]
+            else:
+                state["running"] = False
         elif verb == "/change":
             state["enabled"] = cmd[4] == "/enable"
         return self._done(cmd, 0, "SUCCESS")
@@ -146,7 +153,7 @@ class FakeSchtasks:
             if pending[0] > 0:
                 pending[0] -= 1
             else:
-                self.foreign[task].update(pending[1])
+                (self.foreign.get(task) or self.tasks[task]).update(pending[1])
                 del self._pending[task]
         if not self.powershell:
             raise FileNotFoundError(2, "No such file or directory", "powershell.exe")
@@ -458,8 +465,75 @@ def test_a_removed_unit_is_ended_deleted_and_its_xml_dropped(w):
     [done] = w.apply([gone])
     assert done.ok, done.lines
     task = "\\Moxi\\demo-relay"
-    assert w.sup.calls == [("/end", task), ("/delete", task)]
+    assert w.sup.calls == [("/end", task), ("tasks",), ("/delete", task)]
     assert not change.paths[0].exists() and task not in w.sup.tasks
+    assert done.lines == ()
+
+
+def removing(w) -> tuple[UnitChange, str]:
+    """The relay daemon registered and running, then declared no more: its removal."""
+    w.module(DAEMONS=DAEMON)
+    w.apply(w.plan().values())
+    task = "\\Moxi\\demo-relay"
+    assert w.sup.tasks[task]["running"]
+    w.module()
+    [gone] = w.plan().values()
+    assert gone.action == "remove"
+    return gone, task
+
+
+def test_a_running_task_is_deleted_only_once_its_end_has_settled(w):
+    gone, task = removing(w)
+    w.sup.lag[task] = 2
+    [done] = w.apply([gone])
+    assert done.ok and done.lines == ()
+    assert w.sup.calls == [("/end", task), ("tasks",), ("tasks",), ("tasks",),
+                           ("/delete", task)]
+    assert w.clock.slept == [0.25, 0.25]
+    assert task not in w.sup.tasks and not gone.paths[0].exists()
+
+
+def test_a_task_that_still_runs_after_its_end_is_deleted_at_the_deadline_with_a_line(w):
+    gone, task = removing(w)
+    w.sup.stuck.add(task)
+    [done] = w.apply([gone])
+    line = (f"{task} still runs 5 s after /end; deleted anyway, so its processes may "
+            "still hold their files")
+    assert done.ok and done.lines == (line,) and line in w.lines
+    assert w.clock.now == pytest.approx(5.0)
+    reads = [c for c in w.sup.calls if c == ("tasks",)]
+    assert len(reads) == 21  # one each 0.25 s from the /end up to 5 s
+    assert w.sup.calls[-1] == ("/delete", task) and task not in w.sup.tasks
+
+
+def test_an_idle_task_is_deleted_after_one_read(w):
+    gone, task = removing(w)
+    w.sup.tasks[task]["running"] = False
+    [done] = w.apply([gone])
+    assert done.ok and done.lines == ()
+    assert w.sup.calls == [("/end", task), ("tasks",), ("/delete", task)]
+    assert w.clock.slept == []
+
+
+@pytest.mark.parametrize("missing_powershell", [True, False])
+def test_a_removal_whose_read_fails_deletes_without_waiting_and_says_why(
+        w, missing_powershell):
+    gone, task = removing(w)
+    w.sup.stuck.add(task)
+    if missing_powershell:
+        w.sup.powershell = False
+    else:
+        w.sup.fail[("tasks", None)] = "Get-ScheduledTask : Access is denied."
+    [done] = w.apply([gone])
+    assert w.sup.calls == [("/end", task), ("tasks",), ("/delete", task)]
+    assert w.clock.slept == [] and task not in w.sup.tasks
+    assert done.ok
+    [line] = done.lines
+    assert line in w.lines
+    assert line.startswith(f"{task}'s state couldn't be read (")
+    assert ("did not run" if missing_powershell else "Access is denied") in line
+    assert line.endswith("; deleted without waiting for it to stop, so its processes "
+                         "may still hold their files")
 
 
 def test_a_remove_of_a_task_already_gone_drops_its_xml(w):
