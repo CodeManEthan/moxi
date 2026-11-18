@@ -241,3 +241,93 @@ def test_with_no_other_key_anywhere_the_fix_says_to_name_one(repo, names):
     fix = later_hook_row(repo).fix
     assert fix.startswith("name a key other than Commit-Check on drop-trailer")
     assert fix.endswith("--set pass-trailer=Commit-Check --set drop-trailer=KEY")
+
+
+# -- standing branches --------------------------------------------------------------------
+
+def standing(repo, url="git@github.com:operator/proj-a.git"):
+    """`enabled` with `standing-branch=ci/*` and `origin` at `url`, when one is given."""
+    if url is not None:
+        git(repo, "remote", "add", "origin", url)
+    return enabled(repo, "standing-branch=ci/*", "standing-branch=ci-full/*")
+
+
+@pytest.mark.parametrize("url", ["git@github.com:operator/proj-a.git",
+                                 "https://github.com/operator/proj-a",
+                                 "ssh://git@github.com:22/operator/proj-a.git"])
+def test_standing_branches_to_a_reducing_origin_are_named_on_the_ok_row(repo, names, url):
+    standing(repo, url)
+    assert states(repo) == [("ok", "marked public; the three pieces are enabled; standing "
+                                   "branches: ci/* ci-full/*")]
+
+
+def test_a_bad_standing_pattern_fails_naming_the_fix(repo, names):
+    standing(repo)
+    git(repo, "config", "--add", "moxi-repo.piece.publishing/push.standing-branch", "ci*")
+    [row] = [r for r in doctor.rows() if r.name == f"repo {repo}"]
+    assert row.state == "fail"
+    assert "'ci*' is not a fixed prefix" in row.detail
+    assert "refuses every push" in row.detail
+    assert row.fix == f"moxi publishing enable {repo} --set 'standing-branch=ci/*' (or " \
+                      "--set standing-branch= to remove it)"
+
+
+def test_a_standing_pattern_without_the_github_repo_fails(repo, names):
+    standing(repo)
+    git(repo, "config", "--unset", "moxi-publishing.github")
+    rows = [r for r in doctor.rows() if r.name == f"repo {repo}"]
+    [failed] = [r for r in rows if r.state == "fail"]
+    assert "moxi-publishing.github is unset, so no push of a standing branch goes with " \
+           "no word" in failed.detail
+    assert failed.fix == f"moxi publishing enable {repo} --github OWNER/REPO"
+
+
+@pytest.mark.parametrize("url", ["git@github.com/operator/proj-a.git",
+                                 "http://github.com/operator/proj-a.git",
+                                 "git@github.com:operator/proj-a.git/",
+                                 "git@github.com:operator/other.git"])
+def test_an_origin_that_does_not_reduce_warns_naming_its_url(repo, names, url):
+    standing(repo, url)
+    assert states(repo)[0] == (
+        "warn", f"no push URL of origin ({url}) reduces to operator/proj-a "
+                "(moxi-publishing.github) in one of the three forms git sends to GitHub, "
+                "so a push of ci/* ci-full/* there asks for the word")
+    assert states(repo)[-1][0] == "ok"
+
+
+def test_the_push_url_is_read_as_git_pushes_to_it(repo, names):
+    standing(repo, "gh:operator/proj-a")
+    assert states(repo)[0][0] == "warn"
+    # insteadOf rewrites the URL git pushes to and hands the hook.
+    git(repo, "config", "url.git@github.com:.insteadOf", "gh:")
+    assert states(repo)[0][0] == "ok"
+    # pushInsteadOf rewrites it for a push only, and before insteadOf.
+    git(repo, "config", "url.git@example.test:.pushInsteadOf", "gh:")
+    assert "no push URL of origin (git@example.test:operator/proj-a)" in states(repo)[0][1]
+    git(repo, "config", "--unset", "url.git@example.test:.pushInsteadOf")
+    # A pushurl is where the push goes, whatever url says.
+    git(repo, "config", "remote.origin.pushurl", "git@example.test:operator/proj-a.git")
+    assert "no push URL of origin (git@example.test:operator/proj-a.git)" in \
+        states(repo)[0][1]
+
+
+def test_one_reducing_push_url_of_several_is_enough(repo, names):
+    standing(repo)
+    git(repo, "config", "--add", "remote.origin.pushurl", "git@example.test:mirror.git")
+    git(repo, "config", "--add", "remote.origin.pushurl", "git@github.com:operator/proj-a")
+    assert states(repo) == [("ok", "marked public; the three pieces are enabled; standing "
+                                   "branches: ci/* ci-full/*")]
+
+
+def test_no_origin_warns(repo, names):
+    standing(repo, None)
+    assert states(repo)[0] == (
+        "warn", "the repo has no remote origin with a URL, so a push of ci/* ci-full/* "
+                "goes with no word nowhere")
+
+
+def test_a_shown_push_url_drops_its_userinfo(repo, names):
+    url = "https:/" + "/alice:" + "pw" + "@example.test/operator/proj-a.git"
+    standing(repo, url)
+    detail = states(repo)[0][1]
+    assert "pw" not in detail and "(https://example.test/operator/proj-a.git)" in detail

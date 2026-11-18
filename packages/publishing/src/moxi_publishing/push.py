@@ -7,7 +7,9 @@ It runs on pre-push, fail closed, order 50. Its settings, in each repo's git con
 - `word-required`, one value: `true` when a push needs `MOXI_PUBLISHING_PUSH_WORD`;
 - `free-ref`, any number: ref patterns outside branches and release tags that a push may
   create, move or delete. A pattern never applies to a branch (`refs/heads/*`) or to a
-  release tag, and `moxi publishing enable` refuses one that could match either.
+  release tag, and `moxi publishing enable` refuses one that could match either;
+- `standing-branch`, any number: patterns such as `ci/*` naming standing branches (see
+  STANDING BRANCHES below).
 
 Nothing leaves unless every ref the push moves follows these rules:
 
@@ -38,8 +40,40 @@ is the repo's own identity (secrets' `author.*`), and a foreign commit is scanne
 any other. For each tag pushed, each tag object of its chain: its headers and message the
 same way. Each ref name goes through secrets' sets at `@ref`.
 
+In a repo that sets `standing-branch`, a push to the publishing remote (the URL reduces
+by `github_repo` to the OWNER/REPO in `moxi-publishing.github`) that creates or moves
+`main` to commit C passes only when GitHub has, at C, a run of the root `pyproject.toml`'s
+`check-workflow` (read at C) from a push to a standing branch, in whose jobs `check-job`
+(read at C) concluded `success` (`main_ci`). GitHub is read as the tag gate reads it
+(`tags.default_web`), each read bounded at ten seconds, and the jobs are GitHub's latest
+attempt of the run (the jobs list's default), so a re-run that passed counts and one that
+failed after a pass does not. A read that fails or a setting missing at C refuses, naming
+which. This adds to the word and to the rule that `main` only moves forward. A push of
+`main` from a repo with no `standing-branch`, or to any other URL, reads no CI here.
+
+STANDING BRANCHES. A `standing-branch` value is a fixed prefix of one or more path parts,
+each ending in `/`, then `*` (`ci/*`), and must not match `main` or a `protected` branch;
+while any value breaks that, every push is refused (`Standing`). A branch under a pattern
+(`refs/heads/ci/x`) is a standing branch:
+
+- it is created, moved or forced only to a commit (not a tag object) that is the tip of
+  the local branch named by the rest of its name (`ci/x` at the tip of local `x`), so
+  nothing but a local branch's tip goes out under the prefix;
+- it is deleted whatever its tip, with no merge check and no fetch first;
+- what it sends is judged as any push's, with no setting that narrows it;
+- a push whose every ref line is a standing branch, sent to a URL that reduces
+  (`github_repo`) to the OWNER/REPO in `moxi-publishing.github`, needs no
+  `MOXI_PUBLISHING_PUSH_WORD` where `word-required` is set; a word given on it is judged as
+  on any push, so a malformed one still refuses it. Any other push needs the word as
+  before, and its standing lines are judged by the rules above;
+- its entry in the log's `refs` names the pattern that allowed it (`standing`).
+
+Another pre-push guard that reads this setting must reduce URLs by `github_repo` and judge
+patterns by `Standing` exactly, or the two disagree on one push.
+
 A push that passes is logged first: one JSON line in the module's state directory,
-`pushes.jsonl`. A log that can't be written refuses the push.
+`pushes.jsonl`. A log that can't be written refuses the push. Its `word` is null when no
+word, or a blank one, was given.
 
 Standard library only at import.
 """
@@ -58,7 +92,7 @@ PUSH = {
     "doc": "In a public repo, refuse a push that rewrites or deletes what it may not, or "
            "makes public what a commit would have refused.",
     "settings": {"main": "one", "protected": "multi", "word-required": "one",
-                 "free-ref": "multi"},
+                 "free-ref": "multi", "standing-branch": "multi"},
 }
 
 PIECE_ID = "publishing/push"
@@ -66,6 +100,10 @@ MAIN = "main"
 PROTECTED = "protected"
 WORD_REQUIRED = "word-required"
 FREE_REF = "free-ref"
+STANDING_BRANCH = "standing-branch"
+#: The repo's OWNER/REPO on GitHub, in its git config: the one place a standing push goes
+#: with no word, and where `main_ci` reads CI.
+GITHUB_KEY = "moxi-publishing.github"
 #: Where the push names the place it was approved, when the repo wants that.
 WORD_ENV = "MOXI_PUBLISHING_PUSH_WORD"
 #: The most tags one push may create: one, of any kind.
@@ -90,6 +128,77 @@ def _shown_url(url: str) -> str:
     """`url` without its userinfo (the `user:token@` after the scheme), as it is printed
     and logged: a remote URL can carry a credential."""
     return _USERINFO.sub(r"\1", url)
+
+
+#: A good `standing-branch` value: a fixed prefix of one or more path parts, each ending
+#: in `/`, then `*`.
+_STANDING = re.compile(r"^((?:[^/*?\[\\\s]+/)+)\*$")
+#: The OWNER/REPO a GitHub URL names, in the three forms git sends to GitHub only:
+#: `git@github.com:O/R`, `ssh://git@github.com[:port]/O/R` and
+#: `https://[user@]github.com/O/R`, each with one `.git` optional. USER is one or more
+#: ASCII letters, digits, `.`, `_` and `-`, and any other byte refuses the URL: some,
+#: such as `#`, `?`, `\` or a control character, end the URL's authority in git and move
+#: the real host. Matched against the whole string (`github_repo`).
+#: The bytes an https USER may hold.
+_USER = r"[A-Za-z0-9._-]+"
+_GITHUB_REPO = re.compile(r"(?:git@github\.com:|ssh://git@github\.com(?::[0-9]+)?/"
+                          r"|https://(?:" + _USER + r"@)?github\.com/)"
+                          r"([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?")
+
+
+def github_repo(url: str) -> str | None:
+    """The OWNER/REPO `url` reduces to, or None. Only the whole of `url` in one of the
+    three forms git sends to GitHub reduces (`_GITHUB_REPO`, by `fullmatch`, so no
+    trailing newline or `/`); anything else, such as `git@github.com/O/R` (no colon: git
+    takes it for a local directory), `http://`, `ssh://git@github.com:O/R`, another host,
+    or an https USER with any byte but ASCII letters, digits, `.`, `_` and `-` (git sends
+    `https://evil.example#@github.com/O/R` to evil.example), reduces to nothing."""
+    match = _GITHUB_REPO.fullmatch(url)
+    return match.group(1) if match else None
+
+
+def _under(branch: str, prefix: str) -> bool:
+    return branch.startswith(prefix) and len(branch) > len(prefix)
+
+
+def standing_problem(value: str, main: str, protected) -> str | None:
+    """Why `value` can't be a `standing-branch` pattern, or None: it must be a fixed
+    prefix ending in `/` then `*`, and match neither `main` nor a `protected` branch."""
+    match = _STANDING.match(value)
+    if match is None:
+        return (f"{STANDING_BRANCH} {value!r} is not a fixed prefix ending in / followed "
+                "by *, such as ci/*")
+    hit = [b for b in [main, *sorted(protected)] if _under(b, match.group(1))]
+    if hit:
+        return f"{STANDING_BRANCH} {value!r} matches {hit[0]}, which is main or protected"
+    return None
+
+
+class Standing:
+    """A repo's standing branches, from the push piece's settings: `patterns`, the good
+    `standing-branch` values, and `problems`, one line per value that is not a good
+    pattern. Blank values are skipped and repeats read once."""
+
+    def __init__(self, settings: dict):
+        main = _one(settings, MAIN) or "main"
+        protected = {v.strip() for v in settings.get(PROTECTED, ()) if v.strip()}
+        values = [v.strip() for v in settings.get(STANDING_BRANCH, ()) if v.strip()]
+        self.patterns: list[str] = []
+        self.problems: list[str] = []
+        for value in dict.fromkeys(values):
+            why = standing_problem(value, main, protected)
+            if why is None:
+                self.patterns.append(value)
+            else:
+                self.problems.append(why)
+
+    def match(self, remote_ref: str) -> str | None:
+        """The pattern that makes `remote_ref` a standing branch, or None. Only a branch
+        under a pattern's prefix with something after it matches; a tag never does."""
+        if not remote_ref.startswith(_HEADS):
+            return None
+        branch = remote_ref[len(_HEADS):]
+        return next((p for p in self.patterns if _under(branch, p[:-1])), None)
 
 
 def _zero(sha: str) -> bool:
@@ -234,7 +343,11 @@ class _Push(_Reader):
         # What is printed and logged; a push to a bare URL gives git the URL as the remote.
         self.shown_remote, self.shown_url = _shown_url(self.remote), _shown_url(self.url)
         self.updates = ctx.updates
-        self.word = os.environ.get(WORD_ENV)
+        # A blank word is no word.
+        self.word = os.environ.get(WORD_ENV) or None
+        if self.word is not None and not self.word.strip():
+            self.word = None
+        self.standing = Standing(settings)
         self.commits: list[str] = []
 
     def fetch_fix(self) -> str:
@@ -263,18 +376,62 @@ class _Push(_Reader):
 
     # -- the word -------------------------------------------------------------------------
 
+    def github(self) -> str | None:
+        """`GITHUB_KEY`'s value, or None when it is unset or blank; read once."""
+        if not hasattr(self, "_github"):
+            done = self.git("config", "--get", GITHUB_KEY)
+            value = done.stdout.decode("utf-8", "surrogateescape").strip()
+            self._github = value if done.returncode == 0 and value else None
+        return self._github
+
+    def to_publishing(self) -> bool:
+        """Whether the repo sets a standing pattern and the push goes to the publishing
+        remote: the URL reduces to `GITHUB_KEY`'s value."""
+        github = self.github() if self.standing.patterns else None
+        return bool(github and github_repo(self.url) == github)
+
+    def standing_free(self) -> bool:
+        """Whether the push needs no word: it carries ref lines, every one a standing
+        branch, to the publishing remote (`to_publishing`)."""
+        return bool(self.updates and self.to_publishing()
+                    and all(self.standing.match(u.remote_ref) for u in self.updates))
+
+    def why_not_free(self) -> str:
+        """One line on why the push is not a standing push, for a refusal that asks for
+        the word."""
+        names = " ".join(self.standing.patterns)
+        github = self.github()
+        if not self.updates:
+            return "this push carries no ref line"
+        if not github:
+            return f"{GITHUB_KEY} is not set, so even a push of only {names} needs it"
+        others = [u.remote_ref for u in self.updates
+                  if not self.standing.match(u.remote_ref)]
+        if others:
+            return (f"only a push whose every ref is under {names} goes with no word, and "
+                    f"this one carries {others[0]}")
+        return (f"only a push of {names} to {github} ({GITHUB_KEY}) goes with no word, "
+                f"and this one goes to {self.shown_url}")
+
     def judge_word(self) -> None:
+        """The word, where `word-required` is set: none is needed on a standing push to
+        the publishing remote; one given is judged on every push."""
         if not self.word_required:
             return
         import re
 
         from moxi_publishing import settings
 
-        pattern = settings.load()[settings.WORD_PATTERN]
-        if not self.word:
+        if self.word is None:
+            if self.standing_free():
+                return
             self.reasons.append(f"this repo wants the word: set {WORD_ENV} to where the "
                                 "push was approved")
-        elif re.fullmatch(pattern, self.word) is None:
+            if self.standing.patterns:
+                self.reasons.append(self.why_not_free())
+            return
+        pattern = settings.load()[settings.WORD_PATTERN]
+        if re.fullmatch(pattern, self.word) is None:
             self.reasons.append(f"{WORD_ENV} does not match push.word_pattern "
                                 f"({pattern})")
 
@@ -341,7 +498,12 @@ class _Push(_Reader):
                                         "object")
                     continue
             if ref.startswith(_HEADS):
-                self.judge_branch(u, ref[len(_HEADS):], deleting=deleting, creating=creating, here=here)
+                pattern = self.standing.match(ref)
+                if pattern:
+                    self.judge_standing(u, pattern, chains, deleting=deleting)
+                else:
+                    self.judge_branch(u, ref[len(_HEADS):], deleting=deleting,
+                                      creating=creating, here=here)
                 continue
             if ref.startswith(_TAGS):
                 if creating and not deleting:
@@ -385,6 +547,34 @@ class _Push(_Reader):
                            flag.config_get(self.ctx.root, "moxi-publishing.github"))
         verdict = tags.gate(self.git, name, where=where, tag_object=local_sha)
         self.reasons += [f"{_TAGS}{name}: {line}" for line in verdict.refusals()]
+
+    def judge_standing(self, u, pattern: str, chains, *, deleting: bool) -> None:
+        """A standing branch: deleted freely; created, moved or forced only to a commit
+        that is the tip of the local branch named by the rest of its name."""
+        if deleting:
+            return
+        ref = u.remote_ref
+        if chains[u.local_sha][0][0] != "commit":
+            self.reasons.append(f"{ref}: {u.local_sha[:12]} is a tag object; a standing "
+                                "branch takes a commit, the tip of a local branch")
+            return
+        local = _HEADS + ref[len(_HEADS) + len(pattern) - 1:]
+        tip = self.branch_tip(local)
+        if tip != u.local_sha:
+            where = f"is at {tip[:12]}" if tip else "does not exist here"
+            self.reasons.append(f"{ref}: a branch under {pattern} goes out only at the tip "
+                                f"of {local}, which {where}, not {u.local_sha[:12]}")
+
+    def branch_tip(self, ref: str) -> str | None:
+        """The commit the local branch `ref` (`refs/heads/x`) points at, or None when there
+        is no such branch. Read exactly: `rev-parse` alone would take
+        `refs/tags/refs/heads/x` or `refs/remotes/refs/heads/x` when the branch is
+        missing."""
+        if self.git("show-ref", "--verify", "--quiet", ref).returncode != 0:
+            return None
+        done = self.git("rev-parse", "--verify", "--quiet", "--end-of-options",
+                        f"{ref}^{{commit}}")
+        return done.stdout.decode("ascii").strip() if done.returncode == 0 else None
 
     def judge_branch(self, u, branch: str, *, deleting: bool, creating: bool, here) -> None:
         ref = u.remote_ref
@@ -549,11 +739,38 @@ class _Push(_Reader):
                 if kind == "tag":
                     self.judge_tag(f"tag {u.remote_ref}", data)
 
+    # -- main moves only to a commit CI passed on a standing branch ---------------------
+
+    def judge_main(self) -> None:
+        """`main_ci` for each ref line that creates or moves `main`, only where
+        `to_publishing` holds."""
+        if not self.to_publishing():
+            return
+        for u in self.updates:
+            if u.remote_ref == _HEADS + self.main and not _zero(u.local_sha):
+                self.reasons += main_ci(self.git, u.local_sha, main=self.main,
+                                        patterns=self.standing.patterns,
+                                        github=self.github(), root=self.ctx.root,
+                                        remote=self.shown_remote)
+
     def run(self) -> None:
+        if self.standing.problems:
+            from moxi_repo.api import quote_arg
+
+            root = quote_arg(self.ctx.root or ".")
+            self.reasons += [
+                *self.standing.problems,
+                f"no push goes out while {STANDING_BRANCH} holds a value that is not a "
+                f"good pattern (a fixed prefix ending in / then *, matching neither "
+                f"{self.main} nor a protected branch); fix it with moxi publishing enable "
+                f"{root} --set '{STANDING_BRANCH}=ci/*', or remove it with --set "
+                f"{STANDING_BRANCH}="]
+            return
         self.judge_word()
         self.judge_names()
         chains = self.chains()
         self.judge_refs(chains)
+        self.judge_main()
         public = self.public()
         if public is None:
             return
@@ -566,11 +783,77 @@ class _Push(_Reader):
 
         return {"time": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
                 "repo": self.ctx.root, "remote": self.shown_remote, "url": self.shown_url,
-                "word": self.word,
-                "refs": [{"local_ref": u.local_ref, "local_sha": u.local_sha,
-                          "remote_ref": u.remote_ref, "remote_sha": u.remote_sha}
-                         for u in self.updates],
+                "word": self.word, "refs": [self.ref_entry(u) for u in self.updates],
                 "commits": self.commits}
+
+    def ref_entry(self, u) -> dict:
+        entry = {"local_ref": u.local_ref, "local_sha": u.local_sha,
+                 "remote_ref": u.remote_ref, "remote_sha": u.remote_sha}
+        pattern = self.standing.match(u.remote_ref)
+        if pattern:
+            entry["standing"] = pattern
+        return entry
+
+
+def main_ci(git, commit: str, *, main: str, patterns, github: str | None,
+            root: str | None = None, remote: str = "origin", web=None) -> list[str]:
+    """Why `main` can't move to `commit`, or nothing: it moves only when GitHub has, at
+    `commit`, a run of the root `pyproject.toml`'s `check-workflow` (read at `commit`) from
+    a push to a branch a standing pattern in `patterns` matches, whose `check-job` (read
+    at `commit`) concluded `success` in the run's latest attempt. `git(*args)` runs git
+    with bytes on stdout; `web` is a `tags.Web`, by default the tag gate's. Each read that
+    fails, a missing setting, `github` None and no pattern refuse, naming which."""
+    from urllib.parse import quote
+
+    from moxi_publishing import tags
+
+    label, short = f"{_HEADS}{main}", commit[:12]
+    if not patterns:
+        fix = f"moxi publishing enable {root} --set '{STANDING_BRANCH}=ci/*'" if root \
+            else f"set {STANDING_BRANCH}"
+        return [f"{label}: moves only to a commit whose check passed on a standing branch, "
+                f"and the push piece's {STANDING_BRANCH} setting names none; {fix}"]
+    try:
+        table = tags.release_table(git, commit)
+    except tags.ReleaseError as exc:
+        return [f"{label}: the check {main} waits for can't be read at {short}: {exc}"]
+    workflow, job = table.get(tags.CHECK_WORKFLOW), table.get(tags.CHECK_JOB)
+    for key, value in ((tags.CHECK_WORKFLOW, workflow), (tags.CHECK_JOB, job)):
+        if not isinstance(value, str) or not value.strip():
+            return [f"{label}: [tool.{tags.TABLE}] at {short} has no {key}, so nothing "
+                    f"says which check {main} waits for"]
+    if not github:
+        return [f"{label}: {GITHUB_KEY} is unset, so GitHub can't be asked whether "
+                f"{job} passed at {short}"]
+    standing = Standing({STANDING_BRANCH: list(patterns), MAIN: [main]})
+    web = web if web is not None else tags.default_web()
+    try:
+        runs = web.github(f"/repos/{github}/actions/workflows/{quote(workflow)}/runs"
+                          f"?head_sha={commit}&event=push&per_page=100",
+                          f"{workflow}'s runs at {short}")
+        for run in (runs or {}).get("workflow_runs", []) if isinstance(runs, dict) else []:
+            if not isinstance(run, dict) or run.get("head_sha") != commit or run.get(
+                    "event") != "push" or not isinstance(run.get("head_branch"), str) \
+                    or not standing.match(_HEADS + run["head_branch"]):
+                continue
+            # The jobs list's default filter is `latest`: the jobs of the run's latest
+            # attempt, so a re-run reads as its last attempt went.
+            jobs = web.github(f"/repos/{github}/actions/runs/{run.get('id')}/jobs"
+                              f"?per_page=100", f"the jobs of run {run.get('id')}")
+            for one in (jobs or {}).get("jobs", []) if isinstance(jobs, dict) else []:
+                name = one.get("name", "") if isinstance(one, dict) else ""
+                if (name == job or name.startswith(job + " (")) and one.get(
+                        "conclusion") == "success":
+                    return []
+    except tags.ReleaseError as exc:
+        return [f"{label}: {exc}, so whether {job} passed at {short} can't be told"]
+    first = standing.patterns[0][:-1] + main
+    return [f"{label}: no {workflow} run from a push to {' or '.join(standing.patterns)} "
+            f"at {short} has {job} concluded success, and {main} moves only to a commit "
+            f"whose {job} passed there. Push the commit to a standing branch first (git "
+            f"push {remote} +{main}:refs/heads/{first}) and push {main} once {job} passed "
+            f"there, or move {main} to an earlier commit that passed (git push {remote} "
+            f"<commit>:refs/heads/{main})"]
 
 
 def _own_identity() -> tuple[str, str] | None:
@@ -631,5 +914,7 @@ def pre_push(ctx):
     return Outcome.ok()
 
 
-__all__ = ["PUSH", "PIECE_ID", "MAIN", "PROTECTED", "WORD_REQUIRED", "FREE_REF", "WORD_ENV",
-           "MAX_TAGS", "LOG_FILE", "log_path", "judge_history", "pre_push"]
+__all__ = ["PUSH", "PIECE_ID", "MAIN", "PROTECTED", "WORD_REQUIRED", "FREE_REF",
+           "STANDING_BRANCH", "GITHUB_KEY", "WORD_ENV", "MAX_TAGS", "LOG_FILE", "Standing",
+           "github_repo", "standing_problem", "main_ci", "log_path", "judge_history",
+           "pre_push"]
