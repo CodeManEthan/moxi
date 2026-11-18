@@ -126,9 +126,10 @@ page. Each act on the page runs the same code as the `moxi services` command you
 run in a terminal, and refuses where that command refuses.
 
 With projects' page in the shell too, each project's row there shows the services filed
-under it that failed (`docs failed at 18:00`), one you stopped by hand (`docs is
-stopped`) and a timer whose last run failed, each as its verdict gives it; an opened
-project lists every service filed under it in a `Services` row, first while one fails.
+under it that is down or failed (`docs down`, `web failed`), one you stopped by hand
+(`docs stopped by hand at 18:00`) and a timer whose last run failed, each as its verdict
+gives it; an opened project lists every service filed under it in a `Services` row,
+first while one fails, and its `Services` link opens this page filtered to the project.
 
 - **The list.** Every row, grouped by project, with its verdict and reason, its health
   check's last result, its switch or on/off, and since when it runs or how its last run
