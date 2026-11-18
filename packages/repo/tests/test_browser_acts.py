@@ -81,6 +81,9 @@ def test_an_add_whose_repo_changed_under_its_confirm_shows_the_new_plan_first(wo
     expect(confirm.locator("[data-line=answer]")).to_have_text("This changed since you looked:")
     expect(confirm.locator("[data-line=writes]").first).to_contain_text("zz-early, new")
     expect(confirm.locator("[data-line=writes]").first).not_to_contain_text("first, new")
+    # The question and its button name what the new plan writes, not every piece picked.
+    expect(confirm.locator("[data-line=question]")).to_have_text("Add zz-early to ~/code/atlas-api?")
+    expect(confirm.locator("[data-action=go]")).to_have_text("Add zz-early")
     assert kit.git(world.shell, world.atlas, "config", "--list", "--local").stdout == before
     confirm.locator("[data-action=go]").click()
     expect(confirm.locator("[data-line=said]").first).to_have_text(

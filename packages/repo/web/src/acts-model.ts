@@ -253,9 +253,28 @@ function pieceParts(piece: PlannedPiece, act: Act, name: string,
   return parts;
 }
 
-/** The confirm of an act, drawn from its plan. */
+/** Whether a plan writes something of a piece: it is new, or the plan sets or takes out a
+ * key of its own. */
+function writesPiece(plan: Pick<Plan, "writes">, piece: PlannedPiece): boolean {
+  return piece.new || plan.writes.some((item) => item.place === "config"
+    && (item.key ?? "").startsWith(`${PIECE}${piece.id}.`));
+}
+
+/** The pieces a confirm names: those he picked that the plan writes. A picked piece the
+ * plan lists but writes nothing of (another hand put it in since he picked it, and a
+ * `changed` answer brought the new plan) is left out; with none left, every one he
+ * picked. */
+export function namedPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
+  const idle = new Set(plan.pieces.filter((piece) => !writesPiece(plan, piece)).map((piece) => piece.id));
+  const kept = picked.filter((id) => !idle.has(id));
+  return kept.length > 0 ? kept : [...picked];
+}
+
+/** The confirm of an act, drawn from its plan. The question and button name what the plan
+ * writes, so after `changed` they follow the new plan. */
 export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
-  const { act, repo, picked, offered, home } = context;
+  const { act, repo, offered, home } = context;
+  const picked = namedPieces(plan, context.picked);
   const named = new Map(offered.map((piece) => [piece.id, piece]));
   const nameOf = (id: string): string => named.get(id)?.name ?? pieceName(id);
   const names = joinAnd(picked.map(nameOf));
@@ -281,6 +300,7 @@ export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
   }));
 
   const moves = plan.writes.some((item) => item.place === "hooks" && item.key === "hook");
+  const added = plan.pieces.filter((piece) => writesPiece(plan, piece)).length;
   if (act === "add-repo") {
     view.leaves = plan.own_hooks.length > 0 && !moves
       ? "its files alone · a hook it already has keeps running, after the pieces" : "its files alone";
@@ -291,7 +311,7 @@ export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
   view.go = act === "add" ? `Add ${names}`
     : act === "enable" ? "Turn it on"
     : act === "refresh" ? "Refresh"
-    : plan.pieces.length === 0 ? "Add to the list" : `Add ${counted(plan.pieces.length, "piece")}`;
+    : added === 0 ? "Add to the list" : `Add ${counted(added, "piece")}`;
   view.digest = plan.digest;
   return view;
 }

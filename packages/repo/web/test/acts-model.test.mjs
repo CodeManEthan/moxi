@@ -159,6 +159,29 @@ test("a merge in progress with commit-proof planned says its commit is refused",
   assert.deepEqual(without.then, [GATE.doc]);
 });
 
+test("after changed, the question and button name what the new plan writes, not every piece he picked", () => {
+  const picked = ["repo/commit-proof", "repo/commit-rules"];
+  // commit-rules went in by another hand: the new plan lists it but writes nothing of it.
+  const view = confirmView(plan({
+    pieces: [planned({ id: "repo/commit-proof" }), planned({ id: "repo/commit-rules", new: false })],
+    writes: [...registration("repo/commit-proof", "commit-msg", { order: "60" })],
+  }), context("add", picked));
+  assert.deepEqual([view.title, view.go], ["Add commit-proof to atlas-api?", "Add commit-proof"]);
+  assert.deepEqual(view.writes, ["into this repo's git config · commit-proof, new"]);
+  // A piece the plan rewrites is still named.
+  const rewrite = confirmView(plan({
+    pieces: [planned({ id: "repo/commit-proof" }), planned({ id: "repo/commit-rules", new: false })],
+    writes: [...registration("repo/commit-proof", "commit-msg", { order: "60" }),
+             write("config", "moxi-repo.piece.repo/commit-rules.fail", "open", "closed", { piece: "repo/commit-rules" })],
+  }), context("add", picked));
+  assert.equal(rewrite.go, "Add commit-proof and commit-rules");
+  // Add a repo counts only the pieces the plan writes.
+  const listed = confirmView(plan({
+    indexed: false, pieces: [planned({ id: "repo/commit-rules", new: false })], writes: [write("index", null, null, "/r")],
+  }), context("add-repo", ["repo/commit-rules"]));
+  assert.equal(listed.go, "Add to the list");
+});
+
 test("Add a repo: its folder line, the list alone, pieces counted, a hook it has", () => {
   const listOnly = confirmView(plan({ indexed: false, writes: [write("index", null, null, "/r")] }),
                                context("add-repo"));
