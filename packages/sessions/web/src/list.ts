@@ -727,7 +727,7 @@ export interface RunningGroupView {
   /** `6 running`, or `Running` over a line and no row. */
   label: string;
   rows: RunningRowView[];
-  /** `Nothing is running`, or that the running launches could not be read; null with rows. */
+  /** That the running launches could not be read; null with rows. */
   line: string | null;
   /** Why they could not be read, in launcher's words: shown at the desk. */
   reason: string | null;
@@ -749,7 +749,6 @@ export interface ListView {
 }
 
 export const RUNNING = "Running";
-export const NOTHING_RUNNING = "Nothing is running";
 export const RUNNING_UNREAD = "Moxi couldn't read the running sessions";
 export const LAUNCHED = "launched";
 export const ACTIVE_RECENTLY = "Active recently";
@@ -874,8 +873,8 @@ export function runningRowView(entry: RunningEntry, state: ListState, presses: P
  * Nothing is drawn of it while the find field is set (its results replace every group),
  * nor before a read of launcher came. A read that failed draws `Running` and the line
  * that says so. A list with a filter set holds only the launches whose session the
- * filtered list holds, and no group when none is; without one, every launch running, and
- * `Nothing is running` when none is.
+ * filtered list holds; without one, every launch running. With no launch to draw there is
+ * no group at all.
  */
 export function runningGroup(state: ListState, read: RunningRead | null, presses: Presses = NO_PRESSES,
                              { desk = true, zone = LOCAL }: { desk?: boolean; zone?: Zone } = {})
@@ -885,14 +884,11 @@ export function runningGroup(state: ListState, read: RunningRead | null, presses
   if (read.value === null) {
     return { group: { label: RUNNING, rows: [], line: RUNNING_UNREAD, reason: read.failure }, taken };
   }
-  const filtered = isFiltered(state.query);
-  const kept = filtered ? shownKeys(state.groups) : null;
+  const kept = isFiltered(state.query) ? shownKeys(state.groups) : null;
   const entries = ordered(read.value.sessions).filter((entry) => kept === null || kept.has(runningKey(entry)));
   const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone }));
   for (const row of rows) taken.add(row.key);
-  if (rows.length === 0) {
-    return { group: filtered ? null : { label: RUNNING, rows: [], line: NOTHING_RUNNING, reason: null }, taken };
-  }
+  if (rows.length === 0) return { group: null, taken };
   return { group: { label: `${fmtCount(rows.length)} running`, rows, line: null, reason: null }, taken };
 }
 

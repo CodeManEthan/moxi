@@ -121,9 +121,12 @@ test("without launcher, or before its read, nothing of the running group is draw
   }
 });
 
-test("nothing running says so; a failed read says why; a filter keeps the launches its list holds; find draws none", () => {
+test("nothing running draws no group; a failed read says why; a filter keeps the launches its list holds; find draws none", () => {
   const state = stateOf(listAnswer([row("s-a", at("19:00"))], [row("old", at("09:00"))]));
-  assert.deepEqual(runningGroup(state, up([])).group, { label: "Running", rows: [], line: "Nothing is running", reason: null });
+  assert.deepEqual(runningGroup(state, up([])), { group: null, taken: new Set() });
+  const view = listView(state, { launcher: true, running: up([]), zone: UTC });
+  assert.equal(view.running, null);
+  assert.deepEqual(view.groups.map((group) => group.key), ["recent", TODAY]);
   assert.deepEqual(runningGroup(state, runningRead({ status: 0, data: null })).group,
                    { label: "Running", rows: [], line: "Moxi couldn't read the running sessions", reason: "no answer from the shell" });
   const filtered = stateOf(listAnswer([row("s-a", at("19:00"))], []), { ...NO_FILTERS, harness: "claude" });

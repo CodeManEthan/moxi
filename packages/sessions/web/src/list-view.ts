@@ -692,8 +692,7 @@ export class SessionsList extends LitElement {
       <div class="gk" data-line="label">${group.label}</div>
       <div class="gl">
         ${repeat(group.rows, (row) => row.key, (row) => this.#row(row, row))}
-        ${group.line !== null ? html`<p class="one d" data-line=${group.reason !== null ? "running-unread" : "none-running"}
-          role=${ifDefined(group.reason !== null ? "status" : undefined)}>${group.line}${
+        ${group.line !== null ? html`<p class="one d" data-line="running-unread" role="status">${group.line}${
           group.reason !== null && desk ? html`: <span data-line="reason">${group.reason}</span>` : nothing}</p>` : nothing}
       </div>
     </section>`;
