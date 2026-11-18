@@ -1,11 +1,12 @@
 """turns' panel in a browser, around its rows: each address and an unknown one, `Copy id`,
 `Copy` and `Settings › turns`; the states (loading, a failed route, a failed scan, empty,
-first time); markup drawn as text; nothing that acts on a session and no second heading;
-the page at 1280 and 400 px in the light and the dark theme, with colour from the text
-tokens alone.
+first time, a session whose watch alone is down); markup drawn as text; nothing that acts
+on a session and no second heading; the page at 1280 and 400 px in the light and the dark
+theme, with colour from the text tokens alone.
 
 The loading state, the failed route and the failed scan are the shell's own answers held,
 replaced or changed in the browser; the page server's side of each is its unit tests'.
+A watch that is down is the session's own: its endpoint, in this process, refuses it.
 The shells, the stand-in `claude` and the helpers are `panel_kit`'s.
 """
 
@@ -213,6 +214,23 @@ def test_the_first_time_without_claude_code_says_none_can_show_and_how_to_fix_it
     reach.locator('[data-action="copy-command"]').click()
     expect(reach.locator('[data-action="copy-command"]')).to_have_text("Copied")
     assert page.evaluate("() => navigator.clipboard.readText()") == "moxi install turns"
+
+
+def test_while_a_sessions_watch_alone_is_down_a_dim_line_says_what_shows_may_be_old(
+        panel, make_endpoint, ui_contexts, monkeypatch):
+    from moxi import ipc
+    from moxi_turns.endpoint import Endpoint
+
+    def refused(self, conn, first, live):
+        raise ipc.RpcError(-32000, "this session takes no watch")
+
+    # Every watch of the session is refused; its reads answer.
+    monkeypatch.setattr(Endpoint, "watch", refused)
+    ep, _ = make_endpoint(harness("/srv/work/unwatched"), session_id=SID)
+    panel.listed({key_of(ep)})
+    _, root = open_panel(panel, ui_contexts)
+    expect(row(root, key_of(ep))).to_have_attribute("name", started("unwatched"))
+    expect(root.locator('[data-line="note"]')).to_have_text(["Showing what Moxi read up to 30 s ago"])
 
 
 # --- markup as text --------------------------------------------------------------------------
