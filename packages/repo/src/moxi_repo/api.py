@@ -2,7 +2,9 @@
 CLI and for other modules.
 
 `add`, `remove`, `enable`, `disable` and `refresh` change a repo's git hooks and return a
-`Report` of what they did; `status`, `available` and `rules` read. A verb that can't act raises a
+`Report` of what they did; `status`, `available` and `rules` read. `plan_add`,
+`plan_enable` and `plan_refresh` say what `add`, `enable` and `refresh` would write, and
+write nothing. A verb that can't act raises a
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
@@ -562,19 +564,32 @@ def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ..
     (commit-proof's salt) is shown as None. `digest` is the SHA-256 of `{act, root,
     writes}`. `refusal` is `{code, text}` when `add` would refuse, with no `writes` and no
     `digest`. `path` must be absolute (after `~`)."""
+
+    def make(repo: Repo, version) -> _Plan:
+        ids = tuple(_ids((piece_ids,)))
+        good, bad = _declared(ids)
+        return _plan_add(repo, _state(repo), ids, None, (), version, good, bad)
+
+    return _planned(path, make, floor=True)
+
+
+def _planned(path: str | os.PathLike, make: Callable[[Repo, tuple | None], _Plan], *,
+             floor: bool) -> dict:
+    """A plan of the repo at the absolute `path`, made by `make(repo, git version)`, as
+    `plan_add` returns it; a refusal is the plan's `refusal`. `floor` refuses a git older
+    than repo supports."""
     where = Path(os.path.expanduser(os.fspath(path)))
     view = _plan_view(None, where)
     version = _version(need=False)
     view["git_version"] = version and gitconf.version_text(version)
     try:
-        ids = tuple(_ids((piece_ids,)))
         if not where.is_absolute():
             raise Usage(f"{path} is not an absolute path", reason="not-absolute")
-        _floor(version)
+        if floor:
+            _floor(version)
         repo = _resolve(where)
         view.update(root=str(repo.root), name=repo.root.name, is_repo=True)
-        good, bad = _declared(ids)
-        plan = _plan_add(repo, _state(repo), ids, None, (), version, good, bad)
+        plan = make(repo, version)
     except Failure as exc:
         view["refusal"] = {"code": exc.reason, "text": exc.text}
         return view
@@ -634,7 +649,8 @@ def _plan_view(plan: _Plan | None, root: Path) -> dict:
     if plan is None:
         return view
     repo = plan.repo
-    view.update(is_repo=True, git_version=plan.version and gitconf.version_text(plan.version),
+    version = plan.version or gitconf.git_version()
+    view.update(is_repo=True, git_version=version and gitconf.version_text(version),
                 mode=plan.mode, indexed=plan.indexed, pieces=plan.pieces,
                 mode_change=plan.mode_change, own_hooks=own_hooks(repo, ()),
                 in_progress=_in_progress(repo), writes=plan.writes, digest=plan.digest)
@@ -669,6 +685,15 @@ def _drawn(piece_id: str) -> set[str]:
     return {SALT}
 
 
+def _is_indexed(repo: Repo) -> bool:
+    """Whether the repo is in the index; refuses an index that can't be read, before
+    anything is written."""
+    try:
+        return repo.key in indexed()
+    except IndexUnreadable as exc:
+        raise IndexUnreadable(exc.path, exc.why, writing=True) from None
+
+
 def _index_step(repo: Repo) -> list[gitconf.Step]:
     """The index's step when the repo joins it, or its entry there changes."""
     entry = indexed().get(repo.key)
@@ -687,10 +712,7 @@ def _plan_add(repo: Repo, state: State, piece_ids: tuple, mode: str | None, sets
     plan = _Plan("add", repo, version)
     named = _named(list(piece_ids), good, bad)
     implied = _implied(state, named, good)
-    try:
-        plan.indexed = repo.key in indexed()
-    except IndexUnreadable as exc:
-        raise IndexUnreadable(exc.path, exc.why, writing=True) from None
+    plan.indexed = _is_indexed(repo)
     plan.mode = state.mode
     if not piece_ids and mode is None and not implied:
         plan.steps += _index_step(repo)
@@ -739,6 +761,10 @@ def _plan_add(repo: Repo, state: State, piece_ids: tuple, mode: str | None, sets
     return plan
 
 
+class _GitFailed(Failure):
+    """git failed while a plan was written."""
+
+
 def _write(plan: _Plan, expect: str | None) -> Report:
     """Write `plan`'s items, in order, and report them. With `expect`, first: nothing to
     write answers `already`, and another digest raises `Changed`."""
@@ -762,7 +788,7 @@ def _write(plan: _Plan, expect: str | None) -> Report:
                 done.lines += step.run() or []
                 wrote = True
     except gitconf.GitError as exc:
-        raise Failure(str(exc), partial=wrote) from None
+        raise _GitFailed(str(exc), partial=wrote) from None
     report.lines += plan.lines
     report.take(plan.repo.root, done)
     return report
@@ -869,38 +895,71 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
         report.lines.append(f"dropped {path} from the index; {why}")
 
 
-def enable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, enabled=True)
+def enable(path: str | os.PathLike, piece_id: str, *, expect: str | None = None) -> Report:
+    """Turn a registered piece on in the repo at `path`. It writes what `plan_enable`
+    plans, made under the repo's lock; `expect` is as `add` takes it."""
+    repo = _resolve(path)
+    with _hooks_lock(repo):
+        report = _write(_plan_enable(repo, _state(repo), piece_id, None), expect)
+    if not report.already:
+        report.lines.append(f"enabled {piece_id} in {repo.root}")
+    _sweep(repo)
+    return report
+
+
+def plan_enable(path: str | os.PathLike, piece_id: str) -> dict:
+    """What `enable(path, piece_id)` would write, read as `plan_add` reads it, and in its
+    shape. A piece not registered there is the refusal `not-registered`."""
+    return _planned(path, lambda repo, version: _plan_enable(repo, _state(repo), piece_id,
+                                                              version), floor=False)
+
+
+def _plan_enable(repo: Repo, state: State, piece_id: str, version) -> _Plan:
+    import copy
+
+    if piece_id not in state.pieces:
+        raise Usage(f"{piece_id} is not registered in {repo.root}", reason="not-registered")
+    plan = _Plan("enable", repo, version)
+    plan.indexed = _is_indexed(repo)
+    plan.mode = state.mode
+    after = copy.deepcopy(state)
+    plan.steps += gitconf.plan_enabled(repo, piece_id, enabled=True, state=after)
+    plan.pieces.append({"id": piece_id, "event": last(state.pieces[piece_id], "event"),
+                        "new": False, "implied_by": None, "seeds": []})
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
 
 
 def disable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, enabled=False)
-
-
-def _flip(path: str | os.PathLike, piece_id: str, *, enabled: bool) -> Report:
+    """Turn a registered piece off in the repo at `path`, closing its doctor record."""
     repo = _resolve(path)
     report = Report()
     with _hooks_lock(repo):
         state = _state(repo)
         if piece_id not in state.pieces:
-            raise Usage(f"{piece_id} is not registered in {repo.root}")
+            raise Usage(f"{piece_id} is not registered in {repo.root}", reason="not-registered")
         try:
-            gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
-            if not enabled:
-                # The record, its ledger key, then the flag.
-                _records.close_piece(repo.common_dir, piece_id)
-                gitconf.clear_recorded(repo, piece_id, state)
+            gitconf.set_enabled(repo, piece_id, enabled=False, state=state)
+            # The record, its ledger key, then the flag.
+            _records.close_piece(repo.common_dir, piece_id)
+            gitconf.clear_recorded(repo, piece_id, state)
             report.take(repo.root, gitconf.sync(repo, state))
         except gitconf.GitError as exc:
             raise Failure(str(exc)) from None
-    report.lines.append(f"{'enabled' if enabled else 'disabled'} {piece_id} in {repo.root}")
+    report.lines.append(f"disabled {piece_id} in {repo.root}")
     _sweep(repo)
     return report
 
 
-def refresh(path: str | os.PathLike | None = None) -> Report:
+def refresh(path: str | os.PathLike | None = None, *, expect: str | None = None) -> Report:
     """Re-read declarations, git's version and the interpreter, and rewrite every entry,
-    shim and launcher of one repo or every indexed repo by the rewrite rule; then sweep."""
+    shim and launcher of one repo or every indexed repo by the rewrite rule; then sweep.
+
+    In each repo it writes what `plan_refresh` plans, made under that repo's lock.
+    `expect`, as `add` takes it, needs `path`; with it, a git failure raises (`partial`
+    once something was written) where without it the failure is a problem of the report."""
+    if expect is not None and path is None:
+        raise Usage("a plan's digest is of one repo; name its path")
     version = _version()
     report = Report()
     if path is not None:
@@ -918,7 +977,7 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     for repo in repos:
         try:
             with _hooks_lock(repo):
-                done = _refresh_one(repo, report, good, bad, default, version)
+                done = _refresh_one(repo, report, good, bad, default, version, expect)
         except Busy as exc:
             if path is not None:
                 raise
@@ -926,50 +985,95 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
             continue
         if not done:
             continue
-        _index_put(repo)
         _sweep(repo)
-        report.lines.append(f"refreshed {repo.root}")
+        if not report.already:
+            report.lines.append(f"refreshed {repo.root}")
     if path is None:
         _records.sweep()
     return report
 
 
+def plan_refresh(path: str | os.PathLike) -> dict:
+    """What `refresh(path)` would write, read as `plan_add` reads it, and in its shape;
+    `pieces` names each piece it registers (its `everywhere` key on) or whose declared
+    keys it puts back."""
+
+    def make(repo: Repo, version) -> _Plan:
+        good, bad = pieces.declared()
+        return _plan_refresh(repo, _state(repo), good, bad, default_mode(), version, [])
+
+    return _planned(path, make, floor=True)
+
+
+def _plan_refresh(repo: Repo, state: State, good: dict, bad: dict, default: str, version,
+                  problems: list[str]) -> _Plan:
+    """`refresh`'s plan in one repo, from `state`; adds to `problems` each registration
+    it leaves as it is. Raises `Usage` when a seed is refused."""
+    import copy
+
+    plan = _Plan("refresh", repo, version)
+    plan.indexed = _is_indexed(repo)
+    plan.steps += _index_step(repo)
+    after = copy.deepcopy(state)
+    for piece in _implied(state, [], good):
+        changes = _changes(piece, state, {})
+        plan.steps += gitconf.plan_register(repo, piece, after)
+        plan.steps += gitconf.plan_settings(repo, piece.id, changes, after, event=piece.event,
+                                            seeded=set(changes), drawn=_drawn(piece.id))
+        plan.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
+                          f"{repo.root} ({EVERYWHERE[piece.id]})")
+        plan.pieces.append({"id": piece.id, "event": piece.event, "new": True,
+                            "implied_by": EVERYWHERE[piece.id], "seeds": sorted(changes)})
+    for pid in sorted(state.pieces):
+        if pid in good:
+            steps = gitconf.plan_register(repo, good[pid], after)
+            plan.steps += steps
+            if steps:
+                plan.pieces.append({"id": pid, "event": good[pid].event, "new": False,
+                                    "implied_by": None, "seeds": []})
+        elif pid in bad:
+            problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                            f"({bad[pid]}); its registration is left as it is")
+        else:
+            problems.append(
+                f"{repo.root}: no installed module declares {pid}; remove it with: "
+                f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
+    effective = gitconf.pick_mode(state.mode_set, default, version)
+    plan.mode = effective
+    if effective != state.mode:
+        if state.mode:
+            plan.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
+                              f"(git {gitconf.version_text(version)})")
+            plan.mode_change = {"from": state.mode, "to": effective}
+        plan.steps += gitconf.plan_mode(repo, after, mode=effective)
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
+
+
 def _refresh_one(repo: Repo, report: Report, good: dict, bad: dict, default: str,
-                 version) -> bool:
+                 version, expect: str | None = None) -> bool:
     """`refresh`'s writes in one repo, under its lock; False when a problem stopped them,
-    which is then the report's."""
+    which is then the report's. With `expect`, a refusal, a changed plan and a git failure
+    raise."""
     state = _state(repo)
     try:
-        for piece in _implied(state, [], good):
-            changes = _changes(piece, state, {})
-            gitconf.register(repo, piece, state)
-            if changes:
-                gitconf.apply_settings(repo, piece.id, changes, state)
-            report.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
-                                f"{repo.root} ({EVERYWHERE[piece.id]})")
-        for pid in sorted(state.pieces):
-            if pid in good:
-                gitconf.register(repo, good[pid], state)
-            elif pid in bad:
-                report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
-                                       f"({bad[pid]}); its registration is left as it is")
-            else:
-                report.problems.append(
-                    f"{repo.root}: no installed module declares {pid}; remove it with: "
-                    f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
-        effective = gitconf.pick_mode(state.mode_set, default, version)
-        if effective != state.mode:
-            if state.mode:
-                report.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
-                                    f"(git {gitconf.version_text(version)})")
-            gitconf.set_mode(repo, state, mode=effective)
-        report.take(repo.root, gitconf.sync(repo, state))
-    except gitconf.GitError as exc:
-        report.problems.append(f"{repo.root}: {exc}")
-        return False
+        plan = _plan_refresh(repo, state, good, bad, default, version, report.problems)
     except Usage as exc:
+        if expect is not None:
+            raise
         report.problems.append(f"{repo.root}: {exc.text}")
         return False
+    try:
+        done = _write(plan, expect)
+    except _GitFailed as exc:
+        if expect is not None:
+            raise
+        report.problems.append(f"{repo.root}: {exc.text}")
+        return False
+    report.lines += done.lines
+    report.problems += done.problems
+    report.chain += done.chain
+    report.already = report.already or done.already
     return True
 
 
@@ -1635,8 +1739,8 @@ def __dir__():
 
 
 __all__ = ["Failure", "Usage", "Refused", "Busy", "Changed", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "REFUSAL_CODES", "SEEDS", "SETTING_CHECKS",
-           "RULE_LINES", "EVERYWHERE", "available", "add", "plan_add", "remove", "enable", "disable",
-           "refresh", "rules", "rule_lines_of", "own_hooks", "status",
+           "RULE_LINES", "EVERYWHERE", "available", "add", "plan_add", "remove", "enable", "plan_enable", "disable",
+           "refresh", "plan_refresh", "rules", "rule_lines_of", "own_hooks", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
            "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

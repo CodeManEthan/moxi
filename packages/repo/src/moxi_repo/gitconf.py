@@ -430,9 +430,22 @@ def register(repo: Repo, piece, state: State) -> bool:
     return new
 
 
+def plan_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> list[Step]:
+    """`set_enabled`'s write, as a step, when the piece's `enabled` changes. Updates
+    `state`; writes nothing."""
+    section = state.pieces.setdefault(piece_id, {})
+    value = "true" if enabled else "false"
+    if section.get("enabled") == [value]:
+        return []
+    step = _value_step(repo, piece_key(piece_id, "enabled"), section.get("enabled"), [value],
+                       piece=piece_id, event=last(section, "event") or None)
+    section["enabled"] = [value]
+    return [step]
+
+
 def set_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> None:
-    _set(repo, piece_key(piece_id, "enabled"), "true" if enabled else "false")
-    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if enabled else "false"]
+    for step in plan_enabled(repo, piece_id, enabled=enabled, state=state):
+        step.run()
 
 
 def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
@@ -862,6 +875,6 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False,
 __all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "resolve_repo", "work_tree", "read", "register", "set_enabled", "clear_recorded",
            "apply_settings", "remove_piece",
-           "set_mode", "plan_register", "plan_settings", "plan_mode", "plan_sync", "sync", "SyncPlan", "Step", "item", "remove_all", "pick_mode", "git_version", "parse_version",
+           "set_mode", "plan_enabled", "plan_register", "plan_settings", "plan_mode", "plan_sync", "sync", "SyncPlan", "Step", "item", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "chain_hooks", "holds_chain_line", "check_shims", "key_of", "worktrees",
            "leftovers"]
