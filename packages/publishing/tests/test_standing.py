@@ -184,6 +184,36 @@ def test_a_standing_branch_refuses_anything_but_its_local_branchs_tip(repo, name
     assert run(remote, "rev-parse", "--verify", "-q", "refs/heads/ci/topic").returncode != 0
 
 
+@pytest.mark.parametrize("lookalike", ["refs/tags/refs/heads/elsewhere",
+                                       "refs/remotes/refs/heads/elsewhere",
+                                       "refs/refs/heads/elsewhere"])
+def test_a_standing_branch_reads_only_a_local_branch_of_its_name(
+        repo, names, remote, lookalike):
+    # git's lookup of `refs/heads/elsewhere` falls back to these when there is no branch
+    # `elsewhere`; the piece reads the branch itself.
+    standing_repo(repo)
+    git(repo, "switch", "-q", "-c", "topic")
+    commit(repo, "Topic")
+    tip = head(repo)
+    git(repo, "update-ref", lookalike, tip)
+    assert head(repo, "refs/heads/elsewhere") == tip
+    refused(run(repo, "push", "-q", "origin", f"{tip}:refs/heads/ci/elsewhere"),
+            "the tip of refs/heads/elsewhere, which does not exist here")
+    git(repo, "branch", "elsewhere", "main")
+    refused(run(repo, "push", "-q", "origin", f"{tip}:refs/heads/ci/elsewhere"),
+            f"refs/heads/elsewhere, which is at {head(repo, 'main')[:12]}")
+    git(repo, "branch", "-f", "elsewhere", tip)
+    passed(run(repo, "push", "-q", "origin", f"{tip}:refs/heads/ci/elsewhere"))
+
+
+def test_a_standing_branch_takes_no_branch_below_its_name(repo, names, remote):
+    standing_repo(repo)
+    git(repo, "switch", "-q", "-c", "x/y")
+    commit(repo, "Below")
+    refused(run(repo, "push", "-q", "origin", "x/y:refs/heads/ci/x"),
+            "the tip of refs/heads/x, which does not exist here")
+
+
 def test_a_standing_branch_is_deleted_whatever_its_tip_with_no_fetch(repo, names, remote):
     standing_repo(repo)
     git(repo, "switch", "-q", "-c", "topic")

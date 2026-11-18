@@ -559,13 +559,22 @@ class _Push(_Reader):
                                 "branch takes a commit, the tip of a local branch")
             return
         local = _HEADS + ref[len(_HEADS) + len(pattern) - 1:]
-        done = self.git("rev-parse", "--verify", "--quiet", "--end-of-options",
-                        f"{local}^{{commit}}")
-        tip = done.stdout.decode("ascii").strip() if done.returncode == 0 else None
+        tip = self.branch_tip(local)
         if tip != u.local_sha:
             where = f"is at {tip[:12]}" if tip else "does not exist here"
             self.reasons.append(f"{ref}: a branch under {pattern} goes out only at the tip "
                                 f"of {local}, which {where}, not {u.local_sha[:12]}")
+
+    def branch_tip(self, ref: str) -> str | None:
+        """The commit the local branch `ref` (`refs/heads/x`) points at, or None when there
+        is no such branch. Read exactly: `rev-parse` alone would take
+        `refs/tags/refs/heads/x` or `refs/remotes/refs/heads/x` when the branch is
+        missing."""
+        if self.git("show-ref", "--verify", "--quiet", ref).returncode != 0:
+            return None
+        done = self.git("rev-parse", "--verify", "--quiet", "--end-of-options",
+                        f"{ref}^{{commit}}")
+        return done.stdout.decode("ascii").strip() if done.returncode == 0 else None
 
     def judge_branch(self, u, branch: str, *, deleting: bool, creating: bool, here) -> None:
         ref = u.remote_ref
