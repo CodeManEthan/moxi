@@ -717,22 +717,66 @@ def _stamped_identity(env, project) -> str | None:
     return sender.qualified if sender is not None else None
 
 
-def _send_reserved(args, ctx: Context, *, module: str, name: str, tags) -> int:
-    """A module's send under the reserved name `name`: its token, read through this
-    process's credential chain for `module`, presented to the daemon's `send`. The daemon
-    checks it against the reserved row, and refuses a sender inside a live session."""
+def _send_only_row(name: str, env):
+    """`name`'s `reserved` row that isn't freed, read from comms.db without writing: None
+    when there is none, and `UNREAD` when the store can't be read (an older store, a
+    store that isn't there yet), so the daemon decides."""
+    import sqlite3
+
+    from . import reserved
+    from .store import StoreRefused
+    from .store.open import open_read
+
+    try:
+        conn = open_read(env=env)
+    except (StoreRefused, sqlite3.Error, OSError):
+        return UNREAD
+    try:
+        conn.row_factory = sqlite3.Row
+        return reserved.lookup(conn, name)
+    except sqlite3.Error:
+        return UNREAD
+    finally:
+        conn.close()
+
+
+#: What `_send_only_row` answers when the store can't be read.
+UNREAD = object()
+
+
+def _send_reserved(args, ctx: Context, *, module: str | None, name: str, tags) -> int:
+    """A send under the send-only name `name`: its token, read through this process's
+    credential chain, presented to the daemon's `send`. With `module`, a module's send
+    under a name reserved for it (`api.send_as`); without, a program's send under a
+    name it registered (`moxi comms send --as`, `api.send_under`), refused inside a live
+    session before the token is read. The daemon checks the token against the row, and
+    refuses a sender inside a live session."""
     from . import reserved, secrets
 
     if "@" in name or not NAME_RE.match(name) or is_auto_name(name):
-        _refuse(ctx, "not-reserved", f"{name!r} is not a reserved name: a reserved name "
+        _refuse(ctx, "not-reserved", f"{name!r} is not a send-only name: a send-only name "
                 "is bare and global. Nothing was sent.")
         return _USAGE
+    row = _send_only_row(name, ctx.env)
+    if module is None:
+        code = _registered_refusal(ctx, name, row)
+        if code is not None:
+            return code
+        holder = reserved.PROGRAM_HOLDER
+    else:
+        if row is not UNREAD and reserved.held_by_program(row):
+            _refuse(ctx, "not-reserved", f"{name} is registered by a program, not reserved "
+                    f"for {module}. Nothing was sent.")
+            return _REFUSED
+        holder = reserved.MODULE_HOLDER
+    sid, owner = reserved.credential(name, module, holder)
+    whose = f" for {module}" if module else ""
     try:
         chain = secrets.from_config(env=ctx.env)
-        token = chain.get(reserved.secret_id(name), owner=reserved.owner(module))["value"]
+        token = chain.get(sid, owner=owner)["value"]
     except secrets.SecretNotFound:
         _refuse(ctx, "credential",
-                f"comms holds no token for {name} for {module} in this process's "
+                f"comms holds no token for {name}{whose} in this process's "
                 "credential chain — nothing was sent. Run `moxi doctor`.")
         return _REFUSED
     except secrets.SecretError as exc:
@@ -742,6 +786,36 @@ def _send_reserved(args, ctx: Context, *, module: str, name: str, tags) -> int:
     return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=tags,
                           reply_to=None, channel_room=NAMES,
                           project=project_key(env=ctx.env), reserved_token=token)
+
+
+def _registered_refusal(ctx: Context, name: str, row) -> int | None:
+    """Refuse a program's send under `name` that can't be one, in words that say why: a
+    process inside a live session, a module's name, or a name no program registered. A
+    store that can't be read refuses nothing here: the daemon decides."""
+    from . import reserved
+
+    place = reserved.session_place()
+    if place == reserved.INSIDE:
+        _refuse(ctx, "name-reserved", f"a send under a send-only name from inside a "
+                f"session: {name} sends only from a process outside every session. "
+                "Nothing was sent.")
+        return _REFUSED
+    if place == reserved.UNPLACED:
+        _refuse(ctx, "name-reserved", "comms can't tell whether this process is inside a "
+                f"session, so it sends nothing under {name}. Nothing was sent.")
+        return _REFUSED
+    if row is UNREAD or reserved.held_by_program(row):
+        return None
+    if row is not None and row["state"] != reserved.UNOWNED:
+        whose = (f"{name} is reserved for {row['module']}, which sends under it from its "
+                 "own code" if row["state"] == reserved.ACTIVE else
+                 reserved.module_words(row))
+        _refuse(ctx, "module-reserved", f"{whose}; --as sends only under a name "
+                "registered with `moxi comms send-only add`. Nothing was sent.")
+        return _REFUSED
+    _refuse(ctx, "not-registered", f"{reserved._not_registered(name, row)}. Nothing was "
+            "sent.")
+    return _REFUSED
 
 
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
@@ -2238,8 +2312,11 @@ def _refused_tag(tag: str, error) -> str:
 
 # --------------------------------------------------------------------------- the run
 
-def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendResult:
-    """`run` for a module's send under its reserved name `name` (`api.send_as`)."""
+def run_reserved(ctx: Context, args, *, module: str | None, name: str,
+                 tags) -> SendResult:
+    """`run` for a module's send under its reserved name `name` (`api.send_as`), or,
+    with `module` None, a program's send under a name it registered (`moxi comms send
+    --as`, `api.send_under`)."""
     capture, outer = _Capture(), ctx.capture
     ctx.capture = capture
     try:
@@ -2254,7 +2331,9 @@ def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendRes
     from . import reserved
     reserved.trace_send(module, name, sent=result.outcome == OUTCOME_SENT,
                         credential=(result.refusal is not None
-                                    and result.refusal.code == "credential"))
+                                    and result.refusal.code == "credential"),
+                        holder=(reserved.MODULE_HOLDER if module else
+                                reserved.PROGRAM_HOLDER))
     return result
 
 

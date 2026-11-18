@@ -772,6 +772,8 @@ def state(name, **fields):
     (state("held"), "identity planner@moxi is held by a live session"),
     (state("reserved", module="launcher"), "identity planner@moxi is reserved for launcher"),
     (state("reserved"), "identity planner@moxi is reserved, and no module owns it"),
+    (state("reserved", registered=True),
+     "identity planner@moxi is a send-only name a program registered"),
     (state("retired", reason="planner@moxi is retired: use planner"),
      "identity planner@moxi is retired; comms says: planner@moxi is retired: use planner")])
 def test_check_refuses_an_identity_that_is_held_reserved_or_retired(work, monkeypatch,

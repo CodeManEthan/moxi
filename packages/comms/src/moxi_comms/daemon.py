@@ -1264,12 +1264,14 @@ class Daemon:
                               code=wire.NOT_MAILABLE, name=r.qualified)
 
     def _send_reserved(self, conn, row, token, content: str) -> dict:
-        """A `send` under a reserved name: only its owning module's token sends under it,
-        and never from inside a session. A name an older comms kept, or one in conflict,
-        sends nothing."""
+        """A `send` under a send-only name: only its holder's token sends under it (the
+        module's it is reserved for, or the program's that registered it), and never
+        from inside a session. A name an older comms kept, or one in conflict, sends
+        nothing."""
         name = row["name"]
+        program = reserved_mod.held_by_program(row)
         if row["state"] != reserved_mod.ACTIVE:
-            raise Refusal(f"{name} is a reserved name no module holds; nothing sends "
+            raise Refusal(f"{name} is a send-only name nothing holds; nothing sends "
                           "under it", code=wire.NAME_RESERVED, name=name)
         given_raw = (hashlib.sha256(token.encode()).digest()
                      if isinstance(token, str) else None)
@@ -1278,19 +1280,22 @@ class Daemon:
                 session_token = any(hmac.compare_digest(b.token_hash, given_raw)
                                     for b in self.bindings.values() if b.token_hash)
             if session_token:
-                raise Refusal(f"{name} is reserved for {row['module']}: a session's token "
-                              "never sends under it", code=wire.NAME_RESERVED, name=name)
+                held = ("a send-only name a program registered" if program else
+                        f"reserved for {row['module']}")
+                raise Refusal(f"{name} is {held}: a session's token never sends under it",
+                              code=wire.NAME_RESERVED, name=name)
         self._refuse_session_peer(conn, name)
         given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
         if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
             raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                           credential=True)
         message = self.record.post_as_reserved(name, self._names_channel(), content)
-        log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
+        log.info("send %s under %s, held by %s", message.id, name,
+                 "a program" if program else row["module"])
         return {"message_id": str(message.id)}
 
     def _refuse_session_peer(self, conn, name: str) -> None:
-        """Refuse a send under the reserved `name` from any process inside a live session:
+        """Refuse a send under the send-only `name` from any process inside a live session:
         the connection's peer, walked up its ancestry against every live claim's roots.
         A peer the daemon can't place is refused too, never read as outside."""
         peer = getattr(conn, "peer", None)
@@ -1315,7 +1320,7 @@ class Daemon:
                      "can't be read", name, pid, exc.pid)
             raise unplaced from None
         if inside:
-            raise Refusal(f"a send under a reserved name from inside a session: {name} "
+            raise Refusal(f"a send under a send-only name from inside a session: {name} "
                           "sends only from a process outside every session",
                           code=wire.NAME_RESERVED, name=name)
 
@@ -1592,31 +1597,36 @@ class Daemon:
 
     def _standing_view(self) -> list:
         """The standing names, for `agents`: each directory row (kind `agent`), then
-        each reserved name not freed that is active or kept from an older comms (kind
-        `send-only`), as {qualified, name, scope, kind, module}. `module` is the module
-        a name is reserved for, or declared by when it is in conflict, and None when no
-        module owns it. A conflict row isn't reserved, so it is no send-only name. A
-        store that can't be read lists none."""
+        each send-only name not freed that is active or kept from an older comms (kind
+        `send-only`), as {qualified, name, scope, kind, module, holder}. `module` is the
+        module a name is reserved for, or declared by when it is in conflict, and None
+        when no module owns it. `holder` is `module`, `program` (a name a program
+        registered, which has no module) or None (a name an older comms kept). A
+        conflict row isn't reserved, so it is no send-only name. A store that can't be
+        read lists none."""
         try:
             with self._db() as db:
                 rows = directory.standing_rows(db)
-                held = {r["name"]: (r["module"], r["state"]) for r in db.execute(
-                    "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
+                held = {r["name"]: (r["module"], r["state"], r["holder"])
+                        for r in db.execute("SELECT name, module, state, holder FROM "
+                                            "reserved WHERE freed_at IS NULL")}
         except sqlite3.Error:
             log.exception("agents: the standing names couldn't be read")
             return []
         out = []
         for r in rows:
             q = qualify(r["name"], r["scope"])
+            module, _state, holder = held.get(q, (None, None, None))
             out.append({"qualified": q, "name": r["name"], "scope": r["scope"],
-                        "kind": directory.KIND_AGENT, "module": held.get(q, (None,))[0]})
+                        "kind": directory.KIND_AGENT, "module": module, "holder": holder})
         seen = {e["qualified"] for e in out}
-        for q, (module, state) in sorted(held.items()):
+        for q, (module, state, holder) in sorted(held.items()):
             if q in seen or state not in (reserved_mod.ACTIVE, reserved_mod.UNOWNED):
                 continue
             name, scope = split_tag(q)
             out.append({"qualified": q, "name": name, "scope": scope or GLOBAL,
-                        "kind": reserved_mod.SEND_ONLY, "module": module})
+                        "kind": reserved_mod.SEND_ONLY, "module": module,
+                        "holder": holder})
         return out
 
     def _last_digest_query(self, frame: dict) -> dict:
