@@ -277,7 +277,10 @@ def test_everything_after_the_double_dash_reaches_claude_unchanged(capsys, turns
                f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
     assert launch.endswith(f"claude --session-id {sid} {plugins} --model opus -- -n z "
                            "-n rev"), "the named id goes ahead of claude's own --"
-    assert "--settings" not in launch and "hooks" not in out
+    # The checkout's own path can hold the word (a branch named for git hooks), so
+    # it is taken out before looking for a hooks setting in what was printed.
+    printed = out.replace(str(Path(__file__).resolve().parents[3]), "")
+    assert "--settings" not in launch and "hooks" not in printed
 
 
 def test_moxi_comms_claude_is_the_wrapper(capsys, turns_plugins):

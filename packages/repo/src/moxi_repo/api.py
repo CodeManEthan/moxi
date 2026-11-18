@@ -2,7 +2,9 @@
 CLI and for other modules.
 
 `add`, `remove`, `enable`, `disable` and `refresh` change a repo's git hooks and return a
-`Report` of what they did; `status`, `available` and `rules` read. A verb that can't act raises a
+`Report` of what they did; `status`, `available` and `rules` read. `plan_add`,
+`plan_enable` and `plan_refresh` say what `add`, `enable` and `refresh` would write, and
+write nothing. A verb that can't act raises a
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
@@ -22,9 +24,12 @@ still runs its pieces, and `add PATH` with no piece indexes it again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from collections.abc import Callable
+import threading
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from moxi_repo import EXPORTS as _PACKAGE_EXPORTS
@@ -36,17 +41,26 @@ from moxi_repo.run import quote_arg as _arg
 MODULE = "repo"
 #: The index's file name under the module's state directory.
 INDEX = "repos.json"
+#: The lock every verb that writes a repo's registrations, entries, shims or launcher
+#: holds while it reads and writes them, in `<common git dir>/moxi-repo/`.
+HOOKS_LOCK = "hooks.lock"
+#: How long a verb waits for another's hold on that lock before it raises `Busy`.
+LOCK_WAIT_S = 10.0
 
 
 class Failure(Exception):
-    """A verb that could not act. `code` is its exit code."""
+    """A verb that could not act. `code` is its exit code. `reason` names a refusal (one
+    of `REFUSAL_CODES`, None for one with no name), and `partial` is true when it was
+    raised after the verb's first write, so some of it may be written."""
 
     code = 1
 
-    def __init__(self, text: str, *, lines: list[str] | None = None):
+    def __init__(self, text: str, *, lines: list[str] | None = None,
+                 reason: str | None = None, partial: bool = False):
         super().__init__(text)
         self.text = text
         self.lines = list(lines or [])
+        self.reason, self.partial = reason, partial
 
 
 class Usage(Failure):
@@ -63,28 +77,61 @@ class Busy(Failure):
     code = 75
 
 
+class Changed(Failure):
+    """A verb given the digest of a plan (`expect`) made a different plan under the
+    repo's lock: what it would write changed since that plan was read. Nothing was
+    written; `plan` is the new plan."""
+
+    def __init__(self, plan: dict):
+        super().__init__(f"what this would write in {plan['root']} changed since it was "
+                         "planned; nothing was written")
+        self.plan = plan
+
+
+#: Every `Failure.reason` a verb gives, each named for what it refused.
+REFUSAL_CODES = ("not-absolute", "not-a-repo", "unknown-piece", "declaration-refused",
+                 "seed-refused", "git-too-old", "shim-place", "not-registered",
+                 "index-unreadable", "config-unreadable", "outside-copy", "busy")
+
+
 class Problem(str):
     """One problem a listing names, as the text it prints, carrying the parts the doctor's
     row takes: `detail`, `fix` (the command, or None) and `state` (`fail`, `warn` or `ok`:
-    `ok` for something worth saying that needs no action)."""
+    `ok` for something worth saying that needs no action).
+
+    It also carries what kind of problem it is, for a reader that words it itself: `code`
+    (one of `PROBLEM_CODES`), its subject, `piece` and `event` (each None when it has
+    none), and `refresh`, true when its fix is `git-hooks refresh` of this repo."""
 
     def __new__(cls, detail: str, fix: str | None = None, *, state: str = "fail",
-                how: str = "run"):
+                how: str = "run", code: str | None = None, piece: str | None = None,
+                event: str | None = None, refresh: bool = False):
         self = super().__new__(cls, detail if fix is None else f"{detail}; {how}: {fix}")
         self.detail, self.fix, self.state = detail, fix, state
+        self.code, self.piece, self.event, self.refresh = code, piece, event, refresh
         return self
+
+
+#: Every `Problem.code` a listing gives, each named for what is wrong.
+PROBLEM_CODES = ("gone", "unreadable", "no-module", "not-an-event", "git-too-old", "no-entry",
+                 "interpreter-missing", "runner-missing", "other-environment", "shim-moved",
+                 "shim-missing", "launcher-missing", "left-shim", "left-hook",
+                 "left-hook-taken")
 
 
 class Report:
     """What a verb did: lines to print, problems found, and chain lines the user adds."""
 
-    __slots__ = ("lines", "problems", "chain")
+    __slots__ = ("lines", "problems", "chain", "already")
 
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.problems: list[str] = []
         #: (repo root, event, hook file, chain line, present)
         self.chain: list[tuple[str, str, str, str, bool]] = []
+        #: True when the verb, given a plan's digest, found nothing left to write: it is
+        #: already so, and it wrote nothing.
+        self.already = False
 
     def take(self, root: Path, done: gitconf.Sync) -> None:
         self.lines += done.lines
@@ -221,7 +268,7 @@ class IndexUnreadable(Failure):
         self.detail = f"repo's index {path} can't be read ({why})"
         super().__init__(self.detail + ("; the index was not changed" if writing else "")
                          + "; fix or remove it, then index each repo again with: "
-                         "moxi repo git-hooks add PATH")
+                         "moxi repo git-hooks add PATH", reason="index-unreadable")
 
 
 def _unreadable(path: Path, why: str) -> IndexUnreadable:
@@ -346,35 +393,116 @@ def indexed_repos(index: dict | None = None) -> list[tuple[str, dict, Repo | Non
 
 # -- helpers ------------------------------------------------------------------------------
 
-def _resolve(path: str | os.PathLike) -> Repo:
+def _resolve(path: str | os.PathLike, within: str | None = None) -> Repo:
     try:
-        return gitconf.resolve(path)
+        repo = gitconf.resolve(path)
     except gitconf.NotARepo as exc:
-        raise Usage(f"no git work tree at {exc}") from None
+        raise Usage(f"no git work tree at {exc}", reason="not-a-repo") from None
+    _check_within(repo, within)
+    return repo
+
+
+def _real(path: str | os.PathLike) -> Path:
+    return Path(os.path.normcase(os.path.realpath(path)))
+
+
+def _check_within(repo: Repo, within: str | None) -> None:
+    """Refuse (`outside-copy`) a repo whose main work tree, common git dir or hooks dir
+    is not inside the folder `within`, each by its real path and whole path parts; a
+    `within` that isn't absolute places no folder, so it refuses every repo. None checks
+    nothing."""
+    if within is None:
+        return
+    lead = f"This page runs in a copy of Moxi whose home is {within}. It changes no repo"
+    if not os.path.isabs(within):
+        raise Refused(f"{lead}, since that is not a full path.", reason="outside-copy")
+    home = _real(within)
+    for what, place in (("", repo.root), ("the git folder of ", repo.common_dir),
+                        ("the hooks folder of ", repo.hooks_dir)):
+        if not _real(place).is_relative_to(home):
+            named = f"{repo.root}" if not what else f"{what}{repo.root}, {place},"
+            raise Refused(f"{lead} outside that folder, and {named} is outside it.",
+                          reason="outside-copy")
+
+
+#: Lock file path -> the lock this process's threads queue on before they take that file's
+#: lock, which a second thread of one process can't wait on.
+_QUEUES: dict[str, threading.RLock] = {}
+_QUEUES_GUARD = threading.Lock()
+
+
+@contextlib.contextmanager
+def _hooks_lock(repo: Repo) -> Iterator[None]:
+    """Hold the repo's lock (`HOOKS_LOCK`) for the block; raises `Busy` when another
+    process, or another thread of this one, holds it past `LOCK_WAIT_S`. A verb takes it
+    once per repo, and never while it waits on the committer's lock."""
+    from moxi import files
+
+    path = repo.own_dir / HOOKS_LOCK
+    with _QUEUES_GUARD:
+        queue = _QUEUES.setdefault(os.path.abspath(path), threading.RLock())
+    deadline = time.monotonic() + LOCK_WAIT_S
+    if not queue.acquire(timeout=LOCK_WAIT_S):
+        raise _busy(repo, os.getpid())
+    try:
+        with contextlib.ExitStack() as held:
+            try:
+                held.enter_context(files.lock(
+                    path, timeout_s=max(0.0, deadline - time.monotonic())))
+            except files.LockTimeout as exc:
+                raise _busy(repo, exc.holder) from None
+            yield
+    finally:
+        queue.release()
+
+
+def _busy(repo: Repo, holder: int | None) -> Busy:
+    who = f"pid {holder}" if holder else "another process"
+    return Busy(f"{who} is changing repo's git hooks in {repo.root}; try again in a moment",
+                reason="busy")
+
+
+def _remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
+    """`gitconf.remove_all` under the repo's lock (reading the State there when none is
+    given), then the lock file and its folder once the lock is let go: a file held open
+    can't be deleted on every system. A lock file another process removed first is fine,
+    and so is a folder something else wrote in meanwhile, which stays."""
+    with _hooks_lock(repo):
+        lines = gitconf.remove_all(repo, state or _state(repo), final=final,
+                                   keep=HOOKS_LOCK)
+    (repo.own_dir / HOOKS_LOCK).unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        repo.own_dir.rmdir()
+    return lines
 
 
 def _version(*, need: bool = True) -> tuple[int, int, int] | None:
     version = gitconf.git_version()
-    if not need:
-        return version
+    if need:
+        _floor(version)
+    return version
+
+
+def _floor(version: tuple[int, int, int] | None) -> None:
+    """Refuse a git older than the floor, or none."""
     if version is None:
         raise Refused("git is not on PATH, or `git version` gave no version; install git "
                       f"{gitconf.version_text(gitconf.FLOOR)} or later")
     if version < gitconf.FLOOR:
         raise Refused(f"git {gitconf.version_text(version)} is older than "
                       f"{gitconf.version_text(gitconf.FLOOR)}, the oldest repo's git hooks "
-                      "support; install a newer git")
-    return version
+                      "support; install a newer git", reason="git-too-old")
 
 
 def _named(ids: list[str], good: dict, bad: dict) -> list[pieces.Piece]:
     out = []
     for pid in ids:
         if pid in bad:
-            raise Refused(f"{pid}'s declaration is refused: {bad[pid]}")
+            raise Refused(f"{pid}'s declaration is refused: {bad[pid]}",
+                          reason="declaration-refused")
         if pid not in good:
             raise Usage(f"no installed module declares the piece {pid}; "
-                        "see: moxi repo git-hooks available")
+                        "see: moxi repo git-hooks available", reason="unknown-piece")
         if good[pid] not in out:
             out.append(good[pid])
     return out
@@ -384,7 +512,7 @@ def _state(repo: Repo) -> State:
     try:
         return gitconf.read(repo)
     except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
+        raise Failure(str(exc), reason="config-unreadable") from None
 
 
 def _sweep(repo: Repo) -> None:
@@ -414,28 +542,211 @@ def _ids(given: tuple, piece: str | None = None) -> list[str]:
 
 
 def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
-        mode: str | None = None, sets: list[str] | tuple = ()) -> Report:
+        mode: str | None = None, sets: list[str] | tuple = (),
+        expect: str | None = None, within: str | None = None) -> Report:
     """Register pieces in the repo at `path`; with none, index the repo and write nothing
     else. Each piece id is its own argument, or they come as a list. `mode` pins the mode
-    (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces."""
+    (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces.
+
+    It writes what `plan_add` plans, made under the repo's lock. `expect` is the digest of
+    a plan read before (`plan_add`'s): when there is then nothing left to write it writes
+    nothing and the report is `already`; when the plan differs it writes nothing and
+    raises `Changed`. A `Failure` raised after its first write is `partial`. `within` is
+    the folder of a copy of Moxi: a repo not inside it is refused (`outside-copy`) before
+    anything is read under the lock or written."""
     piece_ids = tuple(_ids(piece_ids))
     if mode is not None and mode not in gitconf.MODE_SETS:
         raise Usage(f"--mode {mode}: it is one of {', '.join(gitconf.MODE_SETS)}")
     if sets and not piece_ids:
         raise Usage("--set sets a setting of a piece named in the same call; name the piece")
     version = _version()
-    repo = _resolve(path)
-    report = Report()
-    state = _state(repo)
-    good, bad = (pieces.declared() if piece_ids or any(map(everywhere, EVERYWHERE))
-                 else ({}, {}))
+    repo = _resolve(path, within)
+    good, bad = _declared(piece_ids)
+    plan = _plan_add(repo, _state(repo), piece_ids, mode, sets, version, good, bad)
+    if plan.in_repo:
+        with _hooks_lock(repo):
+            plan = _plan_add(repo, _state(repo), piece_ids, mode, sets, version, good, bad)
+            report = _write(plan, expect)
+    else:
+        # A plan that writes nothing in the repo takes no lock there.
+        report = _write(plan, expect)
+    _sweep(repo)
+    return report
+
+
+def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ...] = (),
+             *, within: str | None = None) -> dict:
+    """What `add(path, piece_ids)` would write, read without writing anything or taking a
+    lock: `{root, name, is_repo, git_version, mode, indexed, pieces, mode_change,
+    own_hooks, in_progress, writes, refusal, digest}`.
+
+    `pieces` is each piece it would register or rewrite, `{id, event, new, implied_by,
+    seeds}` (`implied_by` the `everywhere` key that brings it in, `seeds` the names of the
+    settings it would seed); `mode` the mode after it; `mode_change` `{from, to}` when the
+    repo's mode changes; `own_hooks` the user's own git hooks in the hooks dir; and
+    `in_progress` `merge` or `rebase` when one is under way, else None. `writes` is every
+    item it writes, in order, as `gitconf.plan_sync` gives them, with `config` items for
+    the registrations, settings and mode and an `index` item when the repo joins the index
+    (`from` its root there before, when it moved). A value drawn at random as it is written
+    (commit-proof's salt) is shown as None. `digest` is the SHA-256 of `{act, root,
+    writes}`. `refusal` is `{code, text}` when `add` would refuse, with no `writes` and no
+    `digest`. `path` must be absolute (after `~`). `within` refuses a repo outside it, as
+    `add` does."""
+
+    def make(repo: Repo, version) -> _Plan:
+        ids = tuple(_ids((piece_ids,)))
+        good, bad = _declared(ids)
+        return _plan_add(repo, _state(repo), ids, None, (), version, good, bad)
+
+    return _planned(path, make, floor=True, within=within)
+
+
+def _planned(path: str | os.PathLike, make: Callable[[Repo, tuple | None], _Plan], *,
+             floor: bool, within: str | None) -> dict:
+    """A plan of the repo at the absolute `path`, made by `make(repo, git version)`, as
+    `plan_add` returns it; a refusal is the plan's `refusal`. `floor` refuses a git older
+    than repo supports, and `within` a repo outside that folder."""
+    where = Path(os.path.expanduser(os.fspath(path)))
+    view = _plan_view(None, where)
+    version = _version(need=False)
+    view["git_version"] = version and gitconf.version_text(version)
+    try:
+        if not where.is_absolute():
+            raise Usage(f"{path} is not an absolute path", reason="not-absolute")
+        if floor:
+            _floor(version)
+        repo = _resolve(where)
+        view.update(root=str(repo.root), name=repo.root.name, is_repo=True)
+        _check_within(repo, within)
+        plan = make(repo, version)
+    except Failure as exc:
+        view["refusal"] = {"code": exc.reason, "text": exc.text}
+        return view
+    return _plan_view(plan, repo.root)
+
+
+class _Plan:
+    """What one act writes in one repo: `steps` (the index's and the config keys') then
+    `sync`'s, the lines its report prints first, and what the plan's reader is shown."""
+
+    __slots__ = ("act", "repo", "steps", "sync", "lines", "pieces", "mode", "mode_change",
+                 "indexed", "version")
+
+    def __init__(self, act: str, repo: Repo, version) -> None:
+        self.act, self.repo, self.version = act, repo, version
+        self.steps: list[gitconf.Step] = []
+        self.sync = gitconf.SyncPlan()
+        self.lines: list[str] = []
+        self.pieces: list[dict] = []
+        self.mode: str | None = None
+        self.mode_change: dict | None = None
+        self.indexed = False
+
+    @property
+    def writes(self) -> list[dict]:
+        return [item for step in self.steps for item in step.items] + self.sync.writes
+
+    @property
+    def nothing(self) -> bool:
+        """True when it writes nothing: no item, or only chain lines the user adds."""
+        return all(item["place"] == "chain" for item in self.writes)
+
+    @property
+    def in_repo(self) -> bool:
+        """True when it writes in the repo, not only into the index."""
+        return any(item["place"] not in ("index", "chain") for item in self.writes)
+
+    @property
+    def digest(self) -> str:
+        return _digest(self.act, self.repo.root, self.writes)
+
+
+def _digest(act: str, root: Path, writes: list[dict]) -> str:
+    import hashlib
+
+    text = json.dumps({"act": act, "root": str(root), "writes": writes}, sort_keys=True,
+                      separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _plan_view(plan: _Plan | None, root: Path) -> dict:
+    """A plan as `plan_add` returns it; with no plan, its fields as for a refusal."""
+    view = {"root": str(root), "name": root.name, "is_repo": False, "git_version": None,
+            "mode": None, "indexed": False, "pieces": [], "mode_change": None,
+            "own_hooks": [], "in_progress": None, "writes": [], "refusal": None,
+            "digest": None}
+    if plan is None:
+        return view
+    repo = plan.repo
+    version = plan.version or gitconf.git_version()
+    view.update(is_repo=True, git_version=version and gitconf.version_text(version),
+                mode=plan.mode, indexed=plan.indexed, pieces=plan.pieces,
+                mode_change=plan.mode_change, own_hooks=own_hooks(repo, ()),
+                in_progress=_in_progress(repo), writes=plan.writes, digest=plan.digest)
+    return view
+
+
+def _in_progress(repo: Repo) -> str | None:
+    """`merge` or `rebase` when one is under way in the work tree, else None."""
+    if (repo.git_dir / "MERGE_HEAD").exists():
+        return "merge"
+    if any((repo.git_dir / name).is_dir() for name in ("rebase-merge", "rebase-apply")):
+        return "rebase"
+    return None
+
+
+def _declared(piece_ids: tuple) -> tuple[dict, dict]:
+    """The declared pieces an add or refresh needs: none when it names none and no
+    `everywhere` key is on."""
+    if piece_ids or any(map(everywhere, EVERYWHERE)):
+        return pieces.declared()
+    return {}, {}
+
+
+def _drawn(piece_id: str) -> set[str]:
+    """The settings whose seed is drawn at random as it is written (commit-proof's salt),
+    which no plan shows or digests. Every other seed comes from the user's configuration
+    and is shown."""
+    if piece_id != COMMIT_PROOF:
+        return set()
+    from moxi_repo.commit_proof import SALT
+
+    return {SALT}
+
+
+def _is_indexed(repo: Repo) -> bool:
+    """Whether the repo is in the index; refuses an index that can't be read, before
+    anything is written."""
+    try:
+        return repo.key in indexed()
+    except IndexUnreadable as exc:
+        raise IndexUnreadable(exc.path, exc.why, writing=True) from None
+
+
+def _index_step(repo: Repo) -> list[gitconf.Step]:
+    """The index's step when the repo joins it, or its entry there changes."""
+    entry = indexed().get(repo.key)
+    if entry == {"root": str(repo.root), "common_dir": str(repo.common_dir)}:
+        return []
+    before = (entry or {}).get("root")
+    return [gitconf.Step([gitconf.item("index", None, None, before, str(repo.root))],
+                         lambda: _index_put(repo))]
+
+
+def _plan_add(repo: Repo, state: State, piece_ids: tuple, mode: str | None, sets, version,
+              good: dict, bad: dict) -> _Plan:
+    """`add`'s plan from `state`; raises the refusal `add` gives, before any write."""
+    import copy
+
+    plan = _Plan("add", repo, version)
     named = _named(list(piece_ids), good, bad)
     implied = _implied(state, named, good)
+    plan.indexed = _is_indexed(repo)
+    plan.mode = state.mode
     if not piece_ids and mode is None and not implied:
-        _index_put(repo)
-        report.lines.append(f"indexed {repo.root}")
-        _sweep(repo)
-        return report
+        plan.steps += _index_step(repo)
+        plan.lines.append(f"indexed {repo.root}")
+        return plan
     try:
         planned = pieces.plan_sets(named, list(sets))
     except pieces.SetError as exc:
@@ -454,24 +765,63 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
                 problems.append(f"{event}: {exc}")
         if problems:
             raise Refused(f"repo can't place its shims in {repo.hooks_dir}; nothing was "
-                          "written", lines=problems)
-    _index_put(repo)
+                          "written", lines=problems, reason="shim-place")
+    plan.steps += _index_step(repo)
+    after = copy.deepcopy(state)
+    plan.steps += gitconf.plan_mode(
+        repo, after, mode=effective,
+        mode_set=mode_set if (mode is not None or state.mode is None) else None)
+    plan.mode = effective
+    if state.mode is not None and state.mode != effective:
+        plan.mode_change = {"from": state.mode, "to": effective}
+    for piece in named:
+        new = piece.id not in after.pieces
+        changes = changes_of[piece.id]
+        seeded = sorted(set(changes) - set(planned.get(piece.id, {})))
+        plan.steps += gitconf.plan_register(repo, piece, after)
+        plan.steps += gitconf.plan_settings(repo, piece.id, changes, after, event=piece.event,
+                                            seeded=seeded, drawn=_drawn(piece.id))
+        why = EVERYWHERE[piece.id] if piece in implied else None
+        plan.lines.append(f"{'added' if new else 'rewrote'} {piece.id} ({piece.event}, "
+                          f"{piece.fail}) in {repo.root}" + (f" ({why})" if why else ""))
+        plan.pieces.append({"id": piece.id, "event": piece.event, "new": new,
+                            "implied_by": why, "seeds": seeded})
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
+
+
+class _GitFailed(Failure):
+    """git failed while a plan was written."""
+
+
+def _write(plan: _Plan, expect: str | None) -> Report:
+    """Write `plan`'s items, in order, and report them. With `expect`, first: nothing to
+    write answers `already`, and another digest raises `Changed`."""
+    report = Report()
+    done = gitconf.Sync()
+    done.problems += plan.sync.problems
+    done.chain.update(plan.sync.chain)
+    if expect is not None and plan.nothing:
+        report.already = True
+        report.take(plan.repo.root, done)
+        return report
+    if expect is not None and plan.digest != expect:
+        raise Changed(_plan_view(plan, plan.repo.root))
+    # A step can make several writes, so a failure partway through the first one is
+    # partial too: git's own count of the config writes it made says so.
+    wrote, start = False, gitconf.writes_made()
     try:
-        gitconf.set_mode(repo, state, mode=effective,
-                         mode_set=mode_set if (mode is not None or state.mode is None)
-                         else None)
-        for piece in named:
-            new = gitconf.register(repo, piece, state)
-            if changes_of[piece.id]:
-                gitconf.apply_settings(repo, piece.id, changes_of[piece.id], state)
-            report.lines.append(f"{'added' if new else 'rewrote'} {piece.id} "
-                                f"({piece.event}, {piece.fail}) in {repo.root}"
-                                + (f" ({EVERYWHERE[piece.id]})" if piece in implied
-                                   else ""))
-        report.take(repo.root, gitconf.sync(repo, state))
+        for step in plan.steps:
+            step.run()
+            wrote = True
+        for step in plan.sync.steps:
+            if step.run is not None:
+                done.lines += step.run() or []
+                wrote = True
     except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
-    _sweep(repo)
+        raise _GitFailed(str(exc), partial=wrote or gitconf.writes_made() != start) from None
+    report.lines += plan.lines
+    report.take(plan.repo.root, done)
     return report
 
 
@@ -498,7 +848,7 @@ def _changes(piece: pieces.Piece, state: State,
         for name, values in changes.items():
             why = check(name, values or [])
             if why is not None:
-                raise Usage(f"{piece.id}: {why}; nothing was written")
+                raise Usage(f"{piece.id}: {why}; nothing was written", reason="seed-refused")
     return changes
 
 
@@ -532,25 +882,29 @@ def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...
                     why=f"that repo is gone and {repo.root}, which was left as it is, "
                     "holds the path now")
         return report
-    state = _state(repo)
-    try:
-        if piece_ids:
-            for pid in piece_ids:
-                if pid not in state.pieces:
-                    raise Usage(f"{pid} is not registered in {repo.root}")
+    if not piece_ids:
+        try:
+            report.lines += _remove_all(repo)
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
+        _records.close_repo(repo.common_dir)
+        _index_drop(repo.key)
+        report.lines.append(f"removed repo's git hooks from {repo.root}")
+        return report
+    with _hooks_lock(repo):
+        state = _state(repo)
+        for pid in piece_ids:
+            if pid not in state.pieces:
+                raise Usage(f"{pid} is not registered in {repo.root}")
+        try:
             for pid in piece_ids:
                 gitconf.remove_piece(repo, pid, state)
                 _records.close_piece(repo.common_dir, pid)
                 report.lines.append(f"removed {pid} from {repo.root}")
             report.take(repo.root, gitconf.sync(repo, state))
-            _sweep(repo)
-            return report
-        report.lines += gitconf.remove_all(repo, state)
-    except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
-    _records.close_repo(repo.common_dir)
-    _index_drop(repo.key)
-    report.lines.append(f"removed repo's git hooks from {repo.root}")
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
+    _sweep(repo)
     return report
 
 
@@ -572,41 +926,82 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
         report.lines.append(f"dropped {path} from the index; {why}")
 
 
-def enable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, enabled=True)
-
-
-def disable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, enabled=False)
-
-
-def _flip(path: str | os.PathLike, piece_id: str, *, enabled: bool) -> Report:
-    repo = _resolve(path)
-    state = _state(repo)
-    if piece_id not in state.pieces:
-        raise Usage(f"{piece_id} is not registered in {repo.root}")
-    report = Report()
-    try:
-        gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
-        if not enabled:
-            # The record, its ledger key, then the flag.
-            _records.close_piece(repo.common_dir, piece_id)
-            gitconf.clear_recorded(repo, piece_id, state)
-        report.take(repo.root, gitconf.sync(repo, state))
-    except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
-    report.lines.append(f"{'enabled' if enabled else 'disabled'} {piece_id} in {repo.root}")
+def enable(path: str | os.PathLike, piece_id: str, *, expect: str | None = None,
+           within: str | None = None) -> Report:
+    """Turn a registered piece on in the repo at `path`. It writes what `plan_enable`
+    plans, made under the repo's lock; `expect` and `within` are as `add` takes them."""
+    repo = _resolve(path, within)
+    with _hooks_lock(repo):
+        report = _write(_plan_enable(repo, _state(repo), piece_id, None), expect)
+    if not report.already:
+        report.lines.append(f"enabled {piece_id} in {repo.root}")
     _sweep(repo)
     return report
 
 
-def refresh(path: str | os.PathLike | None = None) -> Report:
+def plan_enable(path: str | os.PathLike, piece_id: str, *, within: str | None = None
+                ) -> dict:
+    """What `enable(path, piece_id)` would write, read as `plan_add` reads it, and in its
+    shape. A piece not registered there is the refusal `not-registered`."""
+    return _planned(path, lambda repo, version: _plan_enable(repo, _state(repo), piece_id,
+                                                              version),
+                    floor=False, within=within)
+
+
+def _plan_enable(repo: Repo, state: State, piece_id: str, version) -> _Plan:
+    import copy
+
+    if piece_id not in state.pieces:
+        raise Usage(f"{piece_id} is not registered in {repo.root}", reason="not-registered")
+    plan = _Plan("enable", repo, version)
+    plan.indexed = _is_indexed(repo)
+    plan.mode = state.mode
+    after = copy.deepcopy(state)
+    plan.steps += gitconf.plan_enabled(repo, piece_id, enabled=True, state=after)
+    plan.pieces.append({"id": piece_id, "event": last(state.pieces[piece_id], "event"),
+                        "new": False, "implied_by": None, "seeds": []})
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
+
+
+def disable(path: str | os.PathLike, piece_id: str) -> Report:
+    """Turn a registered piece off in the repo at `path`, closing its doctor record."""
+    repo = _resolve(path)
+    report = Report()
+    with _hooks_lock(repo):
+        state = _state(repo)
+        if piece_id not in state.pieces:
+            raise Usage(f"{piece_id} is not registered in {repo.root}", reason="not-registered")
+        try:
+            gitconf.set_enabled(repo, piece_id, enabled=False, state=state)
+            # The record, its ledger key, then the flag.
+            _records.close_piece(repo.common_dir, piece_id)
+            gitconf.clear_recorded(repo, piece_id, state)
+            report.take(repo.root, gitconf.sync(repo, state))
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
+    report.lines.append(f"disabled {piece_id} in {repo.root}")
+    _sweep(repo)
+    return report
+
+
+def refresh(path: str | os.PathLike | None = None, *, expect: str | None = None,
+            within: str | None = None) -> Report:
     """Re-read declarations, git's version and the interpreter, and rewrite every entry,
-    shim and launcher of one repo or every indexed repo by the rewrite rule; then sweep."""
+    shim and launcher of one repo or every indexed repo by the rewrite rule; then sweep.
+
+    In each repo it writes what `plan_refresh` plans, made under that repo's lock.
+    `expect`, as `add` takes it, needs `path`; with it, a git failure raises (`partial`
+    once something was written) where without it the failure is a problem of the report.
+    `within`, as `add` takes it, needs `path` too."""
+    if expect is not None and path is None:
+        raise Usage("a plan's digest is of one repo; name its path")
+    if within is not None and path is None:
+        raise Usage("a copy's folder is checked against one repo; name its path")
     version = _version()
     report = Report()
     if path is not None:
-        repos = [_resolve(path)]
+        repos = [_resolve(path, within)]
     else:
         repos = []
         for key, entry, repo, why in indexed_repos():
@@ -618,44 +1013,106 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     good, bad = pieces.declared()
     default = default_mode()
     for repo in repos:
-        state = _state(repo)
         try:
-            for piece in _implied(state, [], good):
-                changes = _changes(piece, state, {})
-                gitconf.register(repo, piece, state)
-                if changes:
-                    gitconf.apply_settings(repo, piece.id, changes, state)
-                report.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
-                                    f"{repo.root} ({EVERYWHERE[piece.id]})")
-            for pid in sorted(state.pieces):
-                if pid in good:
-                    gitconf.register(repo, good[pid], state)
-                elif pid in bad:
-                    report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
-                                           f"({bad[pid]}); its registration is left as it is")
-                else:
-                    report.problems.append(
-                        f"{repo.root}: no installed module declares {pid}; remove it with: "
-                        f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
-            effective = gitconf.pick_mode(state.mode_set, default, version)
-            if effective != state.mode:
-                if state.mode:
-                    report.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
-                                        f"(git {gitconf.version_text(version)})")
-                gitconf.set_mode(repo, state, mode=effective)
-            report.take(repo.root, gitconf.sync(repo, state))
-        except gitconf.GitError as exc:
-            report.problems.append(f"{repo.root}: {exc}")
+            with _hooks_lock(repo):
+                done = _refresh_one(repo, report, good, bad, default, version, expect)
+        except Busy as exc:
+            if path is not None:
+                raise
+            report.problems.append(exc.text)
             continue
-        except Usage as exc:
-            report.problems.append(f"{repo.root}: {exc.text}")
+        if not done:
             continue
-        _index_put(repo)
         _sweep(repo)
-        report.lines.append(f"refreshed {repo.root}")
+        if not report.already:
+            report.lines.append(f"refreshed {repo.root}")
     if path is None:
         _records.sweep()
     return report
+
+
+def plan_refresh(path: str | os.PathLike, *, within: str | None = None) -> dict:
+    """What `refresh(path)` would write, read as `plan_add` reads it, and in its shape;
+    `pieces` names each piece it registers (its `everywhere` key on) or whose declared
+    keys it puts back."""
+
+    def make(repo: Repo, version) -> _Plan:
+        good, bad = pieces.declared()
+        return _plan_refresh(repo, _state(repo), good, bad, default_mode(), version, [])
+
+    return _planned(path, make, floor=True, within=within)
+
+
+def _plan_refresh(repo: Repo, state: State, good: dict, bad: dict, default: str, version,
+                  problems: list[str]) -> _Plan:
+    """`refresh`'s plan in one repo, from `state`; adds to `problems` each registration
+    it leaves as it is. Raises `Usage` when a seed is refused."""
+    import copy
+
+    plan = _Plan("refresh", repo, version)
+    plan.indexed = _is_indexed(repo)
+    plan.steps += _index_step(repo)
+    after = copy.deepcopy(state)
+    for piece in _implied(state, [], good):
+        changes = _changes(piece, state, {})
+        plan.steps += gitconf.plan_register(repo, piece, after)
+        plan.steps += gitconf.plan_settings(repo, piece.id, changes, after, event=piece.event,
+                                            seeded=set(changes), drawn=_drawn(piece.id))
+        plan.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
+                          f"{repo.root} ({EVERYWHERE[piece.id]})")
+        plan.pieces.append({"id": piece.id, "event": piece.event, "new": True,
+                            "implied_by": EVERYWHERE[piece.id], "seeds": sorted(changes)})
+    for pid in sorted(state.pieces):
+        if pid in good:
+            steps = gitconf.plan_register(repo, good[pid], after)
+            plan.steps += steps
+            if steps:
+                plan.pieces.append({"id": pid, "event": good[pid].event, "new": False,
+                                    "implied_by": None, "seeds": []})
+        elif pid in bad:
+            problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                            f"({bad[pid]}); its registration is left as it is")
+        else:
+            problems.append(
+                f"{repo.root}: no installed module declares {pid}; remove it with: "
+                f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
+    effective = gitconf.pick_mode(state.mode_set, default, version)
+    plan.mode = effective
+    if effective != state.mode:
+        if state.mode:
+            plan.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
+                              f"(git {gitconf.version_text(version)})")
+            plan.mode_change = {"from": state.mode, "to": effective}
+        plan.steps += gitconf.plan_mode(repo, after, mode=effective)
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
+
+
+def _refresh_one(repo: Repo, report: Report, good: dict, bad: dict, default: str,
+                 version, expect: str | None = None) -> bool:
+    """`refresh`'s writes in one repo, under its lock; False when a problem stopped them,
+    which is then the report's. With `expect`, a refusal, a changed plan and a git failure
+    raise."""
+    state = _state(repo)
+    try:
+        plan = _plan_refresh(repo, state, good, bad, default, version, report.problems)
+    except Usage as exc:
+        if expect is not None:
+            raise
+        report.problems.append(f"{repo.root}: {exc.text}")
+        return False
+    try:
+        done = _write(plan, expect)
+    except _GitFailed as exc:
+        if expect is not None:
+            raise
+        report.problems.append(f"{repo.root}: {exc.text}")
+        return False
+    report.lines += done.lines
+    report.problems += done.problems
+    report.chain += done.chain
+    report.already = report.already or done.already
+    return True
 
 
 # -- other modules' installs and uninstalls, and repo's own -------------------------------
@@ -704,33 +1161,45 @@ def install_module(module: str) -> Report:
                 report.problems.append(f"{problem}, so it is left as it is")
             continue
         try:
-            state = gitconf.read(repo)
-            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
-            changed = False
-            for pid in mine:
-                if pid in good:
-                    if _declares_otherwise(state.pieces[pid], good[pid]):
-                        gitconf.register(repo, good[pid], state)
-                        report.lines.append(f"rewrote {pid} ({good[pid].event}, "
-                                            f"{good[pid].fail}) in {repo.root}")
-                        changed = True
-                elif pid in bad:
-                    report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
-                                           f"({bad[pid]}); its registration is left as it is")
-                else:
-                    gitconf.remove_piece(repo, pid, state)
-                    _records.close_piece(repo.common_dir, pid)
-                    report.lines.append(f"removed {pid} from {repo.root}: {module} no "
-                                        "longer declares it")
-                    changed = True
-            if changed:
-                report.take(repo.root, gitconf.sync(repo, state))
+            with _hooks_lock(repo):
+                mine = _install_in(repo, module, good, bad, report)
+        except Busy as exc:
+            report.problems.append(f"{exc.text}; {module}'s pieces there are left as they "
+                                   "are until the next refresh")
+            continue
         except (gitconf.GitError, OSError) as exc:
             report.problems.append(f"{repo.root}: {exc}")
             continue
         if mine:
             _sweep(repo)
     return report
+
+
+def _install_in(repo: Repo, module: str, good: dict, bad: dict, report: Report) -> list[str]:
+    """`install_module`'s writes in one repo, under its lock: the module's registered
+    piece ids."""
+    state = gitconf.read(repo)
+    mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+    changed = False
+    for pid in mine:
+        if pid in good:
+            if _declares_otherwise(state.pieces[pid], good[pid]):
+                gitconf.register(repo, good[pid], state)
+                report.lines.append(f"rewrote {pid} ({good[pid].event}, "
+                                    f"{good[pid].fail}) in {repo.root}")
+                changed = True
+        elif pid in bad:
+            report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                                   f"({bad[pid]}); its registration is left as it is")
+        else:
+            gitconf.remove_piece(repo, pid, state)
+            _records.close_piece(repo.common_dir, pid)
+            report.lines.append(f"removed {pid} from {repo.root}: {module} no "
+                                "longer declares it")
+            changed = True
+    if changed:
+        report.take(repo.root, gitconf.sync(repo, state))
+    return mine
 
 
 def uninstall_module(module: str) -> Report:
@@ -754,19 +1223,25 @@ def uninstall_module(module: str) -> Report:
                                        "left there")
             continue
         try:
-            state = gitconf.read(repo)
-            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
-            for pid in mine:
-                gitconf.remove_piece(repo, pid, state)
-                _records.close_piece(repo.common_dir, pid)
-                report.lines.append(f"removed {pid} from {repo.root}: {module} is "
-                                    "uninstalled")
-            if mine:
-                report.take(repo.root, gitconf.sync(repo, state))
+            # Released before the committer's lock is taken for the specs below.
+            with _hooks_lock(repo):
+                state = gitconf.read(repo)
+                mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+                for pid in mine:
+                    gitconf.remove_piece(repo, pid, state)
+                    _records.close_piece(repo.common_dir, pid)
+                    report.lines.append(f"removed {pid} from {repo.root}: {module} is "
+                                        "uninstalled")
+                if mine:
+                    report.take(repo.root, gitconf.sync(repo, state))
             names = (set(committer.saved_names(repo.common_dir))
                      | set(committer.read_state(repo.common_dir)["specs"]))
             for name in sorted(n for n in names if module_of(n) == module):
                 report.lines += committer.remove_spec(repo.root, name)
+        except Busy as exc:
+            report.problems.append(f"{exc.text}; {module}'s pieces and specs there are left "
+                                   "as they are")
+            continue
         except files.LockTimeout as exc:
             report.problems.append(f"{repo.root}: a committer pass holds {exc.path}, so "
                                    f"{module}'s specs are left; forget each with: "
@@ -904,7 +1379,7 @@ def teardown() -> Teardown:
                 if repo is not None:
                     what = _removing(repo, state)
                     shims = not repo.hooks_inside and shim.our_shims(repo.hooks_dir)
-                    report.lines += gitconf.remove_all(repo, state, final=True)
+                    report.lines += _remove_all(repo, state, final=True)
                     line += f"; removed repo's {what} from {repo.common_dir} too"
                     if not repo.hooks_inside:
                         line += (f"; its hooks dir {repo.hooks_dir} is outside that git dir, "
@@ -917,10 +1392,10 @@ def teardown() -> Teardown:
                 if left is not None:
                     outside.append((left, moved))
                 continue
-            report.lines += gitconf.remove_all(repo, state, final=True)
+            report.lines += _remove_all(repo, state, final=True)
             _records.close_repo(repo.common_dir)
             _index_drop(key)
-        except (gitconf.GitError, OSError, IndexUnreadable) as exc:
+        except (gitconf.GitError, OSError, IndexUnreadable, Busy) as exc:
             report.problems.append(f"{root}: {exc}; repo stopped there, so it and the "
                                    "repos after it are left as they are")
             break
@@ -996,7 +1471,7 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 
 # -- reading ------------------------------------------------------------------------------
 
-def rules(path: str | os.PathLike) -> list[str]:
+def rules(path: str | os.PathLike, *, proof: bool = True) -> list[str]:
     """What a committer in the repo at `path` must know, as the lines `moxi repo rules`
     prints: a heading naming the work tree `path` is in, then the lines of each
     registered piece in `RULE_LINES`, the commit-proof piece's `Commit-Check` line last.
@@ -1004,29 +1479,64 @@ def rules(path: str | os.PathLike) -> list[str]:
 
     The pieces and their settings are the repo's, shared by all its work trees; the
     `Commit-Check` line is for the index of the work tree `path` is in, since a linked
-    work tree has its own. A disabled piece is still registered, so its lines print."""
+    work tree has its own. A disabled piece is still registered, so its lines print.
+    With `proof` false the commit-proof piece gives no line, so nothing is written (its
+    line runs `git write-tree`)."""
     repo = _resolve(path)
     top = gitconf.work_tree(path)
     state = _state(repo)
-    found = [pid for pid in RULE_LINES if pid in state.pieces]
-    if not found:
+    if not any(pid in state.pieces for pid in RULE_LINES):
         return [f"no commit rules for {top}"]
-    lines = [f"commit rules for {top}"]
-    for pid in found:
+    return [f"commit rules for {top}", *rule_lines_of(repo, state, top=top, proof=proof)]
+
+
+def rule_lines_of(repo: Repo, state: State, *, top: Path, proof: bool = True) -> list[str]:
+    """The lines `rules` prints under its heading, from a repo and the `State` already
+    read from it: each registered piece's of `RULE_LINES`, for the work tree `top`. With
+    `proof` false the commit-proof piece gives none; then no git runs and nothing is
+    written."""
+    lines = []
+    for pid in RULE_LINES:
+        if pid not in state.pieces or (pid == COMMIT_PROOF and not proof):
+            continue
         section = state.pieces[pid]
         lines += RULE_LINES[pid](repo, settings_of(section), top=top,
                                  enabled=enabled(section))
     return lines
 
 
-def status(path: str | os.PathLike | None = None) -> list[dict]:
+def own_hooks(repo: Repo, events) -> list[str]:
+    """The git events not in `events` whose git hook in the repo's hooks dir is the user's
+    own: a runnable file named for the event that is not repo's shim. One listing of the
+    hooks dir; a sample (`pre-commit.sample`) is named for no event."""
+    try:
+        names = sorted(entry.name for entry in os.scandir(repo.hooks_dir))
+    except OSError:
+        return []
+    return [name for name in names if name in EVENTS and name not in events
+            and _runnable(repo.hooks_dir / name)
+            and shim.shim_event(repo.hooks_dir / name) is None]
+
+
+def status(path: str | os.PathLike | None = None, *, with_rules: bool = False
+           ) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
     enabled, fail policy, order, settings and whether a doctor record of it is open; its
-    `events` how git reaches each event's pieces (`via`), the existing git hook, and
-    `command`, the text git runs for it as repo wrote it (the config entry's command, the
-    shim, or the launcher; None when it can't be read or nothing of repo's runs); and its
-    `records` each doctor record repo has open for it (`_records.open_of`)."""
+    `events` how git reaches each event's pieces (`via`), the existing git hook
+    (`existing`, a sentence; `existing_hook`, the path of the user's own git hook that runs
+    after the pieces, or alone while each of them is disabled, None in launcher mode and
+    when there is none), and `command`, the text git runs for it as repo wrote it (the
+    config entry's command, the shim, or the launcher; None when it can't be read or
+    nothing of repo's runs); its `own_hooks` (`own_hooks`); and its `records` each doctor
+    record repo has open for it (`_records.open_of`). Each of its `problems` is a
+    `Problem`.
+
+    `with_rules` adds, for each repo that can be opened, `rules`: the lines `rules` prints
+    for its main work tree under its heading, without the commit-proof piece's line, built
+    from the config already read, so no git runs for them and nothing is written (None
+    when they can't be built); and `proof`, whether the commit-proof piece is registered
+    there."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -1037,19 +1547,29 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
     out = []
     for key, repo, why in targets:
         if repo is None:
-            root = index[key].get("root") or key
-            out.append({"root": root, "common_dir": index[key].get("common_dir"),
-                        "indexed": True, "pieces": [], "events": {},
-                        "records": _records.open_of(index[key].get("common_dir") or key),
-                        "problems": [Problem(why,
+            entry = index[key]
+            root = entry.get("root") or key
+            common = entry.get("common_dir") or key
+            # Gone when its folder or its git dir no longer exists; else git can't read
+            # what is there now.
+            if not os.path.isdir(root) or not os.path.isdir(common):
+                code, detail = "gone", why
+            else:
+                code, detail = "unreadable", _unreadable_repo(key, entry) or why
+            out.append({"root": root, "common_dir": entry.get("common_dir"),
+                        "indexed": True, "pieces": [], "events": {}, "own_hooks": [],
+                        "records": _records.open_of(common),
+                        "problems": [Problem(detail,
                                              f"moxi repo git-hooks remove {_arg(root)}",
-                                             state="warn")]})
+                                             state="warn", code=code)]})
             continue
-        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good))
+        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good,
+                              with_rules=with_rules))
     return out
 
 
-def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
+def _status_of(repo: Repo, *, in_index: bool, version, good: dict,
+               with_rules: bool = False) -> dict:
     state = _state(repo)
     problems: list[Problem] = []
     listed = []
@@ -1065,10 +1585,12 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                                     "declares it",
                                     f"moxi repo git-hooks remove {_arg(repo.root)} {pid}",
                                     state="fail" if closing else "warn",
-                                    how="remove it with"))
+                                    how="remove it with", code="no-module", piece=pid,
+                                    event=last(section, "event")))
         if last(section, "event") not in EVENTS:
             problems.append(Problem(f"{pid} names {last(section, 'event')!r}, not a git "
-                                    "event", state="warn"))
+                                    "event", state="warn", code="not-an-event", piece=pid,
+                                    event=last(section, "event")))
     listed.sort(key=lambda p: (p["event"] or "", p["order"], p["id"]))
     mode = state.mode
     if mode == "config" and version is not None and version < gitconf.CONFIG_FROM:
@@ -1078,34 +1600,41 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             default = default_mode()
         except Failure:
             default = "auto"  # refresh itself then names the config that can't be read
-        if gitconf.pick_mode(state.mode_set, default, version) == "config":
+        pinned = gitconf.pick_mode(state.mode_set, default, version) == "config"
+        if pinned:
             fix = f"moxi repo git-hooks add {_arg(repo.root)} --mode shim"
         else:
             fix = f"moxi repo git-hooks refresh {_arg(repo.root)}"
         problems.append(Problem(f"git {gitconf.version_text(version)} runs no config "
-                                "entries, so no piece runs here", fix))
+                                "entries, so no piece runs here", fix, code="git-too-old",
+                                refresh=not pinned))
     events = {}
     ours = shim.our_shims(repo.hooks_dir)
     python, runner = gitconf.interpreter(), gitconf.runner_file()
     running = state.events()
     for event in sorted({p["event"] for p in listed if p["event"] in EVENTS}):
         info: dict = {"pieces": [p["id"] for p in listed if p["event"] == event],
-                      "via": None, "existing": None, "chain_line": None, "command": None}
+                      "via": None, "existing": None, "existing_hook": None,
+                      "chain_line": None, "command": None}
         hook = repo.hooks_dir / event
         if event not in running:
             # Every piece of it is disabled, so nothing of repo's is there to check.
             info["existing"] = str(hook) if _runnable(hook) else None
+            if _runnable(hook) and shim.shim_event(hook) is None:
+                info["existing_hook"] = str(hook)
         elif mode == "config":
             info["via"] = "config entry"
             command = state.entries.get(event)
             if command is None:
                 problems.append(Problem(f"{event} has pieces but no config entry",
-                                        f"moxi repo git-hooks refresh {_arg(repo.root)}"))
+                                        f"moxi repo git-hooks refresh {_arg(repo.root)}",
+                                        code="no-entry", event=event, refresh=True))
             else:
                 info["command"] = command
                 problems += _guard_problems(event, command, python, runner, repo.root)
             if _runnable(hook) and shim.shim_event(hook) is None:
                 info["existing"] = f"{hook}, run by git after the pieces"
+                info["existing_hook"] = str(hook)
         elif repo.hooks_inside:
             info["via"] = "shim"
             mine = ours.get(event, [])
@@ -1121,7 +1650,7 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(
                     f"{event}: another tool's git hook took {hook}, and moved repo's shim "
                     f"to {mine[0].name}; the pieces run only if that tool runs it",
-                    state="ok" if runs else "fail"))
+                    state="ok" if runs else "fail", code="shim-moved", event=event))
                 if runs:
                     # It still runs, so its guard's two paths matter as the shim's do.
                     info["command"] = mine[0].read_text(encoding="utf-8", errors="replace")
@@ -1130,9 +1659,11 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             else:
                 problems.append(Problem(f"{event}: repo's shim is missing or another tool "
                                         "replaced it",
-                                        f"moxi repo git-hooks refresh {_arg(repo.root)}"))
+                                        f"moxi repo git-hooks refresh {_arg(repo.root)}",
+                                        code="shim-missing", event=event, refresh=True))
             if _runnable(local):
                 info["existing"] = f"{local}, run by the shim after the pieces"
+                info["existing_hook"] = str(local)
         else:
             info["via"] = "launcher"
             chain_hook, line, present = gitconf.chain_state(repo, event)
@@ -1146,7 +1677,8 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(f"{event}: the launcher {repo.launcher} is missing, "
                                         "so the chain line skips quietly",
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                        state="fail" if present else "warn"))
+                                        state="fail" if present else "warn",
+                                        code="launcher-missing", event=event, refresh=True))
             else:
                 info["command"] = repo.launcher.read_text(encoding="utf-8",
                                                           errors="replace")
@@ -1158,22 +1690,32 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             problems.append(Problem(f"{event}: repo's shim {path} is left in {path.parent}, "
                                     "which git no longer reads as the hooks dir",
                                     f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                    state="warn"))
+                                    state="warn", code="left-shim", event=event,
+                                    refresh=True))
         elif fixable:
             problems.append(Problem(f"{event}: the git hook repo moved aside is still "
                                     f"{path}, which nothing runs",
                                     f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                    state="warn"))
+                                    state="warn", code="left-hook", event=event,
+                                    refresh=True))
         else:
             problems.append(Problem(f"{event}: the git hook repo moved aside is still "
                                     f"{path}, which nothing runs, and another git hook took "
                                     f"{path.with_name(event)}; merge them or remove one",
-                                    state="warn"))
-    return {"root": str(repo.root), "common_dir": str(repo.common_dir),
-            "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
-            "git_version": gitconf.version_text(version), "mode": mode,
-            "mode_set": state.mode_set, "pieces": listed, "events": events,
-            "records": _records.open_of(repo.common_dir), "problems": problems}
+                                    state="warn", code="left-hook-taken", event=event))
+    out = {"root": str(repo.root), "common_dir": str(repo.common_dir),
+           "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
+           "git_version": gitconf.version_text(version), "mode": mode,
+           "mode_set": state.mode_set, "pieces": listed, "events": events,
+           "own_hooks": own_hooks(repo, {p["event"] for p in listed}),
+           "records": _records.open_of(repo.common_dir), "problems": problems}
+    if with_rules:
+        out["proof"] = COMMIT_PROOF in state.pieces
+        try:
+            out["rules"] = rule_lines_of(repo, state, top=repo.root, proof=False)
+        except Exception:  # noqa: BLE001 - the rest of the repo's listing still reads
+            out["rules"] = None
+    return out
 
 
 def _runnable(path: Path) -> bool:
@@ -1192,13 +1734,16 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     written_run = (run.group(1) or run.group(2)).replace("'\\''", "'") if run else None
     fix = f"moxi repo git-hooks refresh {_arg(root)}"
     if written_py and not Path(written_py).exists():
-        out.append(Problem(f"{event}: the interpreter {written_py} is missing", fix))
+        out.append(Problem(f"{event}: the interpreter {written_py} is missing", fix,
+                           code="interpreter-missing", event=event, refresh=True))
     elif written_run and not Path(written_run).exists():
-        out.append(Problem(f"{event}: the runner {written_run} is missing", fix))
+        out.append(Problem(f"{event}: the runner {written_run} is missing", fix,
+                           code="runner-missing", event=event, refresh=True))
     elif written_py != python or written_run != runner:
         # Both still exist, so the pieces run, from another environment.
         out.append(Problem(f"{event}: written for another interpreter or runner", fix,
-                           state="warn"))
+                           state="warn", code="other-environment", event=event,
+                           refresh=True))
     return out
 
 
@@ -1231,9 +1776,9 @@ def __dir__():
     return sorted({*globals(), *REEXPORTS})
 
 
-__all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
-           "RULE_LINES", "EVERYWHERE", "available", "add", "remove", "enable", "disable",
-           "refresh", "rules", "status",
+__all__ = ["Failure", "Usage", "Refused", "Busy", "Changed", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "REFUSAL_CODES", "SEEDS", "SETTING_CHECKS",
+           "RULE_LINES", "EVERYWHERE", "available", "add", "plan_add", "remove", "enable", "plan_enable", "disable",
+           "refresh", "plan_refresh", "rules", "rule_lines_of", "own_hooks", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
            "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

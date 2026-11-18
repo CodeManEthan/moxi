@@ -9,6 +9,7 @@ handler that sends a key its route doesn't declare, or a value of another type, 
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import time
@@ -16,11 +17,12 @@ import time
 import pytest
 
 import moxi_repo
-from moxi import modules
-from moxi_repo import _records, api, page, pagehandlers
+from moxi import modules, paths
+from moxi_repo import _records, api, committer, gitconf, page, pagehandlers, projects, shim
 from tests.conftest import NEEDS_CONFIG_GIT, POSIX_ONLY, git
-from tests.test_commit_records import cgd, failed_push, push_key
+from tests.test_commit_records import PREPARE, cgd, failed_push, push_key
 from tests.test_committer import spec, write
+from tests.test_projects import Projects
 
 pytestmark = POSIX_ONLY
 
@@ -80,9 +82,20 @@ def read() -> dict:
     before = time.time()
     status, body = asyncio.run(_get(served(), "/api/repos"))
     assert status == 200, body
-    assert set(body) == {"now", "state", "detail", "repos"}
+    assert set(body) == {"now", "today", "home", "state", "detail", "repos", "offered",
+                         "refused", "unindexed"}
     assert before <= body["now"] <= time.time()
+    assert body["today"] == dt.date.today().isoformat()
     return body
+
+
+def offered_now() -> tuple[list[dict], list[dict]]:
+    """`offered` and `refused` as the route gives them, from `api.available()`."""
+    found = api.available()
+    offered = [{"id": p["id"], "module": p["module"], "name": p["id"].split("/", 1)[1],
+                "event": p["event"], "fail": p["fail"], "order": p["order"], "doc": p["doc"],
+                "settings": list(p["settings"])} for p in found["pieces"]]
+    return offered, [{"id": pid, "why": why} for pid, why in found["refused"].items()]
 
 
 # --- the table ------------------------------------------------------------------------------
@@ -91,11 +104,18 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_one_read_not_the_gateways_and_its_built_assets():
+def test_no_declared_route_is_the_gateways():
+    declared = [route.path for route in page.PAGE.routes]
+    exported = loopback().export(page.PAGE)["routes"]
+    assert declared and [route["path"] for route in exported] == declared
+    assert [route.path for route in page.PAGE.routes if route.gateway] == []
+    assert [route["path"] for route in exported if route["gateway"]] == []
+
+
+def test_the_page_declares_its_list_and_its_built_assets():
     exported = loopback().export(page.PAGE)
-    [route] = exported["routes"]
-    assert (route["path"], route["kind"], route["gateway"], route["stream"]) == (
-        "/api/repos", "read", False, False)
+    route = exported["routes"][0]
+    assert (route["path"], route["kind"], route["stream"]) == ("/api/repos", "read", False)
     assert exported["assets"] == ["build-stamp.txt", "page.js"]
 
 
@@ -112,7 +132,7 @@ def _marks(shape: dict, at: str = "") -> dict[str, str]:
 
 
 def test_every_value_that_can_hold_a_path_carries_a_mark():
-    [route] = loopback().export(page.PAGE)["routes"]
+    route = loopback().export(page.PAGE)["routes"][0]
     marks: dict[str, str] = {}
     for key, shape in route["returns"].items():
         marks.update(_marks(shape, key))
@@ -123,8 +143,9 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
             "repos[].specs[].problem", "repos[].specs[].line", "repos[].specs[].remote",
             "repos[].specs[].push_failed[].error", "repos[].specs[].run.command",
             "repos[].specs[].forget.command", "repos[].records[].text",
-            "repos[].records[].fix"]
-    assert marks == {"repos[].root": "path", "repos[].events[].hook": "path",
+            "repos[].records[].fix", "repos[].rules[]", "offered[].doc", "refused[].why"]
+    assert marks == {"home": "path", "repos[].root": "path", "repos[].events[].hook": "path",
+                     "repos[].events[].existing_hook": "path", "unindexed[].root": "path",
                      **dict.fromkeys(said, "redact")}
 
 
@@ -139,8 +160,53 @@ def test_the_announcement_offers_the_page_and_nothing_imports_it():
 # --- /api/repos -----------------------------------------------------------------------------
 
 def test_with_no_repo_the_read_is_up_and_empty(demo):
-    assert read() == {"now": pytest.approx(time.time(), abs=60), "state": "up",
-                      "detail": None, "repos": []}
+    offered, refused = offered_now()
+    assert read() == {"now": pytest.approx(time.time(), abs=60),
+                      "today": dt.date.today().isoformat(), "home": str(paths.home()),
+                      "state": "up", "detail": None, "repos": [], "offered": offered,
+                      "refused": refused, "unindexed": []}
+
+
+def test_home_is_where_moxi_paths_places_it(demo, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "the-home"))
+    assert read()["home"] == str(paths.home()) == str(tmp_path / "the-home")
+
+
+@POSIX_ONLY
+def test_with_nothing_placing_a_home_it_is_null(demo, monkeypatch):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert read()["home"] is None
+
+
+def test_the_read_offers_each_declared_piece_and_names_each_refused_one(demo):
+    body = read()
+    offered = {p["id"]: p for p in body["offered"]}
+    assert offered["demo/gate"] == {
+        "id": "demo/gate", "module": "demo", "name": "gate", "event": "pre-commit",
+        "fail": "closed", "order": 20, "doc": "A closed gate.",
+        "settings": ["refused-name", "label"]}
+    refused = {r["id"]: r["why"] for r in body["refused"]}
+    assert "demo/camel" in refused and "demo/camel" not in offered
+    assert (body["offered"], body["refused"]) == offered_now()
+
+
+def test_offered_pieces_that_cant_be_read_leave_both_lists_empty_and_the_repos(
+        demo, monkeypatch, caplog):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+
+    def broken():
+        raise OSError("no metadata")
+
+    monkeypatch.setattr(api, "available", broken)
+    caplog.set_level(logging.ERROR, logger="moxi.repo.page")
+    for _ in range(2):
+        body = read()
+        assert (body["state"], body["offered"], body["refused"]) == ("up", [], [])
+        assert [r["root"] for r in body["repos"]] == [str(repo)]
+    assert [r.message for r in caplog.records] == [
+        "listing the offered pieces failed (OSError)"]
 
 
 @NEEDS_CONFIG_GIT
@@ -179,6 +245,9 @@ def test_a_repo_reads_back_with_its_pieces_events_specs_records_and_commands(dem
     assert snap["last_commit"] == head and snap["pushed"] == []
     [failed] = snap["push_failed"]
     assert failed["branch"] == "main" and "remote says no" in failed["error"]
+    assert snap["unpushed"] == [{"branch": "main", "ahead": None}]
+    assert (snap["error_since"], snap["error_passes"], snap["index_busy_since"],
+            snap["index_stale"]) == (None, None, None, False)
     assert snap["run"]["command"] == f"moxi repo commit {quoted} --spec demo/snap"
     assert snap["forget"]["command"] == f"moxi repo specs remove {quoted} demo/snap"
     [record] = listed["records"]
@@ -215,7 +284,59 @@ def test_a_problem_carries_its_state_detail_and_fix(demo):
     [problem] = read()["repos"][0]["problems"]
     assert problem == {"state": "fail",
                        "detail": "pre-commit: repo's shim is missing or another tool replaced it",
-                       "fix": f"moxi repo git-hooks refresh {repo}"}
+                       "fix": f"moxi repo git-hooks refresh {repo}", "code": "shim-missing",
+                       "piece": None, "event": "pre-commit", "refresh": True}
+
+
+def test_a_problem_names_its_piece_and_one_not_fixed_by_refresh_says_so(demo):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    for var, value in (("event", "pre-commit"), ("target", "gone.mod:fn"),
+                       ("fail", "open"), ("order", "10"), ("enabled", "false")):
+        git(repo, "config", gitconf.piece_key("demo/gone", var), value)
+    [problem] = read()["repos"][0]["problems"]
+    assert (problem["code"], problem["piece"], problem["event"], problem["refresh"]) == (
+        "no-module", "demo/gone", "pre-commit", False)
+
+
+def test_a_gone_repo_reads_as_indexed_with_no_rules(demo):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    import shutil
+
+    shutil.rmtree(repo)
+    [listed] = read()["repos"]
+    assert (listed["indexed"], listed["rules"], listed["proof"], listed["own_hooks"]) == (
+        True, None, False, [])
+    [problem] = listed["problems"]
+    assert (problem["code"], problem["refresh"]) == ("gone", False)
+
+
+def test_an_event_names_his_own_hook_and_the_repo_his_hooks_with_no_piece(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    for name in ("pre-commit", "commit-msg"):
+        (hooks / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (hooks / name).chmod(0o755)
+    api.add(repo, ["demo/gate"], mode="shim")
+    [listed] = read()["repos"]
+    [event] = listed["events"]
+    own = api.status(repo)[0]["events"]["pre-commit"]["existing_hook"]
+    assert own is not None and event["existing_hook"] == own
+    assert shim.shim_event(hooks / "pre-commit") == "pre-commit"
+    assert listed["own_hooks"] == ["commit-msg"] and listed["indexed"] is True
+
+
+def test_a_repos_rules_read_without_the_proof_line_and_nothing_is_written(demo):
+    repo = demo.repo()
+    api.add(repo, ["repo/commit-rules"], sets=["rule=one change per commit"], mode="shim")
+    [listed] = read()["repos"]
+    assert (listed["rules"], listed["proof"]) == (["- one change per commit"], False)
+    api.add(repo, ["repo/commit-proof"], mode="shim")
+    objects = sorted(p.name for p in (cgd(repo) / "objects").rglob("*"))
+    [listed] = read()["repos"]
+    assert (listed["rules"], listed["proof"]) == (["- one change per commit"], True)
+    assert sorted(p.name for p in (cgd(repo) / "objects").rglob("*")) == objects
 
 
 def test_the_read_writes_nothing(demo, clock):
@@ -288,7 +409,7 @@ def test_an_unreadable_index_is_state_error_with_repos_own_words(demo):
 
 def test_an_unexpected_failure_is_state_error_with_a_fixed_detail_logged_once(
         demo, monkeypatch, caplog):
-    monkeypatch.setattr(api, "status", lambda path=None: 1 / 0)
+    monkeypatch.setattr(api, "status", lambda path=None, *, with_rules=False: 1 / 0)
     caplog.set_level(logging.ERROR, logger="moxi.repo.page")
     for _ in range(2):
         body = read()
@@ -323,3 +444,108 @@ def test_the_page_states_its_group_and_order_among_the_pages():
 
     page_decl = module.COMPONENTS["page"]
     assert (page_decl["group"], page_decl["order"]) == ("setup", 20)
+
+
+def test_a_spec_carries_its_error_run_and_its_index_busy_run(demo, monkeypatch, clock):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    write(repo, "notes/a.md")
+    start = clock[0]
+    monkeypatch.setenv("DEMO_PREPARE", "raise")
+    assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "error"
+    [snap] = read()["repos"][0]["specs"]
+    assert (snap["error_since"], snap["error_passes"], snap["refused_since"]) == (
+        start, 1, None)
+    assert snap["unpushed"] == []
+    monkeypatch.delenv("DEMO_PREPARE")
+    lock = cgd(repo) / "index.lock"
+    lock.write_text("", encoding="utf-8")
+    try:
+        for n in range(1, committer.STALE_INDEX_PASSES + 1):
+            clock[0] += 60
+            assert moxi_repo.commit(spec(repo)).status == "index-busy"
+            [snap] = read()["repos"][0]["specs"]
+            assert snap["index_busy_since"] == start + 60
+            assert snap["index_stale"] is (n == committer.STALE_INDEX_PASSES)
+    finally:
+        lock.unlink()
+
+
+# --- projects -------------------------------------------------------------------------------
+
+@pytest.fixture
+def with_projects(capsys, monkeypatch):
+    import moxi.modules
+
+    yield Projects(capsys, monkeypatch)
+    moxi.modules.reset()
+
+
+def test_without_projects_unindexed_is_null_and_no_repo_has_a_key(demo, monkeypatch):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    monkeypatch.setattr(projects, "api", lambda: None)
+    body = read()
+    assert body["unindexed"] is None
+    assert [(r["root"], r["project"]) for r in body["repos"]] == [(str(repo), None)]
+
+
+def test_a_project_repo_with_no_piece_is_unindexed_and_one_with_pieces_a_row(
+        demo, with_projects):
+    keyed, bare, held = demo.repo("keyed"), demo.repo("bare-proj"), demo.repo("held")
+    plain = demo.tmp / "not-a-repo"
+    plain.mkdir()
+    (bare / "sub").mkdir()
+    api.add(keyed, ["demo/gate"], mode="shim")
+    api.add(held, ["demo/gate"], mode="shim")
+    # Its git config keeps the piece, but the index forgot it.
+    [key] = api.indexed_at(held)
+    api._index_drop(key)
+    for key, root in (("keyed", keyed), ("bare", bare / "sub"), ("held", held),
+                      ("plain", plain), ("gone", demo.tmp / "nowhere")):
+        with_projects.add(key, root)
+    body = read()
+    assert body["state"] == "up"
+    assert body["unindexed"] == [{"project": "bare", "root": str(bare)}]
+    rows = {r["root"]: r for r in body["repos"]}
+    assert set(rows) == {str(keyed), str(held)}
+    assert (rows[str(keyed)]["project"], rows[str(keyed)]["indexed"]) == ("keyed", True)
+    assert (rows[str(held)]["project"], rows[str(held)]["indexed"]) == ("held", False)
+    assert [p["id"] for p in rows[str(held)]["pieces"]] == ["demo/gate"]
+    assert rows[str(held)]["rules"] == []
+
+
+def test_project_repos_that_cant_be_listed_leave_the_indexed_repos_keyed(
+        demo, with_projects, monkeypatch, caplog):
+    repo, other = demo.repo("keyed"), demo.repo("other")
+    api.add(repo, ["demo/gate"], mode="shim")
+    with_projects.add("keyed", repo)
+    with_projects.add("other", other)
+    status_of = api._status_of
+
+    def broken(where, **kwargs):
+        if where.key == gitconf.resolve(other).key:
+            raise PermissionError(13, "Permission denied")
+        return status_of(where, **kwargs)
+
+    monkeypatch.setattr(api, "_status_of", broken)
+    caplog.set_level(logging.ERROR, logger="moxi.repo.page")
+    body = read()
+    assert (body["state"], body["unindexed"]) == ("up", [])
+    assert [(r["root"], r["project"]) for r in body["repos"]] == [(str(repo), "keyed")]
+    assert [r.message for r in caplog.records] == [
+        "listing the project repos failed (PermissionError)"]
+
+
+def test_the_cli_and_the_page_list_the_same_project_repos(demo, with_projects, capsys):
+    from moxi_repo import cli
+
+    keyed, bare = demo.repo("keyed"), demo.repo("bare-proj")
+    api.add(keyed, ["demo/gate"], mode="shim")
+    with_projects.add("keyed", keyed)
+    with_projects.add("bare", bare)
+    assert cli.main(["git-hooks", "list", "--projects", "--json"]) == 0
+    printed = {r["root"]: r["project"] for r in json.loads(capsys.readouterr().out)}
+    body = read()
+    assert printed == {**{r["root"]: r["project"] for r in body["repos"]},
+                       **{u["root"]: u["project"] for u in body["unindexed"]}}

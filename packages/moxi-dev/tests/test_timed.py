@@ -627,3 +627,117 @@ def test_the_strict_line_is_left_out_when_machine_names_another(repo, rec, monke
 def test_no_record_on_the_walk_exits_3(repo, rec):
     commits(repo, 1)
     assert shown(repo, rec)[0] == 3
+
+
+# --- show --package --------------------------------------------------------------------
+
+def two_packages(rec, tip):
+    """alpha with a complete run, host-b with none; each holds a comms test that passed
+    and a sessions test that failed."""
+    machine_file(rec, "alpha", tip, {"c1": {"1": result("passed", package="comms")},
+                                      "s1": {"1": result("failed", package="sessions")}},
+                 collected=["c1", "s1"])
+    machine_file(rec, "host-b", tip, {"c2": {"1": result("passed", package="comms")},
+                                       "s2": {"1": result("failed", package="sessions")}})
+
+
+def test_package_reads_only_its_own_tests_on_every_machine(repo, rec):
+    tip = commits(repo, 1)[0]
+    two_packages(rec, tip)
+    assert shown(repo, rec)[0] == 1
+    code, by, _ = shown(repo, rec, package="comms")
+    assert [row["test"] for row in by["alpha"]["tests"]] == ["c1"]
+    assert [row["test"] for row in by["host-b"]["tests"]] == ["c2"]
+    # Another package's counted failure, on the machine with a complete run and on the
+    # one without, leaves this package's exit 0.
+    assert by["alpha"]["verdict"] == 0 and by["host-b"]["verdict"] is None and code == 0
+    code, by, _ = shown(repo, rec, package="sessions")
+    assert [row["test"] for row in by["alpha"]["tests"]] == ["s1"]
+    assert by["alpha"]["verdict"] == 1 and by["host-b"]["verdict"] == 1 and code == 1
+
+
+def test_package_reads_the_same_by_either_of_its_names(repo, rec):
+    tip = commits(repo, 1)[0]
+    two_packages(rec, tip)
+    assert shown(repo, rec, package="moxi-comms") == shown(repo, rec, package="comms")
+
+
+def test_a_package_name_naming_no_workspace_package_exits_2(repo, rec, monkeypatch, capsys):
+    tip = commits(repo, 1)[0]
+    two_packages(rec, tip)
+    with pytest.raises(timed_show.ShowError, match="names no workspace package: nope"):
+        shown(repo, rec, package="nope")
+    monkeypatch.chdir(repo)
+    assert timed_show.main(["--record-dir", str(rec), "--package", "nope"]) == 2
+    assert capsys.readouterr().err == (
+        "moxi-dev timed show: --package names no workspace package: nope\n")
+
+
+def test_the_strict_line_counts_the_package_s_tests_alone(repo, rec):
+    tip = commits(repo, 1)[0]
+    machine_file(rec, "alpha", tip, {"c1": {"1": result("passed", package="comms")},
+                                      "c2": {"1": result("not measured", package="comms")},
+                                      "s1": {"1": result("passed", package="sessions")},
+                                      "s2": {"1": result("passed", package="sessions")}},
+                 collected=["c1", "c2", "s1", "s2"])
+    _, _, reports = shown(repo, rec, package="comms")
+    assert timed_show.strict_line("alpha", reports, tip, "comms") == (
+        f"alpha's strict reading covers 1 of 2 tests on the walk to {tip[:12]}; "
+        f"the other 1 are read only at the hosts' factors")
+
+
+def test_a_package_with_no_collected_test_has_nothing_to_read(repo, rec):
+    tip = commits(repo, 1)[0]
+    two_packages(rec, tip)
+    nothing = (f"turns has no timed test collected by a complete run on the walk to "
+               f"{tip[:12]}; nothing to read")
+    code, by, reports = shown(repo, rec, package="turns")
+    assert code == 0 and all(not report["tests"] for report in reports)
+    lines = timed_show.render(reports, "main", tip, 7, "alpha", package="turns")
+    assert lines[1] == nothing
+    assert not any(line.startswith("  passed") or line.startswith("  failed")
+                   for line in lines)
+    # With no complete run on any machine the record can't tell a package with no timed
+    # test from one never measured.
+    machine_file(rec, "alpha", tip, {"c1": {"1": result("passed", package="comms")}})
+    code, _, reports = shown(repo, rec, package="turns")
+    assert code == 3
+    assert timed_show.strict_line("alpha", reports, tip, "turns") == nothing
+
+
+def test_a_machine_s_newest_measured_commit_is_its_package_s_newest(repo, rec):
+    old, tip = commits(repo, 2)[::-1]
+    machine_file(rec, "alpha", old, {"c1": {"1": result("passed", package="comms")},
+                                      "s1": {"1": result("passed", package="sessions")}},
+                 collected=["c1", "s1"])
+    # A hand run of another package alone at the tip.
+    machine_file(rec, "alpha", tip, {"s1": {"1": result("passed", package="sessions")}})
+    machine_file(rec, "host-b", tip, {"s2": {"1": result("passed", package="sessions")}},
+                 collected=["s2"])
+    _, by, _ = shown(repo, rec)
+    assert (by["alpha"]["newest_commit"], by["alpha"]["behind"]) == (tip, 0)
+    _, by, reports = shown(repo, rec, package="comms")
+    assert (by["alpha"]["newest_commit"], by["alpha"]["behind"]) == (old, 1)
+    assert (by["host-b"]["newest_commit"], by["host-b"]["behind"]) == (None, None)
+    lines = timed_show.render(reports, "main", tip, 7, "alpha", package="comms")
+    assert (f"alpha: set factor 1 | newest measured commit {old[:12]}, 1 commits behind"
+            in lines)
+    assert "host-b: set factor 1 | no result of comms on the walk" in lines
+    # A package no machine has a result of, read from a machine with no record: the strict
+    # line still picks a set among machines with no newest commit.
+    _, _, reports = shown(repo, rec, package="turns")
+    assert all(report["newest_commit"] is None for report in reports)
+    assert timed_show.strict_line("gamma", reports, tip, "turns").startswith(
+        "turns has no timed test collected by a complete run")
+
+def test_json_carries_the_package(repo, rec, monkeypatch, capsys):
+    tip = commits(repo, 1)[0]
+    two_packages(rec, tip)
+    monkeypatch.setattr(timed_record.platform, "node", lambda: "alpha")
+    monkeypatch.chdir(repo)
+    assert timed_show.main(["--record-dir", str(rec), "--package", "comms", "--json"]) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert body["package"] == "comms"
+    assert [row["test"] for row in body["machines"][0]["tests"]] == ["c1"]
+    assert timed_show.main(["--record-dir", str(rec), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["package"] is None

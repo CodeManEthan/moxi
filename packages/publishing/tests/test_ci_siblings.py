@@ -238,6 +238,28 @@ def test_the_suite_runs_in_the_package_with_the_site_check_loaded(tagged, fake):
     assert call["plugin"] == Path(site_check.__file__).read_text()
 
 
+def test_the_suite_holds_every_timed_test_at_both_resolutions(tagged, fake, monkeypatch):
+    # The fence deselects every `timed` test under `hold`, after the package's own `-m`,
+    # as the land check's parallel pass does; timing bounds run only in `moxi-dev timed`.
+    repo, artifact = tagged
+    monkeypatch.delenv("MOXI_TEST_TIMED", raising=False)
+    runner = Runner({"proj-a": ["0.0.9", []]})
+    result = siblings(repo, artifact, fake, runner)
+    assert result.code == 0, result.lines
+    suites = runner.of("-m", "pytest")
+    assert len(suites) == 2
+    assert [call["env"]["MOXI_TEST_TIMED"] for call in suites] == ["hold", "hold"]
+
+
+def test_the_hold_overrides_a_timed_mode_the_job_set(tagged, fake, monkeypatch):
+    repo, artifact = tagged
+    monkeypatch.setenv("MOXI_TEST_TIMED", "only")
+    runner = Runner({"proj-a": ["0.0.9", []]})
+    siblings(repo, artifact, fake, runner, resolution="lowest-direct")
+    (call,) = runner.of("-m", "pytest")
+    assert call["env"]["MOXI_TEST_TIMED"] == "hold"
+
+
 def test_a_failed_install_fails_the_run(tagged, fake):
     repo, artifact = tagged
     result = siblings(repo, artifact, fake, Runner(install=2), resolution="highest")

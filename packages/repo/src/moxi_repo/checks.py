@@ -206,7 +206,7 @@ def _spec_rows(repo: gitconf.Repo) -> list[Row]:
     saved = [item for item in listed if item["saved"]]
     changed = _changed(repo.root) if saved else []
     now = _now()
-    head = _head_branch(repo.root)
+    head = committer.head_branch(repo.root)
     ledger = _records.ledger()
     out: list[Row] = []
     for item in listed:
@@ -248,13 +248,6 @@ def _changed(top: Path) -> list[str]:
     return [os.fsdecode(item[3:]) for item in done.stdout.split(b"\0") if len(item) > 3]
 
 
-def _head_branch(top: Path) -> str | None:
-    done = git(top, "symbolic-ref", "-q", "HEAD")
-    ref = done.stdout.strip()
-    return ref[len("refs/heads/"):] if done.returncode == 0 and ref.startswith(
-        "refs/heads/") else None
-
-
 def _stamp(t) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t)) if t else "never"
 
@@ -290,22 +283,14 @@ def _push_rows(repo, label: str, name: str, spec: dict, item: dict,
     remote = spec.get("push")
     if not remote:
         return []
-    branches = ([head] if head else []) + sorted(b for b in item["push"] if b != head)
     out = []
-    for branch in branches:
-        if git(repo.root, "rev-parse", "-q", "--verify",
-               f"refs/heads/{branch}").returncode != 0:
-            continue
-        count = git(repo.root, "rev-list", "--count",
-                    f"refs/remotes/{remote}/{branch}..refs/heads/{branch}")
-        if count.returncode == 0:
-            ahead = count.stdout.strip()
-            if ahead == "0":
-                continue
-            what = f"{ahead} {'commit' if ahead == '1' else 'commits'} on {branch} not " \
-                   f"pushed to {remote}"
-        else:
+    for gap in committer.unpushed(repo.root, remote, item["push"], head=head):
+        branch, ahead = gap["branch"], gap["ahead"]
+        if ahead is None:
             what = f"{branch} has never been pushed to {remote}"
+        else:
+            what = (f"{ahead} {'commit' if ahead == 1 else 'commits'} on {branch} not "
+                    f"pushed to {remote}")
         error = (item["push"].get(branch) or {}).get("error")
         out.append(Row(MODULE, f"{label} push", "warn",
                        what + (f"; the last push failed: {error}" if error else ""),
