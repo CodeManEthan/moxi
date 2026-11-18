@@ -216,9 +216,12 @@ commit made public by first making it a local branch's tip.
 
 ### A push of main
 
-A push that creates or moves `main` to commit C passes only when GitHub has, at C, a run
-of the workflow the root `pyproject.toml` names as `check-workflow` (read at C) from a push
-to a standing branch, in which the `check-job` job (read at C) concluded `success`:
+In a repo whose push piece sets `standing-branch`, a push to the publishing remote (its URL
+reduces to `moxi-publishing.github` by the rule in [Standing
+branches](#standing-branches)) that creates or moves `main` to commit C passes only when
+GitHub has, at C, a run of the workflow the root `pyproject.toml` names as
+`check-workflow` (read at C) from a push to a standing branch, in which the `check-job`
+job (read at C) concluded `success`:
 
 ```sh
 git push origin +main:refs/heads/ci/main   # CI runs there; wait for check-job to pass
@@ -230,11 +233,16 @@ bounded at ten seconds). A job counts by its name, or its name followed by ` (` 
 matrix leg. The jobs read are those of the run's latest attempt, which is what GitHub's
 list of a run's jobs gives by default: a job that failed and passed on a re-run counts as
 passed, and one that passed and then failed on a re-run counts as failed. A read that
-fails, a missing `check-workflow` or `check-job` at C, `moxi-publishing.github` unset, or
-no `standing-branch` pattern refuses, naming which. When `main` moved on since the run,
-push the new tip to the standing branch again and wait, or move `main` to the commit that
-passed (`git push origin C:refs/heads/main`). The rule adds to the word and to
-fast-forward only; a push of any other branch or tag reads no CI here.
+fails, or a missing `check-workflow` or `check-job` at C, refuses, naming which. When
+`main` moved on since the run, push the new tip to the standing branch again and wait, or
+move `main` to the commit that passed (`git push origin C:refs/heads/main`). The rule adds
+to the word and to fast-forward only; a push of any other branch or tag reads no CI here.
+
+The rule is a standing-branch repo's, on its way to GitHub. A repo with no
+`standing-branch` pattern pushes `main` as it did before the setting existed: with the
+word where `word-required` is set, forward only, and with no CI read. So does a push of
+`main` to any other URL, a mirror off GitHub or a local remote among them, and so does
+every push while `moxi-publishing.github` is unset, since no URL then reduces to it.
 
 ## Scanning a whole tree
 
@@ -438,8 +446,9 @@ and prints the check as left.
 
 Once `moxi-main` requires `check-job`, GitHub moves `main` only to a commit that check
 has already passed on: a direct push of `main` passes only when the same commit has a
-successful run of `check-job` from another ref, any branch. The push piece asks the same
-before the push goes, from a standing branch only ([A push of main](#a-push-of-main)). So
+successful run of `check-job` from another ref, any branch. In a repo that sets
+`standing-branch`, the push piece asks the same before the push goes, from a standing
+branch only ([A push of main](#a-push-of-main)). So
 each push of `main` goes:
 
 1. push the exact commit `main` will point at to a standing branch (after a merge, the

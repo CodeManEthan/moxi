@@ -40,14 +40,16 @@ is the repo's own identity (secrets' `author.*`), and a foreign commit is scanne
 any other. For each tag pushed, each tag object of its chain: its headers and message the
 same way. Each ref name goes through secrets' sets at `@ref`.
 
-A push that creates or moves `main` to commit C passes only when GitHub has, at C, a run
-of the root `pyproject.toml`'s `check-workflow` (read at C) from a push to a standing
-branch, in whose jobs `check-job` (read at C) concluded `success` (`main_ci`). GitHub is
-read as the tag gate reads it (`tags.default_web`), each read bounded at ten seconds, and
-the jobs are GitHub's latest attempt of the run (the jobs list's default), so a re-run
-that passed counts and one that failed after a pass does not. A read that fails, a setting
-missing at C, `moxi-publishing.github` unset, or no standing pattern refuses, naming
-which. This adds to the word and to the rule that `main` only moves forward.
+In a repo that sets `standing-branch`, a push to the publishing remote (the URL reduces
+by `github_repo` to the OWNER/REPO in `moxi-publishing.github`) that creates or moves
+`main` to commit C passes only when GitHub has, at C, a run of the root `pyproject.toml`'s
+`check-workflow` (read at C) from a push to a standing branch, in whose jobs `check-job`
+(read at C) concluded `success` (`main_ci`). GitHub is read as the tag gate reads it
+(`tags.default_web`), each read bounded at ten seconds, and the jobs are GitHub's latest
+attempt of the run (the jobs list's default), so a re-run that passed counts and one that
+failed after a pass does not. A read that fails or a setting missing at C refuses, naming
+which. This adds to the word and to the rule that `main` only moves forward. A push of
+`main` from a repo with no `standing-branch`, or to any other URL, reads no CI here.
 
 STANDING BRANCHES. A `standing-branch` value is a fixed prefix of one or more path parts,
 each ending in `/`, then `*` (`ci/*`), and must not match `main` or a `protected` branch;
@@ -382,11 +384,16 @@ class _Push(_Reader):
             self._github = value if done.returncode == 0 and value else None
         return self._github
 
+    def to_publishing(self) -> bool:
+        """Whether the repo sets a standing pattern and the push goes to the publishing
+        remote: the URL reduces to `GITHUB_KEY`'s value."""
+        github = self.github() if self.standing.patterns else None
+        return bool(github and github_repo(self.url) == github)
+
     def standing_free(self) -> bool:
         """Whether the push needs no word: it carries ref lines, every one a standing
-        branch, to the URL that reduces to `GITHUB_KEY`'s value."""
-        github = self.github() if self.standing.patterns else None
-        return bool(self.updates and github and github_repo(self.url) == github
+        branch, to the publishing remote (`to_publishing`)."""
+        return bool(self.updates and self.to_publishing()
                     and all(self.standing.match(u.remote_ref) for u in self.updates))
 
     def why_not_free(self) -> str:
@@ -726,6 +733,10 @@ class _Push(_Reader):
     # -- main moves only to a commit CI passed on a standing branch ---------------------
 
     def judge_main(self) -> None:
+        """`main_ci` for each ref line that creates or moves `main`, only where
+        `to_publishing` holds."""
+        if not self.to_publishing():
+            return
         for u in self.updates:
             if u.remote_ref == _HEADS + self.main and not _zero(u.local_sha):
                 self.reasons += main_ci(self.git, u.local_sha, main=self.main,

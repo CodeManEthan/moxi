@@ -367,6 +367,26 @@ def test_a_standing_push_to_a_local_remote_asks_for_the_word(worded):
 
 # -- main moves only to a commit whose check passed on a standing branch -------------------
 
+SSH = """#!/bin/sh
+# git's ssh (GIT_SSH_VARIANT=simple: the host, then the command): run the command asked of
+# github.com against the bare remote instead.
+cmd=${2%% *}
+exec git "${cmd#git-}" "$BARE"
+"""
+
+
+def at_github(repo, remote, monkeypatch, url=URL):
+    """`repo`'s `origin` at the GitHub URL `url`, which git reaches through a stand-in ssh
+    that serves `remote`; git hands the hook `url`."""
+    ssh = remote.parent / "ssh"
+    ssh.write_text(SSH.replace("$BARE", str(remote)), encoding="utf-8")
+    ssh.chmod(0o755)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
+    monkeypatch.setenv("GIT_SSH_VARIANT", "simple")
+    git(repo, "remote", "set-url", "origin", url)
+    return repo
+
+
 @pytest.fixture
 def checked(repo, names, served):
     """`repo` naming its check in a commit; GitHub faked, with no runs."""
@@ -377,16 +397,18 @@ def checked(repo, names, served):
 
 
 @pytest.fixture
-def mainline(checked, remote, served):
-    """`checked` on `origin`, with the push piece on, `standing-branch=ci/*`, its GitHub
-    repo set, and one commit `origin` lacks."""
+def mainline(checked, remote, served, monkeypatch):
+    """`checked` on `origin` at its GitHub URL, with the push piece on,
+    `standing-branch=ci/*`, its GitHub repo set, and one commit `origin` lacks."""
     standing_repo(checked)
     git(checked, "config", "moxi-publishing.github", GITHUB)
+    at_github(checked, remote, monkeypatch)
     commit(checked, "Add")
     return checked
 
 
-def test_main_moves_to_a_commit_whose_check_passed_on_a_standing_branch(mainline, served):
+def test_main_moves_to_a_commit_whose_check_passed_on_a_standing_branch(
+        mainline, remote, served):
     tip = head(mainline)
     refused(run(mainline, "push", "-q", "origin", "main"),
             f"refs/heads/main: no ci.yml run from a push to ci/* at {tip[:12]} has linux "
@@ -396,6 +418,7 @@ def test_main_moves_to_a_commit_whose_check_passed_on_a_standing_branch(mainline
     served.green(tip, branch="ci/main")
     passed(run(mainline, "push", "-q", "origin", "main"))
     assert served.queries[-1] == "per_page=100"   # the jobs of the run's latest attempt
+    assert head(remote, "refs/heads/main") == tip
 
 
 @pytest.mark.parametrize("job, conclusion, event, branch", [
@@ -428,22 +451,7 @@ def test_main_may_move_to_an_earlier_commit_that_passed(mainline, served):
     passed(run(mainline, "push", "-q", "origin", f"{passed_at}:refs/heads/main"))
 
 
-def test_main_with_no_standing_pattern_is_refused(checked, remote, served):
-    public_repo(checked, PIECE, sets=("main=main",))
-    git(checked, "config", "moxi-publishing.github", GITHUB)
-    commit(checked, "Add")
-    served.green(head(checked), branch="ci/main")
-    refused(run(checked, "push", "-q", "origin", "main"),
-            "the push piece's standing-branch setting names none",
-            "--set 'standing-branch=ci/*'")
-
-
-def test_main_without_its_settings_or_the_github_repo_is_refused(mainline, served):
-    served.green(head(mainline), branch="ci/main")
-    git(mainline, "config", "--unset", "moxi-publishing.github")
-    refused(run(mainline, "push", "-q", "origin", "main"),
-            "moxi-publishing.github is unset")
-    git(mainline, "config", "moxi-publishing.github", GITHUB)
+def test_main_without_its_settings_is_refused(mainline, served):
     write(mainline, "pyproject.toml", '[tool.moxi-publishing]\ncheck-workflow = "ci.yml"\n')
     git(mainline, "commit", "-q", "-am", "No job")
     served.green(head(mainline), branch="ci/main")
@@ -478,3 +486,54 @@ def test_only_a_push_of_main_waits_for_the_check(mainline, served):
     passed(run(mainline, "push", "-q", "origin", "topic:refs/heads/ci/topic"))
     refused(run(mainline, "push", "-q", "origin", ":main"), "main is never deleted")
     assert not any("/actions/" in path for path in served.asked)
+
+
+# -- where main's check does not apply: judged as before the setting existed ---------------
+
+def no_ci_read(repo, remote, served):
+    """A push of `main` with no run anywhere passes, and GitHub's runs are never asked."""
+    tip = head(repo)
+    passed(run(repo, "push", "-q", "origin", "main"))
+    assert head(remote, "refs/heads/main") == tip
+    assert not any("/actions/" in path for path in served.asked)
+
+
+def test_main_in_a_repo_with_no_standing_pattern_reads_no_ci(
+        checked, remote, served, monkeypatch):
+    public_repo(checked, PIECE, sets=("main=main",))
+    git(checked, "config", "moxi-publishing.github", GITHUB)
+    at_github(checked, remote, monkeypatch)
+    commit(checked, "Add")
+    no_ci_read(checked, remote, served)
+    # It still goes forward only.
+    git(checked, "reset", "-q", "--hard", "HEAD~1")
+    commit(checked, "Elsewhere")
+    refused(run(checked, "push", "-q", "-f", "origin", "main"), "would rewrite main")
+
+
+@pytest.mark.parametrize("url", [None, "git@example.test:operator/proj-a.git",
+                                 "git@github.com:operator/other.git",
+                                 "ssh://git@github.com/operator/proj-a.git/"])
+def test_main_to_any_other_url_reads_no_ci(mainline, remote, served, monkeypatch, url):
+    if url is None:   # the bare remote's own path
+        git(mainline, "remote", "set-url", "origin", str(remote))
+    else:
+        at_github(mainline, remote, monkeypatch, url)
+    no_ci_read(mainline, remote, served)
+
+
+def test_main_reads_no_ci_while_the_github_repo_is_unset(mainline, remote, served):
+    git(mainline, "config", "--unset", "moxi-publishing.github")
+    no_ci_read(mainline, remote, served)
+
+
+def test_main_ci_refuses_with_no_pattern_or_no_github_repo(checked):
+    from moxi_publishing import tags
+
+    run_git, tip = tags.repo_git(str(checked)), head(checked)
+    [why] = piece.main_ci(run_git, tip, main="main", patterns=[], github=GITHUB,
+                          root=str(checked))
+    assert "the push piece's standing-branch setting names none" in why
+    assert "--set 'standing-branch=ci/*'" in why
+    [why] = piece.main_ci(run_git, tip, main="main", patterns=["ci/*"], github=None)
+    assert "moxi-publishing.github is unset" in why

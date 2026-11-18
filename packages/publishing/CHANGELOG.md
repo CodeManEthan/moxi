@@ -59,5 +59,7 @@ The first version.
   log names each ref's pattern; a bad pattern refuses every push, and `enable` refuses
   one. `moxi doctor publishing` fails a bad pattern or an unset GitHub repo beside one,
   and warns when no push URL of `origin` reduces to the GitHub repo.
-- A push of `main` passes only when GitHub has, at its new tip, a run of `check-workflow`
-  from a push to a standing branch whose `check-job` passed in the run's latest attempt.
+- In a repo that sets `standing-branch`, a push of `main` to the URL that reduces to
+  `moxi-publishing.github` passes only when GitHub has, at its new tip, a run of
+  `check-workflow` from a push to a standing branch whose `check-job` passed in the run's
+  latest attempt. A repo with no pattern, or a push to another URL, reads no CI.

@@ -157,9 +157,7 @@ def test_the_push_piece_judges_50_commits_within_budget(flagged, remote, timed_r
         git(flagged, "commit", "-q", "--no-verify", "-m", f"Step {n}: change the reader")
     tip = git(flagged, "rev-parse", "HEAD").stdout.strip()
     assert git(flagged, "rev-list", "--count", f"{base}..{tip}").stdout.strip() == "50"
-    # A branch other than main: main's move also waits on GitHub's runs, which isn't the
-    # piece's own cost.
-    line = f"refs/heads/topic {tip} refs/heads/topic {'0' * 40}"
+    line = f"refs/heads/main {tip} refs/heads/main {base}"
     result = best(flagged, "push", "origin", str(remote), line)
     assert result["kind"] == "ok", result
     within(timed_reading, "push piece, 50 commits", result["s"], PUSH_BUDGET_S)
