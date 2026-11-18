@@ -16362,3 +16362,5 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	lock.parent.mkdir(parent
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	and row["args"][:2] != ["python", "find"]	keep	find	find
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removeprefix("worktree ")).resolve() == want	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
