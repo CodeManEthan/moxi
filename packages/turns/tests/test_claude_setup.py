@@ -598,3 +598,139 @@ def test_check_carries_the_claude_rows(turns_env, fake_claude):
     names = [row.name for row in doctor.check()]
     assert "claude endpoint.json" in names and "claude code" in names
     assert "claude placed copy" in names
+
+
+# -- the reach ---------------------------------------------------------------------------
+
+
+def _runner_listed(fake_claude, scope="user", **extra):
+    (fake_claude / "plugins.json").write_text(json.dumps(
+        [{"id": "moxi-turns@moxi-turns", "scope": scope, **extra},
+         {"id": "moxi-turns-gate@moxi-turns", "scope": scope, **extra}]))
+
+
+def _name_in_endpoint_file(placed: Path, command: str) -> None:
+    (placed / "moxi-turns" / "endpoint.json").write_text(json.dumps({"command": command}))
+
+
+def test_the_reach_is_start_with_the_runner_and_a_current_endpoint_json(placed, fake_claude):
+    _runner_listed(fake_claude, enabled=True)
+    claude_setup.write_endpoint_file()
+    assert claude_setup.reach() == "start"
+    assert "plugin list --json" in _log(fake_claude)
+    # An entry that says nothing of `enabled` is enabled.
+    _runner_listed(fake_claude)
+    assert claude_setup.reach() == "start"
+
+
+def test_the_reach_is_setup_when_the_install_would_fix_it(placed, fake_claude):
+    claude_setup.write_endpoint_file()
+    _runner_listed(fake_claude, scope="project")
+    assert claude_setup.reach() == "setup"          # the runner not at user scope
+    _runner_listed(fake_claude)
+    (placed / "moxi-turns" / "endpoint.json").unlink()
+    assert claude_setup.reach() == "setup"          # endpoint.json missing
+    _name_in_endpoint_file(placed, str(placed / "no-such-endpoint"))
+    assert claude_setup.reach() == "setup"          # names no executable file
+
+
+def test_the_reach_is_absent_with_no_claude_and_nothing_placed(turns_env, claude_root,
+                                                               monkeypatch):
+    monkeypatch.setattr(claude_setup, "_claude", lambda: None)
+    assert claude_setup.reach() == "absent"
+
+
+def test_the_reach_is_none_with_no_claude_and_a_copy_placed(placed, monkeypatch):
+    monkeypatch.setattr(claude_setup, "_claude", lambda: None)
+    assert claude_setup.reach() is None
+
+
+@pytest.mark.parametrize("listed", ["not json", '{"a": 1}'])
+def test_the_reach_is_none_when_the_plugin_list_fails(placed, fake_claude, listed):
+    claude_setup.write_endpoint_file()
+    (fake_claude / "plugins.json").write_text(listed)
+    assert claude_setup.reach() is None
+
+
+HELD_CLAUDE = """#!/bin/sh
+sleep 30 &
+echo $! > "$FAKE_CLAUDE_DIR/child"
+echo '[]'
+exit 0
+"""
+
+
+def test_the_reach_is_none_past_its_bound_and_kills_a_child_holding_the_pipes(
+        placed, fake_claude, tmp_path):
+    import time
+
+    exe = tmp_path / "bin" / "claude"
+    exe.write_text(HELD_CLAUDE)
+    claude_setup.write_endpoint_file()
+    began = time.monotonic()
+    assert claude_setup.reach(timeout_s=0.5) is None
+    assert time.monotonic() - began < 5.0
+    child = int((fake_claude / "child").read_text())
+    deadline = time.monotonic() + 5.0
+    while _alive(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _alive(child)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        stat_line = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat_line.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def test_the_reach_is_none_with_no_endpoint_command(turns_env, placed, fake_claude):
+    _runner_listed(fake_claude)
+    claude_setup.write_endpoint_file()
+    write_config(turns_env, '[claude]\nendpoint = "relative/endpoint"\n')
+    assert claude_setup.reach() is None
+
+
+def test_the_reach_is_none_for_a_runner_listed_disabled(placed, fake_claude):
+    _runner_listed(fake_claude, enabled=False)
+    claude_setup.write_endpoint_file()
+    assert claude_setup.reach() is None
+
+
+def test_the_reach_is_none_when_endpoint_json_names_another_executable(placed, fake_claude):
+    import sys
+
+    _runner_listed(fake_claude)
+    _name_in_endpoint_file(placed, sys.executable)
+    assert claude_setup.reach() is None
+
+
+def test_the_reach_is_none_without_posix_process_groups(placed, fake_claude, monkeypatch):
+    _runner_listed(fake_claude)
+    claude_setup.write_endpoint_file()
+    monkeypatch.delattr(os, "killpg")
+    assert claude_setup.reach() is None
+    assert "plugin list --json" not in _log(fake_claude)
+
+
+def _tree(*roots: Path) -> dict:
+    out = {}
+    for root in roots:
+        for path in [root, *root.rglob("*")] if root.exists() else []:
+            info = path.lstat()
+            out[path] = (info.st_mtime_ns, info.st_size, info.st_mode)
+    return out
+
+
+def test_the_reach_writes_nothing(turns_env, placed, fake_claude, claude_root):
+    from moxi.paths import Layout
+
+    _runner_listed(fake_claude)
+    claude_setup.write_endpoint_file()
+    layout = Layout("turns")
+    roots = (turns_env, claude_root, layout.data_dir(), layout.state_dir(),
+             layout.config_dir())
+    before = _tree(*roots)
+    assert claude_setup.reach() == "start"
+    assert _tree(*roots) == before
