@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings compares a `path` key's value with its default as paths: a default under the
+  home folder is joined with the platform's separator, and both sides are normalised
+  (and case-folded on Windows) before the comparison. On Windows a path key left at its
+  default no longer counts as changed in the list's counts and the changed view.
 - On a wide page a Settings row's control stays on its label's first line in any sans
   face: the label and key take the width left beside the control and wrap there, the key
   on a line of its own when it doesn't fit. A row laid out for Adwaita Sans's widths no
