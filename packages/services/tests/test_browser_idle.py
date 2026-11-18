@@ -1,8 +1,8 @@
 """services' page server stops when idle though its rows poller runs on, and a job it held
 is gone with it. Through a real shell with a short idle time and services' page open in a
-browser: the page's stream starts the poller, a stop goes through the confirm sheet to
+browser: the page's stream starts the poller, a stop from the opened row's foot goes to
 done, the page closes, and the server exits within its idle time though the poller still
-runs. The next server, started by the next request, holds no record of the stop's key,
+runs. The next server, started by the next request, holds no record of the stop's job,
 so its status answers `unknown` and the row's state shows the outcome.
 """
 
@@ -60,12 +60,11 @@ def test_the_server_exits_when_idle_with_its_poller_running_and_forgets_its_jobs
     # The page follows the topic: its stream started the poller.
     with page.expect_response(lambda r: "/m/services/api/status?job=" in r.url
                               and r.json().get("state") == "done"):
-        with page.expect_request("**/m/services/api/stop") as sent:
-            item.get_by_role("button", name="Stop web", exact=True).click()
-            page.locator("moxi-ui-confirm").get_by_role("dialog").get_by_role(
-                "button", name="Confirm", exact=True).click()
-    key = sent.value.headers["idempotency-key"]
-    expect(item.locator('[data-line="said"]')).to_contain_text("Stop web: Done.")
+        with page.expect_request("**/m/services/api/act") as sent:
+            item.get_by_role("button", name="Open web", exact=True).click()
+            item.locator('[data-part="foot"]').get_by_role("button", name="Stop web", exact=True).click()
+    key = sent.value.post_data_json["job"]
+    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
     row = shell.wait_server("services", "running")
     pid = row["pid"]
     # Open, the page's stream holds the server past its idle time.

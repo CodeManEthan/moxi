@@ -677,7 +677,7 @@ def test_start_from_a_closed_row_reads_starting_then_running(seeded, ui_shell, u
     posts = posts_to(ui_page, "api/act")
     item = row(panel, "services/startme")
     drawn = item.locator("moxi-ui-row")
-    expect(drawn).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
     held: list = []
 
     def first_running(route) -> None:
@@ -731,7 +731,8 @@ def test_a_stop_from_the_foot_reads_stopped_by_hand(seeded, ui_shell, ui_page):
     body = posts[0].post_data_json
     assert body["act"] == "stop" and body["id"] == "services/stopme" and JOB.match(body["job"]), body
     expect(item).to_have_attribute("data-verdict", "warn")
-    expect(item.locator("moxi-ui-row")).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    # A fact in the text colour is the page's own, at line one's right.
+    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
     expect(part.locator('[data-part="foot"] button').first).to_have_text("Start")
     status = get(ui_shell, f"api/status?job={body['job']}")
     assert (status["act"], status["id"], status["state"]) == ("stop", "services/stopme", "done"), status
@@ -747,7 +748,8 @@ def test_a_moxi_daemon_stopped_by_hand_reads_so_and_does_not_rise(seeded, ui_she
     expect(foot).to_have_text(["Restart", "Stop"])
     expect(part.locator('[data-line="stop-lasts"]')).to_have_count(0)
     foot.nth(1).click()
-    expect(item.locator("moxi-ui-row")).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    # A fact in the text colour is the page's own, at line one's right.
+    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
     expect(item).to_have_attribute("data-verdict", "warn")
     expect(item).to_have_attribute("data-cause", "stopped")
     expect(panel.locator('section[data-part="first"] .item[data-id="cache/watch"]')).to_have_count(0)
