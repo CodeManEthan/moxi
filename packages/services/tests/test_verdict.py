@@ -407,7 +407,21 @@ OTHER_VERDICTS = {
     "timer off": lambda: judge(timer_row(), st("timer", enabled=False), is_enabled=False),
     "schedule armed, flag off": lambda: judge(timer_row(), st("timer", enabled=True),
                                               is_enabled=False),
+    "login start unread, flag off": lambda: judge(
+        user(), st(state="inactive", enabled=None), is_enabled=False),
+    "schedule unread, flag on": lambda: judge(timer_row(enabled=True),
+                                              st("timer", enabled=None), is_enabled=True),
+    "schedule unread, flag off": lambda: judge(timer_row(), st("timer", enabled=None),
+                                               is_enabled=False),
 }
+if sys.platform == "linux":
+    OTHER_VERDICTS["not wrapped"] = lambda: judge(
+        user(form="adopted", name="backup"), st("timer", wrapped=None, module=None),
+        is_enabled=True)
+    OTHER_VERDICTS["gate holds the runs"] = lambda: judge(
+        user(form="adopted", name="backup"),
+        st("timer", wrapped=Wrapped("services", "adopted.backup", "backup"), module=None),
+        is_enabled=False)
 
 
 @pytest.mark.parametrize("case", sorted(OTHER_VERDICTS))
