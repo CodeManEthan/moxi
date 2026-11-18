@@ -4,7 +4,7 @@ import test from "node:test";
 import { Feed, parseRepos, RETRIES } from "../src/feed.ts";
 
 const REPO = { root: "/r/alpha-notes", project: null, git_version: "2.56.0", mode: "config",
-               pinned: false, events: [], pieces: [], problems: [], specs: [],
+               pinned: false, events: [], own_hooks: [], pieces: [], problems: [], specs: [],
                specs_problem: null, records: [], commands: [] };
 const UP = { now: 1000, state: "up", detail: null, repos: [REPO] };
 
@@ -27,7 +27,8 @@ test("a 200 gives the value and the server clock's offset", async () => {
   await read;
   assert.equal(feed.reading, false);
   assert.equal(feed.loading, false);
-  assert.deepEqual(feed.value, { state: "up", detail: null, repos: [REPO] });
+  assert.deepEqual(feed.value, { state: "up", detail: null, today: null, repos: [REPO], offered: [], refused: [],
+                                 unindexed: null });
   assert.equal(feed.now(), 1000);
   assert.equal(feed.failure, null);
   assert.equal(changes(), 1);
@@ -84,6 +85,21 @@ test("a refresh while one runs reads once more after it", async () => {
 
 test("an error value keeps its detail and drops the repos", () => {
   assert.deepEqual(parseRepos({ state: "error", detail: "the index can't be read", repos: [REPO] }),
-                   { state: "error", detail: "the index can't be read", repos: [] });
+                   { state: "error", detail: "the index can't be read", today: null, repos: [], offered: [],
+                     refused: [], unindexed: null });
   assert.equal(parseRepos({ state: "up", detail: 3, repos: [] }), null);
+});
+
+test("the value carries today, the offered and refused pieces and the projects with no hooks", () => {
+  const offered = [{ id: "repo/commit-rules", module: "repo", name: "commit-rules", event: "commit-msg",
+                     fail: "closed", order: 50, doc: "checks a message's trailers", settings: [] }];
+  const value = parseRepos({ ...UP, today: "2026-11-18", offered, refused: [{ id: "x/y", why: "no event" }],
+                             unindexed: [{ project: "orbit", root: "/r/orbit" }] });
+  assert.equal(value.today, "2026-11-18");
+  assert.deepEqual(value.offered, offered);
+  assert.deepEqual(value.refused, [{ id: "x/y", why: "no event" }]);
+  assert.deepEqual(value.unindexed, [{ project: "orbit", root: "/r/orbit" }]);
+  for (const bad of [{ offered: {} }, { refused: [1] }, { unindexed: "x" }, { repos: [{ ...REPO, own_hooks: null }] }]) {
+    assert.equal(parseRepos({ ...UP, ...bad }), null);
+  }
 });
