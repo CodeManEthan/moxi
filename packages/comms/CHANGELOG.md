@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The name comms' tools in the Claude apps bind as says what it is on the Comms page: its
+  row reads `Claude's apps, through the connector` after the name. Each live row of
+  `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
+  for a binding of the connector's kind while the connector module is installed, and null
+  for every other row.
 - Any program or service, not only a Moxi module, can hold a send-only name: `moxi comms
   send-only add NAME` registers it, `moxi comms send --as NAME` and
   `moxi_comms.api.send_under` send under it from outside every session, and `send-only
