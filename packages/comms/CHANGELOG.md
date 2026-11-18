@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- The name comms' tools in the Claude apps bind as says what it is on the Comms page: its
-  row reads `Claude's apps, through the connector` after the name. Each live row of
+- The Comms page says what the connector's name is: the row of the name that comms' tools
+  in the Claude apps bind reads `Claude's apps, through the connector` after the name. Each live row of
   `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
   for a binding of the connector's kind while the connector module is installed, and null
   for every other row.
