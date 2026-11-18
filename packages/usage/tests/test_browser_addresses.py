@@ -71,6 +71,8 @@ for spec in json.loads(sys.argv[1]):
 #:   only its reset, and nothing of who used it.
 #: - Claude's weekly Opus window has one reading at 33%: a limit scoped to Opus, so its
 #:   start is known and it was used by the first session's subagent alone.
+#: - Claude's weekly oauth-apps window has one reading at 12%: a scoped limit whose
+#:   reading names no models, so it says no `Used by`.
 READINGS = """
 import time
 from moxi_usage import readings
@@ -82,6 +84,7 @@ found = [
 ] + [
     Reading("claude", "plan", 10080, "seven_day", 0.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
     Reading("claude", "opus", 10080, "seven_day_opus", 33.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
+    Reading("claude", "apps", 10080, "seven_day_oauth_apps", 12.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
 ]
 conn = readings.open_store()
 try:
@@ -456,6 +459,13 @@ def test_a_scoped_limit_says_its_window_one_reading_and_whose_opus_requests_coun
         [re.compile(rf"^\s*proj-a · started {WHEN} · 2 requests\s*(at least )?\$\d+\.\d\d$")])
     expect(used.locator("[data-part=used-total] span").first).to_have_text(
         re.compile(rf"^1 session, 2 Opus requests since {WHEN}$"))
+
+
+def test_a_scoped_limit_whose_reading_names_no_models_says_no_who(seeded, page):
+    panel = open_page(page, "limit/claude/apps/10080")
+    lines = opened(panel)
+    expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(r"12% used$"))
+    expect(lines.locator("[data-opened=used]")).to_have_count(0)
 
 
 def test_a_line_whose_fact_the_answer_does_not_carry_is_absent(seeded, page):
