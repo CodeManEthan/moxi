@@ -596,6 +596,8 @@ def test_turn_started_at_is_the_open_turns_start_and_null_once_it_ends(make_endp
             assert facts_of(data, key)["turn_started_at"] is None
             # A turn held for its tie is open with no turn named yet: no start is sent.
             ep.turn_started("t-held", None, held=True)
+            # A held start raises no event; the read is asked for as the timer would.
+            pagehandlers._reader_now._held[key].dirty.set()
             data = await stream.until(lambda d: turn(d, key) == (2, True), LIVE_S)
             assert facts_of(data, key)["turn_started_at"] is None
             ep.turn_released("t-held")
@@ -1193,11 +1195,18 @@ def test_a_reading_new_only_in_its_at_is_answered_but_not_published(make_endpoin
         stream = Stream(app)
         try:
             data = await stream.until(lambda d: turn(d, key) == (0, False), LIVE_S)
-            # Let the reads the watch's opening asks for settle.
+            # Let the reads the watch's opening asks for settle, and take every value
+            # published before then: the first reach among them.
             await asyncio.sleep(SLOW_S)
+            with contextlib.suppress(TimeoutError):
+                while True:
+                    await stream.next(0.5)
             _, first = await get(app)
-            with pytest.raises(TimeoutError):
-                await stream.next(3 * SLOW_S)
+            try:
+                published = await stream.next(3 * SLOW_S)
+            except TimeoutError:
+                published = None
+            assert published is None, (first, published)
             _, later = await get(app)
             assert facts_of(later, key)["at"] > facts_of(first, key)["at"]
             assert {k: v for k, v in facts_of(later, key).items() if k != "at"} == {
