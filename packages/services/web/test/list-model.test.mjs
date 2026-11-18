@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BUCKETS, bucketOf, commandWords, counts, countsLine, FACTS, FALLBACK, grouped, lastRunLine, MOXI, named,
-  NO_PROJECT, OTHER, risen, rowFact, servicesLabel, systemWord, timingWords, whereOf, YOURS,
+  BUCKETS, bucketOf, commandWords, counts, countsLine, FACTS, FALLBACK, grouped, lastRunLine, listShape, MOXI,
+  named, NO_PROJECT, NOTHING_DOWN, OTHER, risen, rowFact, servicesLabel, systemWord, timingWords, whereOf, YOURS,
 } from "../src/list-model.ts";
 import { moduleRow, row, timer } from "./fixtures.mjs";
 
@@ -221,4 +221,37 @@ test("line one's dim words: his doc or command, Moxi's module, the timing, spend
   assert.equal(systemWord("win32"), "Windows");
   assert.equal(systemWord("plan9"), "plan9");
   assert.equal(systemWord(null), "another system");
+});
+
+test("the list's shape: the first group, its risen rows or sentence and counts, and the groups", () => {
+  const down = of("not-running", "fail", { id: "services/queue-worker", name: "queue-worker", project: "atlas-api", state: "failed", doc: "works the queue" });
+  const up = of("running", "ok", { id: "services/atlas-dev", name: "atlas-dev", project: "atlas-api", since: SINCE, doc: "serves the api" });
+  const shell = moduleRow({ verdict: verdict("ok", "running"), since: SINCE });
+  const AT = "2026-11-03T11:58:00Z";
+
+  const quiet = listShape([up, shell], AT, true, WHEN);
+  assert.equal(quiet.label, "2 services");
+  assert.deepEqual(quiet.risen, []);
+  assert.equal(quiet.sentence, NOTHING_DOWN);
+  assert.equal(quiet.counts, "2 running");
+  assert.equal(quiet.read, "read 11:58");
+  assert.deepEqual(quiet.groups.map((g) => g.group.label), ["atlas-api", MOXI]);
+  assert.deepEqual(quiet.groups[0].rows[0], { row: up, name: "atlas-dev", where: "serves the api",
+                                              fact: "running since 08:19", weight: "dim", line: null });
+
+  // A risen row replaces the sentence and the counts, leaves its group, and reads its
+  // project key and line two.
+  const loud = listShape([down, up, shell], null, true, WHEN);
+  assert.equal(loud.label, "3 services");
+  assert.equal(loud.sentence, null);
+  assert.equal(loud.counts, null);
+  assert.equal(loud.read, null);
+  assert.deepEqual(loud.risen.map((v) => [v.name, v.where, v.fact, v.weight, v.line]),
+                   [["queue-worker", "atlas-api", "down", "heavy", "It failed and is not running."]]);
+  assert.deepEqual(loud.groups[0].rows.map((v) => v.name), ["atlas-dev"]);
+  // Without projects the risen row keeps its own words.
+  assert.equal(listShape([down], null, false, WHEN).risen[0].where, "works the queue");
+  // No row: no counts.
+  const none = listShape([], AT, false, WHEN);
+  assert.deepEqual([none.label, none.sentence, none.counts, none.groups], ["0 services", NOTHING_DOWN, null, []]);
 });

@@ -1,10 +1,13 @@
 // <moxi-services-page route="...">: services' panel.
 //
-// - Every row, grouped by project: its verdict and the reason, its health check, its
-//   switch or flag, since when it runs or its last run, and a mark on a row whose runs
-//   launch an agent session. Each row opens to its command, unit, directory, schedule and
-//   the supervisor's own words.
-// - Each row's acts: start, stop and restart for a daemon, run now and run again in place
+// - The list (`list-model.ts` gives every word), under no heading of its own: the shell's
+//   top line names the page. First, `<n> services` with `Add a service` (desk) beside the
+//   rows that rise (every fail, then failed last runs, then rows it can't tell), each with
+//   its sentence on line two; when none rises, `Nothing is down.`, the dim counts and
+//   `read <time>`. Then the groups: one per project key (with projects installed) and `No
+//   project`, or `Yours`, then `Moxi`. Each row is a `<moxi-ui-row>`: the name, its dim
+//   words and its fact, weighted by the row's cause.
+// - Each row's acts, in its line two: start, stop and restart for a daemon, run now and run again in place
 //   of start and restart for a timer, enable and disable, and remove for a row the user
 //   added. Every one is a confirmed act: its button opens the shell's confirm sheet,
 //   which mints a new key at each confirmation and sends the act once. A run of a row
@@ -14,10 +17,10 @@
 //   no sheet, and the server checks it again.
 //
 // Each act runs as a job on services' page server: the page reads the job's status link
-// once a second until it ends, shows its lines, and keeps every act's control off while
-// one runs, since the server runs its acts one at a time anyway. When a job ends the page
-// reads the rows again. Otherwise it reads `/api/rows` when it opens and when its tab is
-// shown again, follows the topic `rows`, and reads again on "Read again".
+// once a second until it ends, shows its lines under the row, and keeps every act's
+// control off while one runs, since the server runs its acts one at a time anyway. When a
+// job ends the page reads the rows again. Otherwise it reads `/api/rows` when it opens and
+// when its tab is shown again, and follows the topic `rows`.
 //
 // On the phone the add form, the projects list and remove are left out: from the phone a
 // service is acted on, never added or removed. Where the phone runs no acts here, each
@@ -26,15 +29,16 @@
 import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, confirm, gateway, gatewayActs, subscribe } from "/m/ui/client.js";
+import { api, confirm, gateway, gatewayActs, installed, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
 import type { Projects, Row, Rows, Status } from "./feed.ts";
+import { ADD_A_SERVICE, listShape } from "./list-model.ts";
+import type { ListShape, RowView } from "./list-model.ts";
 import {
-  addBody, addRefused, DAYS, emptyForm, flagLine, healthLine, listView, outcomeSaid, rowFacts,
-  shownActs, statusLost, statusSaid, timeLine, verdictLine, verdictTone,
+  addBody, addRefused, DAYS, emptyForm, listView, outcomeSaid, shownActs, statusLost, statusSaid,
 } from "./views.ts";
-import type { Act, AddForm, Group, Said } from "./views.ts";
+import type { Act, AddForm, Said } from "./views.ts";
 
 const TAG = "moxi-services-page";
 
@@ -48,12 +52,9 @@ const ADD = "add";
 const STYLES = css`
   :host { display: block; min-width: 0; color: var(--moxi-text); font-family: var(--moxi-font-sans); }
   * { box-sizing: border-box; }
-  h1 { margin: 0 0 var(--moxi-gap); font-size: 1.4em; }
   h2 { margin: 0; font-size: 1.1em; }
-  h3 { margin: 0; font-size: 1em; }
   p { margin: 0; overflow-wrap: anywhere; }
   code { font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
-  .lede { margin-bottom: var(--moxi-gap); padding-left: 8px; border-left: 3px solid var(--moxi-accent); color: var(--moxi-text-dim); }
   .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
   .ok { color: var(--moxi-ok); }
   .warn { color: var(--moxi-warn); }
@@ -62,27 +63,33 @@ const STYLES = css`
   .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
   .note { padding-left: 8px; border-left: 3px solid var(--moxi-warn); font-size: var(--moxi-font-size-sm); }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
-  section { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: calc(var(--moxi-gap) * 2); padding: 12px;
-            border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius-lg); background: var(--moxi-bg-raised); }
-  .group { display: grid; gap: 6px; min-width: 0; padding-top: var(--moxi-gap); border-top: 1px solid var(--moxi-border); }
-  ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-  .row { display: grid; gap: 4px; min-width: 0; padding: 4px 0 4px 8px; border-left: 3px solid var(--moxi-border); }
-  .row[data-verdict="ok"] { border-left-color: var(--moxi-ok); }
-  .row[data-verdict="warn"] { border-left-color: var(--moxi-warn); }
-  .row[data-verdict="fail"] { border-left-color: var(--moxi-error); }
-  .first { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
-  .first strong { overflow-wrap: anywhere; }
-  .tag { padding: 0 6px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
-         font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
-  .tag.spends { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
-  .verdict { font-weight: 600; overflow-wrap: anywhere; }
-  .lines { display: flex; flex-wrap: wrap; gap: 2px var(--moxi-gap); min-width: 0; }
-  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px var(--moxi-gap); margin: 4px 0 0; }
-  dt { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-  details { min-width: 0; }
-  details > summary { cursor: pointer; color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  .said { display: grid; gap: 2px; padding-left: 8px; border-left: 3px solid var(--moxi-border-strong); }
+  :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
+  section[data-part="add"] { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: 24px; padding: 12px;
+                             border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius-lg);
+                             background: var(--moxi-bg-raised); }
+  p.state, p.foot { margin: 16px 0 0; padding: 0 2px; }
+  p.foot { color: var(--moxi-text-dim); }
+  /* The list is the Projects page's: a dim label at the left of each group, its rows at
+     the right, a rule between groups. No accent, and no verdict colour. */
+  .grps { margin-top: 16px; border-top: 1px solid var(--moxi-border); }
+  .grp { display: grid; grid-template-columns: 96px minmax(0, 1fr); border-bottom: 1px solid var(--moxi-border);
+         padding: 5px 2px; }
+  .grp .gk { color: var(--moxi-text-dim); padding-top: 7px; overflow-wrap: anywhere; }
+  .grp .gk small { display: block; font-size: 13px; line-height: 18px; margin-top: 3px; }
+  .grp .gl { grid-column: 2; min-width: 0; }
+  .grp .gk button, .item moxi-ui-row > button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
+                                                 text-align: left; cursor: pointer; }
+  .grp .gk small button { color: var(--moxi-text); }
+  .grp .gk button:hover:not(:disabled), .item moxi-ui-row > button:hover:not(:disabled) { background: none; }
+  .item moxi-ui-row > button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
+  .one { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; padding: 7px 0;
+         flex-wrap: wrap; }
+  .one .read { margin-left: auto; color: var(--moxi-text-dim); font-variant-numeric: tabular-nums; }
+  .counts { color: var(--moxi-text-dim); padding-bottom: 7px; }
+  .item .said { margin: 0 0 7px; }
+  .said { display: grid; gap: 2px; padding-left: 8px; border-left: 3px solid var(--moxi-border-strong);
+           font-size: 13px; line-height: 18px; }
   .said.ok { border-left-color: var(--moxi-ok); color: var(--moxi-text); }
   .said.error { border-left-color: var(--moxi-error); }
   .said.warn { border-left-color: var(--moxi-warn); color: var(--moxi-text); }
@@ -283,21 +290,20 @@ export class ServicesPage extends LitElement {
     const view = listView(rows);
     if (view.state === "gone") return html`<p class="problem">${view.line}</p>`;
     const told = this.#told;
-    const ids = new Set(view.groups.flatMap((group) => group.rows.map((row) => row.id)));
+    const value = rows.value;
+    const shape = view.groups.length && value !== null
+      ? listShape(value.rows, value.at, installed("projects"), { now: Date.now() / 1000 }) : null;
+    const ids = new Set((value?.rows ?? []).map((row) => row.id));
     const loose = told !== null && told.where !== ADD && (told.where === null || !ids.has(told.where)) ? told.said : null;
-    return html`<h1>Services</h1>
-      <p class="lede">Every daemon and timer on this machine: the ones modules declare, the commands you added and the units you adopted. Each act here does what the same <code>moxi services</code> command does in a terminal.</p>
-      ${this.#phone && !gatewayActs() ? html`<p class="note" data-line="desk">This phone runs no acts here; each one's sheet says to do it at the desk.</p>` : nothing}
+    return html`${this.#phone && !gatewayActs()
+        ? html`<p class="note" data-line="desk">This phone runs no acts here; each one's sheet says to do it at the desk.</p>` : nothing}
       <section data-part="list" data-state=${view.state}>
-        <div class="bar"><h2>Rows</h2>
-          <button type="button" data-action="read" ?disabled=${rows.reading} @click=${() => this.#readAll()}>Read again</button>
-          ${this.#busy ? html`<span class="dim" data-line="busy">An act is running.</span>` : nothing}
-        </div>
-        ${view.problems.map((line) => html`<p class="note" data-line="module-problem">${line}</p>`)}
+        ${this.#busy ? html`<p class="state dim" data-line="busy">An act is running.</p>` : nothing}
         ${loose !== null ? this.#saidPart(loose) : nothing}
-        ${view.state === "loading" ? html`<p class="dim">Reading the rows…</p>` : nothing}
-        ${view.line !== null ? html`<p class=${view.state === "empty" ? "dim" : "problem"} data-line=${view.state}>${view.line}</p>` : nothing}
-        ${repeat(view.groups, (group) => group.project ?? "", (group) => this.#group(group))}
+        ${view.state === "loading" ? html`<p class="state dim" data-line="reading">Reading the rows…</p>` : nothing}
+        ${view.line !== null ? html`<p class=${view.state === "empty" ? "state dim" : "state problem"} data-line=${view.state}>${view.line}</p>` : nothing}
+        ${shape !== null ? this.#list(shape) : nothing}
+        ${view.problems.map((line) => html`<p class="foot" data-line="module-problem">${line}</p>`)}
       </section>
       ${this.#phone ? nothing : this.#addPart()}`;
   }
@@ -307,42 +313,52 @@ export class ServicesPage extends LitElement {
       ${said.lines.map((line) => html`<p>${line}</p>`)}</div>`;
   }
 
-  #group(group: Group) {
-    return html`<div class="group" data-project=${group.project ?? ""}>
-      <h3>${group.label}</h3>
-      <ul aria-label=${group.label}>${repeat(group.rows, (row) => row.id, (row) => this.#row(row))}</ul>
+  /** The first group, then the groups. */
+  #list(shape: ListShape) {
+    return html`<div class="grps">
+      <section class="grp" data-part="first"><div class="gk"><span data-line="count">${shape.label}</span>${this.#phone
+        ? nothing : html`<small><button type="button" data-action="add" @click=${() => this.#toAdd()}>${ADD_A_SERVICE}</button></small>`}</div>
+        <div class="gl">${repeat(shape.risen, (item) => item.row.id, (item) => this.#row(item))}
+          ${shape.sentence !== null || shape.read !== null ? html`<div class="one">
+            ${shape.sentence !== null ? html`<span data-line="sentence">${shape.sentence}</span>` : nothing}
+            ${shape.read !== null ? html`<span class="read" data-line="read">${shape.read}</span>` : nothing}</div>` : nothing}
+          ${shape.counts !== null ? html`<div class="counts" data-line="counts">${shape.counts}</div>` : nothing}
+        </div></section>
+      ${repeat(shape.groups, ({ group }) => `${group.moxi ? "moxi" : "his"}:${group.project ?? group.label}`, ({ group, rows }) => html`
+        <section class="grp" data-part="group" data-group=${group.moxi ? "moxi" : group.project !== null ? "project" : "his"}
+          data-project=${group.project ?? ""}><div class="gk" data-line="group">${group.label}</div>
+          <div class="gl">${repeat(rows, (item) => item.row.id, (item) => this.#row(item))}</div></section>`)}
     </div>`;
   }
 
-  #row(row: Row) {
+  /** One row: line one's name, dim words and fact; a risen row's sentence on line two; the
+   * row's acts at line two's right; what its last act came to under it. A fact in the text
+   * colour is drawn by the page at line one's right, since the row draws its own fact
+   * either dim or heavy. */
+  #row(item: RowView) {
+    const row = item.row;
     const busy = this.#busy;
-    const time = timeLine(row);
-    const health = healthLine(row);
     const told = this.#told?.where === row.id ? this.#told.said : null;
-    const facts = rowFacts(row);
-    return html`<li class="row" data-id=${row.id} data-verdict=${row.verdict.state} data-kind=${row.kind}>
-      <div class="first">
-        <strong>${row.name}</strong>
-        <span class="tag">${row.kind}</span>
-        ${row.form === "module" ? html`<span class="tag" data-line="module">${row.module}</span>` : nothing}
-        ${row.launches_session ? html`<span class="tag spends" data-mark="launches_session" title="Its runs launch an agent session, so they spend usage">launches a session</span>` : nothing}
-        <span class="verdict ${verdictTone(row.verdict.state)}" data-line="verdict">${verdictLine(row.verdict)}</span>
-      </div>
-      <div class="lines">
-        <span class="dim" data-line="flag">${flagLine(row)}</span>
-        ${time !== null ? html`<span class="dim" data-line="time">${time}</span>` : nothing}
-        ${health !== null ? html`<span class="${health.tone}" data-line="health">${health.text}</span>` : nothing}
-      </div>
-      ${row.doc ? html`<p class="dim" data-line="doc">${row.doc}</p>` : nothing}
-      ${facts.length ? html`<details><summary>Details</summary><dl>${facts.map((fact) => html`
-        <dt>${fact.label}</dt><dd data-field=${fact.name}>${fact.name === "command" || fact.name === "health" || fact.name === "cwd" || fact.name === "fix"
-          ? html`<code>${fact.value}</code>` : fact.value}</dd>`)}</dl></details>` : nothing}
-      <div class="bar" data-part="acts">${shownActs(row, this.#phone).map((act) => html`
-        <button type="button" data-action=${act.name} ?disabled=${busy}
-          aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
-          @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
+    const own = item.weight === "text";
+    return html`<div class="item" data-id=${row.id} data-cause=${row.verdict.cause ?? ""} data-verdict=${row.verdict.state}
+        data-weight=${item.weight} data-kind=${row.kind}>
+      <moxi-ui-row name=${item.name} where=${item.where ?? nothing} fact=${own ? nothing : item.fact}
+        ?fact-heavy=${item.weight === "heavy"} lead=${item.line ?? nothing}>
+        ${own ? html`<span slot="acts-one" class="fact" data-line="fact">${item.fact}</span>` : nothing}
+        ${shownActs(row, this.#phone).map((act) => html`
+          <button type="button" slot="acts" class="do" data-action=${act.name} ?disabled=${busy}
+            aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
+            @click=${() => void this.#act(row, act)}>${act.label}</button>`)}
+      </moxi-ui-row>
       ${told !== null ? this.#saidPart(told) : nothing}
-    </li>`;
+    </div>`;
+  }
+
+  /** `Add a service`: the add form, its name field focused. */
+  #toAdd(): void {
+    const name = this.renderRoot.querySelector<HTMLInputElement>('section[data-part="add"] input[name="name"]');
+    name?.scrollIntoView({ block: "nearest" });
+    name?.focus();
   }
 
   #addPart() {

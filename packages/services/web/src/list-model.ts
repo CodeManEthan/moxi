@@ -338,3 +338,57 @@ export function whereOf(row: Row, options: { projects: boolean; risen: boolean }
   if (row.launches_session) parts.push(SPENDS);
   return parts.length ? parts.join(JOIN) : null;
 }
+
+// -- the list as the page draws it --------------------------------------------------------
+
+/** What the first group says when no row rises. */
+export const NOTHING_DOWN = "Nothing is down.";
+/** The first group's act, at the desk. */
+export const ADD_A_SERVICE = "Add a service";
+
+/** One row as `<moxi-ui-row>` draws it: line one's name, its dim words and its fact with
+ * the fact's weight; line two's sentence on a risen row. */
+export interface RowView {
+  row: Row;
+  name: string;
+  where: string | null;
+  fact: string;
+  weight: Weight;
+  line: string | null;
+}
+
+/** The list: the first group (its label, the risen rows or the sentence and counts, the
+ * time of the read), then the groups. */
+export interface ListShape {
+  label: string;
+  risen: RowView[];
+  /** `Nothing is down.` when no row rises, else null. */
+  sentence: string | null;
+  /** The dim counts when no row rises, else null; null too when there is no row. */
+  counts: string | null;
+  /** `read <time>` from the rows' `at`, null without one. */
+  read: string | null;
+  groups: { group: Group; rows: RowView[] }[];
+}
+
+/** One row's view: a risen row's dim words are its project key (with projects). */
+export function rowView(row: Row, options: { projects: boolean; risen: boolean }, when: When): RowView {
+  const found = rowFact(row, when);
+  return { row, name: row.name, where: whereOf(row, options), fact: found.fact, weight: found.weight,
+           line: options.risen ? found.line : null };
+}
+
+/** The list the page draws for `rows`, read at `at`. */
+export function listShape(rows: readonly Row[], at: string | null, projects: boolean, when: When): ListShape {
+  const { risen: up, groups } = grouped(rows, projects, when);
+  const read = timeWords(at, when);
+  const found = counts(rows, when);
+  return {
+    label: servicesLabel(rows.length),
+    risen: up.map((row) => rowView(row, { projects, risen: true }, when)),
+    sentence: up.length ? null : NOTHING_DOWN,
+    counts: up.length || !found.length ? null : countsLine(found),
+    read: read === null ? null : `read ${read}`,
+    groups: groups.map((group) => ({ group, rows: group.rows.map((row) => rowView(row, { projects, risen: false }, when)) })),
+  };
+}

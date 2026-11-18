@@ -1,7 +1,7 @@
 """services' page and home block in a browser, through a real shell that starts services'
 real page server over a fake supervisor (`browser_kit`): the contract check on both, the
-block's count of rows by verdict, the rows grouped by project with their verdicts and
-lines, a confirmed act through the sheet to its status (done, and refused), Cancel
+block's count of rows by verdict, the page's frame (no heading of its own), the first
+group's risen rows (SV1), the groups by project and Moxi's (SV5), a confirmed act through the sheet to its status (done, and refused), Cancel
 sending nothing, a lost answer, the run sheet of a row that launches a session, the add
 form's 202 and the status it reads until the job ends, and the 360 px width check.
 """
@@ -43,6 +43,9 @@ UNITS = {"written": {
     "agent-run": {"kind": "timer", "enabled": True},
     "stopme": {"kind": "daemon", "enabled": True, "active": True},
     "lostone": {"kind": "daemon", "enabled": False, "active": False},
+    "queue-worker": {"kind": "daemon", "enabled": True, "active": False, "failed": True},
+    "dep-audit": {"kind": "timer", "enabled": True,
+                  "runs": [{"at": "2026-11-08T18:00:00Z", "result": "ran", "exit": 1}]},
 }}
 
 
@@ -57,7 +60,8 @@ def seeded(ui_shell) -> None:
     """The project `alpha`, and a row in each verdict: `web` running (ok, in alpha),
     `sync-down` on and not running (fail), `paused` stopped by hand (warn), `spare` off,
     `backup` a timer every 5 minutes (ok) and `agent-run` a timer whose runs launch a
-    session; `elsewhere` was added on another system. `stopme` and `lostone` are the
+    session; `elsewhere` was added on another system; `queue-worker` failed (in alpha) and
+    `dep-audit` a timer whose last run exited 1. `stopme` and `lostone` are the
     acts' own, so the tests run in any order."""
     root = Path(ui_shell.env["HOME"]) / "work" / "alpha"
     root.mkdir(parents=True)
@@ -73,7 +77,9 @@ def seeded(ui_shell) -> None:
                  launches_session=True, project="alpha"),
          written("elsewhere", platform=other),
          written("stopme"),
-         written("lostone", enabled=False))
+         written("lostone", enabled=False),
+         written("queue-worker", project="alpha"),
+         written("dep-audit", kind="timer", every="1h", argv=["/usr/bin/false"]))
 
 
 def panel_of(page):
@@ -84,7 +90,12 @@ def panel_of(page):
 
 
 def row(panel, ident: str):
-    return panel.locator(f'li.row[data-id="{ident}"]')
+    """The row `ident`, with what its last act came to under it."""
+    return panel.locator(f'.item[data-id="{ident}"]')
+
+
+def ids(items) -> list[str]:
+    return [item.get_attribute("data-id") for item in items.all()]
 
 
 def posts_to(page, path: str) -> list:
@@ -116,7 +127,6 @@ def test_the_summary_keeps_the_contract_and_counts_the_rows_by_verdict(seeded, u
 def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     check = ui_component_check(ui_page, "services", "page", keep=True)
     assert check.element == "moxi-services-page"
-    expect(check.locator.locator("h1")).to_have_text("Services")
     expect(check.locator.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
 
 
@@ -125,44 +135,112 @@ def test_the_blocks_link_on_the_modules_view_opens_the_page_which_it_then_marks(
     link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-services-summary h2 a")
     expect(link).to_have_text("Services")
     link.click()
-    expect(ui_page.locator("#moxi-panel > moxi-services-page h1")).to_have_text("Services")
+    expect(ui_page.locator('#moxi-panel > moxi-services-page section[data-part="list"]')).to_have_attribute(
+        "data-state", "up")
     assert ui_page.evaluate("location.pathname") == "/m/services/"
 
 
-# --- the rows -------------------------------------------------------------------------------
+# --- the frame, the first group and the groups ---------------------------------------------
 
-def test_the_rows_are_grouped_by_project_with_their_verdicts_and_lines(seeded, ui_shell, ui_page):
+def test_the_page_draws_no_heading_lede_or_read_again(seeded, ui_page):
     panel = panel_of(ui_page)
-    alpha = panel.locator('.group[data-project="alpha"]')
-    expect(alpha.locator("li.row")).to_have_count(2)
-    expect(alpha.locator("h3")).to_have_text("alpha")
-    loose = panel.locator('.group[data-project=""]')
-    expect(loose.locator("h3")).to_have_text("No project")
-    expect(loose.locator('li.row[data-id="services/sync-down"]')).to_have_count(1)
+    # The shell's top line names the page; the rows follow the topic, read at a time.
+    expect(panel.locator("h1")).to_have_count(0)
+    expect(panel.locator(".lede")).to_have_count(0)
+    expect(panel.get_by_role("button", name="Read again")).to_have_count(0)
+    expect(panel.locator('[data-part="list"] h2, [data-part="list"] h3')).to_have_count(0)
 
-    listed = {r["id"]: r for r in get(ui_shell, "api/rows")["rows"]}
-    for ident, state in (("services/web", "ok"), ("services/sync-down", "fail"),
-                         ("services/paused", "warn"), ("services/spare", "off")):
-        assert listed[ident]["verdict"]["state"] == state, listed[ident]
-        item = row(panel, ident)
-        expect(item).to_have_attribute("data-verdict", state)
-        expect(item.locator('[data-line="verdict"]')).to_have_text(
-            f"{state}: {listed[ident]['verdict']['reason']}")
-    expect(row(panel, "services/web").locator('[data-line="flag"]')).to_have_text("flag: on")
-    expect(row(panel, "services/spare").locator('[data-line="flag"]')).to_have_text("flag: off")
-    expect(row(panel, "services/paused").locator('[data-line="time"]')).to_have_text(
-        f"stopped by hand at {STOPPED:%Y-%m-%d %H:%M} UTC")
-    expect(row(panel, "services/web").locator('[data-line="doc"]')).to_have_text("serves the docs")
 
-    # A timer runs in place of start and restart, and only a row that launches a session
-    # carries the mark.
+def test_sv1_the_rows_that_need_him_rise_first_worst_first(seeded, ui_shell, ui_page):
+    panel = panel_of(ui_page)
+    listed = get(ui_shell, "api/rows")["rows"]
+    first = panel.locator('section[data-part="first"]')
+    expect(first.locator('[data-line="count"]')).to_have_text(f"{len(listed)} services")
+    expect(first.get_by_role("button", name="Add a service", exact=True)).to_have_count(1)
+
+    # Every fail by name, then failed last runs oldest first, then rows it can't tell.
+    def rank(r: dict) -> tuple | None:
+        cause, state = r["verdict"]["cause"], r["verdict"]["state"]
+        if state == "fail":
+            return (0, "", r["name"])
+        if cause == "last-run":
+            return (1, r["last_run"]["at"] or "~", r["name"])
+        if cause == "unknown":
+            return (2, "", r["name"])
+        return None
+    want = [r["id"] for r in sorted((r for r in listed if rank(r) is not None), key=rank)]
+    assert {"services/queue-worker", "services/sync-down", "services/dep-audit"} <= set(want), want
+    risen = first.locator(".item")
+    expect(risen).to_have_count(len(want))
+    assert ids(risen) == want
+    # Risen rows replace the sentence and the counts.
+    expect(first.locator('[data-line="sentence"]')).to_have_count(0)
+    expect(first.locator('[data-line="counts"]')).to_have_count(0)
+
+    # A fail reads heavy `down`, with no time, its project key dim, its sentence on line two.
+    worker = first.locator('.item[data-id="services/queue-worker"] moxi-ui-row')
+    expect(worker).to_have_attribute("fact", "down")
+    expect(worker).to_have_attribute("fact-heavy", "")
+    expect(worker).to_have_attribute("where", "alpha")
+    expect(worker).to_have_attribute("lead", "It failed and is not running.")
+    expect(first.locator('.item[data-id="services/sync-down"] moxi-ui-row')).to_have_attribute(
+        "lead", "It is not running.")
+    # A failed last run is in the text colour, not heavy.
+    audit = first.locator('.item[data-id="services/dep-audit"]')
+    expect(audit.locator('[data-line="fact"]')).to_contain_text("last run failed at ")
+    expect(audit.locator("moxi-ui-row")).not_to_have_attribute("fact-heavy", "")
+    expect(audit.locator("moxi-ui-row")).to_have_attribute("lead", "false exited with code 1.")
+    # A row he stopped stays in its group.
+    paused = panel.locator('section[data-part="group"] .item[data-id="services/paused"]')
+    expect(paused.locator('[data-line="fact"]')).to_contain_text("stopped by hand at ")
+
+
+def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui_page):
+    panel = panel_of(ui_page)
+    groups = panel.locator('section[data-part="group"]')
+    labels = groups.locator('[data-line="group"]').all_inner_texts()
+    assert labels[:2] == ["alpha", "No project"] and labels[-1] == "Moxi", labels
+    alpha = panel.locator('section[data-part="group"][data-project="alpha"]')
+    # queue-worker rose out of it.
+    assert ids(alpha.locator(".item")) == ["services/agent-run", "services/web"]
+    web = alpha.locator('.item[data-id="services/web"] moxi-ui-row')
+    expect(web).to_have_attribute("name", "web")
+    expect(web).to_have_attribute("where", "serves the docs")
+    expect(web).to_have_attribute("fact", "running")
+    expect(web).not_to_have_attribute("lead", re.compile(".*"))
+    expect(alpha.locator('.item[data-id="services/agent-run"] moxi-ui-row')).to_have_attribute(
+        "where", "true · every hour · spends usage")
+    loose = panel.locator('section[data-part="group"][data-group="his"]')
+    expect(loose.locator('.item[data-id="services/backup"] moxi-ui-row')).to_have_attribute(
+        "where", "true · every 5 minutes")
+    expect(loose.locator('.item[data-id="services/spare"] moxi-ui-row')).to_have_attribute("fact", "off")
+
+    # Today's acts stay on each row until the page's own acts replace them.
     agent = row(panel, "services/agent-run")
-    expect(agent.locator('[data-mark="launches_session"]')).to_have_count(1)
-    expect(row(panel, "services/backup").locator('[data-mark="launches_session"]')).to_have_count(0)
-    acts = agent.locator('[data-part="acts"] button')
-    expect(acts).to_have_text(["Run now", "Run again", "Stop run", "Enable", "Disable", "Remove…"])
-    expect(row(panel, "services/web").locator('[data-part="acts"] button')).to_have_text(
+    expect(agent.locator('button[slot="acts"]')).to_have_text(
+        ["Run now", "Run again", "Stop run", "Enable", "Disable", "Remove…"])
+    expect(row(panel, "services/web").locator('button[slot="acts"]')).to_have_text(
         ["Start", "Stop", "Restart", "Enable", "Disable", "Remove…"])
+
+
+def test_sv5_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
+    panel = panel_of(ui_page)
+    listed = get(ui_shell, "api/rows")["rows"]
+    risen = set(ids(panel.locator('section[data-part="first"] .item')))
+    mine = [r for r in listed if r["form"] == "module" and r["id"] not in risen]
+    assert mine, listed
+    moxi = panel.locator('section[data-part="group"]').last
+    expect(moxi).to_have_attribute("data-group", "moxi")
+    expect(moxi.locator('[data-line="group"]')).to_have_text("Moxi")
+    # By module then name, the rows switched off last.
+    want = sorted(mine, key=lambda r: (r["verdict"]["cause"] == "switched-off", r["module"], r["name"]))
+    assert ids(moxi.locator(".item")) == [r["id"] for r in want]
+    for r in want:
+        drawn = moxi.locator(f'.item[data-id="{r["id"]}"] moxi-ui-row')
+        expect(drawn).to_have_attribute("name", r["name"])
+        expect(drawn).to_have_attribute("where", re.compile(rf"^{re.escape(r['module'])}\b"))
+    # No row of his is in it.
+    assert not [i for i in ids(moxi.locator(".item")) if i.startswith("services/")]
 
 
 # --- confirmed acts -------------------------------------------------------------------------
@@ -190,9 +268,9 @@ def test_a_confirmed_stop_goes_through_the_sheet_to_done(seeded, ui_shell, ui_pa
     expect(said).to_contain_text("Stop stopme: Done.")
     assert len(posts) == 1 and KEY.match(posts[0].headers["idempotency-key"])
     assert posts[0].post_data_json == {"id": "services/stopme"}
-    # The page read the rows again: a stop by hand is recorded, and the verdict says so.
+    # The page read the rows again: a stop by hand is recorded, and the fact says so.
     expect(item).to_have_attribute("data-verdict", "warn")
-    expect(item.locator('[data-line="verdict"]')).to_contain_text("stopped by hand")
+    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
     job = posts[0].headers["idempotency-key"]
     status = get(ui_shell, f"api/status?job={job}")
     assert (status["act"], status["id"], status["state"], status["code"]) == (
@@ -282,7 +360,7 @@ def test_the_add_form_takes_a_202_and_reads_the_status_until_the_job_ends(seeded
     item = row(panel, f"services/{name}")
     expect(item).to_have_count(1)
     expect(item).to_have_attribute("data-verdict", verdict)
-    expect(panel.locator(f'.group[data-project="alpha"] li.row[data-id="services/{name}"]')).to_have_count(1)
+    expect(panel.locator(f'section[data-project="alpha"] .item[data-id="services/{name}"]')).to_have_count(1)
     # The form starts again once the add is done, the box off again.
     expect(form.get_by_label("Name", exact=True)).to_have_value("")
     expect(turn_on).not_to_be_checked()
@@ -323,6 +401,4 @@ def test_the_page_and_the_block_fit_a_phone(seeded, ui_page, ui_width_check):
     ui_width_check(ui_page, module="services")
     expect(ui_page.locator("#moxi-panel > moxi-services-page section[data-part=\"list\"]")
            ).to_have_attribute("data-state", "up")
-    ui_page.locator("#moxi-panel > moxi-services-page details").first.evaluate("(d) => { d.open = true; }")
-    ui_width_check(ui_page)
     ui_width_check(ui_page, module="services", name="summary")
