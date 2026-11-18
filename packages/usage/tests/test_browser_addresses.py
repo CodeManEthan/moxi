@@ -29,13 +29,15 @@ pytestmark = [pytest.mark.browser,
 
 MODEL = "claude-sonnet-4-5"
 OTHER_MODEL = "claude-haiku-4-5"
+OPUS_MODEL = "claude-opus-4-5"
 FIRST = "0190b000-0000-7000-8000-0000000000a1"
 SECOND = "0190b000-0000-7000-8000-0000000000a2"
 AGENT = "a0190b00000000a1"
 #: Two sessions of three requests each, on two models. The first began an hour ago,
-#: inside Claude's 5-hour window, and has a subagent of two requests.
+#: inside Claude's 5-hour window, and has a subagent of two requests on Opus.
 SESSIONS = [
-    {"session": FIRST, "project": "proj-a", "hours_ago": 1, "agent": AGENT, "model": MODEL},
+    {"session": FIRST, "project": "proj-a", "hours_ago": 1, "agent": AGENT, "model": MODEL,
+     "agent_model": OPUS_MODEL},
     {"session": SECOND, "project": "proj-b", "hours_ago": 30, "agent": None, "model": OTHER_MODEL},
 ]
 
@@ -59,7 +61,7 @@ for spec in json.loads(sys.argv[1]):
         for m in range(2):
             child.user("Look into it.")
             child.assistant("Found it.", usage=T.usage(input_tokens=100, output=400),
-                            request_id=f"req_{spec['agent'][-4:]}{m}", model=spec["model"])
+                            request_id=f"req_{spec['agent'][-4:]}{m}", model=spec["agent_model"])
     t.write()
 """
 
@@ -67,8 +69,8 @@ for spec in json.loads(sys.argv[1]):
 #: - Claude's 5-hour window opened two hours ago and has three readings: every line.
 #: - Claude's weekly window has one reading at 0%: its start is not known, so it says
 #:   only its reset, and nothing of who used it.
-#: - Claude's weekly Opus window has one reading at 33%: a scoped limit, so its start is
-#:   known and nothing says who used it.
+#: - Claude's weekly Opus window has one reading at 33%: a limit scoped to Opus, so its
+#:   start is known and it was used by the first session's subagent alone.
 READINGS = """
 import time
 from moxi_usage import readings
@@ -441,13 +443,19 @@ def test_a_window_whose_start_is_not_known_says_its_reset_and_no_who(seeded, pag
     expect(lines.locator("[data-opened=note]")).to_have_text([re.compile(r"^No fill time: .+")])
 
 
-def test_a_scoped_limit_says_its_window_and_one_reading_and_not_who_used_it(seeded, page):
+def test_a_scoped_limit_says_its_window_one_reading_and_whose_opus_requests_count(seeded, page):
     panel = open_page(page, "limit/claude/opus/10080")
     lines = opened(panel)
     expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(
         rf"^opened {WHEN}, resets {WHEN} · \d+% of it gone, 33% used$"))
     expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^33% at {WHEN}{LAST_FROM}$"))
-    expect(lines.locator("[data-opened=used]")).to_have_count(0)
+    used = lines.locator("[data-opened=used]")
+    expect(used.locator(".k")).to_have_text("Used by")
+    # Only the subagent's two Opus requests count; the Sonnet and Haiku ones do not.
+    expect(used.locator("[data-part=used-row]")).to_have_text(
+        [re.compile(rf"^\s*proj-a · started {WHEN} · 2 requests\s*(at least )?\$\d+\.\d\d$")])
+    expect(used.locator("[data-part=used-total] span").first).to_have_text(
+        re.compile(rf"^1 session, 2 Opus requests since {WHEN}$"))
 
 
 def test_a_line_whose_fact_the_answer_does_not_carry_is_absent(seeded, page):

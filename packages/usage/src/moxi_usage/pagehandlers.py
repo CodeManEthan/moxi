@@ -799,15 +799,16 @@ def _reading(found: Any) -> dict[str, Any]:
     return {"at": plan.iso(found.observed_at), "used_percent": _num(found.used_percent)}
 
 
-def _used(harness: str, since: float) -> dict[str, Any] | None:
-    """The sessions of `harness` with requests from `since` on, from the index as it is:
-    how many, their requests and cost from then, and the `USED_MAX` dearest, as the
-    sessions report's rows, not yet named. None when there is no index at this version
-    to read."""
+def _used(harness: str, since: float, family: str | None) -> dict[str, Any] | None:
+    """The sessions of `harness` with requests from `since` on, of `family`'s models only
+    when it is set, from the index as it is: how many, their requests and cost from then,
+    and the `USED_MAX` dearest, as the sessions report's rows, not yet named. None when
+    there is no index at this version to read."""
     try:
         if not reports.readable():
             return None
-        answer = api.report("sessions", fresh=False, since=since, harness=harness).as_dict()
+        answer = reports.read("sessions", since=since, harness=harness,
+                              model_family=family).as_dict()
     except _OWN_WORDS as exc:
         raise lb.Refused(str(exc)) from None
     rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
@@ -824,10 +825,12 @@ def window(call: Any) -> dict[str, Any]:
     no `fresh` row is refused (422), so the answer is the reading its limits row shows.
     `opened` is the row's; `readings` counts the period's readings, with the row's own
     as `last` and the earliest as `first`, null when it is the same one; `last.session`
-    is what names the session the reading came from, null when it names none; `used` is
-    the sessions of the harness since the window opened, for the harness's main limit
-    with a known `opened`, else null. The sessions module is asked once, for the
-    reading's session and the sessions listed."""
+    is what names the session the reading came from, null when it names none;
+    `model_family` is the family of models the limit counts, where its reading's kind
+    names one. `used` is the sessions of the harness since the window opened, with a
+    known `opened`, for the harness's main limit and for a limit with a `model_family`,
+    counting then only the requests of that family's models; else null. The sessions
+    module is asked once, for the reading's session and the sessions listed."""
     harness, limit_id = call.query["harness"], call.query["limit_id"]
     minutes = call.query["minutes"]
     if minutes < 1:
@@ -840,7 +843,9 @@ def window(call: Any) -> dict[str, Any]:
         raise lb.Refused("there is no fresh reading of this window")
     row = found.row
     main = limit_id == plan.MAIN_LIMIT[harness]
-    used = _used(harness, row.opened) if main and row.opened is not None else None
+    family = plan.model_family(harness, row.slot)
+    counted = main or family is not None
+    used = _used(harness, row.opened, family) if counted and row.opened is not None else None
     read_by = _str(found.last.session_id) or None
     spent = [] if used is None else used["rows"]
     last = [] if read_by is None else [(harness, read_by)]
@@ -855,6 +860,7 @@ def window(call: Any) -> dict[str, Any]:
         "limit_id": limit_id, "window_minutes": minutes,
         "resets_at": plan.iso(row.resets_at), "used_percent": float(row.used_percent),
         "opened": plan.iso(row.opened),
+        "model_family": family,
         "readings": {"count": found.count,
                      "first": None if found.first is None else _reading(found.first),
                      "last": {**_reading(found.last),

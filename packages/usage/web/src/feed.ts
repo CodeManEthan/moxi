@@ -398,12 +398,16 @@ export interface OpenedWindow {
   resets_at: string;
   used_percent: number;
   opened: string | null;
+  /** The family of models a scoped limit counts (`opus`), where its reading says; null
+   * otherwise. Absent from an answer of a usage that serves no such field. */
+  model_family?: string | null;
   /** `first` is null when the period's earliest reading is `last`; `last.session` is
    * the session the reading came from, null when it names none. */
   readings: { count: number; first: Reading | null;
               last: Reading & { session: SessionRef | null } } | null;
-  /** Null for a limit that is not the harness's main one, with no known start, and
-   * with no index to read. `rows` are the ten dearest. */
+  /** Null for a limit that is neither the harness's main one nor counts a named family
+   * of models, with no known start, and with no index to read. With `model_family` it
+   * counts only that family's requests. `rows` are the ten dearest. */
   used: { since: string; count: number; requests: number; cost: number | null; complete: boolean;
           rows: UsedRow[] } | null;
 }

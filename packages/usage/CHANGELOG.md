@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `GET /api/window` carries `model_family`, the family of models a scoped limit counts
+  where the reading's kind names one (`opus` for Claude's `seven_day_opus`, `sonnet` for
+  `seven_day_sonnet`), else null. Such a limit's `used` lists this machine's sessions of
+  the harness since the window opened, counting only the requests whose model id names
+  the family, and the page shows them as `Used by` on the opened row, its total naming
+  the family: `2 sessions, 9 Opus requests since Wed 23:58`. A limit whose reading names
+  no models (every Codex limit but the main one, Claude's `seven_day_oauth_apps`) still
+  has no `Used by`.
 - Every setting carries page fields, which `moxi config usage show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, the
   unit of each wait, age and token count, seven settings shown first (the default

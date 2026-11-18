@@ -3,7 +3,8 @@
     GET  /api/limits    each plan window now (`limits()`, with no pull), with the
                         server's `now`
     GET  /api/window    one plan window opened (`harness=&limit_id=&minutes=`): when it
-                        started, its period's readings, and the sessions it was used by
+                        started, which models it counts where its reading says, its
+                        period's readings, and the sessions it was used by
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
     GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
                         how many there are and how many come after, each with its context
@@ -476,13 +477,16 @@ LIMITS = {
 _READING = {"at": _TEXT, "used_percent": _WHEN}
 #: One window opened: the row `/api/limits` shows for it, when it started, the readings
 #: of its period and the sessions it was used by. Times are ISO 8601 UTC, as a limits
-#: row's are, but `now`. `readings.last` is the reading the row is from and `first` the
-#: period's earliest, null when that is the same one; `last.session` is what names the
-#: session the reading came from, null when the reading names none. `used` is this
-#: machine's sessions of the harness with requests since the window opened: how many
+#: row's are, but `now`. `model_family` is the family of models a scoped limit counts,
+#: as the reading's kind names it (`opus` for Claude's weekly Opus limit), null where
+#: the reading does not say which models count. `readings.last` is the reading the row
+#: is from and `first` the period's earliest, null when that is the same one;
+#: `last.session` is what names the session the reading came from, null when the reading
+#: names none. `used` is this machine's sessions of the harness with requests since the
+#: window opened, of the family's models only when `model_family` is set: how many
 #: (`count`), their requests and cost since then, and the ten dearest, each with what
-#: names it; null for a limit that is not the harness's main one, with a null `opened`,
-#: and when there is no index to read.
+#: names it; null for a limit that is neither the harness's main one nor names its
+#: models, with a null `opened`, and when there is no index to read.
 OPENED_WINDOW = {
     "now": _FLOAT,
     "today": _TEXT,
@@ -492,6 +496,7 @@ OPENED_WINDOW = {
     "resets_at": _TEXT,
     "used_percent": _FLOAT,
     "opened": _MAYBE,
+    "model_family": _MAYBE,
     "readings": lb.Out("table", nullable=True, items={
         "count": _INT,
         "first": lb.Out("table", nullable=True, items=_READING),
