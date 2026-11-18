@@ -764,6 +764,41 @@ def test_without_a_ref_a_branch_already_at_the_tip_is_not_pushed_again(
     assert len(read.read_text().splitlines()) == 1
 
 
+def test_a_push_url_apart_from_the_fetch_url_is_pushed_though_the_fetch_url_is_at_the_tip(
+        setup, stub, repo, tmp_path):
+    bare_remote(repo, tmp_path)
+    _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    repo.git("push", "-q", "--no-verify", "origin", f"{tree.rev()}:refs/heads/ci/work")
+    pushed_to = tmp_path / "push-only.git"
+    repo.git("init", "-q", "--bare", str(pushed_to))
+    repo.git("remote", "set-url", "--push", "origin", str(pushed_to))
+    green_at(stub, tree.rev())
+
+    assert checking.check(ROUND, "B1", by="coder").already is False
+
+    assert repo.git("--git-dir", str(pushed_to), "rev-parse", "refs/heads/ci/work") == tree.rev()
+
+
+def test_a_push_is_skipped_only_when_every_push_url_is_at_the_tip(
+        setup, stub, repo, tmp_path):
+    read = tmp_path / "hook-read"
+    bare = bare_remote(repo, tmp_path, f"#!/bin/sh\ncat >> {read}\n")
+    _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    second = tmp_path / "second.git"
+    repo.git("init", "-q", "--bare", str(second))
+    repo.git("remote", "set-url", "--add", "--push", "origin", str(bare))
+    repo.git("remote", "set-url", "--add", "--push", "origin", str(second))
+    repo.git("push", "-q", "--no-verify", str(bare), f"{tree.rev()}:refs/heads/ci/work")
+    green_at(stub, tree.rev())
+
+    assert checking.check(ROUND, "B1", by="coder").already is False
+    assert repo.git("--git-dir", str(second), "rev-parse", "refs/heads/ci/work") == tree.rev()
+    assert len(read.read_text().splitlines()) == 1
+
+    assert checking.check(ROUND, "B1", by="coder").already is True
+    assert len(read.read_text().splitlines()) == 1
+
+
 def test_without_a_ref_the_push_goes_to_the_branch_name_and_records_no_ref(
         setup, stub, repo, tmp_path):
     bare = bare_remote(repo, tmp_path)

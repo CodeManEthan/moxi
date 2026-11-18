@@ -532,19 +532,33 @@ class CiChecked:
                 and self.reading.get("reading") == ci.GREEN)
 
 
-def _at_tip(found: _Look, remote: str, name: str) -> bool:
-    """Whether the remote's branch `name` is already at the tip, by `git ls-remote`
-    under the push time limit. A listing that fails, or names no branch of exactly
-    that name, reads as not at the tip, so the push goes ahead and says what is wrong."""
-    argv = ["git", "ls-remote", "--heads", remote, f"refs/heads/{name}"]
+def _git_out(found: _Look, argv: list[str]) -> str | None:
+    """`argv`'s output, run in the worktree under the push time limit, or None when it
+    fails or runs past the limit."""
     try:
         done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
                         cwd=found.worktree)
     except (subprocess.TimeoutExpired, OSError):
-        return False
+        return None
     if done.returncode != 0:
-        return False
-    for line in (done.stdout or b"").decode(errors="replace").splitlines():
+        return None
+    return (done.stdout or b"").decode(errors="replace")
+
+
+def _at_tip(found: _Look, remote: str, name: str) -> bool:
+    """Whether the remote's branch `name` is already at the tip at every URL `git push`
+    sends to: each push URL `git remote get-url --push --all` lists is read with
+    `git ls-remote`, under the push time limit. A read that fails, a remote with no
+    URL listed, or a URL that lists no branch of exactly that name reads as not at the
+    tip, so the push goes ahead and says what is wrong."""
+    said = _git_out(found, ["git", "remote", "get-url", "--push", "--all", remote])
+    urls = [] if said is None else [url for url in said.splitlines() if url.strip()]
+    return bool(urls) and all(_url_at_tip(found, url, name) for url in urls)
+
+
+def _url_at_tip(found: _Look, url: str, name: str) -> bool:
+    said = _git_out(found, ["git", "ls-remote", "--heads", url, f"refs/heads/{name}"])
+    for line in (said or "").splitlines():
         parts = line.split()
         if len(parts) == 2 and parts[1] == f"refs/heads/{name}":
             return parts[0] == found.tip
@@ -555,11 +569,11 @@ def _push(found: _Look, *, again: str) -> tuple[str | None, bool]:
     """Push the tip to the remote the setting names: where it names a `ref`, forced to
     the branch name the template gives the build's branch; else as a plain push to the
     build's own branch name. Returns that `ref` name (None for the build's own branch
-    name), and whether the remote's branch was already at the tip: then nothing is
-    pushed, since git would run the pre-push hook with no ref to push, which a guard
-    may refuse. The name `full_ref` gives is never pushed here. The push runs through
-    the repo's hooks. Raises `Refused` with git's message, and the hooks', when the
-    push is refused."""
+    name), and whether the remote's branch was already at the tip at each of its push
+    URLs: then nothing is pushed, since git would run the pre-push hook with no ref to
+    push, which a guard may refuse. The name `full_ref` gives is never pushed here.
+    The push runs through the repo's hooks. Raises `Refused` with git's message, and
+    the hooks', when the push is refused."""
     from . import ci
 
     remote, branch, template = found.ci.remote, found.build.branch, found.ci.ref
