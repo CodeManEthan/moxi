@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- On Windows the test fence places each module's `MOXI_<MODULE>_HOME` at
+  `moxi\<module>` under the test's own `LOCALAPPDATA`, inside the test's profile, so a
+  file a module keeps only inside the user's profile (comms' token store) is inside the
+  test's. It spells every directory it gives in its long form, its real path, so a
+  runner whose `TEMP` has an 8.3 short name no longer hands tests a short spelling to
+  compare with resolved paths. Elsewhere the module homes stay in the test's short
+  directory.
+- `Fence.profile_dir(name)` makes a new directory inside the test's own profile (its
+  home, `USERPROFILE` on Windows) for a file that must live there.
+- The naming check reads a file's path with `/` separators on every platform, so a
+  Windows contributor's `# noqa: MX...` marks count there too.
 - `moxi-dev timed` runs the timed tests on their own: a run lock first, its own
   environment (`.moxi-dev/timed-env-3.12`), one session per package with no workers and
   the idle gate, and a summary line with exit 0, 1, 3 (some test not measured) or 2. It
