@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addRows, answerView, confirmView, folderLine, placeWords, planFailWords, transportView, writesOf,
+  actRequest, addRows, answerView, confirmView, folderLine, placeWords, planFailWords, planPath, transportView, writesOf,
 } from "../src/acts-model.ts";
 import { answer, HOME, offered, piece, plan, planned, repo, write } from "./fixtures.mjs";
 
@@ -245,4 +245,15 @@ test("the transport words: it may have been done, or the shell's status", () => 
   }
   assert.deepEqual([transportView(400).head, transportView(400).reread], ["The shell refused the request (400).", false]);
   assert.equal(transportView(403).head, "The shell answered 403.");
+});
+
+test("requests: the plan's query and each act's body with the digest", () => {
+  assert.equal(planPath("add", "/home/jp/a b", ["repo/commit-rules", "repo/commit-proof"]),
+               "api/plan?act=add&root=%2Fhome%2Fjp%2Fa+b&pieces=repo%2Fcommit-rules%2Crepo%2Fcommit-proof");
+  assert.equal(planPath("add-repo", "/r", []), "api/plan?act=add&root=%2Fr");
+  assert.equal(planPath("refresh", "/r", []), "api/plan?act=refresh&root=%2Fr");
+  assert.deepEqual(actRequest("enable", "/r", ["notes/secret-gate"], "d1"),
+                   { path: "api/enable", body: { root: "/r", piece: "notes/secret-gate", digest: "d1" } });
+  assert.deepEqual(actRequest("refresh", "/r", [], "d1"), { path: "api/refresh", body: { root: "/r", digest: "d1" } });
+  assert.deepEqual(actRequest("add-repo", "/r", [], "d1"), { path: "api/add", body: { root: "/r", pieces: [], digest: "d1" } });
 });

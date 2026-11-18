@@ -382,3 +382,21 @@ export function transportView(status: number): AnswerView {
   const head = status === 400 ? "The shell refused the request (400)." : `The shell answered ${status}.`;
   return { ...blank, head, reread: false };
 }
+
+// -- requests -----------------------------------------------------------------------------
+
+/** The plan's path for an act: `api/plan?act=…&root=…&pieces=…`; `Add a repo` plans an add. */
+export function planPath(act: Act, root: string, picked: readonly string[]): string {
+  const query = new URLSearchParams({ act: act === "add-repo" ? "add" : act, root });
+  if (picked.length > 0) query.set("pieces", picked.join(","));
+  return `api/plan?${query.toString()}`;
+}
+
+/** The act's path and body: the plan's digest sent back, so the verb writes only what the
+ * confirm drew. */
+export function actRequest(act: Act, root: string, picked: readonly string[], digest: string):
+  { path: string; body: Record<string, unknown> } {
+  if (act === "enable") return { path: "api/enable", body: { root, piece: picked[0], digest } };
+  if (act === "refresh") return { path: "api/refresh", body: { root, digest } };
+  return { path: "api/add", body: { root, pieces: [...picked], digest } };
+}
