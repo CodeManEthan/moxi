@@ -846,28 +846,40 @@ lead's. Each record of the check names the remote and ref it pushed. Once the bu
 finishes or is dropped, by its own drop or its round's, rounds removes from the remote
 each ref the build's records name and the one `ref` gives its branch now, so a push
 that went out unrecorded goes too. A ref is kept while it is the one `ref` gives the
-branch of a build of the repo that has not ended, in any round, or the target's, or one
-such a build recorded pushing, and every ref is kept while any round's log can't be
-read. A removal that fails leaves the finish or drop standing and names the ref; `moxi
-rounds drop --leftovers --refs` lists the branches under `ref`'s prefix on each
-project's remote that the same rule does not keep, and with `--remove`, once the sweep
-is armed, removes them. The session-start sweep never runs it. Every push and removal
-goes through the repo's hooks, so a push guard's refusal is printed with its words and
-nothing is recorded; fix a hit in your own commits and check again, and give any other
-to your lead. Without `ref`, nothing is ever removed.
+branch of a build of the repo that has not ended, in any round, or one such a build
+recorded pushing, or the one `ref` gives a target: the project's (its `into`, else the
+branch checked out at the repo's root, as a new build would take) or such a build's.
+Every ref is kept while any round's log, or the project's target, can't be read. A
+removal that fails leaves the finish or drop standing and names the ref; `moxi rounds
+drop --leftovers --refs` lists the branches under `ref`'s prefix on each project's
+remote that the same rule does not keep, and with `--remove`, once the sweep is armed,
+removes them. The session-start sweep never runs it. Every push and removal goes through
+the repo's hooks, so a push guard's refusal is printed with its words and nothing is
+recorded; fix a hit in your own commits and check again, and give any other to your
+lead. Where `ref` was never set, nothing is removed; once it was, the refs a build's
+records name are still removed at its end after `ref` is changed or unset.
+
+Some refs no account names, and you remove them by hand (`git push <remote> --delete
+refs/heads/<name>`) if you find them. The sweep lists only the prefix `ref` gives now,
+and lists nothing for a project with no `ref`, so a push that went out unrecorded (the
+check stopped, or its read failed) under a prefix `ref` no longer gives is never listed
+and never removed. And the keep rule reads the builds of the project key itself, in the
+rounds folders it can find: an open build in a project whose rounds folder can't be
+worked out, or under another project key whose remote is the same repository, is not
+seen, so its ref is not kept for it.
 
 CI is read with `status`, `ids` and `jobs`, commands printing JSON, by default `gh run
 list --commit {tip} --json ...`, `gh workflow list --all --json id,path` and `gh run
 view {run} --json jobs --jq .jobs` (`{run}` is the run's id), each bounded by
 `status_timeout_s` (60). A workflow reads `green`, `pending`, `red` or `absent` at the
 tip; one read by its jobs reads each job it names, and is `green` only when each is.
-A job the run lacks reads `pending` until the run completes and `absent` after. The
-check step is done once every workflow reads green there, the workflows and jobs named
-are the ones the setting names now, and the local run passed at the tip with the
-command it declares now. The full check, run with `check --full`, meets the step
-whatever CI reads. A `ci` in a project with no `check` is refused, and so is a `ref`
-that is not one prefix then `{branch}`. `defaults.ratify` (and a project's
-`ratify`) picks what a round's ratification view puts to the operator. It also takes
+A job the run lacks reads `pending` until the run completes and `absent` after, and
+with no run at the tip each job it names reads `absent`. The check step is done once
+every workflow reads green there, the workflows and jobs named are the ones the setting
+names now, and the local run passed at the tip with the command it declares now. The
+full check, run with `check --full`, meets the step whatever CI reads. A `ci` in a
+project with no `check` is refused, and so is a `ref` that is not one prefix then
+`{branch}`. `defaults.ratify` (and a project's `ratify`) picks what a round's ratification view puts to the operator. It also takes
 `defaults.check_on` (`merged`: a build's tip must hold the target to finish; `tip`:
 only where CI alone met the check), `defaults.slice_minutes` (45: over it, `fold` and
 `commission` warn of a slice and `mark --brief` refuses its brief),
