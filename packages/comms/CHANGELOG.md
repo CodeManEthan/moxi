@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- On Windows the token store's profile check compares real paths: the store's and those
+  of `USERPROFILE` and `LOCALAPPDATA`, with links and junctions resolved and every part
+  spelled long. A store spelled inside the profile that leads out of it through a
+  junction is now refused, since the profile's access list doesn't reach it there, and a
+  short (8.3) spelling of a place inside the profile is now accepted.
 - Any program or service, not only a Moxi module, can hold a send-only name: `moxi comms
   send-only add NAME` registers it, `moxi comms send --as NAME` and
   `moxi_comms.api.send_under` send under it from outside every session, and `send-only

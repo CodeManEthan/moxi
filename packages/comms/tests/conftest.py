@@ -28,6 +28,7 @@ import io
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -81,20 +82,36 @@ def write_config(env, text: str) -> Path:
     return path
 
 
+#: The mark of a test of the token store's POSIX modes (0600 files in 0700 directories).
+POSIX_MODES = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="file mode bits mean nothing on Windows, where the token store's rule is the "
+           "user's profile, which has tests of its own")
+
+
+@pytest.fixture
+def profile(fence) -> Path:
+    """A directory of the test's own inside its profile (the fence's home, `USERPROFILE`
+    on Windows), where a token store passes Windows's rule that credentials stay inside
+    the user's profile. A test makes its stores here, never under `tmp_path` itself."""
+    return fence.profile_dir("profile")
+
+
 @pytest.fixture(autouse=True)
-def env(monkeypatch, tmp_path, fence):
+def env(monkeypatch, profile, fence):
     """All five roots under tmp. RUNTIME gets a SHORT path (unix socket name limit).
 
     The fence has already emptied the environment, so no variable of the session running
     the suite reaches a test: not its comms sockets or launch stamps, which would let a
     test that pointed at nothing find the real daemon, not its token store or operator
     lane, and not a variable that overrides a config key. `MOXI_COMMS_HOME` collapses the
-    roots under a tmp home of comms' own, beside the fence's HOME, so a test can see that
-    comms wrote nothing there; the device and the runtime directory are set beside it.
+    roots under a tmp home of comms' own, in the test's profile (`profile`), so a test can
+    see that comms wrote nothing there and the token store under it is inside the profile;
+    the device and the runtime directory are set beside it.
     Both temp directories below are in the fence's short directory, which goes with it.
     """
     runtime = Path(tempfile.mkdtemp(prefix="cmx", dir=fence.short))
-    home = tmp_path / "comms-home"
+    home = profile / "comms-home"
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))

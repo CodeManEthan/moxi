@@ -278,8 +278,8 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
     assert tokens.owner_for_role(tokens.ROLE_OPERATOR).parts == ("operator",)
 
 
-def test_the_chain_reads_the_configured_store(tmp_path):
-    store = tmp_path / "store"
+def test_the_chain_reads_the_configured_store(profile):
+    store = profile / "store"
     write_config(None, f'[credentials]\nchain = ["store"]\nstore = "{store}"\n')
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
