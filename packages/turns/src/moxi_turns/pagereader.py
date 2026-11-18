@@ -659,5 +659,5 @@ class Reader:
 
 
 __all__ = ["BOX_HARNESSES", "HOLD_S", "REACH_LATER_S", "REACH_SOON_S", "REREAD_S", "RESCAN_S",
-           "RETRY_S", "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row", "info_row",
-           "read_error"]
+           "RETRY_S", "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row",
+           "info_row", "read_error"]
