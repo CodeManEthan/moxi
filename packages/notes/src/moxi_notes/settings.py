@@ -87,11 +87,11 @@ def prefix_parts(prefix: str, file) -> tuple[str, ...]:
         return ()
     if os.path.isabs(prefix) or prefix[:1] in ("/", "\\") or re.match(r"^[A-Za-z]:", prefix):
         raise ConfigError(file, "prefix", f"is the absolute path {prefix!r}",
-                          "give a folder name under the root, such as your user name")
+                          "give a folder name under the root, such as work")
     parts = tuple(p for p in _SEPARATORS.split(prefix) if p not in ("", "."))
     if ".." in parts:
         raise ConfigError(file, "prefix", f"{prefix!r} climbs out of the root with ..",
-                          "give a folder name under the root, such as your user name")
+                          "give a folder name under the root, such as work")
     return parts
 
 
