@@ -91,11 +91,18 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_one_read_not_the_gateways_and_its_built_assets():
+def test_no_declared_route_is_the_gateways():
+    declared = [route.path for route in page.PAGE.routes]
+    exported = loopback().export(page.PAGE)["routes"]
+    assert declared and [route["path"] for route in exported] == declared
+    assert [route.path for route in page.PAGE.routes if route.gateway] == []
+    assert [route["path"] for route in exported if route["gateway"]] == []
+
+
+def test_the_page_declares_one_read_and_its_built_assets():
     exported = loopback().export(page.PAGE)
     [route] = exported["routes"]
-    assert (route["path"], route["kind"], route["gateway"], route["stream"]) == (
-        "/api/repos", "read", False, False)
+    assert (route["path"], route["kind"], route["stream"]) == ("/api/repos", "read", False)
     assert exported["assets"] == ["build-stamp.txt", "page.js"]
 
 
