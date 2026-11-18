@@ -22,9 +22,10 @@ still runs its pieces, and `add PATH` with no piece indexes it again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from moxi_repo import EXPORTS as _PACKAGE_EXPORTS
@@ -36,6 +37,11 @@ from moxi_repo.run import quote_arg as _arg
 MODULE = "repo"
 #: The index's file name under the module's state directory.
 INDEX = "repos.json"
+#: The lock every verb that writes a repo's registrations, entries, shims or launcher
+#: holds while it reads and writes them, in `<common git dir>/moxi-repo/`.
+HOOKS_LOCK = "hooks.lock"
+#: How long a verb waits for another's hold on that lock before it raises `Busy`.
+LOCK_WAIT_S = 10.0
 
 
 class Failure(Exception):
@@ -366,6 +372,23 @@ def _resolve(path: str | os.PathLike) -> Repo:
         raise Usage(f"no git work tree at {exc}") from None
 
 
+@contextlib.contextmanager
+def _hooks_lock(repo: Repo) -> Iterator[None]:
+    """Hold the repo's lock (`HOOKS_LOCK`) for the block; raises `Busy` when another
+    process holds it past `LOCK_WAIT_S`. A verb takes it once per repo, and never while
+    it waits on the committer's lock."""
+    from moxi import files
+
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(files.lock(repo.own_dir / HOOKS_LOCK, timeout_s=LOCK_WAIT_S))
+        except files.LockTimeout as exc:
+            who = f"pid {exc.holder}" if exc.holder else "another process"
+            raise Busy(f"{who} is changing repo's git hooks in {repo.root}; try again in a "
+                       "moment") from None
+        yield
+
+
 def _version(*, need: bool = True) -> tuple[int, int, int] | None:
     version = gitconf.git_version()
     if not need:
@@ -438,6 +461,27 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         raise Usage("--set sets a setting of a piece named in the same call; name the piece")
     version = _version()
     repo = _resolve(path)
+    if not piece_ids and mode is None:
+        # Indexing alone writes nothing in the repo, so it takes no lock there.
+        good = pieces.declared()[0] if any(map(everywhere, EVERYWHERE)) else {}
+        if not _implied(_state(repo), [], good):
+            return _index_only(repo)
+    with _hooks_lock(repo):
+        report = _add(repo, piece_ids, mode, sets, version)
+    _sweep(repo)
+    return report
+
+
+def _index_only(repo: Repo) -> Report:
+    report = Report()
+    _index_put(repo)
+    report.lines.append(f"indexed {repo.root}")
+    _sweep(repo)
+    return report
+
+
+def _add(repo: Repo, piece_ids: tuple, mode: str | None, sets, version) -> Report:
+    """`add`'s writes, under the repo's lock."""
     report = Report()
     state = _state(repo)
     good, bad = (pieces.declared() if piece_ids or any(map(everywhere, EVERYWHERE))
@@ -447,7 +491,6 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
     if not piece_ids and mode is None and not implied:
         _index_put(repo)
         report.lines.append(f"indexed {repo.root}")
-        _sweep(repo)
         return report
     try:
         planned = pieces.plan_sets(named, list(sets))
@@ -484,7 +527,6 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         report.take(repo.root, gitconf.sync(repo, state))
     except gitconf.GitError as exc:
         raise Failure(str(exc)) from None
-    _sweep(repo)
     return report
 
 
@@ -545,25 +587,31 @@ def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...
                     why=f"that repo is gone and {repo.root}, which was left as it is, "
                     "holds the path now")
         return report
-    state = _state(repo)
-    try:
-        if piece_ids:
-            for pid in piece_ids:
-                if pid not in state.pieces:
-                    raise Usage(f"{pid} is not registered in {repo.root}")
-            for pid in piece_ids:
-                gitconf.remove_piece(repo, pid, state)
-                _records.close_piece(repo.common_dir, pid)
-                report.lines.append(f"removed {pid} from {repo.root}")
-            report.take(repo.root, gitconf.sync(repo, state))
-            _sweep(repo)
-            return report
-        report.lines += gitconf.remove_all(repo, state)
-    except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
-    _records.close_repo(repo.common_dir)
-    _index_drop(repo.key)
-    report.lines.append(f"removed repo's git hooks from {repo.root}")
+    with _hooks_lock(repo):
+        state = _state(repo)
+        try:
+            if piece_ids:
+                for pid in piece_ids:
+                    if pid not in state.pieces:
+                        raise Usage(f"{pid} is not registered in {repo.root}")
+                for pid in piece_ids:
+                    gitconf.remove_piece(repo, pid, state)
+                    _records.close_piece(repo.common_dir, pid)
+                    report.lines.append(f"removed {pid} from {repo.root}")
+                report.take(repo.root, gitconf.sync(repo, state))
+            else:
+                # This removes the lock's own folder too; the lock stays held until the
+                # block ends.
+                report.lines += gitconf.remove_all(repo, state)
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
+        if not piece_ids:
+            _records.close_repo(repo.common_dir)
+            _index_drop(repo.key)
+    if piece_ids:
+        _sweep(repo)
+    else:
+        report.lines.append(f"removed repo's git hooks from {repo.root}")
     return report
 
 
@@ -595,19 +643,20 @@ def disable(path: str | os.PathLike, piece_id: str) -> Report:
 
 def _flip(path: str | os.PathLike, piece_id: str, *, enabled: bool) -> Report:
     repo = _resolve(path)
-    state = _state(repo)
-    if piece_id not in state.pieces:
-        raise Usage(f"{piece_id} is not registered in {repo.root}")
     report = Report()
-    try:
-        gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
-        if not enabled:
-            # The record, its ledger key, then the flag.
-            _records.close_piece(repo.common_dir, piece_id)
-            gitconf.clear_recorded(repo, piece_id, state)
-        report.take(repo.root, gitconf.sync(repo, state))
-    except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
+    with _hooks_lock(repo):
+        state = _state(repo)
+        if piece_id not in state.pieces:
+            raise Usage(f"{piece_id} is not registered in {repo.root}")
+        try:
+            gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
+            if not enabled:
+                # The record, its ledger key, then the flag.
+                _records.close_piece(repo.common_dir, piece_id)
+                gitconf.clear_recorded(repo, piece_id, state)
+            report.take(repo.root, gitconf.sync(repo, state))
+        except gitconf.GitError as exc:
+            raise Failure(str(exc)) from None
     report.lines.append(f"{'enabled' if enabled else 'disabled'} {piece_id} in {repo.root}")
     _sweep(repo)
     return report
@@ -631,37 +680,15 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     good, bad = pieces.declared()
     default = default_mode()
     for repo in repos:
-        state = _state(repo)
         try:
-            for piece in _implied(state, [], good):
-                changes = _changes(piece, state, {})
-                gitconf.register(repo, piece, state)
-                if changes:
-                    gitconf.apply_settings(repo, piece.id, changes, state)
-                report.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
-                                    f"{repo.root} ({EVERYWHERE[piece.id]})")
-            for pid in sorted(state.pieces):
-                if pid in good:
-                    gitconf.register(repo, good[pid], state)
-                elif pid in bad:
-                    report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
-                                           f"({bad[pid]}); its registration is left as it is")
-                else:
-                    report.problems.append(
-                        f"{repo.root}: no installed module declares {pid}; remove it with: "
-                        f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
-            effective = gitconf.pick_mode(state.mode_set, default, version)
-            if effective != state.mode:
-                if state.mode:
-                    report.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
-                                        f"(git {gitconf.version_text(version)})")
-                gitconf.set_mode(repo, state, mode=effective)
-            report.take(repo.root, gitconf.sync(repo, state))
-        except gitconf.GitError as exc:
-            report.problems.append(f"{repo.root}: {exc}")
+            with _hooks_lock(repo):
+                done = _refresh_one(repo, report, good, bad, default, version)
+        except Busy as exc:
+            if path is not None:
+                raise
+            report.problems.append(exc.text)
             continue
-        except Usage as exc:
-            report.problems.append(f"{repo.root}: {exc.text}")
+        if not done:
             continue
         _index_put(repo)
         _sweep(repo)
@@ -669,6 +696,45 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     if path is None:
         _records.sweep()
     return report
+
+
+def _refresh_one(repo: Repo, report: Report, good: dict, bad: dict, default: str,
+                 version) -> bool:
+    """`refresh`'s writes in one repo, under its lock; False when a problem stopped them,
+    which is then the report's."""
+    state = _state(repo)
+    try:
+        for piece in _implied(state, [], good):
+            changes = _changes(piece, state, {})
+            gitconf.register(repo, piece, state)
+            if changes:
+                gitconf.apply_settings(repo, piece.id, changes, state)
+            report.lines.append(f"added {piece.id} ({piece.event}, {piece.fail}) in "
+                                f"{repo.root} ({EVERYWHERE[piece.id]})")
+        for pid in sorted(state.pieces):
+            if pid in good:
+                gitconf.register(repo, good[pid], state)
+            elif pid in bad:
+                report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                                       f"({bad[pid]}); its registration is left as it is")
+            else:
+                report.problems.append(
+                    f"{repo.root}: no installed module declares {pid}; remove it with: "
+                    f"moxi repo git-hooks remove {_arg(repo.root)} {pid}")
+        effective = gitconf.pick_mode(state.mode_set, default, version)
+        if effective != state.mode:
+            if state.mode:
+                report.lines.append(f"{repo.root}: {state.mode} mode to {effective} "
+                                    f"(git {gitconf.version_text(version)})")
+            gitconf.set_mode(repo, state, mode=effective)
+        report.take(repo.root, gitconf.sync(repo, state))
+    except gitconf.GitError as exc:
+        report.problems.append(f"{repo.root}: {exc}")
+        return False
+    except Usage as exc:
+        report.problems.append(f"{repo.root}: {exc.text}")
+        return False
+    return True
 
 
 # -- other modules' installs and uninstalls, and repo's own -------------------------------
@@ -717,33 +783,45 @@ def install_module(module: str) -> Report:
                 report.problems.append(f"{problem}, so it is left as it is")
             continue
         try:
-            state = gitconf.read(repo)
-            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
-            changed = False
-            for pid in mine:
-                if pid in good:
-                    if _declares_otherwise(state.pieces[pid], good[pid]):
-                        gitconf.register(repo, good[pid], state)
-                        report.lines.append(f"rewrote {pid} ({good[pid].event}, "
-                                            f"{good[pid].fail}) in {repo.root}")
-                        changed = True
-                elif pid in bad:
-                    report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
-                                           f"({bad[pid]}); its registration is left as it is")
-                else:
-                    gitconf.remove_piece(repo, pid, state)
-                    _records.close_piece(repo.common_dir, pid)
-                    report.lines.append(f"removed {pid} from {repo.root}: {module} no "
-                                        "longer declares it")
-                    changed = True
-            if changed:
-                report.take(repo.root, gitconf.sync(repo, state))
+            with _hooks_lock(repo):
+                mine = _install_in(repo, module, good, bad, report)
+        except Busy as exc:
+            report.problems.append(f"{exc.text}; {module}'s pieces there are left as they "
+                                   "are until the next refresh")
+            continue
         except (gitconf.GitError, OSError) as exc:
             report.problems.append(f"{repo.root}: {exc}")
             continue
         if mine:
             _sweep(repo)
     return report
+
+
+def _install_in(repo: Repo, module: str, good: dict, bad: dict, report: Report) -> list[str]:
+    """`install_module`'s writes in one repo, under its lock: the module's registered
+    piece ids."""
+    state = gitconf.read(repo)
+    mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+    changed = False
+    for pid in mine:
+        if pid in good:
+            if _declares_otherwise(state.pieces[pid], good[pid]):
+                gitconf.register(repo, good[pid], state)
+                report.lines.append(f"rewrote {pid} ({good[pid].event}, "
+                                    f"{good[pid].fail}) in {repo.root}")
+                changed = True
+        elif pid in bad:
+            report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                                   f"({bad[pid]}); its registration is left as it is")
+        else:
+            gitconf.remove_piece(repo, pid, state)
+            _records.close_piece(repo.common_dir, pid)
+            report.lines.append(f"removed {pid} from {repo.root}: {module} no "
+                                "longer declares it")
+            changed = True
+    if changed:
+        report.take(repo.root, gitconf.sync(repo, state))
+    return mine
 
 
 def uninstall_module(module: str) -> Report:
@@ -767,19 +845,25 @@ def uninstall_module(module: str) -> Report:
                                        "left there")
             continue
         try:
-            state = gitconf.read(repo)
-            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
-            for pid in mine:
-                gitconf.remove_piece(repo, pid, state)
-                _records.close_piece(repo.common_dir, pid)
-                report.lines.append(f"removed {pid} from {repo.root}: {module} is "
-                                    "uninstalled")
-            if mine:
-                report.take(repo.root, gitconf.sync(repo, state))
+            # Released before the committer's lock is taken for the specs below.
+            with _hooks_lock(repo):
+                state = gitconf.read(repo)
+                mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+                for pid in mine:
+                    gitconf.remove_piece(repo, pid, state)
+                    _records.close_piece(repo.common_dir, pid)
+                    report.lines.append(f"removed {pid} from {repo.root}: {module} is "
+                                        "uninstalled")
+                if mine:
+                    report.take(repo.root, gitconf.sync(repo, state))
             names = (set(committer.saved_names(repo.common_dir))
                      | set(committer.read_state(repo.common_dir)["specs"]))
             for name in sorted(n for n in names if module_of(n) == module):
                 report.lines += committer.remove_spec(repo.root, name)
+        except Busy as exc:
+            report.problems.append(f"{exc.text}; {module}'s pieces and specs there are left "
+                                   "as they are")
+            continue
         except files.LockTimeout as exc:
             report.problems.append(f"{repo.root}: a committer pass holds {exc.path}, so "
                                    f"{module}'s specs are left; forget each with: "
@@ -917,7 +1001,8 @@ def teardown() -> Teardown:
                 if repo is not None:
                     what = _removing(repo, state)
                     shims = not repo.hooks_inside and shim.our_shims(repo.hooks_dir)
-                    report.lines += gitconf.remove_all(repo, state, final=True)
+                    with _hooks_lock(repo):
+                        report.lines += gitconf.remove_all(repo, state, final=True)
                     line += f"; removed repo's {what} from {repo.common_dir} too"
                     if not repo.hooks_inside:
                         line += (f"; its hooks dir {repo.hooks_dir} is outside that git dir, "
@@ -930,10 +1015,11 @@ def teardown() -> Teardown:
                 if left is not None:
                     outside.append((left, moved))
                 continue
-            report.lines += gitconf.remove_all(repo, state, final=True)
+            with _hooks_lock(repo):
+                report.lines += gitconf.remove_all(repo, state, final=True)
             _records.close_repo(repo.common_dir)
             _index_drop(key)
-        except (gitconf.GitError, OSError, IndexUnreadable) as exc:
+        except (gitconf.GitError, OSError, IndexUnreadable, Busy) as exc:
             report.problems.append(f"{root}: {exc}; repo stopped there, so it and the "
                                    "repos after it are left as they are")
             break
