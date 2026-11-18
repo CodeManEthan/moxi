@@ -21,8 +21,9 @@ Nothing leaves unless every ref the push moves follows these rules:
   against `<remote>/<main>`;
 - any other ref, another tag among them, moves only when a `free-ref` pattern names it;
 - every ref pushed points at a commit, or at a tag whose chain ends at one;
-- a push creates at most three tags, since GitHub sends no push event for any tag of a
-  push that creates more.
+- a push creates at most one tag, of any kind, so each tag gets its own push event and
+  its own release run, and no release waits on another tag of the same push. (GitHub
+  starts nothing at all for the tags of a push that creates more than three.)
 
 And everything the push makes public for the first time passes what a commit would have
 had to pass. Already public means reachable from the remote's tracking refs or a ref
@@ -67,8 +68,8 @@ WORD_REQUIRED = "word-required"
 FREE_REF = "free-ref"
 #: Where the push names the place it was approved, when the repo wants that.
 WORD_ENV = "MOXI_PUBLISHING_PUSH_WORD"
-#: The most tags one push may create.
-MAX_TAGS = 3
+#: The most tags one push may create: one, of any kind.
+MAX_TAGS = 1
 #: The push log's file name in the module's state directory.
 LOG_FILE = "pushes.jsonl"
 #: The paths secrets scans a commit's headers and a ref's name at.
@@ -358,9 +359,9 @@ class _Push(_Reader):
                     f"{ref}: a ref outside branches may be {what} only when the push "
                     f"piece's {FREE_REF} setting names it")
         if created_tags > MAX_TAGS:
-            self.reasons.append(f"the push creates {created_tags} tags; push at most "
-                                f"{MAX_TAGS} at once, since GitHub starts nothing for a "
-                                "push that creates more")
+            self.reasons.append(f"the push creates {created_tags} tags; a push creates at "
+                                "most one tag, so each gets its own push event and release "
+                                "run: push them one at a time")
 
     def judge_release_tag(self, local_sha: str, name: str) -> None:
         """A tag shaped like a release tag, created: the tag gate when the scheme reads it

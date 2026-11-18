@@ -7711,6 +7711,11 @@ notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=80, metavar="N",	keep	type	type
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("setup", help="ask setup's questions again and write the answers",	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("snapshot", help="commit a snapshot of the notes repo now",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	"home-paths", help="write home paths as ~ and session paths as ids",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--apply", action="store_true", help="write the changes")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	if found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/cli.py	left_alone = any(reason in ("changed", "read-only") for _, reason in found.left)	keep	changed	changed
+notes	packages/notes/src/moxi_notes/cli.py	left_alone = any(reason in ("changed", "read-only") for _, reason in found.left)	keep	any	any
 notes	packages/notes/src/moxi_notes/doctypes.py	NATURES = ("record", "living-state", "ephemeral")	keep	record	record
 notes	packages/notes/src/moxi_notes/doctypes.py	_line	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	_row	name	at	position
@@ -7742,6 +7747,22 @@ notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("cat-file", "-e", f"
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/gates.py	if set(reset) >= set(by_path):	keep	set	set
 notes	packages/notes/src/moxi_notes/gitpieces.py	"fail": "closed",	keep	closed	closed
+notes	packages/notes/src/moxi_notes/guards.py	Guard(name=NAME, calls=CALLS, who="any", judge="moxi_notes.homeguard:judge",	keep	any	any
+notes	packages/notes/src/moxi_notes/home_paths.py	between the read and the write is skipped and listed `changed`, and the run's last lines	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	"changed", "quoted", "login")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	changed = set(wanted)	keep	set	set
+notes	packages/notes/src/moxi_notes/home_paths.py	found.refused = True	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	found.leave(one.path, "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	return sorted(p for p, r in found.left if r == "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	NAMED = ("too-large", "link-outside", "untracked", "modified", "read-only", "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	mode = ("refused; nothing was written" if found.refused else	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	if found.error and not found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	if found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/homeguard.py	**When it tells.** When the text spells `H` (the home folder, from the call's `HOME`) where	keep	HOME	HOME
+notes	packages/notes/src/moxi_notes/homeguard.py	_said: set[str] = set()	keep	set	set
+notes	packages/notes/src/moxi_notes/homeguard.py	home = call.env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
+notes	packages/notes/src/moxi_notes/homeguard.py	if len(rules.login) >= SHORT_LOGIN and any(	keep	any	any
+notes	packages/notes/src/moxi_notes/homeguard.py	__all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "LINE", "judge", "written", "patch_texts",	keep	NAME	NAME
 notes	packages/notes/src/moxi_notes/judge.py	mb = max(1, round(size / MIB))	keep	round	round
 notes	packages/notes/src/moxi_notes/judge.py	return Finding(f"{hit.set}/{hit.rule}", hit.line)	keep	set	set
 notes	packages/notes/src/moxi_notes/listener.py	-	name	_folder	_session_dir
@@ -7816,6 +7837,13 @@ notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "HEAD:plan.md")
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "HEAD:plan.md").stdout == "first\n"	keep	show	show
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "main:c.md").stdout == secret()	keep	show	show
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "side:c.md").stdout == secret()	keep	show	show
+notes	packages/notes/tests/test_home_guard.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+notes	packages/notes/tests/test_home_guard.py	env={"HOME": home_dir})	keep	HOME	HOME
+notes	packages/notes/tests/test_home_guard.py	input={"command": text}, cwd=cwd, env={"HOME": HOME})	keep	HOME	HOME
+notes	packages/notes/tests/test_home_paths.py	full.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+notes	packages/notes/tests/test_home_paths.py	assert set(found) == {"root", "home", "files", "left", "counts", "error"}	keep	set	set
+notes	packages/notes/tests/test_home_paths.py	assert set(change) == {"line", "kind", "before", "after"}	keep	set	set
+notes	packages/notes/tests/test_home_paths.py	assert set(found["counts"]) == {"files", "changes", "by_class", "by_kind", "sessions",	keep	set	set
 notes	packages/notes/tests/test_inbox.py	-	name	test_a_good_slug_names_a_folder_under_the_inbox	test_a_good_slug_names_a_dir_under_the_inbox
 notes	packages/notes/tests/test_inbox.py	-	name	test_make_inbox_makes_a_plain_folder_and_keeps_an_existing_one	test_make_inbox_makes_a_plain_dir_and_keeps_an_existing_one
 notes	packages/notes/tests/test_inbox.py	-	name	test_rename_moves_the_folder	test_rename_moves_the_dir
@@ -8222,6 +8250,13 @@ publishing	packages/publishing/src/moxi_publishing/github.py	gh.send(request)	ke
 publishing	packages/publishing/src/moxi_publishing/github.py	if not any(p.get("name") == RELEASE_TAGS and p.get("type", "branch") == "tag"	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/github.py	read	name	environment	github_environment
 publishing	packages/publishing/src/moxi_publishing/github.py	show; `show` says so.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	keep, and a rewrite carries it. `show` prints each difference field by field, and the	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	return any(p == f"refs/heads/{main}" or p == "~ALL"	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	or any(re.search(r"[*?\[]", p) for p in patterns))	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	return set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	today: set[str] = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/github.py	"expected_rulesets", "read", "differences", "check_job", "show", "apply"]	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/message.py	"fail": "closed",	keep	closed	closed
 publishing	packages/publishing/src/moxi_publishing/message.py	gone: set[int] = set()	keep	set	set
 publishing	packages/publishing/src/moxi_publishing/message.py	if any(os.path.exists(os.path.join(git_dir, name))	keep	any	any
@@ -8287,6 +8322,11 @@ publishing	packages/publishing/tests/test_enable.py	assert not any("private name
 publishing	packages/publishing/tests/test_github.py	-	name	test_show_says_when_the_environment_or_a_ruleset_is_missing	test_show_says_when_the_github_environment_or_a_ruleset_is_missing
 publishing	packages/publishing/tests/test_github.py	assert cli.main(["github", "show", str(repo)]) == 2	keep	show	show
 publishing	packages/publishing/tests/test_github.py	assert not any(path.endswith("/rulesets/102") for _, path, _ in gh.writes)	keep	any	any
+publishing	packages/publishing/tests/test_github.py	#: What `show` and `apply` say when they make `moxi-main` require the check.	keep	show	show
+publishing	packages/publishing/tests/test_github.py	assert (NOTE in lines) is (not any(c["context"] == "linux" for c in checks))	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any(line.startswith("left: ruleset moxi-main: required checks: no check-job ")	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any(line.startswith("ruleset moxi-main: required checks: check-job can't be "	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any("check-job can't be read: pyproject.toml can't be read" in line	keep	any	any
 publishing	packages/publishing/tests/test_push.py	assert set(log_lines()[-1]["commits"]) == set(	keep	set	set
 publishing	packages/publishing/tests/test_push.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 publishing	packages/publishing/tests/test_replace_refs.py	assert "bobsecret" not in git(repo, "show", "HEAD:note.md").stdout	keep	show	show
