@@ -235,6 +235,24 @@ def test_a_ref_a_new_open_build_on_the_branch_owns_is_kept(pushed, repo, bare, t
     assert remote_refs(repo, bare) == ["refs/heads/ci/work"]
 
 
+def test_a_ref_under_the_prefix_it_was_pushed_under_is_kept_for_a_new_open_build(
+        pushed, repo, bare, tmp_path, configure):
+    dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567", run_by="lead")
+    open_with(OTHER_ROUND, tmp_path, {"B1": "work"})
+    commissioning.commission(OTHER_ROUND, "B1", builder="coder", by="planner",
+                             existing=True)
+    repo.git("push", "-q", "origin", "work:refs/heads/ci/work")
+    configure(ref="ci-new/{branch}")
+    folded = states.fold(log.read_round(pushed[0]))
+
+    refs = ci_refs.remove(folded, builds.current(folded, "B1"), settings.load())
+
+    assert [(one.ref, one.fate) for one in refs] == [
+        ("ci/work", ci_refs.KEPT), ("ci-new/work", ci_refs.ABSENT)]
+    assert f"{OTHER_ROUND} B1" in refs[0].why
+    assert remote_refs(repo, bare) == ["refs/heads/ci/work"]
+
+
 def test_every_ref_is_kept_while_a_round_s_log_can_t_be_read(pushed, repo, bare,
                                                               tmp_path):
     other = open_with(OTHER_ROUND, tmp_path, {})
@@ -287,6 +305,30 @@ def test_an_armed_sweep_with_refs_removes_the_stale_ones(pushed, repo, bare, tmp
         ("ci/stale", ci_refs.REMOVED), ("ci/work", ci_refs.KEPT)]
     assert remote_refs(repo, bare) == ["refs/heads/ci/main", "refs/heads/ci/work",
                                        "refs/heads/other"]
+
+
+def test_an_unarmed_sweep_with_refs_and_remove_removes_nothing(pushed, repo, bare,
+                                                               capsys):
+    stale_and_owned(repo)
+
+    assert main(["drop", "--leftovers", "--refs", "--remove"]) != 0
+
+    assert "ref would go origin ci/stale" in capsys.readouterr().out
+    assert len(remote_refs(repo, bare)) == 5
+
+
+def test_a_branch_ls_remote_lists_by_its_tail_alone_is_never_swept(pushed, repo, bare,
+                                                                  configure, capsys):
+    configure(extra=ARMED)
+    repo.git("push", "-q", "origin", "main:refs/heads/x/refs/heads/ci/y")
+    capsys.readouterr()
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    found = json.loads(capsys.readouterr().out)["refs"]["refs"]
+    assert [one["ref"] for one in found] == ["ci/work"]
+    assert remote_refs(repo, bare) == ["refs/heads/ci/work",
+                                       "refs/heads/x/refs/heads/ci/y"]
 
 
 def test_with_no_into_and_no_open_build_the_target_s_ref_is_kept(pushed, repo, bare,
