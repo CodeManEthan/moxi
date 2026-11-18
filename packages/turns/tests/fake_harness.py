@@ -43,6 +43,9 @@ class FakeHarness(Harness):
         self.agents_complete = True
         self.agents_fail = False
         self.live_fails = False
+        #: The box read throws: `live()` answers `draft` true with the list read, as
+        #: Claude Code's runner does.
+        self.box_fails = False
         self.submitted: list[Delivery] = []
         self.appended: list[Delivery] = []
         self.commands: list[CommandRequest] = []
@@ -63,11 +66,12 @@ class FakeHarness(Harness):
     def live(self) -> Live:
         if self.live_fails:
             raise OSError("the prompt box cannot be read")
+        draft = self.box_fails or self.draft
         try:
             agents = self.agents()
-            return Live.of(agents, draft=self.draft)
+            return Live.of(agents, draft=draft)
         except Exception:  # noqa: BLE001 - the box was read; the list is unknown
-            return Live(None, self.draft)
+            return Live(None, draft)
 
     def agents(self) -> Agents:
         if self.agents_fail:
