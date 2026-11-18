@@ -238,12 +238,16 @@ def test_another_turn_end_before_the_reminders_voids_it(rig, opencode, fake, mon
     assert unanswered(rig) == {}
 
 
-def test_a_window_clear_empties_the_debts_and_ends_the_reminder(rig, opencode, fake):
+def test_a_window_clear_empties_the_debts_and_ends_the_reminder(rig, opencode, fake, frames):
     opencode_owes(rig, opencode, fake)
     sid = opencode.session_id
     fake.finish(sid)
     assert wait_until(lambda: opencode.blocked)
     fake.control("new-session", {})
-    assert wait_until(lambda: opencode.session_id != sid)
+    # The follow sets `session_id` before it empties the debts and sends the ready last,
+    # so the test waits on the ready.
+    assert wait_until(lambda: [f for f in frame_kinds(frames, "ready")
+                               if f.get("source") == "clear"])
+    assert opencode.session_id != sid
     assert opencode.reply_ledger.debts == {} and not opencode.blocked
     assert unanswered(rig) == {}
