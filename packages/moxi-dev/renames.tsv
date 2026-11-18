@@ -11561,6 +11561,7 @@ services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("str
 services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
 services	packages/services/src/moxi_services/page.py	_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	TIMING = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	STREAK = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health

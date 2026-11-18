@@ -87,7 +87,7 @@ def every_leaf() -> dict[str, str | None]:
 #: set, and so carry no mark.
 ROW_PLAIN = {"id", "module", "name", "form", "kind", "project", "switch", "verdict.state",
              "verdict.cause", "state", "since", "last_run.at", "checked.state", "checked.at",
-             "timing.every", "timing.at[]", "timing.days[]", "unit", "schedule",
+             "streak.since", "timing.every", "timing.at[]", "timing.days[]", "unit", "schedule",
              "stopped", "platform"}
 ROW_REDACT = {"doc", "verdict.reason", "verdict.fix", "detail", "last_run.text",
               "checked.line", "argv[]", "health[]"}
@@ -98,8 +98,9 @@ def test_every_string_leaf_is_plain_only_for_a_name_an_id_a_time_or_a_word():
              for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),
                                 ("/api/row", "row"))
              for leaf in ROW_PLAIN}
-    plain |= {"/api/rows state", "/api/rows problems[].module",
-              "/api/events rows.state", "/api/events rows.problems[].module",
+    plain |= {"/api/rows state", "/api/rows at", "/api/rows problems[].module",
+              "/api/events rows.state", "/api/events rows.at",
+              "/api/events rows.problems[].module",
               "/api/row runs[].at", "/api/row runs[].result",
               "/api/projects projects[].key",
               "/api/status job", "/api/status act", "/api/status id", "/api/status state"}

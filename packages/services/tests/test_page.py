@@ -42,6 +42,7 @@ def fresh_page(monkeypatch, site, fake):
     table = jobs.Jobs(LB.busy)
     monkeypatch.setattr(pagehandlers, "JOBS", table)
     monkeypatch.setattr(pagehandlers, "_known", {})
+    monkeypatch.setattr(pagehandlers, "_streaks", {})
     monkeypatch.setattr(pagehandlers, "_logged", set())
     yield fake
     table.close()
@@ -285,7 +286,7 @@ def test_since_and_pid_are_read_only_while_a_daemon_is_active(fake):
 
 def test_a_store_that_cannot_be_read_is_state_error_with_the_reason(too_new):
     listed = read("/api/rows")
-    assert listed["state"] == "error" and listed["rows"] == []
+    assert listed["state"] == "error" and listed["rows"] == [] and listed["at"] is None
     assert "newer than" in listed["detail"]
     assert listed["detail"].endswith("fix: upgrade it with `moxi install services`")
 
@@ -728,3 +729,78 @@ def test_an_adoption_without_its_on_or_off_ends_refused_saying_what_is_read_now(
                                              "unit": "backup.service"})))
     assert (found["state"], found["code"]) == ("refused", 2)
     assert store.get("backup") is None
+
+
+# --- a failing timer's streak ------------------------------------------------------------
+
+def run_line(hour: int, code: int = 1, result: str = "ran") -> dict:
+    return {"at": f"2026-11-18T{hour:02d}:00:00Z", "result": result, "exit": code,
+            "seconds": 1.0}
+
+
+def last_runs_calls(fake) -> list:
+    return [c for c in fake.calls if c[0] == "last_runs"]
+
+
+def failing_timer(fake, lines: list[dict]) -> None:
+    a_timer(enable=True)
+    fake.written["nightly"].runs = lines
+
+
+def test_a_streak_counts_the_newest_failed_runs_and_when_the_first_of_them_ran(fake):
+    failing_timer(fake, [run_line(9, 0), run_line(10, 1), run_line(11, 2),
+                         run_line(12, 1)])
+    nightly = by_id()["services/nightly"]
+    assert nightly["verdict"]["cause"] == "last-run"
+    assert nightly["streak"] == {"count": 3, "since": "2026-11-18T10:00:00Z",
+                                 "same_exit": False}
+
+
+def test_a_streak_of_one_exit_code_says_so(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 1)])
+    assert by_id()["services/nightly"]["streak"] == {
+        "count": 2, "since": "2026-11-18T10:00:00Z", "same_exit": True}
+
+
+def test_a_run_held_off_by_its_switch_ends_a_streak():
+    lines = [run_line(10, 1), run_line(11, 0, "off"), run_line(12, 1)]
+    assert pagehandlers.count_streak(lines) == {
+        "count": 1, "since": "2026-11-18T12:00:00Z", "same_exit": True}
+
+
+def test_a_timer_whose_last_run_passed_has_no_streak_and_reads_no_runs(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 0)])
+    assert by_id()["services/nightly"]["streak"] is None
+    assert last_runs_calls(fake) == []
+    assert pagehandlers.count_streak([run_line(10, 1), run_line(11, 0)]) is None
+    assert pagehandlers.count_streak([]) is None
+
+
+def test_a_streak_counts_back_through_at_most_fifty_run_lines(fake):
+    failing_timer(fake, [run_line(h % 24, 1) for h in range(80)])
+    nightly = by_id()["services/nightly"]
+    assert nightly["streak"]["count"] == pagehandlers.STREAK_LINES == 50
+    assert last_runs_calls(fake) == [("last_runs", "services", "nightly", 50)]
+
+
+def test_a_streak_is_read_once_per_newest_run_line(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 1)])
+    by_id()
+    by_id()
+    assert read("/api/row", "id=nightly")["row"]["streak"]["count"] == 2
+    assert len([c for c in last_runs_calls(fake) if c[3] == 50]) == 1
+    fake.written["nightly"].runs.append(run_line(12, 1))
+    assert by_id()["services/nightly"]["streak"]["count"] == 3
+    assert len([c for c in last_runs_calls(fake) if c[3] == 50]) == 2
+
+
+def test_a_daemon_has_no_streak(fake):
+    a_daemon(enable=True)
+    assert by_id()["services/web"]["streak"] is None
+
+
+def test_rows_carry_when_the_supervisor_was_read():
+    a_daemon()
+    before = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    at = read("/api/rows")["at"]
+    assert before <= at <= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

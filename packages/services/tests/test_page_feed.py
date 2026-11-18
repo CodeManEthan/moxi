@@ -30,6 +30,7 @@ def fresh_feed(monkeypatch, site, fake):
     no module rows but a test's own, and a fake supervisor."""
     monkeypatch.setattr(pagehandlers, "_current", None)
     monkeypatch.setattr(pagehandlers, "_known", {})
+    monkeypatch.setattr(pagehandlers, "_streaks", {})
     monkeypatch.setattr(pagehandlers, "_logged", set())
     yield fake
     feed = pagehandlers._current
@@ -52,7 +53,8 @@ class Gathers:
         self.gate.set()
         self.inside = threading.Event()
         self.raises: Exception | None = None
-        self.value = {"state": "up", "detail": None, "rows": [], "problems": []}
+        self.value = {"state": "up", "detail": None, "at": None, "rows": [],
+                      "problems": []}
 
     def __call__(self, *, check_health: bool = False):
         self.calls.append(check_health)
@@ -60,7 +62,7 @@ class Gathers:
         assert self.gate.wait(30)
         if self.raises is not None:
             raise self.raises
-        return dict(self.value)
+        return {**self.value, "at": f"read {len(self.calls)}"}
 
 
 @pytest.fixture
@@ -169,6 +171,49 @@ def test_the_first_gather_runs_the_health_checks_and_then_every_health_period(
 
 def test_the_poller_reads_every_five_seconds_and_checks_health_every_thirty():
     assert (pagehandlers.PERIOD, pagehandlers.HEALTH_PERIOD) == (5.0, 30.0)
+
+
+def test_the_topic_carries_when_the_supervisor_was_read(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", HOUR)
+    a_daemon(enable=True)
+
+    async def go():
+        stream = Stream(served())
+        try:
+            _, data = await stream.next(5)
+            assert data["at"] is not None and data["at"].endswith("Z")
+        finally:
+            await stream.close()
+
+    asyncio.run(go())
+
+
+def test_a_read_that_changed_only_its_time_is_published_once_a_minute(monkeypatch,
+                                                                       gathers):
+    assert pagehandlers.REPUBLISH_S == 60.0
+    monkeypatch.setattr(pagehandlers, "PERIOD", HOUR)
+    monkeypatch.setattr(pagehandlers, "REPUBLISH_S", 0.3)
+    sent = []
+
+    async def go():
+        feed = pagehandlers._feed()
+        monkeypatch.setattr(type(feed.topics), "publish",
+                            lambda self, topic, value: sent.append(value["at"]))
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1"]
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1"]
+        await asyncio.sleep(0.35)
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1", "read 3"]
+        gathers.value = {**gathers.value, "detail": "the store moved"}
+        assert feed.tick()
+        await until_async(lambda: settled(feed))
+        assert sent == ["read 1", "read 3", "read 4"]
+
+    asyncio.run(go())
 
 
 def test_a_tick_that_finds_the_last_gather_running_is_skipped(monkeypatch, gathers):

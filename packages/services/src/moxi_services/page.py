@@ -117,6 +117,15 @@ CHECKED = lb.Out("table", nullable=True, items={
 
 _MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)
 
+#: A timer whose last run failed: how many of its newest runs failed in a row (counting
+#: back through at most 50 run lines), when the oldest of them ran, and whether they all
+#: exited with one code.
+STREAK = lb.Out("table", nullable=True, items={
+    "count": lb.Out("int"),
+    "since": _MAYBE,
+    "same_exit": _FLAG,
+})
+
 #: A timer's schedule as declared: `every` (`5m`, `1h`), or `at` (`HH:MM` times) limited
 #: to `days` (`mon` ... `sun`); each null when not declared.
 TIMING = lb.Out("table", nullable=True, items={
@@ -137,6 +146,8 @@ TIMING = lb.Out("table", nullable=True, items={
 #:   is armed, `pid`, `since` (UTC, ISO 8601 with `Z`) and `detail` as the supervisor
 #:   gives them, null when it was not read.
 #: - `last_run` a timer's last run, `checked` a running daemon's last health result.
+#: - `streak` a timer's run of failed runs, on a timer whose verdict is its last run
+#:   failed; else null.
 #: - `timing` a written or module timer's schedule as declared; null for a daemon and
 #:   for an adopted timer, whose schedule is the supervisor's and not read.
 #: - `ends_slots` True on slots' server only: its stop and restart end what runs in the
@@ -168,6 +179,7 @@ ROW = lb.Out("table", items={
     "detail": _MAYBE_SAYS,
     "last_run": LAST_RUN,
     "checked": CHECKED,
+    "streak": STREAK,
     "timing": TIMING,
     "ends_slots": _FLAG,
     "has_settings": _FLAG,
@@ -185,12 +197,15 @@ ROW = lb.Out("table", items={
 PROBLEM = lb.Out("table", items={"module": _TEXT, "reason": _SAYS})
 
 #: Every row and how the list stands: `state` is `up` or `error`, `detail` null when up
-#: and the reason (with its fix) when the store can't be read. `rows` is the user's rows,
+#: and the reason (with its fix) when the store can't be read. `at` is when this read
+#: asked the supervisor (UTC, ISO 8601 with `Z`), null on an error. The stream publishes
+#: when anything but `at` changed, and at least once a minute. `rows` is the user's rows,
 #: then every installed module's daemons and timers; `problems` the modules whose
 #: run-time declarations failed. `/api/rows` answers it, and each `rows` event carries it.
 ROWS = {
     "state": _TEXT,
     "detail": _MAYBE_SAYS,
+    "at": _MAYBE,
     "rows": lb.Out("list", items=ROW),
     "problems": lb.Out("list", items=PROBLEM),
 }
@@ -305,4 +320,4 @@ PAGE = lb.Page(
 
 __all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "KINDS", "LAST_RUN", "ONE", "PAGE",
            "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS", "ROW_BODY", "RUN", "RUN_BODY",
-           "STATUS", "STATUS_ROUTE", "TIMING", "TOPIC", "VERDICT"]
+           "STATUS", "STATUS_ROUTE", "STREAK", "TIMING", "TOPIC", "VERDICT"]

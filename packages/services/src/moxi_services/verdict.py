@@ -132,6 +132,11 @@ def last_run(st: units.UnitState | None) -> LastRun | None:
     return None
 
 
+def run_of(line: Mapping) -> LastRun:
+    """How the run one gate run line records went."""
+    return _gate_line(line)
+
+
 def _gate_line(line: Mapping) -> LastRun:
     at = line.get("at")
     result, code = line.get("result"), line.get("exit")
@@ -551,5 +556,5 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
     return out
 
 
-__all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run",
+__all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run", "run_of",
            "boot_time", "stop_recorded", "judge", "flags", "healths", "within", "views"]

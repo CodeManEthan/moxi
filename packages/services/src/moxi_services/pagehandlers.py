@@ -102,6 +102,11 @@ PERIOD = 5.0
 HEALTH_PERIOD = 30.0
 #: The most health checks the poller runs at once.
 HEALTH_AT_ONCE = 8
+#: Seconds after which the poller publishes the topic again though nothing but its
+#: `at` changed, so a page's `read <time>` is never older than this.
+REPUBLISH_S = 60.0
+#: The most run lines a failing timer's streak counts back through.
+STREAK_LINES = 50
 #: Seconds a page read, or the poller, waits for the supervisor.
 STATUS_SECONDS = 10.0
 #: Who a change from the page is recorded as made by.
@@ -213,9 +218,11 @@ def with_settings(found: list) -> frozenset[str]:
 
 
 def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
-              checked_at: str | None = None) -> dict[str, Any]:
+              checked_at: str | None = None,
+              streak: dict[str, Any] | None = None) -> dict[str, Any]:
     """One `page.ROW`. `settings` holds the modules that have settings; `checked_at` is
-    when the health pass that gave the row's health result began."""
+    when the health pass that gave the row's health result began; `streak` a failing
+    timer's streak (`count_streak`)."""
     row, st = view.row, view.st
     user = row if isinstance(row, UserRow) else None
     last = verdict.last_run(st) if row.kind == "timer" else None
@@ -237,6 +244,7 @@ def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
         "checked": None if view.health is None else {"state": view.health[0],
                                                      "line": view.health[1],
                                                      "at": checked_at},
+        "streak": streak,
         "timing": _timing(row),
         "ends_slots": row.id == SLOTS_SERVER and row.kind == "daemon" and user is None,
         "has_settings": user is None and row.module in settings,
@@ -249,6 +257,61 @@ def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
         "removing": bool(user and user.removing),
         "platform": user.platform if user else None,
     }
+
+
+# -- a failing timer's streak -----------------------------------------------------------
+
+#: Each failing timer's streak, by row id, with the `at` of the newest run line it was
+#: counted from: the runs file is read again only when a newer line arrives.
+_streaks: dict[str, tuple[str | None, dict[str, Any] | None]] = {}
+_streaks_lock = threading.Lock()
+
+
+def count_streak(lines: list[dict]) -> dict[str, Any] | None:
+    """How many of `lines`' newest runs failed in a row (lines oldest first), when the
+    oldest of them ran, and whether they share one exit code; None when the newest run
+    did not fail."""
+    failed = []
+    for line in reversed(lines):
+        if not verdict.run_of(line).failed:
+            break
+        failed.append(line)
+    if not failed:
+        return None
+    exits = {line.get("exit") for line in failed}
+    return {"count": len(failed), "since": failed[-1].get("at"),
+            "same_exit": len(exits) == 1}
+
+
+def _streak(view: verdict.View, kept: dict[str, tuple[str | None, dict | None]]
+            ) -> dict[str, Any] | None:
+    """A timer's streak when its verdict is a failed last run, else None. Counted from
+    its newest `STREAK_LINES` run lines once per newest line, then taken from `kept`,
+    which this call updates."""
+    if view.verdict.cause != "last-run":
+        return None
+    last = verdict.last_run(view.st)
+    newest = None if last is None else last.at
+    held = kept.get(view.row.id)
+    if held is not None and held[0] == newest:
+        return held[1]
+    found = count_streak(state.last_runs(view.row, STREAK_LINES))
+    kept[view.row.id] = (newest, found)
+    return found
+
+
+def _streaks_of(seen: list[verdict.View], *, is_every_row: bool
+                ) -> dict[str, dict[str, Any] | None]:
+    """Each of `seen`'s streaks, by id. With `is_every_row`, the kept streaks of rows no
+    longer failing, or gone, are dropped."""
+    with _streaks_lock:
+        kept = dict(_streaks)
+    out = {v.row.id: _streak(v, kept) for v in seen}
+    with _streaks_lock:
+        if is_every_row:
+            _streaks.clear()
+        _streaks.update({i: kept[i] for i in out if out[i] is not None})
+    return out
 
 
 # -- the health results the poller last read -----------------------------------------
@@ -297,6 +360,7 @@ def gather(*, check_health: bool = False) -> dict[str, Any]:
     try:
         found, problems = every_row()
         pass_at = None
+        read_at = _iso(time.time())
         if check_health:
             pass_at = _iso(time.time())
             seen = verdict.views(found, check_health=True, status_seconds=STATUS_SECONDS,
@@ -307,14 +371,18 @@ def gather(*, check_health: bool = False) -> dict[str, Any]:
             seen = verdict.views(found, status_seconds=STATUS_SECONDS,
                                  known_health=_known_health())
         settings = with_settings(found)
-        listed = [row_value(v, settings=settings, checked_at=_checked_at(v, pass_at))
+        streaks = _streaks_of(seen, is_every_row=True)
+        listed = [row_value(v, settings=settings, checked_at=_checked_at(v, pass_at),
+                            streak=streaks[v.row.id])
                   for v in seen]
     except ServicesError as exc:
-        return {"state": "error", "detail": _text(exc), "rows": [], "problems": []}
+        return {"state": "error", "detail": _text(exc), "at": None, "rows": [],
+                "problems": []}
     except Exception as unexpected_exc:  # noqa: BLE001 - the page says so, never a 500
         _log_once(unexpected_exc, "listing the rows failed")
-        return {"state": "error", "detail": _unexpected(unexpected_exc), "rows": [], "problems": []}
-    return {"state": "up", "detail": None, "rows": listed,
+        return {"state": "error", "detail": _unexpected(unexpected_exc), "at": None,
+                "rows": [], "problems": []}
+    return {"state": "up", "detail": None, "at": read_at, "rows": listed,
             "problems": [{"module": m, "reason": r} for m, r in problems]}
 
 
@@ -334,7 +402,8 @@ def row(call: Any) -> dict[str, Any]:
     except ServicesError as exc:
         raise _answer(exc) from None
     return {"row": row_value(view, settings=with_settings([found]),
-                             checked_at=_checked_at(view)),
+                             checked_at=_checked_at(view),
+                             streak=_streaks_of([view], is_every_row=False)[found.id]),
             "runs": [{"at": r.get("at"), "result": r.get("result"), "exit": r.get("exit"),
                       "seconds": r.get("seconds")} for r in runs],
             "log": None if view.st is None else view.st.log}
@@ -514,7 +583,10 @@ async def events(call: Any) -> Any:
 
 
 def _digest(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+    """The topic's value's digest, its `at` left out: a read that changed nothing else
+    is not a change."""
+    rest = {k: v for k, v in value.items() if k != "at"}
+    return hashlib.sha256(json.dumps(rest, sort_keys=True, separators=(",", ":"),
                                      allow_nan=False).encode("utf-8")).hexdigest()
 
 
@@ -528,6 +600,7 @@ class _Feed:
         self.skipped = 0
         self._health_at: float | None = None
         self._last: str | None = None
+        self._published_at: float | None = None
         self.task = loop.create_task(self._poll(), name="services rows poller")
 
     async def _poll(self) -> None:
@@ -557,9 +630,12 @@ class _Feed:
         try:
             value = gather(check_health=check_health)
             digest = _digest(value)
-            if digest != self._last:
+            now = time.monotonic()
+            stale = (self._published_at is None
+                     or now - self._published_at >= REPUBLISH_S)
+            if digest != self._last or stale:
                 self.topics.publish(TOPIC, value)
-                self._last = digest
+                self._last, self._published_at = digest, now
         except Exception as exc:  # noqa: BLE001 - the next tick gathers again
             _log_once(exc, "the rows poller's gather failed")
 
@@ -578,7 +654,7 @@ def _feed() -> _Feed:
 
 
 __all__ = ["BY", "DAEMON_STARTS", "HEALTH_PERIOD", "JOBS", "KEY_REUSED", "PERIOD",
-           "SLOTS_SERVER", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "disable", "enable",
+           "REPUBLISH_S", "SLOTS_SERVER", "STREAK_LINES", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "count_streak", "disable", "enable",
            "events", "every_row", "gather", "listing", "not_a_full_path", "projects",
            "remove", "restart", "row", "row_value", "run", "start", "status", "stop",
            "with_settings"]
