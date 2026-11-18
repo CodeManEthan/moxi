@@ -164,6 +164,12 @@
   offline, tried to bind the name it already held, read the refusal as another session
   holding it, and stayed offline for the rest of the session. A close from a connection
   the shim has already replaced now changes nothing.
+- The Comms page says where an agent works when launcher doesn't: with sessions installed,
+  a bound name's row reads its session's folder, when it started and its harness
+  (`atlas-api · started today 12:45 · claude`), and its opened row's `Session` line names
+  the session and links to it on the Sessions page. Launcher's where still wins for a
+  session it runs. Each row of the page's roster carries `harness`, the harness its
+  binding's adapter kind is a session of, or null.
 
 ## 0.3.0 (2026-11-08)
 

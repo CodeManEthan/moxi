@@ -45,6 +45,13 @@
 // press posts to launcher's `/api/keep-warm` and disables the button until the answer and
 // the next value of `running` have come, or for 20 s; a refusal's note leads line three
 // until the next value.
+//
+// With sessions installed it reads sessions' `/api/session` for each live address with a
+// session id and a harness that launcher gives no where (`session-model.ts`), once
+// launcher's read has answered when launcher is installed: on every roster value, after
+// each read of launcher's, and every 30 s while the tab is visible, asking each session
+// once (a read that gave nothing, again after 30 s). Its header gives the row's where when
+// launcher gives none, and the opened row's `Session` line when launcher's join gives none.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -60,6 +67,7 @@ import {
 } from "./box-model.ts";
 import type { Choice } from "./box-model.ts";
 import { failureWhy, Feed, parseRoster } from "./feed.ts";
+import type { RosterRow } from "./feed.ts";
 import {
   ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING, READING_AFTER_MS,
   OTHER_NAMES, otherNamesWords, otherWhere, readLine, SETTINGS_LINK, SETTINGS_ROUTE, THREAD_LABEL,
@@ -72,6 +80,9 @@ import {
 } from "./launched-model.ts";
 import type { Presses, Running } from "./launched-model.ts";
 import { byHim, parseQueue } from "./messages-model.ts";
+import { headerOf, isDue, keyOf, parseSessionHeader, sessionLine, sessionPath, sessionWhere, wantedSessions,
+} from "./session-model.ts";
+import type { SessionRead } from "./session-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
 import type { Line } from "./opened-model.ts";
@@ -276,6 +287,10 @@ export class CommsPage extends LitElement {
   #runningLine: string | null = null;
   #runningOut = false;
   #runningAgain = false;
+  /** A read of launcher's running launches has answered, ok or not. */
+  #runningAnswered = false;
+  /** sessions' header of each session read, by `keyOf`, with sessions installed. */
+  #sessionReads = new Map<string, SessionRead>();
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -292,6 +307,7 @@ export class CommsPage extends LitElement {
     void this.#feed?.refresh();
     this.#readMail();
     void this.#readRunning();
+    this.#readSessions();
   };
 
   /** Reads the mail state again, with today's messages, the days before today the page
@@ -322,11 +338,37 @@ export class CommsPage extends LitElement {
         const value = result.status === 200 ? parseRunning(result.data) : null;
         this.#running = value;
         this.#runningLine = runningLine(result.status, value);
+        this.#runningAnswered = true;
         if (value !== null) this.#presses = valueCame(this.#presses, value);
         this.requestUpdate();
       } while (this.#runningAgain);
     } finally {
       this.#runningOut = false;
+    }
+    this.#readSessions();
+  }
+
+  /** Reads sessions' header of each live address's session that launcher gives no where and
+   * that is due (`isDue`), with sessions installed and, with launcher installed, once
+   * launcher's read has answered. Each read on its own; a read that fails shows nothing. */
+  #readSessions(): void {
+    if (!installed("sessions")) return;
+    if (installed("launcher") && !this.#runningAnswered) return;
+    const rows = this.#kept?.value.rows ?? [];
+    const launched = installed("launcher") ? joinRunning(this.#running, rows, this.#when) : null;
+    const now = Date.now();
+    for (const key of wantedSessions(rows, launched)) {
+      const held = keyOf(key);
+      if (!isDue(this.#sessionReads.get(held), now)) continue;
+      this.#sessionReads.set(held, { state: "out" });
+      void api("sessions", sessionPath(key)).then((result) => {
+        if (!this.isConnected) return;
+        const header = result.status === 200 ? parseSessionHeader(result.data, key) : null;
+        this.#sessionReads.set(held, { state: "read", header, at: Date.now() });
+        this.requestUpdate();
+      }, () => {
+        this.#sessionReads.set(held, { state: "read", header: null, at: Date.now() });
+      });
     }
   }
 
@@ -413,6 +455,7 @@ export class CommsPage extends LitElement {
       if (document.visibilityState !== "visible") return;
       this.#readMail();
       void this.#readRunning();
+      this.#readSessions();
     }, MAIL_EVERY_MS);
   }
 
@@ -455,7 +498,7 @@ export class CommsPage extends LitElement {
 
   /** After every change of the roster's feed: a value that is up is kept with its time, the
    * mail state is read again when the waiting mail or the bound names changed, and
-   * launcher's running launches on every new value. */
+   * launcher's running launches and sessions' headers on every new value. */
   #rosterRead(): void {
     const feed = this.#feed;
     if (feed === null) return;
@@ -470,6 +513,7 @@ export class CommsPage extends LitElement {
         const key = mailKey(value);
         if (this.#mailKey !== null && key !== this.#mailKey) this.#readMail();
         this.#mailKey = key;
+        this.#readSessions();
       }
     }
     this.requestUpdate();
@@ -781,7 +825,8 @@ export class CommsPage extends LitElement {
   #row(item: FrameRow, stale: boolean, mail: boolean) {
     const { row } = item;
     const toggle = (): void => this.#toggle(item);
-    return html`<moxi-ui-row ?toggles=${!stale} data-name=${row.name} name=${row.name} where=${ifDefined(row.where ?? undefined)}
+    const where = row.where ?? this.#sessionWhere(row.addresses.find((one) => one.qualified === row.lead)?.row ?? null);
+    return html`<moxi-ui-row ?toggles=${!stale} data-name=${row.name} name=${row.name} where=${ifDefined(where ?? undefined)}
         fact=${ifDefined(row.fact?.text)} ?fact-heavy=${row.fact?.heavy ?? false} lead=${row.line.lead}
         ?lead-heavy=${row.line.heavy} lead-more=${ifDefined(row.line.more ?? undefined)}
         note=${ifDefined(item.note ?? undefined)} ?open=${item.open} @moxi-row-toggle=${toggle}>
@@ -820,6 +865,10 @@ export class CommsPage extends LitElement {
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
       when: (at) => whenWords(at, this.#today), hasCache: installed("cache"), hasSessions: installed("sessions"),
+      session: installed("sessions")
+        ? sessionLine(headerOf(this.#sessionReads, item.row.addresses.find((one) => one.qualified === to)?.row ?? null),
+                      this.#today)
+        : null,
       showsDetails: this.#details,
     });
     const sessionId = view.sessionId;
@@ -864,6 +913,11 @@ export class CommsPage extends LitElement {
   }
 
   #when = (at: number): string => whenWords(at, this.#today);
+
+  /** sessions' where for a row's lead, where launcher gives none: null without sessions. */
+  #sessionWhere(lead: RosterRow | null): string | null {
+    return installed("sessions") ? sessionWhere(headerOf(this.#sessionReads, lead), this.#today) : null;
+  }
 
   /** The send box of an opened row, written to `to`, and the line under it. */
   protected box(_item: FrameRow | null, to: string): unknown {
