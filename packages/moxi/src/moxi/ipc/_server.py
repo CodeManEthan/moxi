@@ -185,16 +185,25 @@ def _cancel_accept_retries(loop: asyncio.AbstractEventLoop, sock: socket.socket)
     For each accept that fails at a resource limit asyncio's selector loop calls its
     `_start_serving` for the listener again 1 s later. One that runs after the listener
     has closed adds a reader for fd -1 and is logged as an error with a traceback,
-    `Invalid file descriptor: -1`, so `Server.close` cancels them first. asyncio offers
-    no public way to find them: this reads the loop's private `_scheduled` list of
-    timers and each timer's `_callback` and `_args`. Where any of these is missing or
-    not of the expected shape (another loop, or a Python that keeps them otherwise) it
-    cancels nothing."""
+    `Invalid file descriptor: -1`, so `Server.close` cancels them first. A retry waits
+    in the loop's timer heap until due; in the turn it comes due the loop moves it to
+    its ready queue before running that turn's callbacks, so a close in that turn finds
+    it there. asyncio offers no public way to find them: this reads the loop's private
+    `_scheduled` list of timers and `_ready` queue, and each handle's `_callback` and
+    `_args`; `Server.close` passes the socket inside the private `_sock` of the
+    listener's wrapper. Where any of these is missing or not of the expected shape
+    (another loop, or a Python that keeps them otherwise) it cancels nothing there."""
     start = getattr(loop, "_start_serving", None)
-    scheduled = getattr(loop, "_scheduled", None)
-    if start is None or not isinstance(scheduled, list):
+    if start is None:
         return
-    for handle in list(scheduled):
+    scheduled = getattr(loop, "_scheduled", None)
+    ready = getattr(loop, "_ready", None)
+    handles = []
+    if isinstance(scheduled, list):
+        handles.extend(scheduled)
+    if isinstance(ready, collections.deque):
+        handles.extend(ready)
+    for handle in handles:
         callback = getattr(handle, "_callback", None)
         args = getattr(handle, "_args", None)
         if (callback == start and isinstance(args, tuple) and len(args) > 1
