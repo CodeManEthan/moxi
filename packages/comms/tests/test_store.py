@@ -33,7 +33,7 @@ COLUMNS = {
     "identities": ["name", "scope", "status", "kind", "created_at"],
     "operators": ["user_id", "name", "created_at", "token_hash"],
     "reserved": ["name", "module", "token_hash", "state", "reserved_at", "freed_at",
-                 "note"],
+                 "note", "holder"],
     "dropped": ["message_id", "name", "reason", "at"],
     "principals": ["principal_id", "name"],
     "denied": ["principal_id", "channel_id"],
@@ -73,7 +73,7 @@ def test_a_new_store_has_every_table_at_the_current_version():
         assert tables == set(COLUMNS) == set(schema.TABLES)
         for table, columns in COLUMNS.items():
             assert [r[1] for r in conn.execute(f"PRAGMA table_info({table})")] == columns
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 4
         assert conn.execute("SELECT value FROM meta WHERE key = 'next_id'"
                             ).fetchone()[0] == str(2 ** 62)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -102,7 +102,7 @@ def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("SELECT id, author_kind FROM messages ORDER BY id").fetchall() \
             == [(1, "operator"), (2, "identity"), (3, "webhook")]
     finally:
@@ -126,12 +126,42 @@ def test_a_version_two_store_gains_the_tool_tokens_table_at_its_next_open():
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert [r[1] for r in conn.execute("PRAGMA table_info(mcp_tokens)")] \
             == COLUMNS["mcp_tokens"]
         assert conn.execute("SELECT COUNT(*) FROM mcp_tokens").fetchone()[0] == 0
         assert conn.execute("SELECT qualified, released_at FROM bindings").fetchall() \
             == [("planner@proj-a", None)]
+    finally:
+        conn.close()
+
+
+def test_a_version_three_store_says_who_holds_each_reserved_name_at_its_next_open():
+    """Version 4 adds `reserved.holder`: every row a module's declaration wrote, active or
+    in conflict, is a module's, and an unowned row an older comms kept has no holder."""
+    target = store.path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target)
+    try:
+        for step in schema.STEPS[:3]:
+            conn.executescript(step)
+        conn.executemany("INSERT INTO reserved(name, module, token_hash, state, note) "
+                         "VALUES (?, ?, ?, ?, ?)",
+                         [("console", "launcher", "h", "active", None),
+                          ("pager", None, None, "conflict", "two modules declare it"),
+                          ("herald", None, None, "unowned", "kept")])
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+    finally:
+        conn.close()
+    conn = store.open_write()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("SELECT name, module, state, holder FROM reserved "
+                            "ORDER BY name").fetchall() == [
+            ("console", "launcher", "active", "module"),
+            ("herald", None, "unowned", None),
+            ("pager", None, "conflict", "module")]
     finally:
         conn.close()
 
@@ -142,6 +172,8 @@ def test_a_version_two_store_gains_the_tool_tokens_table_at_its_next_open():
     ("bindings", "INSERT INTO bindings(qualified, name, scope, tier, adapter, bound_at, "
                  "kind) VALUES ('a', 'a', 'global', 'chosen', 'x', 't', 'other')"),
     ("reserved", "INSERT INTO reserved(name, state) VALUES ('console', 'held')"),
+    ("reserved", "INSERT INTO reserved(name, state, holder) "
+                 "VALUES ('ticker', 'active', 'service')"),
     ("dropped", "INSERT INTO dropped(message_id, name, reason, at) "
                 "VALUES (1, 'a', 'lost', 't')"),
     ("mcp_tokens", "INSERT INTO mcp_tokens(token_hash, claim_key, identity, adapter, "
@@ -428,7 +460,8 @@ def test_the_reader_reads_a_store_at_any_step_unless_asked_to_check_it():
     with pytest.raises(store.StepMismatch) as older:
         store.open_read(check_step=True)
     assert user_version() == len(schema.STEPS) - 1
-    assert older.value.exit_code == 75 and "step 2 of 3" in str(older.value)
+    steps = len(schema.STEPS)
+    assert older.value.exit_code == 75 and f"step {steps - 1} of {steps}" in str(older.value)
     store.open_write().close()
     assert user_version() == len(schema.STEPS)
     store.open_read(check_step=True).close()

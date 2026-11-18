@@ -119,7 +119,8 @@ def test_the_move_carries_every_row_and_makes_rows_for_row_less_mail(soon):
     assert set(rows("SELECT name, scope, status, kind FROM identities")) == {
         ("reviewer", "proj-a", "active", "agent"), ("planner", "global", "active", "agent"),
         ("old", "proj-a", "retired", "agent")}
-    assert rows("SELECT name, module, state FROM reserved") == [("herald", None, "unowned")]
+    assert rows("SELECT name, module, state, holder FROM reserved") == [
+        ("herald", None, "unowned", None)]
     assert rows("SELECT user_id, name FROM operators") == [
         (MADE["operator_user_id"], "operator")]
     assert rows("SELECT value FROM meta WHERE key = 'migrated_from'") == [("0.2",)]

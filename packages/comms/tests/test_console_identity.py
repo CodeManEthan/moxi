@@ -181,7 +181,7 @@ def test_nothing_sends_under_an_unowned_name(console):
             c.send(RELAY, "any", machine_line.compose([PLANNER], "x"))
     finally:
         c.close()
-    assert e.value.code == wire.NAME_RESERVED and "no module holds" in str(e.value)
+    assert e.value.code == wire.NAME_RESERVED and "nothing holds" in str(e.value)
 
 
 # --------------------------------------------------------------------------- the reads

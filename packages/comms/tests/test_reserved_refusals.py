@@ -270,3 +270,82 @@ def test_the_psutil_reader_gives_the_proc_readers_ancestry():
     pids = [p for p, _ in ProcView().ancestry(os.getpid())]
     assert [p for p, _ in PsutilView().ancestry(os.getpid())] == pids
     assert pids[0] == os.getpid() and len(pids) > 1
+
+
+# --------------------------------------------------------------------------- a program's name
+
+@pytest.fixture
+def ticker(rig):
+    """`ticker` registered by a program, its token in the configured store."""
+    reserved.register("ticker", chain=secrets.from_config())
+    return rig
+
+
+def ticker_token():
+    return TokenStore().read_secret(reserved.program_owner(),
+                                    reserved.program_secret_id("ticker"))
+
+
+def test_no_session_binds_a_programs_name_of_any_kind(ticker):
+    for kind in ticker.daemon.kinds.names():
+        with pytest.raises(DaemonError) as e:
+            bind(name="ticker", global_=True, adapter=kind)
+        assert e.value.code == wire.NAME_RESERVED, kind
+        assert str(e.value).startswith("ticker is a send-only name a program registered: "
+                                       "no session binds it")
+    assert "ticker" not in ticker.daemon.bindings
+
+
+def test_a_removed_programs_name_binds_again(ticker):
+    reserved.remove_program("ticker", chain=secrets.from_config())
+    assert bind(name="ticker", global_=True)["identity"]["qualified"] == "ticker"
+
+
+def test_a_binding_token_never_sends_under_a_programs_name(ticker, client):
+    token = client.bind(name="planner", scope="proj-a")["token"]
+    before = len(history(ticker))
+    with pytest.raises(DaemonError) as e:
+        client.send("ticker", token, machine_line.compose(["main@proj-a"], "x"))
+    assert e.value.code == wire.NAME_RESERVED
+    assert "ticker is a send-only name a program registered: a session's token never " \
+        "sends under it" in str(e.value)
+    assert len(history(ticker)) == before
+
+
+def test_a_send_under_a_programs_name_from_outside_every_session_is_posted(ticker,
+                                                                         client):
+    claim_file("elsewhere", Root(os.getpid() + 1_000_000, "0", TREE))
+    answer = client.send("ticker", ticker_token(), machine_line.compose(
+        ["main@proj-a"], "x", posture=machine_line.POSTURE_NONE))
+    msg = ticker.record.get_message(answer["message_id"])
+    assert (msg.author_id, msg.author_kind) == ("ticker", "reserved")
+
+
+def test_a_send_under_a_programs_name_from_inside_a_session_is_refused(ticker, client):
+    claim_file("planner", root_of(os.getppid(), TREE))
+    with pytest.raises(DaemonError) as e:
+        client.send("ticker", ticker_token(), machine_line.compose(["main@proj-a"], "x"))
+    assert e.value.code == wire.NAME_RESERVED
+    assert "from inside a session" in str(e.value)
+
+
+def test_a_send_under_a_programs_name_from_an_unplaced_peer_is_refused(ticker):
+    with pytest.raises(Refusal) as e:
+        ticker.daemon._send(SimpleNamespace(peer=Peer(None, None, None)), {
+            "as": "ticker", "token": ticker_token(),
+            "content": machine_line.compose(["main@proj-a"], "x")})
+    assert e.value.code == wire.NAME_RESERVED
+    assert "can't tell whether this process is inside a session" in str(e.value)
+
+
+def test_a_wrong_token_never_sends_under_a_programs_name(ticker, client):
+    with pytest.raises(DaemonError) as e:
+        client.send("ticker", "not-the-token", machine_line.compose(["main@proj-a"], "x"))
+    assert e.value.code == wire.CREDENTIAL
+
+
+def test_an_unowned_name_sends_nothing_with_words_for_either_holder(rig, client):
+    write("INSERT INTO reserved(name, state) VALUES ('ticker', 'unowned')")
+    with pytest.raises(DaemonError) as e:
+        client.send("ticker", "anything", machine_line.compose(["main@proj-a"], "x"))
+    assert str(e.value).startswith("ticker is a send-only name nothing holds")

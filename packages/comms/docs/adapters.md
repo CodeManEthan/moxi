@@ -504,35 +504,102 @@ hears of the new session when you submit its first prompt, and from then on mail
 there, starting with any digest still pending in the old one. Until that first prompt
 the wrapper cannot know, and mail still goes to the old session.
 
-## Reserved send-only names
+## Send-only names
 
-A module declares the names it sends under in its announcement's `RESERVED_NAMES`, each
-bare and global (`console`). comms reserves each one when the module installs, with a
-token in the credential chain for that module, and frees it when the module goes. The
-module sends with `moxi_comms.api.send_as(module, name, to, text)`; there is no CLI form.
+A send-only name is one a program sends under and nobody binds or mails. It comes in two
+kinds, which share comms' `reserved` table and the daemon's checks:
 
-No session binds a reserved name, of any adapter kind. A session's binding token never
-sends under one, and the daemon refuses a send under one from any process inside a live
-session, or one whose ancestry it can't read: module code sends from outside every
-session. A send-only name an older comms kept is reserved for nobody until a module
-declares it; nothing sends under it meanwhile.
+- **A module's name.** A module declares the names it sends under in its announcement's
+  `RESERVED_NAMES`, each bare and global (`console`). comms reserves each one when the
+  module installs, with a token in the credential chain for that module, and frees it
+  when the module goes. The module sends with `moxi_comms.api.send_as(module, name, to,
+  text)` from its own code.
+- **A name a program registers.** Any program or service, a Moxi module or not, can
+  register a bare name once and then send under it:
 
-`moxi comms agents` lists each reserved name after the bindings, as
-`console                  send-only, reserved for launcher` (or `send-only, no module
-holds it` for one an older comms kept), and a message sent under one is marked
-`(send-only)` on its frame line. A name declared but in conflict isn't reserved, so it
-isn't listed; `moxi doctor` reports it.
+  ```sh
+  moxi comms send-only add notifier
+  moxi comms send --as notifier main@proj-a "the nightly backup is done" --posture none
+  ```
 
-Nothing is delivered to a reserved name. `moxi comms send` and `moxi comms reply` refuse
+  From Python, `moxi_comms.api.send_under(name, to, text)` sends the same way. `add`
+  mints a token into the first writable step of this process's credential chain and
+  works with the daemon down. Run it, and `send --as`, from the environment the program
+  sends from, so the token lands in a step that environment reads. Running `add` again
+  changes nothing, so a program may run it at every start: it exits `0`, or `REFUSED`
+  (`3`) with a line naming `moxi comms send-only renew NAME` when this process can't read
+  the name's token back.
+
+The three verbs for a program's name:
+
+| verb | what it does |
+|---|---|
+| `moxi comms send-only add NAME [--take]` | register NAME; adopts a name an older comms kept |
+| `moxi comms send-only renew NAME` | remove the old token from every step of this process's chain that holds it, then mint a new one; the old one is refused from then on |
+| `moxi comms send-only remove NAME` | free NAME: it is an ordinary name again, and a session may bind it as someone new |
+
+From inside a session, or from a process comms can't place, only plain `add` of a name
+nobody uses goes ahead. `add --take`, `renew` and `remove` are refused there before
+anything is touched, with a line saying to run them from your own shell: a confused agent
+can't drop another's mail, take a program's token or free its name.
+
+`renew` and `remove` refuse a module's name and say what does it instead (`moxi comms
+reserved renew NAME`, or the module's uninstall), and `moxi comms reserved renew`
+refuses a program's name. When `add` or `renew` can't read the new token back because an
+earlier step holds an older copy (an environment variable such as
+`MOXI_COMMS_SECRET_COMMS_SEND_ONLY_NOTIFIER`, or a stale keychain entry), it says which
+step and exits `REFUSED`: remove that copy there. A step it couldn't reach is named too.
+
+`add` checks, in order, and refuses with nothing written:
+
+1. a name comms can't register: a scoped name (`notifier@proj`), a name that isn't a comms
+   name, an `agent-N` name, `operator` or `auto`;
+2. a name a module holds, active or in conflict (a name a program already holds is the
+   no-op above);
+3. a retired name: it means nobody, and sending under it would bring it back;
+4. a standing identity, or a name a live session holds;
+5. without `--take`, a name a session has held before, or one with mail waiting (the
+   refusal says how many messages). With `--take` it goes ahead, and that mail is
+   dropped.
+
+A name an older comms kept as send-only (`send-only, nothing holds it`) goes to whoever
+claims it first: a module that declares it, or `send-only add`, which needs no `--take`
+for it. `send-only remove` can free one. When a module declares a name a program
+registered, the name stays the program's: the module's install says so, and `moxi doctor`
+warns each run until one of them lets it go.
+
+`send --as` sends with posture `none`, leaving `--posture` out means `none`, and any
+other posture is refused, since nobody can reply. It takes `--expires`, `--interrupt` and
+`--check`; every other send flag is a usage error. It refuses a module's name
+(`module-reserved`), a name no program registered (`not-registered`), and a process
+inside a session (`name-reserved`). `api.send_under` gives the same `refusal.code`
+values, and `api.send_as` refuses a name a program registered (`not-reserved`). There
+is no `reply --as`.
+
+No session binds a send-only name, of any adapter kind, whichever kind it is. A
+session's binding token never sends under one, and the daemon refuses a send under one
+from any process inside a live session, or one whose ancestry it can't read: a module or
+program sends from outside every session. A send-only name an older comms kept has no
+token; nothing sends under it until a module declares it or a program registers it.
+
+`moxi comms agents` lists each send-only name after the bindings, as
+`console                  send-only, reserved for launcher`,
+`notifier                 send-only, registered` for a program's, or `send-only, nothing
+holds it` for one an older comms kept. `agents --json`, `api.roster().standing` and
+`api.roster_rows()` carry `holder` on each: `module`, `program`, or null. A message sent
+under one is marked `(send-only)` on its frame line. A name declared but in conflict
+isn't reserved, so it isn't listed; `moxi doctor` reports it.
+
+Nothing is delivered to a send-only name. `moxi comms send` and `moxi comms reply` refuse
 it as a recipient before anything is posted, and the daemon refuses a `send` whose line
 zero names one (`not-mailable`); a record line that names it anyway is delivered to
 nobody, pending for nobody and held for nobody, and opens no ask for it. A scoped name
-(`console@acme`) is not the reserved one: it is an ordinary name.
+(`console@acme`) is not the send-only one: it is an ordinary name.
 
-Mail that was already waiting for a name when a module reserved it is dropped
-undelivered, and stays dropped if the name is freed later: a later holder of a freed name
-is someone else. Its sender is not told. `moxi comms explain <name> <id>` says
-`reserved`, and `moxi comms history` marks it `[dropped for <name>: reserved]`. The
-daemon drops it at its start, at the name's next release point, and when `moxi comms
-agents` or `explain` asks, so a reservation another process made takes effect at the
-next of those. A name in conflict isn't reserved, and keeps its mail.
+Mail that was already waiting for a name when a module reserved it, or a program
+registered it, is dropped undelivered, and stays dropped if the name is freed later: a
+later holder of a freed name is someone else. Its sender is not told. `moxi comms explain
+<name> <id>` says `reserved`, and `moxi comms history` marks it `[dropped for <name>:
+reserved]`. The daemon drops it at its start, at the name's next release point, and when
+`moxi comms agents` or `explain` asks, so a name another process reserved or registered
+takes effect at the next of those. A name in conflict isn't reserved, and keeps its mail.

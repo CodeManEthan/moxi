@@ -10,7 +10,7 @@ one of these of a name:
 | `standing` | a standing identity's own name, not bound now | goes on: its session binds it |
 | `offline` | comms' daemon can't be asked | refused as a try-again: the wrapper would stop |
 | `held` | a live session holds it | refused, naming the holder |
-| `reserved` | a module's send-only name | refused, naming the module |
+| `reserved` | a send-only name | refused, naming the module or a program |
 | `retired` | a scoped name comms no longer binds | refused, with comms' words |
 
 comms raises `ValueError` for what is not a name a launch can claim (refused with its
@@ -32,24 +32,26 @@ TAKEN = ("held", "reserved", "retired")
 
 class IdentityTaken(Refused):
     """The comms name a launch asks for is held, reserved or retired. `holder` is who
-    holds it, `module` the module it is reserved for, `reason` comms' words."""
+    holds it, `module` the module it is reserved for, `registered` whether a program
+    registered it as a send-only name, `reason` comms' words."""
 
     code = "identity-taken"
 
     def __init__(self, name: str, state: str, holder: str | None = None, *,
-                 module: str | None = None, reason: str | None = None):
+                 module: str | None = None, reason: str | None = None,
+                 registered: bool = False):
         self.name, self.state, self.holder = name, state, holder
-        self.module, self.reason = module, reason
+        self.module, self.reason, self.registered = module, reason, registered
         if state == "held":
             hint = "pick another identity, or wait until that session ends"
         elif state == "reserved":
-            hint = "pick another identity: no session binds a reserved name"
+            hint = "pick another identity: no session binds a send-only name"
         elif state == "retired":
             hint = "launch it under its bare name with no scope, or pick another identity"
         else:
             hint = "pick another identity, or wait until it is free"
         super().__init__("identity", words(name, state, holder, module=module,
-                                           reason=reason), hint)
+                                           reason=reason, registered=registered), hint)
 
 
 class IdentityRefused(Refused):
@@ -93,10 +95,13 @@ class CommsOffline(Refused):
 
 
 def words(name: str, state: str, holder: str | None = None, *,
-          module: str | None = None, reason: str | None = None) -> str:
+          module: str | None = None, reason: str | None = None,
+          registered: bool = False) -> str:
     """One state of a name, in a few words."""
     if state == "held":
         return f"identity {name} is held by {holder or 'a live session'}"
+    if state == "reserved" and registered:
+        return f"identity {name} is a send-only name a program registered"
     if state == "reserved":
         return (f"identity {name} is reserved for {module}" if module else
                 f"identity {name} is reserved, and no module owns it")
@@ -141,7 +146,8 @@ def check(name: str, scope: str | None, comms: Any) -> Refused | None:
     return IdentityTaken(getattr(state, "qualified", None) or named, state.state,
                          str(holder) if holder else None,
                          module=getattr(state, "module", None),
-                         reason=getattr(state, "reason", None))
+                         reason=getattr(state, "reason", None),
+                         registered=bool(getattr(state, "registered", False)))
 
 
 def daemon_errors(comms: Any) -> tuple[type[BaseException], ...]:
