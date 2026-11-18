@@ -30,9 +30,11 @@ export interface RowView {
   open: boolean;
   /** The row has `Refresh`: one of its items' fixes is a refresh. */
   refresh: boolean;
-  /** The row has `Add`: a repo not in repo's list, which `Add` puts in it. A repo in the
-   * list with no piece has none: adding it would write nothing. */
+  /** The row has `Add`: a repo not in repo's list, which `Add` puts in it. */
   add: boolean;
+  /** The row has `Add` that opens the repo with `Add a piece` open: a repo in the list
+   * with no piece, where adding the repo itself would write nothing. */
+  addPiece: boolean;
   /** The repo's folder is gone. */
   gone: boolean;
   /** Its items, in `Hooks`' order. */
@@ -178,14 +180,15 @@ export function repoRow(repo: RepoRow, { home = null, today = null, clock = LOCA
     key: repo.root, repo, unindexed: null, name: repoName(repo, home), where: whereLine(repo), fact, factHeavy: heavy,
     lead: news[0] ?? null, note: news.length > 1 ? news.slice(1).join(" · ") : null, open: true,
     refresh: items.some((item) => item.fix?.refresh === true), add: fact === "not in the list",
-    gone, items,
+    addPiece: fact === "no hooks", gone, items,
   };
 }
 
 /** A project's repo with no hooks, drawn as a row of its own. */
 export function unindexedRow(project: Unindexed): RowView {
   return { key: project.root, repo: null, unindexed: project, name: project.project, where: "", fact: "no hooks",
-           factHeavy: false, lead: null, note: null, open: false, refresh: false, add: true, gone: false, items: [] };
+           factHeavy: false, lead: null, note: null, open: false, refresh: false, add: true, addPiece: false, gone: false,
+           items: [] };
 }
 
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

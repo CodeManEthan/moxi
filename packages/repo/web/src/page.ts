@@ -465,6 +465,17 @@ export class RepoPage extends LitElement {
     this.requestUpdate();
   }
 
+  /** A row's `Add` on a repo in the list with no piece: the repo opens with `Add a piece`
+   * open, and the address says so. */
+  #openAddList(row: RowView): void {
+    this.#close();
+    this.#open = row.key;
+    this.#openAdd = true;
+    this.#unknown = null;
+    this.#write();
+    this.requestUpdate();
+  }
+
   /** `Show` or `Hide` on `Pieces`. */
   #togglePieces(): void {
     const shown = this.#piecesShown;
@@ -776,6 +787,8 @@ export class RepoPage extends LitElement {
       ${acts && !open && row.add ? html`<button type="button" slot="acts-one" class="do ${rowAct === "add-repo" ? "on" : ""}"
         data-action="add" @click=${() => this.#startOutside("add-repo", row.key, `row:${row.key}`, row.name)}>${
         ADD}</button>` : nothing}
+      ${acts && !open && row.addPiece ? html`<button type="button" slot="acts-one" class="do" data-action="add"
+        @click=${() => this.#openAddList(row)}>${ADD}</button>` : nothing}
       ${acts && row.open ? html`<button type="button" slot="acts-one" class="do" data-action="open"
         aria-expanded=${open ? "true" : "false"} @click=${() => this.#toggle(row)}>${open ? CLOSE : OPEN}</button>`
         : nothing}

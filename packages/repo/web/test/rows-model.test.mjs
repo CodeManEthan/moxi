@@ -104,14 +104,19 @@ test("a spec's line: refused, failed, last commit, and pushed only with a remote
   assert.equal(specNews(spec({ last_commit_time: null }), TODAY, UTC), null);
 });
 
-test("acts: Refresh where an item's fix is one, Add only where it would write", () => {
+test("acts: Refresh where an item's fix is one, Add on no hooks and not in the list", () => {
   const stale = repoRow(repo({ pieces: [piece()], problems: [problem({ refresh: true })] }), opts);
   assert.equal(stale.refresh, true);
-  assert.equal(repoRow(repo({ indexed: false, pieces: [piece()] }), opts).add, true);
-  assert.equal(unindexedRow({ project: "atlas-api", root: `${HOME}/code/atlas-api` }).add, true);
-  // In the list with no hooks: Add would write nothing, so the row has none.
+  const unlisted = repoRow(repo({ indexed: false, pieces: [piece()] }), opts);
+  assert.deepEqual([unlisted.add, unlisted.addPiece], [true, false]);
+  const project = unindexedRow({ project: "atlas-api", root: `${HOME}/code/atlas-api` });
+  assert.deepEqual([project.add, project.addPiece], [true, false]);
+  // In the list with no hooks: adding the repo would write nothing, so its Add opens it
+  // with Add a piece open.
   const bare = repoRow(repo({ pieces: [] }), opts);
-  assert.deepEqual([bare.fact, bare.add], ["no hooks", false]);
+  assert.deepEqual([bare.fact, bare.add, bare.addPiece], ["no hooks", false, true]);
+  assert.equal(repoRow(repo({ pieces: [piece()] }), opts).addPiece, false);
+  assert.equal(repoRow(repo({ pieces: [], problems: [problem({ code: "gone" })] }), opts).addPiece, false);
 });
 
 test("rows: needs by their first item, then project keys, then ~ folders, a gone repo last", () => {
