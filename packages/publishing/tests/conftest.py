@@ -191,7 +191,8 @@ class Fake:
     def __init__(self):
         self.default_branch = "main"
         # commit: [{"event", "branch", "jobs": [(job, conclusion)]}], one dict per run; a
-        # conclusion None is a job still running
+        # conclusion None is a job still running. A run's "earlier" holds the jobs of its
+        # earlier attempts, a list per attempt, which only `filter=all` answers with.
         self.runs: dict[str, list[dict]] = {}
         self.full_jobs = list(FULL_JOBS)                   # each new run's, concluded success
         self.index: dict[str, dict[str, list[dict]]] = {}  # dist: {version: [file]}
@@ -252,7 +253,10 @@ class Fake:
         if rest[:2] == ["actions", "runs"]:
             sha, _, n = rest[2].rpartition("-")
             runs = self.runs.get(sha, [])
-            jobs = runs[int(n)]["jobs"] if n.isdigit() and int(n) < len(runs) else []
+            run = runs[int(n)] if n.isdigit() and int(n) < len(runs) else {}
+            jobs = list(run.get("jobs", []))
+            if query.get("filter", ["latest"])[0] == "all":
+                jobs = [job for attempt in run.get("earlier", []) for job in attempt] + jobs
             return 200, {"jobs": [{"name": name, "conclusion": c,
                                    "status": "in_progress" if c is None else "completed"}
                                   for name, c in jobs]}

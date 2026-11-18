@@ -302,6 +302,21 @@ def test_check_3_wants_every_job_that_shares_a_full_jobs_name_to_pass(released_r
         f"ci.yml's secrets-windows at {sha}: {second}"]
 
 
+@pytest.mark.parametrize("before, after", [("failure", "success"), ("success", "failure")])
+def test_check_3_reads_each_jobs_latest_attempt(released_repo, fake, before, after):
+    full = [("linux", "success"), ("other (windows-latest)", "success")]
+    main_runs(fake, head(released_repo), full + [("secrets-windows", after)])
+    fake.runs[head(released_repo)][0]["earlier"] = [full + [("secrets-windows", before)]]
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    sha = head(released_repo)[:12]
+    assert [n for n in full_notes(verdict) if "secrets-windows" in n] == [
+        f"ci.yml's secrets-windows at {sha}: {after}"]
+    if after == "success":
+        assert verdict.passed, verdict.lines()
+    else:
+        failed(verdict, 3, "secrets-windows concluded failure")
+
+
 def test_check_3_reads_the_full_jobs_of_mains_own_run(released_repo, fake):
     fake.runs.clear()
     fake.full_jobs = []
