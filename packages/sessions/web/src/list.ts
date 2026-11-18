@@ -13,6 +13,8 @@
 import { charCount, cutAt, fmtCount, HARNESS_LABELS, isHarness, routeOf } from "./views.ts";
 import type { FeedState } from "./views.ts";
 import type { FoldersAnswer, Group, ListAnswer, ListRow, MoreAnswer, Root } from "./list-feed.ts";
+import { factOf, keepWarmOf, lastAt, leadOf, NO_PRESSES, ordered, whereText } from "./running.ts";
+import type { Presses, RunningEntry, RunningRead } from "./running.ts";
 
 // -- days and times -------------------------------------------------------------------------
 
@@ -600,11 +602,14 @@ export interface RowView {
   route: string | null;
   name: string;
   where: string | null;
-  /** The right end of line one. Nothing the list reads has a place there, so it is null
-   * on every row. */
+  /** The right end of line one: a running launch's cache fact; null on every other row. */
   fact: string | null;
-  /** `2 subagents`. */
+  /** Whether the fact is heavy: a running launch that goes cold with nothing to keep it warm. */
+  factHeavy: boolean;
+  /** `2 subagents`; on a running launch, `waiting on 2 agents` when it goes cold uncovered. */
   lead: string | null;
+  /** Whether the lead is heavy, as `waiting on 2 agents` is. */
+  leadHeavy: boolean;
   /** The time of the typed message on line two. */
   time: string | null;
   /** `you` when line two is a message the record marks as typed. */
@@ -644,7 +649,9 @@ export function rowView(row: ListRow, on: string, today: string, open = false, z
     name,
     where,
     fact: null,
+    factHeavy: false,
     lead,
+    leadHeavy: false,
     time: said && typeof prompt.at === "number" ? timeWords(prompt.at, on, today, zone) : null,
     saidBy: said ? "you" : null,
     rest: said ? cutAt(text, REST_MAX) : null,
@@ -703,11 +710,36 @@ export interface EmptyView {
   start: string | null;
 }
 
+/** A launch running now, as its row is drawn: a row of the list, with what launcher adds. */
+export interface RunningRowView extends RowView {
+  /** The launch's request id, which a press of `Keep warm` posts. */
+  request: string;
+  /** `Keep warm`'s title where the act is drawn, else null. */
+  keepWarm: string | null;
+  /** Whether a press of `Keep warm` waits for its answer: the act is disabled. */
+  pressing: boolean;
+  /** A refused press's words, the row's third line; null for none. */
+  note: string | null;
+}
+
+/** The group of the launches running now, drawn first. */
+export interface RunningGroupView {
+  /** `6 running`, or `Running` over a line and no row. */
+  label: string;
+  rows: RunningRowView[];
+  /** `Nothing is running`, or that the running launches could not be read; null with rows. */
+  line: string | null;
+  /** Why they could not be read, in launcher's words: shown at the desk. */
+  reason: string | null;
+}
+
 /** The list as it is drawn. */
 export interface ListView {
   /** `62 sessions`, or `15 of 62 sessions` with a filter or the find field set; null when
    * no session was counted. */
   count: string | null;
+  /** The launches running now, with launcher installed; null where nothing of them is drawn. */
+  running: RunningGroupView | null;
   groups: GroupView[];
   empty: EmptyView | null;
   notices: Notice[];
@@ -716,6 +748,10 @@ export interface ListView {
   unlisted: string | null;
 }
 
+export const RUNNING = "Running";
+export const NOTHING_RUNNING = "Nothing is running";
+export const RUNNING_UNREAD = "Moxi couldn't read the running sessions";
+export const LAUNCHED = "launched";
 export const ACTIVE_RECENTLY = "Active recently";
 export const EARLIER = "Earlier";
 export const UNDATED = "No date";
@@ -781,7 +817,86 @@ export function unlistedLine(state: ListState): string | null {
     : `${fmtCount(n)} Codex sessions are compressed and not listed.`;
 }
 
-function groupView(group: GroupState, state: ListState, zone: Zone): GroupView | null {
+/** The key of a running launch's row: its session's, so it opens as the list's row of that
+ * session would; a launch with no session id yet is keyed by its request. */
+function runningKey(entry: RunningEntry): string {
+  return entry.session_id !== null ? keyOf({ harness: entry.harness, session: entry.session_id })
+    : `launch/${entry.request_id}`;
+}
+
+/**
+ * One running launch as its row is drawn, as Home's running rows word it: the launch's
+ * name, where it runs, its cache fact and, when it goes cold uncovered, `waiting on n
+ * agents` leading line two. Then the time of its latest message (else of its launch) and
+ * that message, `You:` before one he typed, or `launched` when none was read. A launch
+ * whose session id is known opens in place as the list's rows do; one without has no act.
+ */
+export function runningRowView(entry: RunningEntry, state: ListState, presses: Presses,
+                               { desk = true, zone = LOCAL }: { desk?: boolean; zone?: Zone } = {}): RunningRowView {
+  const key = runningKey(entry);
+  const fact = factOf(entry, zone.clock);
+  const lead = leadOf(entry);
+  const activity = entry.activity;
+  const at = lastAt(entry);
+  const said = activity?.text?.replace(/\s+/g, " ").trim() ?? "";
+  const opens = entry.session_id !== null;
+  const open = opens && state.opened.includes(key);
+  return {
+    key,
+    harness: entry.harness,
+    session: entry.session_id ?? "",
+    route: opens && isHarness(entry.harness)
+      ? routeOf({ harness: entry.harness, session: entry.session_id as string, agent: null }) : null,
+    name: entry.name,
+    where: whereText(entry.where) || null,
+    fact: fact?.text ?? null,
+    factHeavy: fact?.heavy ?? false,
+    lead,
+    leadHeavy: lead !== null,
+    time: at !== null ? timeWords(at, state.today, state.today, zone) : null,
+    saidBy: activity?.by === "you" && said !== "" ? "you" : null,
+    rest: activity === null ? LAUNCHED : said !== "" ? cutAt(said, REST_MAX) : null,
+    lines: 2,
+    act: !opens ? null : open ? "Close" : "Open",
+    open,
+    on: state.today,
+    request: entry.request_id,
+    keepWarm: keepWarmOf(entry, desk),
+    pressing: presses.waiting[entry.request_id] !== undefined,
+    note: desk ? presses.notes[entry.request_id] ?? null : null,
+  };
+}
+
+/**
+ * The running group, and the sessions it holds, which no other group then draws: each
+ * session shows once, in the running group while it runs.
+ *
+ * Nothing is drawn of it while the find field is set (its results replace every group),
+ * nor before a read of launcher came. A read that failed draws `Running` and the line
+ * that says so. A list with a filter set holds only the launches whose session the
+ * filtered list holds, and no group when none is; without one, every launch running, and
+ * `Nothing is running` when none is.
+ */
+export function runningGroup(state: ListState, read: RunningRead | null, presses: Presses = NO_PRESSES,
+                             { desk = true, zone = LOCAL }: { desk?: boolean; zone?: Zone } = {})
+  : { group: RunningGroupView | null; taken: Set<string> } {
+  const taken = new Set<string>();
+  if (read === null || state.query.find !== null) return { group: null, taken };
+  if (read.value === null) {
+    return { group: { label: RUNNING, rows: [], line: RUNNING_UNREAD, reason: read.failure }, taken };
+  }
+  const filtered = isFiltered(state.query);
+  const kept = filtered ? shownKeys(state.groups) : null;
+  const entries = ordered(read.value.sessions).filter((entry) => kept === null || kept.has(runningKey(entry)));
+  const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone }));
+  for (const row of rows) taken.add(row.key);
+  if (rows.length === 0) {
+    return { group: filtered ? null : { label: RUNNING, rows: [], line: NOTHING_RUNNING, reason: null }, taken };
+  }
+  return { group: { label: `${fmtCount(rows.length)} running`, rows, line: null, reason: null }, taken };
+}
+
+function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<string>): GroupView | null {
   const today = state.today;
   const label = groupLabel(group.key, today);
   if (group.key === "earlier") {
@@ -793,21 +908,25 @@ function groupView(group: GroupState, state: ListState, zone: Zone): GroupView |
   // The day a time in this group is taken to be of, unless it says otherwise.
   const on = /^\d{4}-\d{2}-\d{2}$/.test(group.key) ? group.key : today;
   const view = (row: ListRow): RowView => rowView(row, on, today, state.opened.includes(keyOf(row)), zone);
+  // A session the running group holds is drawn there only. It still counts as shown here,
+  // so `N more` stays the group's count less the rows read.
+  const free = (row: ListRow): boolean => !taken.has(keyOf(row));
   const program = group.program;
-  return {
+  const drawn: GroupView = {
     key: group.key,
     label,
-    rows: group.rows.map(view),
+    rows: group.rows.filter(free).map(view),
     more: moreLine(group.count, group.rows.length, group.before),
     program: program === null || program.count <= 0 ? null : {
       text: `${fmtCount(program.count)} started by a program`,
       act: program.open ? HIDE : SHOW,
       open: program.open,
-      rows: program.open ? program.rows.map(view) : [],
+      rows: program.open ? program.rows.filter(free).map(view) : [],
       more: program.open ? moreLine(program.count, program.rows.length, program.before) : null,
     },
     earlier: null,
   };
+  return drawn.rows.length === 0 && drawn.more === null && drawn.program === null && group.rows.length > 0 ? null : drawn;
 }
 
 /**
@@ -819,16 +938,28 @@ function groupView(group: GroupState, state: ListState, zone: Zone): GroupView |
  * read: with a root unread, an empty list says nothing of what is there. A list that a
  * filter or the find field leaves empty reads `No sessions match.`.
  */
-export function listView(state: ListState, { launcher = false, zone = LOCAL }: { launcher?: boolean; zone?: Zone } = {}): ListView {
-  const groups = state.groups.map((group) => groupView(group, state, zone)).filter((group): group is GroupView => group !== null);
+export function listView(state: ListState, { launcher = false, zone = LOCAL, running = null, presses = NO_PRESSES, desk = true }:
+  { launcher?: boolean; zone?: Zone; running?: RunningRead | null; presses?: Presses; desk?: boolean } = {}): ListView {
+  const shown = runningGroup(state, launcher ? running : null, presses, { desk, zone });
+  const groups = state.groups.map((group) => groupView(group, state, zone, shown.taken))
+    .filter((group): group is GroupView => group !== null);
   const notices = state.roots.map(noticeOf);
   let empty: EmptyView | null = null;
+  let group = shown.group;
   if (state.all === 0 && state.roots.length === 0) {
-    empty = { line: NO_SESSIONS, sentence: NO_SESSIONS_SENTENCE, start: launcher ? START_ONE : null };
-  } else if (groups.length === 0 && state.all > 0 && isFiltered(state.query)) {
+    // With no session on the machine, the running group stands in the empty state's place
+    // only while a launch runs.
+    if (group === null || group.rows.length === 0) {
+      empty = { line: NO_SESSIONS, sentence: NO_SESSIONS_SENTENCE, start: launcher ? START_ONE : null };
+      group = null;
+    }
+  } else if (groups.length === 0 && (group === null || group.rows.length === 0) && state.all > 0
+             && isFiltered(state.query)) {
     empty = { line: NO_MATCH, sentence: null, start: null };
+    group = null;
   }
-  return { count: countLine(state), groups: empty === null ? groups : [], empty, notices, unlisted: unlistedLine(state) };
+  return { count: countLine(state), running: group, groups: empty === null ? groups : [], empty, notices,
+           unlisted: unlistedLine(state) };
 }
 
 // -- the find field and the filter line -----------------------------------------------------
