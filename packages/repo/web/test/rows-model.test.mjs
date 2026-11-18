@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { noHooksActs, repoRow, reposView, specNews, whereLine } from "../src/rows-model.ts";
+import { noHooksActs, repoRow, reposView, specNews, unindexedRow, whereLine } from "../src/rows-model.ts";
 import { AT, event, HOME, piece, problem, record, repo, spec, T, TODAY, UTC, value } from "./fixtures.mjs";
 
 const opts = { home: HOME, today: TODAY, clock: UTC };
@@ -104,11 +104,14 @@ test("a spec's line: refused, failed, last commit, and pushed only with a remote
   assert.equal(specNews(spec({ last_commit_time: null }), TODAY, UTC), null);
 });
 
-test("acts: Refresh where an item's fix is one, Add on no hooks and not in the list", () => {
+test("acts: Refresh where an item's fix is one, Add only where it would write", () => {
   const stale = repoRow(repo({ pieces: [piece()], problems: [problem({ refresh: true })] }), opts);
   assert.equal(stale.refresh, true);
-  assert.equal(repoRow(repo(), opts).add, true);
   assert.equal(repoRow(repo({ indexed: false, pieces: [piece()] }), opts).add, true);
+  assert.equal(unindexedRow({ project: "atlas-api", root: `${HOME}/code/atlas-api` }).add, true);
+  // In the list with no hooks: Add would write nothing, so the row has none.
+  const bare = repoRow(repo({ pieces: [] }), opts);
+  assert.deepEqual([bare.fact, bare.add], ["no hooks", false]);
 });
 
 test("rows: needs by their first item, then project keys, then ~ folders, a gone repo last", () => {

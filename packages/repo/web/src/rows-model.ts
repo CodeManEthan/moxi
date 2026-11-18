@@ -30,7 +30,8 @@ export interface RowView {
   open: boolean;
   /** The row has `Refresh`: one of its items' fixes is a refresh. */
   refresh: boolean;
-  /** The row has `Add`: a repo with no piece, or one not in repo's list. */
+  /** The row has `Add`: a repo not in repo's list, which `Add` puts in it. A repo in the
+   * list with no piece has none: adding it would write nothing. */
   add: boolean;
   /** The repo's folder is gone. */
   gone: boolean;
@@ -176,7 +177,7 @@ export function repoRow(repo: RepoRow, { home = null, today = null, clock = LOCA
   return {
     key: repo.root, repo, unindexed: null, name: repoName(repo, home), where: whereLine(repo), fact, factHeavy: heavy,
     lead: news[0] ?? null, note: news.length > 1 ? news.slice(1).join(" · ") : null, open: true,
-    refresh: items.some((item) => item.fix?.refresh === true), add: fact === "no hooks" || fact === "not in the list",
+    refresh: items.some((item) => item.fix?.refresh === true), add: fact === "not in the list",
     gone, items,
   };
 }
