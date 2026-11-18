@@ -20,7 +20,7 @@ import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (T, address, group, harness, key_of, on, open_panel, own_panel, row, rows,
+from panel_kit import (T, address, copied, group, harness, key_of, on, open_panel, own_panel, row, rows,
                        small, started)
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
@@ -32,7 +32,6 @@ __all__ = ["own_panel", "small"]
 
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
 SID2 = "bbbbbbbb-2222-4222-8222-222222222222"
-CLIPBOARD = {"permissions": ["clipboard-read", "clipboard-write"]}
 NOT_RUNNING = "That session isn't running now."
 SCAN_DETAIL = ("turns' page server could not list the sessions (PermissionError); its log has "
                "the details")
@@ -96,12 +95,12 @@ def test_an_unknown_address_opens_nothing_and_says_so(panel, make_endpoint, ui_c
 def test_copy_id_copies_the_session_id_and_settings_opens_turns_settings(
         panel, make_endpoint, ui_contexts):
     first, _ = two(panel, make_endpoint)
-    page, root = open_panel(panel, ui_contexts, route=f"session/{first}", **CLIPBOARD)
+    page, root = open_panel(panel, ui_contexts, route=f"session/{first}", copying=True)
     copy = row(root, first).locator('[data-action="copy-id"]')
     expect(copy).to_have_text("Copy id")
     copy.click()
     expect(copy).to_have_text("Copied")
-    assert page.evaluate("() => navigator.clipboard.readText()") == SID
+    assert copied(page) == SID
     expect(copy).to_have_text("Copy id")
 
     root.locator('[data-action="settings"]').click()
@@ -203,7 +202,7 @@ def test_the_first_time_without_claude_code_says_none_can_show_and_how_to_fix_it
     first = own_panel("absent", small=True)
     first.listed(set(), reach="absent")
     assert first.stub.calls() == []
-    page, root = open_panel(first, ui_contexts, **CLIPBOARD)
+    page, root = open_panel(first, ui_contexts, copying=True)
     expect(root.locator("div[data-state]")).to_have_attribute("data-state", "first")
     expect(root.locator('[data-line="empty"]')).to_have_text("No session can show here yet.")
     reach = root.locator('[data-part="reach"]')
@@ -213,7 +212,7 @@ def test_the_first_time_without_claude_code_says_none_can_show_and_how_to_fix_it
     expect(reach.locator("code")).to_have_text("moxi install turns")
     reach.locator('[data-action="copy-command"]').click()
     expect(reach.locator('[data-action="copy-command"]')).to_have_text("Copied")
-    assert page.evaluate("() => navigator.clipboard.readText()") == "moxi install turns"
+    assert copied(page) == "moxi install turns"
 
 
 def test_while_a_sessions_watch_alone_is_down_its_row_keeps_its_group_and_says_so(
