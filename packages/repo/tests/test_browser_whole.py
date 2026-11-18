@@ -10,7 +10,8 @@ atlas-api, and quill-mobile, which has no hooks.
   verdict's place; a 404 draws nothing.
 - At 1280 and 400 px nothing reaches past the right edge, with every part open in turn.
 - In the light theme and the dark: no heading of the page's own, and no colour but the
-  text's and the surface's tokens, and the warning colour only in a `Turn off` block.
+  text's and the surface's tokens, and the warning colour only in a `Turn off` block: on
+  its title, its rule, its commands and their `Copy` buttons, drawn in the drawing's colour.
 """
 
 from __future__ import annotations
@@ -203,14 +204,31 @@ def test_every_part_fits_the_width(cast, page, ui_width_check, width):
 
 # --- themes -----------------------------------------------------------------------------------
 
+#: The drawing's warning colour, as the browser renders it, in each theme: ui's plain
+#: theme gives it as its danger token.
+WARNING = {"light": "rgb(176, 60, 6)", "dark": "rgb(255, 158, 107)"}
+#: The colours a `Turn off` block renders: its rule, its title, its commands, their labels
+#: and `Copy` buttons, its `Stays` line, and the page's text.
+RENDERED = """(block) => {
+  const colour = (node) => getComputedStyle(node).color;
+  const all = (selector) => [...block.querySelectorAll(selector)].map(colour);
+  const page = document.querySelector("#moxi-panel > moxi-repo-page");
+  return {rule: getComputedStyle(block).borderLeftColor, title: colour(block.querySelector(".q")),
+          commands: all("[data-line=command] code"), labels: all("[data-line=command] .lbl"),
+          copies: all("[data-line=command] [data-action=copy]"),
+          stays: colour([...block.querySelectorAll("p")].find((p) => p.textContent.startsWith("Stays"))),
+          text: colour(page)};
+}"""
+
+
 def walk(page, scheme: str) -> dict:
     """In `scheme`, each colour token the page reaches and where, with no colour reached
-    but the text's, the surface's and the warning's."""
+    but the text's, the surface's and the warning's (ui's danger token)."""
     page.emulate_media(color_scheme=scheme)
     seen = page.evaluate(f"({kit.REACHED})()")
     reached = seen["reached"]
     stray = {token: where for token, where in reached.items()
-             if token not in kit.TEXT_TOKENS and token != "warn"}
+             if token not in kit.TEXT_TOKENS and token != "danger"}
     assert not stray, f"{scheme}: colour from {stray}"
     assert {"text", "text-dim"} <= set(reached), (scheme, reached)
     return seen
@@ -226,7 +244,7 @@ def test_in_both_themes_no_heading_and_no_colour_but_text_and_turn_offs_warning(
     for scheme in ("light", "dark"):
         seen = walk(page, scheme)
         texts.add(seen["text"])
-        assert "warn" not in seen["reached"], (scheme, seen["reached"]["warn"])
+        assert "danger" not in seen["reached"], (scheme, seen["reached"]["danger"])
     assert len(texts) == 2, f"the text colour is the same in both themes: {texts}"
 
     page.emulate_media(color_scheme="light")
@@ -236,8 +254,19 @@ def test_in_both_themes_no_heading_and_no_colour_but_text_and_turn_offs_warning(
     opened.locator('[data-piece="repo/commit-rules"] [data-action=turn-off]').click()
     expect(opened.locator("[data-part=turn-off]")).to_be_visible()
     expect(panel.get_by_role("heading")).to_have_count(0)
+    block = opened.locator("[data-part=turn-off]")
     for scheme in ("light", "dark"):
-        warned = walk(page, scheme)["reached"].get("warn", [])
+        warned = walk(page, scheme)["reached"].get("danger", [])
         assert warned, f"{scheme}: the Turn off block takes no warning colour"
         assert all(where.startswith("off:") for where in warned), (scheme, warned)
-        assert any("[copy]" in where for where in warned), (scheme, warned)
+        # The colour the block renders: the drawing's warning colour on its title, its
+        # rule, both commands and both Copy buttons, and the text's on its other words.
+        drawn = block.evaluate(RENDERED)
+        warning, text = WARNING[scheme], drawn["text"]
+        assert warning != text, (scheme, drawn)
+        assert drawn["rule"] == warning, (scheme, drawn)
+        assert drawn["title"] == warning, (scheme, drawn)
+        assert drawn["commands"] == [warning, warning], (scheme, drawn)
+        assert drawn["copies"] == [warning, warning], (scheme, drawn)
+        assert drawn["labels"] == [text, text], (scheme, drawn)
+        assert drawn["stays"] == text, (scheme, drawn)

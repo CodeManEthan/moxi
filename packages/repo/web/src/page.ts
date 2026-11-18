@@ -183,12 +183,12 @@ const STYLES = css`
   .det .foot button.on { color: var(--moxi-text); }
   .det .cmds { padding: 6px 0 0 118px; }
   .det .cmds .cmd + .cmd { margin-top: 4px; }
-  /* Turn off: the one block in the warning colour, its Copy buttons too. */
-  .off { margin: 6px 0 4px; padding: 8px 0 8px 12px; border-left: 2px solid var(--moxi-warn); color: var(--moxi-warn); }
+  /* Turn off: the one block in the warning colour (ui's danger token), on its title, its
+     rule, its commands and their Copy buttons alone; its other words keep the text's. */
+  .off { margin: 6px 0 4px; padding: 8px 0 8px 12px; border-left: 2px solid var(--moxi-danger); }
   .off p + p, .off .cmd { margin-top: 4px; }
   .off .q { font-weight: 600; font-size: 14px; line-height: 20px; }
-  .off code { color: var(--moxi-warn); }
-  .off .act { color: var(--moxi-warn); }
+  .off .q, .off code, .off .act { color: var(--moxi-danger); }
   .pc { padding-top: 10px; }
   .pc .d.git { margin-left: 6px; }
   .said { padding-top: 10px; color: var(--moxi-text-dim); }
