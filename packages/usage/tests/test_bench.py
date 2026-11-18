@@ -8,6 +8,10 @@ another's opening requests (so claims have work to do), one long session whose m
 makes 6,000 requests across three compactions, and Codex rollouts, some of them imported,
 every request carrying its limits. Each file's mtime is its last line's time.
 The first pass over it is made once too; each test starts from a copy of that index.
+The corpus is removed when the module ends.
+
+Each timed test is held back by `moxi-dev check` and run by `moxi-dev timed`, and reports
+what it measured through `timed_reading`.
 """
 
 from __future__ import annotations
@@ -260,9 +264,9 @@ def build(root: Path, now: float) -> Corpus:
 
 @pytest.fixture(scope="module")
 def corpus(tmp_path_factory) -> Iterator[Corpus]:
-    """The corpus and its first pass, made once for the module. This fixture runs outside
-    the per-test fence, so it sets the environment itself, every home inside its tmp,
-    before the pass runs."""
+    """The corpus and its first pass, made once for the module and removed when it ends.
+    This fixture runs outside the per-test fence, so it sets the environment itself, every
+    home inside its tmp, before the pass runs."""
     root = tmp_path_factory.mktemp("bench")
     now = float(int(time.time() // HOUR) * HOUR)
     made = build(root, now)
@@ -290,6 +294,7 @@ def corpus(tmp_path_factory) -> Iterator[Corpus]:
           f"({result.workers} workers) {made.indexed_s:.1f} s; index.db "
           f"{made.index_bytes / 1e6:.1f} MB, readings.db {made.readings_bytes / 1e6:.1f} MB")
     yield made
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture
@@ -344,8 +349,13 @@ def test_the_index_of_the_corpus_and_its_size(bench):
     assert files == FILES
 
 
+def worst(*pairs: tuple[float, float]) -> tuple[float, float]:
+    """Of a test's (reading, budget) pairs, the one nearest its budget: what it reports."""
+    return max(pairs, key=lambda pair: pair[0] / pair[1])
+
+
 @pytest.mark.timed
-def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(bench):
+def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(bench, timed_reading):
     OPENS.roots = {str(bench.claude): 0, str(bench.codex): 0}
     OPENS.armed = True
     try:
@@ -357,12 +367,13 @@ def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(be
     taken = median_ms(lambda: _pass(bench), 5)
     print(f"\npass with nothing changed over {FILES} sources: {taken:.0f} ms; files "
           f"opened: claude {opened[str(bench.claude)]}, codex {opened[str(bench.codex)]}")
+    timed_reading(taken, 600, "ms")
     assert opened[str(bench.claude)] == 0
     assert taken < 600 * timed_slack()
 
 
 @pytest.mark.timed
-def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
+def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench, timed_reading):
     since = bench.now - 30 * DAY
 
     def daily():
@@ -381,12 +392,13 @@ def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
         conn.close()
     print(f"\n30-day daily over {requests} claimed requests: {taken:.0f} ms through "
           f"report(); {bare:.0f} ms on an open connection, {utc:.0f} ms in UTC")
+    timed_reading(taken, 300, "ms")
     assert taken < 300 * timed_slack()
 
 
 @pytest.mark.timed
 @pytest.mark.parametrize("by", reports.TERMS_BY)
-def test_a_30_day_terms_takes_under_300_ms_by_any_key(bench, by):
+def test_a_30_day_terms_takes_under_300_ms_by_any_key(bench, by, timed_reading):
     since = bench.now - 30 * DAY
     session = LONG_SESSION if by == "agent" else None   # by agent reads one session
 
@@ -397,11 +409,12 @@ def test_a_30_day_terms_takes_under_300_ms_by_any_key(bench, by):
     assert first.rows and all(row["groups"] for row in first.rows)
     taken = median_ms(terms, 7)
     print(f"\n30-day terms by {by}: {taken:.0f} ms through report(), {len(first.rows)} rows")
+    timed_reading(taken, 300, "ms")
     assert taken < 300 * timed_slack()
 
 
 @pytest.mark.timed
-def test_terms_over_all_time_by_model_takes_under_1_5_s(bench):
+def test_terms_over_all_time_by_model_takes_under_1_5_s(bench, timed_reading):
     def terms():
         return reports.report("terms", by="model", fresh=False)
 
@@ -412,11 +425,12 @@ def test_terms_over_all_time_by_model_takes_under_1_5_s(bench):
     taken = median_ms(terms, 5)
     print(f"\nterms by model over all time, {first.total['requests']} claimed requests: "
           f"{taken:.0f} ms through report()")
+    timed_reading(taken, 1500, "ms")
     assert taken < 1500 * timed_slack()
 
 
 @pytest.mark.timed
-def test_the_requests_of_an_agent_of_6000_requests_take_under_150_ms(bench):
+def test_the_requests_of_an_agent_of_6000_requests_take_under_150_ms(bench, timed_reading):
     def requests():
         return reports.report("requests", session=LONG_SESSION, fresh=False)
 
@@ -429,11 +443,12 @@ def test_the_requests_of_an_agent_of_6000_requests_take_under_150_ms(bench):
     taken = median_ms(requests, 7)
     print(f"\nrequests of one agent, {len(first.rows)} rows, {first.total['turns']} turns, "
           f"{len(first.total['marks'])} compactions: {taken:.0f} ms through report()")
+    timed_reading(taken, 150, "ms")
     assert taken < 150 * timed_slack()
 
 
 @pytest.mark.timed
-def test_the_status_over_the_corpus_takes_under_1_s(bench):
+def test_the_status_over_the_corpus_takes_under_1_s(bench, timed_reading):
     # the index pass, `moxi usage status` and the doctor all print it; a query that reads
     # every claimed row once per file takes minutes here
     first = time.perf_counter()
@@ -448,12 +463,13 @@ def test_the_status_over_the_corpus_takes_under_1_s(bench):
         conn.close()
     print(f"\nstatus over {FILES} files: {first * 1000:.0f} ms through report(); "
           f"{bare:.0f} ms on an open connection, of which the duplicates {dup:.0f} ms")
+    timed_reading(*worst((first * 1000, 1000), (bare, 1000)), "ms")
     assert first < 1 * timed_slack() and bare < 1000 * timed_slack()
 
 
 @pytest.mark.timed
 def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
-        bench, monkeypatch):
+        bench, monkeypatch, timed_reading):
     rnd = random.Random(13)
     ids = iter(range(900_000_000, 10**10))
     for t in bench.grow:
@@ -486,22 +502,43 @@ def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
     print(f"\nclaim step after a pass that read {result.read} files: {taken:.1f} ms over "
           f"{keys} keys in {len(spent)} transactions (slowest {max(spent)[0] * 1000:.1f} "
           f"ms); the whole pass {whole * 1000:.0f} ms")
+    timed_reading(taken, 50, "ms")
     assert taken < 50 * timed_slack()
+
+
+def spare_cores(cpus: int) -> int:
+    """The cores a rebuild's 4 workers can have to themselves on a machine of `cpus` CPUs:
+    half of the CPUs are cores (two threads a core), one core is left for the test's own
+    process and the machine's other work, and 4 workers use at most 4. A count, not a
+    reading of which cores are idle. Fewer than two skips the test."""
+    free = min(cpus // 2 - 1, 4)
+    if free < 2:
+        pytest.skip(f"fewer than two cores to spare by this machine's count ({cpus} CPUs)")
+    return free
+
+
+@pytest.mark.parametrize(("cpus", "free"), [(16, 4), (32, 4), (8, 3), (6, 2)])
+def test_a_rebuild_counts_one_core_less_than_the_machine_has_and_at_most_4(cpus, free):
+    assert spare_cores(cpus) == free
+
+
+def test_a_rebuild_skips_with_fewer_than_two_cores_to_spare():
+    with pytest.raises(pytest.skip.Exception, match="fewer than two cores to spare"):
+        spare_cores(4)
 
 
 @pytest.mark.timed
 def test_a_rebuild_on_4_workers_takes_under_two_over_the_cores_of_one_workers(bench,
-                                                                              monkeypatch):
-    """A 4-worker rebuild takes under `2 / min(cores, 4)` of a one-worker one, `cores`
-    being half the CPUs this process may run on: a machine's CPUs are hyperthread pairs,
-    so half of them are its cores. At 8 CPUs or more that is under half, not a quarter:
-    the workers only read, and this process writes every row and runs the claim over
-    every key alone, which takes more than a quarter of a one-worker rebuild whatever the
-    workers do. On 4 CPUs it is under one worker's time. Under 2 cores it skips. A
-    ratio of two times of one run, so no timed slack."""
-    cores = cpu_count() // 2
-    if cores < 2:
-        pytest.skip(f"a rebuild's target needs 2 cores; this machine has {cores}")
+                                                                              monkeypatch,
+                                                                              timed_reading):
+    """A 4-worker rebuild takes under `2 / free` of a one-worker one, `free` being the
+    cores the workers can have to themselves (`spare_cores`), half the CPUs this process
+    may run on less one, at most 4. With 4 that is under half, not a quarter: the workers
+    only read, and this process writes every row and runs the claim over every key alone,
+    which takes more than a quarter of a one-worker rebuild whatever the workers do. With
+    3 it is under two thirds. A ratio of two times of one run, its bound read from the
+    machine's count, so no timed slack."""
+    free = spare_cores(cpu_count())
     parent: dict[str, float] = {}
 
     def timing(name):
@@ -536,8 +573,9 @@ def test_a_rebuild_on_4_workers_takes_under_two_over_the_cores_of_one_workers(be
         parts = ", ".join(f"{k} {v:.1f} s" for k, v in sorted(spent[workers].items()))
         print(f"\nrebuild on {workers} worker(s): {taken[workers]:.1f} s; in this "
               f"process: {parts}", end="")
-    print(f"\nratio 4/1: {taken[4] / taken[1]:.2f}")
-    assert taken[4] < taken[1] * 2 / min(cores, 4)
+    print(f"\nratio 4/1: {taken[4] / taken[1]:.2f}, under {2 / free:.2f} on {free} spare cores")
+    timed_reading(taken[4] / taken[1], 2 / free, "x")
+    assert taken[4] < taken[1] * 2 / free
 
 
 def to_version_1() -> None:
@@ -565,7 +603,7 @@ def _marks() -> int:
 
 
 @pytest.mark.timed
-def test_the_first_pass_after_the_upgrade_takes_under_1_2_times_a_rebuild(bench):
+def test_the_first_pass_after_the_upgrade_takes_under_1_2_times_a_rebuild(bench, timed_reading):
     """The upgrade's pass is a rebuild that also writes the marks; both run with the
     configured workers over the same files, already in the page cache."""
     start = time.perf_counter()
@@ -583,17 +621,19 @@ def test_the_first_pass_after_the_upgrade_takes_under_1_2_times_a_rebuild(bench)
     print(f"\nrebuild ({rebuilt.workers} workers) {rebuild:.1f} s; the first pass after "
           f"the upgrade ({upgraded.workers} workers) {upgrade:.1f} s; "
           f"ratio {upgrade / rebuild:.2f}")
+    timed_reading(upgrade / rebuild, 1.2, "x")
     assert upgrade < 1.2 * rebuild
 
 
 @pytest.mark.timed
-def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
+def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench, timed_reading):
     first = time.perf_counter()
     got = limits.limits(now=bench.now, pull=False)
     first = (time.perf_counter() - first) * 1000
     assert any(row.harness == "codex" and row.state == "fresh" for row in got.rows)
     taken = median_ms(lambda: limits.limits(now=bench.now, pull=False), 7)
     print(f"\nlimits() with no pull: {taken:.1f} ms (the first call {first:.1f} ms)")
+    timed_reading(taken, 100, "ms")
     assert taken < 100 * timed_slack()
 
 
@@ -697,19 +737,25 @@ def _runs(taken: list[float]) -> str:
 
 
 @pytest.mark.timed
-def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench, tmp_path):
+def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench, tmp_path,
+                                                                          timed_reading):
     cold, lapsed = _in_new_processes("opening", tmp_path)
     print(f"\nthe page's {len(opening_reads(dt.date.today()))} opening reads sent together:"
           f" nothing kept {_runs(cold)}; after the gather's reuse {_runs(lapsed)}")
+    timed_reading(*worst((statistics.median(cold), OPENING_COLD_MS),
+                        (statistics.median(lapsed), OPENING_LAPSED_MS)), "ms", clock="child")
     assert statistics.median(cold) < OPENING_COLD_MS * timed_slack()
     assert statistics.median(lapsed) < OPENING_LAPSED_MS * timed_slack()
 
 
 @pytest.mark.timed
-def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench, tmp_path):
+def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench, tmp_path,
+                                                                        timed_reading):
     cold, lapsed = _in_new_processes("sessions", tmp_path)
     print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after the "
           f"gather's reuse {_runs(lapsed)}")
+    timed_reading(*worst((statistics.median(cold), SESSIONS_COLD_MS),
+                        (statistics.median(lapsed), SESSIONS_LAPSED_MS)), "ms", clock="child")
     assert statistics.median(cold) < SESSIONS_COLD_MS * timed_slack()
     assert statistics.median(lapsed) < SESSIONS_LAPSED_MS * timed_slack()
 
@@ -745,18 +791,22 @@ def import_ms(module: str, cwd: Path, *, before: str = "", times: int = 15) -> f
     ("moxi_usage.ceiling", 10.0),
     pytest.param("moxi_usage.guards", 10.0, marks=GUARDS_FRESH),
     ("moxi_usage.api", 15.0)])
-def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path):
+def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path,
+                                                              timed_reading):
     taken = import_ms(module, tmp_path)
     print(f"\nimport {module}: {taken:.1f} ms over a bare interpreter")
+    timed_reading(taken, budget, "ms")
     assert taken < budget * timed_slack()
 
 
 @pytest.mark.timed
-def test_importing_the_guard_declarations_beside_turns_loader_takes_under_10_ms(tmp_path):
+def test_importing_the_guard_declarations_beside_turns_loader_takes_under_10_ms(tmp_path,
+                                                                                timed_reading):
     turns = import_ms(TURNS_GUARDS, tmp_path)
     taken = import_ms("moxi_usage.guards", tmp_path, before=f"{TURNS_GUARDS}, moxi.modules")
     print(f"\nimport moxi_usage.guards: {taken:.1f} ms over an interpreter that holds "
           f"turns' guard loader and the core's modules (the loader alone {turns:.1f} ms)")
+    timed_reading(taken, 10.0, "ms")
     assert taken < 10.0 * timed_slack()
 
 
@@ -873,7 +923,7 @@ def hook(monkeypatch):
 
 
 @pytest.mark.timed
-def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
+def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook, timed_reading):
     from moxi_usage import mark, thresholds
 
     below = LongSession(last=90_000)
@@ -904,6 +954,7 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
           f"{agents:.3f} ms; floor {floor:.3f} ms below, {fired_floor:.4f} ms fired. "
           f"Of a call: last_request {read:.3f} ms, the thresholds' stamp {stamp:.3f} ms, "
           f"the selection {select:.4f} ms")
+    timed_reading(max(armed, fired, agents, floor, fired_floor), 1.0, "ms")
     assert max(armed, fired, agents, floor, fired_floor) < 1.0 * timed_slack()
 
 
@@ -912,7 +963,8 @@ LARGE_RESULT_KB = 150
 
 
 @pytest.mark.timed
-def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(hook):
+def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(hook,
+                                                                                timed_reading):
     from moxi_usage import mark
 
     large = CODE * (LARGE_RESULT_KB * 1024 // len(CODE))
@@ -924,11 +976,13 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(
     read = per_call_ms(lambda: sessions.last_request(source))
     print(f"\nwarn-at listener after a {len(large) // 1024} KB tool result: {taken:.3f} ms "
           f"a call, of which last_request {read:.3f} ms")
+    timed_reading(taken, 1.0, "ms")
     assert taken < 1.0 * timed_slack()
 
 
 @pytest.mark.timed
-def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds(hook):
+def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds(hook,
+                                                                                 timed_reading):
     from moxi_usage import mark
 
     s = LongSession(last=160_000, agent_base=20_000, agent_last=20_000)
@@ -945,12 +999,13 @@ def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds
     assert mark._sessions == {}
     print("\nwarn-at listener with both purposes off, per call: " + ", ".join(
         f"{name} {ms * 1000:.1f} us" for name, ms in times.items()))
+    timed_reading(max(times.values()), 0.01, "ms")
     assert max(times.values()) < 0.01 * timed_slack()
 
 
 @pytest.mark.timed
 def test_the_ceiling_judge_takes_under_2_ms_a_call_below_the_band_and_past_the_hard_mark(
-        hook, tmp_path):
+        hook, tmp_path, timed_reading):
     from moxi_usage import ceiling
 
     handoff = tmp_path / "handoff"
@@ -977,5 +1032,6 @@ def test_the_ceiling_judge_takes_under_2_ms_a_call_below_the_band_and_past_the_h
           f"{under:.3f} ms a call below the band, {returns:.4f} ms for a return tool; "
           f"past the hard mark {denied:.3f} ms a refused call, {allowed:.3f} ms a "
           f"hand-off write the allowlist lets through")
+    timed_reading(max(under, denied, allowed), 2.0, "ms")
     assert under < 2.0 * timed_slack()
     assert max(denied, allowed) < 2.0 * timed_slack()          # BUDGETS' hook_ms

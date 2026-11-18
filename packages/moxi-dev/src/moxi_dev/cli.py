@@ -27,6 +27,9 @@ def _parser() -> argparse.ArgumentParser:
                      help="rename [--dry-run] [ROOT]: apply the identifier rename table")
     verbs.add_parser("stamp", add_help=False,
                      help="check that each web page's build stamp matches its sources")
+    verbs.add_parser("timed", add_help=False,
+                     help="timed [show|take|schedule|unschedule]: run the timed tests on "
+                          "their own, read their record, or schedule the runs")
     return parser
 
 
@@ -43,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     if verb == "stamp":
         from moxi_dev import stamp
         return stamp.main(args[1:])
+    if verb == "timed":
+        from moxi_dev import timed
+        return timed.main(args[1:])
     if verb == "rename":
         from moxi_dev import rename
         return rename.main(args[1:])

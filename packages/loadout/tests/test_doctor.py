@@ -191,41 +191,70 @@ def test_the_doctor_gives_git_short_calls(lo, monkeypatch):
     assert seen and max(seen) <= doctor.GIT_SECONDS
 
 
-@pytest.mark.timed
-@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
-def test_the_rows_finish_inside_the_doctors_time_while_git_hangs(lo, tmp_path, monkeypatch):
+#: How long the doctor's rows may take while git hangs.
+DOCTOR_S = 8.0
+#: The land-check tests' bound, five times `DOCTOR_S`: load alone doesn't fail it, and a
+#: git call that was never cut off does, since the stand-in git sleeps twice as long.
+DOCTOR_LOOSE_S = 5 * DOCTOR_S
+SKIP_ON_WINDOWS = pytest.mark.skipif(sys.platform == "win32",
+                                     reason="the stand-in git is a shell script")
+
+
+def _rows_while_git_hangs(lo, tmp_path, monkeypatch, *, occupied: bool):
+    """The doctor's rows, by name, while git doesn't answer, and how long they took;
+    `occupied` puts the user's own folder at the skill's target first."""
+    if occupied:
+        kit.skill(kit.claude(), "review", "The user's own.\n")
     bin_dir = tmp_path / "slow-bin"
     bin_dir.mkdir()
     slow = bin_dir / "git"
-    slow.write_text("#!/bin/sh\nsleep 60\n")
+    slow.write_text("#!/bin/sh\nsleep 80\n")
     slow.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     kit.manifest(lo, '[user]\nskills = ["review"]\n')
     start = time.monotonic()
     rows = by_name(doctor.rows())
-    took = time.monotonic() - start
-    assert took < 8 * timed_slack(), took
+    return rows, time.monotonic() - start
+
+
+def _blocked_by_git(rows) -> None:
+    row = rows["harness claude"]
+    assert row.state == "warn" and "blocked" in row.detail
+    assert "git did not answer in time" in row.detail
+
+
+@SKIP_ON_WINDOWS
+def test_the_rows_finish_inside_the_doctors_time_while_git_hangs(lo, tmp_path, monkeypatch):
+    rows, took = _rows_while_git_hangs(lo, tmp_path, monkeypatch, occupied=False)
+    assert took < DOCTOR_LOOSE_S, took
     assert rows["would-commit"].state == "warn"
 
 
 @pytest.mark.timed
-@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
+@SKIP_ON_WINDOWS
+def test_the_rows_finish_inside_the_doctors_time_while_git_hangs_in_time(
+        lo, tmp_path, monkeypatch, timed_reading):
+    rows, took = _rows_while_git_hangs(lo, tmp_path, monkeypatch, occupied=False)
+    timed_reading(took, DOCTOR_S, "s")
+    assert took < DOCTOR_S * timed_slack(), took
+    assert rows["would-commit"].state == "warn"
+
+
+@SKIP_ON_WINDOWS
 def test_an_occupant_with_git_hanging_still_finishes_inside_the_doctors_time(
         lo, tmp_path, monkeypatch):
     """The core's tracked check gets the doctor's short git time too: the user's own
     folder at a target reads blocked, saying git did not answer, inside the time."""
-    kit.skill(kit.claude(), "review", "The user's own.\n")
-    bin_dir = tmp_path / "slow-bin"
-    bin_dir.mkdir()
-    slow = bin_dir / "git"
-    slow.write_text("#!/bin/sh\nsleep 60\n")
-    slow.chmod(0o755)
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    kit.manifest(lo, '[user]\nskills = ["review"]\n')
-    start = time.monotonic()
-    rows = by_name(doctor.rows())
-    took = time.monotonic() - start
-    assert took < 8 * timed_slack(), took
-    row = rows["harness claude"]
-    assert row.state == "warn" and "blocked" in row.detail
-    assert "git did not answer in time" in row.detail
+    rows, took = _rows_while_git_hangs(lo, tmp_path, monkeypatch, occupied=True)
+    assert took < DOCTOR_LOOSE_S, took
+    _blocked_by_git(rows)
+
+
+@pytest.mark.timed
+@SKIP_ON_WINDOWS
+def test_an_occupant_with_git_hanging_still_finishes_inside_the_doctors_time_in_time(
+        lo, tmp_path, monkeypatch, timed_reading):
+    rows, took = _rows_while_git_hangs(lo, tmp_path, monkeypatch, occupied=True)
+    timed_reading(took, DOCTOR_S, "s")
+    assert took < DOCTOR_S * timed_slack(), took
+    _blocked_by_git(rows)

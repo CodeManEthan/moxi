@@ -318,7 +318,7 @@ def test_timed_holds_l7():
 def timed_package(pytester):
     pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
     pytester.makeini(INI)
-    pytester.makepyfile(test_timed=TIMED)
+    pytester.makepyfile(test_timed_tiers=TIMED)
     return pytester
 
 
@@ -354,7 +354,7 @@ def test_hold_leaves_out_what_only_runs(timed_package, monkeypatch, var, value, 
     assert not everything & timed and "test_live_timed" not in everything
     assert held(out) == timed
     assert set(json.loads(out.read_text())["tests"]) == {
-        f"test_timed.py::{name}" for name in everything}
+        f"test_timed_tiers.py::{name}" for name in everything}
     monkeypatch.setenv(testing.TIMED_ENV, "only")
     monkeypatch.setenv(testing.DURATIONS_ENV, str(timed_package.path / "only.json"))
     result = timed_package.runpytest("-p", "no:cacheprovider")

@@ -527,7 +527,7 @@ def test_importing_the_judge_costs_next_to_nothing():
 
 
 @pytest.mark.timed
-def test_the_judge_below_the_warning_band_takes_under_two_milliseconds():
+def test_the_judge_below_the_warning_band_takes_under_two_milliseconds(timed_reading):
     write_config(THRESHOLDS)
     a = started()
     a.context(30_000)
@@ -537,4 +537,5 @@ def test_the_judge_below_the_warning_band_takes_under_two_milliseconds():
     for _ in range(50):
         assert ceiling.judge(call) is None
     per_call = (time.perf_counter() - t0) / 50 * 1000
+    timed_reading(per_call, 2.0, "ms")
     assert per_call < 2.0 * timed_slack(), f"{per_call:.3f} ms per call"

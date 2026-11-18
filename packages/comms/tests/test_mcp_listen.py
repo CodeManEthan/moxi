@@ -615,8 +615,18 @@ def test_a_listener_that_may_be_the_unit_is_bind_failed_and_revokes_nothing(
     assert row.state == "fail" and "no token was revoked" in row.detail
 
 
-@pytest.mark.timed
-def test_the_daemon_tries_the_bind_for_five_seconds_before_bind_failed(serving, sessions):
+#: How long the daemon tries the bind, in seconds: a lower bound, which is behaviour.
+BIND_TRIES_S = 5.0
+#: How long the start may take with the port held, in seconds.
+BIND_FAILED_S = 7.0
+#: The land-check test's bound is five times the timed one, so load alone doesn't fail
+#: it (the port is held for the whole call).
+BIND_LOOSE = 5
+
+
+def _start_with_the_port_held(serving, sessions) -> float:
+    """Start a daemon on a port another socket holds, check it says `bind-failed` and
+    revokes no token, and return how long the start took."""
     serving()
     s = sessions()
     s.bind()
@@ -625,8 +635,22 @@ def test_the_daemon_tries_the_bind_for_five_seconds_before_bind_failed(serving, 
         serving(port=held.getsockname()[1])
         took = time.monotonic() - began
         assert endpoint()["why"] == "bind-failed"
-    assert 5.0 <= took < 7.0 * timed_slack()
     assert [r["revoked_at"] for r in rows()] == [None]
+    return took
+
+
+def test_the_daemon_tries_the_bind_for_five_seconds_before_bind_failed(serving, sessions):
+    took = _start_with_the_port_held(serving, sessions)
+    assert BIND_TRIES_S <= took < BIND_LOOSE * BIND_FAILED_S, took
+
+
+@pytest.mark.timed
+def test_the_daemon_tries_the_bind_for_five_seconds_before_bind_failed_in_time(
+        serving, sessions, timed_reading):
+    """As above, with the start under 7 s."""
+    took = _start_with_the_port_held(serving, sessions)
+    timed_reading(took, BIND_FAILED_S, "s")
+    assert BIND_TRIES_S <= took < BIND_FAILED_S * timed_slack(), took
 
 
 @pytest.mark.skipif(not LINUX, reason="reads the kernel's TCP table for TIME_WAIT")

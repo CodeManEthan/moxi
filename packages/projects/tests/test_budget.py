@@ -73,7 +73,8 @@ def _fastest_ms(reads: str, floor: str, env: dict) -> tuple[float, float]:
 
 @pytest.mark.slow
 @pytest.mark.timed
-def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_path):
+def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_path,
+                                                              timed_reading):
     site = tmp_path / "site"
     (site / "moxi_hookcost").mkdir(parents=True)
     (site / "moxi_hookcost" / "__init__.py").write_text("")
@@ -93,4 +94,5 @@ def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_
     ms = read_ms - floor_ms
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else float("nan")
     print(f"\nprojects' part of the hook path: {ms:.1f} ms at load average {load:.2f}")
+    timed_reading(ms, BUDGET_MS, "ms")
     assert ms < BUDGET_MS * timed_slack()
