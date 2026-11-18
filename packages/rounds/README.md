@@ -109,7 +109,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
 | `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
-| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Last, it removes from the remote CI's own refs the build pushed (see `ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
+| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
@@ -678,8 +678,9 @@ and one git can't read, is the operator's. `show` and `list --waiting` name, for
 build to look at, who drops it and the command. The drop records the branch's tip and
 deletes no branch, so the work can be commissioned again. The build's worktree and
 scratch folder are removed under the removal rule below, and one it keeps is named.
-CI's own refs on the remote that each ended build pushed are removed too, as at a
-finish (see `ref` under Config). No question or hold changes, and the stage stays owed.
+CI's own refs on the remote of each ended build are removed too, as at a finish (see
+`ref` and `full_ref` under Config). No question or hold changes, and the stage stays
+owed.
 
 **The removal rule.** rounds removes a build's folder only when both halves hold, read
 as it removes. Ownership: the build was made on this machine; the folder is at the place
@@ -829,7 +830,7 @@ the tip, with a short local run of what CI can't do, stands in for the full chec
 check = { command = "make check", timeout_s = 3600 }
 ci = { workflows = [{ path = ".github/workflows/ci.yml", jobs = ["linux", "web"] },
                     ".github/workflows/lint.yml"],
-       remote = "origin", ref = "ci/{branch}",
+       remote = "origin", ref = "ci/{branch}", full_ref = "ci-full/{branch}",
        local = { command = "./scripts/check-local", timeout_s = 900 } }
 ```
 
@@ -859,11 +860,30 @@ recorded; fix a hit in your own commits and check again, and give any other to y
 lead. Where `ref` was never set, nothing is removed; once it was, the refs a build's
 records name are still removed at its end after `ref` is changed or unset.
 
+`full_ref`, which needs `ref`, is a second template under `ref`'s rules, for a ref of a
+build's branch that someone else pushes, such as a run on more systems that a lead
+starts by hand. Its prefix and `ref`'s may not start with each other (`ci/` and
+`ci-full/` don't), so each ref name belongs to one template. `check` never pushes the
+name `full_ref` gives, and nothing else in rounds does. Rounds can't stop anyone else
+pushing it, though: who may push under that prefix is your remote's rule and your push
+guard's, so where a builder is told not to, its brief is what holds it. Past the push,
+the name `full_ref` gives is CI's own as `ref`'s is: a build's end removes the name
+each template gives its branch now, besides the refs its records name, so a hand push
+for a build goes when the build ends; the keep rule keeps the name either template
+gives the branch of a build that has not ended, or a target (with `into` unset too, so
+`ci-full/main` stays as `ci/main` does); and `drop --leftovers --refs` lists the
+branches under both prefixes. Two things follow from how CI runs and how rounds reads
+it. CI runs the workflow file of the commit pushed, so a push under `full_ref` runs
+what that commit's workflow gives the prefix: a commit cut before the workflow named
+it runs as any other branch does. And rounds reads a commit's runs, not a branch's: a
+run at a build's tip from a push under `full_ref` is read like any run at that tip,
+and when it is the newest run of a workflow named there, it is the reading.
+
 Some refs no account names, and you remove them by hand (`git push <remote> --delete
-refs/heads/<name>`) if you find them. The sweep lists only the prefix `ref` gives now,
-and lists nothing for a project with no `ref`, so a push that went out unrecorded (the
-check stopped, or its read failed) under a prefix `ref` no longer gives is never listed
-and never removed. And the keep rule reads the builds of the project key itself, in the
+refs/heads/<name>`) if you find them. The sweep lists only the prefixes `ref` and
+`full_ref` give now, and lists nothing for a project with no `ref`, so a push that went
+out unrecorded (the check stopped, its read failed, or it was a hand push) under a prefix
+neither gives any more is never listed and never removed. And the keep rule reads the builds of the project key itself, in the
 rounds folders it can find: an open build in a project whose rounds folder can't be
 worked out, or under another project key whose remote is the same repository, is not
 seen, so its ref is not kept for it.
@@ -878,8 +898,9 @@ with no run at the tip each job it names reads `absent`. The check step is done 
 every workflow reads green there, the workflows and jobs named are the ones the setting
 names now, and the local run passed at the tip with the command it declares now. The
 full check, run with `check --full`, meets the step whatever CI reads. A `ci` in a
-project with no `check` is refused, and so is a `ref` that is not one prefix then
-`{branch}`. `defaults.ratify` (and a project's `ratify`) picks what a round's
+project with no `check` is refused, and so is a `ref` or `full_ref` that is not one
+prefix then `{branch}`, a `full_ref` with no `ref`, and two whose prefixes start with
+each other. `defaults.ratify` (and a project's `ratify`) picks what a round's
 ratification view puts to the operator. It also takes
 `defaults.check_on` (`merged`: a build's tip must hold the target to finish; `tip`:
 only where CI alone met the check), `defaults.slice_minutes` (45: over it, `fold` and
