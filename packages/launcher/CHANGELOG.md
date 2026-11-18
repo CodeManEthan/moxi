@@ -10,9 +10,10 @@
 - Home's `+` has `Handoff from a file`, where the harness's form has the `handoff` row.
   The handoff a launch sends, set there or named by `[defaults]` or the applied preset,
   shows on a line under the box with `Clear`; a cleared one is sent as left out, so no
-  layer gives it, until a preset is picked or picked again, when that preset's handoff, or
-  the defaults', shows and is sent. One set through the `+` stays over a preset change, as
-  a brief file does. Home used to leave out every handoff. A handoff alone, with an empty
+  layer gives it, for the next launch only: once that launch starts, or a preset is picked
+  or picked again, the preset's handoff, or the defaults', shows and is sent again. One set
+  through the `+` stays over a preset change and goes after the launch that sent it, as a
+  brief file does. Home used to leave out every handoff. A handoff alone, with an empty
   box, is a headless launch's first turn.
 - Three more Claude Code screens are on the startup list with no setting, so a slot launch
   held on one fails at once, `screen-not-answered`, naming the screen: the first-run

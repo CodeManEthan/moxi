@@ -610,33 +610,39 @@ test("a handoff the defaults or a preset fill is sent unless cleared, and a clea
   }
 });
 
-test("a Clear holds until the next preset, whose handoff then shows and is sent; a launch keeps it cleared", () => {
+test("a Clear covers the one launch it was made for; after it, or a preset change, the form's handoff shows and is sent", () => {
   const filled = (path) => [...FORM_FIELDS, field("handoff", { type: "path", value: path })];
   const alpha = filled("/home/alice/handoffs/alpha.md");
   const beta = filled("/home/alice/handoffs/beta.md");
-  // Cleared over alpha's handoff: none shown, the row left out.
+  const setOf = (held) => (held === null ? SET : { ...SET, handoff: held });
+  // Cleared over alpha's handoff: none shown, and the launch it was made for leaves it out.
   let held = "";
-  assert.equal(handoffOf(alpha, { handoff: held }), null);
-  // A launch with nothing set through the + sent nothing of it, so the Clear stays.
-  held = handoffAtLaunch(held, null);
-  assert.equal(held, "");
-  const again = launchRequest(alpha, null, { ...SET, handoff: held }, SLOT_2);
-  assert.equal("handoff" in again.values, false);
-  assert.equal(again.leave_out.includes("handoff"), true);
-  // Another preset picked, or the same picked again: its handoff shows and is sent.
-  held = handoffAtPreset(held);
+  assert.equal(handoffOf(alpha, setOf(held)), null);
+  const cleared = launchRequest(alpha, null, setOf(held), SLOT_2);
+  assert.equal("handoff" in cleared.values, false);
+  assert.equal(cleared.leave_out.includes("handoff"), true);
+  // That launch started with the Clear: it is let go, so the next launch shows and sends
+  // alpha's handoff.
+  held = handoffAtLaunch(held, "");
   assert.equal(held, null);
-  const set = held === null ? SET : { ...SET, handoff: held };
-  assert.equal(handoffOf(beta, set), "/home/alice/handoffs/beta.md");
-  assert.equal(launchRequest(beta, null, set, SLOT_2).values.handoff, "/home/alice/handoffs/beta.md");
-  assert.equal(handoffOf(alpha, set), "/home/alice/handoffs/alpha.md");
+  assert.equal(handoffOf(alpha, setOf(held)), "/home/alice/handoffs/alpha.md");
+  assert.equal(launchRequest(alpha, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/alpha.md");
+  // A Clear made after the press is for the next launch, so the one in flight keeps it.
+  assert.equal(handoffAtLaunch("", null), "");
+  assert.equal(handoffAtLaunch("", "/srv/mine.md"), "");
+  // Cleared, then another preset picked, or the same picked again: its handoff shows and is sent.
+  held = handoffAtPreset("");
+  assert.equal(held, null);
+  assert.equal(handoffOf(beta, setOf(held)), "/home/alice/handoffs/beta.md");
+  assert.equal(launchRequest(beta, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/beta.md");
   // One set through the + stays over a preset change, as a brief file does, and goes after a
   // launch that sent it, unless it was changed since.
   assert.equal(handoffAtPreset("/srv/mine.md"), "/srv/mine.md");
-  assert.equal(launchRequest(beta, null, { ...SET, handoff: handoffAtPreset("/srv/mine.md") }, SLOT_2).values.handoff,
+  assert.equal(launchRequest(beta, null, setOf(handoffAtPreset("/srv/mine.md")), SLOT_2).values.handoff,
                "/srv/mine.md");
   assert.equal(handoffAtLaunch("/srv/mine.md", "/srv/mine.md"), null);
   assert.equal(handoffAtLaunch("/srv/other.md", "/srv/mine.md"), "/srv/other.md");
+  assert.equal(handoffAtLaunch(null, null), null);
   assert.equal(handoffAtPreset(null), null);
 });
 

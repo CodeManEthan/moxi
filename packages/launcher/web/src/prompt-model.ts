@@ -575,9 +575,10 @@ export function handoffAtPreset(handoff: string | null): string | null {
 }
 
 /**
- * The handoff the piece holds once a launch started: one set through the `+` and sent with
- * the press (`sent`) is let go, unless it was changed since, so the form's own shows again.
- * A cleared one stays cleared until the next preset.
+ * The handoff the piece holds once a launch started, given the one it held at the press
+ * (`sent`): one set through the `+`, or a Clear ("") made for that launch, is let go, unless
+ * it was changed since, so the form's own shows again and goes with the next launch. A
+ * Clear covers the one launch it was made for.
  */
 export function handoffAtLaunch(handoff: string | null, sent: string | null): string | null {
   return sent !== null && handoff === sent ? null : handoff;

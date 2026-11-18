@@ -467,9 +467,10 @@ whatever `[defaults]` or the preset sets for `target` and `slot`; every other ro
 filled from the preset and `[defaults]` as the page's form is. The first turn is what
 Home shows: the text in the box, and a handoff on its line under the box. A brief your
 `[defaults]` or the preset set does not go with a launch from the box; a handoff they
-name shows on that line, with `Clear`, and goes with the launch unless you clear it; a
-cleared one stays off, over launches, until you pick a preset, whose handoff then shows.
-A handoff from the `+` stays when you pick a preset. An empty box with no handoff starts
+name shows on that line, with `Clear`, and goes with the launch unless you clear it. A
+`Clear` covers the next launch only: once it starts, or you pick a preset, the handoff
+shows again and goes. A handoff from the `+` stays when you pick a preset and goes after
+the launch that sent it, as a brief file does. An empty box with no handoff starts
 a session with no first turn. The `+` beside the chip takes a brief from a file instead,
 which turns the box off while it is set, takes a handoff from a file, and offers to
 continue your last session in the place on the line; with `Scratch` on the line there is

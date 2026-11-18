@@ -110,11 +110,12 @@
 // launch that starts with it lets go of it, as it empties the box. `Handoff from a file`,
 // where the form has the row, opens a field for a handoff's path. The handoff the launch
 // sends, whether set there or filled by the user's defaults or the applied preset, is named
-// on a dim line under the box, home written `~`, with `Clear`, which sends none until a
-// preset is picked or applied, when the preset's or the defaults' handoff shows again; the
-// box stays on, since a launch's first turn may hold a brief and a handoff. A launch that
-// starts with a handoff set there lets go of it, so the form's own shows again; a preset
-// leaves it set, as it leaves a brief file. `Continue the last session` is offered when the
+// on a dim line under the box, home written `~`, with `Clear`, which sends none with the next
+// launch from the box; once that launch starts, or a preset is picked or applied, the
+// preset's or the defaults' handoff shows again and is sent. The box stays on, since a
+// launch's first turn may hold a brief and a handoff. A launch that starts with a handoff
+// set there lets go of it, so the form's own shows again; a preset leaves it set, as it
+// leaves a brief file. `Continue the last session` is offered when the
 // menu's read of `/api/sessions`, made each time it opens, holds a session of the line's
 // place that he made and can resume now; its dim line says whether it resumes in a slot or
 // copies the resume command. A click resumes it at once through `/api/resume`, with the lines
@@ -542,7 +543,8 @@ export class LauncherPrompt extends LitElement {
   #actor = "";
   /** The brief file sent with the press; null when none was. */
   #sentFile: string | null = null;
-  /** The handoff set through the `+` that was sent with the press; null when none was. */
+  /** The handoff the piece held at the press: one set through the `+`, or "" for one cleared;
+   * null when it followed the form's fill. */
   #sentHandoff: string | null = null;
   #nameAsked = 0;
   /** The query the latest read of the name was for; null to read it again at the next update. */
@@ -1932,7 +1934,7 @@ export class LauncherPrompt extends LitElement {
     // A brief file is the first turn in place of the box's text, which then stays.
     this.#sentFile = this.briefFile === "" ? null : this.briefFile;
     this.#sent = this.#sentFile === null ? this.brief : null;
-    this.#sentHandoff = this.handoff === "" ? null : this.handoff;
+    this.#sentHandoff = this.handoff;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
     this.flight = PRESSED;
@@ -2005,9 +2007,10 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, lets go of the brief file and the handoff set
-   * through the `+` it was launched with, unless one was changed since, and lets go of each value that can do harm it was
-   * launched with, unless its row was changed since the press. */
+   * its text was changed since the press, lets go of the brief file and of the handoff set
+   * or cleared it was launched with, unless one was changed since, so the form's handoff
+   * shows again, and lets go of each value that can do harm it was launched with, unless its
+   * row was changed since the press. */
   #landed(next: Flight): void {
     if (next === this.flight) return;
     this.flight = next;

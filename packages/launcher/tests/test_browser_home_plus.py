@@ -258,7 +258,7 @@ def launch(page, piece, shell, brief: str) -> tuple[dict, object]:
     return json.loads(sent.value.post_data), kit.newest_launch(shell)
 
 
-def test_a_clear_holds_over_launches_until_a_preset_is_picked_whose_handoff_then_shows_and_goes(
+def test_a_clear_covers_one_launch_and_the_next_launch_or_preset_shows_and_sends_its_handoff(
         page, shell, work_dir):
     alpha, beta, mine = (work_dir / f"{name}-handoff.md" for name in ("alpha", "beta", "mine"))
     for path in (alpha, beta, mine):
@@ -275,15 +275,19 @@ def test_a_clear_holds_over_launches_until_a_preset_is_picked_whose_handoff_then
         piece.locator(".go:not([disabled])").wait_for()
         line.get_by_role("button", name="Clear the handoff").click()
         expect(line).to_have_count(0)
-        # Cleared, then launched with no preset change: it stays cleared, for this launch and
-        # the next.
-        for brief in ("first", "second"):
-            body, row = launch(page, piece, shell, brief)
-            assert body["seat"] == "alpha", body
-            assert "handoff" not in body["values"] and "handoff" in body["leave_out"], body
-            assert row.handoff_path is None, row
-            expect(line).to_have_count(0)
-        # Another preset picked: its handoff shows and is sent.
+        # Cleared, then launched: that launch sends none.
+        body, row = launch(page, piece, shell, "first")
+        assert body["seat"] == "alpha", body
+        assert "handoff" not in body["values"] and "handoff" in body["leave_out"], body
+        assert row.handoff_path is None, row
+        # The Clear went with that launch: alpha's handoff shows again and the next launch sends it.
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
+        body, row = launch(page, piece, shell, "second")
+        assert (body["seat"], body["values"]["handoff"]) == ("alpha", str(alpha)), body
+        assert row.handoff_path == str(alpha), row
+        # Cleared, then another preset picked: its handoff shows and is sent.
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
         pick_seat(piece, "beta")
         expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/beta-handoff.md")
         body, row = launch(page, piece, shell, "third")
@@ -304,5 +308,10 @@ def test_a_clear_holds_over_launches_until_a_preset_is_picked_whose_handoff_then
         pick_seat(piece, "alpha")
         expect(piece.locator('.where [data-item="preset"] > button')).to_contain_text("alpha")
         expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/mine-handoff.md")
+        # It goes with the next launch and is then let go, so the preset's shows again.
+        body, row = launch(page, piece, shell, "fourth")
+        assert (body["seat"], body["values"]["handoff"]) == ("alpha", str(mine)), body
+        assert row.handoff_path == str(mine), row
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
     finally:
         file.unlink()
