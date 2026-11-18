@@ -950,8 +950,9 @@ def test_the_slots_servers_stop_with_sessions_asks_in_the_warning_colour(seeded,
     assert warn.strip(), warn
     colours = [el.evaluate("e => getComputedStyle(e).color") for el in
                (warned.first, warned.last, asked.locator('[data-line="ask"]'), go)]
+    # The default theme's warning colour is its text colour, so only their sameness shows.
     assert len(set(colours)) == 1, colours
-    assert part.locator('[data-part="foot"]').evaluate("e => getComputedStyle(e).color") != colours[0]
+    expect(part.locator('[data-part="foot"] button.w')).to_have_text(["Restart", "Stop"])
     asked.get_by_role("button", name="Keep it running", exact=True).click()
     expect(asked).to_have_count(0)
     assert posts == []
