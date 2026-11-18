@@ -266,12 +266,17 @@ def test_a_health_pass_due_while_a_gather_runs_is_run_at_the_next_tick_that_gath
 def test_the_health_pass_runs_each_check_under_services_own_limit_a_few_at_a_time(
         monkeypatch):
     seen = {}
-    real = pagehandlers.verdict.views
+    real_read, real_views = pagehandlers.verdict.read, pagehandlers.verdict.views
+
+    def read(found, **kwargs):
+        seen.update(kwargs)
+        return real_read(found, **kwargs)
 
     def views(found, **kwargs):
-        seen.update(kwargs)
-        return real(found, **kwargs)
+        seen.update({k: v for k, v in kwargs.items() if k != "reading"})
+        return real_views(found, **kwargs)
 
+    monkeypatch.setattr(pagehandlers.verdict, "read", read)
     monkeypatch.setattr(pagehandlers.verdict, "views", views)
     pagehandlers.gather(check_health=True)
     assert seen == {"check_health": True, "status_seconds": pagehandlers.STATUS_SECONDS,
