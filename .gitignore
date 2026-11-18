@@ -3,3 +3,4 @@ dist/
 __pycache__/
 .moxi-dev/
 node_modules/
+/.moxi-dev-stamp.json

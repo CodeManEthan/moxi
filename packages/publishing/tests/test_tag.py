@@ -109,6 +109,20 @@ def test_the_push_piece_refuses_a_release_shaped_tag_that_names_no_member(
     assert done.returncode != 0 and "names no member and version" in done.stderr
 
 
+def test_a_release_tag_goes_alone_in_its_push(released_repo, names, served):
+    public_repo(released_repo, "publishing/push", sets=("main=main",
+                                                       "free-ref=refs/tags/docs/*"))
+    for name in ("proj-a-v0.1.0", "proj-a-extra-v0.2.0"):
+        git(released_repo, "tag", "-a", "-m", name, name)
+    git(released_repo, "tag", "docs/one")
+    for pair in (("proj-a-v0.1.0", "proj-a-extra-v0.2.0"), ("proj-a-v0.1.0", "docs/one")):
+        done = push(released_repo, "origin", *pair)
+        assert done.returncode != 0 and "the push creates 2 tags" in done.stderr, done.stderr
+    for name in ("proj-a-v0.1.0", "proj-a-extra-v0.2.0", "docs/one"):
+        done = push(released_repo, "origin", name)
+        assert done.returncode == 0, done.stderr
+
+
 def test_ci_notes_prints_the_section(released_repo, monkeypatch, capsys):
     git(released_repo, "tag", "-a", "-m", "x", "proj-a-v0.1.0")
     monkeypatch.chdir(released_repo)

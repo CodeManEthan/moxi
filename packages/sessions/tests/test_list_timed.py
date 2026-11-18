@@ -1,16 +1,20 @@
 """The list's time targets, over roots written with the builders: 5,000 Claude Code
 sessions, and eight long ones that grow between two lists. `slow` tests: a plain pytest
 run leaves them out; `pytest -m slow` runs them. They are also `timed`, so `moxi-dev
-check` runs them alone, after its parallel pass.
+check` holds them back and `moxi-dev timed` runs them.
 
-Each test prints what it measured, so `pytest -m slow -s` shows the numbers.
+Each test prints what it measured, so `pytest -m slow -s` shows the numbers, and reports
+it through `timed_reading`. The 5,000 sessions' root is written once for the module and
+removed when the module ends.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import os
+import shutil
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -89,10 +93,11 @@ def seed_root(home: Path, now: float, *, sessions: int = SESSIONS, late: int = L
 
 
 @pytest.fixture(scope="module")
-def big_home(tmp_path_factory) -> Path:
+def big_home(tmp_path_factory) -> Iterator[Path]:
     home = tmp_path_factory.mktemp("big")
     seed_root(home, time.time())
-    return home
+    yield home
+    shutil.rmtree(home, ignore_errors=True)
 
 
 class Clock:
@@ -104,7 +109,8 @@ class Clock:
 
 
 def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
-                                                                      monkeypatch):
+                                                                      monkeypatch,
+                                                                      timed_reading):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(big_home / "claude-home"))
     monkeypatch.setenv("CODEX_HOME", str(big_home / "codex-home"))
     monkeypatch.setenv("XDG_DATA_HOME", str(big_home / "data"))
@@ -127,6 +133,7 @@ def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
           f"for a prompt); again after the reuse lapsed {again_s * 1000:.0f} ms "
           f"({cat.head_reads - heads} heads, {cat.tail_reads - tails} last turns, "
           f"{cat.prompt_reads - prompts} sessions read through)")
+    timed_reading(*max((cold_s, 3.0), (again_s, 1.0), key=lambda pair: pair[0] / pair[1]), "s")
     assert cold["all"] == cold["total"] == SESSIONS
     assert [g["key"] for g in cold["groups"]][0] == "recent"
     assert cold["groups"][0]["count"] == 10
@@ -173,7 +180,7 @@ def working_lines(t: ClaudeTranscript, size: int, rng) -> bytes:
 
 
 def test_eight_long_sessions_that_grew_are_listed_in_1_s_from_their_new_bytes(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, timed_reading):
     import random
     rng = random.Random(16)
     now = time.time()
@@ -229,6 +236,7 @@ def test_eight_long_sessions_that_grew_are_listed_in_1_s_from_their_new_bytes(
           f"({cat.prompt_reads - LONG} read for a prompt, {cat.prompt_whole - LONG} of "
           f"them whole, {(cat.prompt_bytes - sum(sizes)) / 1024:.0f} KiB read through, "
           f"{cat.tail_reads - tails} last turns)")
+    timed_reading(again_s, 1.0, "s")
     assert [row["prompt"] for row in again["groups"][0]["rows"]] == [None] * LONG
     assert cat.tail_reads - tails == LONG            # every one of them had changed
     assert cat.prompt_reads == 2 * LONG

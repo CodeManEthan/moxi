@@ -46,6 +46,11 @@ notes = "moxi_notes.listeners"
 [project.scripts]
 moxi-notes-snapshot = "moxi_notes.snapshot:main"
 
+# notes' guard for turns: the home-paths guard, which tells an agent its note spells the
+# home folder or the login.
+[project.entry-points."moxi.turns.guards"]
+notes = "moxi_notes.guards"
+
 # The secret gates, which repo's git hook runner calls in the notes repo.
 [project.entry-points."moxi.repo.git_hooks"]
 "notes.secret-gate" = "moxi_notes.gitpieces:SECRET_GATE"
@@ -74,7 +79,7 @@ only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
 # changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
 # `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1). Mark a test that asserts
-# a wall-clock budget `timed`: the check runs it alone, after the parallel pass.
+# a wall-clock budget `timed`: the check holds it back, and `moxi-dev timed` runs it.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not browser and not slow and not build and not live'"

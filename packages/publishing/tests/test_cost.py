@@ -12,7 +12,8 @@ times its value so a slower runner does not flake.
 Each is timed in a fresh interpreter (`cost_driver.py`), as a git hook runs, so a piece's
 time takes in its first-use loads. The trees are generated here from a seeded generator:
 code-shaped lines that hold nothing a scan refuses. Run with `pytest -m slow
-tests/test_cost.py`; `-s` shows the numbers.
+tests/test_cost.py`; `-s` shows the numbers. The generated tree is removed when the
+module's tests end.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import importlib.util
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -86,9 +88,12 @@ def best(cwd: Path, *args: str, runs: int = 3) -> dict:
     return min(results, key=lambda result: result["s"])
 
 
-def within(name: str, took: float, budget: float) -> None:
+def within(timed_reading, name: str, took: float, budget: float) -> None:
+    """Report a piece's time, which its child measured, and hold it under the budget at
+    `SLACK` times the run's `timed_slack()`."""
     print(f"{name}: {took * 1000:.1f} ms (budget {budget * 1000:.0f} ms, held at "
           f"{budget * SLACK * timed_slack() * 1000:.0f} ms)")
+    timed_reading(took, budget * SLACK, "s", clock="child")
     assert took < budget * SLACK * timed_slack(), (name, took, budget)
 
 
@@ -103,14 +108,14 @@ def flagged(repo, names):
 @pytest.mark.timed
 @pytest.mark.parametrize("module", ["moxi_publishing.message", "moxi_publishing.content",
                                     "moxi_publishing.push"])
-def test_a_piece_module_imports_within_budget_without_secrets(repo, module):
+def test_a_piece_module_imports_within_budget_without_secrets(repo, module, timed_reading):
     result = best(repo, "import", module)
     assert not result["secrets_loaded"], module
-    within(f"import {module}", result["s"], IMPORT_BUDGET_S)
+    within(timed_reading, f"import {module}", result["s"], IMPORT_BUDGET_S)
 
 
 @pytest.mark.timed
-def test_the_message_piece_judges_4_kb_within_budget(flagged):
+def test_the_message_piece_judges_4_kb_within_budget(flagged, timed_reading):
     rng = random.Random(11)
     body = text_of(rng, 4000).replace("#", "-")
     message = flagged / ".git" / "COMMIT_EDITMSG"
@@ -119,11 +124,11 @@ def test_the_message_piece_judges_4_kb_within_budget(flagged):
     assert 4000 <= message.stat().st_size < 4400
     result = best(flagged, "message", str(message))
     assert result["kind"] == "ok", result
-    within("message piece, 4 KB", result["s"], MESSAGE_BUDGET_S)
+    within(timed_reading, "message piece, 4 KB", result["s"], MESSAGE_BUDGET_S)
 
 
 @pytest.mark.timed
-def test_the_content_piece_judges_1000_lines_within_budget(flagged):
+def test_the_content_piece_judges_1000_lines_within_budget(flagged, timed_reading):
     rng = random.Random(12)
     lines = code_lines(rng)
     for n in range(10):
@@ -135,11 +140,11 @@ def test_the_content_piece_judges_1000_lines_within_budget(flagged):
     assert sum(int(row.split("\t")[0]) for row in added if row) == 1000
     result = best(flagged, "content")
     assert result["kind"] == "ok", result
-    within("content piece, 1,000 lines", result["s"], CONTENT_BUDGET_S)
+    within(timed_reading, "content piece, 1,000 lines", result["s"], CONTENT_BUDGET_S)
 
 
 @pytest.mark.timed
-def test_the_push_piece_judges_50_commits_within_budget(flagged, remote):
+def test_the_push_piece_judges_50_commits_within_budget(flagged, remote, timed_reading):
     rng = random.Random(13)
     lines = code_lines(rng)
     base = git(flagged, "rev-parse", "HEAD").stdout.strip()
@@ -155,16 +160,15 @@ def test_the_push_piece_judges_50_commits_within_budget(flagged, remote):
     line = f"refs/heads/main {tip} refs/heads/main {base}"
     result = best(flagged, "push", "origin", str(remote), line)
     assert result["kind"] == "ok", result
-    within("push piece, 50 commits", result["s"], PUSH_BUDGET_S)
+    within(timed_reading, "push piece, 50 commits", result["s"], PUSH_BUDGET_S)
 
 
 @pytest.fixture(scope="module")
 def generated_tree(tmp_path_factory, template):
     """A repo whose one commit holds a generated 4.2 MB tree: about 1,300 files in nested
-    folders, like a source repo's."""
-    import shutil
-
-    where = tmp_path_factory.mktemp("tree") / "proj-b"
+    folders, like a source repo's. The tree is removed when the module's tests end."""
+    tree_dir = tmp_path_factory.mktemp("tree")
+    where = tree_dir / "proj-b"
     shutil.copytree(template, where, symlinks=True)
     rng = random.Random(14)
     total = 0
@@ -181,12 +185,14 @@ def generated_tree(tmp_path_factory, template):
            "GIT_CONFIG_NOSYSTEM": "1"}
     git(where, "add", "-A", env=env)
     git(where, "commit", "-q", "--no-verify", "-m", "Generated tree", env=env)
-    return where
+    yield where
+    shutil.rmtree(tree_dir)
 
 
 @pytest.mark.timed
 @pytest.mark.parametrize("ci", [False, True], ids=["local", "ci"])
-def test_scan_of_a_4_mb_tree_within_budget(generated_tree, names, gitenv, ci):
+def test_scan_of_a_4_mb_tree_within_budget(generated_tree, names, gitenv, ci,
+                                           timed_reading):
     if not re2_installed():
         pytest.skip("the scan's budget is set on RE2, which isn't installed here")
     tracked = git(generated_tree, "ls-files", "-z").stdout.split("\0")
@@ -194,5 +200,5 @@ def test_scan_of_a_4_mb_tree_within_budget(generated_tree, names, gitenv, ci):
     assert SCAN_TREE_BYTES <= size < SCAN_TREE_BYTES * 1.01
     result = best(generated_tree, "scan", *(("--ci",) if ci else ()), runs=2)
     assert result["hits"] == 0, result
-    within(f"scan{' --ci' if ci else ''} of {size / 1e6:.1f} MB", result["s"],
-           SCAN_BUDGET_S)
+    within(timed_reading, f"scan{' --ci' if ci else ''} of {size / 1e6:.1f} MB",
+           result["s"], SCAN_BUDGET_S)
