@@ -141,7 +141,9 @@ project lists every service filed under it in a `Services` row, first while one 
 - **Acts.** Start, stop and restart for a daemon, run now and run again for a timer,
   enable and disable, and remove for a row you added. Each opens the shell's confirm
   sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent
-  session says on its sheet that it spends usage.
+  session says on its sheet that it spends usage. The page doesn't turn one of Moxi's
+  own rows on or off: that is the module's setting, under `Settings › <module>`, and
+  `moxi services enable` and `disable` still do it in a terminal.
 - **Stopping slots' server.** With `moxi-slots` installed (the `slots` extra), stopping
   or restarting slots' server ends every session, open slot and job in its slots. Before
   either, the page server reads through slots' API what is in use there. With nothing in

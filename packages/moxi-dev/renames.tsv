@@ -11567,6 +11567,7 @@ services	packages/services/src/moxi_services/page.py	"refused": _MAYBE_SAYS,	kee
 services	packages/services/src/moxi_services/page.py	required=False)},	keep	required=	required=
 services	packages/services/src/moxi_services/page.py	TODAY = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}	keep	required	required
+services	packages/services/src/moxi_services/page.py	"ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -11743,6 +11744,9 @@ services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandler
 services	packages/services/tests/test_page_slots.py	assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
 services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
 services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_NEGATIVE})	keep	refused	refused
+services	packages/services/tests/test_page_act.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_act.py	return body["refused"]	keep	refused	refused
+services	packages/services/tests/test_page_act.py	assert (found["state"], found["code"]) == ("refused", 3)	keep	refused	refused
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

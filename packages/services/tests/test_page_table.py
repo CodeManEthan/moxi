@@ -21,10 +21,12 @@ READS = {"/api/rows", "/api/row", "/api/unit", "/api/ends", "/api/projects",
          page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
              "/api/disable", "/api/remove"}
-#: The routes the phone reaches: the reads but the project list and the unit read (so
-#: the read of what a stop of slots' server ends), the stream, the status route and every
-#: confirmed act on a row but remove.
-GATEWAY = (READS - {"/api/projects", "/api/unit"}) | (CONFIRMED - {"/api/remove"})
+#: The routes the phone reaches: four reads (the rows, one row, the status and the
+#: stream), the read of what a stop of slots' server ends, and the six confirmed acts on
+#: a row: never remove, the desk's plain act, add, the unit read or the project list.
+GATEWAY = {"/api/rows", "/api/row", page.STATUS_ROUTE, "/api/events", "/api/ends",
+           "/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
+           "/api/disable"}
 
 
 def routes() -> dict[str, dict]:
@@ -35,21 +37,25 @@ def test_the_gate_matrix_passes():
     assert LB.gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_its_reads_its_confirmed_acts_and_add():
+def test_the_page_declares_its_reads_its_confirmed_acts_the_plain_act_and_add():
     found = routes()
     assert {p for p, r in found.items() if r["kind"] == "read"} == READS
-    assert {p for p, r in found.items() if r["kind"] == "act"} == CONFIRMED | {"/api/add"}
+    assert {p for p, r in found.items() if r["kind"] == "act"} == CONFIRMED | {
+        "/api/act", "/api/add"}
     assert {p for p, r in found.items() if r["confirmed"]} == CONFIRMED
     assert {p for p, r in found.items() if r["stream"]} == {"/api/events"}
     for path in CONFIRMED:
         assert found[path]["status"] == page.STATUS_ROUTE, path
     assert found["/api/add"]["status"] is None
+    assert found["/api/act"]["status"] is None
 
 
-def test_the_gateway_reaches_the_reads_the_stream_the_status_and_six_acts():
+def test_the_gateway_reaches_four_reads_the_slots_read_and_the_six_confirmed_acts():
     found = routes()
     assert {p for p, r in found.items() if r["gateway"]} == GATEWAY
-    for path in ("/api/add", "/api/remove", "/api/projects", "/api/unit"):
+    assert GATEWAY == (READS - {"/api/projects", "/api/unit"}) | (
+        CONFIRMED - {"/api/remove"})
+    for path in ("/api/act", "/api/add", "/api/remove", "/api/projects", "/api/unit"):
         assert found[path]["gateway"] is False, path
 
 

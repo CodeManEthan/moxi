@@ -29,6 +29,11 @@ status route gives its state, lines and fix.
   exists (an unknown id is a 422 with the fix), a timer's start and restart go through
   `/api/run` and a daemon's never do (422), and an add's fields are in shape. Everything
   else is the act's own refusal, in the job's record.
+- `/api/act` is the desk's one plain act: the page mints its job id per press, and a
+  repeat of it is answered as a confirmed act's key is. The confirmed routes stay for
+  the phone. Every route refuses what the verb refuses, and also an enable or disable
+  of a Moxi row (`ON_OFF_IN_SETTINGS`): the page never turns one on or off; its on and
+  off is in Settings.
 - A stop or restart of slots' server (`slots/server`, by id: no other module declares
   what its daemon's stop ends) is guarded: before the 202 the handler reads through
   slots' API what the stop would end, and goes ahead only when nothing is in use, or
@@ -144,6 +149,13 @@ SLOTS_IN_USE = "Something is running in its slots now."
 ENDS_SLOTS_ONLY = "only slots' server ends what runs in the slots"
 #: What an act is told when its `ends` is below 0.
 ENDS_NEGATIVE = "ends is how many the person was shown in use: 0 or more"
+#: What an enable or disable of a Moxi row is told: the page never turns one on or off.
+ON_OFF_IN_SETTINGS = "Its on and off is in Settings › {module}."
+#: What `/api/act` is told of a job id that isn't 32 hex characters.
+JOB_SHAPE = "job is 32 hex characters the page mints for each press"
+#: What `/api/act` is told of a `restart` or an `ends` its act doesn't take.
+RESTART_RUN_ONLY = "restart goes with run only"
+ENDS_STOP_ONLY = "ends goes with stop and restart only"
 
 log = logging.getLogger("moxi.services.page")
 
@@ -607,11 +619,18 @@ def _canonical(ident: str) -> str:
 
 
 def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
-               is_timer: bool | None = None, is_guarded: bool = False) -> Any:
-    """A confirmed act on one row, queued: `is_timer` True for an act only a timer takes,
-    False for one a timer takes through `/api/run`, None for either. With `is_guarded`,
-    a stop or restart of slots' server goes only as `guard_slots` lets it."""
-    job, ident = call.key, call.body["id"]
+               is_timer: bool | None = None) -> Any:
+    """A confirmed act on one row, queued under its idempotency key (`_queue`)."""
+    return _queue(call.key, act, call.body["id"], run, is_timer=is_timer,
+                  ends=call.body.get("ends"))
+
+
+def _queue(job: str, act: str, ident: str, run: Callable[[str], acts.Outcome], *,
+           is_timer: bool | None = None, ends: int | None = None) -> Any:
+    """An act on one row, queued as `job`: `is_timer` True for an act only a timer takes,
+    False for one a timer takes through `/api/run`, None for either. An enable or
+    disable of a Moxi row is refused, and a stop or restart of slots' server goes only
+    as `guard_slots` lets it, with `ends`."""
     held = JOBS.get(job)
     if held is not None:
         if held.act == act and held.id == _canonical(ident):
@@ -625,8 +644,10 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
         raise lb.Refused(TIMER_RUNS)
     if is_timer is True and found.kind != "timer":
         raise lb.Refused(DAEMON_STARTS)
-    if is_guarded:
-        guard_slots(found, call.body.get("ends"))
+    if act in ("enable", "disable") and isinstance(found, ModuleRow):
+        raise lb.Refused(ON_OFF_IN_SETTINGS.format(module=found.module))
+    if act in ("stop", "restart"):
+        guard_slots(found, ends)
     record, _ = JOBS.submit(job, act, found.id, lambda: run(found.id))
     if record.act != act or record.id != found.id:
         raise lb.Refused(KEY_REUSED)
@@ -641,14 +662,13 @@ def start(call: Any) -> Any:
 def stop(call: Any) -> Any:
     """`POST /api/stop`, confirmed: `moxi services stop ID`, a daemon or a timer's run;
     slots' server's under the guard, with `ends`."""
-    return _confirmed(call, "stop", lambda i: acts.stop(i, by=BY), is_guarded=True)
+    return _confirmed(call, "stop", lambda i: acts.stop(i, by=BY))
 
 
 def restart(call: Any) -> Any:
     """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon; slots'
     server's under the guard, with `ends`."""
-    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False,
-                      is_guarded=True)
+    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False)
 
 
 def run(call: Any) -> Any:
@@ -659,18 +679,60 @@ def run(call: Any) -> Any:
 
 
 def enable(call: Any) -> Any:
-    """`POST /api/enable`, confirmed: `moxi services enable ID`."""
+    """`POST /api/enable`, confirmed: `moxi services enable ID`; a Moxi row's is
+    refused, its on and off being in Settings."""
     return _confirmed(call, "enable", lambda i: acts.enable(i, by=BY))
 
 
 def disable(call: Any) -> Any:
-    """`POST /api/disable`, confirmed: `moxi services disable ID`."""
+    """`POST /api/disable`, confirmed: `moxi services disable ID`; a Moxi row's is
+    refused, as enable's."""
     return _confirmed(call, "disable", lambda i: acts.disable(i, by=BY))
 
 
 def remove(call: Any) -> Any:
     """`POST /api/remove`, confirmed and desk-only: `moxi services remove ID`."""
     return _confirmed(call, "remove", lambda i: acts.remove(i, by=BY))
+
+
+def _run_act(i: str, *, restart: bool) -> acts.Outcome:
+    return (acts.restart if restart else acts.start)(i, by=BY)
+
+
+#: Each act `/api/act` takes: what it runs (given the row's id and the body), and
+#: `is_timer` as `_queue` reads it.
+_ACTS: dict[str, tuple[Callable[[str, Mapping[str, Any]], acts.Outcome], bool | None]] = {
+    "start": (lambda i, body: acts.start(i, by=BY), False),
+    "stop": (lambda i, body: acts.stop(i, by=BY), None),
+    "restart": (lambda i, body: acts.restart(i, by=BY), False),
+    "run": (lambda i, body: _run_act(i, restart=bool(body.get("restart"))), True),
+    "enable": (lambda i, body: acts.enable(i, by=BY), None),
+    "disable": (lambda i, body: acts.disable(i, by=BY), None),
+    "remove": (lambda i, body: acts.remove(i, by=BY), None),
+}
+
+
+def act(call: Any) -> Any:
+    """`POST /api/act`, the desk's one plain act: `act` on the row `id`, queued as `job`,
+    32 hex characters the page mints per press. A repeat of a `job` for the same act and
+    row gets the same link; for another, it is refused. `restart` goes with `run` only,
+    `ends` with `stop` and `restart` only. Each act refuses what its confirmed route
+    refuses."""
+    body = call.body
+    job, name = body["job"], body["act"]
+    if not _is_job(job):
+        raise lb.Refused(JOB_SHAPE)
+    if "restart" in body and name != "run":
+        raise lb.Refused(RESTART_RUN_ONLY)
+    if "ends" in body and name not in ("stop", "restart"):
+        raise lb.Refused(ENDS_STOP_ONLY)
+    work, is_timer = _ACTS[name]
+    return _queue(job, name, body["id"], lambda i: work(i, body), is_timer=is_timer,
+                  ends=body.get("ends"))
+
+
+def _is_job(job: str) -> bool:
+    return len(job) == 32 and all(c in "0123456789abcdefABCDEF" for c in job)
 
 
 def _absolute(path: str) -> bool:
@@ -813,10 +875,11 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_SLOTS_ONLY", "HEALTH_PERIOD",
-           "JOBS", "KEY_REUSED", "PERIOD", "REPUBLISH_S", "RUNS_SHOWN", "SLOTS_IN_USE",
+__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
+           "HEALTH_PERIOD", "JOBS", "JOB_SHAPE", "KEY_REUSED", "ON_OFF_IN_SETTINGS",
+           "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "RUNS_SHOWN", "SLOTS_IN_USE",
            "SLOTS_SERVER", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS", "TODAY_LINES",
-           "UNKNOWN", "add", "count_streak", "count_today", "disable", "enable", "ends",
-           "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
+           "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
+           "ends", "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
            "listing", "not_a_full_path", "projects", "read_ends", "remove", "restart",
            "row", "row_value", "run", "start", "status", "stop", "unit", "with_settings"]

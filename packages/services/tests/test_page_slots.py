@@ -1,5 +1,6 @@
 """services' page and slots' server: `/api/ends`, what a stop or restart of the server
-would end, read through a fake slots API, and the guard on its Stop and Restart.
+would end, read through a fake slots API, and the guard on its Stop and Restart, on
+`/api/stop`, `/api/restart` and `/api/act`.
 
 The fake slots module (`fake_slots`) sits in the test's site, so services loads it as it
 loads the real one, and its `server` daemon is a row. No test reaches a supervisor, a slot
@@ -21,6 +22,7 @@ from fake_units import Unit
 from page_kit import LB, send, served
 
 KEY = "K" * 43
+ACT_JOB = "a" * 32
 SERVER = "slots/server"
 
 
@@ -46,8 +48,16 @@ def get(path: str, query: str = "") -> tuple[int, dict | None]:
     return asyncio.run(send(served(), "GET", path, query=query))
 
 
-def post(path: str, body: dict, *, key: str = KEY) -> tuple[int, dict | None]:
-    return asyncio.run(send(served(), "POST", path, body=body, key=key))
+def post(route: str, body: dict, *, key: str = KEY) -> tuple[int, dict | None]:
+    """A press on `route`: a confirmed route's path, or `act:<act>` for `/api/act`."""
+    if route.startswith("act:"):
+        body = {"act": route.removeprefix("act:"), "job": ACT_JOB, **body}
+        return asyncio.run(send(served(), "POST", "/api/act", body=body))
+    return asyncio.run(send(served(), "POST", route, body=body, key=key))
+
+
+def job_of(route: str) -> str:
+    return ACT_JOB if route.startswith("act:") else KEY
 
 
 def ends() -> dict:
@@ -170,19 +180,19 @@ def test_the_rows_mark_slots_server_as_the_one_that_ends_the_slots(slots):
 
 # -- the guard on Stop and Restart --------------------------------------------------------------
 
-@pytest.fixture(params=["/api/stop", "/api/restart"])
+@pytest.fixture(params=["/api/stop", "/api/restart", "act:stop", "act:restart"])
 def route(request):
     return request.param
 
 
 def _act(route: str) -> str:
-    return route.rsplit("/", 1)[1]
+    return route.rsplit("/", 1)[-1].removeprefix("act:")
 
 
 def test_a_plain_stop_goes_when_nothing_is_in_use(slots, fake, route):
     status, body = post(route, {"id": SERVER})
     assert status == 202, body
-    assert ended(KEY)["state"] == "done"
+    assert ended(job_of(route))["state"] == "done"
     assert acted(fake, _act(route))
     assert slots.calls == ["list_slots", "jobs"]
 
@@ -197,7 +207,7 @@ def test_a_plain_stop_is_refused_while_something_is_in_use(slots, fake, route, b
         slots.running = [Job("build")]
     assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})
     assert not acted(fake, _act(route))
-    assert get(page.STATUS_ROUTE, f"job={KEY}")[1]["state"] == "unknown"
+    assert get(page.STATUS_ROUTE, f"job={job_of(route)}")[1]["state"] == "unknown"
 
 
 @pytest.mark.parametrize("shown", [3, 4])
@@ -206,7 +216,7 @@ def test_a_stop_goes_when_ends_covers_what_is_in_use(slots, fake, route, shown):
     slots.running = [Job("build")]
     status, body = post(route, {"id": SERVER, "ends": shown})
     assert status == 202, body
-    assert ended(KEY)["state"] == "done"
+    assert ended(job_of(route))["state"] == "done"
     assert acted(fake, _act(route))
 
 
@@ -222,7 +232,7 @@ def test_a_stop_goes_unread_when_the_unread_warning_was_confirmed(slots, fake, r
     slots.ok, slots.why = False, "tmux did not answer"
     status, body = post(route, {"id": SERVER, "ends": 0})
     assert status == 202, body
-    assert ended(KEY)["state"] == "done"
+    assert ended(job_of(route))["state"] == "done"
 
 
 def test_a_plain_stop_is_refused_when_the_slots_could_not_be_read(slots, fake, route):
@@ -244,13 +254,13 @@ def test_another_rows_stop_reads_no_slots(site, slots, fake, route):
     fake.modules[("notes", "sync")] = Unit("daemon", enabled=True, active=True)
     status, body = post(route, {"id": "notes/sync"})
     assert status == 202, body
-    assert ended(KEY)["state"] == "done"
+    assert ended(job_of(route))["state"] == "done"
     assert slots.calls == []
 
 
 def test_a_repeated_key_gets_its_link_without_reading_the_slots_again(slots, fake, route):
     assert post(route, {"id": SERVER})[0] == 202
-    ended(KEY)
+    ended(job_of(route))
     slots.running = [Job("build")]
     calls = len(slots.calls)
     status, body = post(route, {"id": SERVER})

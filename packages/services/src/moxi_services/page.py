@@ -19,9 +19,12 @@
                         server's as stop
     POST /api/run       a timer's run now (`start`), or with `restart` its run ended and
                         run once; confirmed (202)
-    POST /api/enable    `moxi services enable ID`; confirmed (202)
-    POST /api/disable   `moxi services disable ID`; confirmed (202)
+    POST /api/enable    `moxi services enable ID`; confirmed (202); a Moxi row's refused
+    POST /api/disable   `moxi services disable ID`; confirmed (202); a Moxi row's refused
     POST /api/remove    `moxi services remove ID`; confirmed (202)
+    POST /api/act       the desk's one plain act: start, stop, restart, run, enable,
+                        disable or remove, by `act`, queued as the page's `job`; no
+                        confirm (202 with the same status link)
     POST /api/add       `moxi services add`, a command to write or a unit to adopt; one
                         step, no confirm (202 with the same status link)
 
@@ -310,6 +313,20 @@ ROW_BODY = {"id": _ID}
 STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}
 #: A timer's run now; with `restart` a run in progress is ended first.
 RUN_BODY = {"id": _ID, "restart": _MAYBE_BOOL}
+#: The acts `/api/act` takes.
+ACTS = ("start", "stop", "restart", "run", "enable", "disable", "remove")
+#: A job id's length on `/api/act`: 32 hex characters the page mints per press.
+ACT_JOB_LENGTH = 32
+
+#: The desk's plain act: `act` on the row `id`, queued as `job`. `restart` is a run's
+#: (its run in progress ended first); `ends` a stop's or restart's, as `STOP_BODY`'s.
+ACT_BODY = {
+    "act": lb.Field("enum", values=ACTS),
+    "id": _ID,
+    "job": lb.Field("string", max=ACT_JOB_LENGTH),
+    "restart": _MAYBE_BOOL,
+    "ends": lb.Field("int", required=False, max=ENDS_MAX),
+}
 #: An add. `command` is the command line of a written row, split as this system's shell
 #: splits it, its first word a full path; `unit` the unit an adopted row takes on, with
 #: `enable` saying whether it is on now. `every`, or `at` with `days`, is a written
@@ -379,11 +396,12 @@ PAGE = lb.Page(
         _confirmed("/api/enable", "enable", ROW_BODY, gateway=True),
         _confirmed("/api/disable", "disable", ROW_BODY, gateway=True),
         _confirmed("/api/remove", "remove", ROW_BODY, gateway=False),
+        lb.Route("/api/act", "act", _target("act"), body=ACT_BODY, returns={}),
         lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns={}),
     ),
 )
 
-__all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "ENDS", "ENDS_MAX", "KINDS",
+__all__ = ["ACTS", "ACT_BODY", "ACT_JOB_LENGTH", "ADD_BODY", "BUDGET", "CHECKED", "DAYS", "ENDS", "ENDS_MAX", "KINDS",
            "LAST_RUN", "ONE", "PAGE", "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS",
            "ROW_BODY", "RUN", "RUN_BODY", "SESSION", "STATUS", "STATUS_ROUTE",
            "STOP_BODY", "STREAK", "TIMING", "TODAY", "TOPIC", "UNIT", "VERDICT"]
