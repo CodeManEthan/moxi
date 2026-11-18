@@ -32,9 +32,10 @@ tip as read (its head, once the branch is gone), in this order:
    folder is removed. Each removal obeys the removal rule (`removal`). A folder it keeps,
    or a branch git won't delete, is named with why in `Finished`, and the finish stands:
    a later sweep takes the folder once the rule holds.
-7. Remove CI's own refs the build pushed from the remote, where its repo's `ci` names a
-   `ref` or its check recorded pushing one, under the keep rule (`ci_refs.remove`). A
-   ref it could not remove is named with why in `Finished`, and the finish stands.
+7. Remove CI's own refs from the remote, those the build's check recorded pushing and
+   those its repo's `ci` templates (`ref`, `full_ref`) give its branch, under the keep
+   rule (`ci_refs.remove`). A ref it could not remove is named with why in `Finished`,
+   and the finish stands.
 
 The finish lock is released however the verb ends once it was taken: only while it
 still points at this finish's own blob. A refusal or a failed action after the verb

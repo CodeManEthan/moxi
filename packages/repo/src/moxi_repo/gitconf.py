@@ -29,7 +29,8 @@ the settings only by `--set`; `recorded` only by the runner and the sweep.
 runs after every change to them, since the guard's exit status depends on them. When git
 reads another hooks dir than `<common git dir>/hooks` (`core.hooksPath` changed), `sync`
 and `remove_all` also take repo's shims out of that default dir and move back the git
-hooks repo moved aside there.
+hooks repo moved aside there. `plan_sync` says what `sync` would write, item by item,
+and writes nothing; `sync` writes exactly what its plan says.
 """
 
 from __future__ import annotations
@@ -37,6 +38,9 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import threading
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from moxi_repo import shim
@@ -154,7 +158,7 @@ def key_of(common_dir: str | os.PathLike) -> str:
 def _rev_parse(path: str | os.PathLike) -> Repo:
     where = Path(path)
     if not where.is_dir():
-        raise NotARepo(f"{path} is not a directory")
+        raise NotARepo(f"{path}: not a directory")
     done = git(where, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
                "--git-path", "hooks", "--show-toplevel")
     lines = done.stdout.splitlines()
@@ -271,7 +275,8 @@ def runner_file() -> str:
 class State:
     """What repo's keys in one repo's local git config say."""
 
-    __slots__ = ("mode", "mode_set", "moved", "pieces", "entries", "sections")
+    __slots__ = ("mode", "mode_set", "moved", "pieces", "entries", "entry_values",
+                 "section_values", "sections")
 
     def __init__(self) -> None:
         self.mode: str | None = None
@@ -280,6 +285,11 @@ class State:
         self.pieces: dict[str, dict[str, list]] = {}
         #: Event -> its config entry's command.
         self.entries: dict[str, str] = {}
+        #: Each key of repo's config entries (`hook.moxi-repo-<event>.<var>`) -> its values.
+        self.entry_values: dict[str, list[str]] = {}
+        #: Each key of the `moxi-repo` section itself (`moxi-repo.mode`, `.mode-set`,
+        #: `.moved`) -> its values.
+        self.section_values: dict[str, list[str]] = {}
         #: Every `moxi-repo` section and subsection, as `--remove-section` names them.
         self.sections: set[str] = set()
 
@@ -297,9 +307,23 @@ class State:
         return out
 
 
+#: The `git config` options that write, and each thread's count of the writes git made
+#: with them, so a writer can tell whether a failure came after one of its writes landed.
+_WRITES = frozenset({"--replace-all", "--unset-all", "--remove-section", "--add"})
+_written = threading.local()
+
+
 def config(repo: Repo, *args: str):
     """`git config --local <args>` in the repo."""
-    return git(repo.root, *repo.git_args, "config", "--local", *args)
+    done = git(repo.root, *repo.git_args, "config", "--local", *args)
+    if done.returncode == 0 and args and args[0] in _WRITES:
+        _written.count = writes_made() + 1
+    return done
+
+
+def writes_made() -> int:
+    """How many config writes git has made on this thread."""
+    return getattr(_written, "count", 0)
 
 
 def _get_regexp(repo: Repo, pattern: str) -> list[tuple[str, str | None]]:
@@ -313,12 +337,15 @@ def _get_regexp(repo: Repo, pattern: str) -> list[tuple[str, str | None]]:
 
 
 def read(repo: Repo) -> State:
+    """repo's own config in the repo and its hook entries, from one `git config` read."""
     state = State()
-    pairs = _get_regexp(repo, r"^moxi-repo\.")
+    found = _get_regexp(repo, r"^(moxi-repo\.|hook\.moxi-repo-)")
+    pairs = [(key, value) for key, value in found if key.startswith("moxi-repo.")]
     for key, value in pairs:
         head, _, var = key.rpartition(".")
         state.sections.add(head)
         if head == SECTION:
+            state.section_values.setdefault(key, []).append(value or "")
             if var == "mode" and value:
                 state.mode = value
             elif var == "mode-set" and value:
@@ -326,9 +353,12 @@ def read(repo: Repo) -> State:
             elif var == "moved" and value:
                 state.moved.add(value)
     state.pieces = pieces_of(pairs)
-    for key, value in _get_regexp(repo, r"^hook\.moxi-repo-"):
+    for key, value in found:
+        if not key.startswith("hook.moxi-repo-"):
+            continue
         head, _, var = key.rpartition(".")
         event = head[len("hook." + HOOK_PREFIX):]
+        state.entry_values.setdefault(key, []).append(value or "")
         if var == "command":
             state.entries[event] = value or ""
         else:
@@ -365,29 +395,76 @@ def piece_key(piece_id: str, var: str) -> str:
     return f"{PIECE_PREFIX}{piece_id}.{var}"
 
 
+def _put_values(repo: Repo, key: str, values: list[str] | None) -> None:
+    """Give `key` the whole list `values`; none removes it."""
+    if values and len(values) == 1:
+        _set(repo, key, values[0])
+        return
+    _unset(repo, key)
+    for value in values or ():
+        _check(config(repo, "--add", key, value), f"add {key}")
+
+
+def _value_step(repo: Repo, key: str, before: list[str] | None, after: list[str] | None, *,
+                piece: str | None = None, event: str | None = None, seed: bool = False,
+                drawn: bool = False) -> Step:
+    """The step that gives one config key its values, shown as one `config` item. A
+    `drawn` value is drawn at random for this write: the item shows no value."""
+
+    def run() -> None:
+        _put_values(repo, key, after)
+
+    return Step([item("config", event, key, _values_text(before),
+                      None if drawn else _values_text(after), piece=piece, seed=seed)], run)
+
+
+def plan_register(repo: Repo, piece, state: State) -> list[Step]:
+    """`register`'s writes, as steps: each declared key whose value in the repo differs
+    from the declaration's (a key set by hand included), and a new registration's
+    `enabled = true`. Updates `state` to what they leave; writes nothing."""
+    new = piece.id not in state.pieces
+    section = state.pieces.setdefault(piece.id, {})
+    values = piece.registration()
+    if new:
+        values["enabled"] = "true"
+    steps = []
+    for var, value in values.items():
+        if section.get(var) != [value]:
+            steps.append(_value_step(repo, piece_key(piece.id, var), section.get(var),
+                                     [value], piece=piece.id, event=piece.event))
+            section[var] = [value]
+    return steps
+
+
 def register(repo: Repo, piece, state: State) -> bool:
     """Write `piece`'s registration by the rewrite rule; return True when it is new.
 
     A new registration also gets `enabled = true`. An existing one gets only the keys the
-    declaration gives, so `enabled`, its settings and `recorded` stay as they were.
+    declaration gives, so `enabled`, its settings and `recorded` stay as they were. A key
+    that already holds the declared value is not written again.
     """
     new = piece.id not in state.pieces
-    for var, value in piece.registration().items():
-        _set(repo, piece_key(piece.id, var), value)
-    if new:
-        _set(repo, piece_key(piece.id, "enabled"), "true")
-        state.pieces[piece.id] = {}
-    section = state.pieces[piece.id]
-    for var, value in piece.registration().items():
-        section[var] = [value]
-    if new:
-        section["enabled"] = ["true"]
+    for step in plan_register(repo, piece, state):
+        step.run()
     return new
 
 
+def plan_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> list[Step]:
+    """`set_enabled`'s write, as a step, when the piece's `enabled` changes. Updates
+    `state`; writes nothing."""
+    section = state.pieces.setdefault(piece_id, {})
+    value = "true" if enabled else "false"
+    if section.get("enabled") == [value]:
+        return []
+    step = _value_step(repo, piece_key(piece_id, "enabled"), section.get("enabled"), [value],
+                       piece=piece_id, event=last(section, "event") or None)
+    section["enabled"] = [value]
+    return [step]
+
+
 def set_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> None:
-    _set(repo, piece_key(piece_id, "enabled"), "true" if enabled else "false")
-    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if enabled else "false"]
+    for step in plan_enabled(repo, piece_id, enabled=enabled, state=state):
+        step.run()
 
 
 def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
@@ -398,18 +475,32 @@ def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
         section.pop("recorded", None)
 
 
+def plan_settings(repo: Repo, piece_id: str, changes: dict[str, list[str] | None],
+                  state: State, *, event: str | None = None, seeded=(), drawn=()
+                  ) -> list[Step]:
+    """`apply_settings`'s writes, as steps: each named setting whose values change. A name
+    in `seeded` is a seed, shown with `seed` true; one in `drawn` is drawn at random, and
+    its item shows no value. Updates `state`; writes nothing."""
+    section = state.pieces.setdefault(piece_id, {})
+    steps = []
+    for name, values in changes.items():
+        before, after = section.get(name) or None, list(values) if values else None
+        if before == after:
+            continue
+        steps.append(_value_step(repo, piece_key(piece_id, name), before, after,
+                                 piece=piece_id, event=event, seed=name in seeded,
+                                 drawn=name in drawn))
+        section.pop(name, None)
+        if after:
+            section[name] = after
+    return steps
+
+
 def apply_settings(repo: Repo, piece_id: str, changes: dict[str, list[str] | None],
                    state: State) -> None:
     """Each named setting takes its whole new list, or goes when None; others stay."""
-    section = state.pieces.setdefault(piece_id, {})
-    for name, values in changes.items():
-        key = piece_key(piece_id, name)
-        _unset(repo, key)
-        section.pop(name, None)
-        for value in values or ():
-            _check(config(repo, "--add", key, value), f"add {key}")
-        if values:
-            section[name] = list(values)
+    for step in plan_settings(repo, piece_id, changes, state):
+        step.run()
 
 
 def remove_piece(repo: Repo, piece_id: str, state: State) -> None:
@@ -418,15 +509,29 @@ def remove_piece(repo: Repo, piece_id: str, state: State) -> None:
     state.sections.discard(f"{SECTION}.piece.{piece_id}")
 
 
-def set_mode(repo: Repo, state: State, *, mode: str | None = None,
-             mode_set: str | None = None) -> None:
+def plan_mode(repo: Repo, state: State, *, mode: str | None = None,
+              mode_set: str | None = None) -> list[Step]:
+    """`set_mode`'s writes, as steps: `moxi-repo.mode-set` and `moxi-repo.mode`, each when
+    its value changes. Updates `state`; writes nothing."""
+    steps = []
+    for var, value in (("mode-set", mode_set), ("mode", mode)):
+        key = f"{SECTION}.{var}"
+        if value is None or state.section_values.get(key) == [value]:
+            continue
+        steps.append(_value_step(repo, key, state.section_values.get(key), [value]))
+        state.section_values[key] = [value]
     if mode_set is not None:
-        _set(repo, f"{SECTION}.mode-set", mode_set)
         state.mode_set = mode_set
-    if mode is not None and mode != state.mode:
-        _set(repo, f"{SECTION}.mode", mode)
+    if mode is not None:
         state.mode = mode
     state.sections.add(SECTION)
+    return steps
+
+
+def set_mode(repo: Repo, state: State, *, mode: str | None = None,
+             mode_set: str | None = None) -> None:
+    for step in plan_mode(repo, state, mode=mode, mode_set=mode_set):
+        step.run()
 
 
 def _write_moved(repo: Repo, state: State, moved: set[str]) -> None:
@@ -548,64 +653,216 @@ def leftovers(repo: Repo, state: State) -> list[tuple[str, Path, bool]]:
     return out
 
 
-def sync(repo: Repo, state: State) -> Sync:
-    """Make the entries, shims and launcher match `state`'s pieces and mode."""
-    from moxi import files
+class Step:
+    """One part of a sync: the writes it shows (`items`, each as `plan_sync` describes
+    them; none for a step that only says a line) and the call that makes them, which
+    returns the lines worth printing (None for an item the user makes, a chain line)."""
 
-    out = Sync()
+    __slots__ = ("items", "run")
+
+    def __init__(self, items: list[dict], run: Callable[[], list[str] | None] | None):
+        self.items, self.run = items, run
+
+
+class SyncPlan:
+    """What a `sync` would write, from a State, before anything is written."""
+
+    __slots__ = ("steps", "problems", "chain")
+
+    def __init__(self) -> None:
+        self.steps: list[Step] = []
+        #: Events repo could not set up, with why, as `Sync.problems`.
+        self.problems: list[str] = []
+        #: As `Sync.chain`.
+        self.chain: dict[str, tuple[Path, str, bool]] = {}
+
+    @property
+    def writes(self) -> list[dict]:
+        """Every item, in the order `sync` makes them."""
+        return [item for step in self.steps for item in step.items]
+
+
+def item(place: str, event: str | None, key: str | None, before: str | None,
+         after: str | None, *, piece: str | None = None, seed: bool = False) -> dict:
+    """One write of a plan: `place` is `config`, `hooks`, `chain` or `index`."""
+    return {"place": place, "piece": piece, "event": event, "key": key, "from": before,
+            "to": after, "seed": seed}
+
+
+def _values_text(values: list[str] | None) -> str | None:
+    return None if not values else ", ".join(values)
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _drop_entry(repo: Repo, state: State, event: str) -> Step:
+    head = f"hook.{HOOK_PREFIX}{event}"
+    keys = sorted(k for k in state.entry_values if k.rpartition(".")[0] == head)
+    if not keys:
+        keys = [f"{head}.command"]
+
+    def run() -> None:
+        _remove_section(repo, head)
+        state.entries.pop(event, None)
+        for key in keys:
+            state.entry_values.pop(key, None)
+
+    return Step([item("config", event, key, _values_text(state.entry_values.get(key)), None)
+                 for key in keys], run)
+
+
+def _set_entry(repo: Repo, state: State, event: str, var: str, value: str) -> Step:
+    key = f"hook.{HOOK_PREFIX}{event}.{var}"
+
+    def run() -> None:
+        _set(repo, key, value)
+        state.entry_values[key] = [value]
+        if var == "command":
+            state.entries[event] = value
+        else:
+            state.entries.setdefault(event, "")
+
+    return Step([item("config", event, key, _values_text(state.entry_values.get(key)),
+                      value)], run)
+
+
+def _plan_settle(hooks_dir: Path, moved: set[str], keep: set[str],
+                 gone: set[Path]) -> list[Step]:
+    """`_settle`'s steps: for each event not in `keep`, take away our shims and move back
+    the git hook repo moved aside where its slot is then free. Adds each `.local` it
+    moves back to `gone`."""
+    steps = []
+    ours = shim.our_shims(hooks_dir)
+    for event in sorted((set(ours) | moved) - keep):
+        hook, local = hooks_dir / event, hooks_dir / (event + shim.LOCAL)
+        mine = ours.get(event, [])
+        if not (mine or (event in moved and _present(local) and not _present(hook))):
+            continue
+        items = [item("hooks", event, "shim", str(path), None) for path in mine]
+        if event in moved and _present(local) and not (_present(hook) and hook not in mine):
+            items.append(item("hooks", event, "hook", str(local), str(hook)))
+            gone.add(local)
+        steps.append(Step(items, partial(shim.take_away, hooks_dir, event,
+                                         moved=event in moved)))
+    return steps
+
+
+def plan_sync(repo: Repo, state: State) -> SyncPlan:
+    """What `sync` would write to make the entries, shims and launcher match `state`'s
+    pieces and mode; writes nothing. Each item is `{place, piece, event, key, from, to,
+    seed}`:
+
+    - `config`: a key of repo's config entries, or `moxi-repo.moved`, with its value
+      before (None when absent; several values joined by `, `) and after (None when
+      removed). A key whose value doesn't change is not an item.
+    - `hooks`: a file in a hooks dir or the launcher, `key` saying which: `shim` (its path
+      in `from` when it is there, in `to` when it will be), `hook` (the user's git hook
+      moved from `from` to `to`, aside or back), `launcher`. A shim whose text doesn't
+      change is not an item.
+    - `chain`: a chain line launcher mode needs that isn't there: `from` the git hook it
+      goes in, `to` the line. The sync writes nothing for it; the user adds it."""
+    plan = SyncPlan()
     python, runner, root = interpreter(), runner_file(), shim.sh_path(repo.root)
     events = state.events()
     moved = set(state.moved)
     if state.mode == "shim":
-        for event in list(state.entries):
-            _remove_section(repo, f"hook.{HOOK_PREFIX}{event}")
-            state.entries.pop(event, None)
+        plan.steps += [_drop_entry(repo, state, event) for event in sorted(state.entries)]
     else:
-        for event, _ in sorted(events.items()):
-            command = shim.entry_command(event, python, runner, root, events[event])
-            _set(repo, f"hook.{HOOK_PREFIX}{event}.command", command)
-            _set(repo, f"hook.{HOOK_PREFIX}{event}.event", event)
-            state.entries[event] = command
-        for event in sorted(set(state.entries) - set(events)):
-            _remove_section(repo, f"hook.{HOOK_PREFIX}{event}")
-            state.entries.pop(event, None)
+        for event, code in sorted(events.items()):
+            command = shim.entry_command(event, python, runner, root, code)
+            for var, value in (("command", command), ("event", event)):
+                if state.entry_values.get(f"hook.{HOOK_PREFIX}{event}.{var}") != [value]:
+                    plan.steps.append(_set_entry(repo, state, event, var, value))
+        plan.steps += [_drop_entry(repo, state, event)
+                       for event in sorted(set(state.entries) - set(events))]
     inside = state.mode == "shim" and repo.hooks_inside
     keep = set(events) if inside else set()
-    out.lines += _settle(repo.hooks_dir, moved if repo.hooks_inside else set(), keep)
+    gone: set[Path] = set()
+    plan.steps += _plan_settle(repo.hooks_dir, moved if repo.hooks_inside else set(), keep,
+                               gone)
     if repo.stray_dir is not None:
         # Every shim there goes; a moved hook of an event placed in the hooks dir is that
         # dir's, so it stays.
-        out.lines += _settle(repo.stray_dir, moved - keep, set())
-    moved = _still_moved(repo, moved, keep)
+        plan.steps += _plan_settle(repo.stray_dir, moved - keep, set(), gone)
+    moved = {event for event in moved if event in keep
+             or any(_present(d / (event + shim.LOCAL)) and d / (event + shim.LOCAL) not in gone
+                    for d in _moved_dirs(repo))}
     if inside:
+        ours = shim.our_shims(repo.hooks_dir)
         for event, code in sorted(events.items()):
             text = shim.shim_text(event, python, runner, root, code, stdin=event in STDIN_EVENTS)
             try:
-                done = shim.place(repo.hooks_dir, event, text, moved=event in moved)
+                shim.check_place(repo.hooks_dir, event, moved=event in moved)
             except shim.ShimRefused as exc:
-                out.problems.append(f"{event}: {exc}")
+                plan.problems.append(f"{event}: {exc}")
                 continue
-            if done:
-                moved.add(event)
-                out.lines += done
-    outside = state.mode == "shim" and not repo.hooks_inside and events
-    if outside:
+            run = partial(shim.place, repo.hooks_dir, event, text, moved=event in moved)
+            if ours.get(event):
+                items = [item("hooks", event, "shim", str(path), str(path))
+                         for path in ours[event] if _read_text(path) != text]
+            else:
+                hook = repo.hooks_dir / event
+                items = []
+                if _present(hook):
+                    items.append(item("hooks", event, "hook", str(hook),
+                                      str(repo.hooks_dir / (event + shim.LOCAL))))
+                    moved.add(event)
+                items.append(item("hooks", event, "shim", None, str(hook)))
+            if items:
+                plan.steps.append(Step(items, run))
+    if state.mode == "shim" and not repo.hooks_inside and events:
         closed = [event for event, code in events.items() if code]
-        files.atomic_write(repo.launcher, shim.launcher_text(python, runner, root, closed),
-                           mode=0o755)
+        text = shim.launcher_text(python, runner, root, closed)
+        launcher = repo.launcher
+        if _read_text(launcher) != text or not os.access(launcher, os.X_OK):
+            from moxi import files
+
+            plan.steps.append(Step(
+                [item("hooks", None, "launcher",
+                      str(launcher) if _present(launcher) else None, str(launcher))],
+                partial(files.atomic_write, launcher, text, mode=0o755)))
         for event in sorted(events):
-            out.chain[event] = chain_state(repo, event)
+            hook, line, present = chain_state(repo, event)
+            plan.chain[event] = (hook, line, present)
+            if not present:
+                plan.steps.append(Step([item("chain", event, None, str(hook), line)], None))
     elif repo.launcher.exists():
-        repo.launcher.unlink()
-    _write_moved(repo, state, moved)
+        plan.steps.append(Step([item("hooks", None, "launcher", str(repo.launcher), None)],
+                               repo.launcher.unlink))
+    if moved != state.moved:
+        plan.steps.append(Step(
+            [item("config", None, f"{SECTION}.moved", _values_text(sorted(state.moved)),
+                  _values_text(sorted(moved)))],
+            partial(_write_moved, repo, state, moved)))
+    return plan
+
+
+def sync(repo: Repo, state: State, plan: SyncPlan | None = None) -> Sync:
+    """Make the entries, shims and launcher match `state`'s pieces and mode: write the
+    items of `plan`, made from `state` (`plan_sync(repo, state)` when None), and nothing
+    else."""
+    plan = plan_sync(repo, state) if plan is None else plan
+    out = Sync()
+    out.problems += plan.problems
+    out.chain.update(plan.chain)
+    for step in plan.steps:
+        if step.run is not None:
+            out.lines += step.run() or []
     return out
 
 
-def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
+def remove_all(repo: Repo, state: State | None = None, *, final: bool = False,
+               keep: str | None = None) -> list[str]:
     """Remove everything repo wrote to the repo: sections, entries, shims (moving each
     `.local` back), the launcher and `<common git dir>/moxi-repo/`. `final` is repo's own
     uninstall: a moved git hook that can't go back is no longer recorded either, and its
-    line says so."""
+    line says so. `keep` names a file in `moxi-repo/` to leave, with the folder: the lock
+    the caller holds, which it removes once it has let go of it."""
     state = state or read(repo)
     lines: list[str] = []
     for event in sorted(state.entries):
@@ -621,14 +878,22 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -
     # A moved git hook that couldn't go back stays recorded, so a later `remove` (once
     # its slot is free) still moves it back; after repo's own uninstall nothing would.
     _write_moved(repo, state, set() if final else _still_moved(repo, moved, set()))
-    if repo.own_dir.exists():
+    if keep is None and repo.own_dir.exists():
         shutil.rmtree(repo.own_dir)
+    elif keep is not None and repo.own_dir.is_dir():
+        for entry in repo.own_dir.iterdir():
+            if entry.name == keep:
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink(missing_ok=True)
     return lines
 
 
 __all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "resolve_repo", "work_tree", "read", "register", "set_enabled", "clear_recorded",
            "apply_settings", "remove_piece",
-           "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
+           "set_mode", "plan_enabled", "plan_register", "plan_settings", "plan_mode", "plan_sync", "sync", "SyncPlan", "Step", "item", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "chain_hooks", "holds_chain_line", "check_shims", "key_of", "worktrees",
            "leftovers"]

@@ -58,6 +58,11 @@
 - The release step refuses a workspace member on neither or both of the root's
   `[tool.moxi-publishing]` `not-ready` and `ready` lists, when the root keeps a `ready`
   list, so a member added later never starts ready.
+- `moxi-dev timed show --package NAME` reads one package's timed tests, by its directory
+  or distribution name in the tree it runs in, as a release reads its own: every machine's
+  set, failures, exit and strict line count that package's results alone, and a package
+  with none collected reads `<name> has no timed test collected by a complete run on the
+  walk to <commit>; nothing to read`.
 
 ## 0.1.1 (2026-11-08)
 
