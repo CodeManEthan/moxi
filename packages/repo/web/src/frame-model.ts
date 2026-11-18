@@ -93,12 +93,17 @@ export const READING_AFTER_MS = 400;
 export const READING = "Reading…";
 /** The first line while the repos can't be read. */
 export const CANT_READ = "Git hooks can't be read right now.";
+/** The listing's error when it gives no detail. */
+export const SERVER_ERROR = "repo's page server hit an error.";
+/** How often the page reads the repos again while its tab is shown, in milliseconds. */
+export const REFRESH_MS = 60_000;
 
 /** The page as it draws:
  * - `loading`: the first read is out; `line` is `Reading…` once `READING_AFTER_MS` have gone.
  * - `down`: the last read failed; `line` says so, and the last value read is drawn dim with
  *   no acts.
- * - `error`: the page server's listing failed; `line` is its detail, in the verdict's place.
+ * - `error`: the page server's listing failed; `line` is its detail, in the verdict's place
+ *   (`SERVER_ERROR` when it gives none).
  * - `up`: read.
  * - `gone`: repo went away while the page was open; nothing is drawn. */
 export interface PageState {
@@ -118,6 +123,6 @@ export function pageState(read: { value: Repos | null; failure: Failure | null; 
   if (read.value === null) {
     return { state: "loading", line: waitedMs >= READING_AFTER_MS ? READING : null, drawn: false, acts: false };
   }
-  if (read.value.state === "error") return { state: "error", line: read.value.detail, drawn: false, acts: false };
+  if (read.value.state === "error") return { state: "error", line: read.value.detail ?? SERVER_ERROR, drawn: false, acts: false };
   return { state: "up", line: null, drawn: true, acts: true };
 }

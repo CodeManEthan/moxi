@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CANT_READ, noSuchRepo, pageState, parseRoute, pathToWrite, READING, routeOf, rowNamed,
+  CANT_READ, noSuchRepo, pageState, parseRoute, pathToWrite, READING, routeOf, rowNamed, SERVER_ERROR,
 } from "../src/frame-model.ts";
 import { repoRow } from "../src/rows-model.ts";
 import { HOME, repo, value } from "./fixtures.mjs";
@@ -47,6 +47,7 @@ test("states: reading, can't be read with the last value kept, the listing's err
   assert.equal(pageState({ value: null, failure: { status: 502, why: "x" }, gone: false }, 0).drawn, false);
   assert.deepEqual(pageState({ value: value({ state: "error", detail: "the index can't be read" }), failure: null, gone: false }, 0),
                    { state: "error", line: "the index can't be read", drawn: false, acts: false });
+  assert.equal(pageState({ value: value({ state: "error", detail: null }), failure: null, gone: false }, 0).line, SERVER_ERROR);
   assert.deepEqual(pageState({ value: up, failure: null, gone: false }, 0), { state: "up", line: null, drawn: true, acts: true });
   assert.equal(pageState({ value: up, failure: null, gone: true }, 0).state, "gone");
 });
