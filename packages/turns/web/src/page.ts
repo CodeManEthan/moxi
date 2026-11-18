@@ -20,15 +20,18 @@
 // on a session.
 //
 // It reads `/api/sessions`, then follows the topic `sessions`, which carries the whole list
-// at each change, and reads the route again when its tab is shown again. It redraws once a
-// minute, for the day words across midnight.
+// at each change, and reads the route again when its tab is shown again. With launcher
+// installed, and not on the phone, it reads launcher's `/api/running` the same way, then
+// its topic `running`, and a launch paired one to one with a row by session id names it
+// (`launch-model.ts`); a read that fails names none, and nothing is said of it. It redraws
+// once a minute, for the day words across midnight.
 
 import { css, html, LitElement, noChange, nothing } from "lit";
 import type { TemplateResult } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, installed, navigate, setAddress, subscribe } from "/m/ui/client.js";
+import { api, gateway, installed, navigate, setAddress, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseList } from "./feed.ts";
 import type { Session, SessionList } from "./feed.ts";
@@ -37,10 +40,12 @@ import {
   SETTINGS_LINK, SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import type { Address, Alert, Frame, ReachLine } from "./frame-model.ts";
+import { launchesOf, parseRunning } from "./launch-model.ts";
+import type { Running } from "./launch-model.ts";
 import { COPY_ID, LABELS, openedOf } from "./opened-model.ts";
 import type { AgentsLines } from "./opened-model.ts";
 import { LOCAL, rowLines } from "./rows-model.ts";
-import type { Group, RowLines } from "./rows-model.ts";
+import type { Group, Launch, RowLines } from "./rows-model.ts";
 
 const TAG = "moxi-turns-page";
 
@@ -147,6 +152,12 @@ export class TurnsPage extends LitElement {
   route = "";
   #feed: Feed<SessionList> | null = null;
   #stop: (() => void) | null = null;
+  /** Launcher's running launches as last read; null when not read, not readable, or not
+   * installed. */
+  #running: Running | null = null;
+  #stopRunning: (() => void) | null = null;
+  #runningOut = false;
+  #runningAgain = false;
   /** The address: the route as given, then each row opened or closed here. */
   #address: Address = { key: null, unknown: false };
   #openedAt = 0;
@@ -156,7 +167,9 @@ export class TurnsPage extends LitElement {
   #readingTimer: ReturnType<typeof setTimeout> | undefined;
   #redrawTimer: ReturnType<typeof setInterval> | undefined;
   #shown = (): void => {
-    if (document.visibilityState === "visible") void this.#feed?.refresh();
+    if (document.visibilityState !== "visible") return;
+    void this.#feed?.refresh();
+    void this.#readRunning();
   };
 
   connectedCallback(): void {
@@ -168,6 +181,16 @@ export class TurnsPage extends LitElement {
     void feed.refresh().then(() => {
       if (this.#feed === feed) this.#stop = subscribe("turns", "sessions", (data) => feed.topic(data));
     });
+    if (this.#readsLauncher()) {
+      void this.#readRunning().then(() => {
+        if (this.#feed === feed) {
+          this.#stopRunning = subscribe("launcher", "running", (data) => {
+            this.#running = parseRunning(data);
+            this.requestUpdate();
+          });
+        }
+      });
+    }
     document.addEventListener("visibilitychange", this.#shown);
     this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#redrawTimer = setInterval(() => this.requestUpdate(), REDRAW_MS);
@@ -179,6 +202,9 @@ export class TurnsPage extends LitElement {
     this.#feed = null;
     this.#stop?.();
     this.#stop = null;
+    this.#stopRunning?.();
+    this.#stopRunning = null;
+    this.#running = null;
     document.removeEventListener("visibilitychange", this.#shown);
     clearTimeout(this.#readingTimer);
     clearTimeout(this.#copyTimer);
@@ -187,6 +213,40 @@ export class TurnsPage extends LitElement {
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("route")) this.#address = parseAddress(this.route);
+  }
+
+  // -- launcher ----------------------------------------------------------------------------
+
+  /** Whether the panel reads launcher: installed, and not on the phone. */
+  #readsLauncher(): boolean {
+    return installed("launcher") && !gateway();
+  }
+
+  /** Reads launcher's running launches; one read at a time, and one more after it when
+   * asked meanwhile. A read that fails names no row. */
+  async #readRunning(): Promise<void> {
+    if (!this.#readsLauncher()) return;
+    if (this.#runningOut) {
+      this.#runningAgain = true;
+      return;
+    }
+    this.#runningOut = true;
+    try {
+      do {
+        this.#runningAgain = false;
+        let answer;
+        try {
+          answer = await api("launcher", "api/running");
+        } catch {
+          answer = { status: 0, data: null };
+        }
+        if (!this.isConnected) return;
+        this.#running = answer.status === 200 ? parseRunning(answer.data) : null;
+        this.requestUpdate();
+      } while (this.#runningAgain);
+    } finally {
+      this.#runningOut = false;
+    }
   }
 
   // -- the address -------------------------------------------------------------------------
@@ -251,6 +311,7 @@ export class TurnsPage extends LitElement {
     const today = LOCAL.day(Date.now() / 1000);
     const failed = frame.state === "failed";
     const home = this.#feed?.value?.home ?? null;
+    const launches = launchesOf(this.#readsLauncher() ? this.#running : null, this.#feed?.value?.sessions ?? []);
     return html`<div data-state=${frame.state}>
       ${reading !== null ? html`<p class="waiting" data-line="reading" role="status">${reading}</p>` : nothing}
       ${frame.alert !== null ? this.#alert(frame.alert) : nothing}
@@ -259,7 +320,7 @@ export class TurnsPage extends LitElement {
           <div class="gk" data-line="label">${group.label}</div>
           <div class="gl">${repeat(group.sessions, (session) => session.key,
                                    (session) => this.#row(session, group.group, frame.open, !failed, today,
-                                                          home))}</div>
+                                                          home, launches.get(session.key) ?? null))}</div>
         </section>`)}</div>` : nothing}
       ${frame.empty !== null ? html`<div class="quietline" data-line="empty">${frame.empty}</div>
         ${frame.reach !== null ? html`<div class="first" data-part="reach"><p>${this.#reach(frame.reach)}</p></div>`
@@ -285,9 +346,10 @@ export class TurnsPage extends LitElement {
       this.#copyButton("command", line.command)}` : nothing}${line.after ?? nothing}`;
   }
 
-  #row(session: Session, group: Group, openKey: string | null, acts: boolean, today: string, home: string | null) {
+  #row(session: Session, group: Group, openKey: string | null, acts: boolean, today: string, home: string | null,
+       launch: Launch | null) {
     const open = acts && session.key === openKey;
-    const lines = rowLines(session, group, today);
+    const lines = rowLines(session, group, today, launch);
     const toggle = (): void => this.#open(open ? null : session.key);
     return html`<moxi-ui-row data-key=${session.key} ${attributes(rowAttributes(lines, open, acts))}
         @moxi-row-toggle=${toggle}>
