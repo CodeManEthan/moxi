@@ -20,8 +20,8 @@ import moxi_repo
 from moxi import modules
 from moxi_repo import _records, api, committer, gitconf, page, pagehandlers, projects, shim
 from tests.conftest import NEEDS_CONFIG_GIT, POSIX_ONLY, git
-from tests.test_commit_records import cgd, failed_push, push_key
-from tests.test_committer import PREPARE, spec, write
+from tests.test_commit_records import PREPARE, cgd, failed_push, push_key
+from tests.test_committer import spec, write
 from tests.test_projects import Projects
 
 pytestmark = POSIX_ONLY
