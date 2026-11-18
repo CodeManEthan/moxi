@@ -150,6 +150,12 @@
 // else it spawns if need be, waits for the first line and makes the ready ask. A hold that
 // ran out passes with no context, whatever the decision is by then. A subagent's
 // SessionStart never holds.
+// The switch at the hold's entry (`SDK_SKIPS_HOLD`, on): before it holds, SessionStart
+// reads `CLAUDE_CODE_ENTRYPOINT` with `$.env.get`; when it starts with `sdk-` (a print or
+// SDK start, for which Claude Code raises session.start only after SessionStart settles),
+// the hold ends at once as ran out, by the same step and with no timer, and the runner
+// logs the value. A read that throws, or no value, holds. The decision never reads the
+// variable: an interactive session that inherited `sdk-cli` takes the late ready.
 // The ordering rule: exactly one ready ask for each main SessionStart before the decision.
 // The hold's end and the decision each run in one step with no await, and the decision
 // takes `missed` in its step: if the hold ran out first, session.start makes the ready (the
@@ -265,6 +271,9 @@ const REPORT_WAIT_MS = 1000
 const HELLO_WAIT_MS = 2000
 /** How long a SessionStart that runs before the decision holds for it. */
 const DECIDE_WAIT_MS = 1000
+/** The switch at the entry to SessionStart's hold: on, a SessionStart whose
+ *  `CLAUDE_CODE_ENTRYPOINT` starts with `sdk-` ends its hold at once. */
+const SDK_SKIPS_HOLD = true
 const IDLE_FAIL_MS = 5000
 const SEND_TRIES = 5
 const SEND_RETRY_MS = 100
@@ -972,10 +981,26 @@ function takeDecision($: Dollar, isInteractive: unknown): ReadyFacts | null {
   return took
 }
 
+/** Whether a SessionStart before the decision ends its hold at once: only with the switch
+ *  on, and only for an entrypoint that starts with `sdk-`. No value never skips. */
+export function skipsHold(entrypoint: string | undefined, options: { switchOn: boolean }): boolean {
+  return options.switchOn && typeof entrypoint === 'string' && entrypoint.startsWith('sdk-')
+}
+
+/** `CLAUDE_CODE_ENTRYPOINT`, or undefined when unset or when the read throws. */
+async function readEntrypoint($: Dollar): Promise<string | undefined> {
+  try {
+    return await $.env.get('CLAUDE_CODE_ENTRYPOINT')
+  } catch {
+    return undefined
+  }
+}
+
 /** A SessionStart before the decision holds for it, at most DECIDE_WAIT_MS. The outcome is
  *  fixed in one step: `decided` when the decision came first, `ran-out` when the bound did,
- *  and that same step records `facts` as `missed`. */
-function hold($: Dollar, facts: ReadyFacts): Promise<'decided' | 'ran-out'> {
+ *  and that same step records `facts` as `missed`. With `skip` that step runs at once, with
+ *  no timer. */
+function hold($: Dollar, facts: ReadyFacts, options: { skip: boolean }): Promise<'decided' | 'ran-out'> {
   return new Promise(resolve => {
     let done = false
     const end = (): void => {
@@ -985,7 +1010,7 @@ function hold($: Dollar, facts: ReadyFacts): Promise<'decided' | 'ran-out'> {
       missed = facts
       resolve('ran-out')
     }
-    if (headless !== undefined) return end()
+    if (headless !== undefined || options.skip) return end()
     void decidedP.then(end)
     $.clock.after(DECIDE_WAIT_MS, end)
   })
@@ -1379,8 +1404,14 @@ export const register: Register = on => {
     try {
       if (e.agent_id !== undefined) return behind(hook, performance.now(), await next(e))
       const facts = { source: e.source, session_id: e.session_id, transcript_path: e.transcript_path }
-      // A hold that ran out passes with no context, whatever the decision is by now.
-      if (headless === undefined && (await hold($, facts)) === 'ran-out') return behind(hook, performance.now(), await next(e))
+      if (headless === undefined) {
+        // Read before the hold, never inside the step that ends it.
+        const entrypoint = await readEntrypoint($)
+        const skip = skipsHold(entrypoint, { switchOn: SDK_SKIPS_HOLD })
+        if (skip) log($, `SessionStart holds for no decision: CLAUDE_CODE_ENTRYPOINT is ${JSON.stringify(entrypoint)}`)
+        // A hold that ran out passes with no context, whatever the decision is by now.
+        if ((await hold($, facts, { skip })) === 'ran-out') return behind(hook, performance.now(), await next(e))
+      }
       if (headless === true) return behind(hook, performance.now(), await next(e))
       if (!spawned) await spawn($)
       const answer = await ready($, facts)

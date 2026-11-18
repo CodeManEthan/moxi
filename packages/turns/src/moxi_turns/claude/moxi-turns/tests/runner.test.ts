@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { ROOT_ARGV, SOCK, commandRow, world } from './world'
 import type { World } from './world'
+import { skipsHold } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -262,6 +263,76 @@ describe('the non-interactive rule', () => {
     expect(w.clock.now()).toBe(1_150)
     expect(w.spawned).toEqual([])
     expect(w.got).toEqual([])
+  })
+
+  describe('the switch at the hold\'s entry, as shipped (on)', () => {
+    const SDK = { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }
+    const SKIPPED = 'moxi-turns: SessionStart holds for no decision: CLAUDE_CODE_ENTRYPOINT is "sdk-cli"'
+
+    test('an sdk- entrypoint: SessionStart passes at once with nothing; a not-interactive session.start spawns and posts nothing', async ($: E, on) => {
+      const w = world(on, { env: SDK })
+      const r = await sessionStart($)
+      expect(w.clock.now()).toBe(1_000)
+      expect(r.additionalContext ?? []).toEqual([])
+      expect(w.logs).toContain(SKIPPED)
+      await startAs($, false)
+      await quietAfter($, w)
+      expect(w.logs).not.toContain(DROPPED)
+    })
+
+    test('an sdk- entrypoint, then session.start interactive: the late ready, as after a missed hold', async ($: E, on) => {
+      const w = world(on, { env: SDK })
+      w.answers['/ask/context'] = { context: 'ROSTER' }
+      expect((await sessionStart($)).additionalContext ?? []).toEqual([])
+      expect(w.clock.now()).toBe(1_000)
+      const s = start($)
+      await w.clock.settle()
+      expect(w.spawned).toEqual([ROOT_ARGV])
+      await w.hello({ guards: [ASK_GUARD] })
+      await s
+      expect(readies(w)).toEqual([READY])
+      expect(w.logs).toContain(DROPPED)
+      expect((await permission($)).decision).toEqual({ behavior: 'deny', message: 'nobody is there to ask' })
+    })
+
+    test('the decision never reads the entrypoint: session.start interactive first, then SessionStart asks as on any start', async ($: E, on) => {
+      const w = world(on, { env: SDK })
+      w.answers['/ask/context'] = { context: 'ROSTER' }
+      await start($)
+      expect(w.spawned).toEqual([ROOT_ARGV])
+      const r = sessionStart($)
+      await w.hello()
+      expect((await r).additionalContext).toEqual(['ROSTER'])
+      expect(readies(w)).toEqual([READY])
+      expect(w.logs).not.toContain(SKIPPED)
+    })
+
+    const holds: [string, { env?: Record<string, string>; envFails?: boolean }][] = [
+      ['an entrypoint of cli', { env: { CLAUDE_CODE_ENTRYPOINT: 'cli' } }],
+      ['no entrypoint', { env: {} }],
+      ['an empty entrypoint', { env: { CLAUDE_CODE_ENTRYPOINT: '' } }],
+      ['an env read that throws', { envFails: true }],
+    ]
+    for (const [name, options] of holds) {
+      test(`${name}: SessionStart holds the full second`, async ($: E, on) => {
+        const w = world(on, options)
+        const r = sessionStart($)
+        await w.clock.advance(999)
+        expect(await settled(w, r)).toBe(false)
+        await w.clock.advance(1)
+        expect((await r).additionalContext ?? []).toEqual([])
+        expect(w.logs.filter(l => l.includes('holds for no decision'))).toEqual([])
+      })
+    }
+
+    test('skipsHold, switch on: only an entrypoint that starts with sdk-', () => {
+      for (const v of ['sdk-cli', 'sdk-ts', 'sdk-py']) expect(skipsHold(v, { switchOn: true })).toBe(true)
+      for (const v of ['cli', '', 'claude-sdk-cli', 'SDK-CLI', undefined]) expect(skipsHold(v, { switchOn: true })).toBe(false)
+    })
+
+    test('skipsHold, switch off: nothing skips, an sdk- entrypoint included', () => {
+      for (const v of ['sdk-cli', 'sdk-ts', 'cli', '', undefined]) expect(skipsHold(v, { switchOn: false })).toBe(false)
+    })
   })
 
   test('a missed hold whose endpoint cannot start: session.start waits for nothing and asks nothing', async ($: E, on) => {
