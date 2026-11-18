@@ -63,8 +63,11 @@ def test_what_needs_him_comes_first_each_with_its_fix(cast, page):
     expect(broke.locator("[data-line=time]")).to_have_text(re.compile(r"^\d{1,2}:\d{2}"))
     expect(broke.locator("[data-line=dim]")).to_have_text(
         "pre-commit git hook: demo/lint broke (ValueError: lint fell over)")
-    expect(broke.locator("[data-line=fix] code")).to_contain_text(
-        f"moxi repo git-hooks disable {lumen} demo/lint")
+    disable = f"moxi repo git-hooks disable {lumen} demo/lint"
+    expect(broke.locator("[data-line=fix] code")).to_have_text(
+        f"{disable} (or: moxi repo git-hooks remove {lumen} demo/lint)")
+    # Copy takes the command that runs as it stands, not the alternative.
+    kit.copied(page, broke.locator("[data-line=fix] [data-action=copy]"), disable)
     expect(broke.locator("[data-line=record]")).to_have_count(0)
     broke.locator("[data-action=show-record]").click()
     expect(broke.locator("[data-line=record]")).to_contain_text("ValueError: lint fell over")

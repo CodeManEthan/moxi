@@ -26,10 +26,11 @@ export type Source =
 export interface Fix {
   /** `Take the piece out`, `Drop it from the list`; null for none. */
   label: string | null;
-  /** The command or line to copy, or the sentence; null for none. */
+  /** The command or line shown, or the sentence; null for none. */
   text: string | null;
-  /** `text` has a `Copy`. */
-  copy: boolean;
+  /** What its `Copy` puts on the clipboard: the command that runs as it stands, without an
+   * `(or: ...)` alternative the text adds; null for no `Copy`. */
+  copy: string | null;
   /** The item offers the Refresh act. */
   refresh: boolean;
 }
@@ -60,11 +61,17 @@ export interface Item {
 function fixOf(text: string | null, { label = null, refresh = false }: { label?: string | null; refresh?: boolean } = {}
 ): Fix | null {
   if (text === null && !refresh) return null;
-  return { label, text, copy: text !== null, refresh };
+  return { label, text, copy: text === null ? null : runnable(text), refresh };
+}
+
+/** A fix's command as it runs: the text before an `(or: ...)` alternative at its end. */
+export function runnable(text: string): string {
+  const at = text.lastIndexOf(" (or: ");
+  return at > 0 && text.endsWith(")") ? text.slice(0, at) : text;
 }
 
 function sentence(text: string): Fix {
-  return { label: null, text, copy: false, refresh: false };
+  return { label: null, text, copy: null, refresh: false };
 }
 
 /** Whether a repo's folder is gone: a `gone` problem names it. */

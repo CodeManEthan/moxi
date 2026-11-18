@@ -727,10 +727,10 @@ export class RepoPage extends LitElement {
       data-action="refresh" @click=${() => this.#startOutside("refresh", item.repo.root, `item:${key}`, item.name)}>${
       REFRESH}</button>` : nothing;
     if (fix.text === null) return fix.refresh ? html`<div class="line sm" data-line="fix"><span></span>${refresh}</div>` : nothing;
-    if (!fix.copy) return html`<div class="line sm" data-line="fix"><span>${fix.text}</span>${refresh}</div>`;
+    if (fix.copy === null) return html`<div class="line sm" data-line="fix"><span>${fix.text}</span>${refresh}</div>`;
     return html`<div class="cmd sm" data-line="fix"><span>${fix.label !== null
       ? html`<span class="d lbl">${fix.label}</span>` : nothing}<code>${fix.text}</code></span><span class="acts">${
-      this.#copyButton(`item:${key}`, fix.text)}${refresh}</span></div>`;
+      this.#copyButton(`item:${key}`, fix.copy)}${refresh}</span></div>`;
   }
 
   #toggleRecord(key: string): void {

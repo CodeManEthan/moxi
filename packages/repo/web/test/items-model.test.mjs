@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { FOLD_PAST, foldedLine, itemsOf, repoItems, timeWords, verdict } from "../src/items-model.ts";
+import { FOLD_PAST, foldedLine, itemsOf, repoItems, runnable, timeWords, verdict } from "../src/items-model.ts";
 import { AT, event, HOME, piece, problem, record, repo, spec, T, TODAY, UTC, value } from "./fixtures.mjs";
 
 const opts = { home: HOME, today: TODAY, clock: UTC };
@@ -23,7 +23,7 @@ test("a piece with no module on an event that refuses, its break merged", () => 
   assert.deepEqual(words(item), {
     weight: "need", title: "lumen-docs refuses every commit: prose-check has no module",
     dim: ["no installed module declares it", "it broke at 17:55"],
-    fix: { label: "Take the piece out", text: "moxi repo git-hooks remove /r inkwell/prose-check", copy: true,
+    fix: { label: "Take the piece out", text: "moxi repo git-hooks remove /r inkwell/prose-check", copy: "moxi repo git-hooks remove /r inkwell/prose-check",
            refresh: false },
     time: "17:55",
   });
@@ -57,7 +57,7 @@ test("a gone folder is a warning with the command that drops it", () => {
   assert.deepEqual(words(item), {
     weight: "warn", title: "~/code/quill-mobile's folder is gone",
     dim: ["~/code/quill-mobile", "its hooks went with it; only this list still names it"],
-    fix: { label: "Drop it from the list", text: "moxi repo git-hooks remove ~/code/quill-mobile", copy: true,
+    fix: { label: "Drop it from the list", text: "moxi repo git-hooks remove ~/code/quill-mobile", copy: "moxi repo git-hooks remove ~/code/quill-mobile",
            refresh: false },
     time: null,
   });
@@ -70,7 +70,7 @@ test("a needed chain line is a warning with its line to copy", () => {
   assert.deepEqual(words(item), {
     weight: "warn", title: "a: before a commit needs a line in another tool's hook",
     dim: ["~/code/a/.husky/pre-commit"],
-    fix: { label: null, text: "sh .git/moxi-repo/launcher pre-commit", copy: true, refresh: false }, time: null,
+    fix: { label: null, text: "sh .git/moxi-repo/launcher pre-commit", copy: "sh .git/moxi-repo/launcher pre-commit", refresh: false }, time: null,
   });
 });
 
@@ -83,11 +83,11 @@ test("any other problem is its detail, with its fix, and Refresh where the fix i
   ] }), opts);
   assert.deepEqual(items.map(words), [
     { weight: "need", title: "a: pre-commit: its script is missing", dim: [],
-      fix: { label: null, text: "moxi repo git-hooks refresh /r", copy: true, refresh: true }, time: null },
+      fix: { label: null, text: "moxi repo git-hooks refresh /r", copy: "moxi repo git-hooks refresh /r", refresh: true }, time: null },
     { weight: "warn", title: "a: git can't read it", dim: [], fix: null, time: null },
   ]);
   const bare = one(repo({ project: "a", problems: [problem({ detail: "x", fix: null, refresh: true })] }));
-  assert.deepEqual(bare.fix, { label: null, text: null, copy: false, refresh: true });
+  assert.deepEqual(bare.fix, { label: null, text: null, copy: null, refresh: true });
 });
 
 test("a piece's record not merged is its own need", () => {
@@ -95,8 +95,17 @@ test("a piece's record not merged is its own need", () => {
                          at: AT("16:40") });
   assert.deepEqual(words(one(repo({ project: "a", records: [broke] }))), {
     weight: "need", title: "a: secret-gate broke", dim: ["secret-gate crashed"],
-    fix: { label: null, text: "run it again", copy: true, refresh: false }, time: "16:40",
+    fix: { label: null, text: "run it again", copy: "run it again", refresh: false }, time: "16:40",
   });
+});
+
+test("a broken piece's Copy takes the command that runs; the alternative stays shown", () => {
+  const fix = "moxi repo git-hooks disable /r lint/lint (or: moxi repo git-hooks remove /r lint/lint)";
+  const item = one(repo({ project: "a", records: [record({ piece: "lint/lint", fix })] }));
+  assert.equal(item.fix.text, fix);
+  assert.equal(item.fix.copy, "moxi repo git-hooks disable /r lint/lint");
+  assert.equal(runnable("moxi repo git-hooks remove /r"), "moxi repo git-hooks remove /r");
+  assert.equal(runnable("run (or: this) and that"), "run (or: this) and that");
 });
 
 const COMMIT = record({ kind: "commit", piece: null, spec: "notes/snapshot",
@@ -111,7 +120,7 @@ test("a refused spec reads the open commit record's words and keeps them after a
     weight: "need", title: "Auto-commit notes/snapshot is refused",
     dim: ["refused: drafts/private/ is never committed (refused since 18:45, 2 passes)", "~/notes", "refused 2 passes",
           "last commit 18:30"],
-    fix: { label: null, text: "Its next pass that commits clears this.", copy: false, refresh: false },
+    fix: { label: null, text: "Its next pass that commits clears this.", copy: null, refresh: false },
     time: "since 18:45",
   });
   assert.equal(item.record, COMMIT);
@@ -126,7 +135,7 @@ test("a failed spec stays failed after a throttled pass, with the record's fix",
   assert.deepEqual(words(one(repo({ project: "n", specs: [failed], records: [rec] }))), {
     weight: "need", title: "Auto-commit notes/snapshot failed",
     dim: ["error: git commit failed", "n", "last commit 18:30"],
-    fix: { label: null, text: "look at the log", copy: true, refresh: false }, time: "since 17:00",
+    fix: { label: null, text: "look at the log", copy: "look at the log", refresh: false }, time: "since 17:00",
   });
   // With no record, no fix.
   assert.equal(one(repo({ project: "n", specs: [failed] })).fix, null);
@@ -139,7 +148,7 @@ test("a stale index lock is a need from the record", () => {
   assert.deepEqual(words(one(repo({ project: "n", specs: [held], records: [rec] }))), {
     weight: "need", title: "Auto-commit notes/snapshot is held up by git's index lock",
     dim: ["repo: notes/snapshot: git's index lock /r/.git/index.lock has been held", "n"],
-    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: true, refresh: false },
+    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: "if no git is running in /r, remove /r/.git/index.lock", refresh: false },
     time: "since 12:00",
   });
   // An index-busy run that isn't stale yet is no item.
@@ -157,7 +166,7 @@ test("a commit record from a pass that committed, with hook lines, is a warning 
                  fix: "see the paths left out", at: AT("19:00") };
   assert.deepEqual(words(one(repo({ project: "n", specs: [spec()], records: [said] }))), {
     weight: "warn", title: "committed abc1234 (3 paths); 1 left out", dim: ["n"],
-    fix: { label: null, text: "see the paths left out", copy: true, refresh: false }, time: "19:00",
+    fix: { label: null, text: "see the paths left out", copy: "see the paths left out", refresh: false }, time: "19:00",
   });
 });
 
@@ -169,7 +178,7 @@ test("a failed push is a need with its unpushed commits, its record merged", () 
   assert.deepEqual(words(item), {
     weight: "need", title: "Auto-commit notes/snapshot can't push: over quota",
     dim: ["~/notes", "2 commits on main not pushed"],
-    fix: { label: null, text: "The next pass pushes.", copy: false, refresh: false }, time: "17:00",
+    fix: { label: null, text: "The next pass pushes.", copy: null, refresh: false }, time: "17:00",
   });
   assert.equal(item.record, pushRec);
   const never = one(repo({ specs: [{ ...pushing, push_failed: [{ branch: "main", error: null, failed_at: null }],
