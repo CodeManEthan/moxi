@@ -61,6 +61,17 @@ value the supervisor can't give is `warn`, "unknown", with the reason. A health 
 give with `--health` runs when asked (`show`, `watch`, `list --health`, the doctor),
 only for a running daemon, for five seconds at most: exit 0 is healthy.
 
+A verdict's `cause`, in `--json` and on the page's reads, is one word that tells a reader
+which case gave it without reading the reason:
+
+- `not-running`: a daemon that is on and not running, with no stop by hand that holds
+  (`fail`);
+- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
+- `last-run`: a timer whose last run failed (`warn`).
+
+Every other verdict's cause is null. The set may grow, so a reader treats a word it does
+not know as it treats null.
+
 ## Adopted timers on Linux
 
 An adopted systemd timer is wrapped: Moxi writes one drop-in beside the service it

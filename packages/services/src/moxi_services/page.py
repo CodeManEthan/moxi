@@ -87,12 +87,14 @@ _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _COMMAND = lb.Out("list", items=_SAYS, mark="redact", nullable=True)
 
 #: A row's verdict: `state` is `ok`, `warn`, `fail` or `off`; `unknown` is True when it
-#: is `warn` because a value could not be read.
+#: is `warn` because a value could not be read; `cause` one word of `verdict.CAUSES` for
+#: the cases a reader tells apart (`not-running`, `stopped`, `last-run`), else null.
 VERDICT = lb.Out("table", items={
     "state": _TEXT,
     "reason": _SAYS,
     "fix": _MAYBE_SAYS,
     "unknown": _FLAG,
+    "cause": _MAYBE,
 })
 
 #: A timer's last run: `failed`, a few words (`ok`, `exit 1`, ...), and when.

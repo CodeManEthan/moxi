@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A verdict gains `cause` in `moxi services list --json`, `show --json`, `watch --json`
+  and the page's reads: `not-running`, `stopped` or `last-run`, else null.
 - The `adopted` switch table carries page fields, which `moxi config services show
   --json` prints and the settings page draws: a plain label and a line. services needs
   moxi 0.1.9 or later.
