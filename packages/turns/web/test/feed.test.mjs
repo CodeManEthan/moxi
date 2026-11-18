@@ -58,6 +58,7 @@ test("a 200 gives the value and the server clock's offset", async () => {
   assert.equal(feed.loading, false);
   assert.deepEqual(feed.value, { listed: true, detail: null, home: "/home/u", reach: null, sessions: [SESSION] });
   assert.equal(feed.offset, 600);
+  assert.equal(feed.readAt, 1000);
   assert.equal(feed.now(), 1000);
   assert.equal(feed.failure, null);
   assert.equal(changes(), 1);
@@ -110,6 +111,7 @@ test("a topic event replaces the value while the last read succeeded", async () 
   await feed.refresh();
   feed.topic({ listed: true, detail: null, sessions: [] });
   assert.deepEqual(feed.value.sessions, []);
+  assert.equal(feed.readAt, feed.now());
   assert.equal(reads.length, 1);
 });
 

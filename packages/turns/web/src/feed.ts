@@ -170,6 +170,9 @@ export class Feed<V> {
   loading = true;
   /** The server's clock minus this browser's, in seconds; null before the first read. */
   offset: number | null = null;
+  /** When the value was last read, on the server's clock: the route's `now`, or the
+   * server's time when a topic event came. Null before the first read. */
+  readAt: number | null = null;
 
   #read: () => Promise<ApiResult>;
   #parse: (data: unknown) => V | null;
@@ -228,6 +231,7 @@ export class Feed<V> {
       return;
     }
     this.value = value;
+    this.readAt = this.now();
     this.#onChange();
   }
 
@@ -247,6 +251,7 @@ export class Feed<V> {
     if (value !== null && typeof now === "number" && Number.isFinite(now)) {
       this.value = value;
       this.offset = now - at;
+      this.readAt = now;
       this.failure = null;
       this.gone = false;
     } else if (answer.status === 404) {
