@@ -17,7 +17,7 @@ import time
 import pytest
 
 import moxi_repo
-from moxi import modules
+from moxi import modules, paths
 from moxi_repo import _records, api, committer, gitconf, page, pagehandlers, projects, shim
 from tests.conftest import NEEDS_CONFIG_GIT, POSIX_ONLY, git
 from tests.test_commit_records import PREPARE, cgd, failed_push, push_key
@@ -82,8 +82,8 @@ def read() -> dict:
     before = time.time()
     status, body = asyncio.run(_get(served(), "/api/repos"))
     assert status == 200, body
-    assert set(body) == {"now", "today", "state", "detail", "repos", "offered", "refused",
-                         "unindexed"}
+    assert set(body) == {"now", "today", "home", "state", "detail", "repos", "offered",
+                         "refused", "unindexed"}
     assert before <= body["now"] <= time.time()
     assert body["today"] == dt.date.today().isoformat()
     return body
@@ -144,7 +144,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
             "repos[].specs[].push_failed[].error", "repos[].specs[].run.command",
             "repos[].specs[].forget.command", "repos[].records[].text",
             "repos[].records[].fix", "repos[].rules[]", "offered[].doc", "refused[].why"]
-    assert marks == {"repos[].root": "path", "repos[].events[].hook": "path",
+    assert marks == {"home": "path", "repos[].root": "path", "repos[].events[].hook": "path",
                      "repos[].events[].existing_hook": "path", "unindexed[].root": "path",
                      **dict.fromkeys(said, "redact")}
 
@@ -162,8 +162,21 @@ def test_the_announcement_offers_the_page_and_nothing_imports_it():
 def test_with_no_repo_the_read_is_up_and_empty(demo):
     offered, refused = offered_now()
     assert read() == {"now": pytest.approx(time.time(), abs=60),
-                      "today": dt.date.today().isoformat(), "state": "up", "detail": None,
-                      "repos": [], "offered": offered, "refused": refused, "unindexed": []}
+                      "today": dt.date.today().isoformat(), "home": str(paths.home()),
+                      "state": "up", "detail": None, "repos": [], "offered": offered,
+                      "refused": refused, "unindexed": []}
+
+
+def test_home_is_where_moxi_paths_places_it(demo, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "the-home"))
+    assert read()["home"] == str(paths.home()) == str(tmp_path / "the-home")
+
+
+@POSIX_ONLY
+def test_with_nothing_placing_a_home_it_is_null(demo, monkeypatch):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert read()["home"] is None
 
 
 def test_the_read_offers_each_declared_piece_and_names_each_refused_one(demo):

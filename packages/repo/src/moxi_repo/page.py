@@ -187,11 +187,13 @@ REFUSED = lb.Out("table", items={"id": _TEXT, "why": _SAYS})
 UNINDEXED = lb.Out("table", items={"project": _TEXT, "root": _PATH})
 
 #: The list and how it stands: `state` is `up` or `error`, and `detail` is null when up;
-#: the server's local date (`today`); the pieces installed modules offer and the
+#: the server's local date (`today`); its home folder (`home`, null when nothing places
+#: one), under which the page writes a path in `~` form; the pieces installed modules offer and the
 #: declarations refused; and `unindexed`, null without projects.
 REPOS = {
     "now": lb.Out("float"),
     "today": _TEXT,
+    "home": lb.Out("string", mark="path", nullable=True),
     "state": _TEXT,
     "detail": _MAYBE_SAYS,
     "repos": lb.Out("list", items=REPO),

@@ -65,6 +65,17 @@ def _today() -> str:
     return dt.date.today().isoformat()
 
 
+def _home() -> str | None:
+    """This server's home folder as `moxi.paths.home()` places it, or None when nothing
+    places one; the page writes a path under it in `~` form."""
+    from moxi import paths
+
+    try:
+        return str(paths.home())
+    except LookupError:
+        return None
+
+
 def _event(name: str, info: dict) -> dict[str, Any]:
     return {"event": name, "via": info.get("via"), "pieces": list(info.get("pieces") or []),
             "existing": info.get("existing"), "existing_hook": info.get("existing_hook"),
@@ -209,10 +220,11 @@ def _listed(found: Any) -> tuple[list[dict], list[dict] | None]:
 
 
 def gather() -> dict[str, Any]:
-    """The route's value without `now`: `state`, `detail`, the repos, `today`, `offered`,
-    `refused` and `unindexed`. Never raises."""
+    """The route's value without `now`: `state`, `detail`, the repos, `today`, `home`,
+    `offered`, `refused` and `unindexed`. Never raises."""
     offered, refused = _offered()
-    value = {"today": _today(), "offered": offered, "refused": refused, "unindexed": None}
+    value = {"today": _today(), "home": _home(), "offered": offered, "refused": refused,
+             "unindexed": None}
     try:
         found = projects.api()
         value["unindexed"] = None if found is None else []

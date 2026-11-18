@@ -139,6 +139,9 @@ export interface Repos {
   detail: string | null;
   /** The page server's date, `YYYY-MM-DD`; null when the answer has none. */
   today: string | null;
+  /** The page server's home folder; a path under it is written in `~` form. Null when
+   * nothing places one. */
+  home: string | null;
   repos: RepoRow[];
   offered: Offered[];
   /** Declarations that can't be offered, and why. */
@@ -260,11 +263,12 @@ export function parseRepos(data: unknown): Repos | null {
   const { state, detail, repos } = data;
   if (detail !== null && detail !== undefined && typeof detail !== "string") return null;
   const today = typeof data.today === "string" ? data.today : null;
+  const home = typeof data.home === "string" && data.home !== "" ? data.home : null;
   const offered = rowsOf(data, "offered");
   const refused = rowsOf(data, "refused");
   const unindexed = data.unindexed === null || data.unindexed === undefined ? null : rowsOf(data, "unindexed");
   if (offered === null || refused === null || (data.unindexed != null && unindexed === null)) return null;
-  const rest = { today, offered: offered as unknown as Offered[], refused: refused as Repos["refused"],
+  const rest = { today, home, offered: offered as unknown as Offered[], refused: refused as Repos["refused"],
                  unindexed: unindexed as Unindexed[] | null };
   if (state === "error") return { state, detail: detail ?? null, repos: [], ...rest };
   if (state !== "up" || !isList(repos)) return null;

@@ -63,7 +63,7 @@ export function offered(over = {}) {
 }
 
 export function value(over = {}) {
-  return { state: "up", detail: null, today: TODAY, repos: [], offered: [], refused: [], unindexed: null, ...over };
+  return { state: "up", detail: null, today: TODAY, home: HOME, repos: [], offered: [], refused: [], unindexed: null, ...over };
 }
 
 /** One item of a plan's `writes`. */

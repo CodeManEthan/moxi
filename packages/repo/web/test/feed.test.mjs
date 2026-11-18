@@ -28,7 +28,7 @@ test("a 200 gives the value and the server clock's offset", async () => {
   await read;
   assert.equal(feed.reading, false);
   assert.equal(feed.loading, false);
-  assert.deepEqual(feed.value, { state: "up", detail: null, today: null, repos: [REPO], offered: [], refused: [],
+  assert.deepEqual(feed.value, { state: "up", detail: null, today: null, home: null, repos: [REPO], offered: [], refused: [],
                                  unindexed: null });
   assert.equal(feed.now(), 1000);
   assert.equal(feed.failure, null);
@@ -86,7 +86,7 @@ test("a refresh while one runs reads once more after it", async () => {
 
 test("an error value keeps its detail and drops the repos", () => {
   assert.deepEqual(parseRepos({ state: "error", detail: "the index can't be read", repos: [REPO] }),
-                   { state: "error", detail: "the index can't be read", today: null, repos: [], offered: [],
+                   { state: "error", detail: "the index can't be read", today: null, home: null, repos: [], offered: [],
                      refused: [], unindexed: null });
   assert.equal(parseRepos({ state: "up", detail: 3, repos: [] }), null);
 });
@@ -97,6 +97,9 @@ test("the value carries today, the offered and refused pieces and the projects w
   const value = parseRepos({ ...UP, today: "2026-11-18", offered, refused: [{ id: "x/y", why: "no event" }],
                              unindexed: [{ project: "orbit", root: "/r/orbit" }] });
   assert.equal(value.today, "2026-11-18");
+  assert.equal(value.home, null);
+  assert.equal(parseRepos({ ...UP, home: "/home/jp" }).home, "/home/jp");
+  assert.equal(parseRepos({ ...UP, home: "" }).home, null);
   assert.deepEqual(value.offered, offered);
   assert.deepEqual(value.refused, [{ id: "x/y", why: "no event" }]);
   assert.deepEqual(value.unindexed, [{ project: "orbit", root: "/r/orbit" }]);
