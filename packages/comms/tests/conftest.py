@@ -93,7 +93,7 @@ POSIX_MODES = pytest.mark.skipif(
 def profile(fence) -> Path:
     """A directory of the test's own inside its profile (the fence's home, `USERPROFILE`
     on Windows), where a token store passes Windows's rule that credentials stay inside
-    the user's profile. A test makes its stores here, never under `tmp_path` itself."""
+    the user's profile. A test whose store is read back makes it here."""
     return fence.profile_dir("profile")
 
 
