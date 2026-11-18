@@ -11,7 +11,7 @@ year of mail, most of them for messages the record has since trimmed. Over that:
 - `/api/messages` with its `earlier`, and the read of the day its cursor names, each
   within 1 s.
 
-Each read goes through loopback's strict app, as the page server answers it, and is
+Each ceiling is held times the run's `timed_slack()`. Each read goes through loopback's strict app, as the page server answers it, and is
 timed as the best of three: load from outside the test only ever adds to a read's time.
 The test prints every time it measures, with the machine's load beside it.
 """
@@ -24,6 +24,7 @@ import sys
 import time
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi.store import transaction
 from moxi_comms import machine_line, pagereads, store
@@ -165,7 +166,8 @@ def best_of(read, **query) -> tuple[float, list[float], float, dict]:
     return min(times), times, load, answer
 
 
-def test_the_page_reads_answer_within_their_ceilings_over_a_full_record(full_record):
+def test_the_page_reads_answer_within_their_ceilings_over_a_full_record(full_record,
+                                                                         timed_reading):
     measured: list[tuple[str, float, list[float], float, float]] = []
 
     def timed(what, ceiling, read, **query) -> dict:
@@ -202,5 +204,9 @@ def test_the_page_reads_answer_within_their_ceilings_over_a_full_record(full_rec
               f" (ceiling {ceiling:.0f}s, load {load:.2f})"
               for what, best, times, load, ceiling in measured]
     print("\n" + "\n".join(lines))
-    over = [what for what, best, _, _, ceiling in measured if best > ceiling]
+    # The read nearest its ceiling.
+    _, best, _, _, ceiling = max(measured, key=lambda m: m[1] / m[4])
+    timed_reading(best, ceiling, "s")
+    over = [what for what, best, _, _, ceiling in measured
+            if best > ceiling * timed_slack()]
     assert not over, "over the ceiling: " + "; ".join(lines)

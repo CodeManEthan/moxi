@@ -5,7 +5,7 @@ start), checked at each animation frame.
 
 A `browser` and `slow` test: a plain pytest run leaves it out; `pytest -m slow -s` runs
 it and prints both times with the machine's load. It is also `timed`, so `moxi-dev check`
-runs it alone, after its parallel pass."""
+holds it back and `moxi-dev timed` runs it."""
 
 from __future__ import annotations
 
@@ -58,13 +58,15 @@ MARKS = """module => {
 
 @pytest.mark.skipif(not {m.name for m in modules.scan()} >= set(FULL),
                     reason="the full install's time: not every module is installed")
-def test_on_the_full_install_the_shown_module_draws_within_2_s_and_every_section_is_read_within_4_s(ui_page):
+def test_on_the_full_install_the_shown_module_draws_within_2_s_and_every_section_is_read_within_4_s(ui_page,
+                                                                                                     timed_reading):
     ui_page.goto("/m/ui/settings", wait_until="commit")
     marks = ui_page.wait_for_function(MARKS, arg="moxi", polling="raf", timeout=WAIT_MS).json_value()
     drawn_s, read_s = marks["drawn"] / 1000, marks["read"] / 1000
     load = ", ".join(f"{one:.1f}" for one in os.getloadavg())
     print(f"\nSettings on the full install ({len(marks['listed'])} modules listed): the core drawn at "
           f"{drawn_s * 1000:.0f} ms, every section read at {read_s * 1000:.0f} ms (load {load})")
+    timed_reading(*max((drawn_s, DRAWN_S), (read_s, READ_S), key=lambda pair: pair[0] / pair[1]), "s")
     assert {"moxi", "ui", "launcher", "comms", "sessions", "turns", "usage"} <= set(marks["listed"])
     assert drawn_s < DRAWN_S * timed_slack()
     assert read_s < READ_S * timed_slack()

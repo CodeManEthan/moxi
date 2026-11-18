@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- `moxi-dev timed` runs the timed tests on their own: a run lock first, its own
+  environment (`.moxi-dev/timed-env-3.12`), one session per package with no workers and
+  the idle gate, and a summary line with exit 0, 1, 3 (some test not measured) or 2. It
+  keeps each run per machine and commit under `<git common dir>/moxi-dev/timed/` (or
+  `--record-dir`), with the slack factor of each result, and `--scheduled` leaves a commit
+  whose tests are all settled. `MOXI_TEST_TIMED_LOCK_FD` hands it a lock its parent holds.
+- `moxi-dev timed show` reads that record along a first-parent walk, each machine at its
+  own set factor, with its own exit codes; `moxi-dev timed take` merges another
+  machine's record into this clone's, per commit, never removing anything.
+- `moxi-dev timed schedule` (Linux) writes a machine's timer as systemd user units: a
+  tick at 08:00, 09:00, 10:00 and 11:00 local time that measures the commit in a run tree
+  of its own (a worktree of a clone, or a verified copy of a tree with no git) at the
+  machine's set factor (`--slack`), with `--record-dir`, `--idle-line`, `--stamp` and
+  `--take`. It checks the source, the tools, linger and the units before the timer
+  starts. `moxi-dev timed unschedule` removes the units and the run directory and keeps
+  the record. Both take the run lock first when the run tree exists, and never touch a
+  drop-in.
+- The tick, `tick.py`, uses the standard library alone: it locks, writes the stamp
+  (`--stamp`), brings the run tree to one commit, runs `moxi-dev timed --scheduled`,
+  takes each host's results, and writes a tick file under `<machine>/ticks/` in the
+  record. A host with no git measures the commit its synced tree's stamp names, once every
+  path matches, and reads as `tree not settled` (exit 3) until then. A new
+  `TICK_VERSION` needs `schedule` run again on each machine.
+- `moxi-dev check` has a renames step, after the Ruff check: it fails when the tree is
+  not settled under `renames.tsv` (a row still to apply, a leftover or a row the script
+  refuses), read in its own process with no `--main`, and prints the first of them with
+  their state. The summary line says `renames pass`, `fail`, or `none` for a tree with no
+  table. `--only renames` runs it alone. It costs about 45 s on this repository.
+- `moxi-dev check` runs no `timed` test, in any form: the serial pass after the parallel
+  one is gone, and the summary line says `timed held <n>` (or `timed none`) for the
+  tests the suites held back. A `--finding` whose tests are all timed no longer fails
+  for want of a test: it prints that they are timed and that `moxi-dev timed` runs them.
+  The durations record holds the parallel pass only, so the first delta against a
+  record that still holds timed tests reads lower once.
 - `moxi-dev rename` reads a row whose file is not in the tree as dead: it applies nothing,
   its old name is no leftover anywhere (a `name` or `kwonly` row there used to list every
   string, attribute, keyword and cite of that spelling across the repository), and it is

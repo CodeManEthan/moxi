@@ -118,8 +118,9 @@ print(json.dumps([time.perf_counter() - t0, line]))
 
 
 @pytest.mark.timed
-def test_the_start_line_costs_under_its_budget_at_the_95th_percentile(alpha):
-    budget = {"win32": 0.150}.get(sys.platform, 0.050) * timed_slack()
+def test_the_start_line_costs_under_its_budget_at_the_95th_percentile(alpha, timed_reading):
+    share = {"win32": 0.150}.get(sys.platform, 0.050)
+    budget = share * timed_slack()
     costs = []
     for _ in range(20):
         done = subprocess.run([sys.executable, "-c", START_COST, str(alpha)],
@@ -128,6 +129,7 @@ def test_the_start_line_costs_under_its_budget_at_the_95th_percentile(alpha):
         assert line == expected(alpha)
         costs.append(cost)
     costs.sort()
+    timed_reading(costs[int(len(costs) * 0.95) - 1], share, "s", clock="child")
     assert costs[int(len(costs) * 0.95) - 1] < budget, costs
 
 

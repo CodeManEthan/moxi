@@ -156,7 +156,7 @@ def test_the_push_question_is_asked_only_with_remotes_and_no_push_set(tmp_path):
     keys = Keyboard("", "", "origin")
     code, out = run(keys)
     assert code == 0, out
-    assert keys.asked[-1] == "Push snapshots to which remote? [origin/none] "
+    assert "Push snapshots to which remote? [origin/none] " in keys.asked
     assert setting("snapshot.push") == "origin"
     keys = Keyboard("", "")
     run(keys)
@@ -185,7 +185,7 @@ def test_switching_actions_both_ways_writes_and_removes_the_filter():
     assert setting("action") == "redact" and driver(root) is not None
     keys = Keyboard("", "1")
     assert run(keys)[0] == 0
-    assert keys.asked[-1].endswith("Choose [2]: ")
+    assert [q for q in keys.asked if "Choose" in q][-1].endswith("Choose [2]: ")
     assert setting("action") == "leave-out"
     assert driver(root) is None and attributes(root) == ""
 
@@ -359,3 +359,28 @@ def test_a_terminal_on_stdin_is_asked_through_input(monkeypatch, capsys):
     assert "Where are your notes? [~/notes] " in shown and "Choose [1]: " in shown
     assert setting("action") == "redact"
     assert (home() / "notes" / ".git").is_dir()
+
+
+@posix
+def test_the_preview_names_home_paths_above_the_allowance_lines():
+    root = notes_repo()
+    private_names(home().name)
+    (root / "paths.md").write_text(f"see {home()}/x\n", encoding="utf-8")
+    (root / "plain.md").write_text("nothing here\n", encoding="utf-8")
+    code, out = run()
+    assert code == 0, out
+    hint = setup.HOME_HINT.format(count=1)
+    assert hint in out
+    assert "moxi notes home-paths" in hint and "--apply" in hint
+    first_allowance = out.index("\ttext:")
+    assert out.index(hint) < first_allowance
+
+
+@posix
+def test_no_hint_when_no_file_with_a_hit_spells_home():
+    root = notes_repo()
+    private_names("quillon")
+    (root / "named.md").write_text("ask quillon\n", encoding="utf-8")
+    code, out = run()
+    assert code == 0, out
+    assert "moxi notes home-paths" not in out

@@ -87,11 +87,13 @@ def test_allowed_text_and_the_author_never_hit(eng):
 @pytest.mark.parametrize("eng", [RE2, PY], ids=["re2", "re"])
 @pytest.mark.parametrize("entry", [" ", " b", "- b"])
 @pytest.mark.timed
-def test_separator_heavy_entries_run_in_linear_time(eng, entry):
+def test_separator_heavy_entries_run_in_linear_time(eng, entry, timed_reading):
     text = " " * 320_000 + "b"
     started = time.perf_counter()
     hits(text, [entry, "a b"], eng=eng)
-    assert time.perf_counter() - started < 3.0 * timed_slack()
+    took = time.perf_counter() - started
+    timed_reading(took, 3.0, "s")
+    assert took < 3.0 * timed_slack(), took
 
 
 def test_the_case_folds_agree_on_both_engines():

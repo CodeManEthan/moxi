@@ -431,7 +431,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
     assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
-            "release not run | "
+            "renames not run | release not run | "
             "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
@@ -447,7 +447,7 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
     assert ("packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "release pass "
+            "renames none | release pass "
             "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
         in result.line()
 
@@ -472,7 +472,7 @@ def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
     result = run_check(repo, runs, base="HEAD")
     assert result.code == 1 and result.release == "fail"
     assert ("| packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "release fail |") in result.line()
+            "renames none | release fail |") in result.line()
     assert ("moxi-dev check: packages/turns: CHANGELOG.md: its first version heading is "
             "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
 
@@ -770,6 +770,107 @@ def test_on_windows_every_step_runs_the_environments_programs_from_scripts(
         assert env["PATH"].split(os.pathsep)[0] == str(scripts)
 
 
+# --- the renames step -----------------------------------------------------------------------
+
+TABLE_HEAD = "# package\tpath\tscope\tkind\told\tnew\n"
+
+
+def with_renames(repo, files, *rows):
+    """Commit `files` and the repository's rename table holding `rows`, each (path,
+    scope, kind, old, new); a row's table line is its place here plus one."""
+    for rel, text in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    table = "".join("\t".join(("p", *row)) + "\n" for row in rows)
+    commit_file(repo, str(check.rename.TABLE), TABLE_HEAD + table)
+
+
+X = "packages/sessions/src/moxi_sessions/x.py"
+
+
+def test_a_settled_tree_passes_the_renames_step(repo):
+    with_renames(repo, {X: "fresh = 1\n"}, (X, "-", "name", "old", "fresh"))
+    result = run_check(repo, Runs())
+    assert result.code == 0 and result.renames == "pass"
+    assert "| ruff pass | renames pass | release pass |" in result.line()
+    assert LINE.match(result.line()), result.line()
+
+
+def test_a_row_to_apply_fails_the_renames_step_and_the_rest_still_run(repo, capsys):
+    with_renames(repo, {X: "old = 1\n"}, (X, "-", "name", "old", "fresh"))
+    runs = Runs()
+    result = run_check(repo, runs)
+    assert result.code == 1 and result.renames == "fail"
+    assert (repo / X).read_text() == "old = 1\n", "the step writes nothing"
+    assert (f"moxi-dev check: renames: to apply: renames.tsv row 2: {X} name old -> fresh"
+            in capsys.readouterr().out)
+    assert "| renames fail |" in result.line() and LINE.match(result.line())
+    # the table's own change picks moxi-dev
+    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms", "moxi-dev"]
+
+
+def test_a_leftover_fails_the_renames_step(repo, capsys):
+    with_renames(repo, {X: "def fresh():\n    pass\nthing.old\n"},
+                 (X, "-", "name", "old", "fresh"))
+    result = run_check(repo, Runs())
+    assert result.code == 1 and result.renames == "fail"
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: renames: leftover: {X}:3: unresolved attribute" in out
+    assert "to apply" not in out
+
+
+def test_a_refused_row_fails_the_renames_step(repo, capsys):
+    text = "def run(timeout=1):\n    pick = lambda timeout: timeout * 2\n    return pick(3)\n"
+    with_renames(repo, {X: text}, (X, "run", "name", "timeout", "timeout_s"))
+    result = run_check(repo, Runs())
+    assert result.code == 1 and result.renames == "fail"
+    out = capsys.readouterr().out
+    assert (f"moxi-dev check: renames: refused: renames.tsv row 2 ({X} run timeout -> "
+            f"timeout_s): {X}:2: a scope inside run has its own 'timeout'") in out
+    assert (repo / X).read_text() == text
+
+
+def test_the_renames_step_does_not_compare_with_main(repo, monkeypatch):
+    with_renames(repo, {X: "fresh = 1\n"}, (X, "-", "name", "old", "fresh"))
+    seen = []
+    real = check.rename.read
+    monkeypatch.setattr(check.rename, "read",
+                        lambda root, rows, **kw: seen.append(kw) or real(root, rows, **kw))
+    assert run_check(repo, Runs()).renames == "pass"
+    assert seen == [{}]
+
+
+def test_a_failing_renames_step_prints_its_first_ten_and_how_many_more(repo, monkeypatch,
+                                                                        capsys):
+    with_renames(repo, {X: "fresh = 1\n"})
+    hits = [check.rename.Unsettled("to apply", X, f"renames.tsv row {n}: ...")
+            for n in range(2, 14)]
+    monkeypatch.setattr(check.rename, "scan", lambda root: hits)
+    assert run_check(repo, Runs()).renames == "fail"
+    out = [line for line in capsys.readouterr().out.splitlines() if "renames:" in line]
+    assert out == [f"moxi-dev check: renames: {hit}" for hit in hits[:10]] + [
+        ("moxi-dev check: renames: and 2 more; `uv run moxi-dev rename --dry-run` lists "
+         "every one")]
+
+
+def test_a_tree_with_no_table_has_no_renames_step(repo, monkeypatch):
+    monkeypatch.setattr(check.rename, "scan", lambda root: pytest.fail("scanned"))
+    assert run_check(repo, Runs()).renames == "none"
+
+
+def test_only_renames_reads_the_whole_tree_and_filters_printing(repo, monkeypatch, capsys):
+    other = "packages/turns/src/moxi_turns/y.py"
+    with_renames(repo, {X: "old = 1\n", other: "gone = 1\n"},
+                 (X, "-", "name", "old", "fresh"), (other, "-", "name", "gone", "kept"))
+    monkeypatch.chdir(repo)
+    assert check.main(["--only", "renames", "packages/sessions"]) == 1
+    out = capsys.readouterr().out
+    assert f"to apply: renames.tsv row 2: {X} name old -> fresh" in out
+    assert other not in out
+    assert check.main(["--only", "renames", "packages/cache"]) == 0
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(
@@ -779,12 +880,13 @@ LINE = re.compile(
     r"refs (pass|fail|not run) \| "
     r"names (pass|fail|not run) \| "
     r"ruff (pass|fail|not run) \| "
+    r"renames (pass|fail|none|not run) \| "
     r"release (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| "
     r"lint (?P<lint>pass|none|not run|fail \([^)]+\)) \| (?P<suites>[^|]+) \| "
-    r"timed (?P<timed>[^|]+) \| "
+    r"timed (?P<timed>held \d+|none|not run) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
@@ -900,8 +1002,7 @@ class Timed(Runs):
     """A step runner whose suites write the kit's durations file: `seconds` maps a
     package to its tests' call seconds, each a number or (seconds, the tiers of a test
     the kit put back). `held` maps a package to its `timed` tests' seconds, in the same
-    shape: the parallel pass (`MOXI_TEST_TIMED=hold`) names them held, and the serial
-    pass (`only`) runs them and nothing else."""
+    shape: a pass under `MOXI_TEST_TIMED=hold` names them held and runs none of them."""
 
     def __init__(self, seconds, codes=None, *, write=True, held=None):
         super().__init__(codes)
@@ -926,9 +1027,7 @@ class Timed(Runs):
             return code
         mode = env.get(testing.TIMED_ENV)
         timed = self.tests("timed", self.held.get(name, []))
-        if mode == "only":
-            body = {"tests": timed}
-        elif name in self.seconds or name in self.held:
+        if name in self.seconds or name in self.held:
             body = {"tests": self.tests("it", self.seconds.get(name, []))}
             if mode == "hold":
                 body["held"] = sorted(timed)
@@ -1192,7 +1291,7 @@ def test_main_reads_the_finding(repo, monkeypatch):
     assert seen["finding"] == ["L4", "L9"]
 
 
-# --- the serial pass of the timed tests --------------------------------------------------------
+# --- the timed tests held back ----------------------------------------------------------------
 
 def pytest_calls(runs):
     """Each pytest run: (package, its xdist arguments, its MOXI_TEST_TIMED, its env)."""
@@ -1200,91 +1299,43 @@ def pytest_calls(runs):
             for cmd, cwd, env in runs.calls if "pytest" in cmd]
 
 
-def test_full_runs_the_held_timed_tests_alone_after_every_parallel_suite(
-        ignoring, monkeypatch):
+def test_full_holds_every_timed_test_and_runs_none(ignoring, monkeypatch):
     monkeypatch.setattr(check, "cpu_count", lambda: 6)
     runs = Timed({name: [1.0] for name in LAYOUT},
                  held={"turns": [0.5], "moxi": [0.25, 0.25]})
     result = run_check(ignoring, runs, full=True)
     assert result.code == 0
-    calls = pytest_calls(runs)
-    parallel, serial = calls[:len(LAYOUT)], calls[len(LAYOUT):]
-    assert [(name, args, mode) for name, args, mode, _ in parallel] == [
+    # one session per package, under workers, holding the timed tests; no other session
+    assert [(name, args, mode) for name, args, mode, _ in pytest_calls(runs)] == [
         (name, ["-n", "6"], "hold") for name in LAYOUT]
-    # in the packages' order, one at a time, no workers, only the timed tests
-    assert [(name, args, mode) for name, args, mode, _ in serial] == [
-        ("moxi", ["-n", "0"], "only"), ("turns", ["-n", "0"], "only")]
-    for _, _, _, env in serial:
-        assert env[testing.TIERS_ENV] == "all" and testing.CHANGED_ENV not in env
-        assert env[testing.DURATIONS_ENV] != parallel[0][3][testing.DURATIONS_ENV]
-    assert re.search(r"\| timed moxi pass \d+\.\d+s, turns pass \d+\.\d+s \|",
-                     result.line()), result.line()
+    assert result.timed == 3
+    assert "| timed held 3 |" in result.line()
     assert LINE.match(result.line()), result.line()
 
 
-def test_a_picked_run_hands_the_serial_pass_the_same_changed_paths(ignoring):
+def test_a_picked_run_holds_the_timed_tests_and_counts_them(ignoring):
     commit_file(ignoring, "packages/sessions/x.py")
     runs = Timed({"sessions": [1.0], "cache": [1.0], "comms": [1.0]},
                  held={"sessions": [0.5], "comms": [0.5]})
     result = run_check(ignoring, runs)
     assert result.code == 0
-    calls = pytest_calls(runs)
-    assert [(name, mode) for name, _, mode, _ in calls] == [
-        ("sessions", "hold"), ("cache", "hold"), ("comms", "hold"),
-        ("sessions", "only"), ("comms", "only")]
-    listed = {env[testing.CHANGED_ENV] for _, _, _, env in calls}
-    assert len(listed) == 1
-    assert Path(listed.pop()).read_text() == "packages/sessions/x.py\0"
-    for _, _, _, env in calls:
-        assert testing.TIERS_ENV not in env
-    assert "| timed sessions pass" in result.line()
+    assert [(name, mode) for name, _, mode, _ in pytest_calls(runs)] == [
+        ("sessions", "hold"), ("cache", "hold"), ("comms", "hold")]
+    assert "| timed held 2 |" in result.line()
 
 
-def test_a_timed_failure_fails_the_check_and_its_package_keeps_no_record(ignoring):
-    commit_file(ignoring, "packages/cache/x.py")
-    serial_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
-                    and cmd[3:] == ["-n", "0"])
-    runs = Timed({"cache": [1.0], "comms": [2.0]}, {serial_cache: 1},
-                 held={"cache": [0.5], "comms": [0.5]})
-    result = run_check(ignoring, runs)
-    assert result.code == 1
-    assert [(name, ok) for name, ok, _ in result.suites] == [("cache", True),
-                                                              ("comms", True)]
-    assert [(name, ok) for name, ok, _ in result.timed] == [("cache", False),
-                                                             ("comms", True)]
-    line = result.line()
-    assert re.search(r"\| timed cache fail \d+\.\d+s, comms pass \d+\.\d+s \|", line), line
-    assert line.endswith("exit 1") and LINE.match(line)
-    record = json.loads(result.kept.read_text())
-    assert list(record["packages"]) == ["comms"]
-
-
-def test_a_parallel_failure_still_runs_the_package_s_timed_tests(ignoring):
-    commit_file(ignoring, "packages/cache/x.py")
-    parallel_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
-                      and cmd[3:] != ["-n", "0"])
-    runs = Timed({"cache": [1.0], "comms": [2.0]}, {parallel_cache: 1},
-                 held={"cache": [0.5]})
-    result = run_check(ignoring, runs)
-    assert result.code == 1
-    assert [(name, ok) for name, ok, _ in result.timed] == [("cache", True)]
-    assert list(json.loads(result.kept.read_text())["packages"]) == ["comms"]
-
-
-def test_the_timed_tests_join_their_package_s_durations_and_record(ignoring):
+def test_held_timed_tests_have_no_times_in_the_durations_or_record(ignoring):
     commit_file(ignoring, "packages/cache/x.py")
     runs = Timed({"cache": [1.0], "comms": [2.0]},
                  held={"cache": [0.5, (4.0, ["slow"])]})
     result = run_check(ignoring, runs)
-    assert "| durations 7.5s, " in result.line()
+    assert "| durations 3.0s, " in result.line()
     cache = json.loads(result.kept.read_text())["packages"]["cache"]
-    assert sorted(cache["tests"]) == ["tests/test_it.py::test_0",
-                                      "tests/test_timed.py::test_0",
-                                      "tests/test_timed.py::test_1"]
-    assert cache["tiers"] == "plain+slow"
+    assert sorted(cache["tests"]) == ["tests/test_it.py::test_0"]
+    assert cache["tiers"] == "plain"
 
 
-def test_no_held_test_runs_no_serial_pass_and_says_none(ignoring):
+def test_no_held_test_says_timed_none(ignoring):
     commit_file(ignoring, "packages/cache/x.py")
     runs = Timed({"cache": [1.0], "comms": [2.0]})
     result = run_check(ignoring, runs)
@@ -1297,27 +1348,42 @@ def test_a_check_that_stops_before_the_suites_says_timed_not_run(repo):
     assert "| no suites run | timed not run |" in run_check(repo, runs, full=True).line()
 
 
-def test_a_package_whose_chosen_tests_are_all_timed_is_none_in_the_parallel_pass(ignoring):
+def test_a_package_whose_chosen_tests_are_all_timed_is_none(ignoring):
     commit_file(ignoring, "packages/cache/x.py")
-    parallel_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
-                      and cmd[3:] != ["-n", "0"])
-    runs = Timed({"comms": [2.0]}, {parallel_cache: 5}, held={"cache": [0.5]})
+    cache = lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
+    runs = Timed({"comms": [2.0]}, {cache: 5}, held={"cache": [0.5]})
     result = run_check(ignoring, runs)
     assert result.code == 0
-    assert re.search(r"\| cache none \S+, comms pass \S+ \| timed cache pass \S+ \|",
+    assert re.search(r"\| cache none \S+, comms pass \S+ \| timed held 1 \|",
                      result.line()), result.line()
-    assert sorted(json.loads(result.kept.read_text())["packages"]) == ["cache", "comms"]
+    assert sorted(json.loads(result.kept.read_text())["packages"]) == ["comms"]
 
 
-def test_a_finding_only_timed_tests_carry_passes_in_the_serial_pass(ignoring):
+@pytest.mark.parametrize("findings, said", [
+    (["L50"], "L50: its tests are timed; moxi-dev timed --finding L50 runs them"),
+    (["L50", "L51"], ("L50, L51: their tests are timed; "
+                      "moxi-dev timed --finding L50 --finding L51 runs them"))])
+def test_a_finding_whose_tests_are_all_timed_points_at_the_timed_mode_and_passes(
+        ignoring, capsys, findings, said):
     commit_file(ignoring, "packages/sessions/x.py")
-    parallel = lambda cmd, cwd: "pytest" in cmd and cmd[3:] != ["-n", "0"]
-    runs = Timed({"cache": [], "comms": []}, {parallel: 5}, held={"sessions": [0.5]})
-    result = run_check(ignoring, runs, finding=["L50"])
+    every = lambda cmd, cwd: "pytest" in cmd
+    runs = Timed({"cache": [], "comms": []}, {every: 5}, held={"sessions": [0.5]})
+    result = run_check(ignoring, runs, finding=findings)
     assert result.code == 0
-    serial = [env for name, _, mode, env in pytest_calls(runs) if mode == "only"]
-    assert len(serial) == 1 and serial[0][testing.FINDING_ENV] == "L50"
-    assert "| timed sessions pass" in result.line()
+    assert {mode for _, _, mode, _ in pytest_calls(runs)} == {"hold"}
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: {said}\n" in out and "carries" not in out
+    assert re.search(r"\| sessions none \S+, cache none \S+, comms none \S+ \| "
+                     r"timed held 1 \|", result.line()), result.line()
+
+
+def test_a_finding_whose_tests_ran_says_nothing_of_its_held_ones(ignoring, capsys):
+    commit_file(ignoring, "packages/sessions/x.py")
+    others = lambda cmd, cwd: "pytest" in cmd and cwd.name != "sessions"
+    runs = Timed({"sessions": [1.0], "cache": [], "comms": []}, {others: 5},
+                 held={"sessions": [0.5]})
+    result = run_check(ignoring, runs, finding=["L50"])
+    assert result.code == 0 and "are timed" not in capsys.readouterr().out
 
 
 def test_the_suites_drop_a_caller_s_timed_setting(repo):
@@ -1332,23 +1398,3 @@ def test_the_suites_drop_a_caller_s_left_out_tiers(repo):
     run_check(repo, runs, full=True,
               env={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
     assert all(testing.LEAVE_OUT_ENV not in env for _, _, _, env in pytest_calls(runs))
-
-
-@pytest.mark.parametrize("why", [None, "Executable doesn't exist at /x/chrome"])
-def test_a_browser_package_s_serial_pass_runs_with_its_parallel_pass_s_browser_choice(
-        browser_repo, monkeypatch, why):
-    (browser_repo / ".git" / "info" / "exclude").write_text(".moxi-dev/\n")
-    monkeypatch.setattr(check, "cpu_count", lambda: 4)
-    runs = Timed({name: [1.0] for name in BROWSER_LAYOUT},
-                 held={"ui": [0.5], "plain": [0.5]})
-    result = run_check(browser_repo, runs, full=True, probe=Probe(why))
-    assert result.code == 0
-    marks = [] if why else ["-m", check.WITH_BROWSER]
-    left_out = "browser" if why else None
-    calls = [(name, args, mode, env.get(testing.LEAVE_OUT_ENV))
-             for name, args, mode, env in pytest_calls(runs)]
-    assert calls == [("ui", ["-n", "4", *marks], "hold", left_out),
-                     ("mod", ["-n", "4", *marks], "hold", left_out),
-                     ("plain", ["-n", "4"], "hold", None),
-                     ("ui", ["-n", "0", *marks], "only", left_out),
-                     ("plain", ["-n", "0"], "only", None)]

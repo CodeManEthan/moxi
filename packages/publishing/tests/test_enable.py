@@ -125,6 +125,56 @@ def test_word_required_takes_true_or_false(repo, names):
     assert caught.value.code == 2
 
 
+def test_standing_branch_takes_good_patterns_and_keeps_the_other_keys(repo, names):
+    flag.enable(repo, sets=["word-required=true", "free-ref=refs/notes/*"])
+    flag.enable(repo, sets=["standing-branch=ci/*", "standing-branch=ci-full/*"])
+    settings = flag.registered(str(repo))["publishing/push"]["settings"]
+    assert settings["standing-branch"] == ["ci/*", "ci-full/*"]
+    assert settings["word-required"] == ["true"]
+    assert settings["free-ref"] == ["refs/notes/*"]
+
+
+@pytest.mark.parametrize("pattern", ["ci", "ci*", "*", "ci/", "ci/**", "ci/x*", "c?/*",
+                                     "main/*/x"])
+def test_standing_branch_refuses_a_pattern_that_is_no_prefix_then_star(repo, names,
+                                                                       pattern):
+    with pytest.raises(flag.Failure) as caught:
+        flag.enable(repo, sets=[f"standing-branch={pattern}"])
+    assert caught.value.code == 2
+    assert "is not a fixed prefix ending in / followed by *" in caught.value.text
+    assert "nothing was written" in caught.value.text
+    assert git(repo, "config", "--get-regexp", "^moxi-", check=False).stdout == ""
+
+
+@pytest.mark.parametrize("first, then, matched", [
+    ([], ["main=release/main", "standing-branch=release/*"], "release/main"),
+    ([], ["protected=ci/keep", "standing-branch=ci/*"], "ci/keep"),
+    # The keys the repo has count, and so do the seeds where the piece is new.
+    (["protected=ci/keep"], ["standing-branch=ci/*"], "ci/keep"),
+    (["standing-branch=ci/*"], ["main=ci/main"], "ci/main"),
+    (["standing-branch=ci/*"], ["protected=ci/x"], "ci/x"),
+])
+def test_standing_branch_refuses_a_pattern_matching_main_or_protected(
+        repo, names, first, then, matched):
+    if first:
+        flag.enable(repo, sets=first)
+    before = git(repo, "config", "--get-regexp", "^moxi-", check=False).stdout
+    with pytest.raises(flag.Failure) as caught:
+        flag.enable(repo, sets=then)
+    assert caught.value.code == 2
+    assert f"matches {matched}, which is main or protected" in caught.value.text
+    assert git(repo, "config", "--get-regexp", "^moxi-", check=False).stdout == before
+
+
+def test_a_call_that_sets_none_of_the_keys_never_fails_on_a_hand_edited_pattern(repo,
+                                                                                names):
+    flag.enable(repo)
+    git(repo, "config", "--add", "moxi-repo.piece.publishing/push.standing-branch", "ci*")
+    flag.enable(repo, sets=["word-required=true"])
+    with pytest.raises(flag.Failure):
+        flag.enable(repo, sets=["main=main"])
+
+
 @pytest.mark.parametrize("sets", [["no-such=1"], ["main=a", "main=b"],
                                   ["drop-trailer=", "drop-trailer=X"]])
 def test_a_set_repo_refuses_writes_nothing(repo, names, sets):
@@ -157,3 +207,4 @@ def test_the_help_says_set_replaces(capsys):
     out = " ".join(capsys.readouterr().out.split())
     assert "replacing its seed" in out
     assert "A key on pass-trailer is never dropped" in out
+    assert "free-ref and standing-branch (the push piece)" in out

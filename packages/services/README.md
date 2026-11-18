@@ -61,6 +61,17 @@ value the supervisor can't give is `warn`, "unknown", with the reason. A health 
 give with `--health` runs when asked (`show`, `watch`, `list --health`, the doctor),
 only for a running daemon, for five seconds at most: exit 0 is healthy.
 
+A verdict's `cause`, in `--json` and on the page's reads, is one word that tells a reader
+which case gave it without reading the reason:
+
+- `not-running`: a daemon that is on and not running, with no stop by hand that holds
+  (`fail`);
+- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
+- `last-run`: a timer whose last run failed (`warn`).
+
+Every other verdict's cause is null. The set may grow, so a reader treats a word it does
+not know as it treats null.
+
 ## Adopted timers on Linux
 
 An adopted systemd timer is wrapped: Moxi writes one drop-in beside the service it
@@ -93,13 +104,19 @@ at `/m/services/`, and a block on the shell's home that counts the rows that are
 page. Each act on the page runs the same code as the `moxi services` command you would
 run in a terminal, and refuses where that command refuses.
 
+With projects' page in the shell too, each project's row there shows the services filed
+under it that failed (`docs failed at 18:00`), one you stopped by hand (`docs is
+stopped`) and a timer whose last run failed, each as its verdict gives it; an opened
+project lists every service filed under it in a `Services` row, first while one fails.
+
 - **The list.** Every row, grouped by project, with its verdict and reason, its health
   check's last result, its switch or on/off, and since when it runs or how its last run
   went. Open a row to see its command, unit, directory, schedule and the supervisor's own
-  words. The page and the home's block follow the rows as they change: while either is
-  open, services' page server reads the supervisor every 5 seconds and runs the health
-  checks every 30, at most eight at a time, and it keeps doing so for a while after the
-  last one closes, until the server stops when idle.
+  words. The page, the home's block and the Projects page's project facts follow the
+  rows as they change: while any of them is open, services' page server reads the
+  supervisor every 5 seconds and runs the health checks every 30, at most eight at a
+  time, and it keeps doing so for a while after the last one closes, until the server
+  stops when idle.
 - **Acts.** Start, stop and restart for a daemon, run now and run again for a timer,
   enable and disable, and remove for a row you added. Each opens the shell's confirm
   sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent

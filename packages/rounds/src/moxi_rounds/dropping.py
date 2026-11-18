@@ -41,7 +41,10 @@ hold, and the stage stays owed: it is commissioned again, or taken out of the pl
 **What goes.** A drop deletes no branch, so the work can be commissioned again. Once
 its event is on the log, the worktree and scratch folder of each build it ended are
 removed under the removal rule (`removal`), and those the rule keeps are named with
-why (`kept`) and left for a later sweep.
+why (`kept`) and left for a later sweep. Then CI's own refs each such build pushed are
+removed from the remote under the keep rule (`ci_refs.remove`), and each is named with
+what became of it (`refs`); one left there stays for `drop --leftovers --refs`. The
+build's branch in the repo stays.
 
 `left_behind` gives the questions on a project's list that came from a round since
 dropped, for the opening of a later round to print: whoever takes that work up adopts
@@ -54,8 +57,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (builds, checking, closing, ending, folders, index, log, moving, open_builds,
-               pointers, questions, removal, sweeping, waits, write)
+from . import (builds, checking, ci_refs, closing, ending, folders, index, log, moving,
+               open_builds, pointers, questions, removal, sweeping, waits, write)
 from . import numbers as counted
 from . import settings as own
 from . import state as states
@@ -81,7 +84,8 @@ class Dropped:
     `(Q<n>, WITHDRAWN)`), the `event` that dropped it and every one of the `events`
     written. `finished` says the call completed a drop that an earlier call was stopped
     in the middle of. `removed` and `kept` hold the folders of the builds that ended
-    with it that the removal rule took and kept.
+    with it that the removal rule took and kept, and `refs` what became of CI's own
+    refs they pushed.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -94,13 +98,14 @@ class Dropped:
     removed: tuple[Path, ...] = ()
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    refs: tuple[ci_refs.Ref, ...] = ()
 
 
 @dataclass(frozen=True)
 class BuildDropped:
     """One build as it was dropped: the round's `name`, the `stage`, who it was `by`
-    and the `record` given, the `event` written, and the build's folders the removal
-    rule `removed` and `kept`.
+    and the `record` given, the `event` written, the build's folders the removal
+    rule `removed` and `kept`, and what became of CI's own `refs` it pushed.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -111,6 +116,7 @@ class BuildDropped:
     removed: tuple[Path, ...] = ()
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    refs: tuple[ci_refs.Ref, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -243,11 +249,13 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
     event = written.events[-1]
     ended = [one for one in builds.builds(written.view.state) if one.ended is None]
     cleaned = _remove_dirs(written.view.state, name, ended, settings)
+    refs = tuple(ref for one in ended
+                 for ref in ci_refs.remove(written.view.state, one, settings))
     return Dropped(name=name, by=by, record=record,
                    went=tuple(event["questions"].items()), event=event,
                    events=written.events, finished=finished[0],
                    removed=cleaned.removed, kept=cleaned.kept,
-                   failed=written.failed)
+                   failed=written.failed, refs=refs)
 
 
 def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by: str,
@@ -326,11 +334,11 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by:
     except NoLog:
         raise NoRound(name) from None
     build = builds.current(written.view.state, stage_id)
+    cleaned = _remove_dirs(written.view.state, name, [build], settings)
     return BuildDropped(name=name, stage=stage_id, by=by, record=record,
-                        event=written.events[0],
-                        **vars(_remove_dirs(written.view.state, name, [build],
-                                               settings)),
-                        failed=written.failed)
+                        event=written.events[0], removed=cleaned.removed,
+                        kept=cleaned.kept, failed=written.failed,
+                        refs=ci_refs.remove(written.view.state, build, settings))
 
 
 def _remove_dirs(state: states.State, name: str, ended, settings) -> removal.Removed:

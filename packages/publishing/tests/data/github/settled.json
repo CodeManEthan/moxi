@@ -47,7 +47,7 @@
     },
     {
       "id": 104,
-      "name": "tags-create",
+      "name": "moxi-tags-create",
       "target": "tag",
       "source_type": "Repository",
       "source": "alice/proj-a",
@@ -97,6 +97,19 @@
       },
       {
         "type": "deletion"
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": false,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "linux",
+              "integration_id": 15368
+            }
+          ]
+        }
       }
     ],
     "bypass_actors": [],
@@ -147,7 +160,7 @@
   },
   "GET repos/alice/proj-a/rulesets/104": {
     "id": 104,
-    "name": "tags-create",
+    "name": "moxi-tags-create",
     "target": "tag",
     "source_type": "Repository",
     "source": "alice/proj-a",

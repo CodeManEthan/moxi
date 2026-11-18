@@ -929,6 +929,14 @@ comms	packages/comms/src/moxi_comms/cli.py	help="the global identity (the defaul
 comms	packages/comms/src/moxi_comms/cli.py	ex.add_argument("--wait-s", dest="wait_s", type=float, default=30.0, metavar="S",	keep	default	default
 comms	packages/comms/src/moxi_comms/cli.py	ex.add_argument("--wait-s", dest="wait_s", type=float, default=30.0, metavar="S",	keep	type	type
 comms	packages/comms/src/moxi_comms/cli.py	help="how long to wait for the name to be released, in seconds "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--as", dest="as_name", metavar="NAME",	keep	NAME	NAME
+comms	packages/comms/src/moxi_comms/cli.py	help="send under NAME, a send-only name registered with `moxi comms "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	so = sub.add_parser("send-only", help="the send-only names programs register: nobody "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	so_sub = so.add_subparsers(dest="action", required=True)	keep	required	required
+comms	packages/comms/src/moxi_comms/cli.py	sa = so_sub.add_parser("add", help="register NAME, its token in this process's "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="register a name a session held before, or one with mail "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	sr = so_sub.add_parser("renew", help="replace NAME's token; run it where the program "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	sx = so_sub.add_parser("remove", help="free NAME: it is an ordinary name again")	keep	help	help
 comms	packages/comms/src/moxi_comms/client.py	"""Fire-and-forget notification (`activity` and its kinds, `injected`,	keep	injected	injected
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
@@ -1267,6 +1275,7 @@ comms	packages/comms/src/moxi_comms/page.py	#: message of the pair above `after`
 comms	packages/comms/src/moxi_comms/page.py	#: oldest one's time, or null when there are none; `changed` is null. With `after` (the	keep	changed	changed
 comms	packages/comms/src/moxi_comms/page.py	lb.Route("/api/events", "read", "moxi_comms.pagehandlers:events", stream=True,	keep	stream=	stream=
 comms	packages/comms/src/moxi_comms/page.py	query={"day": lb.Field("string", required=False, max=10),	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"holder": lb.Out("string", nullable=True),	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/pageacts.py	"delivered": list(result.delivered), "expired": list(result.expired),	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/pageacts.py	"delivered": list(result.delivered), "expired": list(result.expired),	keep	expired	expired
 comms	packages/comms/src/moxi_comms/pageacts.py	"refused", "send", "take_back", "taken"]	keep	refused	refused
@@ -2670,11 +2679,24 @@ comms	packages/comms/tests/test_reply_enforcement.py	test_bodies_keeps_its_bare_
 comms	packages/comms/tests/test_reserved.py	active = set(conn.execute("SELECT name, module FROM reserved "	keep	set	set
 comms	packages/comms/tests/test_reserved_drop.py	return rig.record.post_as_identity(	keep	record	record
 comms	packages/comms/tests/test_reserved_drop.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
+comms	packages/comms/tests/test_reserved_drop.py	return rig.record.history(rig.names_channel)	keep	record	record
+comms	packages/comms/tests/test_reserved_drop.py	assert wait_until(lambda: any(m == mid for m, _, _ in store_rows(TICKER)))	keep	any	any
+comms	packages/comms/tests/test_reserved_drop.py	mid = c.send(TICKER, token, machine_line.compose(	keep	fail	fail
+comms	packages/comms/tests/test_reserved_drop.py	c.send(PLANNER, token, machine_line.compose(names, "x"))	keep	fail	fail
+comms	packages/comms/tests/test_reserved_drop.py	both = rig.record.post_as_identity("reviewer@proj-a", rig.names_channel,	keep	record	record
+comms	packages/comms/tests/test_reserved_drop.py	assert wait_until(lambda: any(p["message_id"] == plain for p in planner.queue)	keep	any	any
+comms	packages/comms/tests/test_reserved_drop.py	assert not any(TICKER in a["open"] for a in rig.daemon.asks.values())	keep	any	any
 comms	packages/comms/tests/test_reserved_refusals.py	assert (result.outcome, result.refusal.code) == ("refused", "name-reserved")	keep	refused	refused
 comms	packages/comms/tests/test_reserved_refusals.py	client.send("console", token, machine_line.compose(["main@proj-a"], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_reserved_refusals.py	client.send("planner@proj-a", token, machine_line.compose(["operator"], "report"))	keep	fail	fail
 comms	packages/comms/tests/test_reserved_refusals.py	client.send("planner@proj-a", token, machine_line.compose(names, "x"))	keep	fail	fail
 comms	packages/comms/tests/test_reserved_refusals.py	return rig.record.history(rig.names_channel)	keep	record	record
+comms	packages/comms/tests/test_reserved_refusals.py	client.send("ticker", token, machine_line.compose(["main@proj-a"], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_reserved_refusals.py	answer = client.send("ticker", ticker_token(), machine_line.compose(	keep	fail	fail
+comms	packages/comms/tests/test_reserved_refusals.py	msg = ticker.record.get_message(answer["message_id"])	keep	record	record
+comms	packages/comms/tests/test_reserved_refusals.py	client.send("ticker", ticker_token(), machine_line.compose(["main@proj-a"], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_reserved_refusals.py	client.send("ticker", "not-the-token", machine_line.compose(["main@proj-a"], "x"))	keep	fail	fail
+comms	packages/comms/tests/test_reserved_refusals.py	client.send("ticker", "anything", machine_line.compose(["main@proj-a"], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_roles.py	-	name	test_the_roles_are_read_from_the_environment_a_caller_passes	test_the_roles_are_read_from_the_env_a_caller_passes
 comms	packages/comms/tests/test_roles.py	@pytest.mark.parametrize("bad", ["..", ".", "a/b", "with space", ""])	keep	bad	bad
 comms	packages/comms/tests/test_roles.py	assert not owner.refused	keep	refused	refused
@@ -2718,6 +2740,7 @@ comms	packages/comms/tests/test_send_check.py	mp.setattr(rig.record, "get_messag
 comms	packages/comms/tests/test_send_check.py	rooms = {name: [(m.id, m.content) for m in rig.record.history(cid)]	keep	record	record
 comms	packages/comms/tests/test_send_check.py	self.hits: set = set()	keep	set	set
 comms	packages/comms/tests/test_send_check.py	text = "x" * rig.record.max_content_length	keep	record	record
+comms	packages/comms/tests/test_send_only.py	verb("console", chain=chain)	keep	chain	chain
 comms	packages/comms/tests/test_send_rule.py	answers = json.loads(child.communicate(timeout=60)[0])	keep	timeout	timeout
 comms	packages/comms/tests/test_send_rule.py	assert claimhold.send_line(shim.claims.record()) == NO_IDENTITY	keep	record	record
 comms	packages/comms/tests/test_send_rule.py	assert wait_for(lambda: any(m["message_id"] == mid for m in bob.queue))	keep	any	any
@@ -2751,6 +2774,17 @@ comms	packages/comms/tests/test_send_rule.py	stderr=subprocess.STDOUT, text=True
 comms	packages/comms/tests/test_send_rule.py	stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)	keep	text	text
 comms	packages/comms/tests/test_send_rule.py	stdout=subprocess.PIPE, text=True)	keep	text	text
 comms	packages/comms/tests/test_send_rule.py	str(speaker.socket_path)], env=child_env(),	keep	env	env
+comms	packages/comms/tests/test_send_under.py	msg = ticker.record.get_message(mid)	keep	record	record
+comms	packages/comms/tests/test_send_under.py	assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))	keep	any	any
+comms	packages/comms/tests/test_send_under.py	before = len(ticker.record.history(ticker.names_channel))	keep	record	record
+comms	packages/comms/tests/test_send_under.py	assert len(ticker.record.history(ticker.names_channel)) == before	keep	record	record
+comms	packages/comms/tests/test_send_under.py	line_zero = ticker.record.get_message(out.split()[1]).content.splitlines()[0]	keep	record	record
+comms	packages/comms/tests/test_send_under.py	assert (result.outcome, result.refusal.code) == ("refused", "module-reserved")	keep	refused	refused
+comms	packages/comms/tests/test_send_under.py	assert (result.outcome, result.refusal.code) == ("refused", "not-registered")	keep	refused	refused
+comms	packages/comms/tests/test_send_under.py	assert (result.outcome, result.refusal.code) == ("refused", "credential")	keep	refused	refused
+comms	packages/comms/tests/test_send_under.py	c.send("ticker", old, "::to main@proj-a [no reply]\nx")	keep	fail	fail
+comms	packages/comms/tests/test_send_under.py	assert (result.outcome, result.refusal.code) == ("refused", "not-reserved")	keep	refused	refused
+comms	packages/comms/tests/test_send_under.py	assert (result.outcome, result.refusal.code) == ("refused", "name-reserved")	keep	refused	refused
 comms	packages/comms/tests/test_settings.py	-	name	test_a_given_environment_is_read_instead_of_the_process	test_a_given_env_is_read_instead_of_the_process
 comms	packages/comms/tests/test_settings.py	-	name	test_a_named_relative_file_is_read_from_the_working_directory	test_a_named_relative_file_is_read_from_the_working_dir
 comms	packages/comms/tests/test_settings.py	-	name	test_the_text_entry_reads_no_environment	test_the_text_entry_reads_no_env
@@ -7341,6 +7375,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	changed: set[str] = set()	keep
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	cited = everywhere | own.get(source.path, set())	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	done: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	for path in sorted(set(edits) | used):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = [Unsettled("refused", reading.rows[index].path, f"{table_name} {why}")	keep	refused	refused
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = found or any(_names(generator.target, name, stored=True)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found: set[Leftover] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here and dead rows with this merged main ref")	keep	help	help
@@ -7403,6 +7438,11 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	self.held: set[str] = set()	k
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	server = make(where / "sock")	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	started.set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	writes = ((isinstance(mode, str) and any(c in mode for c in "wax+"))	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	"waited_s": round(self.waited_s, 3)}	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	waited_s=round(waited, 3))	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	entry.update(other=_rounded(other), waited_s=round(window.waited_s, 3))	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	other = self.gauge.other(window.start, end)	keep	asked	asked
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	return None if value is None else round(value, 3)	keep	round	round
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions", "cache", "comms", "launcher", "usage"}	keep	sessions	sessions
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["pytest"]}),	keep	sessions	sessions
 moxi-dev	packages/moxi-dev/tests/test_check.py	("sessions", "hold"), ("cache", "hold"), ("comms", "hold"),	keep	sessions	sessions
@@ -7566,6 +7606,57 @@ moxi-dev	packages/moxi-dev/tests/test_selection.py	names = set()	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_stamp.py	-	name	test_the_output_directory_is_the_import_package_web_dir	test_the_output_dir_is_the_import_package_web_dir
 moxi-dev	packages/moxi-dev/tests/test_stamp.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_tags.py	-	name	test_scan_reads_a_module_s_own_vendor_directory	test_scan_reads_a_module_s_own_vendor_dir
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.busy += round((other + own) * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.iowait += round(iowait * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.idle += round((self.cpus - other - own - iowait) * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.pauses.append(round(seconds, 6))	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_in_process", "test_in_a_child", "test_says_nothing",	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_one", "test_two"}	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="timed [show|take|schedule|unschedule]: run the timed tests on "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	[--record-dir DIR] [--no-record] [--scheduled]`. Its other verbs: `show` reads the	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	SUBVERBS = ("show", "take", "schedule", "unschedule")	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	lock_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if not any(timed_record.counts(result.get("outcome"), float(key), factor)	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if not opts.record or tree.dirty:	keep	record	record
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	"waited_s": round(result.waited_s, 3),	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	work.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--wait-s", type=float, default=DEFAULT_WAIT_S, metavar="S",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="how long the whole run may wait for the machine to quieten "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	type=float, default=DEFAULT_LINE, metavar="CPUS",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="other work, in CPUs, a test's window must stay under "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--finding", metavar="L<n>", action="append", default=[],	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="run only the timed tests marked with this finding")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--package", metavar="NAME", action="append", default=[],	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="run only this package's timed tests; may be given more "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--machine", metavar="NAME", default=None,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="the machine the record files the run under (default: the "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="keep the record here (default: the clone's git directory)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--no-record", action="store_true", help="keep no record")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="a scheduled run: exit 0 at once when this machine's record "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if verb == "show":	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	for nodeid in sorted(set(mine["tests"]) | set(theirs["tests"])):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	for factor in set(mine["tests"].get(nodeid, {})) | set(theirs["tests"].get(nodeid, {})):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	machine_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	(target / TICKS).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the host's machine directory, inside its results folder")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the host's name, as its record files it")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the record to merge into (default: this clone's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	return max(found, key=lambda one: str(one[1].get("run")), default=None)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	newest_scheduled = max(scheduled, key=lambda run: str(run.get("started")), default=None)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	run=result.get("run"), slack=factor)	keep	run	run
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	base = min(sets, key=lambda report: report["behind"], default=mine)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("rev", nargs="?", default="main", metavar="REV")	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--days", type=float, default=7.0, metavar="N",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="how far back the walk goes from REV's time (default 7)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--machine", metavar="NAME", help="report this machine only")	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="the record to read (default: this clone's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--json", action="store_true", help="print the reports as JSON")	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_timed.py	"""`moxi-dev timed`, its record, `take` and `show`.	keep	show	show
+moxi-dev	packages/moxi-dev/tests/test_timed.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed.py	return tmp_path / "record"	keep	record	record
+moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("no complete run" in line for line in lines)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("passed at slack 2" in line for line in lines)	keep	any	any
 notes	packages/notes/src/moxi_notes/api.py	handoffs_dir	name	folder	found_dir
 notes	packages/notes/src/moxi_notes/backfill.py	"complete": sum(1 for x in p if not x.additions and not x.refused),	keep	refused	refused
 notes	packages/notes/src/moxi_notes/backfill.py	"keys": sum(len(x.additions) for x in p if not x.refused)}	keep	refused	refused
@@ -7620,6 +7711,11 @@ notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=80, metavar="N",	keep	type	type
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("setup", help="ask setup's questions again and write the answers",	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("snapshot", help="commit a snapshot of the notes repo now",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	"home-paths", help="write home paths as ~ and session paths as ids",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--apply", action="store_true", help="write the changes")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	if found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/cli.py	left_alone = any(reason in ("changed", "read-only") for _, reason in found.left)	keep	changed	changed
+notes	packages/notes/src/moxi_notes/cli.py	left_alone = any(reason in ("changed", "read-only") for _, reason in found.left)	keep	any	any
 notes	packages/notes/src/moxi_notes/doctypes.py	NATURES = ("record", "living-state", "ephemeral")	keep	record	record
 notes	packages/notes/src/moxi_notes/doctypes.py	_line	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	_row	name	at	position
@@ -7651,6 +7747,22 @@ notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("cat-file", "-e", f"
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/gates.py	if set(reset) >= set(by_path):	keep	set	set
 notes	packages/notes/src/moxi_notes/gitpieces.py	"fail": "closed",	keep	closed	closed
+notes	packages/notes/src/moxi_notes/guards.py	Guard(name=NAME, calls=CALLS, who="any", judge="moxi_notes.homeguard:judge",	keep	any	any
+notes	packages/notes/src/moxi_notes/home_paths.py	between the read and the write is skipped and listed `changed`, and the run's last lines	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	"changed", "quoted", "login")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	changed = set(wanted)	keep	set	set
+notes	packages/notes/src/moxi_notes/home_paths.py	found.refused = True	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	found.leave(one.path, "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	return sorted(p for p, r in found.left if r == "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	NAMED = ("too-large", "link-outside", "untracked", "modified", "read-only", "changed")	keep	changed	changed
+notes	packages/notes/src/moxi_notes/home_paths.py	mode = ("refused; nothing was written" if found.refused else	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	if found.error and not found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/home_paths.py	if found.refused:	keep	refused	refused
+notes	packages/notes/src/moxi_notes/homeguard.py	**When it tells.** When the text spells `H` (the home folder, from the call's `HOME`) where	keep	HOME	HOME
+notes	packages/notes/src/moxi_notes/homeguard.py	_said: set[str] = set()	keep	set	set
+notes	packages/notes/src/moxi_notes/homeguard.py	home = call.env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
+notes	packages/notes/src/moxi_notes/homeguard.py	if len(rules.login) >= SHORT_LOGIN and any(	keep	any	any
+notes	packages/notes/src/moxi_notes/homeguard.py	__all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "LINE", "judge", "written", "patch_texts",	keep	NAME	NAME
 notes	packages/notes/src/moxi_notes/judge.py	mb = max(1, round(size / MIB))	keep	round	round
 notes	packages/notes/src/moxi_notes/judge.py	return Finding(f"{hit.set}/{hit.rule}", hit.line)	keep	set	set
 notes	packages/notes/src/moxi_notes/listener.py	-	name	_folder	_session_dir
@@ -7725,6 +7837,13 @@ notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "HEAD:plan.md")
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "HEAD:plan.md").stdout == "first\n"	keep	show	show
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "main:c.md").stdout == secret()	keep	show	show
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "side:c.md").stdout == secret()	keep	show	show
+notes	packages/notes/tests/test_home_guard.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+notes	packages/notes/tests/test_home_guard.py	env={"HOME": home_dir})	keep	HOME	HOME
+notes	packages/notes/tests/test_home_guard.py	input={"command": text}, cwd=cwd, env={"HOME": HOME})	keep	HOME	HOME
+notes	packages/notes/tests/test_home_paths.py	full.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+notes	packages/notes/tests/test_home_paths.py	assert set(found) == {"root", "home", "files", "left", "counts", "error"}	keep	set	set
+notes	packages/notes/tests/test_home_paths.py	assert set(change) == {"line", "kind", "before", "after"}	keep	set	set
+notes	packages/notes/tests/test_home_paths.py	assert set(found["counts"]) == {"files", "changes", "by_class", "by_kind", "sessions",	keep	set	set
 notes	packages/notes/tests/test_inbox.py	-	name	test_a_good_slug_names_a_folder_under_the_inbox	test_a_good_slug_names_a_dir_under_the_inbox
 notes	packages/notes/tests/test_inbox.py	-	name	test_make_inbox_makes_a_plain_folder_and_keeps_an_existing_one	test_make_inbox_makes_a_plain_dir_and_keeps_an_existing_one
 notes	packages/notes/tests/test_inbox.py	-	name	test_rename_moves_the_folder	test_rename_moves_the_dir
@@ -8117,6 +8236,8 @@ publishing	packages/publishing/src/moxi_publishing/doctor.py	+ (f"names {CHECKED
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(row.state == "fail" for row in problems):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(v.casefold() == CHECKED_TRAILER.casefold() for v in passing):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	return not named or any(v.casefold() == CHECKED_TRAILER.casefold() for v in named)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(push.github_repo(url) == github for url in urls):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/flag.py	if not any(key in planned for key in keys):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Everything `show` compares, read from GitHub."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""What `show` read from GitHub."""	keep	show	show
@@ -8131,6 +8252,13 @@ publishing	packages/publishing/src/moxi_publishing/github.py	gh.send(request)	ke
 publishing	packages/publishing/src/moxi_publishing/github.py	if not any(p.get("name") == RELEASE_TAGS and p.get("type", "branch") == "tag"	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/github.py	read	name	environment	github_environment
 publishing	packages/publishing/src/moxi_publishing/github.py	show; `show` says so.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	keep, and a rewrite carries it. `show` prints each difference field by field, and the	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	return any(p == f"refs/heads/{main}" or p == "~ALL"	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	or any(re.search(r"[*?\[]", p) for p in patterns))	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	return set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	today: set[str] = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/github.py	"expected_rulesets", "read", "differences", "check_job", "show", "apply"]	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/message.py	"fail": "closed",	keep	closed	closed
 publishing	packages/publishing/src/moxi_publishing/message.py	gone: set[int] = set()	keep	set	set
 publishing	packages/publishing/src/moxi_publishing/message.py	if any(os.path.exists(os.path.join(git_dir, name))	keep	any	any
@@ -8196,8 +8324,14 @@ publishing	packages/publishing/tests/test_enable.py	assert not any("private name
 publishing	packages/publishing/tests/test_github.py	-	name	test_show_says_when_the_environment_or_a_ruleset_is_missing	test_show_says_when_the_github_environment_or_a_ruleset_is_missing
 publishing	packages/publishing/tests/test_github.py	assert cli.main(["github", "show", str(repo)]) == 2	keep	show	show
 publishing	packages/publishing/tests/test_github.py	assert not any(path.endswith("/rulesets/102") for _, path, _ in gh.writes)	keep	any	any
+publishing	packages/publishing/tests/test_github.py	#: What `show` and `apply` say when they make `moxi-main` require the check.	keep	show	show
+publishing	packages/publishing/tests/test_github.py	assert (NOTE in lines) is (not any(c["context"] == "linux" for c in checks))	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any(line.startswith("left: ruleset moxi-main: required checks: no check-job ")	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any(line.startswith("ruleset moxi-main: required checks: check-job can't be "	keep	any	any
+publishing	packages/publishing/tests/test_github.py	assert any("check-job can't be read: pyproject.toml can't be read" in line	keep	any	any
 publishing	packages/publishing/tests/test_push.py	assert set(log_lines()[-1]["commits"]) == set(	keep	set	set
 publishing	packages/publishing/tests/test_push.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_push.py	if PIECE in pieces and not any(s.startswith("standing-branch=") for s in sets):	keep	any	any
 publishing	packages/publishing/tests/test_replace_refs.py	assert "bobsecret" not in git(repo, "show", "HEAD:note.md").stdout	keep	show	show
 publishing	packages/publishing/tests/test_replace_refs.py	blob = git(repo, "hash-object", "-w", "--stdin", input=text).stdout.strip()	use	input=	stdin_data=
 publishing	packages/publishing/tests/test_rules.py	("round" + " proj-a/first-pass", "round-pointer"),	keep	round	round
@@ -8209,6 +8343,11 @@ publishing	packages/publishing/tests/test_scan.py	assert any(f"message line 3, s
 publishing	packages/publishing/tests/test_scan.py	assert any(line.endswith("author header: private-names/private-name") for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_scan.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 publishing	packages/publishing/tests/test_settings.py	assert cli.main(["config", "publishing", "show", "--json"]) == 0	keep	show	show
+publishing	packages/publishing/tests/test_standing.py	USER_BYTES = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	assert piece.standing_problem(value, "main", set()) is None	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	value, "main", set())	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	"release/*", "release/main", set())	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	assert not any("/actions/" in path for path in served.asked)	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
@@ -11499,8 +11638,11 @@ services	packages/services/tests/test_acts.py	put_key	name	on	enabled
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith("/m/services/api/rows") for url in check.requests), check.requests	keep	any	any
 services	packages/services/tests/test_browser_page.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
+services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
+services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] is None	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found[0]["verdict"]) == VERDICT_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}	keep	set	set
 services	packages/services/tests/test_cli.py	code, _, err = run(capsys, "show", "nope")	keep	show	show
@@ -11562,7 +11704,9 @@ services	packages/services/tests/test_page_feed.py	self.gate.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	self.inside.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	test_a_gather_runs_on_a_thread_of_its_own_never_the_bases.gather	name	health	check_health
 services	packages/services/tests/test_page_table.py	-	name	test_commands_are_redact_a_working_directory_path_and_every_sentence_redact	test_commands_are_redact_a_working_dir_path_and_every_sentence_redact
+services	packages/services/tests/test_page_table.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
 services	packages/services/tests/test_page_table.py	assert set(found["topics"]) == {"rows"} == {page.TOPIC}	keep	set	set
+services	packages/services/tests/test_page_table.py	assert set(module.COMPONENTS) == {"page", "summary", "project-facts"}	keep	set	set
 services	packages/services/tests/test_page_table.py	assert set(module.COMPONENTS) == {"page", "summary"}	keep	set	set
 services	packages/services/tests/test_projects_link.py	assert moxi_cmd("projects", "show", "portfolio")[0] == 0	keep	show	show
 services	packages/services/tests/test_projects_link.py	test_a_read_that_fails_raises	name	holder	conn
@@ -16277,3 +16421,66 @@ usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--date", 
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--out", type=Path, default=DATA / "models.json")	keep	type	type
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--url", default=URL, help="where the copy was fetched from")	keep	help	help
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("litellm", type=Path, help="a copy of LiteLLM's price file")	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	except ImportError:                     # Windows: `show` reads the numbers below there	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	if any(part in ("", ".", "..") for part in parts):	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	make(part)	keep	auto	auto
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	make(part)	keep	start	start
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	if rel not in dirs and not any(where.iterdir()):	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	tree.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	code = proc.wait(timeout=RUN_BOUND_S)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	reader.join(timeout=5)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	proc.wait(timeout=KILL_GRACE_S)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	ticks.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="write the source's stamp when it doesn't name main's commit, "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="a hand tick: lock, tree and a run that isn't --scheduled; "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	parser.add_argument("--slack", type=float, metavar="F",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="the hand tick's slack factor (default: the machine's)")	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	run_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	(source / ".moxi-dev").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	if not kept and any(part in tick.KEPT_NAMES for part in rel.parts):	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert set(tracked(tree)) == {".gitignore", "old", "keep"}	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert set(tracked(tree)) == {".gitignore", "keep", "late"}	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	bin_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	self.lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": code})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run=plan)	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 1})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 0}, take={"exit": 2})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert names and names <= set(sys.stdlib_module_names) | {"__future__"}	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return Path(env["HOME"]) if env.get("HOME") else Path.home()	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	required	required
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the machine the record files the runs under")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--slack", type=float, default=1.0, metavar="F",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--slack", type=float, default=1.0, metavar="F",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the machine's set factor, which every scheduled run passes "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	type=float, default=None, metavar="CPUS",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	type=float, default=None, metavar="CPUS",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="the run's --idle-line (default: the verb's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="keep the record here (required for a tree with no git)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="write the stamp a synced copy of this clone is verified "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	parser.add_argument("--take", metavar="NAME=DIR", action="append", default=[],	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	help="after each run, merge host NAME's results from DIR/NAME; may "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	python = _need([uv, "python", "find", "--system", check.PYTHON], base, source).strip()	keep	find	find
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	return set(json.loads(held.read_text())) if held.exists() else set()	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	return {"PATH": str(fakes.bin_dir), "HOME": str(tmp_path / "home"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert set(data) == {"format", "machine", "source", "has_git", "record_dir", "slack",	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	and row["args"][:2] != ["python", "find"]	keep	find	find
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removeprefix("worktree ")).resolve() == want	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
+rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
+rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok

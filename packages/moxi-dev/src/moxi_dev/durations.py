@@ -9,9 +9,7 @@ each package whose suite passed, the tiers it ran and each test's seconds. The t
 for one whose changed paths put some back (`plain+slow`), from the tests the kit marks
 `lifted`. A later run at the same commit replaces the packages it ran and keeps the rest.
 A run on a tree with changes of its own, or one that ran a finding's tests only, keeps
-no record: its times are not the commit's. A package's `timed` tests run in the check's
-serial pass, after its parallel one; their times join the package's in the same record,
-and the package counts as passed only when both passes did.
+no record: its times are not the commit's.
 
 Two checks can keep the same commit's record at once, from two worktrees of one clone.
 Each writes its own part file and replaces the record with it, and the read, merge and
@@ -117,15 +115,6 @@ def load_held(path: Path) -> list[str]:
         if isinstance(held, list) else []
 
 
-def merged(first: Mapping[str, Mapping[str, Any]] | None,
-           second: Mapping[str, Mapping[str, Any]] | None) -> dict[str, Any] | None:
-    """One package's tests from its two passes (the parallel one and the serial timed
-    one), or None when neither wrote any."""
-    if first is None and second is None:
-        return None
-    return {**(first or {}), **(second or {})}
-
-
 def summarize(runs: Mapping[str, PackageRun]) -> Summary:
     times = sorted((test_seconds(entry) for run in runs.values()
                     for entry in run.tests.values()), reverse=True)
@@ -164,7 +153,7 @@ LOCK_RETRY = 0.01
 
 
 @contextlib.contextmanager
-def _locked(records_dir: Path) -> Iterator[None]:
+def locked(records_dir: Path) -> Iterator[None]:
     """Hold the records' lock (module doc); without `fcntl` or `msvcrt`, no lock."""
     if fcntl is None and msvcrt is None:
         yield
@@ -203,7 +192,7 @@ def keep(records_dir: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path
     `OSError` (a read-only or full disk) reaches the caller, and no part file is left."""
     path = records_dir / f"{commit}.json"
     records_dir.mkdir(parents=True, exist_ok=True)
-    with _locked(records_dir):
+    with locked(records_dir):
         packages = dict(read_record(path) or {})
         packages.update(runs)
         body = {"format": FORMAT, "commit": commit,
