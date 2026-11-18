@@ -86,7 +86,7 @@ def test_the_page_keeps_the_contract(notes_repo, ui_page, ui_component_check):
     assert any(REPOS in url for url in check.requests), check.requests
 
 
-def test_a_repo_is_a_row_named_by_its_home_folder(notes_repo, ui_page):
+def test_a_repo_is_a_row_named_in_the_home_form(notes_repo, ui_page):
     panel = open_panel(ui_page)
     expect(panel.locator("section[data-part=page]")).to_have_attribute("data-state", "up")
     row = panel.locator(f'[data-group=repos] moxi-ui-row[data-key="{notes_repo}"]')
