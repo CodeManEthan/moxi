@@ -90,17 +90,20 @@ export function pathToWrite(address: Address, pathname: string): string | null {
   return path === pathname ? null : path;
 }
 
-/** What the page opens of `address`, given the rows' ids, the project keys the filter can
- * name (null without projects) and whether the panel is offered (the desk): a row or
- * project the page does not have, or the panel on the phone, opens nothing, and `unknown`
- * is the foot's dim line. */
+/** What the page opens of `address`, given the rows' ids, the project keys his rows carry
+ * (null without projects) and whether the panel is offered (the desk): a row the page does
+ * not have, a project without projects installed, or the panel on the phone, opens
+ * nothing, and `unknown` is the foot's dim line. A key no row carries keeps the filter on
+ * it, with no row open, since services can't tell whether the project exists: the list
+ * then says no service belongs to it. */
 export function resolve(address: Address, ids: readonly string[], keys: readonly string[] | null,
                         panel: boolean): { address: Address; unknown: string | null } {
   if (address.panel !== null) {
     return panel ? { address, unknown: null } : { address: NOTHING_OPEN, unknown: NO_SUCH_ADDRESS };
   }
-  if (address.project !== null && (keys === null || !keys.includes(address.project))) {
-    return { address: NOTHING_OPEN, unknown: noSuchProject(address.project) };
+  if (address.project !== null) {
+    if (keys === null) return { address: NOTHING_OPEN, unknown: NO_SUCH_ADDRESS };
+    if (!keys.includes(address.project)) return { address: { ...NOTHING_OPEN, project: address.project }, unknown: null };
   }
   if (address.row !== null && !ids.includes(address.row)) {
     return { address: NOTHING_OPEN, unknown: noSuchRow(address.row) };
@@ -114,8 +117,4 @@ export const NO_SUCH_ADDRESS = "This address names nothing on this page.";
 export function noSuchRow(id: string): string {
   const [module, ...name] = id.split("/");
   return `No service is named ${module === HIS ? name.join("/") : id}.`;
-}
-
-export function noSuchProject(key: string): string {
-  return `No project is named ${key}.`;
 }

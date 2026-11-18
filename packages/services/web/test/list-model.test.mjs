@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   BUCKETS, bucketOf, commandWords, counts, countsLine, FACTS, FALLBACK, filtered, grouped, lastReadLine, lastRunLine,
-  listShape, MOXI, named, NO_PROJECT, NO_SUPERVISOR, NOT_ANSWERING, NOTHING_ADDED, NOTHING_DOWN, OTHER, pageState,
+  listShape, MOXI, named, NO_PROJECT, noServiceBelongs, NO_SUPERVISOR, NOT_ANSWERING, NOTHING_ADDED, NOTHING_DOWN, OTHER, pageState,
   problemLines, projectKeys, READING, READING_AFTER_MS, risen, rowFact, servicesLabel, STORE_UNREAD, systemWord,
   timingWords, whereOf, YOURS,
 } from "../src/list-model.ts";
@@ -269,6 +269,8 @@ test("the filter keeps one project's rows of his and counts them against every r
   assert.deepEqual(found.rows.map((r) => r.id), ["services/a"]);
   assert.equal(found.shown, "1 of 4 services");
   assert.equal(filtered(list, "none").shown, "0 of 4 services");
+  // A key no row carries: the page can't tell whether the project exists, so says no more.
+  assert.equal(noServiceBelongs("none"), "No service belongs to none.");
   assert.deepEqual(projectKeys(list), ["atlas", "beta"]);
 });
 

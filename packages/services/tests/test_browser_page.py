@@ -361,11 +361,30 @@ def test_a_moxi_rows_address_is_its_module_and_name(seeded, ui_shell, ui_page):
     expect_path(ui_page, f"/m/services/row/{ident}")
 
 
+@pytest.mark.parametrize("route", ["project/nope", "project/nope/row/web"])
+def test_a_project_no_row_belongs_to_keeps_the_filter_and_says_no_service_belongs(seeded, ui_shell, ui_page, route):
+    # services can't tell whether the project exists, so the page never says it doesn't.
+    ui_page.goto(f"/m/services/{route}")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    filt = panel.locator('[data-part="filter"]')
+    expect(filt.locator('[data-line="project"]')).to_have_text("nope")
+    listed = get(ui_shell, "api/rows")["rows"]
+    expect(filt.locator('[data-line="shown"]')).to_have_text(f"0 of {services(len(listed))}")
+    expect(list_part(panel).locator('[data-line="no-service"]')).to_have_text("No service belongs to nope.")
+    expect(list_part(panel)).not_to_contain_text("No project")
+    expect(list_part(panel).locator('[data-line="unknown"]')).to_have_count(0)
+    expect(panel.locator(".item")).to_have_count(0)
+    expect_path(ui_page, "/m/services/project/nope")
+    filt.get_by_role("button", name="Show all", exact=True).click()
+    expect(list_part(panel).locator('[data-line="no-service"]')).to_have_count(0)
+    expect(panel.locator(".item")).to_have_count(len(listed))
+    expect_path(ui_page, "/m/services/")
+
+
 @pytest.mark.parametrize(("route", "line"), [
     ("row/nosuch", "No service is named nosuch."),
     ("row/ui/nosuch", "No service is named ui/nosuch."),
-    ("project/nope", "No project is named nope."),
-    ("project/nope/row/web", "No project is named nope."),
     ("bogus/x", "This address names nothing on this page."),
 ])
 def test_an_address_naming_nothing_here_opens_the_page_and_says_so(seeded, ui_page, route, line):

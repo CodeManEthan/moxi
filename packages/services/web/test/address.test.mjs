@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addressPath, NO_SUCH_ADDRESS, NOTHING_OPEN, noSuchProject, noSuchRow, parseRoute, pathToWrite, resolve, routeOf,
+  addressPath, NO_SUCH_ADDRESS, NOTHING_OPEN, noSuchRow, parseRoute, pathToWrite, resolve, routeOf,
 } from "../src/address.ts";
 
 const at = (project, row, panel = null) => ({ project, row, panel });
@@ -46,10 +46,12 @@ test("an address naming what the page doesn't have opens nothing, with the foot'
   assert.deepEqual(resolve(at(null, "services/gone"), ids, null, true),
                    { address: NOTHING_OPEN, unknown: "No service is named gone." });
   assert.deepEqual(resolve(at(null, "cache/watch"), ids, null, true).unknown, "No service is named cache/watch.");
-  assert.deepEqual(resolve(at("zeta", null), ids, ["atlas"], true),
-                   { address: NOTHING_OPEN, unknown: noSuchProject("zeta") });
+  // A key no row carries keeps the filter, with no row open: the page never says a
+  // project doesn't exist.
+  assert.deepEqual(resolve(at("zeta", null), ids, ["atlas"], true), { address: at("zeta", null), unknown: null });
+  assert.deepEqual(resolve(at("zeta", "services/web"), ids, ["atlas"], true), { address: at("zeta", null), unknown: null });
   // Without projects there is no filter.
-  assert.equal(resolve(at("atlas", null), ids, null, true).unknown, "No project is named atlas.");
+  assert.deepEqual(resolve(at("atlas", null), ids, null, true), { address: NOTHING_OPEN, unknown: NO_SUCH_ADDRESS });
   // The panel is the desk's.
   assert.deepEqual(resolve(at(null, null, "add"), ids, null, false), { address: NOTHING_OPEN, unknown: NO_SUCH_ADDRESS });
   assert.deepEqual(resolve(at(null, null, "adopt"), ids, null, true), { address: at(null, null, "adopt"), unknown: null });

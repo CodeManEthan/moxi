@@ -52,7 +52,7 @@ import type { Address } from "./address.ts";
 import { Feed, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
 import type { Projects, Row, Rows, Status } from "./feed.ts";
 import {
-  ADD_A_SERVICE, filtered, listShape, pageState, problemLines, PROJECT, projectKeys, READING_AFTER_MS, SHOW_ALL,
+  ADD_A_SERVICE, filtered, listShape, noServiceBelongs, pageState, problemLines, PROJECT, projectKeys, READING_AFTER_MS, SHOW_ALL,
   WHAT_A_SERVICE_IS, YOURS,
 } from "./list-model.ts";
 import type { ListShape, PageState, RowView } from "./list-model.ts";
@@ -471,8 +471,10 @@ export class ServicesPage extends LitElement {
     const all = state.rows && value !== null ? value.rows : null;
     const projects = installed("projects");
     const filter = all !== null && this.#filter !== null ? filtered(all, this.#filter) : null;
-    const shape = all !== null ? listShape(filter?.rows ?? all, value!.at, projects, when, { quiet: state.state === "unread" })
-      : null;
+    // A key no row of his carries keeps the filter, with its own line in place of the list.
+    const none = filter !== null && filter.rows.length === 0;
+    const shape = all !== null && !none
+      ? listShape(filter?.rows ?? all, value!.at, projects, when, { quiet: state.state === "unread" }) : null;
     const ids = new Set((value?.rows ?? []).map((row) => row.id));
     const loose = told !== null && told.where !== ADD && (told.where === null || !ids.has(told.where)) ? told.said : null;
     return html`${this.#phone && !gatewayActs()
@@ -480,10 +482,11 @@ export class ServicesPage extends LitElement {
       <section data-part="list" data-state=${state.state}>
         ${this.#busy ? html`<p class="state dim" data-line="busy">An act is running.</p>` : nothing}
         ${loose !== null ? this.#saidPart(loose) : nothing}
-        ${shape === null && state.line !== null ? html`<p class=${state.state === "loading" ? "state dim" : "state problem"}
+        ${shape === null && !none && state.line !== null ? html`<p class=${state.state === "loading" ? "state dim" : "state problem"}
           data-line=${state.state} role="status">${state.line}</p>` : nothing}
         ${filter !== null && all !== null ? this.#filterLine(all, filter.shown, state.acts) : nothing}
         ${shape !== null ? this.#list(shape, state) : nothing}
+        ${none ? html`<p class="state dim" data-line="no-service">${noServiceBelongs(this.#filter!)}</p>` : nothing}
         ${this.#unknown !== null && state.acts ? html`<p class="foot" data-line="unknown">${this.#unknown}</p>` : nothing}
         ${value !== null && state.rows ? problemLines(value).map((line) => html`<p class="foot" data-line="module-problem">${line}</p>`)
           : nothing}

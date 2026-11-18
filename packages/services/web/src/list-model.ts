@@ -420,6 +420,12 @@ export const PROJECT = "Project";
 /** The filter line's act: every row again. */
 export const SHOW_ALL = "Show all";
 
+/** The list under the filter when no row of his carries `key`. The page never says a
+ * project doesn't exist: services can't know that from its own rows. */
+export function noServiceBelongs(key: string): string {
+  return `No service belongs to ${key}.`;
+}
+
 /** The project keys his rows carry, by key: the projects the filter can name. */
 export function projectKeys(rows: readonly Row[]): string[] {
   const keys = new Set<string>();
