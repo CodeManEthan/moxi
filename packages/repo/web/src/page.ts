@@ -36,7 +36,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { api, navigate } from "/m/ui/client.js";
 
 import {
-  actRequest, addRows, answerView, confirmView, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
+  actRequest, addRows, answerView, confirmView, folderLine, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
 } from "./acts-model.ts";
 import type { Act, AnswerView, ConfirmView } from "./acts-model.ts";
 import { Feed, parseAnswer, parsePlanned } from "./feed.ts";
@@ -52,9 +52,10 @@ import { openedView, turnOffView } from "./opened-model.ts";
 import type { AutoView, EventView, OpenedView, PieceLine, RulesView, TodayLine } from "./opened-model.ts";
 import { piecesView } from "./pieces-model.ts";
 import type { PiecesView } from "./pieces-model.ts";
-import { reposView } from "./rows-model.ts";
+import { noHooksActs, reposView } from "./rows-model.ts";
 import type { ReposView, RowView } from "./rows-model.ts";
-import { LOCAL } from "./words.ts";
+import { offeredOrder } from "./pieces-model.ts";
+import { homeForm, LOCAL } from "./words.ts";
 
 const TAG = "moxi-repo-page";
 
@@ -87,6 +88,10 @@ const THEN = "Then";
 const LEAVES = "Leaves";
 /** `Add a piece` with every offered piece already in the repo. */
 const NONE_TO_ADD = "Every piece offered is here already.";
+const ADD_A_REPO = "Add a repo";
+const FOLDER = "Folder";
+/** How long after typing stops the folder's plan is read, in milliseconds. */
+const FOLDER_MS = 400;
 /** How long a `Copy` reads `Copied`, in milliseconds. */
 const COPIED_MS = 1500;
 
@@ -206,6 +211,19 @@ const STYLES = css`
   button.btn:disabled { color: var(--moxi-text-dim); border-color: var(--moxi-border); }
   button.lnk { color: var(--moxi-text-dim); }
   .ans { padding: 2px 0; font-size: 13px; line-height: 18px; }
+  /* Add a repo: at the top of Repos, closed off from the rows under it. */
+  .cf.add { border-top: 0; margin: 4px 0 4px; padding: 4px 0 10px; border-bottom: 1px solid var(--moxi-border); }
+  .cf .sub { display: block; color: var(--moxi-text-dim); overflow-wrap: anywhere; margin-top: 3px; }
+  input.fld { font: 12px/18px var(--moxi-font-mono); color: var(--moxi-text); background: none; width: 250px;
+              max-width: 100%; border: 1px solid var(--moxi-border-strong); border-radius: 7px; padding: 4px 9px; }
+  .tick { display: inline-flex; align-items: baseline; gap: 6px; margin-right: 16px; white-space: nowrap; }
+  button.sw { position: relative; flex: none; width: 23px; height: 13px; border-radius: 7px; align-self: center;
+              border: 1px solid var(--moxi-text-dim); }
+  button.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 7px; height: 7px; border-radius: 50%;
+                     background: var(--moxi-text-dim); }
+  button.sw[aria-checked="true"] { background: var(--moxi-text); border-color: var(--moxi-text); }
+  button.sw[aria-checked="true"]::after { left: 12px; background: var(--moxi-bg); }
+  .one .t { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
   .ans > * + * { margin-top: 3px; }
 
   @media (max-width: 720px) {
@@ -277,6 +295,10 @@ export class RepoPage extends LitElement {
   #openAdd = false;
   /** `Add a repo` is open. */
   #adding = false;
+  /** `Add a repo`'s folder, as typed. */
+  #folder = "";
+  /** The pieces switched on in `Add a repo`, in run order. */
+  #addPicked: string[] = [];
   /** `Pieces` is shown. */
   #piecesShown = false;
   /** The warnings folded under the verdict are shown. */
@@ -305,6 +327,7 @@ export class RepoPage extends LitElement {
   #readingTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
+  #folderTimer: ReturnType<typeof setTimeout> | undefined;
 
   #shown = (): void => {
     if (document.visibilityState === "visible") void this.#feed?.refresh();
@@ -330,6 +353,7 @@ export class RepoPage extends LitElement {
     clearTimeout(this.#readingTimer);
     clearInterval(this.#refreshTimer);
     clearTimeout(this.#copyTimer);
+    clearTimeout(this.#folderTimer);
     document.removeEventListener("visibilitychange", this.#shown);
   }
 
@@ -422,6 +446,9 @@ export class RepoPage extends LitElement {
     this.#picked = [];
     this.#acting = null;
     this.#adding = false;
+    this.#folder = "";
+    this.#addPicked = [];
+    clearTimeout(this.#folderTimer);
     this.#piecesShown = false;
   }
 
@@ -526,6 +553,10 @@ export class RepoPage extends LitElement {
   /** `Cancel`, or `Close` under an answer: the act closes, and its picks with it. */
   #cancel(acting: Acting): void {
     if (this.#acting !== acting) return;
+    if (acting.at === "add") {
+      this.#toggleAdding(null);
+      return;
+    }
     this.#acting = null;
     if (acting.act === "add") this.#picked = [];
     this.requestUpdate();
@@ -555,10 +586,60 @@ export class RepoPage extends LitElement {
     this.#startAct("add", row.key, this.#picked, `foot:${row.key}`, row.name);
   }
 
+  /** `Add a repo` under the `Repos` label, or a project's `Add` on the `No hooks:` line
+   * (`folder` its root): the panel opens, with the folder filled and its plan read when
+   * one is given; pressed again with none, it closes. */
+  #toggleAdding(folder: string | null): void {
+    const open = this.#adding;
+    this.#close();
+    this.#unknown = null;
+    if (!open || folder !== null) {
+      this.#adding = true;
+      if (folder !== null) {
+        this.#folder = folder;
+        this.#planFolder();
+      }
+    }
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** The folder typed: its plan is read once typing stops for a while. Until then no plan
+   * is drawn, so the button never sends a plan for a folder the field no longer names. */
+  #typed(text: string): void {
+    this.#folder = text;
+    if (this.#acting?.at === "add") this.#acting = null;
+    clearTimeout(this.#folderTimer);
+    this.#folderTimer = setTimeout(() => this.#planFolder(), FOLDER_MS);
+    this.requestUpdate();
+  }
+
+  /** A piece switched on or off in `Add a repo`: the plan is read again. */
+  #switchPiece(id: string, order: readonly string[]): void {
+    const picked = new Set(this.#addPicked);
+    if (picked.has(id)) picked.delete(id);
+    else picked.add(id);
+    this.#addPicked = order.filter((one) => picked.has(one));
+    clearTimeout(this.#folderTimer);
+    this.#planFolder();
+  }
+
+  /** Reads the plan of adding the folder typed with the pieces switched on. */
+  #planFolder(): void {
+    if (!this.#adding) return;
+    const folder = this.#folder.trim();
+    if (folder === "") {
+      if (this.#acting?.at === "add") this.#acting = null;
+      this.requestUpdate();
+      return;
+    }
+    this.#startAct("add-repo", folder, this.#addPicked, "add", folder);
+  }
+
   /** Where the open act is drawn: where it opened while that is drawn, else `Hooks`' foot. */
   #placeOf(acting: Acting, drawn: Drawn): string {
     const at = acting.at;
-    if (at === "add") return this.#adding ? at : HOOKS_END;
+    if (at === "add") return this.#adding ? at : HOOKS_END;  // drawn by `Add a repo` itself
     if (at.startsWith("foot:")) return this.#open === at.slice(5) ? at : HOOKS_END;
     if (at.startsWith("row:")) {
       const key = at.slice(4);
@@ -662,9 +743,17 @@ export class RepoPage extends LitElement {
 
   #repos(drawn: Drawn, acts: boolean) {
     const view = drawn.repos;
-    return html`<section class="grp rows" data-group="repos"><div class="gk">${REPOS}</div><div class="gl">
+    const noHooks = view.noHooks;
+    return html`<section class="grp rows" data-group="repos"><div class="gk">${REPOS}${acts ? html`<small><button
+        type="button" data-action="add-repo" aria-expanded=${this.#adding ? "true" : "false"}
+        @click=${() => this.#toggleAdding(null)}>${ADD_A_REPO}</button></small>` : nothing}</div><div class="gl">
+      ${this.#adding && acts ? this.#adder(drawn, acts) : nothing}
       ${repeat(view.rows, (row) => row.key, (row) => this.#row(row, drawn, acts))}
-      ${view.noHooks !== null ? html`<div class="one" data-line="no-hooks"><span>${view.noHooks.text}</span></div>`
+      ${noHooks !== null ? html`<div class="one" data-line="no-hooks"><span>${noHooks.text}</span>${acts
+        ? html`<span class="t">${noHooksActs(noHooks).map((act) => html`<button type="button" data-action="add"
+          data-project=${act.project.project} @click=${() => this.#toggleAdding(homeForm(act.project.root,
+                                                                                         drawn.value.home))}>${
+          act.label}</button>`)}</span>` : nothing}</div>`
         : nothing}
     </div></section>`;
   }
@@ -833,12 +922,48 @@ export class RepoPage extends LitElement {
     this.requestUpdate();
   }
 
+  // -- Add a repo --------------------------------------------------------------------------
+
+  /** `Add a repo`: the folder, what the plan says of it, each offered piece as a switch,
+   * then the plan's lines and `Add <n> pieces` or `Add to the list`, and `Cancel`. */
+  #adder(drawn: Drawn, acts: boolean) {
+    const acting = this.#acting !== null && this.#acting.at === "add" ? this.#acting : null;
+    const order = offeredOrder(drawn.value.offered);
+    const picked = new Set(this.#addPicked);
+    const plan = acting?.plan ?? null;
+    const said = acting === null ? null : acting.failed ?? (plan === null ? READING : folderLine(plan));
+    const asking = acting === null || acting.outcome === null || acting.outcome === "changed";
+    const view = acting === null || plan === null || plan.refusal !== null ? null : confirmView(plan, {
+      act: "add-repo", repo: acting.repo, picked: acting.picked, offered: drawn.value.offered, home: drawn.value.home,
+    });
+    return html`<div class="cf add" data-part="add-repo" role="group" aria-label=${ADD_A_REPO}>
+      <p class="q">${ADD_A_REPO}</p>
+      <div class="cr"><span class="k">${FOLDER}</span><span class="f"><input class="fld" type="text" data-line="folder"
+          aria-label=${FOLDER} spellcheck="false" autocomplete="off" .value=${this.#folder}
+          @input=${(event: Event) => this.#typed((event.target as HTMLInputElement).value)}>${said !== null
+          ? html`<span class="sub" data-line="folder-said">${said}</span>` : nothing}</span></div>
+      ${order.length > 0 ? html`<div class="cr"><span class="k">${PIECES}</span><span class="f">${order.map((piece) =>
+        html`<span class="tick" data-piece=${piece.id}><button type="button" class="sw" role="switch"
+          aria-checked=${picked.has(piece.id) ? "true" : "false"} aria-label=${piece.name} data-action="switch"
+          @click=${() => this.#switchPiece(piece.id, order.map((one) => one.id))}></button>${piece.name}</span>`)}</span></div>`
+        : nothing}
+      ${acting !== null && acting.outcome === "changed" ? this.#answer(acting) : nothing}
+      ${acting !== null && asking && view !== null ? this.#planLines(acting, view) : nothing}
+      ${acting !== null && !asking ? this.#answer(acting) : nothing}
+      <div class="btns">${asking && view?.go != null && acting !== null ? html`<button type="button" class="btn"
+          data-action="go" ?disabled=${!acts || acting.sending} @click=${() => void this.#send(acting)}>${view.go}</button>`
+          : nothing}
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#toggleAdding(null)}>${
+          asking ? CANCEL : CLOSE}</button></div>
+    </div>`;
+  }
+
   // -- confirms and answers ----------------------------------------------------------------
 
   /** The open act, when it is drawn at `at`. */
   #actAt(at: string, drawn: Drawn, acts: boolean) {
     const acting = this.#acting;
-    if (acting === null || this.#placeOf(acting, drawn) !== at) return nothing;
+    if (acting === null || acting.at === "add" || this.#placeOf(acting, drawn) !== at) return nothing;
     return this.#confirm(acting, drawn, acts);
   }
 

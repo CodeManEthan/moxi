@@ -204,3 +204,10 @@ export function reposView(value: Pick<Repos, "repos" | "today" | "unindexed">,
   if (projects.length === 0) return { rows, noHooks: null };
   return { rows, noHooks: { text: `No hooks: ${projects.map((p) => p.project).join(", ")}`, projects } };
 }
+
+/** The `Add` buttons of the `No hooks:` line, each opening `Add a repo` with that project's
+ * root filled: `Add` for one project, `Add <key>` for each of several. */
+export function noHooksActs(noHooks: NoHooks): { label: string; project: Unindexed }[] {
+  const one = noHooks.projects.length === 1;
+  return noHooks.projects.map((project) => ({ label: one ? "Add" : `Add ${project.project}`, project }));
+}

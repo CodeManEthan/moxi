@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { repoRow, reposView, specNews, whereLine } from "../src/rows-model.ts";
+import { noHooksActs, repoRow, reposView, specNews, whereLine } from "../src/rows-model.ts";
 import { AT, event, HOME, piece, problem, record, repo, spec, T, TODAY, UTC, value } from "./fixtures.mjs";
 
 const opts = { home: HOME, today: TODAY, clock: UTC };
@@ -107,4 +107,12 @@ test("with no repo in the list, each project with no hooks is a row; without pro
   assert.deepEqual(view.rows.map((row) => [row.name, row.fact, row.add, row.open]), [["orbit-cli", "no hooks", true, false]]);
   assert.deepEqual(reposView(value({ repos: [repo({ pieces: [piece()] })] }), { clock: UTC }).noHooks, null);
   assert.deepEqual(reposView(value({ repos: [repo({ pieces: [piece()] })], unindexed: [] }), { clock: UTC }).noHooks, null);
+});
+
+test("the No hooks line's Add: one for one project, one per project named for several", () => {
+  const orbit = { project: "orbit-cli", root: "/home/u/code/orbit-cli" };
+  const home = { project: "reviewer-home", root: "/home/u/code/reviewer-home" };
+  assert.deepEqual(noHooksActs({ text: "No hooks: orbit-cli", projects: [orbit] }), [{ label: "Add", project: orbit }]);
+  assert.deepEqual(noHooksActs({ text: "", projects: [orbit, home] }).map((act) => act.label),
+                   ["Add orbit-cli", "Add reviewer-home"]);
 });
