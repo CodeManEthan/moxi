@@ -52,6 +52,10 @@ SESSION_KEYS = ["key", "harness", "pid", "session_id", "cwd", "started", "capabi
                 "read_error", "ended_at", "has_box", "unread_since"]
 
 
+#: The reader's own reach, before `fresh_reader` puts a stand-in in its place.
+OWN_REACH = pagereader._claude_reach
+
+
 def loopback():
     found = modules.load("ui", interface=3)
     assert found.ok, found.reason
@@ -60,7 +64,9 @@ def loopback():
 
 @pytest.fixture(autouse=True)
 def fresh_reader(monkeypatch, turns_env):
-    """Each test starts its own reader in its own runtime directory, and stops it."""
+    """Each test starts its own reader in its own runtime directory, and stops it. Its
+    reach is a stand-in: only the reach's own tests read it through `claude_setup`."""
+    monkeypatch.setattr(pagereader, "_claude_reach", lambda: "start")
     monkeypatch.setattr(pagehandlers, "_reader_now", None)
     monkeypatch.setattr(pagehandlers, "_feed_now", None)
     yield
@@ -358,7 +364,7 @@ def test_the_page_has_one_read_and_one_stream_and_no_act():
     assert routes["/api/events"]["stream"]
     assert list(routes["/api/events"]["topics"]) == ["sessions"]
     assert list(routes["/api/sessions"]["returns"]) == ["now", "listed", "detail", "home",
-                                                        "sessions"]
+                                                        "reach", "sessions"]
     assert routes["/api/events"]["topics"]["sessions"]["items"] == {
         key: value for key, value in routes["/api/sessions"]["returns"].items()
         if key != "now"}
@@ -431,7 +437,7 @@ def test_the_first_read_lists_the_session_with_its_facts_and_agents(make_endpoin
 def test_no_session_reads_as_listed_and_empty():
     status, data = run(get(served()))
     assert status == 200
-    assert {k: v for k, v in data.items() if k != "now"} == {
+    assert {k: v for k, v in data.items() if k not in ("now", "reach")} == {
         "listed": True, "detail": None, "home": os.path.expanduser("~"), "sessions": []}
 
 
@@ -772,6 +778,133 @@ def test_the_draft_cases_on_the_wire(make_endpoint, setup, draft, agents):
     _, data = run(get(served()))
     facts = facts_of(data, ep.dir.name)
     assert (facts["draft"], facts["agents"]) == (draft, agents)
+
+
+# --- the reach --------------------------------------------------------------------------------
+
+class Reaches:
+    """A reach stand-in that answers `answer` and counts its reads; with `hold` set it waits
+    for `go` first."""
+
+    def __init__(self, answer="setup", *, hold=False):
+        self.answer = answer
+        self.calls = 0
+        self.go = threading.Event()
+        if not hold:
+            self.go.set()
+
+    def __call__(self):
+        self.go.wait(LIVE_S)
+        self.calls += 1
+        return self.answer
+
+
+def until(check, timeout=LIVE_S):
+    deadline = time.monotonic() + timeout
+    while not check():
+        assert time.monotonic() < deadline, "it never came"
+        time.sleep(0.02)
+
+
+@pytest.fixture
+def reader():
+    made = []
+
+    def make(reach, **kw):
+        one = pagereader.Reader(rescan_s=0.1, reach=reach, **kw)
+        made.append(one)
+        one.start()
+        return one
+
+    yield make
+    for one in made:
+        one.stop()
+
+
+def test_the_reach_is_null_until_its_first_read_answers(monkeypatch):
+    from moxi_turns.codex_host import codex_host_available
+
+    reach = Reaches("setup", hold=True)
+    monkeypatch.setattr(pagereader, "_claude_reach", reach)
+
+    async def go():
+        app = served()
+        _, data = await get(app)
+        assert data["reach"] is None
+        stream = Stream(app)
+        try:
+            reach.go.set()
+            data = await stream.until(lambda d: d["reach"] is not None, LIVE_S)
+            assert data["reach"] == {"claude": "setup", "codex": codex_host_available()}
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_the_reach_is_read_again_when_endpoint_json_or_claude_changes(reader, monkeypatch):
+    from moxi_turns import claude_setup
+
+    reach = Reaches("start")
+    one = reader(reach, reach_soon_s=600, reach_later_s=600)
+    until(lambda: reach.calls == 1)
+    target = claude_setup.plugin_dir(claude_setup.RUNNER, claude_setup.placed_root()) \
+        / claude_setup.ENDPOINT_FILE
+    target.parent.mkdir(parents=True)
+    target.write_text("{}")
+    until(lambda: reach.calls == 2)
+    target.write_text('{"command": "/a/longer/one"}')
+    until(lambda: reach.calls == 3)
+    monkeypatch.setenv("PATH", os.pathsep.join(
+        part for part in os.environ["PATH"].split(os.pathsep)
+        if not (Path(part) / "claude").exists()))
+    until(lambda: reach.calls == 4)
+    time.sleep(0.5)
+    assert reach.calls == 4 and one.value()["reach"]["claude"] == "start"
+
+
+def test_the_reach_is_read_again_soon_while_setup_and_late_while_start(reader):
+    setup = Reaches("setup")
+    reader(setup, reach_soon_s=0.2, reach_later_s=600)
+    until(lambda: setup.calls >= 3)
+    start = Reaches("start")
+    reader(start, reach_soon_s=0.2, reach_later_s=600)
+    until(lambda: start.calls == 1)
+    time.sleep(1.0)
+    assert start.calls == 1
+
+
+def test_a_changed_reach_is_published_once_and_an_unchanged_one_not():
+    reach = Reaches("setup")
+    notified = []
+    one = pagereader.Reader(rescan_s=0.1, reach=reach, reach_soon_s=0.1)
+    one.listen(lambda: notified.append(one.value()["reach"]))
+    try:
+        one.start()
+        until(lambda: reach.calls >= 3)
+        assert [r for r in notified if r is not None] == [
+            {"claude": "setup", "codex": notified[-1]["codex"]}]
+        reach.answer = "start"
+        until(lambda: any(r and r["claude"] == "start" for r in notified))
+        calls = reach.calls
+        time.sleep(0.5)
+        assert reach.calls == calls     # start waits for the long pace
+        assert [r["claude"] for r in notified if r is not None] == ["setup", "start"]
+    finally:
+        one.stop()
+
+
+def test_the_readers_own_reach_asks_the_stand_in_claude(monkeypatch, stub_claude):
+    """Without a stand-in reach the reader reads `claude_setup.reach`, which runs the
+    `claude` PATH finds: the conftest's stand-in, never the real one."""
+    monkeypatch.setattr(pagereader, "_claude_reach", OWN_REACH)
+    one = pagereader.Reader(rescan_s=0.1)
+    try:
+        one.start()
+        until(lambda: one.value()["reach"] is not None)
+    finally:
+        one.stop()
+    assert "plugin list --json" in (stub_claude / "log").read_text().splitlines()
 
 
 # --- a slow or misbehaving endpoint ---------------------------------------------------------

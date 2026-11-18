@@ -33,6 +33,16 @@ The library is blocking, and each of its calls is bounded by the library's own t
 Each session's calls run on that session's own threads, so a slow or dead endpoint holds up
 only its own row: never the scan, the other sessions, the page's read or its topic.
 
+One more thread reads the reach: whether a Claude Code session started by hand runs with
+turns here (`claude_setup.reach`), and whether launched Codex sessions can run under turns'
+host (`codex_host_available`). It is null on the list until its first read answers. Then,
+at each scan's pace, the thread looks at the cheap facts the reach rests on (`claude` on
+PATH, and the placed `endpoint.json`'s modification time and size, or its absence) and reads
+the reach again at once when they changed; it also reads again `REACH_SOON_S` seconds after
+a read that answered `setup` or could not tell, and `REACH_LATER_S` seconds after any other.
+A changed answer is published; an unchanged one is not. The reach is never read on a
+request.
+
 A session leaves the list when its watch ends (its `session.gone`, or the connection
 closing), or when a scan no longer finds it while no watch of it is open. A session whose
 watch or reads fail stays listed, with `read_error` saying what could not be read, and its
@@ -52,6 +62,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -71,6 +82,10 @@ REREAD_S = 30.0
 UNREAD_S = 5.0
 #: How many times in a row a stale facts reading is read again.
 STALE_REREADS = 3
+#: Seconds until the reach is read again after a read that asks him to act or can't tell.
+REACH_SOON_S = 30.0
+#: Seconds until the reach is read again after any other read.
+REACH_LATER_S = 300.0
 
 #: The reads that can fail, in the order `read_error` names them.
 _READS = ("watch", "facts", "agents")
@@ -345,6 +360,27 @@ class _Held:
         self.reader._read_ok(self, name, value)
 
 
+def _claude_reach() -> str | None:
+    from . import claude_setup
+
+    return claude_setup.reach(claude_setup.REACH_TIMEOUT_S)
+
+
+def _cheap_facts() -> tuple[Any, ...]:
+    """What the reach rests on that is cheap to look at: where PATH finds `claude`, and the
+    placed `endpoint.json`'s modification time and size, or None when it is absent."""
+    from . import claude_setup
+
+    try:
+        path = claude_setup.plugin_dir(claude_setup.RUNNER, claude_setup.placed_root()) \
+            / claude_setup.ENDPOINT_FILE
+        info = path.stat()
+        written: Any = (info.st_mtime_ns, info.st_size)
+    except Exception:  # noqa: BLE001 - absent, or not readable: either is a fact
+        written = None
+    return shutil.which("claude"), written
+
+
 def _only_at_differs(old: dict[str, Any] | None, new: dict[str, Any] | None) -> bool:
     """Whether two readings differ in nothing but their `at`."""
     if old is None or new is None or "at" not in old:
@@ -381,12 +417,18 @@ class Reader:
 
     def __init__(self, *, rescan_s: float | None = None, retry_s: float | None = None,
                  hold_s: float | None = None, reread_s: float | None = None,
-                 unread_s: float | None = None):
+                 unread_s: float | None = None,
+                 reach: Callable[[], str | None] | None = None,
+                 reach_soon_s: float | None = None, reach_later_s: float | None = None):
         self.rescan_s = RESCAN_S if rescan_s is None else rescan_s
         self.retry_s = RETRY_S if retry_s is None else retry_s
         self.hold_s = HOLD_S if hold_s is None else hold_s
         self.reread_s = REREAD_S if reread_s is None else reread_s
         self.unread_s = UNREAD_S if unread_s is None else unread_s
+        self.reach_soon_s = REACH_SOON_S if reach_soon_s is None else reach_soon_s
+        self.reach_later_s = REACH_LATER_S if reach_later_s is None else reach_later_s
+        self._read_reach = _claude_reach if reach is None else reach
+        self._reach: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self._held: dict[str, _Held] = {}
         self._dropped: dict[str, float] = {}
@@ -397,6 +439,8 @@ class Reader:
         self._started = False
         self._scanner = threading.Thread(target=self._scanning, name="turns page scan",
                                          daemon=True)
+        self._reacher = threading.Thread(target=self._reaching, name="turns page reach",
+                                         daemon=True)
 
     # -- the outside ------------------------------------------------------------------------
 
@@ -406,6 +450,7 @@ class Reader:
                 return
             self._started = True
         self._scanner.start()
+        self._reacher.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -443,13 +488,45 @@ class Reader:
         return True
 
     def value(self) -> dict[str, Any]:
-        """The list now: `listed`, `detail`, `home` and `sessions`, newest first."""
+        """The list now: `listed`, `detail`, `home`, `reach` and `sessions`, newest
+        first."""
         with self._lock:
             rows = [one.row() for one in self._held.values()]
             listed, detail = self._listed.is_set(), self._detail
+            reach = None if self._reach is None else dict(self._reach)
         rows.sort(key=lambda row: (-(row["started"] or 0.0), row["key"]))
         return {"listed": listed, "detail": detail, "home": os.path.expanduser("~"),
-                "sessions": rows}
+                "reach": reach, "sessions": rows}
+
+    # -- the reach -----------------------------------------------------------------------
+
+    def _reaching(self) -> None:
+        from .codex_host import codex_host_available
+
+        seen: Any = None
+        due = 0.0
+        while not self._stop.is_set():
+            cheap = _cheap_facts()
+            if self._reach is None or cheap != seen or time.monotonic() >= due:
+                seen = cheap
+                try:
+                    claude = self._read_reach()
+                except Exception as exc:  # noqa: BLE001 - a reach that fails can't tell
+                    log.warning("reading the reach failed: %s", exc, exc_info=exc)
+                    claude = None
+                if claude not in ("start", "setup", "absent"):
+                    claude = None
+                value = {"claude": claude, "codex": codex_host_available()}
+                pace = self.reach_later_s if claude in ("start", "absent") else \
+                    self.reach_soon_s
+                due = time.monotonic() + pace
+                with self._lock:
+                    changed = value != self._reach
+                    self._reach = value
+                if changed and not self._stop.is_set():
+                    self._notify()
+            if self._stop.wait(self.rescan_s):
+                return
 
     # -- the scanner ---------------------------------------------------------------------
 
@@ -581,6 +658,6 @@ class Reader:
                 log.warning("a listener of turns' page failed: %s", exc, exc_info=exc)
 
 
-__all__ = ["BOX_HARNESSES", "HOLD_S", "REREAD_S", "RESCAN_S", "RETRY_S", "STALE_REREADS",
-           "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row", "info_row",
+__all__ = ["BOX_HARNESSES", "HOLD_S", "REACH_LATER_S", "REACH_SOON_S", "REREAD_S", "RESCAN_S",
+           "RETRY_S", "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row", "info_row",
            "read_error"]

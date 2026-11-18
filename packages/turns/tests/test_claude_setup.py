@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 from pathlib import Path
 
 import pytest
@@ -19,32 +18,11 @@ from conftest import write_config
 from moxi import paths
 from moxi_turns import claude_setup
 
-FAKE_CLAUDE = """#!/bin/sh
-echo "$*" >> "$FAKE_CLAUDE_DIR/log"
-case "$*" in
-  "--version") echo "$FAKE_CLAUDE_VERSION (Claude Code)" ;;
-  "plugin marketplace list --json") cat "$FAKE_CLAUDE_DIR/markets.json" ;;
-  "plugin list --json") cat "$FAKE_CLAUDE_DIR/plugins.json" ;;
-esac
-exit 0
-"""
-
-
 @pytest.fixture
-def fake_claude(tmp_path, monkeypatch):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    exe = bin_dir / "claude"
-    exe.write_text(FAKE_CLAUDE)
-    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
-    state = tmp_path / "state"
-    state.mkdir()
-    (state / "markets.json").write_text("[]")
-    (state / "plugins.json").write_text("[]")
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_CLAUDE_DIR", str(state))
-    monkeypatch.setenv("FAKE_CLAUDE_VERSION", "2.1.296")
-    return state
+def fake_claude(stub_claude):
+    """The stand-in `claude` every test has on PATH (conftest's `stub_claude`): the folder
+    of its files and log."""
+    return stub_claude
 
 
 def _log(state: Path) -> list[str]:
@@ -661,10 +639,10 @@ exit 0
 
 
 def test_the_reach_is_none_past_its_bound_and_kills_a_child_holding_the_pipes(
-        placed, fake_claude, tmp_path):
+        placed, fake_claude):
     import time
 
-    exe = tmp_path / "bin" / "claude"
+    exe = Path(shutil.which("claude"))
     exe.write_text(HELD_CLAUDE)
     claude_setup.write_endpoint_file()
     began = time.monotonic()

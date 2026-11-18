@@ -112,10 +112,18 @@ SESSION = lb.Out("table", items={
 #: The list. `listed` is false until the page server's first scan for sessions has
 #: finished; `detail` is null unless the last scan failed; `home` is the page server's
 #: home folder, so the page can write a folder in `~` form; `sessions` is newest first.
+#: `reach` is what this machine can show, null until its first read answers: `claude` is
+#: `start` (a Claude Code session started by hand runs with turns), `setup` (`moxi install
+#: turns` would make it so), `absent` (Claude Code was not found when turns was
+#: installed), or null when that can't be told or the install would not fix it; `codex`
+#: says whether launched Codex sessions can run under turns' host.
+REACH = lb.Out("table", nullable=True, items={"claude": _MAYBE, "codex": _FLAG})
+
 LIST = {
     "listed": _FLAG,
     "detail": _MAYBE,
     "home": lb.Out("string", mark="path"),
+    "reach": REACH,
     "sessions": lb.Out("list", items=SESSION),
 }
 
@@ -145,4 +153,5 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["AGENT", "AGENTS", "BUDGET", "FACTS", "LIST", "PAGE", "READY", "SESSION", "TOPIC"]
+__all__ = ["AGENT", "AGENTS", "BUDGET", "FACTS", "LIST", "PAGE", "REACH", "READY", "SESSION",
+           "TOPIC"]
