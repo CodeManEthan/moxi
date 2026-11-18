@@ -64,8 +64,10 @@ project key; see [Projects](#projects).
 
 Exit codes: 0 done; 1 a git or config failure, or `refresh` found a problem; 2 a usage
 error, such as an unknown piece or a path that isn't a git work tree; 3 refused: a
-declaration repo refuses, git older than 2.39, or a shim that can't be placed. A refused
-command writes nothing.
+declaration repo refuses, git older than 2.39, or a shim that can't be placed; 75 another
+command is changing the same repo's hooks and didn't finish within 10 seconds (each holds
+`moxi-repo/hooks.lock` in the repo's common git dir while it writes). A refused command
+writes nothing.
 
 ### Where things live
 
@@ -557,19 +559,25 @@ whether to remove repo's index and its ledger of records.
 
 ## The git hooks page
 
-With the `ui` extra, the browser UI shell shows a git hooks page: for each indexed repo,
-its problems, each git event with its pieces in the order they run, the existing git hook
-and the chain line's state, each committer spec's last pass, last commit and pushes, and
-the doctor records repo has open. The page reads what `moxi repo git-hooks list --json`
-and `moxi repo specs --json` print.
+With the `ui` extra, the browser UI shell shows a git hooks page in three parts. `Hooks`
+says in one line whether every repo runs its hooks, and lists what needs you: a piece
+with no module left, a hook entry gone, an auto-commit that keeps failing, a chain line
+to add, an open record. Each says where, and how to fix it, with the command to copy
+where a command fixes it. `Repos` has a row per repo, by its project's name with the
+projects module installed and by its folder without it. A row opens in place: each git
+event with its pieces in the order they run, today's records, the auto-commit's last
+pass, commit and pushes, the repo's rules, git's version and mode, and its commands.
+`Pieces` lists every piece the installed modules offer, where each is in use, and what
+happens when one breaks. The page reads the same facts as `moxi repo git-hooks list
+--json` and `moxi repo specs --json`.
 
 The page can do three things itself: add pieces to a repo (or add the repo alone to the
-list), turn a registered piece on, and refresh a repo. Each first reads what it would
-write, the same plan `moxi repo git-hooks add`, `enable` and `refresh` make, and draws
-every key, hook file and index entry of it, with the old value of any key it puts back.
-What you press sends that plan's digest, and the verb writes only if the plan it makes
-again, under the repo's lock, has the same one; otherwise it writes nothing and shows the
-new plan. A press sent twice writes nothing the second time. Before writing, the page
+list), turn a registered piece on, and refresh a repo, each only where it would change
+something. Each first reads what it would write, the same plan `moxi repo git-hooks
+add`, `enable` and `refresh` make, and draws every key, hook file and index entry of it,
+with the old value of any key it puts back. What you press sends that plan's digest, and
+the verb writes only if the plan it makes again, under the repo's lock, has the same one;
+otherwise it writes nothing and shows the new plan. A press sent twice writes nothing the second time. Before writing, the page
 checks with ui that it would write where your terminal does, as every page that writes
 does. It never disables, removes or changes a setting: those stay commands to copy and
 run in a terminal.
