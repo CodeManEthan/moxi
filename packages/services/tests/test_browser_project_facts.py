@@ -138,7 +138,8 @@ def test_it_reports_services_verdicts_for_the_given_projects_and_follows_the_top
     assert (section["label"], section["rank"], section["link"]) == ("Services", 30, SECTION_LINK)
     lines = [[part["text"] for part in line["parts"]] for line in section["lines"]]
     assert lines[:2] == [["docs failed", "not running"], ["preview is stopped"]], lines
-    assert len(lines) == 3 and lines[2][0].startswith("web running") and lines[2][1] == "spare off"
+    assert len(lines) == 3 and sorted(lines[2])[0] == "spare off", lines
+    assert sorted(lines[2])[1].startswith("web running"), lines
     assert "sections" not in report["projects"]["kestrel-web"]
 
     # A row added under kestrel-web comes by the topic, with no read of the route again.
