@@ -8348,7 +8348,11 @@ publishing	packages/publishing/tests/test_standing.py	assert piece.standing_prob
 publishing	packages/publishing/tests/test_standing.py	value, "main", set())	keep	set	set
 publishing	packages/publishing/tests/test_standing.py	"release/*", "release/main", set())	keep	set	set
 publishing	packages/publishing/tests/test_standing.py	assert not any("/actions/" in path for path in served.asked)	keep	any	any
-publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	if not any(isinstance(name := one.get("name"), str) and (	keep	any	any
+publishing	packages/publishing/tests/test_tag.py	assert any(refused in line for line in made.lines)	keep	any	any
+publishing	packages/publishing/tests/test_tag.py	assert any("secrets-windows concluded failure" in line for line in lines), lines	keep	any	any
+publishing	packages/publishing/tests/test_tags.py	assert any(n.endswith("other (windows-latest) at "	keep	any	any
+publishing	packages/publishing/tests/test_tags.py	assert any(n.endswith(f"{missing} at {head(released_repo)[:12]}: no such job")	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
 repo	packages/repo/src/moxi_repo/_records.py	- `<cgd>::piece::<id>`: a piece's last run broke, or a post-* piece returned `record`.	keep	record	record
