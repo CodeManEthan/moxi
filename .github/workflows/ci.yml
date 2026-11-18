@@ -81,6 +81,13 @@ jobs:
       - name: install tmux, which the slots tests drive
         if: runner.os == 'macOS'
         run: brew install tmux
+      # macOS's own TMPDIR is long, under /var/folders: a socket under the tests' temp
+      # root passes Unix sockets' path limit, and the short path code falls back to in
+      # /private/tmp is outside the test fence. With TMPDIR=/tmp the temp root and its
+      # sockets stay short and inside it.
+      - name: keep the temp root short
+        if: runner.os == 'macOS'
+        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
       - run: uv sync --locked
       - run: uv run --locked moxi-dev check --full
 
