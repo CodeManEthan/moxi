@@ -1,6 +1,6 @@
 """What every test of the launcher shares: the one time its launches are named at, a
 short startup watch, and the `slot_target` mark, which skips a test of the slot target on
-native Windows."""
+native Windows unless the test is also marked `on_windows`."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ SLOT_TARGET_SKIP = "the slot target needs slots, which runs on Linux and WSL2, n
 
 def pytest_configure(config):
     config.addinivalue_line("markers", f"slot_target: a test of the slot target; {SLOT_TARGET_SKIP}")
+    config.addinivalue_line("markers", "on_windows: a slot target test of a path native Windows "
+                            "runs, such as its refusal there; it is not skipped there")
 
 
 def pytest_collection_modifyitems(items):
@@ -25,7 +27,7 @@ def pytest_collection_modifyitems(items):
         return
     skip = pytest.mark.skip(reason=SLOT_TARGET_SKIP)
     for item in items:
-        if item.get_closest_marker("slot_target"):
+        if item.get_closest_marker("slot_target") and not item.get_closest_marker("on_windows"):
             item.add_marker(skip)
 
 

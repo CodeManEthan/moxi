@@ -331,6 +331,7 @@ def test_without_slots_a_slot_launch_is_refused_naming_the_other_targets(work, h
     assert type(listed) is targets.NoSlots and nothing_written()
 
 
+@pytest.mark.on_windows
 def test_on_native_windows_a_slot_launch_is_refused(work, harness, rig, monkeypatch):
     monkeypatch.setattr(targets, "WINDOWS", True)
     with pytest.raises(targets.SlotsUnsupported) as raised:
