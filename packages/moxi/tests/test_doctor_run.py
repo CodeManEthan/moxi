@@ -1437,7 +1437,7 @@ def test_open_handles_far_over_the_fds_budget_read_as_handles_and_never_warn(d, 
     handles = got[("demo", "cost handles")]
     assert (handles.state, handles.detail) == ("ok", "232 open handles")
     assert ("demo", "cost fds") not in got
-    assert not any("fds" in row.detail for row in got.values())
+    assert [row.name for row in got.values() if "fds" in row.detail] == []
 
 
 def test_open_fds_over_the_fds_budget_still_warn(d, monkeypatch):
