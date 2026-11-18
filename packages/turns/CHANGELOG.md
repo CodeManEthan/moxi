@@ -23,10 +23,10 @@
 - The Claude runner plugin took a new version, 0.2.0, for the leg it speaks now. Claude
   Code runs a user-scope plugin from a cache kept per version, so `moxi install turns` now
   updates a plugin installed at another version than the one it ships (`claude plugin
-  update`) instead of skipping it. Before, an earlier install kept running the old runner, which
-  the endpoint refuses, so every session it loaded in ran without turns. `moxi doctor
-  turns` has a new row, `claude installed runner`, that reads the leg of the runner
-  Claude Code runs at user scope and fails when it is not the endpoint's.
+  update`) instead of skipping it. Before, an earlier install kept running the old
+  runner, which the endpoint refuses, so every session it loaded in ran without turns.
+  `moxi doctor turns` has a new row, `claude installed runner`, that reads the leg of the
+  runner Claude Code runs at user scope and fails when it is not the endpoint's.
 - `start.order`'s default is `["launcher", "comms", "notes", "memory"]`, the
   start-context modules in this repository. A config that sets the key keeps its own list.
 
