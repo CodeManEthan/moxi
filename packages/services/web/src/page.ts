@@ -29,9 +29,15 @@
 //   rest in the opened row's foot, by the row's cause and kind. A press is a plain
 //   `/api/act` with a job key minted for it; while its job runs the row's fact says what
 //   is being done and every act is off; an act that didn't hold keeps the row open and
-//   says so in `State`, with its lines and the act again. Remove, and a run of a row whose
-//   runs launch a session, still go through the shell's confirm sheet. The phone keeps
-//   its row's acts under the row, each through the sheet.
+//   says so in `State`, with its lines and the act again. The acts that can hurt or spend
+//   ask once, in place, under the opened row's foot: Remove of his row (what goes, what
+//   stays, and the command that adds a written row again), a run of a row whose runs
+//   launch a session, and a Stop or Restart of slots' server while its slots hold
+//   something or can't be read, read from `/api/ends` on the press and sent with what it
+//   showed; the server's guard refuses one whose count has grown, and the page reads the
+//   slots again and asks anew. ui's shell offers no Stop (its opened row gives the
+//   command), and after its Restart the page reloads once the shell answers again. The
+//   phone keeps its row's acts under the row, each through the sheet.
 // - The add form: a command line to run, or a unit already on the system to adopt, with
 //   its schedule, directory, health command, project and doc. It is one plain request,
 //   no sheet, and the server checks it again.
@@ -54,8 +60,11 @@ import { api, components, confirm, gateway, gatewayActs, installed, navigate, su
 import { NO_SUCH_ADDRESS, NOTHING_OPEN, parseRoute, pathToWrite, resolve } from "./address.ts";
 import type { Address } from "./address.ts";
 
-import { actsOf, jobSaid, runningFact, STOP_LASTS, transportSaid, usageConfirm } from "./acts-model.ts";
-import type { Act as RowAct, Ends } from "./acts-model.ts";
+import {
+  actsOf, jobSaid, removeConfirm, runningFact, SHELL, SHELL_RESTART, slotsConfirm, STOP_LASTS, transportSaid, usageConfirm,
+  warned,
+} from "./acts-model.ts";
+import type { Act as RowAct, Confirm, Ends, Sends } from "./acts-model.ts";
 import { Feed, parseEnds, parseOne, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
 import type { Projects, Row, Rows, Status } from "./feed.ts";
 import {
@@ -66,7 +75,7 @@ import type { ListShape, PageState, RowView } from "./list-model.ts";
 import { footLinks, openedLines } from "./opened-model.ts";
 import type { Line, One, Opened } from "./opened-model.ts";
 import {
-  actsOf as sheetActs, addBody, addRefused, DAYS, emptyForm, outcomeSaid, shownActs, statusLost, statusSaid,
+  actsOf as sheetActs, addBody, addRefused, DAYS, emptyForm, outcomeSaid, statusLost, statusSaid,
 } from "./views.ts";
 import type { Act, AddForm, Said } from "./views.ts";
 
@@ -167,10 +176,21 @@ const STYLES = css`
   .det button.act.d { color: var(--moxi-text-dim); }
   .det button.act:hover:not(:disabled) { background: none; text-decoration: underline; }
   .det .foot .note { flex: 1 1 14em; text-align: right; font-size: 13px; }
+  .det button.act.w, moxi-ui-row > button.do.act.w { color: var(--moxi-warn); }
+  /* An act's confirm, in place under the foot. */
+  .det .cf { margin: 10px 0 2px 84px; padding-top: 10px; border-top: 1px solid var(--moxi-border); }
+  .det .cf .q { margin: 0; padding-bottom: 4px; font-weight: 600; }
+  .det .cf.w .q { color: var(--moxi-warn); }
+  .det .cf .btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 0 2px; }
+  .det .cf button.btn { padding: 5px 13px; background: none; }
+  .det .cf button.btn.wn { color: var(--moxi-warn); border-color: var(--moxi-warn); }
+  .det .cf button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); }
+  .det .cf button.btn:hover:not(:disabled), .det .cf button.lnk:hover:not(:disabled) { background: none; }
   .det .links { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 6px 0 0 84px; font-size: 13px; }
   @media (max-width: 480px) {
     .det .r { grid-template-columns: minmax(0, 1fr); }
     .det details.r > .f, .det .links, .det .foot { padding-left: 0; }
+    .det .cf { margin-left: 0; }
     .det .foot .note { text-align: left; }
   }
   .yours { color: var(--moxi-text-dim); padding: 7px 0; }
@@ -204,6 +224,10 @@ const STYLES = css`
 
 /** How long `Copied` stands in for `Copy`, in milliseconds. */
 const COPIED_MS = 1500;
+/** After a Restart of ui's shell, how often and how long the page reads the rows before it
+ * reloads, in milliseconds. */
+const RELOAD_POLL_MS = 1000;
+const RELOAD_FOR_MS = 30_000;
 
 /** What the page last said, and where: a row's id, `ADD`, or null for the page. */
 interface Told {
@@ -240,6 +264,13 @@ interface Ended {
   again: { label: string; act: RowAct } | null;
 }
 
+/** An act's in-place confirm, open under its row's foot. */
+interface Asking {
+  where: string;
+  act: RowAct;
+  confirm: Confirm;
+}
+
 /** A job's key for `/api/act`: 32 hex characters, new at each press. */
 function mintJob(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -267,6 +298,11 @@ export class ServicesPage extends LitElement {
   #sending = false;
   #told: Told | null = null;
   #ended: Ended | null = null;
+  #asking: Asking | null = null;
+  /** slots' server's last `/api/ends` read, by the opened row or a press: its Stop and
+   * Restart are in the warning colour while it found something in use or couldn't read. */
+  #ends: { id: string; ends: Ends } | null = null;
+  #reloadTimer: ReturnType<typeof setTimeout> | undefined;
   #form: AddForm = emptyForm();
   /** Whether the page came through the gateway, on the phone. */
   #phone = false;
@@ -326,6 +362,7 @@ export class ServicesPage extends LitElement {
     this.#stop = null;
     clearTimeout(this.#jobTimer);
     clearTimeout(this.#readingTimer);
+    clearTimeout(this.#reloadTimer);
     document.removeEventListener("visibilitychange", this.#shown);
   }
 
@@ -361,8 +398,15 @@ export class ServicesPage extends LitElement {
     const fresh: OpenReads = {
       id: row.id, seen,
       one: new Feed<One>(() => api("services", `api/row${query}`), parseOne, changed),
-      ends: row.ends_slots ? new Feed<Ends>(() => api("services", `api/ends${query}`), parseEnds, changed) : null,
+      ends: null,
     };
+    if (row.ends_slots) {
+      const ends: Feed<Ends> = new Feed<Ends>(() => api("services", `api/ends${query}`), parseEnds, () => {
+        if (ends.value !== null && ends.failure === null) this.#ends = { id: row.id, ends: ends.value };
+        changed();
+      });
+      fresh.ends = ends;
+    }
     this.#reads = fresh;
     void fresh.one.refresh();
     void fresh.ends?.refresh();
@@ -469,6 +513,7 @@ export class ServicesPage extends LitElement {
     this.#panel = null;
     this.#unknown = null;
     if (this.#ended?.where !== this.#open) this.#ended = null;
+    if (this.#asking?.where !== this.#open) this.#asking = null;
     this.#write();
     this.requestUpdate();
   }
@@ -494,33 +539,101 @@ export class ServicesPage extends LitElement {
 
   // -- acts --------------------------------------------------------------------------------
 
-  /** A press of a row's act: a plain `/api/act` with a new job key, followed to its end.
-   * Remove and a run that spends usage still go through the shell's sheet here. */
+  /** A press of a row's act. One that can hurt or spend asks in place first (`#ask`);
+   * slots' server's Stop and Restart read what they would end, and go plain when nothing
+   * is in use; every other act is sent at once. */
   async #press(row: Row, a: RowAct): Promise<void> {
     if (this.#busy) return;
-    if (a.name === "remove" || usageConfirm(row, a) !== null) {
-      const sheet = sheetActs(row).find((one) => one.name === a.name);
-      if (sheet !== undefined) void this.#act(row, sheet);
+    this.#asking = null;
+    if (a.name === "remove") {
+      this.#ask(row, a, removeConfirm(row));
       return;
     }
+    const usage = usageConfirm(row, a);
+    if (usage !== null) {
+      this.#ask(row, a, usage);
+      return;
+    }
+    if (row.ends_slots && (a.body.act === "stop" || a.body.act === "restart")) {
+      await this.#slotsAsk(row, a, null);
+      return;
+    }
+    await this.#send(row, a, {});
+  }
+
+  /** Shows `confirm` for the act `a` under its row's foot, opening the row. */
+  #ask(row: Row, a: RowAct, confirm: Confirm): void {
+    this.#asking = { where: row.id, act: a, confirm };
+    this.#told = null;
+    this.#ended = null;
+    if (this.#open !== row.id) {
+      this.#open = row.id;
+      this.#panel = null;
+      this.#unknown = null;
+      this.#write();
+    }
+    this.requestUpdate();
+  }
+
+  /** slots' server's Stop or Restart: reads `/api/ends` now; with nothing in use the act
+   * goes plain, else its warning asks in place. `refused` is the guard's sentence when
+   * this is a read again after it refused the act: the warning is shown anew, or, when
+   * nothing is in use now, the sentence. */
+  async #slotsAsk(row: Row, a: RowAct, refused: string | null): Promise<void> {
     this.#sending = true;
     this.#told = null;
     this.#ended = null;
     this.requestUpdate();
+    let ends: Ends | null = null;
     try {
-      const answer = await api("services", "api/act", { ...a.body, job: mintJob() });
+      const answer = await api("services", `api/ends?id=${encodeURIComponent(row.id)}`);
+      ends = answer.status === 200 ? parseEnds(answer.data) : null;
+      if (ends === null) {
+        const said = transportSaid(answer.status, saidOf(answer.data));
+        this.#told = { where: row.id, said: { tone: "error", lines: [said.text] } };
+        return;
+      }
+      this.#ends = { id: row.id, ends };
+    } finally {
+      this.#sending = false;
+      this.requestUpdate();
+    }
+    const confirm = slotsConfirm(a, ends, this.#phone);
+    if (confirm !== null) this.#ask(row, a, confirm);
+    else if (refused !== null) this.#told = { where: row.id, said: { tone: "error", lines: [refused] } };
+    else await this.#send(row, a, {});
+  }
+
+  /** Sends the act `a` as a plain `/api/act` with a new job key and what its confirm
+   * showed, then follows its job to its end. */
+  async #send(row: Row, a: RowAct, sends: Sends): Promise<void> {
+    if (this.#busy) return;
+    this.#asking = null;
+    this.#sending = true;
+    this.#told = null;
+    this.#ended = null;
+    this.requestUpdate();
+    let refused: string | null = null;
+    try {
+      const answer = await api("services", "api/act", { ...a.body, ...sends, job: mintJob() });
       const status = answer.status === 202 ? (answer.data as { status?: unknown } | null)?.status : undefined;
       if (status !== undefined) {
         this.#follow(status, `${a.label} ${row.name}`, row.id, a);
         return;
       }
       const said = transportSaid(answer.status, saidOf(answer.data));
+      if (answer.status === 422 && row.ends_slots && (a.body.act === "stop" || a.body.act === "restart")) {
+        refused = said.text;
+        return;
+      }
       this.#told = { where: row.id, said: { tone: said.reread ? "warn" : "error", lines: [said.text] } };
       if (said.reread) void this.#rows?.refresh();
     } finally {
       this.#sending = false;
       this.requestUpdate();
     }
+    // The guard refused it: what runs in the slots changed since he was shown it.
+    if (refused !== null) await this.#slotsAsk(row, a, refused);
   }
 
   async #act(row: Row, act: Act): Promise<void> {
@@ -598,6 +711,11 @@ export class ServicesPage extends LitElement {
   #pressEnded(job: Job, a: RowAct, status: Status | null): void {
     const said = jobSaid(a, status?.state ?? "unknown");
     this.#readAgain(job.where);
+    // A Restart of ui's shell that didn't fail or get refused reloads the page once the
+    // shell answers again.
+    if (job.where === SHELL && a.body.act === "restart" && status?.state !== "failed" && status?.state !== "refused") {
+      this.#reloadWhenBack(Date.now() + RELOAD_FOR_MS);
+    }
     if (said !== null) {
       this.#ended = { where: job.where, heavy: said.heavy,
                       lines: (status?.lines ?? []).filter((line): line is string => line !== null),
@@ -609,6 +727,18 @@ export class ServicesPage extends LitElement {
       }
     }
     void this.#rows?.refresh();
+  }
+
+  /** After a Restart of ui's shell: reads the rows once a second until the shell answers,
+   * then reloads the document; it gives up after `RELOAD_FOR_MS`. */
+  #reloadWhenBack(until: number): void {
+    clearTimeout(this.#reloadTimer);
+    this.#reloadTimer = setTimeout(async () => {
+      if (!this.isConnected) return;
+      const answer = await api("services", "api/rows");
+      if (answer.status === 200) location.reload();
+      else if (Date.now() < until) this.#reloadWhenBack(until);
+    }, RELOAD_POLL_MS);
   }
 
   /** After an act on the opened row, its own reads are read again. */
@@ -766,7 +896,7 @@ export class ServicesPage extends LitElement {
           : nothing}
         ${open ? this.#opened(row) : nothing}
       </moxi-ui-row>
-      <div class="acts" data-part="acts">${(acts && this.#phone ? shownActs(row, true) : []).map((act) => html`
+      <div class="acts" data-part="acts">${(acts && this.#phone ? sheetActs(row) : []).map((act) => html`
         <button type="button" class="do" data-action=${act.name} ?disabled=${busy}
           aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
           @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
@@ -788,6 +918,7 @@ export class ServicesPage extends LitElement {
       ${lines.map((line) => line.label === "Details" ? this.#details(line)
         : line.label === "State" && ended !== null ? html`${this.#line(line)}${this.#endedPart(row, ended)}` : this.#line(line))}
       ${this.#phone ? nothing : this.#foot(row)}
+      ${this.#asking?.where === row.id && !this.#phone ? this.#confirmPart(row, this.#asking) : nothing}
       ${links.length ? html`<div class="links" data-part="links">${links.map((link) =>
         this.#link(link, "module-link"))}</div>` : nothing}
     </div>`;
@@ -795,9 +926,39 @@ export class ServicesPage extends LitElement {
 
   /** A row's act as a button: `closed` on the closed row's line, `foot` under its lines. */
   #button(row: Row, a: RowAct, where: "closed" | "foot", label = a.label) {
-    const cls = where === "closed" ? "do act" : `act ${PLAIN_ACTS.has(a.name) && !a.tucked ? "" : "d"}`;
+    const warn = this.#warns(row, a);
+    const cls = where === "closed" ? `do act${warn ? " w" : ""}`
+      : `act ${warn ? "w" : PLAIN_ACTS.has(a.name) && !a.tucked ? "" : "d"}`;
     return html`<button type="button" slot=${where === "closed" ? "acts-one" : nothing} class=${cls} data-action=${a.name}
-      ?disabled=${this.#busy} aria-label=${`${label} ${row.name}`} @click=${() => void this.#press(row, a)}>${label}</button>`;
+      data-warn=${warn ? "true" : nothing} ?disabled=${this.#busy} aria-label=${`${label} ${row.name}`}
+      @click=${() => void this.#press(row, a)}>${label}</button>`;
+  }
+
+  /** slots' server's Stop and Restart are in the warning colour while its last read found
+   * something in use or couldn't read. */
+  #warns(row: Row, a: RowAct): boolean {
+    if (!row.ends_slots || (a.body.act !== "stop" && a.body.act !== "restart")) return false;
+    return this.#ends?.id === row.id && warned(this.#ends.ends);
+  }
+
+  /** An act's confirm in place: its question, its lines, a command with `Copy`, and the
+   * button that goes beside the one that keeps. */
+  #confirmPart(row: Row, asking: Asking) {
+    const { confirm, act } = asking;
+    const keep = (): void => {
+      this.#asking = null;
+      this.requestUpdate();
+    };
+    return html`<div class="cf ${confirm.warn ? "w" : ""}" data-part="confirm" data-act=${act.name}
+        data-warn=${confirm.warn ? "true" : "false"} role="group" aria-label=${confirm.ask}>
+      <p class="q" data-line="ask">${confirm.ask}</p>
+      ${confirm.lines.map((line) => html`<div class="r" data-line=${line.label ?? "note"}><span class="k">${line.label ?? ""}</span>
+        <div class="f"><p class=${line.label === null ? "d" : ""}>${line.text}</p></div></div>`)}
+      ${confirm.command !== null ? this.#line({ label: "", text: null, mono: confirm.command, copy: true }) : nothing}
+      <div class="btns"><button type="button" class="btn ${confirm.warn ? "wn" : ""}" data-action="go" ?disabled=${this.#busy}
+          @click=${() => void this.#send(row, act, confirm.sends)}>${confirm.go}</button>
+        <button type="button" class="lnk" data-action="keep" @click=${keep}>${confirm.keep}</button></div>
+    </div>`;
   }
 
   /** The opened row's foot: its acts, his daemon's word beside Stop, and the tucked acts. */
@@ -805,8 +966,10 @@ export class ServicesPage extends LitElement {
     const foot = actsOf(row).foot;
     if (!foot.length) return nothing;
     const lasts = row.form !== "module" && row.kind === "daemon" && foot.some((a) => a.name === "stop");
+    const reloads = row.id === SHELL && foot.some((a) => a.name === "restart");
     return html`<div class="foot" data-part="foot">${foot.map((a) => this.#button(row, a, "foot"))}${lasts
-      ? html`<span class="d note" data-line="stop-lasts">${STOP_LASTS}</span>` : nothing}</div>`;
+      ? html`<span class="d note" data-line="stop-lasts">${STOP_LASTS}</span>` : nothing}${reloads
+      ? html`<span class="d note" data-line="shell-restart">${SHELL_RESTART}</span>` : nothing}</div>`;
   }
 
   /** In `State`, what a row's act that didn't hold came to, and the act again. */

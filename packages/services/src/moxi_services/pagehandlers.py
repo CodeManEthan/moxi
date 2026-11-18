@@ -22,9 +22,9 @@ status route gives its state, lines and fix.
 - A confirmed act's job id is its idempotency key. Within one server's life loopback
   answers a repeat of the key itself. A repeat it has dropped (it keeps the last 1,024)
   finds the job here, for the same act on the same row, and gets the same link, acting
-  nothing; for another act or row it is a 422. After a restart, a key is new: stop,
-  disable and remove end where the first did (a removed row's id is refused here), and a
-  start, run or restart runs again.
+  nothing; for another act or row it is a 422. After a restart, a key is new: stop
+  and disable end where the first did, a remove of a removed row's id is refused here,
+  and a start, run or restart runs again.
 - Before the 202, a handler checks only what needs no lock and no supervisor: the row
   exists (an unknown id is a 422 with the fix), a timer's start and restart go through
   `/api/run` and a daemon's never do (422), and an add's fields are in shape. Everything
@@ -715,11 +715,6 @@ def disable(call: Any) -> Any:
     return _confirmed(call, "disable", lambda i: acts.disable(i, by=BY))
 
 
-def remove(call: Any) -> Any:
-    """`POST /api/remove`, confirmed and desk-only: `moxi services remove ID`."""
-    return _confirmed(call, "remove", lambda i: acts.remove(i, by=BY))
-
-
 def _run_act(i: str, *, restart: bool) -> acts.Outcome:
     return (acts.restart if restart else acts.start)(i, by=BY)
 
@@ -906,5 +901,5 @@ __all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_ONE_CONFIRM", "ENDS_SLO
            "SLOTS_SERVER", "SLOTS_UNREAD", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS",
            "TODAY_LINES", "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
            "ends", "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
-           "listing", "not_a_full_path", "projects", "read_ends", "remove", "restart",
+           "listing", "not_a_full_path", "projects", "read_ends", "restart",
            "row", "row_value", "run", "start", "status", "stop", "unit", "with_settings"]

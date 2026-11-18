@@ -106,7 +106,7 @@ export function rowFacts(row: Row): { name: string; label: string; value: string
 
 // -- the acts -----------------------------------------------------------------------------
 
-export type ActName = "start" | "stop" | "restart" | "run" | "rerun" | "enable" | "disable" | "remove";
+export type ActName = "start" | "stop" | "restart" | "run" | "rerun" | "enable" | "disable";
 
 /** One act a row offers. */
 export interface Act {
@@ -117,8 +117,6 @@ export interface Act {
   body: { id: string; restart?: boolean };
   /** The confirm sheet's lines. */
   sheet: string[];
-  /** Done only at the desk: the phone hides it. */
-  desk: boolean;
 }
 
 /** The line a `launches_session` row's run adds to its sheet. */
@@ -155,11 +153,6 @@ function sheetOf(row: Row, name: ActName): string[] {
         : row.kind === "timer" ? `Turns ${it}'s flag off; a run in progress finishes.`
         : `Turns ${it}'s flag off: it stops and no longer starts at login.`);
       break;
-    case "remove":
-      lines.push(row.form === "adopted"
-        ? `services forgets ${it}; its unit stays on the system as it was.`
-        : `Removes ${it}'s unit, then its row. Add it again to have it back.`);
-      break;
   }
   if ((name === "run" || name === "rerun" || name === "start" || name === "restart") && row.launches_session) {
     lines.push(SPENDS);
@@ -168,12 +161,12 @@ function sheetOf(row: Row, name: ActName): string[] {
 }
 
 function act(row: Row, name: ActName, label: string, path: string, extra: { restart?: boolean } = {}): Act {
-  return { name, label, path, body: { id: row.id, ...extra }, sheet: sheetOf(row, name), desk: name === "remove" };
+  return { name, label, path, body: { id: row.id, ...extra }, sheet: sheetOf(row, name) };
 }
 
-/** The acts a row offers, in the order the page shows them. A timer runs through
- * `/api/run` in place of start and restart; a module row takes no remove; a module unit
- * without a switch takes no enable or disable. */
+/** The acts the phone offers under a row through the shell's sheet, in the order it shows
+ * them. A timer runs through `/api/run` in place of start and restart; a module unit
+ * without a switch takes no enable or disable. Remove is the desk's alone. */
 export function actsOf(row: Row): Act[] {
   const found: Act[] = row.kind === "timer"
     ? [act(row, "run", "Run now", "api/run"), act(row, "rerun", "Run again", "api/run", { restart: true }),
@@ -181,13 +174,7 @@ export function actsOf(row: Row): Act[] {
     : [act(row, "start", "Start", "api/start"), act(row, "stop", "Stop", "api/stop"),
        act(row, "restart", "Restart", "api/restart")];
   if (row.has_switch) found.push(act(row, "enable", "Enable", "api/enable"), act(row, "disable", "Disable", "api/disable"));
-  if (row.form !== "module") found.push(act(row, "remove", "Remove…", "api/remove"));
   return found;
-}
-
-/** The acts the page shows here: on the phone, those the phone may run. */
-export function shownActs(row: Row, phone: boolean): Act[] {
-  return actsOf(row).filter((a) => !(phone && a.desk));
 }
 
 // -- what an act came to ------------------------------------------------------------------

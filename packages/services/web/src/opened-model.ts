@@ -3,7 +3,7 @@
 // string here goes into the page as text.
 
 import type { Ends } from "./acts-model.ts";
-import { actsOf, inUse } from "./acts-model.ts";
+import { actsOf, inUse, SHELL, SHELL_STOP, SHELL_STOP_COMMAND } from "./acts-model.ts";
 import type { When } from "./facts.ts";
 import type { Row } from "./feed.ts";
 import { JOIN, rowFact, timeWords, timingWords } from "./list-model.ts";
@@ -189,6 +189,8 @@ export function openedLines(row: Row, one: One | null, ends: Ends | null, when: 
   if (adoptedTask(row)) {
     lines.push({ label: KNOWN, text: TASK_KNOWN }, { label: NOT_KNOWN, text: TASK_NOT_KNOWN, more: [TASK_JUDGED] });
   }
+  // ui's shell offers no Stop: stopping it closes this page, so it is done at the terminal.
+  if (desk && row.id === SHELL) lines.push({ label: "Stop", text: SHELL_STOP, mono: SHELL_STOP_COMMAND, copy: true });
   const unit = one?.unit ?? null;
   if (unit !== null) {
     const how = row.form === "written" ? "a command you added; Moxi wrote the unit"

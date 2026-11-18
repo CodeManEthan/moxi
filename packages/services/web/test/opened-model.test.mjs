@@ -122,3 +122,14 @@ test("an adopted Windows timer says what Task Scheduler keeps and what it doesn'
     assert.ok(!labels(openedLines({ ...task, ...other }, null, null, WHEN, DESK)).includes(KNOWN), JSON.stringify(other));
   }
 });
+
+test("ui's shell says its Stop is done at the terminal, with the command to copy, before its Unit", () => {
+  const shell = moduleRow({ id: "ui/shell", module: "ui", name: "shell", has_switch: false, switch: null,
+                            verdict: verdict("ok", "running") });
+  const lines = openedLines(shell, one({ unit: "moxi-ui-shell.service" }), null, WHEN, DESK);
+  assert.deepEqual(labels(lines).slice(-3), ["Stop", "Unit", "Details"]);
+  assert.deepEqual(line(lines, "Stop"), { label: "Stop", text: "Stopping it closes this page, so it is done at the terminal:",
+                                          mono: "moxi services stop ui/shell", copy: true });
+  assert.equal(line(openedLines(shell, one(), null, WHEN, PHONE), "Stop"), undefined);
+  assert.equal(line(openedLines(moduleRow({ verdict: verdict("ok", "running") }), one(), null, WHEN, DESK), "Stop"), undefined);
+});

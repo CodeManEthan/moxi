@@ -443,13 +443,6 @@ def test_enable_and_disable_set_the_flag_and_its_unit(fake, path, act, on):
     assert store.get("web").enabled is on and fake.written["web"].enabled is on
 
 
-def test_remove_of_a_user_row_removes_it():
-    a_daemon()
-    found = ended(accepted(post("/api/remove", {"id": "web"}, key=KEY)))
-    assert (found["act"], found["state"]) == ("remove", "done"), found
-    assert store.get("web") is None
-
-
 def test_an_act_on_an_id_that_names_no_row_is_refused_before_any_job():
     assert "no service is named gone" in refused(post("/api/stop", {"id": "gone"},
                                                       key=KEY))
@@ -612,12 +605,12 @@ def test_a_key_after_a_restart_is_acted_on_anew(fake, monkeypatch):
     assert len([c for c in fake.calls if c[0] == "stop"]) == 2
 
 
-def test_a_remove_key_after_a_restart_is_refused_for_the_removed_row(monkeypatch):
+def test_a_remove_job_after_a_restart_is_refused_for_the_removed_row(monkeypatch):
     a_daemon()
-    ended(accepted(post("/api/remove", {"id": "web"}, key=KEY)))
+    remove = {"act": "remove", "id": "web", "job": "0" * 32}
+    ended(accepted(post("/api/act", remove)))
     monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
-    assert "no service is named web" in refused(post("/api/remove", {"id": "web"},
-                                                     key=KEY))
+    assert "no service is named web" in refused(post("/api/act", remove))
 
 
 # -- timers -----------------------------------------------------------------------------------

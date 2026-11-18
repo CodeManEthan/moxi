@@ -22,7 +22,6 @@
                         run once; confirmed (202)
     POST /api/enable    `moxi services enable ID`; confirmed (202); a Moxi row's refused
     POST /api/disable   `moxi services disable ID`; confirmed (202); a Moxi row's refused
-    POST /api/remove    `moxi services remove ID`; confirmed (202)
     POST /api/act       the desk's one plain act: start, stop, restart, run, enable,
                         disable or remove, by `act`, queued as the page's `job`; no
                         confirm (202 with the same status link)
@@ -401,7 +400,6 @@ PAGE = lb.Page(
         _confirmed("/api/run", "run", RUN_BODY, gateway=True),
         _confirmed("/api/enable", "enable", ROW_BODY, gateway=True),
         _confirmed("/api/disable", "disable", ROW_BODY, gateway=True),
-        _confirmed("/api/remove", "remove", ROW_BODY, gateway=False),
         lb.Route("/api/act", "act", _target("act"), body=ACT_BODY, returns={}),
         lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns={}),
     ),

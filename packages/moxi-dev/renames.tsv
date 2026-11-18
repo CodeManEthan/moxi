@@ -11656,6 +11656,7 @@ services	packages/services/tests/test_browser_page.py	expect(closed("services/de
 services	packages/services/tests/test_browser_page.py	expect(closed("services/web")).to_have_count(0)	keep	closed	closed
 services	packages/services/tests/test_browser_page.py	expect(closed("services/backup")).to_have_count(0)	keep	closed	closed
 services	packages/services/tests/test_browser_page.py	json=status_of(posts[-1].post_data_json, "refused", ["web: not now"])))	keep	refused	refused
+services	packages/services/tests/test_browser_page.py	assert len(set(colours)) == 1, colours	keep	set	set
 services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
 services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set

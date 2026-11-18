@@ -6,8 +6,10 @@ spends usage (SV4), the groups by project and Moxi's (SV5), a failed daemon's st
 log (SV6), a project's address (SV7), each address and what the page writes back, the
 list's states, the opened row's lines, the acts on the closed row and in the foot as plain
 presses followed to their end (done, did not hold, refused, a lost answer), a Moxi
-daemon's stop by hand, the run sheet of a row that launches a session, the add form's 202
-and the status it reads until the job ends, and the 360 px width check.
+daemon's stop by hand, the in-place confirms (a run that spends usage, Remove, slots'
+server's Stop and Restart over a fake slots API, the guard's refusal asked anew, ui's
+shell), the add form's 202 and the status it reads until the job ends, and the 360 px
+width check.
 """
 
 from __future__ import annotations
@@ -21,15 +23,13 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-from browser_kit import fake_site, get, moxi, seed, stored, written
+from browser_kit import fake_site, get, moxi, seed, slots_said, stored, written
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="services' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
 
-#: What a run of a row that launches a session adds to its sheet.
-SPENDS = "Each run launches an agent session, so this run spends usage."
 VERDICTS = ("ok", "warn", "fail", "off")
 #: When `paused` was stopped by hand: now, so the stop is after the last boot and still
 #: holds (a stop from before the boot is dropped, and a fixed time fails on any machine
@@ -58,16 +58,35 @@ UNITS = {"written": {
     "queue-worker": {"kind": "daemon", "enabled": True, "active": False, "failed": True},
     "dep-audit": {"kind": "timer", "enabled": True,
                   "runs": [{"at": "2026-11-08T18:00:00Z", "result": "ran", "exit": 1}]},
+    "goner": {"kind": "daemon", "enabled": True, "active": False},
 }, "modules": {
     # A Moxi daemon with no switch, running, for its Stop by hand.
     "cache/watch": {"kind": "daemon", "enabled": True, "active": True},
-}, "fail": [["start", "nostart"]]}
+    # slots' server, whose stop ends what runs in the slots, and ui's shell, running.
+    "slots/server": {"kind": "daemon", "enabled": True, "active": True},
+    "ui/shell": {"kind": "daemon", "enabled": True, "active": True},
+}, "fail": [["start", "nostart"]],
+    # Their own checks would reach a tmux server and a shell's port.
+    "health": {"slots/server": ["ok", "tmux answers"], "ui/shell": ["ok", "the shell answers"]},
+    "slots": True}
+#: slots' server and ui's shell.
+SLOTS = "slots/server"
+SHELL = "ui/shell"
+#: Where `goner`, the row Remove takes, runs.
+GONER_CWD = "/srv/goner"
 
 
 @pytest.fixture(scope="module")
-def ui_shell_options(tmp_path_factory) -> dict:
-    """services' page server acts on the fake supervisor holding `UNITS`."""
-    return {"site": [str(fake_site(tmp_path_factory.mktemp("services-units"), UNITS))]}
+def units_base(tmp_path_factory) -> Path:
+    """Where the fake supervisor's units and the fake slots API's answer are kept."""
+    return tmp_path_factory.mktemp("services-units")
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options(units_base) -> dict:
+    """services' page server acts on the fake supervisor holding `UNITS`, and reads a fake
+    slots API."""
+    return {"site": [str(fake_site(units_base, UNITS))]}
 
 
 @pytest.fixture(scope="module")
@@ -76,8 +95,9 @@ def seeded(ui_shell) -> None:
     `sync-down` on and not running (fail), `paused` stopped by hand (warn), `spare` off,
     `backup` a timer every 5 minutes (ok) and `agent-run` a timer whose runs launch a
     session; `elsewhere` was added on another system; `queue-worker` failed (in alpha) and
-    `dep-audit` a timer whose last run exited 1. `stopme`, `lostone`, `startme` and
-    `nostart` (whose start fails) are the acts' own, so the tests run in any order."""
+    `dep-audit` a timer whose last run exited 1. `stopme`, `lostone`, `startme`,
+    `nostart` (whose start fails) and `goner` (which Remove takes) are the acts' own, so
+    the tests run in any order."""
     root = Path(ui_shell.env["HOME"]) / "work" / "alpha"
     root.mkdir(parents=True)
     moxi(ui_shell, "projects", "add", "alpha", "--root", str(root))
@@ -96,7 +116,8 @@ def seeded(ui_shell) -> None:
          written("startme", after={"stopped": f"{STOPPED:%Y-%m-%dT%H:%M:%SZ}"}),
          written("nostart", after={"stopped": f"{STOPPED:%Y-%m-%dT%H:%M:%SZ}"}),
          written("queue-worker", project="alpha"),
-         written("dep-audit", kind="timer", every="1h", argv=["/usr/bin/false"]))
+         written("dep-audit", kind="timer", every="1h", argv=["/usr/bin/false"]),
+         written("goner", cwd=GONER_CWD))
 
 
 def panel_of(page):
@@ -808,16 +829,218 @@ def test_a_lost_answer_says_the_act_may_have_been_done(seeded, ui_page):
         ui_page.unroute("**/m/services/api/act")
 
 
-def test_a_run_of_a_row_that_launches_a_session_says_it_spends_usage(seeded, ui_page):
+# --- the in-place confirms ---------------------------------------------------------------
+
+def confirm_of(part):
+    return part.locator('[data-part="confirm"]')
+
+
+def name_of(shell, ident: str) -> str:
+    return {r["id"]: r for r in get(shell, "api/rows")["rows"]}[ident]["name"]
+
+
+def done_after(page, press) -> dict:
+    """Presses, and gives the status of the job the press started once it ends."""
+    with page.expect_response(lambda r: "/m/services/api/status?job=" in r.url
+                              and r.json().get("state") != "running") as ended:
+        press()
+    return ended.value.json()
+
+
+def test_a_run_that_spends_usage_asks_in_place_then_runs(seeded, ui_page):
     panel = panel_of(ui_page)
-    posts = posts_to(ui_page, "api/run")
-    sheet = ui_page.locator("moxi-ui-confirm").get_by_role("dialog")
+    posts = posts_to(ui_page, "api/act")
     part = opened(panel, "services/agent-run", "agent-run")
-    part.get_by_role("button", name="Run now · spends usage agent-run", exact=True).click()
-    expect(sheet).to_contain_text(SPENDS)
-    sheet.get_by_role("button", name="Cancel", exact=True).click()
+    run = part.get_by_role("button", name="Run now · spends usage agent-run", exact=True)
+    run.click()
+    asked = confirm_of(part)
+    expect(asked.locator('[data-line="ask"]')).to_have_text(
+        "Run agent-run now? Its runs launch agent sessions, so this spends usage.")
+    expect(asked).to_have_attribute("data-warn", "false")
+    # No sheet: the step is in place.
     expect(ui_page.locator("moxi-ui-confirm")).to_have_count(0)
+    asked.get_by_role("button", name="Cancel", exact=True).click()
+    expect(asked).to_have_count(0)
     assert posts == []
+    run.click()
+    status = done_after(ui_page, lambda: confirm_of(part).get_by_role("button", name="Run now", exact=True).click())
+    assert status["state"] == "done", status
+    assert len(posts) == 1, posts
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "run", "id": "services/agent-run"}, body
+    expect(confirm_of(part)).to_have_count(0)
+
+
+def test_remove_asks_in_place_with_what_goes_and_the_command_then_the_row_goes(seeded, ui_shell, ui_page):
+    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, "services/goner", "goner")
+    remove = part.get_by_role("button", name="Remove goner", exact=True)
+    remove.click()
+    asked = confirm_of(part)
+    expect(asked.locator('[data-line="ask"]')).to_have_text("Remove goner?")
+    expect(asked.locator('[data-line="Goes"] .f')).to_have_text("its entry and the unit Moxi wrote")
+    expect(asked.locator('[data-line="Stays"] .f')).to_have_text(
+        f"everything in {GONER_CWD}, its past lines in the system log")
+    expect(asked.locator('[data-line="note"] .f')).to_have_text(
+        "Moxi keeps no copy. To have it back, add it again with this command:")
+    again = f"moxi services add goner --cwd {GONER_CWD} -- /usr/bin/python3 -m http.server"
+    expect(asked.locator('[data-line="mono"]')).to_have_text(again)
+    copy = asked.get_by_role("button", name=f"Copy {again}", exact=True)
+    copy.click()
+    expect(copy).to_have_text("Copied")
+    assert ui_page.evaluate("navigator.clipboard.readText()") == again
+    asked.get_by_role("button", name="Keep it", exact=True).click()
+    expect(asked).to_have_count(0)
+    assert posts == []
+    remove.click()
+    status = done_after(ui_page, lambda: confirm_of(part).get_by_role("button", name="Remove", exact=True).click())
+    assert status["state"] == "done", status
+    expect(row(panel, "services/goner")).to_have_count(0)
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "remove", "id": "services/goner"}, body
+    assert "goner" not in stored(ui_shell)
+
+
+#: Three sessions in slots 1, 3 and 4.
+THREE = tuple({"number": n, "state": "occupied", "idle": False, "label": label}
+              for n, label in ((1, "kestrel-web"), (3, "planner"), (4, "builder-1")))
+
+
+def test_the_slots_servers_restart_with_nothing_in_use_goes_plain(seeded, units_base, ui_shell, ui_page):
+    slots_said(units_base)
+    name = name_of(ui_shell, SLOTS)
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, SLOTS, name)
+    expect(label(part, "Needs it").locator('[data-line="text"]')).to_have_text("Nothing is running in its slots.")
+    with ui_page.expect_request("**/m/services/api/ends?id=*"):
+        status = done_after(ui_page, lambda: part.get_by_role("button", name=f"Restart {name}", exact=True).click())
+    assert status["state"] == "done", status
+    expect(confirm_of(part)).to_have_count(0)
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "restart", "id": SLOTS}, body
+    expect(panel.locator("button[data-warn]")).to_have_count(0)
+
+
+def test_the_slots_servers_stop_with_sessions_asks_in_the_warning_colour(seeded, units_base, ui_shell, ui_page):
+    slots_said(units_base, slots=(*THREE, {"number": 2, "state": "free", "idle": False}),
+               jobs=({"name": "nightly", "running": True},))
+    name = name_of(ui_shell, SLOTS)
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, SLOTS, name)
+    part.get_by_role("button", name=f"Stop {name}", exact=True).click()
+    asked = confirm_of(part)
+    expect(asked.locator('[data-line="ask"]')).to_have_text("Stop the slots server and end 3 sessions?")
+    expect(asked.locator('[data-line="Ends now"] .f')).to_have_text(
+        "kestrel-web in slot 1, planner in slot 3, builder-1 in slot 4, 1 open slot, 1 job")
+    expect(asked.locator('[data-line="Stops"] .f')).to_have_text("launching into a slot, until it is started again")
+    expect(asked.locator('[data-line="Stays"] .f')).to_have_text("sessions outside the slots")
+    expect(asked.locator('[data-line="note"] .f')).to_have_text(
+        "A working session is cut off mid-turn. This cannot be taken back.")
+    expect(asked).to_have_attribute("data-warn", "true")
+    go = asked.get_by_role("button", name="Stop it and end 3 sessions", exact=True)
+    expect(go).to_be_visible()
+    # The warning colour is on its two acts only, and on the confirm's question.
+    warned = panel.locator('button[data-warn="true"]')
+    expect(warned).to_have_text(["Restart", "Stop"])
+    warn = ui_page.evaluate("getComputedStyle(document.body).getPropertyValue('--moxi-warn')")
+    assert warn.strip(), warn
+    colours = [el.evaluate("e => getComputedStyle(e).color") for el in
+               (warned.first, warned.last, asked.locator('[data-line="ask"]'), go)]
+    assert len(set(colours)) == 1, colours
+    assert part.locator('[data-part="foot"]').evaluate("e => getComputedStyle(e).color") != colours[0]
+    asked.get_by_role("button", name="Keep it running", exact=True).click()
+    expect(asked).to_have_count(0)
+    assert posts == []
+
+
+def test_a_risen_slots_server_restart_from_the_closed_row_asks_then_goes_with_its_count(
+        seeded, units_base, ui_shell, ui_page):
+    slots_said(units_base, slots=THREE)
+    listed = get(ui_shell, "api/rows")
+    for found in listed["rows"]:
+        if found["id"] == SLOTS:
+            found["verdict"] = {**found["verdict"], "state": "fail", "cause": "health",
+                                "reason": "tmux doesn't answer on its socket"}
+    shown_without_the_topic(ui_page)
+    as_rows(ui_page, listed)
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    item = panel.locator(f'section[data-part="first"] .item[data-id="{SLOTS}"]')
+    item.locator('moxi-ui-row > button[data-action="restart"]').click()
+    asked = confirm_of(item)
+    expect(asked.locator('[data-line="ask"]')).to_have_text("Restart the slots server and end 3 sessions?")
+    expect_path(ui_page, f"/m/services/row/{SLOTS}")
+    status = done_after(ui_page, lambda: asked.get_by_role(
+        "button", name="Restart it and end 3 sessions", exact=True).click())
+    assert status["state"] == "done", status
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "restart", "id": SLOTS, "ends": 3}, body
+
+
+def test_the_guard_refusing_a_grown_count_shows_the_warning_anew(seeded, units_base, ui_shell, ui_page):
+    slots_said(units_base, slots=THREE[:1])
+    name = name_of(ui_shell, SLOTS)
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, SLOTS, name)
+    part.get_by_role("button", name=f"Stop {name}", exact=True).click()
+    asked = confirm_of(part)
+    expect(asked.locator('[data-line="ask"]')).to_have_text("Stop the slots server and end 1 session?")
+    # Two more sessions start before he confirms: the guard refuses, and he is asked anew.
+    slots_said(units_base, slots=THREE)
+    with ui_page.expect_response("**/m/services/api/act") as answer:
+        asked.get_by_role("button", name="Stop it and end 1 session", exact=True).click()
+    assert answer.value.status == 422, answer.value.json()
+    assert posts[0].post_data_json["ends"] == 1
+    expect(asked.locator('[data-line="ask"]')).to_have_text("Stop the slots server and end 3 sessions?")
+    expect(asked.get_by_role("button", name="Stop it and end 3 sessions", exact=True)).to_be_visible()
+    asked.get_by_role("button", name="Keep it running", exact=True).click()
+    assert len(posts) == 1
+    assert {r["id"]: r for r in get(ui_shell, "api/rows")["rows"]}[SLOTS]["state"] == "active"
+
+
+def test_slots_that_cant_be_read_ask_with_the_unread_warning_and_send_its_marker(seeded, units_base, ui_shell,
+                                                                                 ui_page):
+    slots_said(units_base, ok=False, why="its tmux server didn't answer")
+    name = name_of(ui_shell, SLOTS)
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, SLOTS, name)
+    part.get_by_role("button", name=f"Restart {name}", exact=True).click()
+    asked = confirm_of(part)
+    expect(asked.locator('[data-line="ask"]')).to_have_text(
+        "Moxi can't read the slots, so stopping it may end sessions in them.")
+    expect(asked).to_have_attribute("data-warn", "true")
+    expect(panel.locator('button[data-warn="true"]')).to_have_text(["Restart", "Stop"])
+    status = done_after(ui_page, lambda: asked.get_by_role("button", name="Restart it anyway", exact=True).click())
+    assert status["state"] == "done", status
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "restart", "id": SLOTS, "ends_unread": True}, body
+
+
+def test_ui_shells_stop_is_a_command_and_its_restart_reloads_the_page(seeded, ui_shell, ui_page):
+    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    name = name_of(ui_shell, SHELL)
+    panel = panel_of(ui_page)
+    part = opened(panel, SHELL, name)
+    stop = label(part, "Stop")
+    expect(stop.locator('[data-line="text"]')).to_have_text("Stopping it closes this page, so it is done at the terminal:")
+    expect(stop.locator('[data-line="mono"]')).to_have_text("moxi services stop ui/shell")
+    stop.get_by_role("button", name="Copy moxi services stop ui/shell", exact=True).click()
+    assert ui_page.evaluate("navigator.clipboard.readText()") == "moxi services stop ui/shell"
+    foot = part.locator('[data-part="foot"]')
+    expect(foot.locator("button")).to_have_text(["Restart"])
+    expect(foot.locator('[data-line="shell-restart"]')).to_have_text("Restart reloads this page.")
+    ui_page.evaluate("window.beforeTheRestart = true")
+    status = done_after(ui_page, lambda: foot.get_by_role("button", name=f"Restart {name}", exact=True).click())
+    assert status["state"] == "done", status
+    ui_page.wait_for_function("window.beforeTheRestart === undefined")
+    expect(ui_page.locator('#moxi-panel > moxi-services-page section[data-part="list"]')).to_have_attribute(
+        "data-state", "up")
 
 
 # --- add ------------------------------------------------------------------------------------

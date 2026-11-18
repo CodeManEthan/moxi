@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   actsOf, addBody, addRefused, commandLine, counts, emptyForm, flagLine, healthLine, HIDDEN,
-  MAY_HAVE_ACTED, outcomeSaid, rowFacts, shownActs, SPENDS, statusLost, statusSaid, summaryView,
+  MAY_HAVE_ACTED, outcomeSaid, rowFacts, SPENDS, statusLost, statusSaid, summaryView,
   timeLine, verdictLine, when,
 } from "../src/views.ts";
 import { moduleRow, row, rows, timer } from "./fixtures.mjs";
@@ -38,13 +38,12 @@ test("a command line quotes the words that need it", () => {
   assert.equal(facts.find((f) => f.name === "state").value, "active, enabled, pid 4242");
 });
 
-test("a daemon offers start, stop, restart, enable, disable and, as a user row, remove", () => {
+test("a daemon offers start, stop, restart, enable and disable through the sheet, and never remove", () => {
   const acts = actsOf(row());
   assert.deepEqual(acts.map((a) => [a.name, a.path]), [
     ["start", "api/start"], ["stop", "api/stop"], ["restart", "api/restart"],
-    ["enable", "api/enable"], ["disable", "api/disable"], ["remove", "api/remove"]]);
+    ["enable", "api/enable"], ["disable", "api/disable"]]);
   for (const act of acts) assert.deepEqual(act.body, { id: "services/web" });
-  assert.deepEqual(acts.filter((a) => a.desk).map((a) => a.name), ["remove"]);
 });
 
 test("a timer runs through /api/run in place of start and restart", () => {
@@ -52,28 +51,20 @@ test("a timer runs through /api/run in place of start and restart", () => {
   assert.deepEqual(acts.map((a) => [a.name, a.path, a.body]), [
     ["run", "api/run", { id: "services/backup" }], ["rerun", "api/run", { id: "services/backup", restart: true }],
     ["stop", "api/stop", { id: "services/backup" }], ["enable", "api/enable", { id: "services/backup" }],
-    ["disable", "api/disable", { id: "services/backup" }], ["remove", "api/remove", { id: "services/backup" }]]);
+    ["disable", "api/disable", { id: "services/backup" }]]);
   assert.ok(!acts.some((a) => a.path === "api/start" || a.path === "api/restart"));
 });
 
-test("a module row takes no remove, and one without a switch no enable or disable", () => {
-  assert.ok(!actsOf(moduleRow()).some((a) => a.name === "remove"));
+test("a module row without a switch takes no enable or disable", () => {
   assert.deepEqual(actsOf(moduleRow({ has_switch: false, switch: null })).map((a) => a.name), ["start", "stop", "restart"]);
   assert.match(actsOf(moduleRow()).find((a) => a.name === "enable").sheet[0], /cache\.watch\.enabled/);
-});
-
-test("the phone leaves remove out", () => {
-  assert.ok(!shownActs(row(), true).some((a) => a.name === "remove"));
-  assert.ok(shownActs(row(), false).some((a) => a.name === "remove"));
 });
 
 test("a run of a row that launches a session says it spends usage, and other acts don't", () => {
   const acts = actsOf(timer({ launches_session: true }));
   for (const name of ["run", "rerun"]) assert.ok(acts.find((a) => a.name === name).sheet.includes(SPENDS), name);
-  for (const name of ["stop", "enable", "disable", "remove"]) assert.ok(!acts.find((a) => a.name === name).sheet.includes(SPENDS), name);
+  for (const name of ["stop", "enable", "disable"]) assert.ok(!acts.find((a) => a.name === name).sheet.includes(SPENDS), name);
   assert.ok(!actsOf(timer()).find((a) => a.name === "run").sheet.includes(SPENDS));
-  assert.match(actsOf(row({ form: "adopted", unit: "backup.service" })).find((a) => a.name === "remove").sheet[0],
-               /unit stays on the system/);
 });
 
 test("each confirm outcome but accepted, cancelled and desk says something", () => {

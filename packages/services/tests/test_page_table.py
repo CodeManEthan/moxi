@@ -20,7 +20,7 @@ from page_kit import LB
 READS = {"/api/rows", "/api/row", "/api/unit", "/api/ends", "/api/projects",
          page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
-             "/api/disable", "/api/remove"}
+             "/api/disable"}
 #: The routes the phone reaches: four reads (the rows, one row, the status and the
 #: stream), the read of what a stop of slots' server ends, and the six confirmed acts on
 #: a row: never remove, the desk's plain act, add, the unit read or the project list.
@@ -53,10 +53,11 @@ def test_the_page_declares_its_reads_its_confirmed_acts_the_plain_act_and_add():
 def test_the_gateway_reaches_four_reads_the_slots_read_and_the_six_confirmed_acts():
     found = routes()
     assert {p for p, r in found.items() if r["gateway"]} == GATEWAY
-    assert GATEWAY == (READS - {"/api/projects", "/api/unit"}) | (
-        CONFIRMED - {"/api/remove"})
-    for path in ("/api/act", "/api/add", "/api/remove", "/api/projects", "/api/unit"):
+    assert GATEWAY == (READS - {"/api/projects", "/api/unit"}) | CONFIRMED
+    for path in ("/api/act", "/api/add", "/api/projects", "/api/unit"):
         assert found[path]["gateway"] is False, path
+    # Remove is the desk's plain act alone: no route of its own.
+    assert "/api/remove" not in found
 
 
 def test_the_stream_has_one_topic_carrying_what_the_rows_read_answers():

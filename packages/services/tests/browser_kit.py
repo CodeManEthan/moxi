@@ -13,6 +13,11 @@ server's memory, so a new server (after an idle exit) starts from the file again
 Rows go into services' store with the shell's environment, so the store is the one the
 page server reads, under the shell's home. A `moxi` command run here sees no supervisor,
 so tests read what the page shows back from the page server (`get`), or from the store.
+
+The same `sitecustomize` can give that server a fake slots API and fixed health checks,
+so no test reaches a tmux server or a shell's port: with `slots`, each read of slots'
+API answers from a JSON file (`slots_said`), and `health` gives a module daemon's check
+by its id.
 """
 
 from __future__ import annotations
@@ -49,6 +54,38 @@ SITECUSTOMIZE = textwrap.dedent('''\
         _fake.fail = {{tuple(_pair) for _pair in _spec.get("fail", [])}}
         for _module in (acts, lifecycle, state, verdict):
             _module.units = _fake
+
+        _checks = {{_id: tuple(_said) for _id, _said in _spec.get("health", {{}}).items()}}
+        _health = state.health
+
+        def _checked(row, st):
+            if row.id in _checks and st is not None and st.state == "active":
+                return _checks[row.id]
+            return _health(row, st)
+
+        state.health = _checked
+
+        if _spec.get("slots"):
+            import types
+
+            import fake_slots
+
+            def _said():
+                with open(_spec["slots"], encoding="utf-8") as _file:
+                    return json.load(_file)
+
+            def _list_slots():
+                said = _said()
+                return fake_slots.Listing(
+                    ok=said.get("ok", True), why=said.get("why", ""),
+                    slots=tuple(fake_slots.Slot(**one) for one in said.get("slots", [])))
+
+            def _jobs():
+                return [fake_slots.Job(**one) for one in _said().get("jobs", [])]
+
+            _api = types.ModuleType("moxi_slots.api")
+            _api.list_slots, _api.jobs = _list_slots, _jobs
+            sys.modules["moxi_slots.api"] = _api
 ''')
 
 
@@ -56,14 +93,29 @@ def fake_site(base: Path, spec: dict[str, Any]) -> Path:
     """A site directory for the shell's `PYTHONPATH` whose `sitecustomize` gives services'
     page server a fake supervisor holding `spec`'s units: `written` by row name and
     `modules` by `<module>/<name>`, each a `fake_units.Unit`'s fields, and `fail`, the
-    `[act, name]` pairs whose act fails."""
+    `[act, name]` pairs whose act fails. `health` gives a running module daemon's check
+    by its id, `[verdict, line]`, in place of the module's own. With `slots` true, slots'
+    API answers from `<base>/slots.json`, which `slots_said` writes."""
     site = base / "site"
     site.mkdir(parents=True)
     path = base / "units.json"
+    if spec.get("slots"):
+        spec = {**spec, "slots": str(slots_said(base))}
     path.write_text(json.dumps(spec), encoding="utf-8")
     (site / "sitecustomize.py").write_text(
         SITECUSTOMIZE.format(tests=str(TESTS), spec=str(path)), encoding="utf-8")
     return site
+
+
+def slots_said(base: Path, *, ok: bool = True, why: str = "", slots: tuple = (),
+               jobs: tuple = ()) -> Path:
+    """What the fake slots API answers from now on, for the site `fake_site` made under
+    `base`: a listing (`ok`, `why`, `slots`, each a `fake_slots.Slot`'s fields) and its
+    `jobs` (each a `fake_slots.Job`'s)."""
+    path = base / "slots.json"
+    path.write_text(json.dumps({"ok": ok, "why": why, "slots": list(slots), "jobs": list(jobs)}),
+                    encoding="utf-8")
+    return path
 
 
 _SEED = textwrap.dedent('''\

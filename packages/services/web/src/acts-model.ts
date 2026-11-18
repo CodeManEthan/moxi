@@ -122,14 +122,15 @@ export function phoneActs(row: Row, actsOn: boolean): { closed: Act | null; foot
 }
 
 /** The phone's confirmed route for an act, relative to services' page, and its body, with
- * what the slots server's confirm sends (`Confirm.sends`) on a stop or restart. */
+ * what the slots server's confirm sends (`Confirm.sends`) on a stop or restart. Remove,
+ * which the phone never offers, has none. */
 export function phoneRoute(a: Act, sends: Sends = {}): { path: string; body: Record<string, unknown> } {
   const body: Record<string, unknown> = { id: a.body.id };
   if (a.body.restart) body.restart = true;
   if (a.body.act === "stop" || a.body.act === "restart") Object.assign(body, sends);
   const paths: Record<string, string> = {
     start: "api/start", stop: "api/stop", restart: "api/restart", run: "api/run", enable: "api/enable",
-    disable: "api/disable", remove: "api/remove",
+    disable: "api/disable",
   };
   return { path: paths[a.body.act], body };
 }
@@ -198,7 +199,7 @@ export function slotsConfirm(a: Act, ends: Ends, phone: boolean): Confirm | null
   const sessions = ends.sessions!;
   const count = sessions.length;
   const ended: string[] = [];
-  if (!phone) for (const s of sessions) ended.push(s.label ? `${s.label}, slot ${s.slot}` : `slot ${s.slot}`);
+  if (!phone) for (const s of sessions) ended.push(s.label ? `${s.label} in slot ${s.slot}` : `slot ${s.slot}`);
   else if (count) ended.push(plural(count, "session", "sessions"));
   if (ends.open) ended.push(plural(ends.open, "open slot", "open slots"));
   if (ends.jobs) ended.push(plural(ends.jobs, "job", "jobs"));

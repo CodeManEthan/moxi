@@ -103,7 +103,7 @@ test("the slots server's warning confirm: sessions, open slots and jobs, none, u
   const three = ends([{ slot: 1, label: "fix the tests" }, { slot: 2, label: null }, { slot: 4, label: "docs" }], 2, 1);
   const found = slotsConfirm(stop, three, false);
   assert.equal(found.ask, "Stop the slots server and end 3 sessions?");
-  assert.deepEqual(found.lines[0], { label: "Ends now", text: "fix the tests, slot 1, slot 2, docs, slot 4, 2 open slots, 1 job" });
+  assert.deepEqual(found.lines[0], { label: "Ends now", text: "fix the tests in slot 1, slot 2, docs in slot 4, 2 open slots, 1 job" });
   assert.deepEqual(found.lines.slice(1).map((l) => l.text), [
     "launching into a slot, until it is started again", "sessions outside the slots",
     "A working session is cut off mid-turn. This cannot be taken back."]);
