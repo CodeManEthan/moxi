@@ -65,3 +65,25 @@ export function offered(over = {}) {
 export function value(over = {}) {
   return { state: "up", detail: null, today: TODAY, repos: [], offered: [], refused: [], unindexed: null, ...over };
 }
+
+/** One item of a plan's `writes`. */
+export function write(place, key, from, to, over = {}) {
+  return { place, piece: null, event: null, key, from, to, seed: false, ...over };
+}
+
+/** A planned piece. */
+export function planned(over = {}) {
+  return { id: "repo/commit-rules", event: "commit-msg", new: true, implied_by: null, seeds: [], ...over };
+}
+
+/** A plan of `/api/plan`, with every key the route sends. */
+export function plan(over = {}) {
+  return { root: `${HOME}/code/atlas-api`, name: "atlas-api", is_repo: true, git_version: "2.56.0", mode: "config",
+           indexed: true, pieces: [], mode_change: null, own_hooks: [], in_progress: null, writes: [], refusal: null,
+           digest: "d1", ...over };
+}
+
+/** An act's answer, with every key the route sends. */
+export function answer(over = {}) {
+  return { outcome: "done", lines: [], problems: [], chain: [], plan: null, refusal: null, ...over };
+}

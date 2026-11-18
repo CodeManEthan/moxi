@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Feed, parseRepos, RETRIES } from "../src/feed.ts";
+import { Feed, parseAnswer, parsePlanned, parseRepos, RETRIES } from "../src/feed.ts";
+import { answer, plan } from "./fixtures.mjs";
 
 const REPO = { root: "/r/alpha-notes", project: null, git_version: "2.56.0", mode: "config",
                pinned: false, events: [], own_hooks: [], pieces: [], problems: [], specs: [],
@@ -101,5 +102,29 @@ test("the value carries today, the offered and refused pieces and the projects w
   assert.deepEqual(value.unindexed, [{ project: "orbit", root: "/r/orbit" }]);
   for (const bad of [{ offered: {} }, { refused: [1] }, { unindexed: "x" }, { repos: [{ ...REPO, own_hooks: null }] }]) {
     assert.equal(parseRepos({ ...UP, ...bad }), null);
+  }
+});
+
+test("a plan's value: up with its plan, error with its detail, anything else unread", () => {
+  const up = parsePlanned({ state: "up", detail: null, plan: plan() });
+  assert.deepEqual(up, { state: "up", detail: null, plan: plan() });
+  const refused = plan({ refusal: { code: "not-a-repo", text: "/r is not in a git repo" }, digest: null });
+  assert.equal(parsePlanned({ state: "up", detail: null, plan: refused }).plan.refusal.code, "not-a-repo");
+  assert.deepEqual(parsePlanned({ state: "error", detail: "it broke", plan: null }),
+                   { state: "error", detail: "it broke", plan: null });
+  for (const bad of [null, [], { state: "up", plan: null }, { state: "error" }, { state: "up", plan: { root: "/r" } },
+                     { state: "up", plan: plan({ writes: [1] }) }, { state: "up", plan: plan({ refusal: "no" }) }]) {
+    assert.equal(parsePlanned(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("an act's answer: each outcome, a changed one needs its plan", () => {
+  for (const outcome of ["done", "nothing", "refused", "partial", "failed"]) {
+    assert.equal(parseAnswer(answer({ outcome })).outcome, outcome);
+  }
+  assert.equal(parseAnswer(answer({ outcome: "changed", plan: plan() })).plan.digest, "d1");
+  for (const bad of [answer({ outcome: "changed" }), answer({ outcome: "maybe" }), answer({ lines: "x" }),
+                     answer({ chain: [1] }), answer({ refusal: { code: null } }), null]) {
+    assert.equal(parseAnswer(bad), null, JSON.stringify(bad));
   }
 });

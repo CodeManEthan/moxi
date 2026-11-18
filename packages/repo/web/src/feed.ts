@@ -147,6 +147,79 @@ export interface Repos {
   unindexed: Unindexed[] | null;
 }
 
+/** One item an act would write. `place` is `config` (a git config key of repo's, its
+ * value before and after; `to` null on a removed key or a `seed` drawn as it is written),
+ * `hooks` (`key` `shim`, `hook` or `launcher`: a file placed, moved or taken away),
+ * `chain` (a line he adds to another tool's hook: `from` the hook, `to` the line) or
+ * `index` (the repo joins repo's list: `to` its root, `from` its root there before). */
+export interface WriteItem {
+  place: string;
+  piece: string | null;
+  event: string | null;
+  key: string | null;
+  from: string | null;
+  to: string | null;
+  seed: boolean;
+}
+
+/** A piece an act would register or rewrite. */
+export interface PlannedPiece {
+  id: string;
+  event: string | null;
+  new: boolean;
+  /** The `everywhere` key that brings it in, when it wasn't named. */
+  implied_by: string | null;
+  /** The settings it would seed. */
+  seeds: string[];
+}
+
+/** What an act would write in one repo: `/api/plan`'s `plan`, and a `changed` answer's. */
+export interface Plan {
+  root: string;
+  name: string;
+  is_repo: boolean;
+  git_version: string | null;
+  /** `config` or `shim` after the act. */
+  mode: string | null;
+  indexed: boolean;
+  pieces: PlannedPiece[];
+  mode_change: { from: string; to: string } | null;
+  own_hooks: string[];
+  /** `merge` or `rebase` when one is under way. */
+  in_progress: string | null;
+  writes: WriteItem[];
+  /** What the act would refuse, with no `writes` and no `digest`. */
+  refusal: { code: string | null; text: string } | null;
+  digest: string | null;
+}
+
+/** `/api/plan`'s value: `up` with the plan, or `error` with `detail` and no plan. */
+export interface Planned {
+  state: "up" | "error";
+  detail: string | null;
+  plan: Plan | null;
+}
+
+/** A line launcher mode needs in another tool's hook, from an act's report. */
+export interface ChainLine {
+  event: string;
+  hook: string;
+  line: string;
+  present: boolean;
+}
+
+/** An act's answer. */
+export interface Answer {
+  /** `done`, `nothing`, `changed`, `refused`, `partial` or `failed`. */
+  outcome: string;
+  lines: string[];
+  problems: string[];
+  chain: ChainLine[];
+  /** The new plan, with `changed`. */
+  plan: Plan | null;
+  refusal: { code: string | null; text: string } | null;
+}
+
 /** A request that gave no readable value. */
 export interface Failure {
   /** The answer's status: 0 when no answer came, 200 for a body that can't be read. */
@@ -198,6 +271,42 @@ export function parseRepos(data: unknown): Repos | null {
   const rows = repos.map(parseRepo);
   if (rows.some((row) => row === null)) return null;
   return { state, detail: null, repos: rows as RepoRow[], ...rest };
+}
+
+const isTexts = (value: unknown): value is string[] => isList(value) && value.every((v) => typeof v === "string");
+
+/** A plan, or null when it isn't one: only what the page reads before drawing is checked. */
+export function parsePlan(data: unknown): Plan | null {
+  if (!isRow(data) || typeof data.root !== "string") return null;
+  for (const key of ["pieces", "writes"]) {
+    if (!isList(data[key]) || !(data[key] as unknown[]).every(isRow)) return null;
+  }
+  if (!isTexts(data.own_hooks)) return null;
+  if (data.refusal != null && !(isRow(data.refusal) && typeof data.refusal.text === "string")) return null;
+  return data as unknown as Plan;
+}
+
+/** `/api/plan`'s value, or null when it isn't one. */
+export function parsePlanned(data: unknown): Planned | null {
+  if (!isRow(data)) return null;
+  if (data.state === "error") {
+    return typeof data.detail === "string" ? { state: "error", detail: data.detail, plan: null } : null;
+  }
+  const plan = parsePlan(data.plan);
+  return data.state === "up" && plan !== null ? { state: "up", detail: null, plan } : null;
+}
+
+const OUTCOMES = new Set(["done", "nothing", "changed", "refused", "partial", "failed"]);
+
+/** An act's answer, or null when it isn't one. */
+export function parseAnswer(data: unknown): Answer | null {
+  if (!isRow(data) || typeof data.outcome !== "string" || !OUTCOMES.has(data.outcome)) return null;
+  if (!isTexts(data.lines) || !isTexts(data.problems) || !isList(data.chain) || !data.chain.every(isRow)) return null;
+  const plan = data.plan === null || data.plan === undefined ? null : parsePlan(data.plan);
+  if (data.outcome === "changed" && plan === null) return null;
+  const refusal = data.refusal ?? null;
+  if (refusal !== null && !(isRow(refusal) && typeof refusal.text === "string")) return null;
+  return { ...(data as unknown as Answer), plan, refusal: refusal as Answer["refusal"] };
 }
 
 /** The line a failure shows. */
