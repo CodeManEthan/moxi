@@ -157,7 +157,7 @@ def key_of(common_dir: str | os.PathLike) -> str:
 def _rev_parse(path: str | os.PathLike) -> Repo:
     where = Path(path)
     if not where.is_dir():
-        raise NotARepo(f"{path} is not a directory")
+        raise NotARepo(f"{path}: not a directory")
     done = git(where, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
                "--git-path", "hooks", "--show-toplevel")
     lines = done.stdout.splitlines()

@@ -230,6 +230,9 @@ def test_each_refusal_is_named_in_the_plan_and_by_the_verb(demo, held):
         assert caught.value.reason == code and caught.value.text == plan["refusal"]["text"]
     assert api.plan_add("relative/path", ["demo/gate"])["refusal"]["code"] == "not-absolute"
     assert not api.plan_add(plain)["is_repo"]
+    # A folder that isn't there reads as one sentence, whether alone or after the verb's.
+    gone = demo.tmp / "gone"
+    assert api.plan_add(gone)["refusal"]["text"] == f"no git work tree at {gone}: not a directory"
     with pytest.raises(api.Usage) as caught:
         api.add(repo, api.COMMIT_RULES, sets=["tag-pattern=[unclosed"])
     assert caught.value.reason == "seed-refused"
