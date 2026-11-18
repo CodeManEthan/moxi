@@ -121,7 +121,7 @@ def test_rows_lists_every_row_with_its_verdict_and_state():
     assert (web["form"], web["kind"], web["flag"], web["state"]) == (
         "written", "daemon", True, "active")
     assert web["verdict"] == {"state": "ok", "reason": web["verdict"]["reason"],
-                              "fix": None, "unknown": False, "cause": None}
+                              "fix": None, "unknown": False, "cause": "running"}
     assert web["argv"] == [PY, "-m", "http.server"] and web["has_switch"] is True
     assert (nightly["kind"], nightly["flag"], nightly["schedule"]) == ("timer", False,
                                                                       "every 1h")

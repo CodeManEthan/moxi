@@ -15,9 +15,8 @@ export const VERDICTS = ["ok", "warn", "fail", "off"] as const;
 export type VerdictState = (typeof VERDICTS)[number];
 
 /** A row's verdict. `unknown` is true for a `warn` given because a value couldn't be
- * read. `cause` is one word for the case that gave it (`not-running`, `stopped`,
- * `last-run`), or null; services may add words, so a reader treats one it doesn't know
- * as null. */
+ * read. `cause` is one word for the case that gave it (services' README lists them), or
+ * null; services may add words, so a reader treats one it doesn't name as null. */
 export interface Verdict {
   state: VerdictState;
   reason: string | null;

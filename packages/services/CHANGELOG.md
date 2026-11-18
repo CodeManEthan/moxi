@@ -3,7 +3,8 @@
 ## Unreleased
 
 - A verdict gains `cause` in `moxi services list --json`, `show --json`, `watch --json`
-  and the page's reads: `not-running`, `stopped` or `last-run`, else null.
+  and the page's reads: one word for each case a verdict tells apart, listed in the
+  README's "One verdict per row".
 - With the `ui` extra, a `project-facts` component reports each project's failed and
   warned services to the Projects page, and the opened project's `Services` row.
 - The `adopted` switch table carries page fields, which `moxi config services show

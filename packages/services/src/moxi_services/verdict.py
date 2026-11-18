@@ -67,12 +67,14 @@ AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add 
             "without --timer")
 
 
-#: The words a verdict's `cause` may hold, so a reader tells a verdict's case without
-#: reading its reason: `not-running`, a daemon that is on and not running (`fail`);
-#: `stopped`, a daemon's stop by hand that still holds (`warn`); `last-run`, a timer whose
-#: last run failed (`warn`). Every other verdict's cause is None. The set may grow; a
-#: reader treats a word it does not know as it treats None.
-CAUSES = ("not-running", "stopped", "last-run")
+#: The words a verdict's `cause` holds, one per case `judge` tells apart, so a reader
+#: tells a verdict's case without reading its reason. services' README lists what each
+#: means. The set may grow; a reader treats a word it does not know, and None, as its
+#: fallback.
+CAUSES = ("elsewhere", "no-supervisor", "removing", "switched-off", "unknown", "not-here",
+          "missing", "not-wrapped", "listening", "stopped", "not-running", "no-login",
+          "running", "running-off", "login-off", "off", "armed-off", "not-armed",
+          "schedule-failed", "last-run", "armed", "health")
 
 
 @dataclass(frozen=True)
@@ -226,7 +228,7 @@ def _cmd(verb: str, row: Row) -> str:
 
 
 def _unknown(reason: str) -> Verdict:
-    return Verdict("warn", f"unknown: {reason}", None, unknown=True)
+    return Verdict("warn", f"unknown: {reason}", None, unknown=True, cause="unknown")
 
 
 def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
@@ -246,22 +248,22 @@ def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, heal
     said, line = health
     if said == "fail":
         return Verdict("fail", f"health check failed: {line}",
-                       st.log if st is not None else None)
+                       st.log if st is not None else None, cause="health")
     if said == "warn" and found.state == "ok":
-        return Verdict("warn", f"health check: {line}", None)
+        return Verdict("warn", f"health check: {line}", None, cause="health")
     return found
 
 
 def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread) -> Verdict:
     user = isinstance(row, UserRow)
     if user and not row.here:
-        return Verdict("off", f"added on {row.platform}")
+        return Verdict("off", f"added on {row.platform}", cause="elsewhere")
     if not supervisor or (st is not None and st.state == "nobackend"):
-        return Verdict("off", "no supervisor")
+        return Verdict("off", "no supervisor", cause="no-supervisor")
     if user and row.removing:
-        return Verdict("warn", "remove not finished", _cmd("remove", row))
+        return Verdict("warn", "remove not finished", _cmd("remove", row), cause="removing")
     if not user and is_enabled is False:
-        return Verdict("off", f"its switch {row.switch} is off")
+        return Verdict("off", f"its switch {row.switch} is off", cause="switched-off")
     if is_enabled is None:
         what = (f"its switch {row.switch}" if not user
                 else f"its key {state.key(row.name)}")
@@ -271,12 +273,12 @@ def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unre
     if st.state == "unknown":
         return _unknown(st.detail or "the supervisor did not say")
     if st.state == "off":
-        return Verdict("off", st.detail or "not for this system")
+        return Verdict("off", st.detail or "not for this system", cause="not-here")
     if st.state == "missing":
         return _missing(row, is_enabled=is_enabled)
     if user and state.is_wrapped(row) and st.wrapped is None:
         return Verdict("warn", "not wrapped: runs are neither gated nor recorded",
-                       _cmd("enable" if is_enabled else "disable", row))
+                       _cmd("enable" if is_enabled else "disable", row), cause="not-wrapped")
     if row.kind == "daemon":
         return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted)
     return _timer(row, st, is_enabled=is_enabled)
@@ -290,7 +292,7 @@ def _missing(row: Row, *, is_enabled: bool) -> Verdict:
     else:
         fix = _cmd("remove", row)
     what = "its unit is missing" if row.form != "adopted" else f"{row.unit} is missing"
-    return Verdict("fail" if is_enabled else "warn", what, fix)
+    return Verdict("fail" if is_enabled else "warn", what, fix, cause="missing")
 
 
 def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
@@ -302,7 +304,7 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         enabled = socket.enabled
     if is_enabled:
         if listening:
-            return Verdict("ok", "idle, socket listening")
+            return Verdict("ok", "idle, socket listening", cause="listening")
         if not running:
             stopped = stop_recorded(row, booted)
             if stopped is not None:
@@ -318,39 +320,43 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         if enabled is False:
             fix = (f"moxi install {row.module}" if isinstance(row, ModuleRow)
                    else _cmd("enable", row))
-            return Verdict("warn", "won't start at login", fix)
-        return Verdict("ok", "running")
+            return Verdict("warn", "won't start at login", fix, cause="no-login")
+        return Verdict("ok", "running", cause="running")
     if running:
-        return Verdict("warn", "running, off at next login", _cmd("disable", row))
+        return Verdict("warn", "running, off at next login", _cmd("disable", row),
+                       cause="running-off")
     if enabled is None:
         return _unknown("whether it starts at login can't be read"
                         + (f" ({st.detail})" if st.detail else ""))
     if enabled:
-        return Verdict("warn", "starts at login, flag off", _cmd("disable", row))
-    return Verdict("off", "off")
+        return Verdict("warn", "starts at login, flag off", _cmd("disable", row),
+                       cause="login-off")
+    return Verdict("off", "off", cause="off")
 
 
 def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
     module_or_wrapped = isinstance(row, ModuleRow) or state.is_wrapped(row)
     if not is_enabled:
         if module_or_wrapped:
-            return Verdict("off", "off; its gate holds the runs")
+            return Verdict("off", "off; its gate holds the runs", cause="off")
         if st.enabled is None:
             return _unknown("whether its schedule is armed can't be read"
                             + (f" ({st.detail})" if st.detail else ""))
         if st.enabled:
-            return Verdict("warn", "schedule armed, flag off", _cmd("disable", row))
-        return Verdict("off", "off")
+            return Verdict("warn", "schedule armed, flag off", _cmd("disable", row),
+                           cause="armed-off")
+        return Verdict("off", "off", cause="off")
     if st.enabled is None:
         return _unknown("whether its schedule is armed can't be read"
                         + (f" ({st.detail})" if st.detail else ""))
     fix = (f"moxi install {row.module}" if isinstance(row, ModuleRow)
            else _cmd("enable", row))
     if st.enabled is False:
-        return Verdict("fail", "schedule not armed", fix)
+        return Verdict("fail", "schedule not armed", fix, cause="not-armed")
     if st.state == "failed":
         return Verdict("fail", "its schedule failed"
-                       + (f" ({st.detail})" if st.detail else ""), st.log or fix)
+                       + (f" ({st.detail})" if st.detail else ""), st.log or fix,
+                       cause="schedule-failed")
     last = last_run(st)
     if last is not None and last.failed:
         at = f" at {last.at}" if last.at else ""
@@ -358,8 +364,8 @@ def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
         return Verdict("warn", f"last run failed ({last.text}{at}){hint}", st.log,
                        cause="last-run")
     if last is None:
-        return Verdict("ok", "armed, no run yet")
-    return Verdict("ok", "armed")
+        return Verdict("ok", "armed, no run yet", cause="armed")
+    return Verdict("ok", "armed", cause="armed")
 
 
 def _adopted_task(row: Row, st) -> bool:

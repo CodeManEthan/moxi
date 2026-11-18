@@ -11636,6 +11636,7 @@ services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) 
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] is None	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found[0]["verdict"]) == VERDICT_KEYS	keep	set	set
+services	packages/services/tests/test_cli.py	assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] == "off"	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}	keep	set	set
 services	packages/services/tests/test_cli.py	code, _, err = run(capsys, "show", "nope")	keep	show	show
 services	packages/services/tests/test_cli.py	code, out, _ = run(capsys, "show", "agent")	keep	show	show
@@ -11709,6 +11710,9 @@ services	packages/services/tests/test_store.py	test_a_store_held_locked_past_the
 services	packages/services/tests/test_verdict.py	assert len(found) == 12 and set(found.values()) == {("ok", "fine")}	keep	set	set
 services	packages/services/tests/test_verdict.py	gate_.set()	keep	set	set
 services	packages/services/tests/test_verdict.py	rest = {"services/svc0", "services/svc1", "services/svc2"} - set(ran)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert given == set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert len(verdict.CAUSES) == len(set(verdict.CAUSES))	keep	set	set
+services	packages/services/tests/test_verdict.py	assert {"not-running", "stopped", "last-run"} <= set(verdict.CAUSES)	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

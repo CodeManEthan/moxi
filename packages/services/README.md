@@ -62,15 +62,34 @@ give with `--health` runs when asked (`show`, `watch`, `list --health`, the doct
 only for a running daemon, for five seconds at most: exit 0 is healthy.
 
 A verdict's `cause`, in `--json` and on the page's reads, is one word that tells a reader
-which case gave it without reading the reason:
+which case gave it without reading the reason. Each case has its own:
 
+- `elsewhere`: a row added on another system (`off`);
+- `no-supervisor`: this system has no supervisor (`off`);
+- `removing`: a remove that did not finish (`warn`);
+- `switched-off`: one of Moxi's rows whose module switch is off (`off`);
+- `unknown`: a value the supervisor can't give (`warn`, "unknown");
+- `not-here`: a unit that is not for this system (`off`);
+- `missing`: a unit that is missing (`fail` while on, `warn` while off);
+- `not-wrapped`: an adopted Linux timer whose drop-in is gone (`warn`);
+- `listening`: a daemon idle under its listening socket (`ok`);
+- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
 - `not-running`: a daemon that is on and not running, with no stop by hand that holds
   (`fail`);
-- `stopped`: a daemon you stopped by hand, since the last boot (`warn`);
-- `last-run`: a timer whose last run failed (`warn`).
+- `no-login`: a running daemon that won't start at login (`warn`);
+- `running`: a daemon that is on and running (`ok`);
+- `running-off`: a daemon that is off but running until the next login (`warn`);
+- `login-off`: a daemon that is off but starts at login (`warn`);
+- `off`: a daemon or timer that is off (`off`);
+- `armed-off`: a timer that is off whose schedule is armed (`warn`);
+- `not-armed`: a timer that is on whose schedule is not armed (`fail`);
+- `schedule-failed`: a timer whose schedule failed (`fail`);
+- `last-run`: a timer whose last run failed (`warn`);
+- `armed`: a timer that is on and armed, its last run fine or none yet (`ok`);
+- `health`: a running daemon whose health check failed (`fail`) or warned (`warn`).
 
-Every other verdict's cause is null. The set may grow, so a reader treats a word it does
-not know as it treats null.
+The set may grow, so a reader names the words it knows and treats every other word, and
+null, as its fallback.
 
 ## Adopted timers on Linux
 
