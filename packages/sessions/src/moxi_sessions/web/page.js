@@ -166,6 +166,8 @@ var ve=globalThis,ke=ve.ShadowRoot&&(ve.ShadyCSS===void 0||ve.ShadyCSS.nativeSha
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  /* Keep warm is set in the text colour: the one act a session going cold uncovered carries. */
+  .do.warm { color: var(--moxi-text); }
   .do:hover:not(:disabled) { text-decoration: underline; }
   .do:disabled { color: var(--moxi-text-faint); opacity: 0.6; cursor: default; }
   /* A row opened in place: label, what it says, and an act at the right end. */
@@ -295,7 +297,7 @@ var ve=globalThis,ke=ve.ShadowRoot&&(ve.ShadyCSS===void 0||ve.ShadyCSS.nativeSha
         ?lead-heavy=${n.leadHeavy} time=${C(n.time??void 0)} said-by=${C(n.saidBy??void 0)}
         rest=${C(n.rest??void 0)} note=${C(s?.note??void 0)} ?open=${n.open}
         @moxi-row-toggle=${r}>
-      ${o!==null?d`<button type="button" slot="acts" class="do" data-action="keep-warm"
+      ${o!==null?d`<button type="button" slot="acts" class="do warm" data-action="keep-warm"
         title=${o.keepWarm} aria-description=${o.keepWarm} ?disabled=${o.pressing}
         @click=${()=>{this.#G(o.request)}}>${An}</button>`:c}
       ${n.act!==null&&i?d`<button type="button" slot="acts" class="do" data-action="open"

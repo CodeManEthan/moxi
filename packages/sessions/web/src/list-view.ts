@@ -122,6 +122,8 @@ const STYLES = css`
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  /* Keep warm is set in the text colour: the one act a session going cold uncovered carries. */
+  .do.warm { color: var(--moxi-text); }
   .do:hover:not(:disabled) { text-decoration: underline; }
   .do:disabled { color: var(--moxi-text-faint); opacity: 0.6; cursor: default; }
   /* A row opened in place: label, what it says, and an act at the right end. */
@@ -708,7 +710,7 @@ export class SessionsList extends LitElement {
         ?lead-heavy=${row.leadHeavy} time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}
         rest=${ifDefined(row.rest ?? undefined)} note=${ifDefined(running?.note ?? undefined)} ?open=${row.open}
         @moxi-row-toggle=${toggle}>
-      ${keep !== null ? html`<button type="button" slot="acts" class="do" data-action="keep-warm"
+      ${keep !== null ? html`<button type="button" slot="acts" class="do warm" data-action="keep-warm"
         title=${keep.keepWarm as string} aria-description=${keep.keepWarm as string} ?disabled=${keep.pressing}
         @click=${() => void this.#press(keep.request)}>${KEEP_WARM}</button>` : nothing}
       ${row.act !== null && desk ? html`<button type="button" slot="acts" class="do" data-action="open"
