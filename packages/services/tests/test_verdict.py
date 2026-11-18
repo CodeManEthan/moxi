@@ -428,7 +428,7 @@ OTHER_VERDICTS = {
         timer_row(enabled=True), st("timer", last=gate("off", 0)), is_enabled=True)),
     "timer off": (("off", "off"), lambda: judge(
         timer_row(), st("timer", enabled=False), is_enabled=False)),
-    "module timer off": (("off", "off"), lambda: judge(
+    "module timer off": (("off", "switched-off"), lambda: judge(
         module_row("timer", "snapshot.enabled", "snapshot"), st("timer", enabled=True),
         is_enabled=False)),
     "schedule armed, flag off": (("warn", "armed-off"), lambda: judge(
@@ -491,6 +491,10 @@ def test_views_judge_every_row_from_one_read(fake):
 
 
 def test_views_read_module_stops_from_the_store_by_row_id(fake):
+    from fake_units import Unit
+
+    for name in ("sync", "other"):
+        fake.modules[("notes", name)] = Unit("daemon", enabled=True, active=False)
     store.write(lambda c: (
         store.set_module_stop(c, "notes/sync", "2030-01-01T00:00:00Z", by="test"),
         store.set_module_stop(c, "gone/daemon", "2030-01-01T00:00:00Z", by="test")))
