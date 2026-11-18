@@ -1,16 +1,20 @@
 """repo's page: the one route its page server answers, declared as data.
 
-    GET /api/repos   each indexed repo's git hooks and committer specs, with the
-                     server's `now`
+    GET /api/repos   each indexed repo's git hooks and committer specs, the pieces
+                     installed modules offer, the projects with no hooks yet, and the
+                     server's `now` and `today`
 
 It answers from `api.status()` and `api.specs(sweep=False)`, what `moxi repo git-hooks
 list --json` and `moxi repo specs --json` print, so the page shows what those commands
-show. The route is a read and writes nothing: the listing of specs runs without the
-record sweep. It is not the gateway's. Every command the page offers is a line to copy
-and run in a terminal; the page runs none.
+show, and from `api.available()`. With projects installed it lists project repos as
+`git-hooks list --projects` does. The route is a read and writes nothing: the listing of
+specs runs without the record sweep, and a repo's rules are read without the commit-proof
+line, whose `git write-tree` writes. It is not the gateway's. Every command the page
+offers is a line to copy and run in a terminal; the page runs none.
 
-Every value that can hold a path carries a mark: `root` and `hook` are `path`, and each
-sentence or command line that can name a path or a remote is `redact`. Only the gateway
+Every value that can hold a path carries a mark: `root`, `hook` and `existing_hook` are
+`path`, and each sentence, rule or command line that can name a path or a remote is
+`redact`. Only the gateway
 acts on a mark, so today the page gets each value as it is; if the route is ever opened to
 the gateway, those values are cut or swapped for a handle there. The chain line names no
 path, so it carries none.
@@ -39,16 +43,21 @@ _PATH = lb.Out("string", mark="path")
 _SAYS = lb.Out("string", mark="redact")
 _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _WHEN = lb.Out("float", nullable=True)
+_COUNT = lb.Out("int", nullable=True)
+_FLAG = lb.Out("bool")
 _COMMAND = lb.Out("table", items={"label": _TEXT, "command": _SAYS})
 
 #: One event that has pieces: how git reaches them (`config entry`, `shim`, `launcher`,
-#: or null when every piece of it is disabled), the existing git hook, and in launcher mode
-#: whether the chain line is `present` or `needed`, the hook file it goes in, and the line.
+#: or null when every piece of it is disabled), the existing git hook (`existing`, a
+#: sentence; `existing_hook`, the path of the user's own git hook that runs after the
+#: pieces, or alone while each is disabled), and in launcher mode whether the chain line
+#: is `present` or `needed`, the hook file it goes in, and the line.
 EVENT = lb.Out("table", items={
     "event": _TEXT,
     "via": _MAYBE,
     "pieces": lb.Out("list", items=_TEXT),
     "existing": _MAYBE_SAYS,
+    "existing_hook": lb.Out("string", mark="path", nullable=True),
     "chain_line": _MAYBE,
     "hook": lb.Out("string", mark="path", nullable=True),
     "line": _MAYBE,
@@ -69,11 +78,23 @@ PIECE = lb.Out("table", items={
     "remove": _COMMAND,
 })
 
-#: One problem the listing names: `state` is `fail`, `warn` or `ok`, `fix` the command.
-PROBLEM = lb.Out("table", items={"state": _TEXT, "detail": _SAYS, "fix": _MAYBE_SAYS})
+#: One problem the listing names: `state` is `fail`, `warn` or `ok`, `fix` the command;
+#: `code` its kind, `piece` and `event` its subject, and `refresh` true when its fix is a
+#: refresh of this repo.
+PROBLEM = lb.Out("table", items={
+    "state": _TEXT,
+    "detail": _SAYS,
+    "fix": _MAYBE_SAYS,
+    "code": _MAYBE,
+    "piece": _MAYBE,
+    "event": _MAYBE,
+    "refresh": _FLAG,
+})
 
-#: One committer spec: its last pass (`status` null when none has run), its author's last
-#: commit, each branch's last pushed commit and each branch whose last push failed.
+#: One committer spec: its last pass (`status` null when none has run), the runs of
+#: refused, error and index-busy passes it is in (each null when it isn't), its author's
+#: last commit, each branch's last pushed commit, each branch whose last push failed, and
+#: each branch with commits its remote lacks (`ahead` null when never pushed).
 SPEC = lb.Out("table", items={
     "name": _TEXT,
     "saved": lb.Out("bool"),
@@ -82,13 +103,19 @@ SPEC = lb.Out("table", items={
     "line": _MAYBE_SAYS,
     "time": _WHEN,
     "refused_since": _WHEN,
-    "refused_passes": lb.Out("int", nullable=True),
+    "refused_passes": _COUNT,
+    "error_since": _WHEN,
+    "error_passes": _COUNT,
+    "index_busy_since": _WHEN,
+    "index_stale": _FLAG,
     "last_commit": _MAYBE,
     "last_commit_time": _WHEN,
     "remote": _MAYBE_SAYS,
     "pushed": lb.Out("list", items=lb.Out("table", items={"branch": _TEXT, "sha": _TEXT})),
     "push_failed": lb.Out("list", items=lb.Out("table", items={
         "branch": _TEXT, "error": _MAYBE_SAYS, "failed_at": _WHEN})),
+    "unpushed": lb.Out("list", items=lb.Out("table", items={
+        "branch": _TEXT, "ahead": _COUNT})),
     "run": _COMMAND,
     "forget": _COMMAND,
 })
@@ -104,28 +131,61 @@ RECORD = lb.Out("table", items={
     "at": _MAYBE,
 })
 
-#: One indexed repo. `specs_problem` says why its specs could not be listed.
+#: One repo, indexed or (a project's, with pieces) not. `own_hooks` names the events with
+#: no piece that have a git hook of the user's own; `rules` the lines `moxi repo rules`
+#: prints under its heading, less the commit-proof line (null when they can't be built),
+#: and `proof` whether the commit-proof piece is registered. `specs_problem` says why its
+#: specs could not be listed.
 REPO = lb.Out("table", items={
     "root": _PATH,
     "project": _MAYBE,
+    "indexed": _FLAG,
     "git_version": _MAYBE,
     "mode": _MAYBE,
     "pinned": lb.Out("bool"),
     "events": lb.Out("list", items=EVENT),
+    "own_hooks": lb.Out("list", items=_TEXT),
     "pieces": lb.Out("list", items=PIECE),
     "problems": lb.Out("list", items=PROBLEM),
     "specs": lb.Out("list", items=SPEC),
     "specs_problem": _MAYBE_SAYS,
     "records": lb.Out("list", items=RECORD),
+    "rules": lb.Out("list", items=_SAYS, nullable=True),
+    "proof": _FLAG,
     "commands": lb.Out("list", items=_COMMAND),
 })
 
-#: The list and how it stands: `state` is `up` or `error`, and `detail` is null when up.
+#: One piece an installed module declares: `name` the part of its id after `/`, and
+#: `settings` the names of its settings.
+OFFERED = lb.Out("table", items={
+    "id": _TEXT,
+    "module": _TEXT,
+    "name": _TEXT,
+    "event": _TEXT,
+    "fail": _TEXT,
+    "order": lb.Out("int"),
+    "doc": _SAYS,
+    "settings": lb.Out("list", items=_TEXT),
+})
+
+#: One declaration that was refused, and why.
+REFUSED = lb.Out("table", items={"id": _TEXT, "why": _SAYS})
+
+#: A project whose root is a git repo with no piece of repo's, not indexed.
+UNINDEXED = lb.Out("table", items={"project": _TEXT, "root": _PATH})
+
+#: The list and how it stands: `state` is `up` or `error`, and `detail` is null when up;
+#: the server's local date (`today`); the pieces installed modules offer and the
+#: declarations refused; and `unindexed`, null without projects.
 REPOS = {
     "now": lb.Out("float"),
+    "today": _TEXT,
     "state": _TEXT,
     "detail": _MAYBE_SAYS,
     "repos": lb.Out("list", items=REPO),
+    "offered": lb.Out("list", items=OFFERED),
+    "refused": lb.Out("list", items=REFUSED),
+    "unindexed": lb.Out("list", items=UNINDEXED, nullable=True),
 }
 
 PAGE = lb.Page(
@@ -135,4 +195,5 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["EVENT", "PAGE", "PIECE", "PROBLEM", "RECORD", "REPO", "REPOS", "SPEC"]
+__all__ = ["EVENT", "OFFERED", "PAGE", "PIECE", "PROBLEM", "RECORD", "REFUSED", "REPO",
+           "REPOS", "SPEC", "UNINDEXED"]
