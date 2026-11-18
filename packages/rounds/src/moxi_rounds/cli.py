@@ -1216,8 +1216,9 @@ def _declare_check(verbs) -> None:
             "Its output goes to check-<n>.log in the build's scratch folder. Nothing is "
             "recorded when the tip or the worktree changed while it ran. In a repo that "
             "declares ci, it pushes the tip to ci.remote when set (forced, to the "
-            "branch name ci.ref gives, where it names one), runs the local part unless "
-            "it passed at the tip, and reads CI; --full runs the full check instead.")
+            "branch name ci.ref gives, where it names one, never to ci.full_ref's), runs "
+            "the local part unless it passed at the tip, and reads CI; --full runs the "
+            "full check instead.")
     parser = verbs.add_parser("check", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -1354,7 +1355,10 @@ def _ci_checked(ran, args, out) -> int:
     from . import ci
 
     print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}, by CI", file=out)
-    if ran.pushed is not None:
+    if ran.pushed is not None and ran.already:
+        print(f"pushed: nothing, {ran.pushed} {ran.ref or 'the branch'} is already at "
+              "the tip", file=out)
+    elif ran.pushed is not None:
         print(f"pushed: {ran.pushed}" + ("" if ran.ref is None else f" {ran.ref}, forced"),
               file=out)
     local = ran.local
@@ -1446,8 +1450,9 @@ def _declare_drop(verbs) -> None:
     parser.add_argument("--refs", action="store_true",
                         help="with --leftovers, also give the account of CI's own refs "
                              "on the remote of each project whose ci names a ref: each "
-                             "branch under the ref's prefix that no build that has not "
-                             "ended, nor the target, owns; it reaches the network")
+                             "branch under the prefix of ref, or of full_ref where set, "
+                             "that no build that has not ended, nor the target, owns; "
+                             "it reaches the network")
     parser.add_argument("--remove", action="store_true",
                         help="with --leftovers, remove what would go; refused, after "
                              "the dry run, until sweep.armed is true")
@@ -1582,7 +1587,7 @@ def _account_lines(swept, out) -> None:
 
 
 def _ref_lines(refs, out) -> None:
-    """Say what became of each of CI's own refs an ended build pushed."""
+    """Say what became of each of CI's own refs of an ended build."""
     for one in refs:
         print(one.line(), file=out)
 

@@ -9,8 +9,9 @@ a new way in, and turns offers none.
 
 Both routes answer from the live list `moxi_turns.pagereader` keeps in the page server's
 process; `pagehandlers` starts it on the page's first read or subscribe. Every route is a
-read, and none is the gateway's. `cwd` is marked `path`; `trouble` and an agent's
-`description`, which the harness writes and which can name a path, are marked `redact`.
+read, and none is the gateway's. `cwd` and `home` are marked `path`; `trouble` and an
+agent's `description`, which the harness writes and which can name a path, are marked
+`redact`.
 
 The page's assets are what the repository's web build writes from `packages/turns/web/`
 into this package's `web/`: `page.js`, the panel, and its build stamp.
@@ -39,15 +40,21 @@ _WHEN = lb.Out("float")
 _MAYBE_WHEN = lb.Out("float", nullable=True)
 
 #: The last `session.ready` the endpoint raised: its `source` (`startup`, `resume`,
-#: `clear`, `compact`, or null when the harness did not say) and `at`, wall-clock seconds.
-READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "at": _MAYBE_WHEN})
+#: `clear`, `compact`, or null when the harness did not say), the `session_id` it was
+#: raised for, and `at`, wall-clock seconds.
+READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "session_id": _MAYBE,
+                                              "at": _MAYBE_WHEN})
 
-#: One observation of a session, `facts()`: null until the first read answers. `agents` is
-#: the count of busy subagents, null when they could not be listed; `at` is the read's
-#: wall-clock time.
+#: One observation of a session, `facts()`: null until the first read answers.
+#: `session_id` is the id the reading was taken under; `turn_started_at` is the open
+#: turn's start, null when no turn is open and while an open turn waits for its tie.
+#: `agents` is the count of busy subagents, null when they could not be listed; `at` is
+#: the read's wall-clock time.
 FACTS = lb.Out("table", nullable=True, items={
+    "session_id": _MAYBE,
     "turn_number": lb.Out("int"),
     "turn_open": _FLAG,
+    "turn_started_at": _MAYBE_WHEN,
     "agents": lb.Out("int", nullable=True),
     "draft": _FLAG,
     "stale": _FLAG,
@@ -74,8 +81,15 @@ AGENTS = lb.Out("table", nullable=True, items={
 
 #: One session. `key` is its endpoint's name, `<harness>-<nonce>`, fixed for the
 #: endpoint's life. The fields from `harness` to `trouble` are its `session` answer and its
-#: hello's capabilities, refreshed at each scan; `read_error` is a fixed sentence when its
-#: watch or its last facts or agents read failed, null when none did.
+#: hello's capabilities, refreshed at each scan; `facts` and `agents` are read again at
+#: least every 30 s; `read_error` is a fixed sentence when its watch or its last facts or
+#: agents read failed, null when none did. `ended_at` is the
+#: page server's wall-clock time when its watch saw the session's last turn end, sent only
+#: while the latest facts show no turn open at that same session id and turn number, else
+#: null. `has_box` is true when turns reads the harness's prompt box, so `facts.draft` can
+#: be true for a draft; on the other harnesses `draft` is always false. `unread_since` is
+#: the page server's wall-clock time when a run of unread readings began (a facts or
+#: agents read failed, or the facts reading has `agents` null), null when none runs.
 SESSION = lb.Out("table", items={
     "key": _TEXT,
     "harness": _TEXT,
@@ -90,13 +104,26 @@ SESSION = lb.Out("table", items={
     "facts": FACTS,
     "agents": AGENTS,
     "read_error": _MAYBE,
+    "ended_at": _MAYBE_WHEN,
+    "has_box": _FLAG,
+    "unread_since": _MAYBE_WHEN,
 })
 
 #: The list. `listed` is false until the page server's first scan for sessions has
-#: finished; `detail` is null unless the last scan failed; `sessions` is newest first.
+#: finished; `detail` is null unless the last scan failed; `home` is the page server's
+#: home folder, so the page can write a folder in `~` form; `sessions` is newest first.
+#: `reach` is what this machine can show, null until its first read answers: `claude` is
+#: `start` (a Claude Code session started by hand runs with turns), `setup` (`moxi install
+#: turns` would make it so), `absent` (Claude Code was not found when turns was
+#: installed), or null when that can't be told or the install would not fix it; `codex`
+#: says whether launched Codex sessions can run under turns' host.
+REACH = lb.Out("table", nullable=True, items={"claude": _MAYBE, "codex": _FLAG})
+
 LIST = {
     "listed": _FLAG,
     "detail": _MAYBE,
+    "home": lb.Out("string", mark="path"),
+    "reach": REACH,
     "sessions": lb.Out("list", items=SESSION),
 }
 
@@ -126,4 +153,5 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["AGENT", "AGENTS", "BUDGET", "FACTS", "LIST", "PAGE", "READY", "SESSION", "TOPIC"]
+__all__ = ["AGENT", "AGENTS", "BUDGET", "FACTS", "LIST", "PAGE", "REACH", "READY", "SESSION",
+           "TOPIC"]

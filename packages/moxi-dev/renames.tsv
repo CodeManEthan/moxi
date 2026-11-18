@@ -7645,18 +7645,22 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the record to merg
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	return max(found, key=lambda one: str(one[1].get("run")), default=None)	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	newest_scheduled = max(scheduled, key=lambda run: str(run.get("started")), default=None)	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	run=result.get("run"), slack=factor)	keep	run	run
-moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	base = min(sets, key=lambda report: report["behind"], default=mine)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	report["behind"] or 0), default=mine)	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("rev", nargs="?", default="main", metavar="REV")	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--days", type=float, default=7.0, metavar="N",	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="how far back the walk goes from REV's time (default 7)")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--machine", metavar="NAME", help="report this machine only")	keep	NAME	NAME
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="the record to read (default: this clone's)")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--json", action="store_true", help="print the reports as JSON")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	--package` takes it, resolved against the workspace of the tree `show` runs in; a name	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--package", metavar="NAME",	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="read only this package's tests: its directory under packages/ "	keep	help	help
 moxi-dev	packages/moxi-dev/tests/test_timed.py	"""`moxi-dev timed`, its record, `take` and `show`.	keep	show	show
 moxi-dev	packages/moxi-dev/tests/test_timed.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_timed.py	return tmp_path / "record"	keep	record	record
 moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("no complete run" in line for line in lines)	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("passed at slack 2" in line for line in lines)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed.py	assert not any(line.startswith("  passed") or line.startswith("  failed")	keep	any	any
 notes	packages/notes/src/moxi_notes/api.py	handoffs_dir	name	folder	found_dir
 notes	packages/notes/src/moxi_notes/backfill.py	"complete": sum(1 for x in p if not x.additions and not x.refused),	keep	refused	refused
 notes	packages/notes/src/moxi_notes/backfill.py	"keys": sum(len(x.additions) for x in p if not x.refused)}	keep	refused	refused
@@ -8348,15 +8352,18 @@ publishing	packages/publishing/tests/test_standing.py	assert piece.standing_prob
 publishing	packages/publishing/tests/test_standing.py	value, "main", set())	keep	set	set
 publishing	packages/publishing/tests/test_standing.py	"release/*", "release/main", set())	keep	set	set
 publishing	packages/publishing/tests/test_standing.py	assert not any("/actions/" in path for path in served.asked)	keep	any	any
-publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	if not any(isinstance(name := one.get("name"), str) and (	keep	any	any
+publishing	packages/publishing/tests/test_tag.py	assert any(refused in line for line in made.lines)	keep	any	any
+publishing	packages/publishing/tests/test_tag.py	assert any("secrets-windows concluded failure" in line for line in lines), lines	keep	any	any
+publishing	packages/publishing/tests/test_tags.py	assert any(n.endswith("other (windows-latest) at "	keep	any	any
+publishing	packages/publishing/tests/test_tags.py	assert any(n.endswith(f"{missing} at {head(released_repo)[:12]}: no such job")	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
 repo	packages/repo/src/moxi_repo/_records.py	- `<cgd>::piece::<id>`: a piece's last run broke, or a post-* piece returned `record`.	keep	record	record
 repo	packages/repo/src/moxi_repo/_records.py	if any(e.get("kind") == "piece" for e in entries.values()):	keep	any	any
 repo	packages/repo/src/moxi_repo/_records.py	specs_of: set[str] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/api.py	"refused": dict(sorted(bad.items()))}	keep	refused	refused
-repo	packages/repo/src/moxi_repo/api.py	_flip	kwonly	value	value
-repo	packages/repo/src/moxi_repo/api.py	_flip	name	value	enabled
+repo	-	removed:moxi_repo.api:_flip	keep	value	enabled
 repo	packages/repo/src/moxi_repo/api.py	_status_of	kwonly	in_index	in_index
 repo	packages/repo/src/moxi_repo/api.py	and not any(p.id == pid for p in named) and everywhere(pid)]	keep	any	any
 repo	packages/repo/src/moxi_repo/api.py	closing = enabled(section) and fail_policy(section) == "closed"	keep	closed	closed
@@ -8369,6 +8376,16 @@ repo	packages/repo/src/moxi_repo/api.py	names = (set(committer.saved_names(repo.
 repo	packages/repo/src/moxi_repo/api.py	return any(section.get(var) != [value] for var, value in piece.registration().items())	keep	any	any
 repo	packages/repo/src/moxi_repo/api.py	why = check(name, values or [])	keep	ok	ok
 repo	packages/repo/src/moxi_repo/api.py	| set(committer.read_state(repo.common_dir)["specs"]))	keep	set	set
+repo	packages/repo/src/moxi_repo/api.py	if not queue.acquire(timeout=LOCK_WAIT_S):	keep	timeout	timeout
+repo	packages/repo/src/moxi_repo/api.py	plan = make(repo, version)	keep	auto	auto
+repo	packages/repo/src/moxi_repo/api.py	plan = make(repo, version)	keep	start	start
+repo	packages/repo/src/moxi_repo/api.py	return any(item["place"] not in ("index", "chain") for item in self.writes)	keep	any	any
+repo	packages/repo/src/moxi_repo/api.py	if any((repo.git_dir / name).is_dir() for name in ("rebase-merge", "rebase-apply")):	keep	any	any
+repo	packages/repo/src/moxi_repo/api.py	if piece_ids or any(map(everywhere, EVERYWHERE)):	keep	any	any
+repo	packages/repo/src/moxi_repo/api.py	return set()	keep	set	set
+repo	packages/repo/src/moxi_repo/api.py	seeded = sorted(set(changes) - set(planned.get(piece.id, {})))	keep	set	set
+repo	packages/repo/src/moxi_repo/api.py	seeded=set(changes), drawn=_drawn(piece.id))	keep	set	set
+repo	packages/repo/src/moxi_repo/api.py	if not any(pid in state.pieces for pid in RULE_LINES):	keep	any	any
 repo	packages/repo/src/moxi_repo/checks.py	and any(_covers(sp, p) for sp in spec["paths"])]	keep	any	any
 repo	packages/repo/src/moxi_repo/checks.py	if any(row.state in ("warn", "fail") for row in out):	keep	any	any
 repo	packages/repo/src/moxi_repo/checks.py	left = set(item["left"])	keep	set	set
@@ -8474,6 +8491,11 @@ repo	packages/repo/src/moxi_repo/gitconf.py	set_enabled	kwonly	value	value
 repo	packages/repo/src/moxi_repo/gitconf.py	set_enabled	name	value	enabled
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set(moved)	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	for event in sorted(set(state.entries) - set(events))]	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	gone: set[Path] = set()	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	plan.steps += _plan_settle(repo.hooks_dir, moved if repo.hooks_inside else set(), keep,	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	plan.steps += _plan_settle(repo.stray_dir, moved - keep, set(), gone)	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	or any(_present(d / (event + shim.LOCAL)) and d / (event + shim.LOCAL) not in gone	keep	any	any
 repo	packages/repo/src/moxi_repo/gitrun.py	"""One changed path. `status` is git's letter (`A`, `M`, `D`, `R`, `T`, ...);	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	-	name	environment	git_env
 repo	packages/repo/src/moxi_repo/gitrun.py	_REMOTE_VERBS = frozenset({"update", "prune", "show", "set-head"})	keep	show	show
@@ -8494,9 +8516,29 @@ repo	packages/repo/src/moxi_repo/page.py	"refused_passes": lb.Out("int", nullabl
 repo	packages/repo/src/moxi_repo/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
 repo	packages/repo/src/moxi_repo/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 repo	packages/repo/src/moxi_repo/page.py	_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	_COUNT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"existing_hook": lb.Out("string", mark="path", nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"rules": lb.Out("list", items=_SAYS, nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"home": lb.Out("string", mark="path", nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"refused": lb.Out("list", items=REFUSED),	keep	refused	refused
+repo	packages/repo/src/moxi_repo/page.py	"unindexed": lb.Out("list", items=UNINDEXED, nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"mode_change": lb.Out("table", items={"from": _TEXT, "to": _TEXT}, nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"refusal": lb.Out("table", items={"code": _MAYBE, "text": _SAYS}, nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	}, nullable=True)	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	#: An act's answer: `outcome` is `done`, `nothing`, `changed` (with the new `plan`),	keep	changed	changed
+repo	packages/repo/src/moxi_repo/page.py	#: `refused` (`refusal` its code and text), `partial` (`refusal` the text of a failure	keep	refused	refused
+repo	packages/repo/src/moxi_repo/page.py	"pieces": lb.Field("string", required=False,	keep	required	required
+repo	packages/repo/src/moxi_repo/page.py	"pieces": lb.Field("list", required=False, max=PIECES_MAX,	keep	required	required
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_repo	name	err	unexpected_exc
 repo	packages/repo/src/moxi_repo/pagehandlers.py	gather	name	err	unexpected_exc
+repo	packages/repo/src/moxi_repo/pagehandlers.py	refused = [{"id": pid, "why": why} for pid, why in found["refused"].items()]	keep	refused	refused
+repo	packages/repo/src/moxi_repo/pagehandlers.py	`offered`, `refused` and `unindexed`. Never raises."""	keep	refused	refused
+repo	packages/repo/src/moxi_repo/pagehandlers.py	value = {"today": _today(), "home": _home(), "offered": offered, "refused": refused,	keep	refused	refused
+repo	packages/repo/src/moxi_repo/pagehandlers.py	line = found.api.check(_places)	keep	ok	ok
+repo	packages/repo/src/moxi_repo/pagehandlers.py	return _answer("refused", text=line)	keep	refused	refused
+repo	packages/repo/src/moxi_repo/pagehandlers.py	return _answer("changed", plan=exc.plan)	keep	changed	changed
+repo	packages/repo/src/moxi_repo/pagehandlers.py	return _answer("partial" if exc.partial else "refused", code=exc.reason,	keep	refused	refused
 repo	packages/repo/src/moxi_repo/pieces.py	"""What a piece returns. Make one with `ok()`, `refuse()`, `notice()` or `record()`."""	keep	record	record
 repo	packages/repo/src/moxi_repo/pieces.py	FAIL_POLICIES = ("closed", "open")	keep	closed	closed
 repo	packages/repo/src/moxi_repo/pieces.py	HookContext.git	name	input	stdin_data
@@ -8507,6 +8549,7 @@ repo	packages/repo/src/moxi_repo/pieces.py	if any(v == "" for v in values):	keep
 repo	packages/repo/src/moxi_repo/pieces.py	return cls("record", (str(line),))	keep	record	record
 repo	packages/repo/src/moxi_repo/pieces.py	unknown = sorted(set(map(str, value)) - DECLARATION_KEYS)	keep	set	set
 repo	packages/repo/src/moxi_repo/projects.py	return bool(arg) and not any(s in arg for s in seps) and not arg.startswith("~")	keep	any	any
+repo	packages/repo/src/moxi_repo/projects.py	repo = api._status_of(where, in_index=where.key in index, version=version, good=good,	keep	in_index	in_index
 repo	packages/repo/src/moxi_repo/run.py	_fits	kwonly	refusing	refusing
 repo	packages/repo/src/moxi_repo/run.py	_flag	kwonly	value	value
 repo	packages/repo/src/moxi_repo/run.py	_flag	name	value	enabled
@@ -8531,11 +8574,20 @@ repo	packages/repo/tests/conftest.py	git	name	input	stdin_data
 repo	packages/repo/tests/conftest.py	monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))	keep	find	find
 repo	packages/repo/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
+repo	packages/repo/tests/repo_page_kit.py	done = subprocess.run(list(argv), cwd=cwd or shell.env["HOME"],	keep	HOME	HOME
+repo	packages/repo/tests/repo_page_kit.py	repo.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/repo_page_kit.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
+repo	packages/repo/tests/repo_page_kit.py	hook.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_api_reexports.py	assert set(api.REEXPORTS) == set(NAMES)	keep	set	set
 repo	packages/repo/tests/test_api_reexports.py	assert set(moxi_repo.EXPORTS) <= set(api.REEXPORTS)	keep	set	set
 repo	packages/repo/tests/test_api_reexports.py	return set(json.loads(done.stdout.splitlines()[-1]))	keep	set	set
 repo	packages/repo/tests/test_browser_page.py	assert any(REPOS in url for url in check.requests), check.requests	keep	any	any
 repo	packages/repo/tests/test_browser_page.py	repo = Path(ui_shell.env["HOME"]) / "alpha-notes"	keep	HOME	HOME
+repo	packages/repo/tests/test_browser_questions.py	for text in ("says no", "refused"):	keep	refused	refused
+repo	packages/repo/tests/test_browser_questions.py	(notes / "notes").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_browser_questions.py	assert "refused" in run_pass("c.md", {"DEMO_PREPARE": "refuse"})	keep	refused	refused
+repo	packages/repo/tests/test_browser_whole.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
+repo	packages/repo/tests/test_browser_whole.py	texts = set()	keep	set	set
 repo	packages/repo/tests/test_cli.py	assert gitconf.read(gitconf.resolve(repo)).sections == set()	keep	set	set
 repo	packages/repo/tests/test_cli.py	assert set(found["refused"]) == {"demo/camel", "demo/reserved"}	keep	set	set
 repo	packages/repo/tests/test_commit_proof.py	"commit-msg", "closed", 20)	keep	closed	closed
@@ -8566,6 +8618,7 @@ repo	packages/repo/tests/test_commit_records.py	release.set()	keep	set	set
 repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="backup", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="origin", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_commit_records.py	took.set()	keep	set	set
+repo	packages/repo/tests/test_commit_records.py	assert moxi_repo.commit(spec(repo, prepare=PREPARE)).status == "refused"	keep	refused	refused
 repo	packages/repo/tests/test_commit_rules.py	assert any("Round" in p for p in problems), problems	keep	any	any
 repo	packages/repo/tests/test_commit_rules.py	assert any('line 1 has "TAG-12"' in p for p in problems), problems	keep	any	any
 repo	packages/repo/tests/test_commit_rules.py	imported = set()	keep	set	set
@@ -8660,6 +8713,9 @@ repo	packages/repo/tests/test_installs.py	demo.act(lint="raise", watch="record")
 repo	packages/repo/tests/test_installs.py	demo.act(watch="record")	keep	record	record
 repo	packages/repo/tests/test_installs.py	deny(bare, on=True)	use	on=	enabled=
 repo	packages/repo/tests/test_installs.py	site.module("ears", package="ears_module")	keep	package	package
+repo	packages/repo/tests/test_listing.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_listing.py	assert len(set(api.PROBLEM_CODES)) == len(api.PROBLEM_CODES) == 15	keep	set	set
+repo	packages/repo/tests/test_listing.py	("fail", "closed"), ("order", "10"), ("enabled", "true")):	keep	closed	closed
 repo	packages/repo/tests/test_page.py	"pre-commit", "closed", 20, True)	keep	closed	closed
 repo	packages/repo/tests/test_page.py	api.index_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_page.py	assert set(body) == {"now", "state", "detail", "repos"}	keep	set	set
@@ -8667,11 +8723,51 @@ repo	packages/repo/tests/test_page.py	assert set(listed) == {str(broken_repo), s
 repo	packages/repo/tests/test_page.py	assert set(module.OPTIONAL) == {"ui", "projects"}	keep	set	set
 repo	packages/repo/tests/test_page.py	inner = lb.app(page.PAGE, module="repo", server_id=SERVER_ID, strict=True)	keep	strict	strict
 repo	packages/repo/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+repo	packages/repo/tests/test_page.py	assert set(body) == {"now", "today", "home", "state", "detail", "repos", "offered",	keep	set	set
+repo	packages/repo/tests/test_page.py	"refused", "unindexed"}	keep	refused	refused
+repo	packages/repo/tests/test_page.py	"""`offered` and `refused` as the route gives them, from `api.available()`."""	keep	refused	refused
+repo	packages/repo/tests/test_page.py	return offered, [{"id": pid, "why": why} for pid, why in found["refused"].items()]	keep	refused	refused
+repo	packages/repo/tests/test_page.py	"refused": refused, "unindexed": []}	keep	refused	refused
+repo	packages/repo/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp_path / "the-home"))	keep	HOME	HOME
+repo	packages/repo/tests/test_page.py	monkeypatch.setenv("HOME", "")	keep	HOME	HOME
+repo	packages/repo/tests/test_page.py	"fail": "closed", "order": 20, "doc": "A closed gate.",	keep	closed	closed
+repo	packages/repo/tests/test_page.py	refused = {r["id"]: r["why"] for r in body["refused"]}	keep	refused	refused
+repo	packages/repo/tests/test_page.py	assert (body["offered"], body["refused"]) == offered_now()	keep	refused	refused
+repo	packages/repo/tests/test_page.py	assert (body["state"], body["offered"], body["refused"]) == ("up", [], [])	keep	refused	refused
+repo	packages/repo/tests/test_page.py	assert set(rows) == {str(keyed), str(held)}	keep	set	set
+repo	packages/repo/tests/test_page_acts.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+repo	packages/repo/tests/test_page_acts.py	assert set(answer) == {"outcome", "lines", "problems", "chain", "plan", "refusal"}	keep	set	set
+repo	packages/repo/tests/test_page_acts.py	demo.mp.setenv("HOME", str(copy))	keep	HOME	HOME
+repo	packages/repo/tests/test_page_acts.py	assert "refused" in planned("enable", repo, status=422)	keep	refused	refused
+repo	packages/repo/tests/test_page_acts.py	assert "refused" in planned("enable", repo, ["demo/gate", "demo/watch"], status=422)	keep	refused	refused
+repo	packages/repo/tests/test_page_acts.py	assert answer["outcome"] == "changed" and answer["refusal"] is None	keep	changed	changed
+repo	packages/repo/tests/test_page_acts.py	assert answer["outcome"] == "refused"	keep	refused	refused
+repo	packages/repo/tests/test_page_acts.py	assert (answer["outcome"], answer["refusal"]["code"]) == ("refused", "busy")	keep	refused	refused
+repo	packages/repo/tests/test_page_acts.py	assert answer["outcome"] == "refused", (case, act)	keep	refused	refused
+repo	packages/repo/tests/test_page_acts.py	assert answer["outcome"] == "refused" and answer["refusal"]["code"] is None	keep	refused	refused
 repo	packages/repo/tests/test_pieces.py	"fail": "closed", "order": "50"}	keep	closed	closed
 repo	packages/repo/tests/test_pieces.py	(dict(GOOD, fail="soft"), "fail 'soft' is not"),	keep	fail	fail
 repo	packages/repo/tests/test_pieces.py	GOOD = {"event": "pre-commit", "target": "pkg.mod:fn", "fail": "closed"}	keep	closed	closed
 repo	packages/repo/tests/test_pieces.py	assert set(good) == {"demo/lint"}	keep	set	set
 repo	packages/repo/tests/test_pieces.py	entries = [_Entry("demo.gate", dict(GOOD, fail="soft")), _Entry("demo.gate", GOOD)]	keep	fail	fail
+repo	packages/repo/tests/test_plan_add.py	assert any("pre-commit.local" in line for line in report.lines[1:])	keep	any	any
+repo	packages/repo/tests/test_plan_add.py	git(repo, "config", "moxi-repo.piece.demo/lint.fail", "closed")	keep	closed	closed
+repo	packages/repo/tests/test_plan_add.py	assert (item["piece"], item["from"], item["to"]) == ("demo/lint", "closed", "open")	keep	closed	closed
+repo	packages/repo/tests/test_plan_add.py	assert any(i["key"] == "moxi-repo.mode" and i["to"] == "shim" for i in plan["writes"])	keep	any	any
+repo	packages/repo/tests/test_plan_add.py	answers.append("changed")	keep	changed	changed
+repo	packages/repo/tests/test_plan_add.py	thread.join(timeout=60)	keep	timeout	timeout
+repo	packages/repo/tests/test_plan_add.py	assert sorted(answers) in (["already", "done"], ["changed", "done"])	keep	changed	changed
+repo	packages/repo/tests/test_plan_add.py	(repo / ".git" / "hooks").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_plan_add.py	api.index_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_plan_enable_refresh.py	git(repo, "config", "moxi-repo.piece.demo/lint.fail", "closed")	keep	closed	closed
+repo	packages/repo/tests/test_plan_enable_refresh.py	"moxi-repo.piece.demo/lint.fail", "closed", "open")	keep	closed	closed
+repo	packages/repo/tests/test_plan_enable_refresh.py	git(repo, "config", f"moxi-repo.piece.{key}", "open" if "gate" in key else "closed")	keep	closed	closed
+repo	packages/repo/tests/test_plan_sync.py	out = set()	keep	set	set
+repo	packages/repo/tests/test_plan_sync.py	out |= {key for key in set(old) | set(new) if old.get(key) != new.get(key)}	keep	set	set
+repo	packages/repo/tests/test_plan_sync.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_plan_sync.py	proc.wait(timeout=30)	keep	timeout	timeout
+repo	packages/repo/tests/test_plan_sync.py	assert any(str(repo) in p and "changing repo's git hooks" in p	keep	any	any
+repo	packages/repo/tests/test_plan_sync.py	assert sorted(taken) == sorted(set(taken)), taken	keep	set	set
 repo	packages/repo/tests/test_projects.py	Projects.held	name	holder	holder_conn
 repo	packages/repo/tests/test_projects.py	assert pieces_of(alpha) == set()	keep	set	set
 repo	packages/repo/tests/test_projects.py	assert pieces_of(beta) == {"demo/gate", "demo/lint"} and pieces_of(alpha) == set()	keep	set	set
@@ -8697,7 +8793,9 @@ repo	packages/repo/tests/test_records.py	demo.act(lint="raise", watch="record")	
 repo	packages/repo/tests/test_records.py	demo.act(watch="record")	keep	record	record
 repo	packages/repo/tests/test_records.py	out = set()	keep	set	set
 repo	packages/repo/tests/test_records.py	out.add("record")	keep	record	record
+repo	packages/repo/tests/test_rules.py	assert runs == without and not any("write-tree" in argv for argv in runs)	keep	any	any
 repo	packages/repo/tests/test_settings.py	assert cli.main(["config", "repo", "show", "--json"]) == 0	keep	show	show
+repo	packages/repo/tests/test_within.py	assert pagehandlers.within({"HOME": str(tmp_path)}) is None	keep	HOME	HOME
 rounds	packages/rounds/src/moxi_rounds/api.py	"own_commits", "hand_merge", "idle", "shares", "problem"}`. `state` is `gone`,	use	"own_commits"	"has_own_commits"
 rounds	packages/rounds/src/moxi_rounds/api.py	-	name	round	round_data
 rounds	packages/rounds/src/moxi_rounds/api.py	_CLOSED = "closed"	keep	closed	closed
@@ -13249,6 +13347,8 @@ turns	packages/turns/src/moxi_turns/claude_setup.py	data = json.dumps({"command"
 turns	packages/turns/src/moxi_turns/claude_setup.py	if not any(p.path == key and p.state == "ok" for p in done):	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_setup.py	install_plugins	name	folder	marketplace_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	installed = set() if moved else {	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_setup.py	out, _ = proc.communicate(timeout=timeout_s)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/claude_setup.py	proc.wait(timeout=1.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/claude_setup.py	return any(isinstance(p, dict) and p.get("scope") == "user"	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_setup.py	rows	name	folder	plugin_root_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	write_endpoint_file	name	out	fh
@@ -13589,11 +13689,11 @@ turns	packages/turns/src/moxi_turns/page.py	"pid": lb.Out("int", nullable=True),
 turns	packages/turns/src/moxi_turns/page.py	"sessions": lb.Out("list", items=SESSION),	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	"stale": _FLAG,	keep	stale	stale
 turns	packages/turns/src/moxi_turns/page.py	"trouble": lb.Out("string", mark="redact", nullable=True),	keep	nullable=	nullable=
-turns	packages/turns/src/moxi_turns/page.py	#: finished; `detail` is null unless the last scan failed; `sessions` is newest first.	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	AGENTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	FACTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	GET /api/events     the stream; its one topic, `sessions`, is the same list without	keep	sessions	sessions
-turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "at": _MAYBE_WHEN})	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	REACH = lb.Out("table", nullable=True, items={"claude": _MAYBE, "codex": _FLAG})	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "session_id": _MAYBE,	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	TOPIC = "sessions"	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
@@ -13607,7 +13707,6 @@ turns	packages/turns/src/moxi_turns/pagehandlers.py	__all__ = ["FIRST_S", "event
 turns	packages/turns/src/moxi_turns/pagehandlers.py	await self.snapshot.changed()	use	changed	on_changed
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.kick.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.loop.call_soon_threadsafe(self.kick.set)	keep	set	set
-turns	packages/turns/src/moxi_turns/pagereader.py	"""The list now: `listed`, `detail` and `sessions`, newest first."""	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	"stale": _need(facts.stale, _flag, "facts.stale"),	keep	stale	stale
 turns	packages/turns/src/moxi_turns/pagereader.py	# A session `sessions()` found knows its capabilities from its probe's hello; reading	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	- one scanner thread calls `sessions()` every `RESCAN_S` seconds, since no central registry	keep	sessions	sessions
@@ -13624,9 +13723,9 @@ turns	packages/turns/src/moxi_turns/pagereader.py	held = list(self._held.values(
 turns	packages/turns/src/moxi_turns/pagereader.py	held = self._held.get(key)	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	held = self._held[key] = _Held(self, key, session)	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	held, self._held = list(self._held.values()), {}	keep	_held	_held
+turns	packages/turns/src/moxi_turns/pagereader.py	if facts.stale is not True:	keep	stale	stale
 turns	packages/turns/src/moxi_turns/pagereader.py	if self._held.get(held.key) is not held:	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	if self._started:	keep	_started	_started
-turns	packages/turns/src/moxi_turns/pagereader.py	return {"listed": listed, "detail": detail, "sessions": rows}	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	rows = [one.row() for one in self._held.values()]	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	self._dropped = {k: t for k, t in self._dropped.items() if t > now}	keep	_dropped	_dropped
 turns	packages/turns/src/moxi_turns/pagereader.py	self._dropped: dict[str, float] = {}	keep	_dropped	_dropped
@@ -13643,6 +13742,7 @@ turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._failed(self, "wat
 turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._failed(self, name, exc)	use	_failed	_on_failed
 turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._gone(self, gone)	use	gone	said=gone
 turns	packages/turns/src/moxi_turns/pagereader.py	self.stopped.set()	keep	set	set
+turns	packages/turns/src/moxi_turns/pagereader.py	while the ledger moved (`stale`) is read again at once, up to `STALE_REREADS` times;	keep	stale	stale
 turns	packages/turns/src/moxi_turns/procs.py	seen: set[int] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/protocol.py	"""Ask the version 1 endpoint in `directory` for its hello, with version 1's own line	keep	directory	directory
 turns	packages/turns/src/moxi_turns/protocol.py	"""The `hello.json` in `directory` as a dict, or None when it is missing or does not	keep	directory	directory
@@ -13802,8 +13902,9 @@ turns	packages/turns/tests/test_bound_grant.py	ep, fake = make_endpoint(session_
 turns	packages/turns/tests/test_bound_grant.py	held.set()	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	release.set()	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	return turns.launch_additions(harness, cwd="/work", env={"HOME": "/home/someone"}, **kw)	keep	HOME	HOME
-turns	packages/turns/tests/test_browser_page.py	assert any(SESSIONS in url for url in check.requests), check.requests	keep	any	any
+turns	packages/turns/tests/test_browser_page.py	assert any("/m/turns/api/sessions" in url for url in check.requests), check.requests	keep	any	any
 turns	packages/turns/tests/test_browser_page.py	expect(found).to_have_count(1, timeout=APPEAR_MS)	keep	timeout	timeout
+turns	packages/turns/tests/test_browser_page.py	expect(reach).to_have_text(START_SMALL, timeout=20_000)	keep	timeout	timeout
 turns	packages/turns/tests/test_browser_page.py	expect(rows(panel)).to_have_count(2, timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_browser_page.py	expect(state).to_have_attribute("data-state", "empty", timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	"environ"})	keep	environ	environ
@@ -14173,18 +14274,20 @@ turns	packages/turns/tests/test_opencode_host.py	until(lambda: seen.extend(_drai
 turns	packages/turns/tests/test_opencode_host.py	while not isinstance(events.get(timeout=5), TurnEnded):	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	world.fake.compacted(h.session_id)	keep	compacted	compacted
 turns	packages/turns/tests/test_opencode_host.py	world.fake.sessions.clear()	keep	sessions	sessions
-turns	packages/turns/tests/test_page.py	"listed": True, "detail": None, "sessions": []}	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	"""A session stand-in whose facts readings are stale for the first `stale` reads."""	keep	stale	stale
 turns	packages/turns/tests/test_page.py	"turn": None, "agents": 0, "draft": False, "at": time.time(), "stale": False,	keep	stale	stale
+turns	packages/turns/tests/test_page.py	"turn_started_at", "agents", "draft", "stale",	keep	stale	stale
+turns	packages/turns/tests/test_page.py	@pytest.mark.parametrize(("stale", "calls", "kept_stale"), [	keep	stale	stale
 turns	packages/turns/tests/test_page.py	[row] = data["sessions"]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert data["listed"] is True and data["sessions"] == []	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	assert facts.stale is kept_stale	keep	stale	stale
 turns	packages/turns/tests/test_page.py	assert facts["agents"] == 1 and facts["draft"] is False and facts["stale"] is False	keep	stale	stale
-turns	packages/turns/tests/test_page.py	assert list(page.FACTS.items) == ["turn_number", "turn_open", "agents", "draft", "stale",	keep	stale	stale
 turns	packages/turns/tests/test_page.py	assert list(routes["/api/events"]["topics"]) == ["sessions"]	keep	sessions	sessions
-turns	packages/turns/tests/test_page.py	assert list(routes["/api/sessions"]["returns"]) == ["now", "listed", "detail", "sessions"]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert name == "sessions"	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert name == "sessions" and keys(data) == [a.dir.name]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert not set(page.SESSION.items) & {"address", "dir", "nonce", "endpoint_pid", "earlier"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert out["refused"].startswith("turns' page needs the ui module")	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert pagehandlers._reader_now._held[key].ended is not None	keep	_held	_held
 turns	packages/turns/tests/test_page.py	assert pagereader.read_error(set()) is None	keep	set	set
 turns	packages/turns/tests/test_page.py	assert reader.value()["sessions"] == []	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert routes["/api/events"]["topics"]["sessions"]["items"] == {	keep	sessions	sessions
@@ -14194,10 +14297,17 @@ turns	packages/turns/tests/test_page.py	assert set(module.OPTIONAL) == {"codex",
 turns	packages/turns/tests/test_page.py	assert {"deliver", "agents", "steer"} <= set(row["capabilities"])	keep	set	set
 turns	packages/turns/tests/test_page.py	await stream.until(lambda d: len(d["sessions"]) == 2, 5)	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	by `sessions()` through a `hello.json` of its own. `answers[method]` is called with the	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	ep.turn_started("t-held", None, held=True)	keep	held=	held=
 turns	packages/turns/tests/test_page.py	failing.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	held = pagehandlers._reader_now._held[key]	keep	_held	_held
+turns	packages/turns/tests/test_page.py	held.dirty.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	if check(data):	keep	ok	ok
 turns	packages/turns/tests/test_page.py	inner = lb.app(page.PAGE, module="turns", server_id=SERVER_ID, strict=True)	keep	strict	strict
 turns	packages/turns/tests/test_page.py	monkeypatch.setattr(client, "sessions", broken)	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held[key].dirty.set()	keep	_held	_held
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held[key].dirty.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	reach.go.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	return SimpleNamespace(stale=self.calls <= self.stale, n=self.calls)	keep	stale	stale
 turns	packages/turns/tests/test_page.py	return [row["key"] for row in data["sessions"]]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	return next((row for row in data["sessions"] if row["key"] == key), None)	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
@@ -14205,6 +14315,9 @@ turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=Tr
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	super().set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dirty.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.go.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.stale = stale	keep	stale	stale
+turns	packages/turns/tests/test_page.py	until(lambda: any(r and r["claude"] == "start" for r in notified))	keep	any	any
 turns	packages/turns/tests/test_settings.py	assert cli.main(["config", "turns", "show", "--json"]) == 0	keep	show	show
 turns	packages/turns/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
 turns	packages/turns/tests/test_settings.py	assert not any(hurt["stays"] for hurt in hurts.values())	keep	any	any
@@ -16484,3 +16597,10 @@ rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
+turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
+turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_browser_states.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	first.listed(set(), reach="absent")	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	panel.listed(set())	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	texts = set()	keep	set	set

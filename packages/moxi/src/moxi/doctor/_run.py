@@ -31,7 +31,9 @@
         step that fixes it (`terminal_row`);
     12. each `moxi.doctor` extension entry's rows;
     13. each module's `DOCTOR` rows;
-    14. with `costs=True`, each module's active daemons against its `BUDGETS`.
+    14. with `costs=True`, each module's active daemons against its `BUDGETS`. On
+        Windows their open handles are shown and never compared with the `fds` budget,
+        a POSIX fd limit: a handle count also holds events, threads and registry keys.
 
 Module names restrict the rows to those modules; `moxi` names the core's own rows. A
 `DOCTOR` target and a `moxi.doctor` entry run in a worker thread with `DOCTOR_SECONDS`
@@ -74,6 +76,9 @@ SAMPLE_MIN_AGE = 600.0
 SAMPLE_AGE = 3600.0
 #: How many interpreter starts the floor is the median of.
 FLOOR_RUNS = 5
+
+#: Whether `process_measure` counts open handles in place of open fds; tests set it.
+_WINDOWS = sys.platform == "win32"
 
 _RANK = {"ok": 0, "off": 1, "warn": 2, "fail": 3}
 _SIZES = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3}
@@ -1074,14 +1079,18 @@ def floor_ms() -> float:
 
 class Measure:
     """What one daemon costs now: CPU seconds since it started, memory plus swap in
-    bytes, open files (or handles), and its start time when known."""
+    bytes, open fds, and its start time when known. On Windows `fds` is None and
+    `handles` holds its open handles, which also count events, threads and registry
+    keys; elsewhere `handles` is None."""
 
-    __slots__ = ("cpu", "memory", "fds", "started")
+    __slots__ = ("cpu", "memory", "fds", "handles", "started")
 
-    def __init__(self, cpu: float, memory: int, fds: int, started: float | None = None):
+    def __init__(self, cpu: float, memory: int, fds: int | None,
+                 started: float | None = None, *, handles: int | None = None):
         self.cpu = cpu
         self.memory = memory
         self.fds = fds
+        self.handles = handles
         self.started = started
 
 
@@ -1115,10 +1124,13 @@ def _check_costs(ctx: _Context) -> list[Row]:
 
 def _module_costs(found, active: list, samples: list[dict], now: float,
                   taken: list[dict]) -> list[Row]:
-    """One module's active daemons, summed, against its `BUDGETS`."""
+    """One module's active daemons, summed, against its `BUDGETS`. Open handles get a
+    row of their own, "N open handles", never compared with the `fds` budget; the `fds`
+    row is left out when every measured daemon gave handles."""
     module = found.name
     rows = []
-    rate = memory = fds = 0
+    rate = memory = fds = handles = 0
+    had_fds = had_handles = False
     rated = True
     hows = set()
     for state in active:
@@ -1133,7 +1145,12 @@ def _module_costs(found, active: list, samples: list[dict], now: float,
         one, how = idle_rate(samples, unit, got.cpu, now, since)
         taken.append({"unit": unit, "at": _stamp(now), "cpu_s": round(got.cpu, 3)})
         memory += got.memory
-        fds += got.fds
+        if got.fds is not None:
+            fds += got.fds
+            had_fds = True
+        if got.handles is not None:
+            handles += got.handles
+            had_handles = True
         if one is None:
             rated = False
         else:
@@ -1152,8 +1169,11 @@ def _module_costs(found, active: list, samples: list[dict], now: float,
     rows.append(_budget_row(module, "rss", over=cap is not None and memory > cap,
                             measured=f"{cli._size_text(memory)} of memory and swap",
                             budget=budgets.get("rss")))
-    rows.append(_budget_row(module, "fds", over="fds" in budgets and fds > budgets["fds"],
-                            measured=f"{fds} open files", budget=budgets.get("fds")))
+    if had_fds or not had_handles:
+        rows.append(_budget_row(module, "fds", over="fds" in budgets and fds > budgets["fds"],
+                                measured=f"{fds} open files", budget=budgets.get("fds")))
+    if had_handles:
+        rows.append(Row(module, "cost handles", "ok", f"{handles} open handles"))
     return rows
 
 
@@ -1242,7 +1262,7 @@ def cgroup_measure(pid: int) -> Measure | None:
 
 def process_measure(pid: int) -> Measure | str:
     """psutil over process `pid` and its children: CPU times, resident memory (and swap
-    where psutil gives it) and open files (handles on Windows)."""
+    where psutil gives it) and open fds, or on Windows open handles and no fds."""
     import psutil
 
     try:
@@ -1252,21 +1272,23 @@ def process_measure(pid: int) -> Measure | str:
     except psutil.Error as exc:
         return f"process {pid}: {_describe(exc)}"
     cpu = 0.0
-    memory = fds = 0
+    memory = opened = 0
     for proc in procs:
         try:
             with proc.oneshot():
                 times = proc.cpu_times()
                 cpu += times.user + times.system
                 memory += proc.memory_info().rss
-                fds += proc.num_handles() if os.name == "nt" else proc.num_fds()
+                opened += proc.num_handles() if _WINDOWS else proc.num_fds()
         except psutil.Error:
             continue
         try:
             memory += getattr(proc.memory_full_info(), "swap", 0)
         except (psutil.Error, OSError):
             pass
-    return Measure(cpu, memory, fds, started)
+    if _WINDOWS:
+        return Measure(cpu, memory, None, started, handles=opened)
+    return Measure(cpu, memory, opened, started)
 
 
 def _started(pid: int) -> float | None:

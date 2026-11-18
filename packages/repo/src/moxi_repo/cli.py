@@ -184,42 +184,15 @@ def _resolve_paths(args, action: str) -> None:
 def _with_keys(repos: list[dict], *, add_projects: bool = False) -> list[dict]:
     """Each listed repo with its project key (`project`, None when it is in no project or
     projects is off); with `add_projects`, every project's repo not listed yet, marked not
-    indexed. A projects error leaves the key empty and prints one line."""
-    from moxi_repo import gitconf
-
+    indexed (`projects.with_projects`). A projects error leaves the key empty and prints
+    one line."""
     found = projects.api()
-    for repo in repos:
-        repo["project"] = None
-    if found is None:
-        if add_projects:
-            print(f"repo: projects isn't installed, so --projects adds nothing; run: "
-                  f"{projects.INSTALL}", file=sys.stderr)
-        return repos
-    said = set()
-
-    def say(line):
-        if line and line not in said:
-            said.add(line)
-            print(f"repo: {line}", file=sys.stderr)
-
-    for repo in repos:
-        repo["project"], why = projects.key_for(found, repo["root"])
-        say(why)
-    if add_projects:
-        listed, why = projects.project_roots(found)
-        say(why)
-        seen = {gitconf.key_of(r["common_dir"]) for r in repos if r.get("common_dir")}
-        for key, root in listed:
-            try:
-                where = gitconf.resolve(root)
-            except gitconf.NotARepo:
-                continue
-            if where.key in seen:
-                continue
-            seen.add(where.key)
-            for repo in api.status(where.root):
-                repo["project"] = key
-                repos.append(repo)
+    if found is None and add_projects:
+        print(f"repo: projects isn't installed, so --projects adds nothing; run: "
+              f"{projects.INSTALL}", file=sys.stderr)
+    repos, lines = projects.with_projects(repos, found, add=add_projects)
+    for line in lines:
+        print(f"repo: {line}", file=sys.stderr)
     return repos
 
 

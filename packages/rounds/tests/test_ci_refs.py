@@ -50,18 +50,21 @@ def remote_refs(repo, bare: Path) -> list[str]:
 
 @pytest.fixture
 def configure(write_config, tmp_path):
-    """`configure(ref="ci/{branch}", extra="")`: the config with proj-a's check and a
-    `ci` that pushes to `origin` and reads no run."""
+    """`configure(ref="ci/{branch}", full_ref=None, extra="")`: the config with proj-a's
+    check and a `ci` that pushes to `origin` and reads no run."""
     ids = shlex.join([PY, "-c", f"print({json.dumps(json.dumps([{'id': 11, 'path': FLOW}]))})"])
     status = shlex.join([PY, "-c", "print('[]')"])
 
-    def write(ref: str | None = "ci/{branch}", extra: str = "") -> None:
+    def write(ref: str | None = "ci/{branch}", extra: str = "", *,
+              full_ref: str | None = None) -> None:
         full = shlex.join([PY, "-c", "print('full ran')"])
         table = (f'workflows = ["{FLOW}"], local = "none", remote = "origin", '
                  f"status = {json.dumps(shlex.split(status))}, "
                  f"ids = {json.dumps(shlex.split(ids))}")
         if ref is not None:
             table += f", ref = {json.dumps(ref)}"
+        if full_ref is not None:
+            table += f", full_ref = {json.dumps(full_ref)}"
         write_config(f"{extra}[projects.proj-a]\ncheck = {{ command = {json.dumps(full)} }}\n"
                      f"ci = {{ {table} }}\n")
 
@@ -379,6 +382,142 @@ def test_refs_is_refused_without_leftovers(capsys):
 
 def test_the_session_start_sweep_never_reaches_a_remote():
     assert "--refs" not in listener.ARGV
+
+
+# -- the second template ----------------------------------------------------------------
+
+FULL = "ci-full/{branch}"
+
+
+def test_a_build_s_end_removes_the_name_full_ref_gives_its_branch_and_nothing_else(
+        pushed, repo, bare, configure, capsys):
+    configure(full_ref=FULL)
+    _path, tree = pushed
+    repo.git("push", "-q", "origin", f"{tree.rev()}:refs/heads/ci-full/work")
+    for ref in ("refs/heads/main", "refs/heads/ci/main", "refs/heads/ci-full/main",
+                "refs/heads/other", "refs/tags/ci-full/work"):
+        repo.git("push", "-q", "origin", f"main:{ref}")
+    capsys.readouterr()
+
+    assert main(["drop", ROUND, "B1", "--by", "operator", "--record", "comms:1234567"]) == 0
+
+    said = capsys.readouterr().out
+    assert "ref removed origin ci/work" in said and "ref removed origin ci-full/work" in said
+    assert remote_refs(repo, bare) == [
+        "refs/heads/ci-full/main", "refs/heads/ci/main", "refs/heads/main",
+        "refs/heads/other", "refs/tags/ci-full/work"]
+
+
+def test_a_finished_build_s_ci_full_ref_goes_too_and_one_never_pushed_reads_absent(
+        pushed, repo, bare, configure, capsys):
+    path, tree = pushed
+    configure(full_ref=FULL)
+    checking.check(ROUND, "B1", by="coder", full=True)
+    verify(path, tree.rev())
+    assert remote_refs(repo, bare) == ["refs/heads/ci/work"]
+    capsys.readouterr()
+
+    assert main(["finish", ROUND, "B1"]) == 0
+
+    said = capsys.readouterr().out
+    assert "ref removed origin ci/work" in said
+    assert "ref absent origin ci-full/work" in said
+    assert remote_refs(repo, bare) == []
+
+
+def test_the_name_full_ref_gives_a_new_open_build_s_branch_is_kept(pushed, repo, bare,
+                                                                   tmp_path, configure):
+    configure(full_ref=FULL)
+    dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567", run_by="lead")
+    open_with(OTHER_ROUND, tmp_path, {"B1": "work"})
+    commissioning.commission(OTHER_ROUND, "B1", builder="coder", by="planner",
+                             existing=True)
+    repo.git("push", "-q", "origin", "work:refs/heads/ci-full/work")
+    folded = states.fold(log.read_round(pushed[0]))
+
+    refs = ci_refs.remove(folded, builds.current(folded, "B1"), settings.load())
+
+    assert [(one.ref, one.fate) for one in refs] == [
+        ("ci/work", ci_refs.ABSENT), ("ci-full/work", ci_refs.KEPT)]
+    assert f"{OTHER_ROUND} B1" in refs[1].why
+    assert remote_refs(repo, bare) == ["refs/heads/ci-full/work"]
+
+
+def test_with_no_into_and_no_open_build_both_templates_keep_the_target_s_ref(
+        pushed, repo, bare, configure, capsys):
+    dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567", run_by="lead")
+    configure(extra=ARMED, full_ref=FULL)
+    for ref in ("ci/main", "ci-full/main"):
+        repo.git("push", "-q", "origin", f"main:refs/heads/{ref}")
+    capsys.readouterr()
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    found = json.loads(capsys.readouterr().out)["refs"]["refs"]
+    assert sorted((one["ref"], one["fate"]) for one in found) == [
+        ("ci-full/main", ci_refs.KEPT), ("ci/main", ci_refs.KEPT)]
+    assert all("the target main" in one["why"] for one in found)
+    assert remote_refs(repo, bare) == ["refs/heads/ci-full/main", "refs/heads/ci/main"]
+
+
+def both_prefixes(repo) -> None:
+    """On the remote, beside B1's ci/work: under each prefix the target's ref, a stale
+    ref and a nested stale one; ci-full/work for B1; and refs under neither prefix: a
+    look-alike prefix, two whose tail holds one, main, and a tag under one."""
+    for ref in ("heads/ci/main", "heads/ci/stale", "heads/ci-full/main",
+                "heads/ci-full/stale", "heads/ci-full/a/b", "heads/ci-full/work",
+                "heads/ci-fullx/y", "heads/x/ci-full/y", "heads/x/refs/heads/ci-full/y",
+                "heads/other", "heads/main", "tags/ci-full/stale"):
+        repo.git("push", "-q", "origin", f"main:refs/{ref}")
+
+
+def test_the_sweep_lists_both_prefixes_and_judges_each_by_the_keep_rule(
+        pushed, repo, bare, configure, capsys):
+    configure(full_ref=FULL)
+    both_prefixes(repo)
+
+    assert main(["drop", "--leftovers", "--refs"]) == 0
+
+    said = capsys.readouterr().out
+    assert "ref kept origin ci-full/main: it is the ref of the target main" in said
+    assert ("ref kept origin ci-full/work: it is the ref of a build that has not ended: "
+            f"{ROUND} B1") in said
+    for ref in ("ci/stale", "ci-full/stale", "ci-full/a/b"):
+        assert f"ref would go origin {ref}\n" in said
+    assert "ci-fullx" not in said and "x/ci-full" not in said and " other" not in said
+    assert len(remote_refs(repo, bare)) == 13
+
+
+def test_an_armed_sweep_removes_stale_refs_under_both_prefixes_and_nothing_else(
+        pushed, repo, bare, configure, capsys):
+    configure(extra=ARMED, full_ref=FULL)
+    both_prefixes(repo)
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    found = json.loads(capsys.readouterr().out)["refs"]
+    assert sorted((one["ref"], one["fate"]) for one in found["refs"]) == [
+        ("ci-full/a/b", ci_refs.REMOVED), ("ci-full/main", ci_refs.KEPT),
+        ("ci-full/stale", ci_refs.REMOVED), ("ci-full/work", ci_refs.KEPT),
+        ("ci/main", ci_refs.KEPT), ("ci/stale", ci_refs.REMOVED),
+        ("ci/work", ci_refs.KEPT)]
+    assert remote_refs(repo, bare) == [
+        "refs/heads/ci-full/main", "refs/heads/ci-full/work", "refs/heads/ci-fullx/y",
+        "refs/heads/ci/main", "refs/heads/ci/work", "refs/heads/main",
+        "refs/heads/other", "refs/heads/x/ci-full/y", "refs/heads/x/refs/heads/ci-full/y",
+        "refs/tags/ci-full/stale"]
+
+
+def test_with_no_full_ref_the_sweep_lists_only_ref_s_prefix(pushed, repo, bare,
+                                                             configure, capsys):
+    configure(extra=ARMED)
+    both_prefixes(repo)
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    found = json.loads(capsys.readouterr().out)["refs"]["refs"]
+    assert sorted(one["ref"] for one in found) == ["ci/main", "ci/stale", "ci/work"]
+    assert "refs/heads/ci-full/stale" in remote_refs(repo, bare)
 
 
 def test_an_unreachable_remote_is_named_and_not_swept(pushed, repo, tmp_path, capsys):

@@ -163,7 +163,11 @@ members = ["packages/a", "packages/a-extra"]
 not-ready = {not_ready}
 check-workflow = "ci.yml"
 check-job = "linux"
+full-jobs = {full_jobs}
 """
+
+#: The `full-jobs` of the release workspace: a matrix leg and a job of its own.
+FULL_JOBS = ["other (windows-latest)", "secrets-windows"]
 
 
 def member_toml(name: str, version: str, deps=(), extras=None) -> str:
@@ -186,8 +190,11 @@ class Fake:
 
     def __init__(self):
         self.default_branch = "main"
-        # commit: [{"event", "branch", "jobs": [(job, conclusion)]}], one dict per run
+        # commit: [{"event", "branch", "jobs": [(job, conclusion)]}], one dict per run; a
+        # conclusion None is a job still running. A run's "earlier" holds the jobs of its
+        # earlier attempts, a list per attempt, which only `filter=all` answers with.
         self.runs: dict[str, list[dict]] = {}
+        self.full_jobs = list(FULL_JOBS)                   # each new run's, concluded success
         self.index: dict[str, dict[str, list[dict]]] = {}  # dist: {version: [file]}
         self.tags: list[str] = []
         self.broken: set[str] = set()                      # path prefixes answering 500
@@ -203,12 +210,14 @@ class Fake:
     def green(self, commit: str, job: str = "linux", conclusion: str = "success", *,
               event: str = "push", branch: str | None = None) -> None:
         """A job of the workflow run at `commit` from `event` on `branch` (default: the
-        default branch), the run made the first time it is named."""
+        default branch), the run made the first time it is named, holding then each of
+        `full_jobs` concluded `success`."""
         branch = branch or self.default_branch
         runs = self.runs.setdefault(commit, [])
         run = next((r for r in runs if (r["event"], r["branch"]) == (event, branch)), None)
         if run is None:
-            run = {"event": event, "branch": branch, "jobs": []}
+            run = {"event": event, "branch": branch,
+                   "jobs": [(name, "success") for name in self.full_jobs]}
             runs.append(run)
         run["jobs"].append((job, conclusion))
 
@@ -244,8 +253,13 @@ class Fake:
         if rest[:2] == ["actions", "runs"]:
             sha, _, n = rest[2].rpartition("-")
             runs = self.runs.get(sha, [])
-            jobs = runs[int(n)]["jobs"] if n.isdigit() and int(n) < len(runs) else []
-            return 200, {"jobs": [{"name": name, "conclusion": c} for name, c in jobs]}
+            run = runs[int(n)] if n.isdigit() and int(n) < len(runs) else {}
+            jobs = list(run.get("jobs", []))
+            if query.get("filter", ["latest"])[0] == "all":
+                jobs = [job for attempt in run.get("earlier", []) for job in attempt] + jobs
+            return 200, {"jobs": [{"name": name, "conclusion": c,
+                                   "status": "in_progress" if c is None else "completed"}
+                                  for name, c in jobs]}
         if rest[:3] == ["git", "matching-refs", "tags"]:
             prefix = "/".join(rest[3:])
             return 200, [{"ref": f"refs/tags/{t}"} for t in self.tags if t.startswith(prefix)]
@@ -306,8 +320,9 @@ def release_files(repo: Path, *, not_ready=(), a_version="0.1.0",
                   a_heading="## 0.1.0 (2026-01-05)") -> None:
     """Write the release workspace: `proj-a` and `proj-a-extra`, which requires
     `proj-a>=0.0.9` and has an extra wanting `proj-a>=0.9`."""
-    write(repo, "pyproject.toml", ROOT_TOML.format(not_ready=repr(list(not_ready))
-                                                   .replace("'", '"')))
+    write(repo, "pyproject.toml", ROOT_TOML.format(
+        not_ready=repr(list(not_ready)).replace("'", '"'),
+        full_jobs=repr(FULL_JOBS).replace("'", '"')))
     write(repo, "packages/a/pyproject.toml", member_toml("proj-a", a_version))
     write(repo, "packages/a/CHANGELOG.md",
           f"# Changelog\n\n## Unreleased\n\n{a_heading}\n\n- First.\n\n### Fixed\n\n- A fix.\n"
