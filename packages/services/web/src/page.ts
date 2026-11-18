@@ -624,10 +624,10 @@ export class ServicesPage extends LitElement {
       const said = transportSaid(answer.status, saidOf(answer.data));
       if (answer.status === 422 && row.ends_slots && (a.body.act === "stop" || a.body.act === "restart")) {
         refused = said.text;
-        return;
+      } else {
+        this.#told = { where: row.id, said: { tone: said.reread ? "warn" : "error", lines: [said.text] } };
+        if (said.reread) void this.#rows?.refresh();
       }
-      this.#told = { where: row.id, said: { tone: said.reread ? "warn" : "error", lines: [said.text] } };
-      if (said.reread) void this.#rows?.refresh();
     } finally {
       this.#sending = false;
       this.requestUpdate();

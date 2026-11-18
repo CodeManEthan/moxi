@@ -1036,9 +1036,10 @@ def test_ui_shells_stop_is_a_command_and_its_restart_reloads_the_page(seeded, ui
     expect(foot.locator("button")).to_have_text(["Restart"])
     expect(foot.locator('[data-line="shell-restart"]')).to_have_text("Restart reloads this page.")
     ui_page.evaluate("window.beforeTheRestart = true")
-    status = done_after(ui_page, lambda: foot.get_by_role("button", name=f"Restart {name}", exact=True).click())
+    with ui_page.expect_event("load"):
+        status = done_after(ui_page, lambda: foot.get_by_role("button", name=f"Restart {name}", exact=True).click())
     assert status["state"] == "done", status
-    ui_page.wait_for_function("window.beforeTheRestart === undefined")
+    assert ui_page.evaluate("window.beforeTheRestart") is None
     expect(ui_page.locator('#moxi-panel > moxi-services-page section[data-part="list"]')).to_have_attribute(
         "data-state", "up")
 
