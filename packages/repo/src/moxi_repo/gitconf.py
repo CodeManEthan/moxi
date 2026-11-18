@@ -337,8 +337,10 @@ def _get_regexp(repo: Repo, pattern: str) -> list[tuple[str, str | None]]:
 
 
 def read(repo: Repo) -> State:
+    """repo's own config in the repo and its hook entries, from one `git config` read."""
     state = State()
-    pairs = _get_regexp(repo, r"^moxi-repo\.")
+    found = _get_regexp(repo, r"^(moxi-repo\.|hook\.moxi-repo-)")
+    pairs = [(key, value) for key, value in found if key.startswith("moxi-repo.")]
     for key, value in pairs:
         head, _, var = key.rpartition(".")
         state.sections.add(head)
@@ -351,7 +353,9 @@ def read(repo: Repo) -> State:
             elif var == "moved" and value:
                 state.moved.add(value)
     state.pieces = pieces_of(pairs)
-    for key, value in _get_regexp(repo, r"^hook\.moxi-repo-"):
+    for key, value in found:
+        if not key.startswith("hook.moxi-repo-"):
+            continue
         head, _, var = key.rpartition(".")
         event = head[len("hook." + HOOK_PREFIX):]
         state.entry_values.setdefault(key, []).append(value or "")

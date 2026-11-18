@@ -521,14 +521,14 @@ def test_project_repos_that_cant_be_listed_leave_the_indexed_repos_keyed(
     api.add(repo, ["demo/gate"], mode="shim")
     with_projects.add("keyed", repo)
     with_projects.add("other", other)
-    status = api.status
+    status_of = api._status_of
 
-    def broken(path=None, *, with_rules=False):
-        if path is not None:
+    def broken(where, **kwargs):
+        if where.key == gitconf.resolve(other).key:
             raise PermissionError(13, "Permission denied")
-        return status(path, with_rules=with_rules)
+        return status_of(where, **kwargs)
 
-    monkeypatch.setattr(api, "status", broken)
+    monkeypatch.setattr(api, "_status_of", broken)
     caplog.set_level(logging.ERROR, logger="moxi.repo.page")
     body = read()
     assert (body["state"], body["unindexed"]) == ("up", [])

@@ -139,6 +139,9 @@ def with_projects(repos: list[dict], found, *, add: bool = False,
     listed, why = project_roots(found)
     say(why)
     seen = {gitconf.key_of(r["common_dir"]) for r in repos if r.get("common_dir")}
+    # Each root not listed yet costs its one `rev-parse` and one config read: git's
+    # version, the declared pieces and the index are read once for them all.
+    shared: tuple | None = None
     for key, root in listed:
         if not os.path.isdir(root):
             continue
@@ -149,9 +152,15 @@ def with_projects(repos: list[dict], found, *, add: bool = False,
         if where.key in seen:
             continue
         seen.add(where.key)
-        for repo in api.status(where.root, with_rules=with_rules):
-            repo["project"] = key
-            repos.append(repo)
+        if shared is None:
+            from moxi_repo import pieces
+
+            shared = (gitconf.git_version(), pieces.declared()[0], api.indexed())
+        version, good, index = shared
+        repo = api._status_of(where, in_index=where.key in index, version=version, good=good,
+                              with_rules=with_rules)
+        repo["project"] = key
+        repos.append(repo)
     return repos, lines
 
 
