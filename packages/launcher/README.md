@@ -450,30 +450,32 @@ The page has four parts.
   (headless, live, a relaunch or recycle still under way) come back at once.
 
 **The box on Home.** The shell's home opens on a box that starts a session without a
-visit to the page. Type what the agent should do and press the button. The line above
-the box says where the session starts, a project, a folder or `Scratch`, a throwaway
-folder the launcher makes: it opens on the place you last launched in, and its menu
-takes a typed folder path, lists your recent places, offers `Scratch` and, with projects
+visit to the page. Type what the agent should do and press the button. The line above the
+box says where the session starts, a project, a folder or `Scratch`, a throwaway folder
+the launcher makes: it opens on the place you last launched in (after a launch in
+`Scratch`, which is not kept as a place, on the place before it), and its menu takes a
+typed folder path, lists your recent places, offers `Scratch` and, with projects
 installed, every project. A launch names only the place the line shows. With any preset
 set up, `Preset` on the same line applies a seat or a project preset; a project picked
 there, or the one Home opens on, applies that project's own preset, and a preset that
-names a place, `Scratch` among them, moves the line there. The chip in the box sets the harness, the model
-and the effort. The button names where the launch runs, and its caret opens the choices:
-each slot with its state, your terminal, or headless. With slots it starts at the lowest
-free slot, without slots at your terminal, and the choice is not kept from one visit to
-the next. A launch from the box runs where its button says, whatever `[defaults]` or the
-preset sets for `target` and `slot`; every other row is filled from the preset and
-`[defaults]` as the page's form is. The first turn is what Home shows: the text in the
-box, and a handoff on its line under the box. A brief your `[defaults]` or the preset set
-does not go with a launch from the box; a handoff they name shows on that line, with
-`Clear`, and goes with the launch unless you clear it; a cleared one stays off, over launches, until you pick a preset, whose handoff then shows. A handoff from the `+` stays when you pick a preset. An empty box with no handoff
-starts a session with no first turn. The `+` beside the chip takes a brief from a file
-instead, which turns the box off while it is set, takes a handoff from a file, and offers
-to continue your last session in the place on the line; with `Scratch` on the line there
-is none to continue. A slot or headless launch is
-previewed and handed to a detached job as on the page, and a line under the box says
-where it started, or why it failed or was refused. A terminal launch is not run: its
-command is copied for you to paste.
+names a place, `Scratch` among them, moves the line there. The chip in the box sets the
+harness, the model and the effort. The button names where the launch runs, and its caret
+opens the choices: each slot with its state, your terminal, or headless. With slots it
+starts at the lowest free slot, without slots at your terminal, and the choice is not
+kept from one visit to the next. A launch from the box runs where its button says,
+whatever `[defaults]` or the preset sets for `target` and `slot`; every other row is
+filled from the preset and `[defaults]` as the page's form is. The first turn is what
+Home shows: the text in the box, and a handoff on its line under the box. A brief your
+`[defaults]` or the preset set does not go with a launch from the box; a handoff they
+name shows on that line, with `Clear`, and goes with the launch unless you clear it; a
+cleared one stays off, over launches, until you pick a preset, whose handoff then shows.
+A handoff from the `+` stays when you pick a preset. An empty box with no handoff starts
+a session with no first turn. The `+` beside the chip takes a brief from a file instead,
+which turns the box off while it is set, takes a handoff from a file, and offers to
+continue your last session in the place on the line; with `Scratch` on the line there is
+none to continue. A slot or headless launch is previewed and handed to a detached job as
+on the page, and a line under the box says where it started, or why it failed or was
+refused. A terminal launch is not run: its command is copied for you to paste.
 
 `Options` beside the chip opens a panel with the form's other rows, in groups, with a
 find field. Each row you change there is named on a `Changed` line under the box, with
