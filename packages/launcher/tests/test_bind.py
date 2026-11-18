@@ -549,6 +549,7 @@ def slot_launch(tmp_path, monkeypatch, ask, harness="claude"):
                                     actor="ann"))
 
 
+@pytest.mark.slot_target
 def test_a_slot_whose_wrapper_refused_the_name_fails_identity_taken(tmp_path, monkeypatch,
                                                                     rig):
     rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=3)
@@ -561,6 +562,7 @@ def test_a_slot_whose_wrapper_refused_the_name_fails_identity_taken(tmp_path, mo
     assert "on slot 4's pane" in got.line and got.slot == "4"
 
 
+@pytest.mark.slot_target
 def test_a_slot_whose_wrapper_found_no_daemon_fails_comms_offline(tmp_path, monkeypatch,
                                                                   rig):
     rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=75)
@@ -568,6 +570,7 @@ def test_a_slot_whose_wrapper_found_no_daemon_fails_comms_offline(tmp_path, monk
     assert (got.reason, got.exit_code) == (targets.COMMS_OFFLINE, exits.TEMPFAIL)
 
 
+@pytest.mark.slot_target
 @LISTS
 def test_a_slot_whose_codex_wrapper_had_no_answer_fails_with_its_cause(tmp_path,
                                                                        monkeypatch, rig,
@@ -580,6 +583,7 @@ def test_a_slot_whose_codex_wrapper_had_no_answer_fails_with_its_cause(tmp_path,
     assert "codex did not start (exit 75)" in got.line and got.slot == "4"
 
 
+@pytest.mark.slot_target
 def test_a_slot_whose_wrapper_bound_the_name_is_started(tmp_path, monkeypatch, rig):
     rig.plan(placed=4, pane_pid=os.getpid(), exec="started")
     got = slot_launch(tmp_path, monkeypatch, comms(state("held", holder=Holder(SID))))

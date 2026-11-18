@@ -686,6 +686,7 @@ def ended_and_held(rig, number: int = 3, holder: str = "run1") -> None:
                                   "hold": {"holder": holder, "until": 1.9e9}}})
 
 
+@pytest.mark.slot_target
 def test_a_relaunch_respawns_its_slot_under_its_hold(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)
@@ -701,6 +702,7 @@ def test_a_relaunch_respawns_its_slot_under_its_hold(work, harness, rig):
     assert row("r2").slot == "3"
 
 
+@pytest.mark.slot_target
 def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)
@@ -712,6 +714,7 @@ def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
     assert [c["meta"]["chain"] for c in rig.calls("respawn")] == ["r1", "r1"]
 
 
+@pytest.mark.slot_target
 def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig, monkeypatch):
     for name in TERMINAL:
         monkeypatch.delenv(name, raising=False)
@@ -727,6 +730,7 @@ def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig, monk
     assert start["argv"][1:3] == ["--resume", SID]
 
 
+@pytest.mark.slot_target
 def test_a_slot_held_by_another_is_refused_even_with_a_hold(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig, holder="someone")
@@ -736,6 +740,7 @@ def test_a_slot_held_by_another_is_refused_even_with_a_hold(work, harness, rig):
     assert rig.calls("respawn") == []
 
 
+@pytest.mark.slot_target
 def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)

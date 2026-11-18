@@ -28,6 +28,8 @@ TESTS = Path(__file__).resolve().parent
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 BRIEF = "Read the design and start the build."
 
+pytestmark = pytest.mark.slot_target
+
 
 @pytest.fixture(autouse=True)
 def no_turns(monkeypatch):

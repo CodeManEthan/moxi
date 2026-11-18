@@ -665,6 +665,7 @@ def test_a_terminal_resume_keeps_the_id_and_later_acts_find_the_new_launch(work,
     assert found.row.request_id == "r2" and found.live
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_goes_back_to_its_slot(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -677,6 +678,7 @@ def test_a_slot_resume_goes_back_to_its_slot(work, harness, rig):
     assert got.exit_code == 0 and got.data["slot"] == "3"
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_takes_the_lowest_when_its_slot_is_occupied(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -687,6 +689,7 @@ def test_a_slot_resume_takes_the_lowest_when_its_slot_is_occupied(work, harness,
     assert got.data["slot"] == "1"
 
 
+@pytest.mark.slot_target
 def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")
@@ -704,6 +707,7 @@ def test_a_slot_named_for_a_terminal_resume_is_refused(work, harness, no_exec):
     assert with_store(lambda c: store.get(c, "r2")) is None
 
 
+@pytest.mark.slot_target
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")

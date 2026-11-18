@@ -1,5 +1,5 @@
 """Shared fixtures: a fake tmux, a recorded tmux path, the socket fence and a private
-server.
+server. Every test is skipped on native Windows: slots runs on Linux and WSL2.
 
 The socket fence is on for every test: any tmux call slots makes must name, with `-S`,
 the exact socket `moxi.paths.socket_path` gives under the test's own `MOXI_HOME`, or the
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,17 @@ from moxi import paths
 from moxi_slots import places, tmux
 from moxi_slots.settings import SETUP_BY
 from slots_kit import Server, kill, real_tmux, record, start_server, wait_answer, write_tool
+
+
+def pytest_collection_modifyitems(items):
+    # The hook sees every item of the session, so it marks only slots' own tests.
+    if sys.platform != "win32":
+        return
+    here = Path(__file__).parent
+    skip = pytest.mark.skip(reason="slots runs on Linux and WSL2, not native Windows")
+    for item in items:
+        if here in item.path.parents:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)
