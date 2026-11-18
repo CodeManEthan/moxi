@@ -12,6 +12,12 @@ first read or subscribe, and it runs until the page server stops:
   each `session.ready`, `turn.started`, `turn.steered` and `turn.ended`. Events that come
   while a read runs share the one read after it.
 
+When the watch sees a `turn.ended`, the reader stamps the session with its own wall clock
+and the event's session id and turn number. The row sends that time as `ended_at` only
+while the latest facts reading shows no turn open at that same session id and turn number:
+a turn opened since, a new session id, or a turn that ended while no watch was held each
+leave it null until the watch sees the next end. Nothing guesses an end it did not see.
+
 The library is blocking, and each of its calls is bounded by the library's own timeouts.
 Each session's calls run on that session's own threads, so a slow or dead endpoint holds up
 only its own row: never the scan, the other sessions, the page's read or its topic.
@@ -34,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -50,6 +57,10 @@ HOLD_S = 5.0
 
 #: The reads that can fail, in the order `read_error` names them.
 _READS = ("watch", "facts", "agents")
+
+#: The harnesses whose prompt box turns reads. Only Claude Code's runner reads the box;
+#: the Codex and OpenCode hosts have none, and their `draft` is always false.
+BOX_HARNESSES = frozenset({"claude"})
 
 
 def _text(value: Any) -> str | None:
@@ -86,13 +97,19 @@ def facts_row(facts: Any) -> dict[str, Any]:
     ready = facts.ready
     ready_row = None
     if ready is not None:
-        ready_row = {"source": _text(ready.source), "at": _number(ready.at)}
+        ready_row = {"source": _text(ready.source), "session_id": _text(ready.session_id),
+                     "at": _number(ready.at)}
     agents = facts.agents
     if agents is not None:
         agents = _need(agents, _int, "facts.agents")
+    started_at = None
+    if facts.turn is not None:
+        started_at = _need(facts.turn.started_at, _number, "facts.turn.started_at")
     return {
+        "session_id": _text(facts.session_id),
         "turn_number": _need(facts.turn_number, _int, "facts.turn_number"),
         "turn_open": _need(facts.turn_open, _flag, "facts.turn_open"),
+        "turn_started_at": started_at,
         "agents": agents,
         "draft": _need(facts.draft, _flag, "facts.draft"),
         "stale": _need(facts.stale, _flag, "facts.stale"),
@@ -140,6 +157,19 @@ def info_row(key: str, info: dict[str, Any], capabilities: frozenset[str]) -> di
     }
 
 
+def ended_at(ended: tuple[float, str | None, int | None] | None,
+             facts: dict[str, Any] | None) -> float | None:
+    """The time of the turn end `ended` names, while the reading `facts` is still at that
+    turn: no turn open, the same session id (never a null one) and the same turn number.
+    None otherwise."""
+    if ended is None or facts is None or facts["turn_open"]:
+        return None
+    at, session_id, turn_number = ended
+    if session_id is None or facts["session_id"] != session_id:
+        return None
+    return at if facts["turn_number"] == turn_number else None
+
+
 def read_error(failed: set[str]) -> str | None:
     """The sentence the page shows for the reads that failed, or None when none did."""
     names = [name for name in _READS if name in failed]
@@ -166,6 +196,8 @@ class _Held:
         self.facts: dict[str, Any] | None = None
         self.agents: dict[str, Any] | None = None
         self.failed: set[str] = set()
+        #: The last turn end the watch saw: `(at, session_id, turn_number)`, or None.
+        self.ended: tuple[float, str | None, int | None] | None = None
         self.watch: Any = None
         self.watching = False
         #: Set once the first read of facts and agents has finished, read or not.
@@ -200,12 +232,14 @@ class _Held:
         out["facts"] = self.facts
         out["agents"] = self.agents
         out["read_error"] = read_error(self.failed)
+        out["ended_at"] = ended_at(self.ended, self.facts)
+        out["has_box"] = out["harness"] in BOX_HARNESSES
         return out
 
     # -- the watch thread ----------------------------------------------------------------
 
     def _watching(self) -> None:
-        from .results import Gone
+        from .results import Gone, TurnEnded
 
         while not self.stopped.is_set():
             try:
@@ -229,6 +263,8 @@ class _Held:
                     if isinstance(event, Gone):
                         gone = True
                         break
+                    if isinstance(event, TurnEnded):
+                        self.reader._on_turn_ended(self, event)
                     self.dirty.set()
             except Exception as exc:  # noqa: BLE001 - a broken stream ends the watch
                 log.info("the watch of %s failed: %s", self.key, exc)
@@ -339,12 +375,13 @@ class Reader:
         return True
 
     def value(self) -> dict[str, Any]:
-        """The list now: `listed`, `detail` and `sessions`, newest first."""
+        """The list now: `listed`, `detail`, `home` and `sessions`, newest first."""
         with self._lock:
             rows = [one.row() for one in self._held.values()]
             listed, detail = self._listed.is_set(), self._detail
         rows.sort(key=lambda row: (-(row["started"] or 0.0), row["key"]))
-        return {"listed": listed, "detail": detail, "sessions": rows}
+        return {"listed": listed, "detail": detail, "home": os.path.expanduser("~"),
+                "sessions": rows}
 
     # -- the scanner ---------------------------------------------------------------------
 
@@ -432,6 +469,13 @@ class Reader:
             log.info("turns' page could not read the %s of %s: %s", name, held.key, err)
             self._notify()
 
+    def _on_turn_ended(self, held: _Held, event: Any) -> None:
+        with self._lock:
+            if self._held.get(held.key) is not held:
+                return
+            held.ended = (time.time(), _text(event.session_id), _int(event.turn_number))
+        self._notify()
+
     def _read_ok(self, held: _Held, name: str, value: dict[str, Any] | None = None) -> None:
         with self._lock:
             if self._held.get(held.key) is not held:
@@ -465,5 +509,5 @@ class Reader:
                 log.warning("a listener of turns' page failed: %s", exc, exc_info=exc)
 
 
-__all__ = ["HOLD_S", "RESCAN_S", "RETRY_S", "Reader", "agents_row", "facts_row", "info_row",
-           "read_error"]
+__all__ = ["BOX_HARNESSES", "HOLD_S", "RESCAN_S", "RETRY_S", "Reader", "agents_row",
+           "ended_at", "facts_row", "info_row", "read_error"]
