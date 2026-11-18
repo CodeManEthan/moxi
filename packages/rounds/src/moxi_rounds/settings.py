@@ -370,14 +370,16 @@ def _check_check(file, where, value) -> None:
 
 
 #: The keys of `ci`.
-_CI_KEYS = ("workflows", "local", "remote", "status", "ids", "status_timeout_s")
+_CI_KEYS = ("workflows", "local", "remote", "ref", "status", "ids", "jobs",
+            "status_timeout_s")
+#: The keys of a `ci.workflows` entry written as a table.
+_WORKFLOW_KEYS = ("path", "jobs")
 
 
 def _check_ci(file, where, value) -> None:
-    """CI in place of the full check: the workflow files, the local part, and the
-    commands that read a commit's runs."""
-    from pathlib import PurePosixPath
-
+    """CI in place of the full check: the workflow files, each read whole or by the jobs
+    it names, the local part, where the tip is pushed, and the commands that read a
+    commit's runs and a run's jobs."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { workflows = [".github/workflows/ci.yml"], '
@@ -392,14 +394,8 @@ def _check_ci(file, where, value) -> None:
                           "is missing" if workflows is None else "names no workflow",
                           "name each workflow by its file's path in the repo: "
                           'workflows = [".github/workflows/ci.yml"]')
-    for path in workflows:
-        parts = PurePosixPath(path).parts if isinstance(path, str) else ()
-        if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
-                or ".." in parts or ":" in path.split("/")[0]):
-            raise ConfigError(file, f"{where}.workflows",
-                              f"names {path!r}, which is not a path inside the repo",
-                              "give each workflow's path relative to the repo's root, "
-                              "with no .. part")
+    for entry in workflows:
+        _check_workflow(file, f"{where}.workflows", entry)
     local = value.get("local")
     if local is None:
         raise ConfigError(file, f"{where}.local", "is missing",
@@ -415,10 +411,59 @@ def _check_ci(file, where, value) -> None:
         _check_check(file, f"{where}.local", local)
     if "remote" in value:
         _check_string(file, f"{where}.remote", value["remote"], "a remote's name")
-    for key in ("status", "ids"):
+    if "ref" in value:
+        _check_ref(file, f"{where}.ref", value["ref"])
+        if "remote" not in value:
+            raise ConfigError(file, f"{where}.ref", "is set with no remote to push it to",
+                              f'set {where}.remote too: remote = "origin"')
+    for key in ("status", "ids", "jobs"):
         if key in value:
             flows.check_argv(file, f"{where}.{key}", value[key])
     flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
+
+
+def _check_workflow(file, where, entry) -> None:
+    """One `ci.workflows` entry: a path inside the repo, or a table of the `path` and
+    the `jobs` read of its run."""
+    from pathlib import PurePosixPath
+
+    path = entry
+    if isinstance(entry, dict):
+        for other in entry:
+            if other not in _WORKFLOW_KEYS:
+                raise ConfigError(file, f"{where}.{other}",
+                                  "is not a key of a workflow entry",
+                                  "remove it; an entry takes " + ", ".join(_WORKFLOW_KEYS))
+        path = entry.get("path")
+        jobs = entry.get("jobs")
+        if (not isinstance(jobs, list) or not jobs
+                or not all(isinstance(one, str) and one.strip() for one in jobs)):
+            raise ConfigError(file, f"{where}.jobs",
+                              "is missing" if jobs is None else "is not a list of job names",
+                              'name each job read as its run names it: jobs = ["linux"], '
+                              "or give the entry as its path alone to read the whole run")
+        if len(set(jobs)) != len(jobs):
+            raise ConfigError(file, f"{where}.jobs", "names a job twice",
+                              "name each job once")
+    parts = PurePosixPath(path).parts if isinstance(path, str) else ()
+    if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
+            or ".." in parts or ":" in path.split("/")[0]):
+        raise ConfigError(file, where,
+                          f"names {path!r}, which is not a path inside the repo",
+                          "give each workflow's path relative to the repo's root, "
+                          "with no .. part")
+
+
+def _check_ref(file, where, value) -> None:
+    """`ci.ref`: one fixed prefix that ends in `/`, then `{branch}`, and nothing else."""
+    from . import ci
+
+    _check_string(file, where, value, "a branch name template")
+    why = ci.ref_problem(value)
+    if why is not None:
+        raise ConfigError(file, where, why,
+                          'give a fixed prefix ending in / and then {branch}: '
+                          'ref = "ci/{branch}"')
 
 
 def _check_finish(file, where, value) -> None:

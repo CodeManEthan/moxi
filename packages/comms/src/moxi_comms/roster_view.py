@@ -22,8 +22,10 @@ NO_BINDINGS = "no live bindings — nothing is addressable right now."
 #: The kind a reserved name has in the `agents` answer's `standing` list.
 SEND_ONLY = "send-only"
 
-#: A reserved name no module owns: one an older comms kept.
-UNOWNED_ROW = "send-only, no module holds it (kept from an older comms)"
+#: A send-only name nothing holds: one an older comms kept.
+UNOWNED_ROW = "send-only, nothing holds it (kept from an older comms)"
+#: A send-only name a program registered (`moxi comms send-only add`).
+REGISTERED_ROW = "send-only, registered"
 
 #: The adapter kind of an OpenCode binding (`adapters.opencode.ADAPTER_KIND`, spelled
 #: here so this module imports no adapter).
@@ -45,8 +47,9 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     what an agent sees when it re-runs the verb.
 
     The default view is the names an agent can message, one row each, then one row for
-    each reserved send-only name (`standing` entries of kind `send-only`): a module
-    sends under it and nobody mails it, and the row says which module. `seats=True` (the
+    each send-only name (`standing` entries of kind `send-only`): its holder sends
+    under it and nobody mails it, and the row says which module holds it, or that a
+    program registered it, or that nothing holds it. `seats=True` (the
     `--seats` flag, the operator's view) lists the same rows, then the mail waiting for
     each name (`waiting`) and the unanswered rows. On `--seats` an OpenCode binding's row
     also says `interrupt delivers at idle`. The snapshot never asks for `--seats`. `now`
@@ -63,7 +66,8 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     for s in standing if isinstance(standing, list) else ():
         if isinstance(s, dict) and s.get("kind") == SEND_ONLY:
             module = s.get("module")
-            what = f"send-only, reserved for {module}" if module else UNOWNED_ROW
+            what = (REGISTERED_ROW if s.get("holder") == "program" else
+                    f"send-only, reserved for {module}" if module else UNOWNED_ROW)
             lines.append(f"{s['qualified']:<24} {what}")
     if not seats:
         return "\n".join(lines)

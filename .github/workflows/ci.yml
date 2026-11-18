@@ -3,8 +3,14 @@
 # after the merge, and gate nothing while the packages are Linux-only. secrets' tests
 # also run in a Windows job of their own, on the same terms: on pushes to main, gating
 # nothing, with only secrets and what it needs installed and line-ending conversion on.
-# The web job runs on all three systems on every push: the web pages' built files must be
-# what the pinned Node toolchain makes from their sources, byte for byte.
+# The web job runs on all three systems on every push but one to a ci/ branch: the web
+# pages' built files must be what the pinned Node toolchain makes from their sources,
+# byte for byte.
+# A ci/ branch carries a build's tip for rounds to read, so there the linux job runs the
+# full check, as on main, and the web job runs on Linux only. A newer push to a ci/
+# branch cancels the run of that branch still going; a run of any other ref shares its
+# concurrency group with no other run, so none of main's or a tag's is ever cancelled.
+# Every job skips the push that deletes a branch.
 # The browser jobs run the browser tests: every page package's in Chromium and Firefox on
 # Linux on every push, gating; ui's in Chromium on Windows and macOS and WebKit on macOS
 # on pushes to main, gating nothing. They run in the full workspace, every package with
@@ -17,6 +23,10 @@ on:
   push:
     branches: ["**"]
 
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/heads/ci/') && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -27,6 +37,7 @@ env:
 
 jobs:
   linux:
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -39,14 +50,14 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - name: check the change against main
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/')
         run: uv run --locked moxi-dev check --base origin/main
       - name: check everything
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci/')
         run: uv run --locked moxi-dev check --full
 
   other:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !github.event.deleted
     # Linux-only packages today: these runs report and gate nothing.
     continue-on-error: true
     strategy:
@@ -70,10 +81,11 @@ jobs:
       - run: uv run --locked moxi-dev check --full
 
   web:
+    if: ${{ !github.event.deleted }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ startsWith(github.ref, 'refs/heads/ci/') && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -107,6 +119,7 @@ jobs:
     # Chromium is installed, which the linux job's runner is not. Each runs from its
     # package's directory in the full workspace, every package with every extra, which
     # is what moxi-dev check syncs.
+    if: ${{ !github.event.deleted }}
     strategy:
       fail-fast: false
       matrix:
@@ -154,7 +167,7 @@ jobs:
     # ui's tests in Chromium on Windows and macOS, and in WebKit on macOS, in the full
     # workspace like the Linux ones. Like the other non-Linux runs, on pushes to main,
     # gating nothing.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !github.event.deleted
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -195,7 +208,7 @@ jobs:
     # leave them alone, so line-ending conversion is turned on before the checkout.
     # Only secrets is synced, so another package failing on Windows does not fail
     # this job.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !github.event.deleted
     continue-on-error: true
     runs-on: windows-latest
     timeout-minutes: 30

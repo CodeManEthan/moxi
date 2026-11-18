@@ -56,7 +56,8 @@ lb = _ui.api.loopback
 #: binding, so its binding's fields are null, and a live row's session fields are null
 #: when the daemon couldn't say. `cache` is `api.CacheFact`'s `{kind, until}`: `warm` or
 #: `cold`, and when it goes or went cold, epoch seconds, whole; null for a standing row,
-#: any other read and a box without the cache module.
+#: any other read and a box without the cache module. `holder` is a send-only name's
+#: (`module`, `program`, or null for one an older comms kept), null for any other.
 ROW = lb.Out("table", items={
     "qualified": lb.Out("string"),
     "name": lb.Out("string"),
@@ -74,6 +75,7 @@ ROW = lb.Out("table", items={
         "kind": lb.Out("string"),
         "until": lb.Out("float"),
     }),
+    "holder": lb.Out("string", nullable=True),
 })
 
 #: The rows and how they stand: `state` is `up`, `offline` or `error`; `detail` is null

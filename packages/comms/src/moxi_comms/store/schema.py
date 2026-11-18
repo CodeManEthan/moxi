@@ -1,7 +1,8 @@
 """comms.db's schema: the steps `moxi.store.migrate` walks, one per `user_version`.
 
-Version 1 is the whole store, version 2 renames the operator's `author_kind`, and version
-3 adds `mcp_tokens`, the hashes of the per-session tokens comms' tools take. Each table
+Version 1 is the whole store, version 2 renames the operator's `author_kind`, version 3
+adds `mcp_tokens`, the hashes of the per-session tokens comms' tools take, and version 4
+adds `reserved.holder`, which says who holds a send-only name. Each table
 names what it holds; the rules about who writes which table live in
 `store/__init__.py`.
 
@@ -37,6 +38,9 @@ BINDING_KINDS = ("session", "reserved")
 IDENTITY_KINDS = ("agent",)
 IDENTITY_STATUSES = ("active", "retired")
 RESERVED_STATES = ("active", "conflict", "unowned")
+#: Who holds a `reserved` row's name: a module that declared it, or a program that
+#: registered it (`moxi comms send-only add`). An `unowned` row has none.
+RESERVED_HOLDERS = ("module", "program")
 DROP_REASONS = ("expired", "withdrawn", "reserved")
 ROOM_KINDS = ("names",)
 #: Why a per-session tool token was revoked (`mcp/tokens.py`).
@@ -147,7 +151,8 @@ CREATE TABLE operators (
     token_hash     TEXT
 );
 
--- Send-only names a module declared, and the names that couldn't be reserved.
+-- Send-only names a module declared, and the names that couldn't be reserved. Version 4
+-- adds `holder`.
 CREATE TABLE reserved (
     name           TEXT PRIMARY KEY,
     module         TEXT,               -- NULL for an unowned row
@@ -207,8 +212,18 @@ CREATE INDEX mcp_tokens_claim ON mcp_tokens(claim_key) WHERE revoked_at IS NULL;
 CREATE INDEX mcp_tokens_binding ON mcp_tokens(binding_id) WHERE binding_id IS NOT NULL;
 """
 
+#: Version 4: `reserved.holder`, who holds a send-only name: `module` for a row a module's
+#: declaration wrote, `program` for a name a program registered, NULL for an `unowned`
+#: row an older comms kept. Every row older than this step that isn't unowned is a
+#: module's. A program-held row has no `module`.
+V4 = f"""
+ALTER TABLE reserved ADD COLUMN holder TEXT
+    {_among("holder", RESERVED_HOLDERS).replace("CHECK (", "CHECK (holder IS NULL OR ")};
+UPDATE reserved SET holder = 'module' WHERE state != 'unowned';
+"""
+
 #: The steps, oldest first; the store's `user_version` counts those run.
-STEPS = (V1, V2, V3)
+STEPS = (V1, V2, V3, V4)
 
 #: The tables the steps make, in the order above.
 TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings",
@@ -217,5 +232,6 @@ TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings"
 
 __all__ = ["ID_BASE", "META_NEXT_ID", "META_MIGRATED_FROM", "META_AUTHOR_STAMPS",
            "META_QUEUE_MIGRATED", "QUEUE_STATES", "BINDING_KINDS",
-           "IDENTITY_KINDS", "IDENTITY_STATUSES", "RESERVED_STATES", "DROP_REASONS",
-           "ROOM_KINDS", "REVOKED_WHY", "STEPS", "TABLES", "V1", "V2", "V3"]
+           "IDENTITY_KINDS", "IDENTITY_STATUSES", "RESERVED_STATES", "RESERVED_HOLDERS",
+           "DROP_REASONS", "ROOM_KINDS", "REVOKED_WHY", "STEPS", "TABLES", "V1", "V2",
+           "V3", "V4"]

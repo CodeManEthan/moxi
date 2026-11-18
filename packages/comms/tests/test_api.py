@@ -114,7 +114,7 @@ def test_interface_2_holds_its_names():
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Waiting", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
-        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
+        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as", "send_under",
         "session_of", "caller_identity", "roster_rows", "RosterRow", "CacheFact",
         "CODEX_RESUME",
         "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "HEADLESS", "parse_exit", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
@@ -180,9 +180,10 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
                                                     "adapter", "directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
-                                                       "kind", "module"]
+                                                       "kind", "module", "holder"]
     assert list(api.IdentityState.__dataclass_fields__) == ["qualified", "state", "holder",
-                                                            "module", "reason"]
+                                                            "module", "reason",
+                                                            "registered"]
     assert list(api.Holder.__dataclass_fields__) == ["adapter", "session_id"]
     assert api.IDENTITY_STATES == ("free", "held", "standing", "reserved", "retired",
                                    "offline")
@@ -192,7 +193,7 @@ def test_the_reads_and_names_are_pinned():
                                                     "directors", "awaiting"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting", "cache"]
+        "directors", "session_id", "bound_at", "awaiting", "cache", "holder"]
     assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
     params = inspect.signature(api.roster_rows).parameters
     assert params["timeout_s"].default == api.READ_DEADLINE
@@ -626,3 +627,18 @@ def test_the_paths(env, tmp_path):
 def test_a_send_that_names_no_recipient_is_refused_before_anything_posts(to):
     with pytest.raises(ValueError, match="at least one recipient"):
         api.send(api.Sender.operator("u1"), to, "hello", posture=None)
+
+
+def test_roster_and_identity_state_say_a_program_registered_a_name(rig):
+    from moxi_comms import reserved, secrets
+
+    reserved.register("ticker", chain=secrets.from_config())
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    got = {s.qualified: s for s in api.roster().standing}
+    assert got["ticker"] == api.Standing("ticker", "ticker", "global", api.SEND_ONLY,
+                                         None, "program")
+    assert got["console"].holder == "module"
+    ticker = api.identity_state("ticker")
+    assert (ticker.state, ticker.module, ticker.registered) == ("reserved", None, True)
+    console = api.identity_state("console")
+    assert (console.module, console.registered) == ("launcher", False)

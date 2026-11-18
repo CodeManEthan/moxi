@@ -117,6 +117,12 @@ test("a send-only name is in Other names with its module and no Message", () => 
                             { qualified: "relay", sentBy: null, writable: false }]);
 });
 
+test("a send-only name a program registered is sent by a program", () => {
+  const r = roster([row("ticker", { kind: "send-only", module: null, holder: "program" })]);
+  const { others } = agents(r);
+  assert.deepEqual(others, [{ qualified: "ticker", sentBy: "a program", writable: false }]);
+});
+
 test("an owed author with no other fact is a row of its own, with Reply", () => {
   const got = only(roster([]), mail({ owed: [owed("tester@atlas", "18:02")] }));
   assert.equal(got.name, "tester");

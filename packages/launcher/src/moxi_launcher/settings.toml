@@ -33,13 +33,13 @@ unit = "seconds"
 [startup.trust_dialog]
 type = "bool"
 default = false
-doc = "Answer Claude Code's folder-trust screen in a slot launch, when it shows."
+doc = "Let Claude slot launches past Claude Code's folder-trust screen: mark the launch folder's git root trusted in Claude Code's ~/.claude.json before the launch, and answer the screen if it still shows. Off, a launch into a folder Claude Code hasn't trusted fails at the screen."
 read = "use"
 needs = "slots"
 label = "Answer the folder-trust screen"
-line = "In a slot launch, answers Claude Code's “Do you trust this folder?” for you."
+line = "In a slot launch, marks the folder trusted in ~/.claude.json and answers Claude Code's “Do you trust this folder?” for you."
 common = true
-hurts = { when = "on", says = "answers the trust question for every slot launch", confirm = "Every slot launch says yes to Claude Code's folder-trust screen for you, in whatever folder it starts.", stays = true }
+hurts = { when = "on", says = "trusts the folder of every slot launch", confirm = "Every slot launch marks its folder's git root trusted in Claude Code's ~/.claude.json, and says yes to the folder-trust screen if it still shows. Claude Code keeps that trust for later sessions there.", stays = true }
 
 [startup.dev_channels_dialog]
 type = "bool"
@@ -51,6 +51,17 @@ label = "Answer the development-channels screen"
 line = "In a slot launch, when it shows."
 common = true
 hurts = { when = "on", says = "answers the development-channels screen for every slot launch", confirm = "Every slot launch accepts Claude Code's development-channels screen for you." }
+
+[startup.bypass_warning]
+type = "bool"
+default = false
+doc = "Let Claude slot launches past Claude Code's bypass-permissions warning when the per-launch key didn't keep it away: press 'Yes, I accept', after which Claude Code writes skipDangerousModePermissionPrompt into ~/.claude/settings.json for every later bypass session. Off, a launch held on the warning fails at it."
+read = "use"
+needs = "slots"
+label = "Answer the bypass-permissions warning"
+line = "In a slot launch, accepts the warning if it still shows; Claude Code then turns it off for good in ~/.claude/settings.json."
+common = true
+hurts = { when = "on", says = "accepts the bypass-permissions warning for every slot launch", confirm = "A bypass slot launch held on Claude Code's bypass-permissions warning presses 'Yes, I accept', and Claude Code writes skipDangerousModePermissionPrompt: true into ~/.claude/settings.json, which turns the warning off for every later bypass session on this machine.", stays = true }
 
 [recycle.limit_wait_s]
 type = "int"
@@ -73,10 +84,10 @@ unit = "seconds"
 [runs.keep_days]
 type = "int"
 default = 30
-doc = "How many days a launch's run files (its prompt file and headless log) are kept."
+doc = "How many days a launch's run files (its prompt file, settings file and headless log) are kept."
 read = "use"
 label = "Keep run files for"
-line = "A launch's prompt file and headless log."
+line = "A launch's prompt file, settings file and headless log."
 common = true
 unit = "days"
 

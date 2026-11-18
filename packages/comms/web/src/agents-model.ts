@@ -251,7 +251,8 @@ export interface AgentRow {
  * by it. */
 export interface OtherName {
   qualified: string;
-  /** `sent by <module>` for a send-only name; null else. */
+  /** Who sends under a send-only name: its module, or `a program` for a name a program
+   * registered; null else. */
   sentBy: string | null;
   /** `Message` writes to it; false for a send-only name. */
   writable: boolean;
@@ -595,6 +596,13 @@ export function order(rows: readonly AgentRow[]): AgentRow[] {
   return [...rows].sort((a, b) => groupOf(a) - groupOf(b) || keyOf(a) - keyOf(b) || byText(a.name, b.name));
 }
 
+/** Who sends under a send-only row's name: its module, `a program` for a name a program
+ * registered, or null for one nothing holds. */
+function sentBy(row: RosterRow): string | null {
+  if (row.holder === "program") return "a program";
+  return row.module ?? null;
+}
+
 /**
  * The agent rows and `Other names` for a roster that is up and, once read, the mail state.
  * A name none of whose addresses has a session, mail or an `owed` message is no row: its
@@ -613,7 +621,7 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
   const other = (address: Address): void => {
     const row = address.row as RosterRow;
     const sendOnly = row.kind === "send-only";
-    others.push({ qualified: address.qualified, sentBy: sendOnly ? row.module : null, writable: !sendOnly });
+    others.push({ qualified: address.qualified, sentBy: sendOnly ? sentBy(row) : null, writable: !sendOnly });
   };
   for (const [name, all] of names) {
     const sendOnly = all.filter((address) => address.row?.kind === "send-only" && !address.bound

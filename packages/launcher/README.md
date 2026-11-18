@@ -51,7 +51,8 @@ and a `--settings` JSON string with a `permissions` mode, allow or deny list; Co
 `--dangerously-bypass-approvals-and-sandbox` and `--approve-for-me` (and their hidden
 aliases `--yolo` and `--not-so-yolo`), and a config override (passed on, or a `--config`
 item) keyed `sandbox_mode` or `approval_policy`. A settings file, or a Codex profile, is
-not read: what it sets is up to you.
+not checked: what it sets is up to you. (A bypass slot launch reads your settings file to
+merge it into its own; see below.)
 
 **Permission rows.** A row that sets how much the session may do without asking (Claude's
 permission mode and tool lists, Codex's sandbox and approval) is a posture row. A launch
@@ -67,6 +68,51 @@ headless launch needs a brief. With a comms identity it runs comms' wrapper inst
 (below). `--target slot` starts the session in a tmux slot, and needs
 the slots module (Linux and WSL2; macOS untested). `--slot` names the slot; a launch with
 any other target that names one is refused, exit 2.
+
+**How a slot launch starts.** Claude Code can open on a screen of its own before the
+session runs: the folder-trust screen, the development-channels screen, and in
+`bypassPermissions` the bypass-permissions warning. A Claude slot launch watches for every
+one of them, whatever your settings say. A screen whose `startup.*` setting is on is
+answered; one whose setting is off ends the launch at once, `screen-not-answered`, with
+nothing pressed, the rows the screen showed, and the setting that would answer it. With
+`startup.trust_dialog` on, the launch first marks its folder's git root trusted in Claude
+Code's own config, so the trust screen does not show at all. A `bypassPermissions` slot
+launch passes Claude Code a settings file of its own, `<request id>.settings.json` among
+its run files, holding `skipDangerousModePermissionPrompt: true` for that launch only; a
+`--settings` you pass is read (never changed) and merged into it, so the session gets one.
+A Codex launch settles its folder's trust on its own command line (below), so Codex's
+trust screen does not show.
+
+Three more Claude Code screens are on the watch with no setting, and the launcher never
+answers them: the first-run theme picker and the welcome screen ("Security notes ... Press
+Enter to continue"), which show in a config folder Claude Code has never run in, and the
+"Claude in Chrome extension detected" dialog, which shows once onboarding is done until
+it is answered once. Each ends the launch at once, `screen-not-answered`, naming the
+screen. For the first two, run `claude` once in a terminal with the same
+`CLAUDE_CONFIG_DIR` and finish its setup; for the Chrome dialog, answer it once in a
+terminal session.
+
+Then every slot launch waits for its session to be ready, up to `ready.wait_s`, first
+turn owed or not. With nothing that can say so (no turns), it ends `started` with the
+reason `ready-unknown`: attach to the slot to see it. A launch of a new session (a fresh
+launch or a resume) that finds a screen it won't answer, or no ready in time (`no-ready`),
+ends `failed`, exit 1, naming the slot. The `no-ready` line names both causes a launch
+can't tell apart: a screen the launcher doesn't know, and a session turns isn't running
+in. The session is never stopped: it stays in its slot for you to attach to. A relaunch
+has already exited the session it replaces, so the same
+findings only flag it: its row stays `started` with a `flagged` event, a self relaunch's
+run ends `first-turn-not-sent` (its handoff is not sent), a director's ends `relaunched`
+with the finding as its word, and either tells the directors. A relaunch fails only when
+its new session is not running.
+
+**Codex folder trust.** Every Codex launch, interactive, under turns' host or headless,
+passes its folder's trust level itself, so Codex neither asks nor writes a `[projects]`
+entry into its config. With `trust_cwd` on, the folder runs `trusted`. With it off, your
+Codex config (`$CODEX_HOME/config.toml`, else `~/.codex/config.toml`) decides when it gives
+the folder, or the git project it belongs to, a trust level; with no entry there, the
+folder runs `trusted` for this launch only, written nowhere. A folder you want untrusted
+needs one `trust_level = "untrusted"` entry there. `preview` prints which case applied,
+and the launch records it as its `trust` value. The launcher never writes Codex's config.
 
 **The brief.** Without turns, the brief (or the handoff) is the harness's opening prompt.
 With turns, a launch in this terminal or in a slot waits until the session is ready and
@@ -596,19 +642,45 @@ launcher ends the wrapper (SIGTERM), and its session with it, and the row ends `
 an identity.
 `moxi comms exit-session NAME` ends such a session.
 
+## What the launcher changes on your machine
+
+Every other answer the launcher gives a harness is for one launch only, on its command
+line or in its own run files, which the sweep removes. These are the exceptions:
+
+| Change | Who writes it | When | Where you see it | Undo |
+|---|---|---|---|---|
+| `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set): `projects["<git root>"].hasTrustDialogAccepted = true` | the launcher | a Claude slot launch with `startup.trust_dialog` on, in a git root (or folder outside any) not yet trusted; never the home folder | the install question; the launch's `trust-seed` event in `moxi launcher log` | leaving it is harmless. To take it out, set that folder's key to false while no Claude session is open (a running session can write its own copy back); the next launch there seeds it again unless the setting is off |
+| the same key | Claude Code, after the launcher presses "Yes, I trust this folder" | the seed missed or was refused and the screen showed, with `startup.trust_dialog` on | the launch's `startup-screen` event | as above |
+| `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR/settings.json` when set): `skipDangerousModePermissionPrompt: true`, the file written out again | Claude Code, after the launcher presses "Yes, I accept" | a `bypassPermissions` slot launch with `startup.bypass_warning` on, when the per-launch key did not keep the warning away | the install question; the launch's `startup-screen` event, which names the file | remove the key; the next bypass session started without the per-launch key shows the warning again. While the setting is on, a later held launch writes it back |
+
+Nothing goes into Codex's config. Before this release a Codex launch under turns' host, or
+headless, could leave `[projects."<path>"] trust_level = "trusted"` tables in
+`~/.codex/config.toml` (Codex's own write, sometimes for the whole repository, or the main
+checkout of a worktree); the launcher can't tell those from your own entries, so look there
+if you want them gone.
+
 ## Settings
 
 Set with `moxi config set launcher <key> <value>`:
 
 - `page.launch_wait_s` (600): how long a launch made from the page may take, and how long
   a preview stays good for launching.
-- `ready.wait_s` (60): how long the first-turn sender waits for the session to be ready.
+- `ready.wait_s` (60): how long a slot launch, and the first-turn sender, wait for the session to be ready.
 - `first.wait_s` (120): how long it then waits for the first turn to start.
 - `startup.trust_dialog` and `startup.dev_channels_dialog` (both off): whether a slot
-  launch answers Claude's folder-trust and development-channels screens. The launcher
-  presses a key only on a screen it has just seen.
-- `startup.wait_s` (20): how long a slot launch watches for those screens.
-- `runs.keep_days` (30): how long run logs and prompt files are kept.
+  launch answers Claude's folder-trust and development-channels screens. With
+  `startup.trust_dialog` on, a slot launch also marks its folder's git root trusted in
+  `~/.claude.json` before the session starts. The launcher presses a key only on a screen
+  it has just seen; a screen whose setting is off fails the launch `screen-not-answered`.
+- `startup.bypass_warning` (off): whether a slot launch accepts Claude Code's
+  bypass-permissions warning when the per-launch key did not keep it away. Claude Code then
+  writes `skipDangerousModePermissionPrompt: true` into `~/.claude/settings.json`, which
+  turns the warning off for every later bypass session on the machine. Off, the launch
+  fails `screen-not-answered`; one bypass launch in a terminal, accepted there, makes the
+  same write.
+- `startup.wait_s` (20): how long a slot launch watches for those screens. Without turns,
+  a Claude slot launch takes this long before it returns.
+- `runs.keep_days` (30): how long run logs, prompt files and settings run files are kept.
 - `relaunch.wait_s` (900): how long a self relaunch waits for its session to be quiet.
 - `relaunch.person_s` (120): how recently a person's use of the pane, or a turn no
   delivery opened, holds an act.
