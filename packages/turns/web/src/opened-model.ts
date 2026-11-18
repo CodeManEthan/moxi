@@ -69,11 +69,13 @@ export function nowLine(session: Session, today: string, clock: Clock = LOCAL): 
 
 /** `Agents`: one entry per agent, then `not known` when the list is not whole; `not
  * known` alone for a session with the `agents` capability whose list is null; null for a
- * session without that capability. */
+ * session without that capability, and for a whole list with no entry, which has nothing
+ * to say on the line. */
 export function agentsLines(session: Session): AgentsLines | null {
   if (session.agents === null) {
     return session.capabilities.includes("agents") ? { entries: [], notKnown: NOT_KNOWN } : null;
   }
+  if (session.agents.entries.length === 0 && session.agents.complete) return null;
   const entries = session.agents.entries.map((agent) => ({
     id: agent.id,
     text: agent.description ? `${agent.description} · ${agent.kind}` : agent.kind,

@@ -52,9 +52,13 @@ test("Agents: each entry with busy in the text colour, and not known when the li
     ],
     notKnown: NOT_KNOWN,
   });
-  assert.equal(agentsLines(session()).notKnown, null);
+  assert.equal(agentsLines(session({ agents: { entries: [agent()], complete: true } })).notKnown, null);
   assert.deepEqual(agentsLines(session({ agents: null })), { entries: [], notKnown: NOT_KNOWN });
   assert.equal(agentsLines(session({ agents: null, capabilities: ["deliver"] })), null);
+  // A whole list with no entry: no line. One that is not whole says so.
+  assert.equal(agentsLines(session({ agents: { entries: [], complete: true } })), null);
+  assert.deepEqual(agentsLines(session({ agents: { entries: [], complete: false } })),
+                   { entries: [], notKnown: NOT_KNOWN });
 });
 
 test("Prompt box: empty or may hold a draft for each draft case, only where turns reads the box", () => {
