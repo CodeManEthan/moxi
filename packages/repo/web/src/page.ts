@@ -37,6 +37,7 @@ import { api, navigate } from "/m/ui/client.js";
 
 import {
   actRequest, addRows, answerView, confirmView, folderLine, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
+  sentPieces,
 } from "./acts-model.ts";
 import type { Act, AnswerView, ConfirmView } from "./acts-model.ts";
 import { Feed, parseAnswer, parsePlanned } from "./feed.ts";
@@ -527,13 +528,14 @@ export class RepoPage extends LitElement {
     this.requestUpdate();
   }
 
-  /** Sends the act with the digest of the plan its confirm drew, and draws the answer. */
+  /** Sends the act with the digest of the plan its confirm drew, and the pieces that plan
+   * writes, and draws the answer. */
   async #send(acting: Acting): Promise<void> {
-    const digest = acting.plan?.digest ?? null;
-    if (digest === null || acting.sending) return;
+    const plan = acting.plan;
+    if (plan === null || plan.digest === null || acting.sending) return;
     acting.sending = true;
     this.requestUpdate();
-    const request = actRequest(acting.act, acting.root, acting.picked, digest);
+    const request = actRequest(acting.act, acting.root, sentPieces(plan, acting.picked), plan.digest);
     const result = await api("repo", request.path, request.body);
     const answer = result.status === 200 ? parseAnswer(result.data) : null;
     const value = this.#feed?.value ?? null;

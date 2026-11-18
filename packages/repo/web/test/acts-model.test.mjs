@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   actRequest, addRows, answerView, confirmView, folderLine, placeWords, planFailWords, planPath, refreshCommand,
-  rowAddTitle, transportView, writesOf,
+  rowAddTitle, sentPieces, transportView, writesOf,
 } from "../src/acts-model.ts";
 import { answer, HOME, offered, piece, plan, planned, repo, write } from "./fixtures.mjs";
 
@@ -168,6 +168,13 @@ test("after changed, the question and button name what the new plan writes, not 
   }), context("add", picked));
   assert.deepEqual([view.title, view.go], ["Add commit-proof to atlas-api?", "Add commit-proof"]);
   assert.deepEqual(view.writes, ["into this repo's git config · commit-proof, new"]);
+  // The act sends only that piece, so the verb's answer names only what the question named.
+  const changed = plan({
+    pieces: [planned({ id: "repo/commit-proof" }), planned({ id: "repo/commit-rules", new: false })],
+    writes: [...registration("repo/commit-proof", "commit-msg", { order: "60" })],
+  });
+  assert.deepEqual(sentPieces(changed, picked), ["repo/commit-proof"]);
+  assert.deepEqual(sentPieces(changed, ["repo/commit-rules"]), []);
   // A piece the plan rewrites is still named.
   const rewrite = confirmView(plan({
     pieces: [planned({ id: "repo/commit-proof" }), planned({ id: "repo/commit-rules", new: false })],

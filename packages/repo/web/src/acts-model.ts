@@ -260,13 +260,19 @@ function writesPiece(plan: Pick<Plan, "writes">, piece: PlannedPiece): boolean {
     && (item.key ?? "").startsWith(`${PIECE}${piece.id}.`));
 }
 
-/** The pieces a confirm names: those he picked that the plan writes. A picked piece the
- * plan lists but writes nothing of (another hand put it in since he picked it, and a
- * `changed` answer brought the new plan) is left out; with none left, every one he
+/** The pieces an act sends: those he picked that the plan writes. A picked piece the plan
+ * lists but writes nothing of (another hand put it in since he picked it, and a `changed`
+ * answer brought the new plan) is left out, so the verb's answer names only what the
+ * question named. The plan's writes are the same without it, so its digest still holds. */
+export function sentPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
+  const idle = new Set(plan.pieces.filter((piece) => !writesPiece(plan, piece)).map((piece) => piece.id));
+  return picked.filter((id) => !idle.has(id));
+}
+
+/** The pieces a confirm names: those the act sends; with none left, every one he
  * picked. */
 export function namedPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
-  const idle = new Set(plan.pieces.filter((piece) => !writesPiece(plan, piece)).map((piece) => piece.id));
-  const kept = picked.filter((id) => !idle.has(id));
+  const kept = sentPieces(plan, picked);
   return kept.length > 0 ? kept : [...picked];
 }
 

@@ -88,6 +88,8 @@ def test_an_add_whose_repo_changed_under_its_confirm_shows_the_new_plan_first(wo
     confirm.locator("[data-action=go]").click()
     expect(confirm.locator("[data-line=said]").first).to_have_text(
         f"added demo/zz-early (pre-commit, open) in {world.atlas}")
+    # It sent only the piece the new plan writes, so the answer names nothing else.
+    expect(confirm.locator("[data-line=said]").filter(has_text="demo/first")).to_have_count(0)
     assert enabled(world, world.atlas, "demo/zz-early") == "true"
 
 
