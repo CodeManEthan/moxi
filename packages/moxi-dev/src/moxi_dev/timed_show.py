@@ -25,7 +25,8 @@ machine has a complete run and none failed.
 
 Before the machines, the strict line: how many tests of the set (this machine's, or the
 newest other machine's when this one has none) this machine, which measures the strict
-budget, has a counted outcome for.
+budget, has a counted outcome for. With `--machine` naming another machine, the reading
+leaves this one out, so there is no strict line (`--json`'s `strict` is null).
 """
 
 from __future__ import annotations
@@ -204,11 +205,24 @@ def _reading(row: dict[str, Any]) -> str:
     return f"{row['reading']:g} of {row['budget']:g} {row.get('unit') or ''}".rstrip()
 
 
+def strict_for(own: str, reports: Sequence[dict[str, Any]], tip: str,
+                 machine: str | None) -> str | None:
+    """The strict line when the reading includes this machine (no `--machine`, or
+    `--machine` naming it) and holds a report; else None."""
+    if not reports or machine not in (None, own):
+        return None
+    return strict_line(own, reports, tip)
+
+
 def render(reports: Sequence[dict[str, Any]], rev: str, tip: str, days: float,
-           own: str) -> list[str]:
-    lines = [f"moxi-dev timed show: {rev} ({tip[:12]}), back {days:g} days",
-             strict_line(own, reports, tip)] if reports else [
-        f"moxi-dev timed show: {rev} ({tip[:12]}), back {days:g} days: no record on the walk"]
+           own: str, *, machine: str | None = None) -> list[str]:
+    head = f"moxi-dev timed show: {rev} ({tip[:12]}), back {days:g} days"
+    if not reports:
+        return [f"{head}: no record on the walk"]
+    lines = [head]
+    strict = strict_for(own, reports, tip, machine)
+    if strict is not None:
+        lines.append(strict)
     for report in reports:
         name, set_factor = report["machine"], report["set_factor"]
         lines.append(f"{name}: set factor {set_factor:g} | newest measured commit "
@@ -284,10 +298,10 @@ def main(argv: list[str]) -> int:
         return 2
     if args.json:
         print(json.dumps({"rev": args.rev, "commit": tip, "exit": code,
-                          "strict": strict_line(own, reports, tip) if reports else None,
+                          "strict": strict_for(own, reports, tip, args.machine),
                           "machines": reports}, indent=1, sort_keys=True))
     else:
-        for line in render(reports, args.rev, tip, args.days, own):
+        for line in render(reports, args.rev, tip, args.days, own, machine=args.machine):
             print(line)
         print(f"moxi-dev timed show: exit {code}")
     return code

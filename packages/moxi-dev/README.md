@@ -288,7 +288,7 @@ the machine it runs on first. It prints each machine's set factor, its newest me
 commit and how many commits behind REV it is, its newest tick, and each test's newest
 counted outcome with its reading and budget, a failure's range of commits, and the tests
 with no counted outcome. A line before the machines says how many tests this machine's own
-strict reading covers. Exit 1 when a test's newest counted outcome failed on any machine;
+strict reading covers; `--machine` naming another machine leaves it out. Exit 1 when a test's newest counted outcome failed on any machine;
 3 when some test of a machine's set has no counted outcome, or no machine has a complete
 run in the window; 0 otherwise. A machine with no complete run and no counted failure is
 listed and stays out of the exit.

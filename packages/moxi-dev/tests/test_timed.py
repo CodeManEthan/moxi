@@ -603,6 +603,27 @@ def test_the_strict_line_states_coverage(repo, rec):
         f"the other 2 are read only at the hosts' factors")
 
 
+def test_the_strict_line_is_left_out_when_machine_names_another(repo, rec, monkeypatch,
+                                                                capsys):
+    tip = commits(repo, 1)[0]
+    for name in ("alpha", "host-b"):
+        machine_file(rec, name, tip, {"a": {"1": result("passed")}}, collected=["a"])
+    monkeypatch.setattr(timed_record.platform, "node", lambda: "alpha")
+    monkeypatch.chdir(repo)
+    strict = f"alpha's strict reading covers 1 of 1 tests on the walk to {tip[:12]}"
+
+    def read(*argv):
+        assert timed_show.main(["--record-dir", str(rec), *argv]) == 0
+        return capsys.readouterr().out
+
+    assert strict not in read("--machine", "host-b")
+    assert "no strict reading" not in read("--machine", "host-b")
+    assert json.loads(read("--machine", "host-b", "--json"))["strict"] is None
+    assert strict in read("--machine", "alpha")
+    assert strict in read()
+    assert json.loads(read("--json"))["strict"].startswith(strict)
+
+
 def test_no_record_on_the_walk_exits_3(repo, rec):
     commits(repo, 1)
     assert shown(repo, rec)[0] == 3
