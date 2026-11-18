@@ -1,11 +1,13 @@
-"""What a relaunch run tells, and whom, when it ends without relaunching its session.
+"""What a relaunch run tells, and whom, when it ends without relaunching its session, or
+relaunches it flagged.
 
     note(conn, run, session, wait_s=)          # a self run that never touched its session
     notify(conn, run, row, comms=, ...)         # the directors, then the fallback
 
 | outcome | session | told |
 |---|---|---|
-| `relaunched` | new | nobody |
+| `relaunched`, not flagged | new | nobody |
+| `relaunched`, flagged (its word the finding) | new, held on a screen or not ready | directors, then fallback |
 | `expired`, `held`, `not-held`, `stopped` | untouched | a self run's session, one note |
 | `not-exited`, `exit-pending` | still up, maybe at its exit dialog | directors, then fallback |
 | `relaunch-failed`, `first-turn-not-sent`, `gone`, `error` | down, or up without its handoff | directors, then fallback |
@@ -49,6 +51,9 @@ NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped")
 #: The outcomes told past the session, to the directors and then the fallback.
 NOTICE_OUTCOMES = ("not-exited", "exit-pending", "relaunch-failed", "first-turn-not-sent",
                    "gone", "error")
+#: The outcome of a relaunch whose new session runs; told past the session only when the
+#: launch flagged it (`is_flagged`).
+RELAUNCHED = "relaunched"
 #: What a note that was not taken is told as.
 NOTE_NOT_TAKEN = "note-not-taken"
 #: The module and the reserved name a notice goes out under.
@@ -73,7 +78,15 @@ _SESSION = {
     "gone": "The session is down.",
     "error": "The session may be down.",
     NOTE_NOT_TAKEN: "The session was not touched, and did not take the note saying so.",
+    RELAUNCHED: "The session was launched again and is running, but it may be held on a "
+                "screen or not yet ready: attach to its slot to see it.",
 }
+
+
+def is_flagged(run: store.Run) -> bool:
+    """Whether `run` relaunched its session and the launch flagged the new one: it ended
+    `relaunched` with the finding as its word."""
+    return run.outcome == RELAUNCHED and bool(run.word)
 
 
 def note_text(run: store.Run) -> str:
@@ -220,5 +233,5 @@ def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["MODULE", "NAME_RESERVED", "NOTE", "NOTE_NOT_TAKEN", "NOTE_OUTCOMES",
-           "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RESERVED_RETRY_S", "SENDER", "directors",
-           "note", "note_text", "notify", "settings_of", "text"]
+           "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED", "RESERVED_RETRY_S", "SENDER",
+           "directors", "is_flagged", "note", "note_text", "notify", "settings_of", "text"]
