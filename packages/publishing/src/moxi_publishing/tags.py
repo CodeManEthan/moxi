@@ -286,6 +286,13 @@ def read_file(git, commit: str, path: str) -> bytes | None:
         raise ReleaseError(str(exc)) from None
 
 
+def release_table(git, commit: str) -> dict:
+    """The root `pyproject.toml`'s `[tool.moxi-publishing]` at `commit`, empty when the file
+    has no such table. Raises `ReleaseError` when the file is missing or can't be read."""
+    return _table(_toml(read_file(git, commit, "pyproject.toml"),
+                        f"{commit[:12]}:pyproject.toml"), "tool", TABLE)
+
+
 def workspace(git, commit: str) -> Workspace:
     """The workspace members and the release settings at `commit`. A root with no
     `[tool.uv.workspace]` is its own one member. Raises `ReleaseError`."""
@@ -800,5 +807,5 @@ __all__ = ["CORE", "CATALOGUE", "CHANGELOG", "SEPARATOR", "TABLE", "NOT_READY",
            "CHECKS", "ReleaseError", "normalised", "tag_name", "parse_tag", "Heading",
            "version_headings", "first_version_heading", "same_version",
            "changelog_section", "Member", "Workspace", "repo_git", "read_file",
-           "workspace", "work_tree_workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
+           "release_table", "workspace", "work_tree_workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
            "peel", "resolve", "gate", "admitted", "file_hashes", "released"]

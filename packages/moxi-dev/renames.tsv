@@ -8236,6 +8236,8 @@ publishing	packages/publishing/src/moxi_publishing/doctor.py	+ (f"names {CHECKED
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(row.state == "fail" for row in problems):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(v.casefold() == CHECKED_TRAILER.casefold() for v in passing):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/doctor.py	return not named or any(v.casefold() == CHECKED_TRAILER.casefold() for v in named)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(push.github_repo(url) == github for url in urls):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/flag.py	if not any(key in planned for key in keys):	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""Everything `show` compares, read from GitHub."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""What `show` read from GitHub."""	keep	show	show
@@ -8329,6 +8331,7 @@ publishing	packages/publishing/tests/test_github.py	assert any(line.startswith("
 publishing	packages/publishing/tests/test_github.py	assert any("check-job can't be read: pyproject.toml can't be read" in line	keep	any	any
 publishing	packages/publishing/tests/test_push.py	assert set(log_lines()[-1]["commits"]) == set(	keep	set	set
 publishing	packages/publishing/tests/test_push.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_push.py	if PIECE in pieces and not any(s.startswith("standing-branch=") for s in sets):	keep	any	any
 publishing	packages/publishing/tests/test_replace_refs.py	assert "bobsecret" not in git(repo, "show", "HEAD:note.md").stdout	keep	show	show
 publishing	packages/publishing/tests/test_replace_refs.py	blob = git(repo, "hash-object", "-w", "--stdin", input=text).stdout.strip()	use	input=	stdin_data=
 publishing	packages/publishing/tests/test_rules.py	("round" + " proj-a/first-pass", "round-pointer"),	keep	round	round
@@ -8340,6 +8343,11 @@ publishing	packages/publishing/tests/test_scan.py	assert any(f"message line 3, s
 publishing	packages/publishing/tests/test_scan.py	assert any(line.endswith("author header: private-names/private-name") for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_scan.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 publishing	packages/publishing/tests/test_settings.py	assert cli.main(["config", "publishing", "show", "--json"]) == 0	keep	show	show
+publishing	packages/publishing/tests/test_standing.py	USER_BYTES = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	assert piece.standing_problem(value, "main", set()) is None	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	value, "main", set())	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	"release/*", "release/main", set())	keep	set	set
+publishing	packages/publishing/tests/test_standing.py	assert not any("/actions/" in path for path in served.asked)	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
