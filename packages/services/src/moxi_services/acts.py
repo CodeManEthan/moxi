@@ -28,7 +28,9 @@ Every act on a row terminates in every state. The rules that make it so:
   moxi.paths.core_lock(), nested=True)`, so the core's own calls inside it yield to it),
   and holds it around the write and the supervisor call that goes with it. Past its
   timeout nothing is written and the act exits 75. No store transaction is held across a
-  supervisor call: each write is one short transaction.
+  supervisor call: each write is one short transaction. A reader that takes the same lock
+  (`between_acts`) around its store read and its supervisor read never sees an act's
+  write without the supervisor call that goes with it.
 - `add` deletes its own row whenever the core will not write the unit, so no row
   outlives a refused add. `remove` deletes the row whenever no unit or drop-in of it
   remains, or none can exist here (a row of another system, no supervisor, an editable
@@ -198,6 +200,23 @@ def _locked() -> Iterator[None]:
         raise Busy(f"the core lock stayed held by {who} (an install, or another act) "
                    f"past {LOCK_TIMEOUT:g} s; nothing was changed",
                    str(exc.path)) from None
+    with stack:
+        yield
+
+
+@contextmanager
+def between_acts(timeout_s: float) -> Iterator[None]:
+    """The core lock, for a read of the store and the supervisor together, so no act's
+    write and supervisor call fall between them; waited for `timeout_s` seconds, then
+    `Busy`."""
+    stack = ExitStack()
+    try:
+        stack.enter_context(moxi.files.lock(moxi.paths.core_lock(), timeout_s=timeout_s,
+                                            nested=True))
+    except moxi.files.LockTimeout as exc:
+        who = f"pid {exc.holder}" if exc.holder else "another process"
+        raise Busy(f"the rows weren't read: the core lock stayed held by {who} (an "
+                   f"install, or an act) past {timeout_s:g} s", str(exc.path)) from None
     with stack:
         yield
 
@@ -909,4 +928,4 @@ def _remove_wrapped(row: UserRow, by: str, lines: list[str]):
 
 __all__ = [
     "BY", "LOCK_TIMEOUT", "Outcome", "resolve", "start", "stop", "restart", "enable",
-    "disable", "add_written", "add_adopted", "remove"]
+    "disable", "add_written", "add_adopted", "remove", "between_acts"]

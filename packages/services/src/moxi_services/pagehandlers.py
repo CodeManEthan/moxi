@@ -67,7 +67,16 @@ bound keeps the server's open files within its budget however many rows have a c
 each running check holds its pipes. A gather runs in a thread
 of its own, never on the base's threads, and only one runs at a time: a tick that finds
 the last one still running is skipped, and a skipped health pass runs at the next tick
-that gathers. The topic is published only when its value changed. The poller is not a
+that gathers. The topic is published only when its value changed.
+
+**One consistent read.** A gather, and one row's read, read the store and then the
+supervisor under the core lock (`acts.between_acts`), which every act holds around its
+write to the store (a stop by hand, or its clear) and the supervisor call that goes with
+it. So no row is judged from a store read older than the supervisor read it pairs with,
+and a stop or a start never reads as `not-running` on the way. The lock is waited for
+`ROWS_WAIT_S` seconds at most, the health pass runs after it is let go, and while an
+install or a slow act holds it, a gather answers the last value it read here (its `at`
+says when), or, with none, the error that the rows weren't read. The poller is not a
 request, a stream or a busy hold, so it never delays the server's idle exit, and it
 survives every exception, logged once per class.
 
@@ -89,6 +98,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import moxi.paths
 from moxi import modules
 
 from . import acts, jobs, rows, state, store, verdict
@@ -128,6 +138,8 @@ TODAY_LINES = 500
 RUNS_SHOWN = 5
 #: Seconds a page read, or the poller, waits for the supervisor.
 STATUS_SECONDS = 10.0
+#: Seconds a gather, or one row's read, waits for the core lock while an act holds it.
+ROWS_WAIT_S = 5.0
 #: Who a change from the page is recorded as made by.
 BY = "services page"
 #: What a status read says of a job this server holds no record of.
@@ -398,22 +410,44 @@ def every_row() -> tuple[list, list[tuple[str, str]]]:
     return [*user, *found], problems
 
 
+#: The last value a gather read under the lock, by the core lock's path.
+_gathered: dict[str, dict[str, Any]] = {}
+_gathered_lock = threading.Lock()
+
+
+def _read_steady(read: Callable[[], Any]) -> Any:
+    """`read()`, under the core lock, waited for `ROWS_WAIT_S`; `Busy` past it."""
+    with acts.between_acts(ROWS_WAIT_S):
+        return read()
+
+
 def gather(*, check_health: bool = False) -> dict[str, Any]:
     """The `rows` topic's value and `/api/rows`' answer. With `check_health`, every running
     daemon's check runs and its result is kept for the reads after. Never raises."""
     try:
-        found, problems = every_row()
+        where = str(moxi.paths.core_lock())
+
+        def read() -> tuple[list, list, str, verdict.Reading]:
+            found, problems = every_row()
+            at = _iso(time.time())
+            return found, problems, at, verdict.read(found, status_seconds=STATUS_SECONDS)
+        try:
+            found, problems, read_at, reading = _read_steady(read)
+        except Busy:
+            with _gathered_lock:
+                last = _gathered.get(where)
+            if last is not None:
+                return last
+            raise
         pass_at = None
-        read_at = _iso(time.time())
         if check_health:
             pass_at = _iso(time.time())
-            seen = verdict.views(found, check_health=True, status_seconds=STATUS_SECONDS,
+            seen = verdict.views(found, check_health=True, reading=reading,
                                  health_seconds=state.HEALTH_SECONDS,
                                  health_at_once=HEALTH_AT_ONCE)
             _remember(seen, pass_at)
         else:
-            seen = verdict.views(found, status_seconds=STATUS_SECONDS,
-                                 known_health=_known_health())
+            seen = verdict.views(found, reading=reading, known_health=_known_health())
         settings = with_settings(found)
         streaks = _streaks_of(seen, is_every_row=True)
         listed = [row_value(v, settings=settings, checked_at=_checked_at(v, pass_at),
@@ -426,8 +460,11 @@ def gather(*, check_health: bool = False) -> dict[str, Any]:
         _log_once(unexpected_exc, "listing the rows failed")
         return {"state": "error", "detail": _unexpected(unexpected_exc), "at": None,
                 "rows": [], "problems": []}
-    return {"state": "up", "detail": None, "at": read_at, "rows": listed,
-            "problems": [{"module": m, "reason": r} for m, r in problems]}
+    value = {"state": "up", "detail": None, "at": read_at, "rows": listed,
+             "problems": [{"module": m, "reason": r} for m, r in problems]}
+    with _gathered_lock:
+        _gathered[where] = value
+    return value
 
 
 def listing(call: Any) -> dict[str, Any]:
@@ -454,9 +491,11 @@ def row(call: Any) -> dict[str, Any]:
     today, the units the supervisor knows it by and its log hint; 422 for an id that
     names no row."""
     try:
-        found = acts.resolve(call.query["id"])
-        view = verdict.views([found], status_seconds=STATUS_SECONDS,
-                             known_health=_known_health())[0]
+        def read() -> tuple[Any, verdict.Reading]:
+            one = acts.resolve(call.query["id"])
+            return one, verdict.read([one], status_seconds=STATUS_SECONDS)
+        found, reading = _read_steady(read)
+        view = verdict.views([found], reading=reading, known_health=_known_health())[0]
         lines = state.last_runs(found, TODAY_LINES) if found.kind == "timer" else []
         ids = list(state.unit_ids(found))
     except ServicesError as exc:
@@ -897,7 +936,7 @@ def _feed() -> _Feed:
 
 __all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_ONE_CONFIRM", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
            "HEALTH_PERIOD", "JOBS", "JOB_SHAPE", "KEY_REUSED", "ON_OFF_IN_SETTINGS",
-           "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "RUNS_SHOWN", "SLOTS_IN_USE",
+           "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "ROWS_WAIT_S", "RUNS_SHOWN", "SLOTS_IN_USE",
            "SLOTS_SERVER", "SLOTS_UNREAD", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS",
            "TODAY_LINES", "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
            "ends", "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",

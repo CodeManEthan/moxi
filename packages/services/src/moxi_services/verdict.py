@@ -514,18 +514,27 @@ def within(fn: Callable[[], object], seconds: float):
     return True, value
 
 
-def views(rows: Sequence[Row], *, check_health: bool = False,
-          status_seconds: float | None = None,
-          health_seconds: float | None = None, health_at_once: int | None = None,
-          known_health: Mapping[str, tuple[str, str]] | None = None) -> list[View]:
-    """Every row's view, from one supervisor read. With `check_health`, every running
-    daemon's check runs, all at once or `health_at_once` at a time, waited on for
-    `health_seconds` a turn (see `healths`);
-    `known_health` gives results of an earlier run to judge with instead. With
-    `status_seconds`, the read gets that long in a worker thread; past it every row read
-    is `unknown` and no health runs."""
+@dataclass(frozen=True)
+class Reading:
+    """What the supervisor and the store said of some rows, read together: each row's
+    unit state and socket by id, why the supervisor wasn't read (`unread`, else None),
+    each row's on/off, and the module daemons' recorded stops by hand."""
+
+    states: Mapping[str, units.UnitState | None]
+    sockets: Mapping[str, units.UnitState | None]
+    unread: str | None
+    flags: Mapping[str, bool | None]
+    module_stops: Mapping[str, str]
+
+
+def read(rows: Sequence[Row], *, status_seconds: float | None = None) -> Reading:
+    """One read of the supervisor for `rows`, then of their on/off and the module
+    daemons' stops by hand. With `status_seconds`, the supervisor read gets that long in
+    a worker thread; past it every row's state is None, with `unread` saying so. A
+    caller that holds the core lock across the store read that gave `rows` and this
+    gets one consistent picture: an act writes a row's stop and its unit under that
+    lock."""
     rows = list(rows)
-    supervisor = units.backend() is not None
     unread = None
     if status_seconds is None:
         states, sockets = state.read_with_sockets(rows)
@@ -536,8 +545,32 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
         else:
             states, sockets = {r.id: None for r in rows}, {}
             unread = f"the supervisor did not answer in {status_seconds:g} s"
-            check_health = False
-    on = flags(rows)
+    module_stops = (store.read_module_stops()
+                    if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)
+                    else {})
+    return Reading(states, sockets, unread, flags(rows), module_stops)
+
+
+def views(rows: Sequence[Row], *, check_health: bool = False,
+          status_seconds: float | None = None,
+          health_seconds: float | None = None, health_at_once: int | None = None,
+          known_health: Mapping[str, tuple[str, str]] | None = None,
+          reading: Reading | None = None) -> list[View]:
+    """Every row's view, from one supervisor read: `reading`, or one made now (see
+    `read`). With `check_health`, every running
+    daemon's check runs, all at once or `health_at_once` at a time, waited on for
+    `health_seconds` a turn (see `healths`);
+    `known_health` gives results of an earlier run to judge with instead. With
+    `status_seconds`, the read gets that long in a worker thread; past it every row read
+    is `unknown` and no health runs."""
+    rows = list(rows)
+    supervisor = units.backend() is not None
+    if reading is None:
+        reading = read(rows, status_seconds=status_seconds)
+    states, sockets, unread = reading.states, reading.sockets, reading.unread
+    if unread is not None:
+        check_health = False
+    on = reading.flags
     if check_health:
         checked = healths([(r, states.get(r.id)) for r in rows], health_seconds,
                           at_once=health_at_once)
@@ -547,9 +580,7 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
     else:
         checked = {}
     booted = boot_time()
-    module_stops = (store.read_module_stops()
-                    if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)
-                    else {})
+    module_stops = reading.module_stops
     out = []
     for row in rows:
         st = states.get(row.id)
@@ -562,4 +593,5 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
 
 
 __all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run", "run_of",
-           "boot_time", "utc_seconds", "stop_recorded", "judge", "flags", "healths", "within", "views"]
+           "boot_time", "utc_seconds", "stop_recorded", "judge", "flags", "healths", "within", "Reading",
+           "read", "views"]

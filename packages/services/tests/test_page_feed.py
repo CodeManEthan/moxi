@@ -31,6 +31,7 @@ def fresh_feed(monkeypatch, site, fake):
     monkeypatch.setattr(pagehandlers, "_current", None)
     monkeypatch.setattr(pagehandlers, "_known", {})
     monkeypatch.setattr(pagehandlers, "_streaks", {})
+    monkeypatch.setattr(pagehandlers, "_gathered", {})
     monkeypatch.setattr(pagehandlers, "_logged", set())
     yield fake
     feed = pagehandlers._current
@@ -106,9 +107,15 @@ def test_the_first_event_is_every_row_and_a_change_comes_at_the_next_tick(monkey
             assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
                 == [("services/web", "active", "running")]
             await asyncio.to_thread(acts.stop, "web")
-            _, data = await stream.next(5)
-            assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
-                == [("services/web", "inactive", "stopped")]
+            # Every event up to the one that reads the stop; none may judge the row
+            # failed on the way, between the stop's record and its unit's stop.
+            deadline = time.monotonic() + 5
+            while True:
+                _, data = await stream.next(max(deadline - time.monotonic(), 0.01))
+                seen = [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]]
+                assert all(cause != "not-running" for _, _, cause in seen), seen
+                if seen == [("services/web", "inactive", "stopped")]:
+                    break
         finally:
             await stream.close()
 
