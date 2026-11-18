@@ -80,7 +80,7 @@
 // The internal leg rule: no hook waits on the endpoint longer than a bound this plugin's
 // own timer keeps, and a request that misses its bound counts as unanswered. A reporting
 // hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a context ask
-// listen_wait_ms + 1 s; SessionStart waits at most 2 s for the first line.
+// listen_wait_ms + 1 s; a ready waits at most 2 s for the first line.
 //
 // The queue: a report made before the first line waits in the queue and is sent after the
 // session report once the line comes; one whose hook stopped waiting (the 1 s) stays queued
@@ -106,7 +106,7 @@
 // The entry rule: a runner prompt enters only as the prompt of the window now open,
 // admitted once by the endpoint. The runner puts the window nonce on the prompt's first
 // line and keeps the endpoint's mod.sock path in $.state (`endpoint`), written at the
-// first line, at every SessionStart (a /clear empties $.state) and before each submit. The
+// first line, at every ready (a /clear empties $.state) and before each submit. The
 // gate (moxi-turns-gate) asks the endpoint for every runner prompt, takes the nonce line
 // off on a pass and drops everything else. The gate is required: without it in
 // $.command.list() the runner submits nothing, and the submit closes as `unsupported`.
@@ -137,9 +137,28 @@
 // A turn's abort drops the main loop's calls from the count (their tools are stopped);
 // a call whose hook never returns keeps the mark set, which errs to `complete` false.
 //
-// The non-interactive rule: `$.session.surfaces()` empty means headless, read in
-// whichever of session.start and classic.SessionStart runs first; the first read decides.
-// A headless run spawns no endpoint and every hook returns at once.
+// The non-interactive rule: a session is headless only when Claude Code's own
+// session.start says nobody is at the prompt (`isInteractive` false). The runner decides
+// at its first session.start and keeps that for the module load; until then the session
+// is not headless. A missing or non-boolean `isInteractive` counts as interactive, with one
+// log line naming what it carried. A headless run spawns no endpoint and every hook
+// returns at once.
+// A main classic.SessionStart that runs before the decision holds for it, at most 1 s. The
+// hold ends in one step: decided (the decision came first) or ran out (the bound came
+// first, and that step records the SessionStart's source, session id and transcript path
+// as missed). After a decided hold SessionStart goes on as on any start: headless passes,
+// else it spawns if need be, waits for the first line and makes the ready ask. A hold that
+// ran out passes with no context, whatever the decision is by then. A subagent's
+// SessionStart never holds.
+// The ordering rule: exactly one ready ask for each main SessionStart before the decision.
+// The hold's end and the decision each run in one step with no await, and the decision
+// takes `missed` in its step: if the hold ran out first, session.start makes the ready (the
+// late ready); if the decision came first, SessionStart makes it. A not-interactive
+// decision drops what it took and makes none.
+// The late ready: session.start, once it has spawned the endpoint, makes the missed
+// SessionStart's ready with that SessionStart's facts and checks (no wait and no ask once
+// the endpoint has ended, at most 2 s for the first line) before calling `next`. The
+// answer's context has nowhere to go; the runner drops it and logs that it did.
 //
 // The guards: the runner matches every tool call against the table the endpoint sent, in
 // its own process, and only a call a judge entry covers leaves it. An entry is
@@ -244,6 +263,8 @@ const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
 const HELLO_WAIT_MS = 2000
+/** How long a SessionStart that runs before the decision holds for it. */
+const DECIDE_WAIT_MS = 1000
 const IDLE_FAIL_MS = 5000
 const SEND_TRIES = 5
 const SEND_RETRY_MS = 100
@@ -313,8 +334,17 @@ type Win = {
   timer: { cancel: () => void } | null
 }
 
+/** What a SessionStart's ready ask carries from its hook input. */
+type ReadyFacts = { source: unknown; session_id: unknown; transcript_path: unknown }
+
 // Module state: a reload starts it over, with a new endpoint.
+/** The decision: undefined until the first session.start, then kept. */
 let headless: boolean | undefined
+/** Settles once, in the step that sets `headless`. */
+let decided: () => void = () => {}
+const decidedP = new Promise<void>(resolve => { decided = resolve })
+/** The facts of a SessionStart whose hold ran out before the decision, or null. */
+let missed: ReadyFacts | null = null
 let spawned = false
 let hello: Hello | undefined
 let ended = false
@@ -926,18 +956,60 @@ async function spawn($: Dollar): Promise<void> {
   })()
 }
 
-/** The first surfaces read decides: true when the session draws nowhere. */
-async function isHeadless($: Dollar): Promise<boolean> {
-  if (headless === undefined) {
-    let surfaces: readonly string[] = []
-    try {
-      surfaces = await $.session.surfaces()
-    } catch {
-      surfaces = []
-    }
-    if (headless === undefined) headless = surfaces.length === 0
+/** The decision, at the first session.start, in one step: headless only when
+ *  `isInteractive` is false. It sets `headless`, settles the hold's promise and takes
+ *  `missed`, which it returns. */
+function takeDecision($: Dollar, isInteractive: unknown): ReadyFacts | null {
+  headless = isInteractive === false
+  decided()
+  const took = missed
+  missed = null
+  if (typeof isInteractive !== 'boolean') {
+    const carried = isInteractive === undefined ? 'nothing' : JSON.stringify(isInteractive)
+    log($, `session.start carried no boolean isInteractive (${carried}); the session counts as interactive`)
   }
-  return headless
+  if (headless) log($, 'session.start says the session is not interactive: no endpoint, and every hook passes')
+  return took
+}
+
+/** A SessionStart before the decision holds for it, at most DECIDE_WAIT_MS. The outcome is
+ *  fixed in one step: `decided` when the decision came first, `ran-out` when the bound did,
+ *  and that same step records `facts` as `missed`. */
+function hold($: Dollar, facts: ReadyFacts): Promise<'decided' | 'ran-out'> {
+  return new Promise(resolve => {
+    let done = false
+    const end = (): void => {
+      if (done) return
+      done = true
+      if (headless !== undefined) return resolve('decided')
+      missed = facts
+      resolve('ran-out')
+    }
+    if (headless !== undefined) return end()
+    void decidedP.then(end)
+    $.clock.after(DECIDE_WAIT_MS, end)
+  })
+}
+
+/** The ready: wait at most 2 s for the first line (not when the endpoint has ended), write
+ *  the mod.sock path again, and ask the listeners. Their answer (undefined when the ask
+ *  missed its bound), or null when no ask was made: no first line, or the endpoint ended. */
+async function ready($: Dollar, facts: ReadyFacts): Promise<Json | undefined | null> {
+  if (hello === undefined && !ended) await Promise.race([helloP, after($, HELLO_WAIT_MS)])
+  if (hello === undefined || ended) return null
+  // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
+  // written again at every ready, for the gate.
+  await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
+  // A new session's context is not known until its first reading.
+  contextTokens = null
+  return ask($, '/ask/context', { event: 'ready', source: facts.source ?? null, session_id: facts.session_id, transcript_path: facts.transcript_path || null }, hello.listenWaitMs + MARGIN_MS)
+}
+
+/** SessionStart's ready, made at session.start for a SessionStart whose hold ran out. The
+ *  answer's context has nowhere to go and is dropped. */
+async function lateReady($: Dollar, facts: ReadyFacts): Promise<void> {
+  if ((await ready($, facts)) === null) return
+  log($, `the ready context was dropped: SessionStart ran out its ${DECIDE_WAIT_MS / 1000} s hold before session.start`)
 }
 
 const withContext = <R extends { additionalContext?: string[] }>(r: R, context: unknown): R =>
@@ -1288,8 +1360,14 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const hook = watch()
     try {
-      // Spawned before `next`, so the endpoint's start overlaps the session's.
-      if (!(await isHeadless($))) await spawn($)
+      const took = headless === undefined ? takeDecision($, (e as Json).isInteractive) : null
+      if (headless !== true) {
+        // Spawned before `next`, so the endpoint's start overlaps the session's.
+        await spawn($)
+        // Claude Code awaits the first session.start before the first prompt, so the late
+        // ready lands before turn one.
+        if (took !== null) await lateReady($, took)
+      }
       return behind(hook, performance.now(), await next(e))
     } finally {
       timeHook($, 'session.start', hook)
@@ -1299,16 +1377,13 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const hook = watch()
     try {
-      if (e.agent_id !== undefined || (await isHeadless($))) return behind(hook, performance.now(), await next(e))
+      if (e.agent_id !== undefined) return behind(hook, performance.now(), await next(e))
+      const facts = { source: e.source, session_id: e.session_id, transcript_path: e.transcript_path }
+      // A hold that ran out passes with no context, whatever the decision is by now.
+      if (headless === undefined && (await hold($, facts)) === 'ran-out') return behind(hook, performance.now(), await next(e))
+      if (headless === true) return behind(hook, performance.now(), await next(e))
       if (!spawned) await spawn($)
-      if (hello === undefined && !ended) await Promise.race([helloP, after($, HELLO_WAIT_MS)])
-      if (hello === undefined || ended) return behind(hook, performance.now(), await next(e))
-      // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
-      // written again at every SessionStart, for the gate.
-      await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
-      // A new session's context is not known until its first reading.
-      contextTokens = null
-      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id, transcript_path: e.transcript_path || null }, hello.listenWaitMs + MARGIN_MS)
+      const answer = await ready($, facts)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
       timeHook($, 'classic.SessionStart', hook)

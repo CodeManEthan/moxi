@@ -1,4 +1,5 @@
-// The runner: the non-interactive rule, the internal leg's queue and bounds,
+// The runner: the non-interactive rule (the decision, SessionStart's hold, the ordering
+// rule and the late ready), the internal leg's queue and bounds,
 // the tie's window with its three ends and the idle-only bound, the context asks, the Stop
 // ask, and the session commands.
 
@@ -19,19 +20,260 @@ async function attached($: E, w: World): Promise<void> {
   await w.hello()
 }
 
+const startAs = ($: E, isInteractive: unknown) => $.session.start({ cwd: '/work', surface: 'terminal', isInteractive })
+const sessionStart = ($: E) => $.classic.SessionStart({ source: 'startup', session_id: 'S-1', transcript_path: '/p/S-1.jsonl' })
+const READY = { event: 'ready', source: 'startup', session_id: 'S-1', transcript_path: '/p/S-1.jsonl' }
+const readies = (w: World) => w.got.filter(g => g.path === '/ask/context' && g.body.event === 'ready').map(g => g.body)
+const DROPPED = 'moxi-turns: the ready context was dropped: SessionStart ran out its 1 s hold before session.start'
+const NOT_INTERACTIVE = 'moxi-turns: session.start says the session is not interactive: no endpoint, and every hook passes'
+/** A data-only ask entry: it denies every Bash permission ask. */
+const ASK_GUARD = { id: 't.asks', calls: ['Bash'], who: 'any', match: null, match_flags: '', judge: false, deny: 'nobody is there to ask', wants: [], on_error: 'allow', deadline_ms: 500, step: 'ask' }
+const permission = ($: E) => $.classic.PermissionRequest({
+  session_id: 'S-1', transcript_path: '/p/S-1.jsonl', cwd: '/work', permission_mode: 'bypassPermissions',
+  tool_name: 'Bash', tool_input: { command: 'rm -rf build' },
+})
+
+/** Whether `p` has settled, once what can run has run. */
+async function settled(w: World, p: Promise<unknown>): Promise<boolean> {
+  let done = false
+  void p.then(() => { done = true }, () => { done = true })
+  await w.clock.settle()
+  return done
+}
+
+/** After the decision: the later hooks of a turn and an ask post nothing and spawn nothing. */
+async function quietAfter($: E, w: World): Promise<void> {
+  await turnStart($, 't1')
+  await turnEnd($, 't1')
+  await $.classic.Stop({ stop_hook_active: false })
+  expect((await permission($)).decision).toBeUndefined()
+  expect(w.spawned).toEqual([])
+  expect(w.got).toEqual([])
+}
+
 describe('the non-interactive rule', () => {
-  test('a headless run spawns nothing, and SessionStart waits for no first line', async ($: E, on) => {
-    const w = world(on, { surfaces: [] })
-    // Under -p classic.SessionStart comes first; its read decides.
-    const r = await $.classic.SessionStart({ source: 'startup' })
+  test('session.start first, interactive: spawned there, and SessionStart holds for nothing and asks', async ($: E, on) => {
+    const w = world(on)
+    w.answers['/ask/context'] = { context: 'ROSTER' }
     await start($)
-    await turnStart($, 't1')
-    await turnEnd($, 't1')
-    await $.classic.Stop({ stop_hook_active: false })
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    const r = sessionStart($)
+    await w.clock.settle()
+    expect(w.clock.now()).toBe(1_000)
+    await w.hello()
+    expect((await r).additionalContext).toEqual(['ROSTER'])
+    expect(readies(w)).toEqual([READY])
+    expect(w.spawned).toEqual([ROOT_ARGV])
+  })
+
+  test('session.start first, not interactive: nothing spawned, SessionStart passes at once, later hooks post nothing', async ($: E, on) => {
+    const w = world(on)
+    await startAs($, false)
+    const r = await sessionStart($)
+    expect(w.clock.now()).toBe(1_000)
+    expect(r.additionalContext ?? []).toEqual([])
+    await quietAfter($, w)
+    expect(w.logs).toContain(NOT_INTERACTIVE)
+  })
+
+  test('the race: SessionStart first with no surface, session.start interactive inside the hold; one ready, from SessionStart', async ($: E, on) => {
+    const w = world(on, { surfaces: [] })
+    w.answers['/ask/context'] = { context: 'ROSTER' }
+    const r = sessionStart($)
+    await w.clock.advance(150)
+    expect(w.spawned).toEqual([])
+    await start($)
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(readies(w)).toEqual([])
+    await w.hello()
+    expect((await r).additionalContext).toEqual(['ROSTER'])
+    expect(readies(w)).toEqual([READY])
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(w.logs).not.toContain(DROPPED)
+    expect(w.clock.now()).toBe(1_150)
+  })
+
+  test('the -p order: SessionStart holds 1 s and passes with nothing, then session.start not interactive spawns nothing', async ($: E, on) => {
+    const w = world(on)
+    const r = sessionStart($)
+    await w.clock.advance(999)
+    expect(await settled(w, r)).toBe(false)
+    await w.clock.advance(1)
+    expect((await r).additionalContext ?? []).toEqual([])
+    expect(w.spawned).toEqual([])
+    await startAs($, false)
+    await quietAfter($, w)
+    expect(w.logs).not.toContain(DROPPED)
+  })
+
+  test('a missed hold: session.start interactive spawns and makes the ready itself, settling only after the ask', async ($: E, on) => {
+    const w = world(on)
+    let doneAtAsk: boolean | undefined
+    let done = false
+    w.answers['/ask/context'] = async () => {
+      doneAtAsk = done
+      return { context: 'ROSTER' }
+    }
+    const r = sessionStart($)
+    await w.clock.advance(1_000)
+    expect((await r).additionalContext ?? []).toEqual([])
+    const s = start($)
+    void s.then(() => { done = true })
+    await w.clock.settle()
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(done).toBe(false)
+    await w.hello()
+    await s
+    expect(readies(w)).toEqual([READY])
+    expect(doneAtAsk).toBe(false)
+    expect(w.logs).toContain(DROPPED)
+  })
+
+  test('surfaces do not decide: none and interactive is interactive', async ($: E, on) => {
+    const w = world(on, { surfaces: [] })
+    await start($)
+    expect(w.spawned).toEqual([ROOT_ARGV])
+  })
+
+  test('surfaces do not decide: a terminal and not interactive is headless', async ($: E, on) => {
+    const w = world(on, { surfaces: ['terminal'] })
+    await startAs($, false)
+    await sessionStart($)
+    expect(w.clock.now()).toBe(1_000)
+    await quietAfter($, w)
+  })
+
+  for (const [name, carried, logged] of [['absent', undefined, 'nothing'], ['a string', 'yes', '"yes"'], ['null', null, 'null'], ['a number', 0, '0']] as const) {
+    test(`isInteractive ${name} counts as interactive, and the runner says what session.start carried`, async ($: E, on) => {
+      const w = world(on)
+      if (carried === undefined) await $.session.start({ cwd: '/work', surface: 'terminal' })
+      else await startAs($, carried)
+      expect(w.spawned).toEqual([ROOT_ARGV])
+      expect(w.logs).toContain(`moxi-turns: session.start carried no boolean isInteractive (${logged}); the session counts as interactive`)
+    })
+  }
+
+  test('a boolean isInteractive logs no such line', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect(w.logs.filter(l => l.includes('no boolean isInteractive'))).toEqual([])
+  })
+
+  test('the ask step is live after the race', async ($: E, on) => {
+    const w = world(on)
+    const r = sessionStart($)
+    await w.clock.advance(150)
+    await start($)
+    await w.hello({ guards: [ASK_GUARD] })
+    await r
+    expect((await permission($)).decision).toEqual({ behavior: 'deny', message: 'nobody is there to ask' })
+  })
+
+  test('the ask step is live after a missed hold', async ($: E, on) => {
+    const w = world(on)
+    const r = sessionStart($)
+    await w.clock.advance(1_000)
+    await r
+    const s = start($)
+    await w.clock.settle()
+    await w.hello({ guards: [ASK_GUARD] })
+    await s
+    expect((await permission($)).decision).toEqual({ behavior: 'deny', message: 'nobody is there to ask' })
+  })
+
+  test('in the -p order the ask passes untouched', async ($: E, on) => {
+    const w = world(on)
+    const r = sessionStart($)
+    await w.clock.advance(1_000)
+    await r
+    await startAs($, false)
+    expect((await permission($)).decision).toBeUndefined()
+    expect(w.got).toEqual([])
+  })
+
+  test('a subagent\'s SessionStart never holds, even before the decision, and leaves nothing missed', async ($: E, on) => {
+    const w = world(on)
+    const r = await $.classic.SessionStart({ source: 'startup', session_id: 'S-1', agent_id: 'a1' })
+    expect(w.clock.now()).toBe(1_000)
+    expect(r.additionalContext ?? []).toEqual([])
+    await start($)
+    await w.hello()
+    expect(readies(w)).toEqual([])
+    expect(w.logs).not.toContain(DROPPED)
+  })
+
+  describe('the ordering rule: one ready ask in each interleaving', () => {
+    test('the hold runs out, then session.start runs while SessionStart is still in flight: the ask is session.start\'s', async ($: E, on) => {
+      const w = world(on)
+      w.answers['/ask/context'] = { context: 'ROSTER' }
+      let release = () => {}
+      w.beneathSessionStart = new Promise<void>(resolve => { release = resolve })
+      const r = sessionStart($)
+      await w.clock.advance(1_000)
+      expect(await settled(w, r)).toBe(false)
+      const s = start($)
+      await w.clock.settle()
+      await w.hello()
+      await s
+      release()
+      expect((await r).additionalContext ?? []).toEqual([])
+      expect(readies(w)).toEqual([READY])
+      expect(w.logs).toContain(DROPPED)
+    })
+
+    test('the decision and the hold\'s bound in one tick, the decision first: the ask is SessionStart\'s', async ($: E, on) => {
+      const w = world(on)
+      w.answers['/ask/context'] = { context: 'ROSTER' }
+      // Registered before the hold's timer, so it runs first at the same instant.
+      const s = w.clock.sleep(1_000).then(() => start($))
+      const r = sessionStart($)
+      await w.clock.advance(1_000)
+      await s
+      await w.hello()
+      expect((await r).additionalContext).toEqual(['ROSTER'])
+      expect(readies(w)).toEqual([READY])
+      expect(w.logs).not.toContain(DROPPED)
+    })
+
+    test('the decision and the hold\'s bound in one tick, the bound first: the ask is session.start\'s', async ($: E, on) => {
+      const w = world(on)
+      w.answers['/ask/context'] = { context: 'ROSTER' }
+      const r = sessionStart($)
+      await w.clock.settle()
+      // Registered after the hold's timer, so it runs second at the same instant.
+      const s = w.clock.sleep(1_000).then(() => start($))
+      await w.clock.advance(1_000)
+      expect((await r).additionalContext ?? []).toEqual([])
+      await w.clock.settle()
+      await w.hello()
+      await s
+      expect(readies(w)).toEqual([READY])
+      expect(w.logs).toContain(DROPPED)
+    })
+  })
+
+  test('a not-interactive decision inside the hold: SessionStart resumes at once with nothing', async ($: E, on) => {
+    const w = world(on)
+    const r = sessionStart($)
+    await w.clock.advance(150)
+    await startAs($, false)
+    expect(await settled(w, r)).toBe(true)
+    expect((await r).additionalContext ?? []).toEqual([])
+    expect(w.clock.now()).toBe(1_150)
     expect(w.spawned).toEqual([])
     expect(w.got).toEqual([])
-    expect(r.additionalContext ?? []).toEqual([])
-    expect(w.clock.now()).toBe(1_000)
+  })
+
+  test('a missed hold whose endpoint cannot start: session.start waits for nothing and asks nothing', async ($: E, on) => {
+    const w = world(on, { endpointJson: null })
+    const r = sessionStart($)
+    await w.clock.advance(1_000)
+    await r
+    await start($)
+    expect(w.clock.now()).toBe(2_000)
+    expect(w.spawned).toEqual([])
+    expect(w.got).toEqual([])
+    expect(w.logs).not.toContain(DROPPED)
   })
 
   test('an interactive start spawns the endpoint named in endpoint.json, at session.start', async ($: E, on) => {
