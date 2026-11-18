@@ -49,7 +49,7 @@ LIVE_S = 30.0
 
 SESSION_KEYS = ["key", "harness", "pid", "session_id", "cwd", "started", "capabilities",
                 "endpoint_version", "mod_version", "trouble", "facts", "agents",
-                "read_error", "ended_at", "has_box"]
+                "read_error", "ended_at", "has_box", "unread_since"]
 
 
 def loopback():
@@ -412,6 +412,7 @@ def test_the_first_read_lists_the_session_with_its_facts_and_agents(make_endpoin
     assert row["endpoint_version"] == ep.version and row["mod_version"] is None
     assert row["trouble"] is None and row["read_error"] is None
     assert row["ended_at"] is None and row["has_box"] is False
+    assert row["unread_since"] is None
     facts = row["facts"]
     assert facts["session_id"] == "s-1"
     assert facts["turn_number"] == 0 and facts["turn_open"] is False
@@ -853,8 +854,8 @@ def test_values_of_the_wrong_type_never_reach_the_page(odd):
     assert row["endpoint_version"] is None and row["session_id"] is None
     assert row["trouble"] == "the endpoint reports trouble turns cannot read"
     assert row["facts"] is None
-    assert row["read_error"] == ("turns could not read this session's facts; what is shown "
-                                 "may be old")
+    assert row["read_error"] == "its turn could not be read, so what shows may be old"
+    assert isinstance(row["unread_since"], float)
 
 
 def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypatch):
@@ -886,7 +887,7 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
             data = await stream.until(lambda d: row_of(d, key)["read_error"] is not None
                                       and turn(d, key) == (1, True), LIVE_S)
             assert row_of(data, key)["read_error"] == (
-                "turns could not read this session's agents; what is shown may be old")
+                "its agents could not be read, so what shows may be old")
             assert row_of(data, key)["agents"] == {"entries": [], "complete": True}
             failing.clear()
             fake.end_turn()
@@ -928,10 +929,205 @@ def test_the_reader_starts_on_the_first_ask_and_stop_closes_every_watch(make_end
 
 def test_the_read_error_sentences():
     assert pagereader.read_error(set()) is None
-    assert pagereader.read_error({"watch"}) == ("turns could not watch this session; it "
-                                                "tries again")
+    assert pagereader.read_error({"watch"}) == (
+        "Moxi can't watch it, so what shows is read every 30 s and may be up to 30 s old")
+    assert pagereader.read_error({"watch"}, reread_s=2.5) == (
+        "Moxi can't watch it, so what shows is read every 2.5 s and may be up to 2.5 s old")
+    assert pagereader.read_error({"watch", "facts"}) == (
+        "Moxi can't watch it or read its turn, and tries again")
+    assert pagereader.read_error({"agents", "watch"}) == (
+        "Moxi can't watch it or read its agents, and tries again")
     assert pagereader.read_error({"facts", "agents", "watch"}) == (
-        "turns could not watch this session or read its facts and agents; it tries again")
+        "Moxi can't watch it or read its turn and agents, and tries again")
+    assert pagereader.read_error({"facts"}) == (
+        "its turn could not be read, so what shows may be old")
+    assert pagereader.read_error({"agents"}) == (
+        "its agents could not be read, so what shows may be old")
+    assert pagereader.read_error({"agents", "facts"}) == (
+        "its turn and agents could not be read, so what shows may be old")
+
+
+# --- the timer -----------------------------------------------------------------------------
+
+#: The paces the timer tests run at: short, so a test waits seconds, not half a minute.
+FAST_S = 0.3
+SLOW_S = 1.5
+
+
+@pytest.fixture
+def short_paces(monkeypatch):
+    monkeypatch.setattr(pagereader, "UNREAD_S", FAST_S)
+    monkeypatch.setattr(pagereader, "REREAD_S", SLOW_S)
+
+
+def test_a_live_part_that_did_not_read_is_read_again_at_the_fast_pace(make_endpoint,
+                                                                      short_paces):
+    fake = FakeHarness()
+    fake.live_fails = True
+    ep, _ = make_endpoint(fake, session_id="s-1")
+    key = ep.dir.name
+
+    async def go():
+        stream = Stream(served())
+        try:
+            data = await stream.until(lambda d: facts_of(d, key) != {}, LIVE_S)
+            row = row_of(data, key)
+            assert row["facts"]["agents"] is None and isinstance(row["unread_since"], float)
+            fake.live_fails = False
+            began = time.monotonic()
+            data = await stream.until(lambda d: row_of(d, key)["unread_since"] is None,
+                                      LIVE_S)
+            # No event asked for it: the fast pace did, well before the slow one.
+            assert time.monotonic() - began < SLOW_S
+            assert facts_of(data, key)["agents"] == 0
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_an_agent_that_ends_with_no_event_leaves_within_the_slow_pace(make_endpoint,
+                                                                      short_paces):
+    fake = FakeHarness()
+    fake.live_agents = 1
+    ep, _ = make_endpoint(fake, session_id="s-1")
+    key = ep.dir.name
+
+    async def go():
+        stream = Stream(served())
+        try:
+            await stream.until(lambda d: facts_of(d, key).get("agents") == 1, LIVE_S)
+            fake.live_agents = 0
+            data = await stream.until(lambda d: facts_of(d, key).get("agents") == 0
+                                      and row_of(d, key)["agents"]["entries"] == [], LIVE_S)
+            assert row_of(data, key)["unread_since"] is None
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_a_failed_read_is_tried_again_and_its_run_is_published_once(make_endpoint,
+                                                                    monkeypatch,
+                                                                    short_paces):
+    ep, _ = make_endpoint(session_id="s-1")
+    key = ep.dir.name
+    failing = threading.Event()
+    tries = []
+    real = client.Session.facts
+
+    def facts(self):
+        if failing.is_set():
+            tries.append(time.monotonic())
+            raise turns.TurnsError("the endpoint did not answer facts")
+        return real(self)
+
+    monkeypatch.setattr(client.Session, "facts", facts)
+
+    async def go():
+        stream = Stream(served())
+        try:
+            await stream.until(lambda d: turn(d, key) == (0, False), LIVE_S)
+            failing.set()
+            data = await stream.until(lambda d: row_of(d, key)["unread_since"] is not None,
+                                      LIVE_S)
+            since = row_of(data, key)["unread_since"]
+            assert row_of(data, key)["read_error"] == (
+                "its turn could not be read, so what shows may be old")
+            # Retries at the fast pace fail again and publish nothing.
+            with pytest.raises(TimeoutError):
+                await stream.next(6 * FAST_S)
+            assert len(tries) >= 3
+            _, now = await get(served())
+            assert row_of(now, key)["unread_since"] == since
+            failing.clear()
+            data = await stream.until(lambda d: row_of(d, key)["unread_since"] is None,
+                                      LIVE_S)
+            assert row_of(data, key)["read_error"] is None
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_a_reading_new_only_in_its_at_is_answered_but_not_published(make_endpoint,
+                                                                   short_paces):
+    ep, _ = make_endpoint(session_id="s-1")
+    key = ep.dir.name
+
+    async def go():
+        app = served()
+        stream = Stream(app)
+        try:
+            data = await stream.until(lambda d: turn(d, key) == (0, False), LIVE_S)
+            # Let the reads the watch's opening asks for settle.
+            await asyncio.sleep(SLOW_S)
+            _, first = await get(app)
+            with pytest.raises(TimeoutError):
+                await stream.next(3 * SLOW_S)
+            _, later = await get(app)
+            assert facts_of(later, key)["at"] > facts_of(first, key)["at"]
+            assert {k: v for k, v in facts_of(later, key).items() if k != "at"} == {
+                k: v for k, v in facts_of(first, key).items() if k != "at"}
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_with_the_watch_down_the_timer_still_reads_and_nothing_says_unread(make_endpoint,
+                                                                          monkeypatch,
+                                                                          short_paces):
+    def no_watch(self):
+        raise turns.TurnsError("the watch cannot start")
+
+    monkeypatch.setattr(client.Session, "watch", no_watch)
+    ep, fake = make_endpoint(session_id="s-1")
+    key = ep.dir.name
+
+    async def go():
+        stream = Stream(served())
+        try:
+            data = await stream.until(lambda d: turn(d, key) == (0, False)
+                                      and row_of(d, key)["read_error"] is not None, LIVE_S)
+            row = row_of(data, key)
+            assert row["read_error"] == (
+                f"Moxi can't watch it, so what shows is read every {SLOW_S:g} s and may be "
+                f"up to {SLOW_S:g} s old")
+            assert row["unread_since"] is None
+            fake.start_turn()
+            began = time.monotonic()
+            await stream.until(lambda d: turn(d, key) == (1, True), LIVE_S)
+            assert time.monotonic() - began < 2 * SLOW_S
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+class _Reads:
+    """A session stand-in whose facts readings are stale for the first `stale` reads."""
+
+    def __init__(self, stale: int):
+        self.stale = stale
+        self.calls = 0
+
+    def facts(self):
+        from types import SimpleNamespace
+
+        self.calls += 1
+        return SimpleNamespace(stale=self.calls <= self.stale, n=self.calls)
+
+
+@pytest.mark.parametrize(("stale", "calls", "kept_stale"), [
+    (0, 1, False), (1, 2, False), (3, 4, False), (10, 4, True)])
+def test_a_stale_reading_is_read_again_up_to_three_times(stale, calls, kept_stale):
+    held = object.__new__(pagereader._Held)
+    held.session = _Reads(stale)
+    facts = held.read_facts()
+    assert pagereader.STALE_REREADS == 3
+    assert held.session.calls == calls and facts.n == calls
+    assert facts.stale is kept_stale
 
 
 # --- without the UI -------------------------------------------------------------------------

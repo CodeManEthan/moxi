@@ -81,12 +81,15 @@ AGENTS = lb.Out("table", nullable=True, items={
 
 #: One session. `key` is its endpoint's name, `<harness>-<nonce>`, fixed for the
 #: endpoint's life. The fields from `harness` to `trouble` are its `session` answer and its
-#: hello's capabilities, refreshed at each scan; `read_error` is a fixed sentence when its
-#: watch or its last facts or agents read failed, null when none did. `ended_at` is the
+#: hello's capabilities, refreshed at each scan; `facts` and `agents` are read again at
+#: least every 30 s; `read_error` is a fixed sentence when its watch or its last facts or
+#: agents read failed, null when none did. `ended_at` is the
 #: page server's wall-clock time when its watch saw the session's last turn end, sent only
 #: while the latest facts show no turn open at that same session id and turn number, else
 #: null. `has_box` is true when turns reads the harness's prompt box, so `facts.draft` can
-#: be true for a draft; on the other harnesses `draft` is always false.
+#: be true for a draft; on the other harnesses `draft` is always false. `unread_since` is
+#: the page server's wall-clock time when a run of unread readings began (a facts or
+#: agents read failed, or the facts reading has `agents` null), null when none runs.
 SESSION = lb.Out("table", items={
     "key": _TEXT,
     "harness": _TEXT,
@@ -103,6 +106,7 @@ SESSION = lb.Out("table", items={
     "read_error": _MAYBE,
     "ended_at": _MAYBE_WHEN,
     "has_box": _FLAG,
+    "unread_since": _MAYBE_WHEN,
 })
 
 #: The list. `listed` is false until the page server's first scan for sessions has
