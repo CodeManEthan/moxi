@@ -23,6 +23,7 @@ packages/moxi/src/moxi/proc.py	p_pid	the pid field of macOS's struct kinfo_proc
 packages/moxi/src/moxi/terminal/_walk.py	hidepid	the Linux /proc mount option that hides other users' processes
 packages/moxi/tests/test_run.py	CommandLineToArgvW	the Windows API function whose rules split a command line
 packages/moxi/tests/test_settle_procs.py	nohup	the POSIX command that starts a program with hang-ups ignored
+packages/publishing/src/moxi_publishing/doctor.py	pushInsteadOf	git's config key that rewrites a remote's URL for pushes only
 packages/repo/src/moxi_repo/commit_rules.py	core.commentString	a git config key, the comment prefix of commit messages
 packages/repo/src/moxi_repo/commit_rules.py	find_separator	the function in git's trailer code that finds a trailer's separator
 packages/secrets/src/moxi_secrets/_generate.py	unicode.SimpleFold	the Go standard library function for Unicode simple case folding

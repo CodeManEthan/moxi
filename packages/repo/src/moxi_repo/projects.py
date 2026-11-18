@@ -110,6 +110,60 @@ def project_roots(found) -> tuple[list[tuple[str, str]], str | None]:
     return [(str(p.key), str(p.root)) for p in listed], None
 
 
+def with_projects(repos: list[dict], found, *, add: bool = False,
+                  with_rules: bool = False) -> tuple[list[dict], list[str]]:
+    """Each listed repo (as `api.status` lists it) with its project key (`project`, None
+    when it is in no project or `found`, projects' read API, is None); with `add`, each
+    project's repo not listed yet, as `api.status` lists it (`with_rules` passed on), so
+    marked `indexed` false, after them. Also the lines saying why projects couldn't be
+    read, each once. A project root that is not a folder is skipped before any git runs,
+    and one that is in no git repo is skipped too. `git-hooks list` and repo's page both
+    list project repos through this."""
+    from moxi_repo import api, gitconf
+
+    lines: list[str] = []
+
+    def say(line):
+        if line and line not in lines:
+            lines.append(line)
+
+    for repo in repos:
+        repo["project"] = None
+    if found is None:
+        return repos, lines
+    for repo in repos:
+        repo["project"], why = key_for(found, repo["root"])
+        say(why)
+    if not add:
+        return repos, lines
+    listed, why = project_roots(found)
+    say(why)
+    seen = {gitconf.key_of(r["common_dir"]) for r in repos if r.get("common_dir")}
+    # Each root not listed yet costs its one `rev-parse` and one config read: git's
+    # version, the declared pieces and the index are read once for them all.
+    shared: tuple | None = None
+    for key, root in listed:
+        if not os.path.isdir(root):
+            continue
+        try:
+            where = gitconf.resolve(root)
+        except gitconf.NotARepo:
+            continue
+        if where.key in seen:
+            continue
+        seen.add(where.key)
+        if shared is None:
+            from moxi_repo import pieces
+
+            shared = (gitconf.git_version(), pieces.declared()[0], api.indexed())
+        version, good, index = shared
+        repo = api._status_of(where, in_index=where.key in index, version=version, good=good,
+                              with_rules=with_rules)
+        repo["project"] = key
+        repos.append(repo)
+    return repos, lines
+
+
 def _reason(exc: BaseException) -> str:
     reason = getattr(exc, "reason", None) or str(exc) or type(exc).__name__
     fix = getattr(exc, "fix", None)
@@ -133,4 +187,5 @@ resolve_project = resolve
 ProjectUnavailable = Unavailable
 
 __all__ = ["INSTALL", "ProjectUnavailable", "Unavailable", "api", "installed", "key_for",
-           "looks_like_key", "project_roots", "resolve", "resolve_project", "why_off"]
+           "looks_like_key", "project_roots", "resolve", "resolve_project", "why_off",
+           "with_projects"]

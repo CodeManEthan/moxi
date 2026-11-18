@@ -1,4 +1,5 @@
-"""`moxi-dev timed show [REV] [--days N] [--machine NAME] [--json]`: read the timed record.
+"""`moxi-dev timed show [REV] [--days N] [--machine NAME] [--package NAME] [--json]`: read
+the timed record.
 
 It walks REV's first-parent line (`main` by default) back N days (7 by default) from
 REV's own commit time, and reports each machine with a record on the walk on its own: a
@@ -27,6 +28,23 @@ Before the machines, the strict line: how many tests of the set (this machine's,
 newest other machine's when this one has none) this machine, which measures the strict
 budget, has a counted outcome for. With `--machine` naming another machine, the reading
 leaves this one out, so there is no strict line (`--json`'s `strict` is null).
+
+`--package NAME` reads one package's tests, as a release reads its own: NAME is the
+package's directory under `packages/` or its distribution name, as `moxi-dev timed
+--package` takes it, resolved against the workspace of the tree `show` runs in; a name
+naming no package there exits 2. Results are picked by each result's `package` field,
+the directory name at the run, never by the node id, so no name reads results filed
+under a directory that tree no longer has. Every part of the reading counts that
+package's tests and no other's: each machine's set is its `collected` list cut to the
+ids whose results name the package, a machine with no complete run lists only that
+package's outcomes, a failure lifts the exit only when it is that package's, a
+machine's newest measured commit is its newest record on the walk holding one of that
+package's results (`no result of <name> on the walk` with none), and the strict line
+counts that package's tests alone. When the set the strict line reads holds
+none of the package's tests, the line in its place is `<name> has no timed test
+collected by a complete run on the walk to <commit>; nothing to read`. A machine whose
+cut set is empty has nothing unsettled and reads 0; with no complete run on any machine
+the exit is 3, as without `--package`.
 """
 
 from __future__ import annotations
@@ -39,7 +57,7 @@ from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
 
-from . import timed, timed_record
+from . import check, timed, timed_record
 
 DAY_S = 86400
 
@@ -69,9 +87,25 @@ def _counted(data: dict[str, Any], nodeid: str, set_factor: float
     return max(found, key=lambda one: str(one[1].get("run")), default=None)
 
 
-def machine_report(name: str, machine_dir: Path, walk_shas: Sequence[str]
-                   ) -> dict[str, Any] | None:
-    """One machine's report over the walk (module doc); None when it has no record on it."""
+def package_only(data: dict[str, Any], package: str) -> dict[str, Any]:
+    """A commit file cut to the results whose `package` is `package` (a directory name),
+    its `collected` list to the ids whose results in the file name it."""
+    tests = {}
+    for nodeid, by_factor in data["tests"].items():
+        mine = {key: result for key, result in by_factor.items()
+                if result.get("package") == package}
+        if mine:
+            tests[nodeid] = mine
+    cut = {**data, "tests": tests}
+    if data.get("collected") is not None:
+        cut["collected"] = [nodeid for nodeid in data["collected"] if nodeid in tests]
+    return cut
+
+
+def machine_report(name: str, machine_dir: Path, walk_shas: Sequence[str],
+                   package: str | None = None) -> dict[str, Any] | None:
+    """One machine's report over the walk (module doc), cut to `package`'s results when
+    given; None when it has no record on it."""
     files = timed_record.commit_files(machine_dir)
     records, unreadable = [], []
     for sha in walk_shas:
@@ -85,6 +119,8 @@ def machine_report(name: str, machine_dir: Path, walk_shas: Sequence[str]
                 records.append((sha, data))
     if not records:
         return None
+    if package is not None:
+        records = [(sha, package_only(data, package)) for sha, data in records]
     scheduled = [run for _, data in records for run in data["runs"]
                  if run.get("kind") == "scheduled"]
     newest_scheduled = max(scheduled, key=lambda run: str(run.get("started")), default=None)
@@ -147,22 +183,32 @@ def machine_report(name: str, machine_dir: Path, walk_shas: Sequence[str]
             tick = timed_record.read_tick(ticks[-1])
         except timed_record.RecordError as exc:
             unreadable.append(str(exc))
-    newest_sha = records[0][0]
+    if package is None:
+        newest_sha: str | None = records[0][0]
+    else:
+        newest_sha = next((sha for sha, data in records if data["tests"]), None)
+    behind = None if newest_sha is None else list(walk_shas).index(newest_sha)
     return {"machine": name, "set_factor": set_factor, "complete": complete,
-            "newest_commit": newest_sha, "behind": list(walk_shas).index(newest_sha),
+            "newest_commit": newest_sha, "behind": behind,
             "tests": reported, "tick": tick, "verdict": verdict,
             "unreadable": unreadable}
 
 
-def strict_line(own: str, reports: Sequence[dict[str, Any]], tip: str) -> str:
-    """How much of the test set this machine's strict reading covers."""
+def strict_line(own: str, reports: Sequence[dict[str, Any]], tip: str,
+                package: str | None = None) -> str:
+    """How much of the test set this machine's strict reading covers; with `package`, the
+    name given, the no-timed-test line when that set holds none of its tests."""
     mine = next((report for report in reports if report["machine"] == own), None)
     sets = [report for report in reports if report["complete"]]
     if mine is not None and mine["complete"]:
         base = mine
     else:
-        base = min(sets, key=lambda report: report["behind"], default=mine)
+        base = min(sets, key=lambda report: (report["behind"] is None,
+                                             report["behind"] or 0), default=mine)
     total = len(base["tests"]) if base else 0
+    if package is not None and not total:
+        return (f"{package} has no timed test collected by a complete run on the walk to "
+                f"{tip[:12]}; nothing to read")
     covered = 0
     if mine is not None:
         counted = {row["test"] for row in mine["tests"] if row.get("outcome")}
@@ -206,27 +252,33 @@ def _reading(row: dict[str, Any]) -> str:
 
 
 def strict_for(own: str, reports: Sequence[dict[str, Any]], tip: str,
-                 machine: str | None) -> str | None:
+               machine: str | None, package: str | None = None) -> str | None:
     """The strict line when the reading includes this machine (no `--machine`, or
     `--machine` naming it) and holds a report; else None."""
     if not reports or machine not in (None, own):
         return None
-    return strict_line(own, reports, tip)
+    return strict_line(own, reports, tip, package)
 
 
 def render(reports: Sequence[dict[str, Any]], rev: str, tip: str, days: float,
-           own: str, *, machine: str | None = None) -> list[str]:
+           own: str, *, machine: str | None = None, package: str | None = None
+           ) -> list[str]:
     head = f"moxi-dev timed show: {rev} ({tip[:12]}), back {days:g} days"
     if not reports:
         return [f"{head}: no record on the walk"]
     lines = [head]
-    strict = strict_for(own, reports, tip, machine)
+    strict = strict_for(own, reports, tip, machine, package)
     if strict is not None:
         lines.append(strict)
     for report in reports:
         name, set_factor = report["machine"], report["set_factor"]
-        lines.append(f"{name}: set factor {set_factor:g} | newest measured commit "
-                     f"{report['newest_commit'][:12]}, {report['behind']} commits behind")
+        if report["newest_commit"] is None:
+            lines.append(f"{name}: set factor {set_factor:g} | no result of {package} on "
+                         f"the walk")
+        else:
+            lines.append(f"{name}: set factor {set_factor:g} | newest measured commit "
+                         f"{report['newest_commit'][:12]}, {report['behind']} commits "
+                         f"behind")
         lines += _tick_lines(name, report["tick"])
         if not report["complete"]:
             lines.append("  no complete run in the window; outcomes found:")
@@ -257,16 +309,32 @@ def render(reports: Sequence[dict[str, Any]], rev: str, tip: str, days: float,
     return lines
 
 
+def package_dir(root: Path, name: str) -> str:
+    """The directory under `packages/` of the workspace package `name` names, in the
+    workspace of the tree at `root`."""
+    workspace = timed.workspace_root(root)
+    if workspace is None:
+        raise ShowError(f"--package reads the workspace of the tree it runs in; {root} is "
+                        f"under no uv workspace root")
+    try:
+        (package,) = timed.chosen_packages(check.load_workspace(workspace), [name])
+    except (check.CheckError, timed.TimedError) as exc:
+        raise ShowError(str(exc)) from exc
+    return package.dir
+
+
 def show(root: Path, record_dir: Path, rev: str = "main", *, days: float = 7,
-         machine: str | None = None, own: str | None = None
+         machine: str | None = None, own: str | None = None, package: str | None = None
          ) -> tuple[int, list[dict[str, Any]], str]:
-    """The reports, each machine on its own (module doc), the exit code and REV's sha."""
+    """The reports, each machine on its own and cut to `package` when given (module doc),
+    the exit code and REV's sha."""
     own = own or timed_record.default_machine()
+    cut = package_dir(root, package) if package is not None else None
     shas = walk(root, rev, days)
     names = [machine] if machine else timed_record.machines(record_dir)
     names = sorted(names, key=lambda name: (name != own, name))
     reports = [report for name in names
-               if (report := machine_report(name, record_dir / name, shas)) is not None]
+               if (report := machine_report(name, record_dir / name, shas, cut)) is not None]
     return exit_code(reports), reports, (shas[0] if shas else rev)
 
 
@@ -280,6 +348,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--days", type=float, default=7.0, metavar="N",
                         help="how far back the walk goes from REV's time (default 7)")
     parser.add_argument("--machine", metavar="NAME", help="report this machine only")
+    parser.add_argument("--package", metavar="NAME",
+                        help="read only this package's tests: its directory under packages/ "
+                             "or its distribution name")
     parser.add_argument("--record-dir", metavar="DIR",
                         help="the record to read (default: this clone's)")
     parser.add_argument("--json", action="store_true", help="print the reports as JSON")
@@ -292,16 +363,18 @@ def main(argv: list[str]) -> int:
     own = timed_record.default_machine()
     try:
         code, reports, tip = show(root, record_dir, args.rev, days=args.days,
-                                  machine=args.machine, own=own)
+                                  machine=args.machine, own=own, package=args.package)
     except ShowError as exc:
         print(f"moxi-dev timed show: {exc}", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps({"rev": args.rev, "commit": tip, "exit": code,
-                          "strict": strict_for(own, reports, tip, args.machine),
+                          "package": args.package,
+                          "strict": strict_for(own, reports, tip, args.machine, args.package),
                           "machines": reports}, indent=1, sort_keys=True))
     else:
-        for line in render(reports, args.rev, tip, args.days, own, machine=args.machine):
+        for line in render(reports, args.rev, tip, args.days, own, machine=args.machine,
+                           package=args.package):
             print(line)
         print(f"moxi-dev timed show: exit {code}")
     return code

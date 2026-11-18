@@ -52,3 +52,24 @@ The first version.
 - Every setting carries page fields, which `moxi config publishing show --json` prints
   and the settings page draws: a plain label, a line, and on `provenance.rules` a
   can-hurt mark on taking a rule away. publishing needs moxi 0.1.9 or later.
+- The push piece's `standing-branch` setting (`ci/*`, say): a standing branch goes out
+  only at the tip of the local branch its name names, may be forced, and is deleted
+  whatever its tip; a push of only standing branches to the URL that reduces to
+  `moxi-publishing.github` needs no word, while a malformed word still refuses it; the
+  log names each ref's pattern; a bad pattern refuses every push, and `enable` refuses
+  one. `moxi doctor publishing` fails a bad pattern or an unset GitHub repo beside one,
+  and warns when no push URL of `origin` reduces to the GitHub repo.
+- In a repo that sets `standing-branch`, a push of `main` to the URL that reduces to
+  `moxi-publishing.github` passes only when GitHub has, at its new tip, a run of
+  `check-workflow` from a push to a standing branch whose `check-job` passed in the run's
+  latest attempt. A repo with no pattern, or a push to another URL, reads no CI.
+- `[tool.moxi-publishing]` takes `full-jobs`, the jobs on other systems a release waits
+  for: the tag gate's check 3 then passes only when, in the run from a push to main at
+  the tag's commit where `check-job` passed, a job of exactly each name concluded
+  `success` in the run's latest attempt. A name with no job, another conclusion, or a
+  missing or empty `full-jobs` refuses, naming it; a job still running refuses with "wait
+  for it"; each such job's conclusion goes in the gate's notes. `moxi publishing tag`,
+  the push piece and `ci gate` all read it.
+- `moxi publishing ci siblings` runs the suite with `MOXI_TEST_TIMED=hold`, over any value
+  the job had, so a release's test run holds every timed test as the land check does;
+  they run only in `moxi-dev timed`.
