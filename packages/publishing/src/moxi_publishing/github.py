@@ -22,17 +22,19 @@ What a public repo expects of GitHub:
   show; `show` says so.
 
 Each ruleset is active with no bypass actors, and its rules are compared with their
-parameters, not by type alone. `show` prints each difference field by field, and the push
-piece's `main` setting when it isn't the repository's default branch. `apply` writes the
-expected rulesets and settings; it deletes no ruleset and changes no branch, and prints
-what it left for you. Where the required check is new, both say what it asks of the CI
-workflow: a check that runs only on pushes to main can never pass first elsewhere, so
-main could no longer move.
+parameters, not by type alone: a parameter the expected rule doesn't set is GitHub's to
+keep, and a rewrite carries it. `show` prints each difference field by field, and the
+push piece's `main` setting when it isn't the repository's default branch. `apply`
+writes the expected rulesets and settings; it deletes no ruleset and changes no branch,
+and prints what it left for you. Where main would require after `apply` a check it
+doesn't require today, both say what that asks of the CI workflow: a check that runs
+only on pushes to main can never pass first elsewhere, so main could no longer move.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 from moxi_publishing.flag import Failure
@@ -79,8 +81,9 @@ class Difference:
     text: str
     writes: tuple[Request, ...] = ()
     left: str = ""
-    #: Whether the writes make `moxi-main` require a check it doesn't require today.
-    adds_required_check: bool = False
+    #: The checks main requires once `apply` has made the writes and doesn't require
+    #: today, by name; `differences` sets them on one difference at most.
+    new_required_checks: tuple[str, ...] = ()
 
     def line(self) -> str:
         return f"{self.subject}: {self.text}"
@@ -266,12 +269,14 @@ def _checks_text(checks: list[tuple[str, int | None]]) -> str:
 def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Difference]:
     subject = f"ruleset {want['name']}"
     want_rules = {rule["type"]: rule for rule in want["rules"]}
-    adds = REQUIRED_CHECKS in want_rules
     if have is None:
         return [Difference(subject, "missing",
-                           (Request("POST", f"repos/{github}/rulesets", want),),
-                           adds_required_check=adds)]
-    write = (Request("PUT", f"repos/{github}/rulesets/{have['id']}", want),)
+                           (Request("POST", f"repos/{github}/rulesets", want),))]
+    have_rules: dict[str, dict] = {}
+    for rule in have.get("rules") or []:
+        have_rules.setdefault(rule.get("type", "?"), rule)
+    write = (Request("PUT", f"repos/{github}/rulesets/{have['id']}",
+                     _carrying(want, have_rules)),)
     found = []
 
     def differ(name: str, has, wants) -> None:
@@ -291,9 +296,6 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
         if has != wants:
             found.append(Difference(subject, f"{key}: has {_names(has)}; want "
                                              f"{_names(wants)}", write))
-    have_rules: dict[str, dict] = {}
-    for rule in have.get("rules") or []:
-        have_rules.setdefault(rule.get("type", "?"), rule)
     has = sorted(kind for kind in have_rules if kind != REQUIRED_CHECKS)
     wants = sorted(kind for kind in want_rules if kind != REQUIRED_CHECKS)
     if has != wants:
@@ -303,10 +305,7 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
     want_checks = _checks(want_rules.get(REQUIRED_CHECKS))
     if has_checks != want_checks:
         found.append(Difference(subject, f"required checks: has {_checks_text(has_checks)}; "
-                                         f"want {_checks_text(want_checks)}", write,
-                                adds_required_check=bool(
-                                    {name for name, _ in want_checks}
-                                    - {name for name, _ in has_checks})))
+                                         f"want {_checks_text(want_checks)}", write))
     # A rule's parameters, where GitHub holds the rule: every one the expected rule sets.
     for kind, rule in want_rules.items():
         if kind not in have_rules:
@@ -318,6 +317,48 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
                     subject, f"{kind} {key}: has {json.dumps(has_params.get(key))}; want "
                              f"{json.dumps(value)}", write))
     return found
+
+
+def _carrying(want: dict, have_rules: dict[str, dict]) -> dict:
+    """`want` as a rewrite writes it: each rule GitHub holds keeps the parameters the
+    expected rule doesn't set (`do_not_enforce_on_create`, say), rather than having them
+    written back to GitHub's defaults."""
+    rules = []
+    for rule in want["rules"]:
+        held = (have_rules.get(rule["type"]) or {}).get("parameters") or {}
+        params = {**held, **(rule.get("parameters") or {})}
+        rules.append({**rule, "parameters": params} if params else rule)
+    return {**want, "rules": rules}
+
+
+def _names_main(patterns, main: str, default: str | None) -> bool:
+    """Whether a ruleset's `include` list names `main` for sure: by its full ref, `~ALL`,
+    or `~DEFAULT_BRANCH` when main is the default branch. A pattern is not matched."""
+    return any(p == f"refs/heads/{main}" or p == "~ALL"
+               or (p == "~DEFAULT_BRANCH" and default == main) for p in patterns)
+
+
+def _may_name_main(patterns, main: str, default: str | None) -> bool:
+    """Whether an `exclude` list may leave `main` out: it names main as `include` would,
+    or holds a pattern (`*`, `?`, `[`)."""
+    return (_names_main(patterns, main, default)
+            or any(re.search(r"[*?\[]", p) for p in patterns))
+
+
+def _required_on_main(ruleset: dict, main: str, default: str | None) -> set[str]:
+    """The checks `ruleset` makes main require today, by name: only where it surely
+    applies (an active branch ruleset with no bypass actors that names main and can't
+    leave it out). Where that isn't sure it counts as requiring none, so the note on a
+    new required check errs toward being printed."""
+    if (ruleset.get("target") != "branch" or ruleset.get("enforcement") != "active"
+            or ruleset.get("bypass_actors")):
+        return set()
+    ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+    if (not _names_main(ref_name.get("include") or [], main, default)
+            or _may_name_main(ref_name.get("exclude") or [], main, default)):
+        return set()
+    return {name for rule in ruleset.get("rules") or [] if rule.get("type") == REQUIRED_CHECKS
+            for name, _ in _checks(rule)}
 
 
 def _github_environment_differences(  # noqa: MX3 -- GitHub's own name for it
@@ -403,6 +444,23 @@ def differences(github: str, state: State, *, main: str,
                                    "parameters": held.get("parameters") or {}})
     for want in wanted:
         found += _ruleset_differences(github, by_name.get(want["name"]), want)
+    # After apply, main requires what the other rulesets require today and what the
+    # expected moxi-main requires (when moxi-main isn't written, GitHub's equals it).
+    held_main = by_name.get(MAIN_RULESET)
+    default = state.repo.get("default_branch")
+    today: set[str] = set()
+    after = {name for rule in wanted[0]["rules"] if rule["type"] == REQUIRED_CHECKS
+             for name, _ in _checks(rule)}
+    for ruleset in state.rulesets:
+        required = _required_on_main(ruleset, main, default)
+        today |= required
+        if ruleset is not held_main:
+            after |= required
+    new = tuple(sorted(after - today))
+    writing = next((each for each in found
+                    if each.subject == f"ruleset {MAIN_RULESET}" and each.writes), None)
+    if new and writing is not None:
+        writing.new_required_checks = new
     if not check.job:
         kept = (f"GitHub holds {_checks_text(_checks(held))}, kept" if _checks(held)
                 else "GitHub holds none")
@@ -469,13 +527,19 @@ def check_job(root: str) -> CheckJob:
     return CheckJob(job.strip(), workflow)
 
 
-def _check_note(check: CheckJob, main: str) -> str:
+def _check_note(found: list[Difference], check: CheckJob, main: str) -> list[str]:
+    """The note on the checks main requires after `apply` and not today, or none."""
+    new = [name for each in found for name in each.new_required_checks]
+    if not new:
+        return []
+    names = " and ".join(new)
+    whose = f"{names} check has" if len(new) == 1 else f"{names} checks have"
     where = (f".github/workflows/{check.workflow}" if check.workflow
              else "the CI workflow")
-    return (f"note: with {check.job} required, GitHub moves {main} only to a commit whose "
-            f"{check.job} check has already passed on another ref, so {where} must run "
-            f"{check.job} on pushes to branches other than {main}; a check that runs only "
-            f"on {main} can never pass first, and {main} could no longer move")
+    return [f"note: with {names} required, GitHub moves {main} only to a commit whose "
+            f"{whose} already passed on another ref, so {where} must run "
+            f"{names} on pushes to branches other than {main}; a check that runs only "
+            f"on {main} can never pass first, and {main} could no longer move"]
 
 
 def _publisher_line(root: str, github: str) -> str:
@@ -499,8 +563,7 @@ def show(path: str, *, run=None) -> Result:
     lines = [f"{github}: default branch {state.repo.get('default_branch')}, reviewer "
              f"{state.account['login']} (gh's account)"]
     lines += [each.line() for each in found]
-    if any(each.adds_required_check for each in found):
-        lines.append(_check_note(check, main))
+    lines += _check_note(found, check, main)
     lines.append(_publisher_line(root, github))
     lines.append(f"{len(found)} difference(s)" if found else "no difference")
     return Result(lines, 0)
@@ -521,8 +584,7 @@ def apply(path: str, *, run=None) -> Result:
                 gh.send(request)
                 done.append(request)
                 lines.append(f"wrote {request.method} {request.path}")
-    if any(each.adds_required_check for each in found):
-        lines.append(_check_note(check, main))
+    lines += _check_note(found, check, main)
     for each in found:
         if not each.writes:
             lines.append(f"left: {each.line()}" + (f"; {each.left}" if each.left else ""))

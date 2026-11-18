@@ -142,7 +142,9 @@ def test_show_reads_every_field_of_a_ruleset(gh_repo):
         "ruleset moxi-main: rules: has deletion, required_linear_history; want deletion, "
         "non_fast_forward",
         "ruleset moxi-tags-create: bypass actors: has 1; want none"]
-    assert lines[5].startswith("PyPI")
+    # moxi-main isn't in force on main today, so the check it lists is new to main.
+    assert lines[5] == NOTE
+    assert lines[6].startswith("PyPI")
 
 
 @pytest.mark.parametrize(("checks", "has"), [
@@ -183,7 +185,12 @@ def test_moxi_main_is_rewritten_when_its_check_is_missing_or_strict(gh_repo):
                         "strict_required_status_checks_policy: has true; want false")
     github.apply(str(gh_repo), run=gh)
     want = {w["name"]: w for w in github.expected_rulesets("main", "linux")}
-    assert gh.writes == [("PUT", f"{REPO}/rulesets/101", want["moxi-main"])]
+    (method, path, body), = gh.writes
+    assert (method, path) == ("PUT", f"{REPO}/rulesets/101")
+    # The rule's parameter publishing doesn't set is carried as GitHub holds it.
+    assert body["rules"][:2] == want["moxi-main"]["rules"][:2]
+    assert body["rules"][2]["parameters"] == {
+        **want["moxi-main"]["rules"][2]["parameters"], "do_not_enforce_on_create": False}
     gh = FakeGh("settled.json")
     main_rules(gh).remove(held_check(gh))
     result = github.apply(str(gh_repo), run=gh)
@@ -204,12 +211,110 @@ def test_with_no_check_job_the_check_is_left_and_one_github_holds_is_kept(gh_rep
     assert [line for line in result.lines if line.startswith("left: ")] == [
         f"left: {left}; name the CI job that must pass before main moves as check-job, "
         "then run github apply again"]
-    # A rewrite of moxi-main for another field keeps the check GitHub holds.
+    assert NOTE not in result.lines
+    # A rewrite of moxi-main for another field keeps the check GitHub holds; with the
+    # ruleset not in force today, that check is new to main.
     gh.answers[f"GET {REPO}/rulesets/101"]["enforcement"] = "evaluate"
-    github.apply(str(gh_repo), run=gh)
+    result = github.apply(str(gh_repo), run=gh)
     (_, path, body), = gh.writes
     assert path == f"{REPO}/rulesets/101" and held_check(gh) in body["rules"]
-    assert NOTE not in result.lines
+    assert NOTE in result.lines
+
+
+def add_ruleset(gh, ruleset):
+    gh.answers[f"GET {REPO}/rulesets?includes_parents=false&per_page=100"].append(
+        {key: ruleset[key] for key in ("id", "name", "target", "enforcement")})
+    gh.answers[f"GET {REPO}/rulesets/{ruleset['id']}"] = ruleset
+
+
+def check_ruleset(name="ci-gate", include=("refs/heads/main",), exclude=(), **fields):
+    """A branch ruleset requiring linux from GitHub Actions, active unless `fields` say."""
+    return {"id": 110, "name": name, "target": "branch", "enforcement": "active",
+            "bypass_actors": [],
+            "conditions": {"ref_name": {"include": list(include), "exclude": list(exclude)}},
+            "rules": [github.required_check_rule("linux")], **fields}
+
+
+@pytest.mark.parametrize("held", [
+    {"enforcement": "evaluate"},
+    {"enforcement": "disabled"},
+    {"conditions": {"ref_name": {"include": ["refs/heads/trunk"], "exclude": []}}},
+    {"conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+     "default_branch": "trunk"},
+    {"conditions": {"ref_name": {"include": ["~ALL"], "exclude": ["refs/heads/m*"]}}},
+    {"bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole",
+                        "bypass_mode": "always"}]},
+])
+def test_the_note_comes_when_moxi_main_holds_the_check_but_main_doesnt_require_it(
+        gh_repo, held):
+    gh = FakeGh("settled.json")
+    held = dict(held)
+    gh.answers[f"GET {REPO}"]["default_branch"] = held.pop("default_branch", "main")
+    gh.answers[f"GET {REPO}/rulesets/101"].update(held)
+    assert NOTE in show(gh_repo, gh)
+    result = github.apply(str(gh_repo), run=gh)
+    (method, path, body), = gh.writes
+    assert (method, path) == ("PUT", f"{REPO}/rulesets/101")
+    assert body["enforcement"] == "active" and body["bypass_actors"] == []
+    assert body["conditions"]["ref_name"] == {"include": ["refs/heads/main"], "exclude": []}
+    assert NOTE in result.lines
+
+
+@pytest.mark.parametrize("include", [["~DEFAULT_BRANCH"], ["~ALL"]])
+def test_no_note_when_moxi_main_already_requires_the_check_on_main(gh_repo, include):
+    gh = FakeGh("settled.json")
+    gh.answers[f"GET {REPO}/rulesets/101"]["conditions"]["ref_name"]["include"] = include
+    lines = show(gh_repo, gh)
+    assert f"ruleset moxi-main: include: has {include[0]}; want refs/heads/main" in lines
+    assert NOTE not in lines
+
+
+@pytest.mark.parametrize(("other", "noted"), [
+    (check_ruleset(), False),
+    (check_ruleset(include=["~ALL"]), False),
+    (check_ruleset(enforcement="evaluate"), True),
+    (check_ruleset(include=["refs/heads/ma*"]), True),
+    (check_ruleset(include=["~ALL"], exclude=["refs/heads/release/*"]), True),
+])
+def test_the_note_weighs_what_another_ruleset_requires_on_main(gh_repo, other, noted):
+    gh = FakeGh("settled.json")
+    main_rules(gh).remove(held_check(gh))
+    add_ruleset(gh, other)
+    lines = show(gh_repo, gh)
+    assert "ruleset moxi-main: required checks: has none; " + WANT_CHECK in lines
+    assert (NOTE in lines) is noted
+    # moxi-main missing altogether: the same.
+    gh.answers[f"GET {REPO}/rulesets?includes_parents=false&per_page=100"].pop(0)
+    lines = show(gh_repo, gh)
+    assert "ruleset moxi-main: missing" in lines and (NOTE in lines) is noted
+
+
+def test_the_note_names_each_new_check(gh_repo):
+    without_check_job(gh_repo)
+    gh = FakeGh("settled.json")
+    gh.answers[f"GET {REPO}/rulesets/101"]["enforcement"] = "evaluate"
+    held_check(gh)["parameters"]["required_status_checks"].append(
+        {"context": "build", "integration_id": 15368})
+    lines = show(gh_repo, gh)
+    assert NOTE.replace("with linux required", "with build and linux required").replace(
+        "whose linux check has", "whose build and linux checks have").replace(
+        "must run linux", "must run build and linux") in lines
+
+
+def test_a_rewrite_carries_each_parameter_github_holds_that_publishing_doesnt_set(gh_repo):
+    gh = FakeGh("settled.json")
+    held_check(gh)["parameters"]["do_not_enforce_on_create"] = True
+    main_rules(gh)[0]["parameters"] = {"held": 1}
+    assert show(gh_repo, gh)[-1] == "no difference"
+    gh.answers[f"GET {REPO}/rulesets/101"]["enforcement"] = "evaluate"
+    github.apply(str(gh_repo), run=gh)
+    (_, _, body), = gh.writes
+    rules = {rule["type"]: rule for rule in body["rules"]}
+    assert rules["required_status_checks"]["parameters"] == {
+        "strict_required_status_checks_policy": False, "do_not_enforce_on_create": True,
+        "required_status_checks": [{"context": "linux", "integration_id": 15368}]}
+    assert rules["non_fast_forward"]["parameters"] == {"held": 1}
+    assert "parameters" not in rules["deletion"]
 
 
 def test_with_no_check_job_apply_writes_moxi_mains_other_rules(gh_repo):

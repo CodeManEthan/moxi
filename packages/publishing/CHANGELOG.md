@@ -41,7 +41,7 @@ The first version.
   by field, or written. `moxi-main` requires the root `pyproject.toml`'s `check-job`
   from the GitHub Actions app, and both commands say what that asks of the CI workflow;
   the tag-creation ruleset is `moxi-tags-create`; a rule is compared with its
-  parameters, not by type alone.
+  parameters, not by type alone, and a rewrite keeps the ones publishing doesn't set.
 - `moxi doctor publishing`: fails a hook command running another interpreter than the
   recorded one, and a later commit-msg hook while `drop-trailer` names `Commit-Check`;
   warns on an unset GitHub repo, a workflow file unlike its template, an empty private

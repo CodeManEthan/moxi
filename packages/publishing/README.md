@@ -337,7 +337,9 @@ public repo expects; `moxi publishing github apply [PATH]` writes those that dif
 - Ruleset `moxi-tags` on every tag: no update, deletion or force push.
 - Ruleset `moxi-tags-create` on every tag but release tags (`*-v*`): no creation.
 - Each ruleset active, with no bypass actors, and each rule compared with its
-  parameters (the required check's name, its app, strictness), not by type alone.
+  parameters (the required check's name, its app, strictness), not by type alone. A
+  parameter publishing doesn't set (`do_not_enforce_on_create`, say) is GitHub's: a
+  rewrite keeps it as GitHub holds it.
 - Secret scanning with push protection, which needs admin access to read. With push
   protection on, GitHub refuses a push it finds a secret in, a push of `main` included,
   and links a way past it.
@@ -372,8 +374,11 @@ successful run of `check-job` from another ref, any branch. So each push of `mai
 **Your CI must run `check-job` on pushes to branches other than `main`.** A workflow
 that runs it only on `main` can never pass first anywhere else, and after `apply` no
 commit could ever reach `main`. `show` and `apply` print a note saying so whenever
-`apply` makes `moxi-main` require a check it doesn't require yet; read your workflow's
-`on: push` trigger before you run `apply`.
+`main` would require after `apply` a check it doesn't require today, a `moxi-main` that
+lists the check but isn't in force on `main` included; read your workflow's `on: push`
+trigger before you run `apply`. The note errs toward being printed: another ruleset
+counts as requiring a check on `main` today only when it is active, has no bypass actors,
+names `main` without a pattern, and has no exclusion that might leave `main` out.
 
 ### Testing the required check once
 
