@@ -304,10 +304,12 @@ that package's tests alone: each machine's set, its outcomes, its newest measure
 (its newest record holding one of the package's results, or `no result of <name> on the
 walk`), the failures that make the exit 1 and the strict line. When the set the strict
 line reads holds none of the package's tests, the line in its place is `<name> has no
-timed test collected by a complete run on the walk to <commit>; nothing to read`, and the
-exit is 0, or 3 when no machine has a complete run. A test that landed after the newest
-complete run isn't in its set yet, so a release reads that line beside the package's own
-`timed` marks.
+timed test collected by a complete run on the walk to <commit>; nothing to read`. The exit
+follows each machine's verdict as always: a machine whose cut set is empty has nothing
+unsettled and reads 0. So the exit is 0 when no machine collected a test of the package, 1
+when another machine's reading of it failed, and 3 when no machine has a complete run. A
+test that landed after the newest complete run isn't in its set yet, so a release reads
+that line beside the package's own `timed` marks.
 `--json` carries `package`, the name given or null.
 
 `moxi-dev timed take DIR --machine NAME` merges another machine's record, `DIR` being that
