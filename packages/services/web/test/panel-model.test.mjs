@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addBody, addRefused, adoptKind, answerNow, emptyForm, fullPathHint, kindToAsk, moreLine, onOffSays, parseUnit,
+  addBody, addRefused, adoptKind, answerNow, emptyForm, fullPathHint, KIND_ASK, kindToAsk, moreLine, onOffSays, parseUnit,
   turnOnSays, unitRoute, unitSays, WRAPS_SAYS,
 } from "../src/panel-model.ts";
 
@@ -40,10 +40,17 @@ test("the adopt body: the unit, on or off, and the kind the unit was read as", (
   assert.equal(addBody(timer).body.kind, "timer");
   assert.equal(addBody(timer, unit({ kind: "timer" })).body.kind, "timer");
   assert.equal(addBody(timer).body.enable, true);
-  // Where the system can't tell, the kind chosen goes.
-  const asked = { ...adopt, unit: "com.example.agent", kind: "timer" };
+  // Where the system can't tell, the kind chosen goes, and none is picked for him: the add
+  // waits until he picks one, even before an answer is in hand.
+  const asked = { ...adopt, unit: "com.example.agent", adoptAs: "timer" };
   assert.equal(addBody(asked, unit({ asks_kind: true, kind: "timer" })).body.kind, "timer");
-  assert.equal(adoptKind({ ...asked, kind: "daemon" }, unit({ asks_kind: true, kind: "daemon" })), "daemon");
+  assert.equal(adoptKind({ ...asked, adoptAs: "daemon" }, unit({ asks_kind: true, kind: "daemon" })), "daemon");
+  const unpicked = { ...asked, adoptAs: "" };
+  assert.deepEqual(addBody(unpicked, unit({ asks_kind: true, kind: null })), { missing: KIND_ASK });
+  assert.deepEqual(addBody(unpicked, null, true), { missing: KIND_ASK });
+  assert.equal(addBody({ ...asked, kind: "daemon" }, null, true).body.kind, "timer");
+  // The way add's kind is never the adopted one's.
+  assert.equal(adoptKind({ ...unpicked, kind: "timer" }, null, true), null);
 });
 
 test("the panel says what it still needs", () => {
@@ -85,15 +92,18 @@ test("/api/unit's answer is read, and the route asks a kind only where told to",
   assert.equal(parseUnit({ ...unit(), kind: "socket" }), null);
   assert.equal(unitRoute(" a b.service ", null), "api/unit?ref=a%20b.service");
   assert.equal(unitRoute("com.x", "timer"), "api/unit?ref=com.x&kind=timer");
-  const form = { ...emptyForm("adopt"), kind: "timer" };
+  const form = { ...emptyForm("adopt"), adoptAs: "timer" };
+  assert.equal(emptyForm("adopt").adoptAs, "");
   assert.equal(kindToAsk(form, false), null);
   assert.equal(kindToAsk(form, true), "timer");
+  assert.equal(kindToAsk({ ...form, adoptAs: "" }, true), null);
 });
 
 test("what the panel says of the unit: found and what, missing, refused, unread", () => {
   assert.deepEqual(unitSays(unit({ kind: "timer" })), {
     line: "Found: a timer of your own. Moxi lists it and acts on it; its file is never rewritten.", refused: false });
   assert.match(unitSays(unit()).line, /^Found: a service of your own\./);
+  assert.match(unitSays(unit({ kind: null })).line, /^Found: a unit of your own\./);
   assert.equal(unitSays(unit({ found: false })).line, "Your system has no unit by that name.");
   assert.deepEqual(unitSays(unit({ found: null, refused: "x is in moxi's own unit namespace" })),
                    { line: "x is in moxi's own unit namespace", refused: true });
@@ -113,6 +123,11 @@ test("only the answer for what the field holds now is drawn", () => {
   assert.equal(answerNow(null, form), null);
   // Where the system asks the kind, an answer read as the other kind is old.
   const launchd = { unit: "a.service", kind: "timer", answer: unit({ asks_kind: true, kind: "timer" }) };
-  assert.equal(answerNow(launchd, { ...form, kind: "daemon" }), null);
-  assert.deepEqual(answerNow(launchd, { ...form, kind: "timer" }), launchd.answer);
+  assert.equal(answerNow(launchd, { ...form, adoptAs: "daemon" }), null);
+  assert.equal(answerNow(launchd, form), null);
+  assert.deepEqual(answerNow(launchd, { ...form, adoptAs: "timer" }), launchd.answer);
+  // One read with none chosen draws, and knows no kind: the system's default isn't the unit's.
+  const first = { unit: "a.service", kind: null, answer: unit({ asks_kind: true, kind: "daemon" }) };
+  assert.deepEqual(answerNow(first, form), unit({ asks_kind: true, kind: null }));
+  assert.equal(answerNow(first, { ...form, adoptAs: "daemon" }), null);
 });

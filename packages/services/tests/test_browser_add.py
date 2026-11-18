@@ -5,7 +5,8 @@ left off and turned on, its job followed to the row in the list, the form empty 
 command whose first word isn't a full path, and a taken name, refused; a systemd timer
 adopted, with what the system says of it, on or off asked, and the file adopting adds
 named; a unit the system doesn't have, and one in Moxi's own namespace; and, where the
-system can't tell a unit's kind, the kind asked and the unit read again as the one chosen.
+system can't tell a unit's kind, the kind asked with none chosen, Adopt held until he picks
+one, and the unit read again as the one he picks.
 """
 
 from __future__ import annotations
@@ -226,10 +227,12 @@ def test_the_unit_typed_is_read_and_only_its_own_answer_drawn(seeded, ui_page, u
         route.abort()
 
 
-def test_where_the_system_cant_tell_the_kind_it_is_asked_and_read_again(seeded, ui_page):
+def test_where_the_system_cant_tell_the_kind_it_is_asked_with_none_chosen_and_read_again(seeded, ui_page):
     """On launchd or Task Scheduler `/api/unit` answers `asks_kind`; the shell's own page
-    server runs on the fake systemd, so its answers here are the page's stand-ins."""
+    server runs on the fake systemd, so its answers here are the page's stand-ins. No kind
+    is chosen for him, and Adopt sends nothing until he picks one."""
     asked: list[str] = []
+    posted: list[str] = []
 
     def answer(route):
         url = route.request.url
@@ -241,17 +244,24 @@ def test_where_the_system_cant_tell_the_kind_it_is_asked_and_read_again(seeded, 
     ui_page.route(re.compile(r".*/m/services/api/unit\?.*"), answer)
     ui_page.route("**/m/services/api/add", lambda route: route.fulfill(
         status=422, json={"refused": "the stand-in takes no add"}))
+    ui_page.on("request", lambda request: posted.append(request.url) if request.url.endswith("/api/add") else None)
     aside = opened(ui_page, "adopt")
     aside.get_by_label("Unit", exact=True).fill("com.example.backup")
-    expect(aside.locator('[data-line="found"]')).to_contain_text("Found: a service of your own.")
-    keeps = aside.get_by_role("radio", name="keeps running")
-    expect(keeps).to_be_checked()
+    expect(aside.locator('[data-line="found"]')).to_have_text(
+        "Found: a unit of your own. Moxi lists it and acts on it; its file is never rewritten.")
     assert "kind=" not in asked[-1], asked
+    kinds = aside.get_by_role("radiogroup", name="It", exact=True).get_by_role("radio")
+    expect(kinds).to_have_count(2)
+    for at in range(2):
+        expect(kinds.nth(at)).not_to_be_checked()
+    aside.get_by_label("Name", exact=True).fill("backup")
+    aside.get_by_role("radio", name="off", exact=True).click()
+    aside.get_by_role("button", name="Adopt unit", exact=True).click()
+    expect(said(aside)).to_have_text("Say whether it keeps running or runs on a schedule.")
+    assert posted == []
     aside.get_by_role("radio", name="runs on a schedule").click()
     expect(aside.locator('[data-line="found"]')).to_contain_text("Found: a timer of your own.")
     assert asked[-1].endswith("ref=com.example.backup&kind=timer"), asked
-    aside.get_by_label("Name", exact=True).fill("backup")
-    aside.get_by_role("radio", name="off", exact=True).click()
     with ui_page.expect_request("**/m/services/api/add") as sent:
         aside.get_by_role("button", name="Adopt unit", exact=True).click()
     assert sent.value.post_data_json == {"name": "backup", "kind": "timer", "unit": "com.example.backup",

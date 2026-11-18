@@ -13,8 +13,8 @@
 // - A unit already on this computer: `Unit`. 250 ms after the last key it reads
 //   `/api/unit` and says under the field what the system says of it: found and what it
 //   is, missing, or why it can't be adopted. Only the answer for what the field holds now
-//   is drawn. Where the system can't tell a unit's kind, `It` asks it, and the unit is read
-//   again as the kind chosen. `It is` on or off, which he must say, with what the system
+//   is drawn. Where the system can't tell a unit's kind, `It` asks it with none chosen, the
+//   unit is read again as the kind he picks, and Adopt waits for it. `It is` on or off, which he must say, with what the system
 //   says; `Project`; for a systemd timer the two sentences on the file adopting adds; and
 //   under `More`, the health check, the description and whether its runs launch sessions.
 //
@@ -193,8 +193,7 @@ export class ServicesPanel extends LitElement {
     const before = this.#form;
     this.#form = { ...before, ...change };
     // A new unit, or a new kind where the system asks it, is read again.
-    if (change.unit !== undefined || (this.#asks && change.kind !== undefined && change.kind !== before.kind
-        && before.way === "adopt")) {
+    if (change.unit !== undefined || (this.#asks && change.adoptAs !== undefined && change.adoptAs !== before.adoptAs)) {
       this.#readUnit(UNIT_WAIT_MS);
     }
     this.requestUpdate();
@@ -234,18 +233,16 @@ export class ServicesPanel extends LitElement {
     const read = answer.status === 200 ? parseUnit(answer.data) : null;
     if (read === null) return;
     this.#asked = { unit, kind, answer: read };
-    if (read.asks_kind && !this.#asks) {
-      this.#asks = true;
-      // The first read went as the system's default kind; the one shown is asked now.
-      if (read.kind !== null && read.kind !== this.#form.kind) this.#form = { ...this.#form, kind: read.kind };
-    }
+    // The kind is asked with none chosen: the first read went without one, so the system's
+    // default it was read as is no fact of the unit's.
+    if (read.asks_kind) this.#asks = true;
     this.requestUpdate();
   }
 
   #submit = (event: Event): void => {
     event.preventDefault();
     if (this.busy) return;
-    const built = addBody(this.#form, answerNow(this.#asked, this.#form));
+    const built = addBody(this.#form, answerNow(this.#asked, this.#form), this.#asks);
     this.dispatchEvent(new CustomEvent(PANEL_SEND, { detail: built }));
   };
 
@@ -322,14 +319,14 @@ export class ServicesPanel extends LitElement {
       ${says !== null ? html`<p class="hint" data-line="found" data-refused=${says.refused ? "true" : "false"}>${says.line}</p>`
         : nothing}
       ${asks ? html`<p class="f">It</p>${this.#choice("kind", "It", KIND_WORDS.map(({ kind, label }) => ({ value: kind, label })),
-        form.kind, (kind) => this.#set({ kind: kind as AddForm["kind"] }))}` : nothing}
+        form.adoptAs, (kind) => this.#set({ adoptAs: kind as AddForm["adoptAs"] }))}` : nothing}
       ${this.#input("name", "Name", form)}
       <p class="f">It is</p>
       ${this.#choice("on", "It is", [{ value: "on", label: "on" }, { value: "off", label: "off" }], form.adoptOn,
         (on) => this.#set({ adoptOn: on as AddForm["adoptOn"] }))}
       <p class="hint" data-line="on-off">${onOffSays(answer)}</p>
       ${this.#projectPart(form)}
-      ${answer?.wraps && adoptKind(form, answer) === "timer" && answer.refused === null
+      ${answer?.wraps && adoptKind(form, answer, asks) === "timer" && answer.refused === null
         ? html`<p class="hint" data-line="wraps">${WRAPS_SAYS}</p>` : nothing}
       ${this.#morePart(form, false)}`;
   }

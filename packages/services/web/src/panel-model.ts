@@ -29,9 +29,11 @@ export const UNIT_WAIT_MS = 250;
 export interface AddForm {
   way: Way;
   name: string;
-  /** The way `add`'s kind, as chosen; the way `adopt` asks it only where the supervisor
-   * can't tell, and otherwise takes the kind the unit was read as. */
+  /** The way `add`'s kind, as chosen. */
   kind: "daemon" | "timer";
+  /** The way `adopt`'s kind, as chosen where the supervisor can't tell it (`""` until
+   * chosen: none is picked for him). Elsewhere the unit's name tells it. */
+  adoptAs: "" | "daemon" | "timer";
   command: string;
   unit: string;
   /** A written row: start it now. */
@@ -53,7 +55,7 @@ export interface AddForm {
 /** A new form on `way`. A written row starts off, as `moxi services add` leaves it
  * without `--enable`: he turns on "Turn it on now" to start it now and at every login. */
 export function emptyForm(way: Way = "add"): AddForm {
-  return { way, name: "", kind: "daemon", command: "", unit: "", enable: false, adoptOn: "",
+  return { way, name: "", kind: "daemon", adoptAs: "", command: "", unit: "", enable: false, adoptOn: "",
            schedule: "every", every: "", at: "", days: [], cwd: "", health: "", project: "",
            launchesSession: false, doc: "" };
 }
@@ -120,18 +122,19 @@ export interface Asked {
 }
 
 /** The answer for what the field holds now, or null: an answer for an older value is
- * never drawn. */
+ * never drawn. Where the supervisor can't tell the kind, an answer read as another kind
+ * than the one chosen is old too, and one read with none chosen knows no kind. */
 export function answerNow(asked: Asked | null, form: AddForm): UnitRead | null {
   if (asked === null || asked.unit !== form.unit.trim()) return null;
-  // Where the supervisor can't tell the kind, an answer read as another kind is old too.
-  if (asked.answer.asks_kind && asked.answer.kind !== form.kind) return null;
-  return asked.answer;
+  if (!asked.answer.asks_kind) return asked.answer;
+  if (asked.kind !== (form.adoptAs === "" ? null : form.adoptAs)) return null;
+  return { ...asked.answer, kind: asked.kind };
 }
 
-/** The kind to read the unit as: none on a supervisor that tells it by the unit's name,
- * else the one chosen. `asks` is whether the last answer for this unit asked it. */
+/** The kind to read the unit as: the one chosen where the supervisor asks it, else none.
+ * `asks` is whether an answer for this unit asked it. */
 export function kindToAsk(form: AddForm, asks: boolean): "daemon" | "timer" | null {
-  return asks ? form.kind : null;
+  return asks && form.adoptAs !== "" ? form.adoptAs : null;
 }
 
 export const ADOPT_KEEPS = "Moxi lists it and acts on it; its file is never rewritten.";
@@ -148,7 +151,8 @@ export function unitSays(answer: UnitRead): { line: string; refused: boolean } {
     return { line: "Your system couldn't be read just now; adopting it reads it again.", refused: false };
   }
   if (!answer.found) return { line: "Your system has no unit by that name.", refused: false };
-  const what = answer.kind === "timer" ? "a timer of your own" : "a service of your own";
+  const what = answer.kind === null ? "a unit of your own"
+    : answer.kind === "timer" ? "a timer of your own" : "a service of your own";
   return { line: `Found: ${what}. ${ADOPT_KEEPS}`, refused: false };
 }
 
@@ -158,20 +162,23 @@ export function onOffSays(answer: UnitRead | null): string {
   return `Your system says it is ${answer.enabled ? "on" : "off"}. ${ON_OFF_ASK}`;
 }
 
-/** The kind an adopted row is sent with: the one chosen where the supervisor asks it, else
- * the one the unit was read as, else the one its name says. */
-export function adoptKind(form: AddForm, answer: UnitRead | null): "daemon" | "timer" {
-  if (answer === null) return form.unit.trim().endsWith(".timer") ? "timer" : "daemon";
-  if (answer.asks_kind) return form.kind;
-  return answer.kind ?? form.kind;
+/** The kind an adopted row is sent with: where the supervisor asks it (`asks`, or the
+ * answer says so), the one chosen, or null while none is; else the one the unit was read
+ * as, else the one its name says. */
+export function adoptKind(form: AddForm, answer: UnitRead | null, asks = false): "daemon" | "timer" | null {
+  if (asks || answer?.asks_kind) return form.adoptAs === "" ? null : form.adoptAs;
+  return answer?.kind ?? (form.unit.trim().endsWith(".timer") ? "timer" : "daemon");
 }
+
+export const KIND_ASK = "Say whether it keeps running or runs on a schedule.";
 
 // -- the body -----------------------------------------------------------------------------------
 
 /** `/api/add`'s body from the form, or the one line that says what it still needs. The
- * server checks it again and has the last word. `answer` is the unit's read, for the way
- * `adopt`'s kind. */
-export function addBody(form: AddForm, answer: UnitRead | null = null): { body: Record<string, unknown> } | { missing: string } {
+ * server checks it again and has the last word. `answer` is the unit's read, and `asks`
+ * whether the supervisor asks its kind, for the way `adopt`'s kind. */
+export function addBody(form: AddForm, answer: UnitRead | null = null,
+                        asks = false): { body: Record<string, unknown> } | { missing: string } {
   const body: Record<string, unknown> = {};
   if (form.way === "add") {
     const command = form.command.trim();
@@ -196,10 +203,12 @@ export function addBody(form: AddForm, answer: UnitRead | null = null): { body: 
   } else {
     const unit = form.unit.trim();
     if (unit === "") return { missing: "Give the unit to adopt, as your system names it." };
+    const kind = adoptKind(form, answer, asks);
+    if (kind === null) return { missing: KIND_ASK };
     const name = form.name.trim();
     if (name === "") return { missing: "Give the service a name." };
     if (form.adoptOn === "") return { missing: "Say whether it is on or off now." };
-    Object.assign(body, { name, kind: adoptKind(form, answer), unit, enable: form.adoptOn === "on" });
+    Object.assign(body, { name, kind, unit, enable: form.adoptOn === "on" });
   }
   const health = form.health.trim();
   if (health !== "") body.health = health;
