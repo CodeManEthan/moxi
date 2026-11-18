@@ -269,13 +269,17 @@ class SchtasksBackend:
         module's files (its `.exe` shims, its database, its logs) until they exit, so an
         uninstall's later steps wait on this one. A task that still reads `Running` at the
         deadline is deleted anyway, with a line saying so; one that isn't running costs
-        one read. When the read fails (no PowerShell, the task not found) the task is
-        deleted without a wait."""
+        one read. When the read fails (no PowerShell, an error, or the task not found by
+        it) the task is deleted without a wait, with a line saying why."""
         task = self.task(change.module, change.name)
         io.fence.run("/end", task)  # a task that is not running is no failure here
-        settled, info, _ = self._settle(
+        settled, info, why = self._settle(
             task, io.fence, lambda read: read.get("state") != "Running")
-        if not settled and info is not None:
+        if info is None:
+            io.say(change, f"{task}'s state couldn't be read ({why}); deleted without "
+                           "waiting for it to stop, so its processes may still hold "
+                           "their files")
+        elif not settled:
             io.say(change, f"{task} still runs {SETTLE_SECONDS:g} s after /end; deleted "
                            "anyway, so its processes may still hold their files")
         ran = io.fence.run("/delete", task)

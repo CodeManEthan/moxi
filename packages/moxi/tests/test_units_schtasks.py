@@ -515,14 +515,25 @@ def test_an_idle_task_is_deleted_after_one_read(w):
     assert w.clock.slept == []
 
 
-def test_a_removal_whose_read_fails_deletes_without_waiting(w):
+@pytest.mark.parametrize("missing_powershell", [True, False])
+def test_a_removal_whose_read_fails_deletes_without_waiting_and_says_why(
+        w, missing_powershell):
     gone, task = removing(w)
     w.sup.stuck.add(task)
-    w.sup.powershell = False
+    if missing_powershell:
+        w.sup.powershell = False
+    else:
+        w.sup.fail[("tasks", None)] = "Get-ScheduledTask : Access is denied."
     [done] = w.apply([gone])
-    assert done.ok and done.lines == ()
     assert w.sup.calls == [("/end", task), ("tasks",), ("/delete", task)]
     assert w.clock.slept == [] and task not in w.sup.tasks
+    assert done.ok
+    [line] = done.lines
+    assert line in w.lines
+    assert line.startswith(f"{task}'s state couldn't be read (")
+    assert ("did not run" if missing_powershell else "Access is denied") in line
+    assert line.endswith("; deleted without waiting for it to stop, so its processes "
+                         "may still hold their files")
 
 
 def test_a_remove_of_a_task_already_gone_drops_its_xml(w):
