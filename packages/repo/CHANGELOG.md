@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- The git hooks page is redrawn on ui's row element. `Hooks` gathers what needs you
+  (problems, failing auto-commits, open records) under one verdict line; `Repos` has a
+  row per repo that opens in place with its events, today's records, auto-commit, rules,
+  git and commands; `Pieces` lists every offered piece. From the page you can add pieces
+  to a repo, add a repo, turn a piece on and refresh a repo. Each act first shows all it
+  would write, and is offered only when it would change something. Turning a piece off
+  and removing one stay commands to copy. repo's `ui` extra needs moxi-ui 0.2.3 or later.
+- `moxi_repo.api.plan_add`, `plan_enable` and `plan_refresh`: what `add`, `enable` and
+  `refresh` would write in a repo, read without writing or taking a lock, with a digest
+  of it. The three verbs take `expect`, that digest, and write only if the plan they make
+  again under the repo's lock has it; otherwise they write nothing and raise
+  `moxi_repo.api.Changed`, which holds the new plan. Given `within`, a plan or verb
+  refuses a repo outside that folder.
+- Every command that writes a repo's hooks holds a lock of that repo's own
+  (`moxi-repo/hooks.lock` in its common git dir). One that waits more than 10 seconds for
+  another exits 75 and writes nothing.
+- A `moxi_repo.api.Failure` carries `reason`, one of `REFUSAL_CODES`, and `partial`, true
+  when it came after the first write. A problem (`moxi_repo.api.Problem`) carries `code`
+  (one of `PROBLEM_CODES`), `piece`, `event` and `refresh`, true where `git-hooks refresh`
+  fixes it.
+- `git-hooks list --json` gives each event's `existing_hook`, the user's own git hook
+  there, and each repo's `own_hooks`. A repo git can't read names git's reason.
+- A folder that isn't there now reads `no git work tree at <path>: not a directory`
+  (was `no git work tree at <path> is not a directory`), as git's own reasons read.
+- `moxi repo specs --json` gives a run of failing passes' start and count
+  (`error_since`, `error_passes`), as for refused and index-busy passes, and
+  `index_stale` once git's index lock has been held for five passes in a row. The
+  committer's records count passes in words that agree (`1 pass`, `2 passes`), and say
+  when in a local clock time (`since 14:05`, `since Nov 17 14:05` on an earlier day),
+  not a UTC stamp. A refused pass's record no longer counts the passes: the spec's
+  `refused_passes` does.
+
 - Every setting carries page fields, which `moxi config repo show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, and
   words for each git hook mode. repo needs moxi 0.1.9 or later.
