@@ -878,9 +878,10 @@ def main(argv: list[str]) -> int:
         return only(root, args.only, args.paths)
     unit = scope.inner_unit(os.environ)
     if unit is None:
-        # A marker that names no scope this process is in counts for nothing.
-        os.environ.pop(SCOPE_ENV, None)
-        return _outer(root, args, argv)
+        # A marker that names no scope this process is in counts for nothing: the outer
+        # and all it starts run without it.
+        env = {key: value for key, value in os.environ.items() if key != SCOPE_ENV}
+        return _outer(root, args, argv, env)
     return _inner(root, args, unit)
 
 
@@ -895,10 +896,10 @@ def _commit_or_unknown(root: Path) -> str:
         return "unknown"
 
 
-def _outer(root: Path, args: argparse.Namespace, argv: list[str]) -> int:
+def _outer(root: Path, args: argparse.Namespace, argv: list[str],
+           env: Mapping[str, str]) -> int:
     """Run the check in a memory scope of its own (`moxi_dev.scope`), or in place where
-    there is none, and return its exit code."""
-    env = os.environ
+    there is none, with `env` as its environment, and return its exit code."""
     started = time.monotonic()
     try:
         found = scope.figures(env, int(worker_args(env)[1]))
@@ -911,7 +912,8 @@ def _outer(root: Path, args: argparse.Namespace, argv: list[str]) -> int:
     host = scope.find_host(system) if found is not None else None
     why = scope.skip_reason(found, host)
     if why is not None:
-        result = check(root, full=args.full, base=args.base, finding=args.finding)
+        result = check(root, full=args.full, base=args.base, finding=args.finding,
+                       env=env)
         result.memory = f"not capped ({why})"
         print(result.line(), flush=True)
         return result.code

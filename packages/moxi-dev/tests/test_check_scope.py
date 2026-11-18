@@ -98,6 +98,9 @@ def outer(monkeypatch):
     FakeOuter.outcome = Outcome(0)
     monkeypatch.setattr(scope, "find_host", lambda system: HOST)
     monkeypatch.setattr(scope, "Outer", FakeOuter)
+    # 16 CPUs whatever the machine has, so MOXI_TEST_WORKERS alone sets the worker count
+    # the figures follow.
+    monkeypatch.setattr(check, "cpu_count", lambda: 16)
     return FakeOuter
 
 
@@ -146,7 +149,7 @@ def test_a_mismatched_marker_is_dropped_and_the_check_makes_its_own_scope(
     monkeypatch.setenv(scope.SCOPE_ENV, "moxi-dev-check-000000000000.scope")
     monkeypatch.setattr(scope, "inner_unit", lambda env: None)
     check.main([])
-    assert scope.SCOPE_ENV not in os.environ and len(outer.made) == 1
+    assert len(outer.made) == 1 and scope.SCOPE_ENV not in outer.made[0].env
 
 
 def inner_cgroup(tmp_path: Path) -> Path:
