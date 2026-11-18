@@ -275,7 +275,7 @@ class State:
     """What repo's keys in one repo's local git config say."""
 
     __slots__ = ("mode", "mode_set", "moved", "pieces", "entries", "entry_values",
-                 "sections")
+                 "section_values", "sections")
 
     def __init__(self) -> None:
         self.mode: str | None = None
@@ -286,6 +286,9 @@ class State:
         self.entries: dict[str, str] = {}
         #: Each key of repo's config entries (`hook.moxi-repo-<event>.<var>`) -> its values.
         self.entry_values: dict[str, list[str]] = {}
+        #: Each key of the `moxi-repo` section itself (`moxi-repo.mode`, `.mode-set`,
+        #: `.moved`) -> its values.
+        self.section_values: dict[str, list[str]] = {}
         #: Every `moxi-repo` section and subsection, as `--remove-section` names them.
         self.sections: set[str] = set()
 
@@ -325,6 +328,7 @@ def read(repo: Repo) -> State:
         head, _, var = key.rpartition(".")
         state.sections.add(head)
         if head == SECTION:
+            state.section_values.setdefault(key, []).append(value or "")
             if var == "mode" and value:
                 state.mode = value
             elif var == "mode-set" and value:
@@ -372,23 +376,57 @@ def piece_key(piece_id: str, var: str) -> str:
     return f"{PIECE_PREFIX}{piece_id}.{var}"
 
 
+def _put_values(repo: Repo, key: str, values: list[str] | None) -> None:
+    """Give `key` the whole list `values`; none removes it."""
+    if values and len(values) == 1:
+        _set(repo, key, values[0])
+        return
+    _unset(repo, key)
+    for value in values or ():
+        _check(config(repo, "--add", key, value), f"add {key}")
+
+
+def _value_step(repo: Repo, key: str, before: list[str] | None, after: list[str] | None, *,
+                piece: str | None = None, event: str | None = None, seed: bool = False,
+                drawn: bool = False) -> Step:
+    """The step that gives one config key its values, shown as one `config` item. A
+    `drawn` value is drawn at random for this write: the item shows no value."""
+
+    def run() -> None:
+        _put_values(repo, key, after)
+
+    return Step([item("config", event, key, _values_text(before),
+                      None if drawn else _values_text(after), piece=piece, seed=seed)], run)
+
+
+def plan_register(repo: Repo, piece, state: State) -> list[Step]:
+    """`register`'s writes, as steps: each declared key whose value in the repo differs
+    from the declaration's (a key set by hand included), and a new registration's
+    `enabled = true`. Updates `state` to what they leave; writes nothing."""
+    new = piece.id not in state.pieces
+    section = state.pieces.setdefault(piece.id, {})
+    values = piece.registration()
+    if new:
+        values["enabled"] = "true"
+    steps = []
+    for var, value in values.items():
+        if section.get(var) != [value]:
+            steps.append(_value_step(repo, piece_key(piece.id, var), section.get(var),
+                                     [value], piece=piece.id, event=piece.event))
+            section[var] = [value]
+    return steps
+
+
 def register(repo: Repo, piece, state: State) -> bool:
     """Write `piece`'s registration by the rewrite rule; return True when it is new.
 
     A new registration also gets `enabled = true`. An existing one gets only the keys the
-    declaration gives, so `enabled`, its settings and `recorded` stay as they were.
+    declaration gives, so `enabled`, its settings and `recorded` stay as they were. A key
+    that already holds the declared value is not written again.
     """
     new = piece.id not in state.pieces
-    for var, value in piece.registration().items():
-        _set(repo, piece_key(piece.id, var), value)
-    if new:
-        _set(repo, piece_key(piece.id, "enabled"), "true")
-        state.pieces[piece.id] = {}
-    section = state.pieces[piece.id]
-    for var, value in piece.registration().items():
-        section[var] = [value]
-    if new:
-        section["enabled"] = ["true"]
+    for step in plan_register(repo, piece, state):
+        step.run()
     return new
 
 
@@ -405,18 +443,32 @@ def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
         section.pop("recorded", None)
 
 
+def plan_settings(repo: Repo, piece_id: str, changes: dict[str, list[str] | None],
+                  state: State, *, event: str | None = None, seeded=(), drawn=()
+                  ) -> list[Step]:
+    """`apply_settings`'s writes, as steps: each named setting whose values change. A name
+    in `seeded` is a seed, shown with `seed` true; one in `drawn` is drawn at random, and
+    its item shows no value. Updates `state`; writes nothing."""
+    section = state.pieces.setdefault(piece_id, {})
+    steps = []
+    for name, values in changes.items():
+        before, after = section.get(name) or None, list(values) if values else None
+        if before == after:
+            continue
+        steps.append(_value_step(repo, piece_key(piece_id, name), before, after,
+                                 piece=piece_id, event=event, seed=name in seeded,
+                                 drawn=name in drawn))
+        section.pop(name, None)
+        if after:
+            section[name] = after
+    return steps
+
+
 def apply_settings(repo: Repo, piece_id: str, changes: dict[str, list[str] | None],
                    state: State) -> None:
     """Each named setting takes its whole new list, or goes when None; others stay."""
-    section = state.pieces.setdefault(piece_id, {})
-    for name, values in changes.items():
-        key = piece_key(piece_id, name)
-        _unset(repo, key)
-        section.pop(name, None)
-        for value in values or ():
-            _check(config(repo, "--add", key, value), f"add {key}")
-        if values:
-            section[name] = list(values)
+    for step in plan_settings(repo, piece_id, changes, state):
+        step.run()
 
 
 def remove_piece(repo: Repo, piece_id: str, state: State) -> None:
@@ -425,15 +477,29 @@ def remove_piece(repo: Repo, piece_id: str, state: State) -> None:
     state.sections.discard(f"{SECTION}.piece.{piece_id}")
 
 
-def set_mode(repo: Repo, state: State, *, mode: str | None = None,
-             mode_set: str | None = None) -> None:
+def plan_mode(repo: Repo, state: State, *, mode: str | None = None,
+              mode_set: str | None = None) -> list[Step]:
+    """`set_mode`'s writes, as steps: `moxi-repo.mode-set` and `moxi-repo.mode`, each when
+    its value changes. Updates `state`; writes nothing."""
+    steps = []
+    for var, value in (("mode-set", mode_set), ("mode", mode)):
+        key = f"{SECTION}.{var}"
+        if value is None or state.section_values.get(key) == [value]:
+            continue
+        steps.append(_value_step(repo, key, state.section_values.get(key), [value]))
+        state.section_values[key] = [value]
     if mode_set is not None:
-        _set(repo, f"{SECTION}.mode-set", mode_set)
         state.mode_set = mode_set
-    if mode is not None and mode != state.mode:
-        _set(repo, f"{SECTION}.mode", mode)
+    if mode is not None:
         state.mode = mode
     state.sections.add(SECTION)
+    return steps
+
+
+def set_mode(repo: Repo, state: State, *, mode: str | None = None,
+             mode_set: str | None = None) -> None:
+    for step in plan_mode(repo, state, mode=mode, mode_set=mode_set):
+        step.run()
 
 
 def _write_moved(repo: Repo, state: State, moved: set[str]) -> None:
@@ -796,6 +862,6 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False,
 __all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "resolve_repo", "work_tree", "read", "register", "set_enabled", "clear_recorded",
            "apply_settings", "remove_piece",
-           "set_mode", "plan_sync", "sync", "SyncPlan", "Step", "item", "remove_all", "pick_mode", "git_version", "parse_version",
+           "set_mode", "plan_register", "plan_settings", "plan_mode", "plan_sync", "sync", "SyncPlan", "Step", "item", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "chain_hooks", "holds_chain_line", "check_shims", "key_of", "worktrees",
            "leftovers"]

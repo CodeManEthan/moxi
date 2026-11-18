@@ -25,6 +25,8 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -45,14 +47,18 @@ LOCK_WAIT_S = 10.0
 
 
 class Failure(Exception):
-    """A verb that could not act. `code` is its exit code."""
+    """A verb that could not act. `code` is its exit code. `reason` names a refusal (one
+    of `REFUSAL_CODES`, None for one with no name), and `partial` is true when it was
+    raised after the verb's first write, so some of it may be written."""
 
     code = 1
 
-    def __init__(self, text: str, *, lines: list[str] | None = None):
+    def __init__(self, text: str, *, lines: list[str] | None = None,
+                 reason: str | None = None, partial: bool = False):
         super().__init__(text)
         self.text = text
         self.lines = list(lines or [])
+        self.reason, self.partial = reason, partial
 
 
 class Usage(Failure):
@@ -67,6 +73,23 @@ class Busy(Failure):
     """Another process holds a lock the verb needs; try again later."""
 
     code = 75
+
+
+class Changed(Failure):
+    """A verb given the digest of a plan (`expect`) made a different plan under the
+    repo's lock: what it would write changed since that plan was read. Nothing was
+    written; `plan` is the new plan."""
+
+    def __init__(self, plan: dict):
+        super().__init__(f"what this would write in {plan['root']} changed since it was "
+                         "planned; nothing was written")
+        self.plan = plan
+
+
+#: Every `Failure.reason` a verb gives, each named for what it refused.
+REFUSAL_CODES = ("not-absolute", "not-a-repo", "unknown-piece", "declaration-refused",
+                 "seed-refused", "git-too-old", "shim-place", "not-registered",
+                 "index-unreadable", "config-unreadable", "busy")
 
 
 class Problem(str):
@@ -97,13 +120,16 @@ PROBLEM_CODES = ("gone", "unreadable", "no-module", "not-an-event", "git-too-old
 class Report:
     """What a verb did: lines to print, problems found, and chain lines the user adds."""
 
-    __slots__ = ("lines", "problems", "chain")
+    __slots__ = ("lines", "problems", "chain", "already")
 
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.problems: list[str] = []
         #: (repo root, event, hook file, chain line, present)
         self.chain: list[tuple[str, str, str, str, bool]] = []
+        #: True when the verb, given a plan's digest, found nothing left to write: it is
+        #: already so, and it wrote nothing.
+        self.already = False
 
     def take(self, root: Path, done: gitconf.Sync) -> None:
         self.lines += done.lines
@@ -240,7 +266,7 @@ class IndexUnreadable(Failure):
         self.detail = f"repo's index {path} can't be read ({why})"
         super().__init__(self.detail + ("; the index was not changed" if writing else "")
                          + "; fix or remove it, then index each repo again with: "
-                         "moxi repo git-hooks add PATH")
+                         "moxi repo git-hooks add PATH", reason="index-unreadable")
 
 
 def _unreadable(path: Path, why: str) -> IndexUnreadable:
@@ -369,24 +395,44 @@ def _resolve(path: str | os.PathLike) -> Repo:
     try:
         return gitconf.resolve(path)
     except gitconf.NotARepo as exc:
-        raise Usage(f"no git work tree at {exc}") from None
+        raise Usage(f"no git work tree at {exc}", reason="not-a-repo") from None
+
+
+#: Lock file path -> the lock this process's threads queue on before they take that file's
+#: lock, which a second thread of one process can't wait on.
+_QUEUES: dict[str, threading.RLock] = {}
+_QUEUES_GUARD = threading.Lock()
 
 
 @contextlib.contextmanager
 def _hooks_lock(repo: Repo) -> Iterator[None]:
     """Hold the repo's lock (`HOOKS_LOCK`) for the block; raises `Busy` when another
-    process holds it past `LOCK_WAIT_S`. A verb takes it once per repo, and never while
-    it waits on the committer's lock."""
+    process, or another thread of this one, holds it past `LOCK_WAIT_S`. A verb takes it
+    once per repo, and never while it waits on the committer's lock."""
     from moxi import files
 
-    with contextlib.ExitStack() as held:
-        try:
-            held.enter_context(files.lock(repo.own_dir / HOOKS_LOCK, timeout_s=LOCK_WAIT_S))
-        except files.LockTimeout as exc:
-            who = f"pid {exc.holder}" if exc.holder else "another process"
-            raise Busy(f"{who} is changing repo's git hooks in {repo.root}; try again in a "
-                       "moment") from None
-        yield
+    path = repo.own_dir / HOOKS_LOCK
+    with _QUEUES_GUARD:
+        queue = _QUEUES.setdefault(os.path.abspath(path), threading.RLock())
+    deadline = time.monotonic() + LOCK_WAIT_S
+    if not queue.acquire(timeout=LOCK_WAIT_S):
+        raise _busy(repo, os.getpid())
+    try:
+        with contextlib.ExitStack() as held:
+            try:
+                held.enter_context(files.lock(
+                    path, timeout_s=max(0.0, deadline - time.monotonic())))
+            except files.LockTimeout as exc:
+                raise _busy(repo, exc.holder) from None
+            yield
+    finally:
+        queue.release()
+
+
+def _busy(repo: Repo, holder: int | None) -> Busy:
+    who = f"pid {holder}" if holder else "another process"
+    return Busy(f"{who} is changing repo's git hooks in {repo.root}; try again in a moment",
+                reason="busy")
 
 
 def _remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
@@ -405,26 +451,31 @@ def _remove_all(repo: Repo, state: State | None = None, *, final: bool = False) 
 
 def _version(*, need: bool = True) -> tuple[int, int, int] | None:
     version = gitconf.git_version()
-    if not need:
-        return version
+    if need:
+        _floor(version)
+    return version
+
+
+def _floor(version: tuple[int, int, int] | None) -> None:
+    """Refuse a git older than the floor, or none."""
     if version is None:
         raise Refused("git is not on PATH, or `git version` gave no version; install git "
                       f"{gitconf.version_text(gitconf.FLOOR)} or later")
     if version < gitconf.FLOOR:
         raise Refused(f"git {gitconf.version_text(version)} is older than "
                       f"{gitconf.version_text(gitconf.FLOOR)}, the oldest repo's git hooks "
-                      "support; install a newer git")
-    return version
+                      "support; install a newer git", reason="git-too-old")
 
 
 def _named(ids: list[str], good: dict, bad: dict) -> list[pieces.Piece]:
     out = []
     for pid in ids:
         if pid in bad:
-            raise Refused(f"{pid}'s declaration is refused: {bad[pid]}")
+            raise Refused(f"{pid}'s declaration is refused: {bad[pid]}",
+                          reason="declaration-refused")
         if pid not in good:
             raise Usage(f"no installed module declares the piece {pid}; "
-                        "see: moxi repo git-hooks available")
+                        "see: moxi repo git-hooks available", reason="unknown-piece")
         if good[pid] not in out:
             out.append(good[pid])
     return out
@@ -434,7 +485,7 @@ def _state(repo: Repo) -> State:
     try:
         return gitconf.read(repo)
     except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
+        raise Failure(str(exc), reason="config-unreadable") from None
 
 
 def _sweep(repo: Repo) -> None:
@@ -464,10 +515,16 @@ def _ids(given: tuple, piece: str | None = None) -> list[str]:
 
 
 def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
-        mode: str | None = None, sets: list[str] | tuple = ()) -> Report:
+        mode: str | None = None, sets: list[str] | tuple = (),
+        expect: str | None = None) -> Report:
     """Register pieces in the repo at `path`; with none, index the repo and write nothing
     else. Each piece id is its own argument, or they come as a list. `mode` pins the mode
-    (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces."""
+    (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces.
+
+    It writes what `plan_add` plans, made under the repo's lock. `expect` is the digest of
+    a plan read before (`plan_add`'s): when there is then nothing left to write it writes
+    nothing and the report is `already`; when the plan differs it writes nothing and
+    raises `Changed`. A `Failure` raised after its first write is `partial`."""
     piece_ids = tuple(_ids(piece_ids))
     if mode is not None and mode not in gitconf.MODE_SETS:
         raise Usage(f"--mode {mode}: it is one of {', '.join(gitconf.MODE_SETS)}")
@@ -475,37 +532,170 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         raise Usage("--set sets a setting of a piece named in the same call; name the piece")
     version = _version()
     repo = _resolve(path)
-    if not piece_ids and mode is None:
-        # Indexing alone writes nothing in the repo, so it takes no lock there.
-        good = pieces.declared()[0] if any(map(everywhere, EVERYWHERE)) else {}
-        if not _implied(_state(repo), [], good):
-            return _index_only(repo)
-    with _hooks_lock(repo):
-        report = _add(repo, piece_ids, mode, sets, version)
+    good, bad = _declared(piece_ids)
+    plan = _plan_add(repo, _state(repo), piece_ids, mode, sets, version, good, bad)
+    if plan.in_repo:
+        with _hooks_lock(repo):
+            plan = _plan_add(repo, _state(repo), piece_ids, mode, sets, version, good, bad)
+            report = _write(plan, expect)
+    else:
+        # A plan that writes nothing in the repo takes no lock there.
+        report = _write(plan, expect)
     _sweep(repo)
     return report
 
 
-def _index_only(repo: Repo) -> Report:
-    report = Report()
-    _index_put(repo)
-    report.lines.append(f"indexed {repo.root}")
-    _sweep(repo)
-    return report
+def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ...] = ()
+             ) -> dict:
+    """What `add(path, piece_ids)` would write, read without writing anything or taking a
+    lock: `{root, name, is_repo, git_version, mode, indexed, pieces, mode_change,
+    own_hooks, in_progress, writes, refusal, digest}`.
+
+    `pieces` is each piece it would register or rewrite, `{id, event, new, implied_by,
+    seeds}` (`implied_by` the `everywhere` key that brings it in, `seeds` the names of the
+    settings it would seed); `mode` the mode after it; `mode_change` `{from, to}` when the
+    repo's mode changes; `own_hooks` the user's own git hooks in the hooks dir; and
+    `in_progress` `merge` or `rebase` when one is under way, else None. `writes` is every
+    item it writes, in order, as `gitconf.plan_sync` gives them, with `config` items for
+    the registrations, settings and mode and an `index` item when the repo joins the index
+    (`from` its root there before, when it moved). A value drawn at random as it is written
+    (commit-proof's salt) is shown as None. `digest` is the SHA-256 of `{act, root,
+    writes}`. `refusal` is `{code, text}` when `add` would refuse, with no `writes` and no
+    `digest`. `path` must be absolute (after `~`)."""
+    where = Path(os.path.expanduser(os.fspath(path)))
+    view = _plan_view(None, where)
+    version = _version(need=False)
+    view["git_version"] = version and gitconf.version_text(version)
+    try:
+        ids = tuple(_ids((piece_ids,)))
+        if not where.is_absolute():
+            raise Usage(f"{path} is not an absolute path", reason="not-absolute")
+        _floor(version)
+        repo = _resolve(where)
+        view.update(root=str(repo.root), name=repo.root.name, is_repo=True)
+        good, bad = _declared(ids)
+        plan = _plan_add(repo, _state(repo), ids, None, (), version, good, bad)
+    except Failure as exc:
+        view["refusal"] = {"code": exc.reason, "text": exc.text}
+        return view
+    return _plan_view(plan, repo.root)
 
 
-def _add(repo: Repo, piece_ids: tuple, mode: str | None, sets, version) -> Report:
-    """`add`'s writes, under the repo's lock."""
-    report = Report()
-    state = _state(repo)
-    good, bad = (pieces.declared() if piece_ids or any(map(everywhere, EVERYWHERE))
-                 else ({}, {}))
+class _Plan:
+    """What one act writes in one repo: `steps` (the index's and the config keys') then
+    `sync`'s, the lines its report prints first, and what the plan's reader is shown."""
+
+    __slots__ = ("act", "repo", "steps", "sync", "lines", "pieces", "mode", "mode_change",
+                 "indexed", "version")
+
+    def __init__(self, act: str, repo: Repo, version) -> None:
+        self.act, self.repo, self.version = act, repo, version
+        self.steps: list[gitconf.Step] = []
+        self.sync = gitconf.SyncPlan()
+        self.lines: list[str] = []
+        self.pieces: list[dict] = []
+        self.mode: str | None = None
+        self.mode_change: dict | None = None
+        self.indexed = False
+
+    @property
+    def writes(self) -> list[dict]:
+        return [item for step in self.steps for item in step.items] + self.sync.writes
+
+    @property
+    def nothing(self) -> bool:
+        """True when it writes nothing: no item, or only chain lines the user adds."""
+        return all(item["place"] == "chain" for item in self.writes)
+
+    @property
+    def in_repo(self) -> bool:
+        """True when it writes in the repo, not only into the index."""
+        return any(item["place"] not in ("index", "chain") for item in self.writes)
+
+    @property
+    def digest(self) -> str:
+        return _digest(self.act, self.repo.root, self.writes)
+
+
+def _digest(act: str, root: Path, writes: list[dict]) -> str:
+    import hashlib
+
+    text = json.dumps({"act": act, "root": str(root), "writes": writes}, sort_keys=True,
+                      separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _plan_view(plan: _Plan | None, root: Path) -> dict:
+    """A plan as `plan_add` returns it; with no plan, its fields as for a refusal."""
+    view = {"root": str(root), "name": root.name, "is_repo": False, "git_version": None,
+            "mode": None, "indexed": False, "pieces": [], "mode_change": None,
+            "own_hooks": [], "in_progress": None, "writes": [], "refusal": None,
+            "digest": None}
+    if plan is None:
+        return view
+    repo = plan.repo
+    view.update(is_repo=True, git_version=plan.version and gitconf.version_text(plan.version),
+                mode=plan.mode, indexed=plan.indexed, pieces=plan.pieces,
+                mode_change=plan.mode_change, own_hooks=own_hooks(repo, ()),
+                in_progress=_in_progress(repo), writes=plan.writes, digest=plan.digest)
+    return view
+
+
+def _in_progress(repo: Repo) -> str | None:
+    """`merge` or `rebase` when one is under way in the work tree, else None."""
+    if (repo.git_dir / "MERGE_HEAD").exists():
+        return "merge"
+    if any((repo.git_dir / name).is_dir() for name in ("rebase-merge", "rebase-apply")):
+        return "rebase"
+    return None
+
+
+def _declared(piece_ids: tuple) -> tuple[dict, dict]:
+    """The declared pieces an add or refresh needs: none when it names none and no
+    `everywhere` key is on."""
+    if piece_ids or any(map(everywhere, EVERYWHERE)):
+        return pieces.declared()
+    return {}, {}
+
+
+def _drawn(piece_id: str) -> set[str]:
+    """The settings whose seed is drawn at random as it is written (commit-proof's salt),
+    which no plan shows or digests. Every other seed comes from the user's configuration
+    and is shown."""
+    if piece_id != COMMIT_PROOF:
+        return set()
+    from moxi_repo.commit_proof import SALT
+
+    return {SALT}
+
+
+def _index_step(repo: Repo) -> list[gitconf.Step]:
+    """The index's step when the repo joins it, or its entry there changes."""
+    entry = indexed().get(repo.key)
+    if entry == {"root": str(repo.root), "common_dir": str(repo.common_dir)}:
+        return []
+    before = (entry or {}).get("root")
+    return [gitconf.Step([gitconf.item("index", None, None, before, str(repo.root))],
+                         lambda: _index_put(repo))]
+
+
+def _plan_add(repo: Repo, state: State, piece_ids: tuple, mode: str | None, sets, version,
+              good: dict, bad: dict) -> _Plan:
+    """`add`'s plan from `state`; raises the refusal `add` gives, before any write."""
+    import copy
+
+    plan = _Plan("add", repo, version)
     named = _named(list(piece_ids), good, bad)
     implied = _implied(state, named, good)
+    try:
+        plan.indexed = repo.key in indexed()
+    except IndexUnreadable as exc:
+        raise IndexUnreadable(exc.path, exc.why, writing=True) from None
+    plan.mode = state.mode
     if not piece_ids and mode is None and not implied:
-        _index_put(repo)
-        report.lines.append(f"indexed {repo.root}")
-        return report
+        plan.steps += _index_step(repo)
+        plan.lines.append(f"indexed {repo.root}")
+        return plan
     try:
         planned = pieces.plan_sets(named, list(sets))
     except pieces.SetError as exc:
@@ -524,23 +714,57 @@ def _add(repo: Repo, piece_ids: tuple, mode: str | None, sets, version) -> Repor
                 problems.append(f"{event}: {exc}")
         if problems:
             raise Refused(f"repo can't place its shims in {repo.hooks_dir}; nothing was "
-                          "written", lines=problems)
-    _index_put(repo)
+                          "written", lines=problems, reason="shim-place")
+    plan.steps += _index_step(repo)
+    after = copy.deepcopy(state)
+    plan.steps += gitconf.plan_mode(
+        repo, after, mode=effective,
+        mode_set=mode_set if (mode is not None or state.mode is None) else None)
+    plan.mode = effective
+    if state.mode is not None and state.mode != effective:
+        plan.mode_change = {"from": state.mode, "to": effective}
+    for piece in named:
+        new = piece.id not in after.pieces
+        changes = changes_of[piece.id]
+        seeded = sorted(set(changes) - set(planned.get(piece.id, {})))
+        plan.steps += gitconf.plan_register(repo, piece, after)
+        plan.steps += gitconf.plan_settings(repo, piece.id, changes, after, event=piece.event,
+                                            seeded=seeded, drawn=_drawn(piece.id))
+        why = EVERYWHERE[piece.id] if piece in implied else None
+        plan.lines.append(f"{'added' if new else 'rewrote'} {piece.id} ({piece.event}, "
+                          f"{piece.fail}) in {repo.root}" + (f" ({why})" if why else ""))
+        plan.pieces.append({"id": piece.id, "event": piece.event, "new": new,
+                            "implied_by": why, "seeds": seeded})
+    plan.sync = gitconf.plan_sync(repo, after)
+    return plan
+
+
+def _write(plan: _Plan, expect: str | None) -> Report:
+    """Write `plan`'s items, in order, and report them. With `expect`, first: nothing to
+    write answers `already`, and another digest raises `Changed`."""
+    report = Report()
+    done = gitconf.Sync()
+    done.problems += plan.sync.problems
+    done.chain.update(plan.sync.chain)
+    if expect is not None and plan.nothing:
+        report.already = True
+        report.take(plan.repo.root, done)
+        return report
+    if expect is not None and plan.digest != expect:
+        raise Changed(_plan_view(plan, plan.repo.root))
+    wrote = False
     try:
-        gitconf.set_mode(repo, state, mode=effective,
-                         mode_set=mode_set if (mode is not None or state.mode is None)
-                         else None)
-        for piece in named:
-            new = gitconf.register(repo, piece, state)
-            if changes_of[piece.id]:
-                gitconf.apply_settings(repo, piece.id, changes_of[piece.id], state)
-            report.lines.append(f"{'added' if new else 'rewrote'} {piece.id} "
-                                f"({piece.event}, {piece.fail}) in {repo.root}"
-                                + (f" ({EVERYWHERE[piece.id]})" if piece in implied
-                                   else ""))
-        report.take(repo.root, gitconf.sync(repo, state))
+        for step in plan.steps:
+            step.run()
+            wrote = True
+        for step in plan.sync.steps:
+            if step.run is not None:
+                done.lines += step.run() or []
+                wrote = True
     except gitconf.GitError as exc:
-        raise Failure(str(exc)) from None
+        raise Failure(str(exc), partial=wrote) from None
+    report.lines += plan.lines
+    report.take(plan.repo.root, done)
     return report
 
 
@@ -567,7 +791,7 @@ def _changes(piece: pieces.Piece, state: State,
         for name, values in changes.items():
             why = check(name, values or [])
             if why is not None:
-                raise Usage(f"{piece.id}: {why}; nothing was written")
+                raise Usage(f"{piece.id}: {why}; nothing was written", reason="seed-refused")
     return changes
 
 
@@ -1410,8 +1634,8 @@ def __dir__():
     return sorted({*globals(), *REEXPORTS})
 
 
-__all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "SEEDS", "SETTING_CHECKS",
-           "RULE_LINES", "EVERYWHERE", "available", "add", "remove", "enable", "disable",
+__all__ = ["Failure", "Usage", "Refused", "Busy", "Changed", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "REFUSAL_CODES", "SEEDS", "SETTING_CHECKS",
+           "RULE_LINES", "EVERYWHERE", "available", "add", "plan_add", "remove", "enable", "disable",
            "refresh", "rules", "rule_lines_of", "own_hooks", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
