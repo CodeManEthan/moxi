@@ -15,7 +15,7 @@ the test writes; its placed copy is in the shell's own data folder.
 Launcher's `running` is answered in the browser by `LauncherStub`, in launcher's declared
 shape, its entries joined to the endpoints' session ids: its route, and its topic on the
 shell's push stream, so a value the full install's real launcher publishes never replaces
-the stub's. Beyond ui's testing kit, these tests import no other package's kit.
+the stub's. These tests import no other package's kit.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from moxi.paths import Layout
 from conftest import FAKE_CLAUDE
 from fake_harness import FakeHarness
 from moxi_dev.testing import short_dir
-from moxi_ui.testing.browser import copied, ready_copying
 
 #: The modules the small install keeps: the core's own, ui and turns.
 SMALL = ("moxi", "ui", "turns")
@@ -301,12 +300,48 @@ _PUSHED = r"""(() => {
 })()"""
 
 
+# The page's copies, kept where a test can read them back. Chromium is granted the
+# clipboard; Firefox refuses a `clipboard-read` grant, so there each document wraps
+# `navigator.clipboard.writeText` to keep the last text in `window.__copied`, then calls
+# the real one. Guarded, so a second run in the same document wraps nothing.
+_KEEP_COPIED = """(() => {
+  const clipboard = navigator.clipboard;
+  if (!clipboard || clipboard.__keepsCopied) return;
+  const write = clipboard.writeText.bind(clipboard);
+  clipboard.writeText = (text) => { window.__copied = text; return write(text); };
+  clipboard.__keepsCopied = true;
+})()"""
+
+
+def _on_chromium(context: Any) -> bool:
+    return context.browser.browser_type.name == "chromium"
+
+
+def ready_copying(context: Any) -> None:
+    """Ready `context` to read back what its page copies: grant the clipboard on
+    Chromium, keep each `writeText` argument elsewhere. Read it with `copied`."""
+    if _on_chromium(context):
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        return
+    context.add_init_script(_KEEP_COPIED)
+    for page in context.pages:
+        page.evaluate(_KEEP_COPIED)
+
+
+def copied(page: Any) -> str | None:
+    """The text `page` last copied: the clipboard's on Chromium, the last `writeText`
+    argument elsewhere (None when it copied nothing)."""
+    if _on_chromium(page.context):
+        return page.evaluate("navigator.clipboard.readText()")
+    return page.evaluate("window.__copied ?? null")
+
+
 def open_panel(panel: Panel, ui_contexts, *, route: str = "", launches: list[dict] | None = None,
                before=None, copying: bool = False, **context_args) -> tuple[Any, Any]:
     """A signed-in page on the shell's turns panel at `route`, once the shell's push stream
     has brought the modules; with `launches`, the launcher stub serves them. `before(page)`
     runs before the page opens (a route of its own). With `copying`, `copied(page)` reads
-    back what a Copy wrote, in any browser (ui's `ready_copying`). The page and the panel's
+    back what a Copy wrote, in any browser (`ready_copying`, below). The page and the panel's
     root.
 
     The shell places the page again on a modules event when the address differs from the
