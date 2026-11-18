@@ -463,17 +463,39 @@ def test_status_gives_git_the_doctors_time(lo, monkeypatch):
     assert seen["git_seconds"] == doctor.PLACE_GIT_SECONDS <= 2
 
 
-@pytest.mark.timed
-@pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
-def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
+#: How long a read may take while git stalls.
+STALL_S = 15.0
+#: The land-check tests' bound, five times `STALL_S`: load alone doesn't fail it, and a
+#: git call that was never cut off does, since the stalled git sleeps twice as long.
+STALL_LOOSE_S = 5 * STALL_S
+POSIX_GIT = pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
+
+
+def read_while_git_stalls(path: str, monkeypatch, tmp_path) -> tuple[dict, float]:
+    """`path` read while git doesn't answer, and how long the read took."""
     stalled = tmp_path / "stalled-bin"
     stalled.mkdir()
-    (stalled / "git").write_text("#!/bin/sh\nexec sleep 60\n")
+    (stalled / "git").write_text("#!/bin/sh\nexec sleep 150\n")
     (stalled / "git").chmod(0o755)
     monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
     start = time.monotonic()
-    body = read("/api/status")
-    assert time.monotonic() - start < 15 * timed_slack()
+    body = read(path)
+    return body, time.monotonic() - start
+
+
+@POSIX_GIT
+def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
+    body, took = read_while_git_stalls("/api/status", monkeypatch, tmp_path)
+    assert took < STALL_LOOSE_S, took
+    assert body["problem"] is None
+
+
+@pytest.mark.timed
+@POSIX_GIT
+def test_a_read_returns_while_git_stalls_in_time(lo, monkeypatch, tmp_path, timed_reading):
+    body, took = read_while_git_stalls("/api/status", monkeypatch, tmp_path)
+    timed_reading(took, STALL_S, "s")
+    assert took < STALL_S * timed_slack(), took
     assert body["problem"] is None
 
 
@@ -543,19 +565,26 @@ def test_source_dir_read_writes_nothing_to_the_index(site, tree):
     assert index.read_bytes() == before
 
 
-@pytest.mark.timed
-@pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
-def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monkeypatch, tmp_path):
-    stalled = tmp_path / "stalled-bin"
-    stalled.mkdir()
-    (stalled / "git").write_text("#!/bin/sh\nexec sleep 60\n")
-    (stalled / "git").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
-    start = time.monotonic()
-    body = read("/api/folder")
-    assert time.monotonic() - start < 15 * timed_slack()
+def _says_git_is_slow(body: dict) -> None:
     assert body["state"] == "error" and body["detail"] == pagehandlers.GIT_SLOW
     assert (body["uncommitted"], body["more"]) == (None, 0)
+
+
+@POSIX_GIT
+def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monkeypatch, tmp_path):
+    body, took = read_while_git_stalls("/api/folder", monkeypatch, tmp_path)
+    assert took < STALL_LOOSE_S, took
+    _says_git_is_slow(body)
+
+
+@pytest.mark.timed
+@POSIX_GIT
+def test_source_dir_whose_git_stalls_says_so_and_names_no_files_in_time(
+        site, tree, monkeypatch, tmp_path, timed_reading):
+    body, took = read_while_git_stalls("/api/folder", monkeypatch, tmp_path)
+    timed_reading(took, STALL_S, "s")
+    assert took < STALL_S * timed_slack(), took
+    _says_git_is_slow(body)
 
 
 def test_source_dir_whose_git_fails_says_so_in_a_line_with_no_path(site, lo, monkeypatch):

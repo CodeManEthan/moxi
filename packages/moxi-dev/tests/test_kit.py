@@ -161,6 +161,69 @@ def test_a_slack_that_is_not_a_factor_of_at_least_one_stops_the_run(slack_probe,
     assert repr(value) in result.stderr.str()
 
 
+# --- a bench module's corpus -------------------------------------------------------------
+
+BENCH_MODULE = """
+import shutil
+
+import pytest
+
+
+@pytest.fixture(scope="module")
+def corpus(tmp_path_factory):
+    corpus_dir = tmp_path_factory.mktemp("bench")
+    (corpus_dir / "transcript.jsonl").write_text("{}\\n" * 1000)
+    yield corpus_dir
+    shutil.rmtree(corpus_dir, ignore_errors=True)
+
+
+def test_one(corpus):
+    assert (corpus / "transcript.jsonl").exists()
+
+
+def test_two(corpus):
+    assert (corpus / "transcript.jsonl").exists()
+"""
+
+AFTER_MODULE = """
+def test_the_bench_modules_corpus_is_gone_when_the_next_module_runs(tmp_path_factory):
+    base = tmp_path_factory.getbasetemp()
+    assert not [path for path in base.iterdir()
+                if path.name.startswith("bench") and path.is_dir()]
+"""
+
+KEPT_MODULE = """
+import pytest
+
+
+@pytest.fixture(scope="module")
+def corpus(tmp_path_factory):
+    return tmp_path_factory.mktemp("kept")
+
+
+def test_one(corpus):
+    assert corpus.is_dir()
+"""
+
+
+def corpora(base: Path, prefix: str) -> list[Path]:
+    """The directories under `base` named `prefix...`, leaving out pytest's
+    `<prefix>current` link to the newest one."""
+    return [path for path in base.rglob(f"{prefix}*")
+            if path.is_dir() and not path.is_symlink()]
+
+
+def test_a_bench_module_leaves_no_corpus_behind_in_the_base_temp(pytester):
+    pytester.makepyfile(test_a_bench=BENCH_MODULE, test_b_after=AFTER_MODULE,
+                        test_c_kept=KEPT_MODULE)
+    base = pytester.path / "basetemp"
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "no:randomly",
+                                           f"--basetemp={base}")
+    result.assert_outcomes(passed=4)
+    assert corpora(base, "bench") == []
+    assert len(corpora(base, "kept")) == 1          # the listing sees a corpus left behind
+
+
 def test_fsync_is_a_no_op_in_a_plain_test(tmp_path):
     assert os.fsync is not testing._REAL_FSYNC
     fd = os.open(tmp_path / "f", os.O_WRONLY | os.O_CREAT, 0o600)

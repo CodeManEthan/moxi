@@ -11,11 +11,12 @@ so the bump can drop them with their cost as the reason.
 
 On the fallback the test holds the deadline's promise instead: each shape comes back,
 scanned or unscanned, within its deadline plus the kill time (also at three times), and
-never clean for a set where RE2 finds a hit.
+never clean for a set where RE2 finds a hit. The check runs that test with a bound five
+times as loose, so load alone doesn't fail it; its timed twin holds the tight one.
 
-Run with `pytest -m slow tests/test_cost.py`. Each run prints its numbers (`-s` shows
-them). The timed tests are marked `timed`, so `moxi-dev check` runs them alone, after its
-parallel pass.
+Every bound is the budget times the run's `timed_slack()`. Run with `pytest -m slow
+tests/test_cost.py`. Each run prints its numbers (`-s` shows them). The timed tests are
+marked `timed`, so `moxi-dev check` holds them and `moxi-dev timed` runs them.
 """
 
 from __future__ import annotations
@@ -107,6 +108,12 @@ def best_of(n, fn):
         fn()
         times.append(time.perf_counter() - started)
     return min(times)
+
+
+def report_nearest(timed_reading, measured, *, clock="wall"):
+    """Report the reading nearest its budget, of `(label, seconds, budget)` triples."""
+    _, took, budget = max(measured, key=lambda m: m[1] / m[2])
+    timed_reading(took, budget, "s", clock=clock)
 
 
 def size_mb(text):
@@ -267,10 +274,16 @@ def re2_hits():
     return {}
 
 
+@pytest.fixture(scope="module")
+def re2_module():
+    """google-re2's module, read before a fallback test hides it from import."""
+    return engine.re2_module()
+
+
 @pytest.mark.parametrize("set_name", ["credentials", "broad"])
 @pytest.mark.parametrize("name", list(SHAPES))
 @pytest.mark.timed
-def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch):
+def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch, timed_reading):
     monkeypatch.setattr(engine, "_active", None)
     eng = re2_engine()
     text = shape(name)
@@ -279,21 +292,26 @@ def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch):
     scan_mod.run_gitleaks(engine.Text(text), (set_name,), None, counter)
     forget_counting()
     mb = size_mb(text)
-    budget = SLACK * timed_slack() * (GITLEAKS_BUDGET[0] * mb + GITLEAKS_BUDGET[1] * counter.count)
+    budget = SLACK * (GITLEAKS_BUDGET[0] * mb + GITLEAKS_BUDGET[1] * counter.count)
     hits = []
     took = best_of(2, lambda: hits.append(scan(text, (set_name,))))
     re2_hits[(name, set_name)] = {(h.rule, h.start, h.end) for h in hits[-1]}
     print(f"\nre2 {set_name} {name}: {took:.3f} s for {mb:.2f} MB, {counter.count} "
           f"candidates, {len(hits[-1])} hits, budget {budget:.3f} s")
-    if took > budget:
-        pytest.fail(f"{set_name} on {name}: {took:.3f} s, budget {budget:.3f} s; slowest "
-                    f"rules: {slowest_rules(text, set_name, eng)}")
+    timed_reading(took, budget, "s")
+    if took > budget * timed_slack():
+        pytest.fail(f"{set_name} on {name}: {took:.3f} s, budget {budget:.3f} s times "
+                    f"{timed_slack()}; slowest rules: {slowest_rules(text, set_name, eng)}")
 
 
-@pytest.mark.parametrize("name", list(SHAPES))
-@pytest.mark.timed
-def test_the_fallback_returns_by_its_deadline_and_never_clean(name, re2_hits,
-                                                              fallback_engine):
+#: The land-check test's bound is five times the timed one, with no factor, so load
+#: alone doesn't fail it.
+FALLBACK_LOOSE = 5
+
+
+def _scan_on_the_fallback(name, re2_hits, re2_module) -> tuple[float, float]:
+    """Scan a shape on the fallback, check it is never clean for a set where RE2 finds a
+    hit, and return how long it took and its deadline."""
     text = shape(name)
     sets = ("credentials", "broad")
     wait = fallback.deadline(len(text.encode("utf-8")))
@@ -303,15 +321,36 @@ def test_the_fallback_returns_by_its_deadline_and_never_clean(name, re2_hits,
     unscanned = {h.set for h in hits if h.rule == "unscanned"}
     print(f"\nfallback {name}: {took:.3f} s, deadline {wait:.2f} s, "
           f"unscanned {sorted(unscanned)}, {len(hits)} hits")
-    assert took <= wait + SLACK * timed_slack() * KILL_TIME
     for set_name in sets:
         if set_name in unscanned:
             continue
         found = {(h.rule, h.start, h.end) for h in hits if h.set == set_name}
-        expected = re2_hits.get((name, set_name))
-        if expected is None:
-            pytest.skip("RE2's run of this shape did not run first")
+        if (name, set_name) not in re2_hits:
+            # RE2's timed test fills this as it runs; without it, RE2 scans here.
+            with pytest.MonkeyPatch.context() as m:
+                m.setattr(engine, "_active", engine.Re2Engine(re2_module))
+                re2_hits[(name, set_name)] = {(h.rule, h.start, h.end)
+                                              for h in scan(text, (set_name,))}
+        expected = re2_hits[(name, set_name)]
         assert expected <= found, (set_name, len(expected - found))
+    return took, wait
+
+
+@pytest.mark.parametrize("name", list(SHAPES))
+def test_the_fallback_returns_by_its_deadline_and_never_clean(name, re2_hits, re2_module,
+                                                              fallback_engine):
+    took, wait = _scan_on_the_fallback(name, re2_hits, re2_module)
+    assert took <= FALLBACK_LOOSE * (wait + SLACK * KILL_TIME), (took, wait)
+
+
+@pytest.mark.parametrize("name", list(SHAPES))
+@pytest.mark.timed
+def test_the_fallback_returns_by_its_deadline_and_never_clean_in_time(
+        name, re2_hits, re2_module, fallback_engine, timed_reading):
+    """As above, within the deadline plus the kill time."""
+    took, wait = _scan_on_the_fallback(name, re2_hits, re2_module)
+    timed_reading(took, wait + SLACK * KILL_TIME, "s")
+    assert took <= wait + SLACK * timed_slack() * KILL_TIME, (took, wait)
 
 
 # -- private names --------------------------------------------------------------------------
@@ -344,12 +383,13 @@ def names_shapes(entries):
 
 @pytest.mark.parametrize("eng_name", ["re2", "re"])
 @pytest.mark.timed
-def test_private_names_hold_the_budget(eng_name, names_config):
+def test_private_names_hold_the_budget(eng_name, names_config, timed_reading):
     entries = made_up_entries(corpus.rng(49))
     names_config(words=entries[:150], anywhere=entries[150:180], emails=[
         f"{e}@example.test" for e in entries[180:]])
     listed = names_mod.private_names()
     eng = re2_engine() if eng_name == "re2" else engine.python()
+    measured = []
     for label, text in names_shapes(entries):
         counter = Counting(eng)
         forget_counting()
@@ -360,14 +400,17 @@ def test_private_names_hold_the_budget(eng_name, names_config):
         mb = size_mb(text)
         if eng_name == "re2":
             base, per_entry, per_candidate = NAMES_BUDGET
-            budget = SLACK * timed_slack() * (base * mb + per_entry * mb * held + per_candidate * counter.count)
+            budget = SLACK * (base * mb + per_entry * mb * held + per_candidate * counter.count)
         else:
             per_entry, per_candidate = NAMES_FALLBACK_BUDGET
-            budget = SLACK * timed_slack() * (per_entry * mb * len(entries) + per_candidate * counter.count)
+            budget = SLACK * (per_entry * mb * len(entries) + per_candidate * counter.count)
         took = best_of(2, lambda: names_mod.spans(engine.Text(text), listed, eng))
         print(f"\n{eng_name} private names {label}: {took:.3f} s, {counter.count} "
               f"candidates, {held} entries held, budget {budget:.3f} s")
-        assert took <= budget, label
+        measured.append((label, took, budget))
+    report_nearest(timed_reading, measured)
+    for label, took, budget in measured:
+        assert took <= budget * timed_slack(), label
 
 
 # -- personal data --------------------------------------------------------------------------
@@ -407,17 +450,21 @@ def personal_candidates(text, eng, monkeypatch) -> int:
 
 @pytest.mark.parametrize("eng_name", ["re2", "re"])
 @pytest.mark.timed
-def test_personal_data_holds_the_budget(eng_name, monkeypatch):
+def test_personal_data_holds_the_budget(eng_name, monkeypatch, timed_reading):
     eng = re2_engine() if eng_name == "re2" else engine.python()
+    measured = []
     for label, text in personal_shapes():
         candidates = personal_candidates(text, eng, monkeypatch)
         monkeypatch.setattr(engine, "_active", eng)
         mb = size_mb(text)
-        budget = SLACK * timed_slack() * (PERSONAL_BUDGET[0] * mb + PERSONAL_BUDGET[1] * candidates)
+        budget = SLACK * (PERSONAL_BUDGET[0] * mb + PERSONAL_BUDGET[1] * candidates)
         took = best_of(2, lambda: personal_mod.spans(engine.Text(text)))
         print(f"\n{eng_name} personal data {label}: {took:.3f} s, {candidates} "
               f"candidates, budget {budget:.3f} s")
-        assert took <= budget, label
+        measured.append((label, took, budget))
+    report_nearest(timed_reading, measured)
+    for label, took, budget in measured:
+        assert took <= budget * timed_slack(), label
 
 
 # -- redact ---------------------------------------------------------------------------------
@@ -461,25 +508,29 @@ def child_times(text, *, hide_re2=False):
 
 
 @pytest.mark.timed
-def test_the_import_and_the_first_scan_hold_their_budgets():
+def test_the_import_and_the_first_scan_hold_their_budgets(timed_reading):
     text = prose(corpus.rng(80), 4_000)
     runs = [child_times(text) for _ in range(5)]
     imported = min(r["import"] for r in runs)
     first = min(r["first"] for r in runs)
     print(f"\nimport {imported * 1000:.1f} ms, first 4 KB credentials scan "
           f"{first * 1000:.1f} ms")
-    assert imported <= SLACK * timed_slack() * 0.010
-    assert first <= SLACK * timed_slack() * 0.010
     runs = [child_times(text, hide_re2=True) for _ in range(5)]
-    first = min(r["first"] for r in runs)
-    print(f"first 4 KB fallback scan, the child's start included: {first * 1000:.1f} ms")
-    assert first <= SLACK * timed_slack() * 0.050
+    first_fallback = min(r["first"] for r in runs)
+    print(f"first 4 KB fallback scan, the child's start included: "
+          f"{first_fallback * 1000:.1f} ms")
+    measured = [("import", imported, SLACK * 0.010), ("first scan", first, SLACK * 0.010),
+                ("first fallback scan", first_fallback, SLACK * 0.050)]
+    report_nearest(timed_reading, measured, clock="child")
+    for label, took, budget in measured:
+        assert took <= budget * timed_slack(), label
 
 
 @pytest.mark.parametrize("set_name", ["credentials", "broad", "private-names",
                                       "personal-data"])
 @pytest.mark.timed
-def test_a_warm_short_text_holds_its_budget(set_name, names_config, monkeypatch):
+def test_a_warm_short_text_holds_its_budget(set_name, names_config, monkeypatch,
+                                            timed_reading):
     monkeypatch.setattr(engine, "_active", None)
     names_config(words=made_up_entries(corpus.rng(90), 40))
     r = corpus.rng(91)
@@ -490,4 +541,5 @@ def test_a_warm_short_text_holds_its_budget(set_name, names_config, monkeypatch)
     n = 500
     took = best_of(3, lambda: [scan(text, (set_name,)) for _ in range(n)]) / n
     print(f"\nwarm short text, {set_name}: {took * 1e6:.0f} us")
+    timed_reading(took * 1e6, SLACK * 100, "us")
     assert took <= SLACK * timed_slack() * 100e-6
