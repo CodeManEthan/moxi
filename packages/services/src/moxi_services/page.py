@@ -97,18 +97,32 @@ VERDICT = lb.Out("table", items={
     "cause": _MAYBE,
 })
 
-#: A timer's last run: `failed`, a few words (`ok`, `exit 1`, ...), and when.
+#: A timer's last run: `failed`, a few words (`ok`, `exit 1`, ...), when, and the exit
+#: code its gate line gives (null when the supervisor gave the result).
 LAST_RUN = lb.Out("table", nullable=True, items={
     "failed": _FLAG,
     "text": _SAYS,
     "at": _MAYBE,
+    "exit": _MAYBE_INT,
 })
 
 #: A running daemon's last health check: `state` `ok` or `fail` (a module daemon's own
-#: check may also give `warn` or `off`), and the check's first line.
+#: check may also give `warn` or `off`), the check's first line, and `at`, when the
+#: health pass that ran it began (UTC, ISO 8601 with `Z`; null when not known).
 CHECKED = lb.Out("table", nullable=True, items={
     "state": _TEXT,
     "line": _SAYS,
+    "at": _MAYBE,
+})
+
+_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)
+
+#: A timer's schedule as declared: `every` (`5m`, `1h`), or `at` (`HH:MM` times) limited
+#: to `days` (`mon` ... `sun`); each null when not declared.
+TIMING = lb.Out("table", nullable=True, items={
+    "every": _MAYBE,
+    "at": _MAYBE_WORDS,
+    "days": _MAYBE_WORDS,
 })
 
 #: One row as the page shows it.
@@ -123,6 +137,11 @@ CHECKED = lb.Out("table", nullable=True, items={
 #:   is armed, `pid`, `since` (UTC, ISO 8601 with `Z`) and `detail` as the supervisor
 #:   gives them, null when it was not read.
 #: - `last_run` a timer's last run, `checked` a running daemon's last health result.
+#: - `timing` a written or module timer's schedule as declared; null for a daemon and
+#:   for an adopted timer, whose schedule is the supervisor's and not read.
+#: - `ends_slots` True on slots' server only: its stop and restart end what runs in the
+#:   slots.
+#: - `has_settings` True for a module row whose module has settings.
 #: - A user row's `argv` (written), `cwd`, `unit` (adopted), `schedule` (`every 5m`, `at
 #:   09:00 on mon,fri`), `health` (its health command), `project`, `removing` and
 #:   `platform` (the system it was added on); null or False for a module row.
@@ -149,6 +168,9 @@ ROW = lb.Out("table", items={
     "detail": _MAYBE_SAYS,
     "last_run": LAST_RUN,
     "checked": CHECKED,
+    "timing": TIMING,
+    "ends_slots": _FLAG,
+    "has_settings": _FLAG,
     "argv": _COMMAND,
     "cwd": _MAYBE_PATH,
     "unit": _MAYBE,
@@ -283,4 +305,4 @@ PAGE = lb.Page(
 
 __all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "KINDS", "LAST_RUN", "ONE", "PAGE",
            "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS", "ROW_BODY", "RUN", "RUN_BODY",
-           "STATUS", "STATUS_ROUTE", "TOPIC", "VERDICT"]
+           "STATUS", "STATUS_ROUTE", "TIMING", "TOPIC", "VERDICT"]

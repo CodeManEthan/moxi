@@ -5,6 +5,10 @@
 - A verdict gains `cause` in `moxi services list --json`, `show --json`, `watch --json`
   and the page's reads: one word for each case a verdict tells apart, listed in the
   README's "One verdict per row".
+- The page's rows gain a timer's declared schedule (`timing`), `ends_slots` on slots'
+  server, `has_settings` on a module row whose module has settings, the last run's
+  `exit` code and when its health check ran (`checked.at`). A module row in `moxi
+  services show --json` gains a timer's `every`, `at` and `days`.
 - With the `ui` extra, a `project-facts` component reports each project's failed and
   warned services to the Projects page, and the opened project's `Services` row.
 - The `adopted` switch table carries page fields, which `moxi config services show

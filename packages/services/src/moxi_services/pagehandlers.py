@@ -119,6 +119,9 @@ STORE_UNREADABLE = ("services' store can't be read; fix: `moxi services list` on
                     "machine names the file and how to fix it")
 STORE_TOO_NEW = ("services' store was written by a newer moxi-services; fix: upgrade it "
                  "with `moxi install services`")
+#: The one row whose stop and restart end what runs in the slots: slots' server, by its
+#: id. No other module declares what its daemon's stop ends.
+SLOTS_SERVER = "slots/server"
 
 log = logging.getLogger("moxi.services.page")
 
@@ -184,8 +187,35 @@ def _list(value) -> list[str] | None:
     return None if value is None else list(value)
 
 
-def row_value(view: verdict.View) -> dict[str, Any]:
-    """One `page.ROW`."""
+def _timing(row) -> dict[str, Any] | None:
+    """A timer's schedule as declared: a written row's from the store, a module timer's
+    from its declaration. None for a daemon and an adopted timer."""
+    if row.kind != "timer" or (isinstance(row, UserRow) and row.form != "written"):
+        return None
+    return {"every": row.every, "at": _list(row.at), "days": _list(row.days)}
+
+
+def with_settings(found: list) -> frozenset[str]:
+    """The modules among `found`'s module rows that have settings, so a row's
+    `Settings` link leads somewhere. A module whose schema can't be read has none."""
+    import moxi.config
+
+    names = {r.module for r in found if isinstance(r, ModuleRow)}
+    out = set()
+    for name in names:
+        loaded = modules.load(name)
+        try:
+            if loaded.ok and moxi.config.schema_for(loaded) is not None:
+                out.add(name)
+        except Exception as exc:  # noqa: BLE001 - an unreadable schema is no link
+            _log_once(exc, f"{name}'s settings schema couldn't be read")
+    return frozenset(out)
+
+
+def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
+              checked_at: str | None = None) -> dict[str, Any]:
+    """One `page.ROW`. `settings` holds the modules that have settings; `checked_at` is
+    when the health pass that gave the row's health result began."""
     row, st = view.row, view.st
     user = row if isinstance(row, UserRow) else None
     last = verdict.last_run(st) if row.kind == "timer" else None
@@ -203,9 +233,13 @@ def row_value(view: verdict.View) -> dict[str, Any]:
         "since": None if st is None else _iso(st.since),
         "detail": (st.detail or None) if st is not None else None,
         "last_run": None if last is None else {"failed": last.failed, "text": last.text,
-                                               "at": last.at},
+                                               "at": last.at, "exit": last.exit},
         "checked": None if view.health is None else {"state": view.health[0],
-                                                     "line": view.health[1]},
+                                                     "line": view.health[1],
+                                                     "at": checked_at},
+        "timing": _timing(row),
+        "ends_slots": row.id == SLOTS_SERVER and row.kind == "daemon" and user is None,
+        "has_settings": user is None and row.module in settings,
         "argv": _list(user.argv) if user else None,
         "cwd": user.cwd if user else None,
         "unit": user.unit if user else None,
@@ -219,19 +253,32 @@ def row_value(view: verdict.View) -> dict[str, Any]:
 
 # -- the health results the poller last read -----------------------------------------
 
-_known: dict[str, tuple[str, str]] = {}
+#: Each row's last health result, by id, with when the pass that ran it began.
+_known: dict[str, tuple[str, str, str]] = {}
 _known_lock = threading.Lock()
 
 
-def _remember(seen: list[verdict.View]) -> None:
+def _remember(seen: list[verdict.View], at: str) -> None:
     with _known_lock:
         _known.clear()
-        _known.update({v.row.id: v.health for v in seen if v.health is not None})
+        _known.update({v.row.id: (*v.health, at) for v in seen if v.health is not None})
 
 
 def _known_health() -> dict[str, tuple[str, str]]:
     with _known_lock:
-        return dict(_known)
+        return {ident: (said, line) for ident, (said, line, _) in _known.items()}
+
+
+def _checked_at(view: verdict.View, at: str | None = None) -> str | None:
+    """When the pass that gave `view` its health result began: `at` for this gather's own
+    pass, else the kept pass's."""
+    if view.health is None:
+        return None
+    if at is not None:
+        return at
+    with _known_lock:
+        kept = _known.get(view.row.id)
+    return None if kept is None else kept[2]
 
 
 # -- the reads -------------------------------------------------------------------------
@@ -249,15 +296,19 @@ def gather(*, check_health: bool = False) -> dict[str, Any]:
     daemon's check runs and its result is kept for the reads after. Never raises."""
     try:
         found, problems = every_row()
+        pass_at = None
         if check_health:
+            pass_at = _iso(time.time())
             seen = verdict.views(found, check_health=True, status_seconds=STATUS_SECONDS,
                                  health_seconds=state.HEALTH_SECONDS,
                                  health_at_once=HEALTH_AT_ONCE)
-            _remember(seen)
+            _remember(seen, pass_at)
         else:
             seen = verdict.views(found, status_seconds=STATUS_SECONDS,
                                  known_health=_known_health())
-        listed = [row_value(v) for v in seen]
+        settings = with_settings(found)
+        listed = [row_value(v, settings=settings, checked_at=_checked_at(v, pass_at))
+                  for v in seen]
     except ServicesError as exc:
         return {"state": "error", "detail": _text(exc), "rows": [], "problems": []}
     except Exception as unexpected_exc:  # noqa: BLE001 - the page says so, never a 500
@@ -282,7 +333,8 @@ def row(call: Any) -> dict[str, Any]:
         runs = state.last_runs(found, 5) if found.kind == "timer" else []
     except ServicesError as exc:
         raise _answer(exc) from None
-    return {"row": row_value(view),
+    return {"row": row_value(view, settings=with_settings([found]),
+                             checked_at=_checked_at(view)),
             "runs": [{"at": r.get("at"), "result": r.get("result"), "exit": r.get("exit"),
                       "seconds": r.get("seconds")} for r in runs],
             "log": None if view.st is None else view.st.log}
@@ -526,6 +578,7 @@ def _feed() -> _Feed:
 
 
 __all__ = ["BY", "DAEMON_STARTS", "HEALTH_PERIOD", "JOBS", "KEY_REUSED", "PERIOD",
-           "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "disable", "enable",
+           "SLOTS_SERVER", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "disable", "enable",
            "events", "every_row", "gather", "listing", "not_a_full_path", "projects",
-           "remove", "restart", "row", "row_value", "run", "start", "status", "stop"]
+           "remove", "restart", "row", "row_value", "run", "start", "status", "stop",
+           "with_settings"]

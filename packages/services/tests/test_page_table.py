@@ -86,7 +86,8 @@ def every_leaf() -> dict[str, str | None]:
 #: Within one row: the string leaves that are a name, an id, a time or a word of a fixed
 #: set, and so carry no mark.
 ROW_PLAIN = {"id", "module", "name", "form", "kind", "project", "switch", "verdict.state",
-             "verdict.cause", "state", "since", "last_run.at", "checked.state", "unit", "schedule",
+             "verdict.cause", "state", "since", "last_run.at", "checked.state", "checked.at",
+             "timing.every", "timing.at[]", "timing.days[]", "unit", "schedule",
              "stopped", "platform"}
 ROW_REDACT = {"doc", "verdict.reason", "verdict.fix", "detail", "last_run.text",
               "checked.line", "argv[]", "health[]"}

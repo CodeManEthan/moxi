@@ -151,8 +151,136 @@ def test_rows_carries_the_last_health_result_and_runs_no_check(monkeypatch):
     assert ran == []
     pagehandlers.gather(check_health=True)
     assert ran == [(PY, "-c", "pass")]
-    assert read("/api/rows")["rows"][0]["checked"] == {"state": "ok", "line": "fine"}
+    checked = read("/api/rows")["rows"][0]["checked"]
+    assert (checked["state"], checked["line"]) == ("ok", "fine")
     assert len(ran) == 1
+
+
+def test_checked_at_is_when_the_health_pass_that_ran_the_check_began(monkeypatch):
+    a_daemon(enable=True, health=[PY, "-c", "pass"])
+    monkeypatch.setattr(pagehandlers.state, "run_health", lambda argv: ("ok", "fine"))
+    before = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    passed = pagehandlers.gather(check_health=True)["rows"][0]["checked"]["at"]
+    after = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    assert before <= passed <= after
+    # A read between passes carries the kept result's pass time.
+    assert read("/api/rows")["rows"][0]["checked"]["at"] == passed
+    assert read("/api/row", "id=web")["row"]["checked"]["at"] == passed
+
+
+# --- the row's fields beyond its verdict ----------------------------------------------
+
+CLOCK = '''
+SUMMARY = "clock"
+SETTINGS = "settings.toml"
+DAEMONS = {"tick": {"command": "moxi-clock-tick"}}
+TIMERS = {"chime": {"command": "moxi-clock-chime", "at": ["09:00", "17:30"],
+                    "days": ["mon", "fri"], "switch": "chime.enabled"},
+          "nudge": {"command": "moxi-clock-nudge", "every": "15m",
+                    "switch": "nudge.enabled"}}
+'''
+
+CLOCK_SETTINGS = '''
+[chime.enabled]
+type = "bool"
+default = true
+doc = "Whether the chime runs."
+read = "use"
+
+[nudge.enabled]
+type = "bool"
+default = true
+doc = "Whether the nudge runs."
+read = "use"
+'''
+
+SLOTS = '''
+SUMMARY = "slots"
+DAEMONS = {"server": {"command": "moxi-slots-server"},
+           "keeper": {"command": "moxi-slots-keeper"}}
+'''
+
+
+def by_id() -> dict[str, dict]:
+    return {r["id"]: r for r in read("/api/rows")["rows"]}
+
+
+def clock(site) -> None:
+    site.module("clock", CLOCK)
+    site.write("moxi_clock/settings.toml", CLOCK_SETTINGS)
+
+
+def test_timing_is_a_written_or_module_timers_schedule_as_declared(site, fake):
+    from fake_units import Unit
+
+    clock(site)
+    a_daemon()
+    a_timer("hourly")
+    out = acts.add_written("weekly", [PY], is_timer=True, at=["09:00"], days=["mon"])
+    assert out.ok, out
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
+    assert acts.add_adopted("backup", "backup.timer", enable=True, is_timer=True).ok
+    rows_now = by_id()
+    assert rows_now["services/hourly"]["timing"] == {"every": "1h", "at": None, "days": None}
+    assert rows_now["services/weekly"]["timing"] == {"every": None, "at": ["09:00"],
+                                                     "days": ["mon"]}
+    assert rows_now["clock/chime"]["timing"] == {"every": None, "at": ["09:00", "17:30"],
+                                                 "days": ["mon", "fri"]}
+    assert rows_now["clock/nudge"]["timing"] == {"every": "15m", "at": None, "days": None}
+    # An adopted timer's schedule is the supervisor's, which is not read; a daemon has none.
+    assert rows_now["services/backup"]["timing"] is None
+    assert rows_now["services/web"]["timing"] is None
+    assert rows_now["clock/tick"]["timing"] is None
+
+
+def test_ends_slots_is_true_on_slots_server_only(site):
+    site.module("slots", SLOTS)
+    clock(site)
+    a_daemon("server")
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["ends_slots"]} == {"slots/server"}
+    assert read("/api/row", "id=slots/server")["row"]["ends_slots"] is True
+
+
+def test_has_settings_is_true_for_a_module_row_whose_module_has_settings(site):
+    clock(site)
+    site.module("slots", SLOTS)
+    a_daemon()
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["has_settings"]} == {
+        "clock/tick", "clock/chime", "clock/nudge"}
+    assert read("/api/row", "id=clock/tick")["row"]["has_settings"] is True
+    assert read("/api/row", "id=slots/keeper")["row"]["has_settings"] is False
+
+
+def test_a_settings_schema_that_cannot_be_read_gives_no_settings(site):
+    site.module("clock", CLOCK)
+    assert not any(r["has_settings"] for r in by_id().values())
+
+
+def test_last_run_carries_the_gate_lines_exit_code(fake):
+    a_timer()
+    fake.written["nightly"].runs = [
+        {"at": "2026-11-18T10:00:00Z", "result": "ran", "exit": 0, "seconds": 1.0},
+        {"at": "2026-11-18T11:00:00Z", "result": "ran", "exit": 3, "seconds": 2.5}]
+    last = by_id()["services/nightly"]["last_run"]
+    assert last == {"failed": True, "text": "exit 3", "at": "2026-11-18T11:00:00Z",
+                    "exit": 3}
+    found = read("/api/row", "id=nightly")
+    assert [r["exit"] for r in found["runs"]] == [0, 3]
+
+
+def test_since_and_pid_are_read_only_while_a_daemon_is_active(fake):
+    a_daemon(enable=True)
+    unit = fake.written["web"]
+    unit.pid, unit.since = 4242, 1_763_460_000.0
+    web = by_id()["services/web"]
+    assert (web["state"], web["pid"], web["since"]) == ("active", 4242,
+                                                       "2025-11-18T10:00:00Z")
+    unit.active, unit.failed = False, True
+    web = by_id()["services/web"]
+    assert (web["state"], web["pid"], web["since"]) == ("failed", None, None)
+    assert (web["verdict"]["state"], web["verdict"]["cause"]) == ("fail", "not-running")
 
 
 def test_a_store_that_cannot_be_read_is_state_error_with_the_reason(too_new):

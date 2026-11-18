@@ -11559,6 +11559,8 @@ services	packages/services/src/moxi_services/page.py	_MAYBE_PATH = lb.Out("strin
 services	packages/services/src/moxi_services/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
 services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
+services	packages/services/src/moxi_services/page.py	_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	TIMING = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -11574,6 +11576,7 @@ services	packages/services/src/moxi_services/pagehandlers.py	projects	name	err	e
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,	use	args=(health,)	kwargs={"health": health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": check_health}, daemon=True,	use	kwargs={"health": check_health}	kwargs={"check_health": check_health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": health}, daemon=True,	use	kwargs={"health": health}	kwargs={"check_health": check_health}
+services	packages/services/src/moxi_services/pagehandlers.py	out = set()	keep	set	set
 services	packages/services/src/moxi_services/rows.py	"created", "changed", "changed_by")	keep	changed	changed
 services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	`launches_session` are bools; `stopped`, `created` and `changed` are UTC times	keep	changed	changed
@@ -11688,6 +11691,7 @@ services	packages/services/tests/test_page.py	monkeypatch.setattr(pagehandlers, 
 services	packages/services/tests/test_page.py	release.set()	keep	set	set
 services	packages/services/tests/test_page.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+services	packages/services/tests/test_page.py	assert not any(r["has_settings"] for r in by_id().values())	keep	any	any
 services	packages/services/tests/test_page_feed.py	"""A gather in place of the page's: each call recorded with its `health`, blocking	use	health	check_health
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"

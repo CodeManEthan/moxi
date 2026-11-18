@@ -98,11 +98,14 @@ class Verdict:
 
 @dataclass(frozen=True)
 class LastRun:
-    """A timer's last run: `failed`, a few words, and when (as given, or None)."""
+    """A timer's last run: `failed`, a few words, when (as given, or None), and the exit
+    code its gate line gives (None for a result the supervisor gave, or a line with
+    none)."""
 
     failed: bool
     text: str
     at: str | None
+    exit: int | None = None
 
 
 def worst(states: Iterable[str]) -> str:
@@ -132,17 +135,19 @@ def last_run(st: units.UnitState | None) -> LastRun | None:
 def _gate_line(line: Mapping) -> LastRun:
     at = line.get("at")
     result, code = line.get("result"), line.get("exit")
+    number = code if isinstance(code, int) and not isinstance(code, bool) else None
     if result == "off":
-        return LastRun(failed=False, text="held off by its switch", at=at)
+        return LastRun(failed=False, text="held off by its switch", at=at, exit=number)
     if result == "ran" and code == 0:
-        return LastRun(failed=False, text="ok", at=at)
+        return LastRun(failed=False, text="ok", at=at, exit=number)
     if result == "ran":
-        return LastRun(failed=True, text=f"exit {code}", at=at)
+        return LastRun(failed=True, text=f"exit {code}", at=at, exit=number)
     if result == "unreadable":
-        return LastRun(failed=True, text="its switch's config file could not be read", at=at)
+        return LastRun(failed=True, text="its switch's config file could not be read", at=at,
+                       exit=number)
     if result == "not-started":
-        return LastRun(failed=True, text="the command did not start", at=at)
-    return LastRun(code not in (0, None), f"{result}, exit {code}", at)
+        return LastRun(failed=True, text="the command did not start", at=at, exit=number)
+    return LastRun(code not in (0, None), f"{result}, exit {code}", at, number)
 
 
 def _supervisor_last(found: Mapping) -> LastRun | None:

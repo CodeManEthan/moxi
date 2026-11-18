@@ -689,3 +689,24 @@ def test_only_an_adopted_windows_timer_says_how_it_is_judged():
     found = judge(row, st("timer", backend="systemd", last=SUPERVISOR_FAILED["systemd"]),
                   is_enabled=True)
     assert found.state == "warn" and "judged as a timer" not in found.reason
+
+
+# --- a timer's last run's exit code ------------------------------------------------------
+
+@pytest.mark.parametrize(("line", "exit_code"), [
+    ({"at": "t", "result": "ran", "exit": 0}, 0),
+    ({"at": "t", "result": "ran", "exit": 1}, 1),
+    ({"at": "t", "result": "off", "exit": 0}, 0),
+    ({"at": "t", "result": "unreadable", "exit": 3}, 3),
+    ({"at": "t", "result": "not-started", "exit": 127}, 127),
+    ({"at": "t", "result": "ran"}, None),
+    ({"at": "t", "result": "ran", "exit": True}, None),
+])
+def test_a_gate_lines_exit_code_is_the_last_runs(line, exit_code):
+    assert verdict.last_run(st("timer", last=line)).exit == exit_code
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_last_run_the_supervisor_gave_has_no_exit_code(backend):
+    last = verdict.last_run(st("timer", backend=backend, last=SUPERVISOR_FAILED[backend]))
+    assert last.failed and last.exit is None
