@@ -172,7 +172,7 @@ class Plan:
     slack: float
     idle_line: float | None
     takes: dict[str, Path]
-    stamp: bool
+    writes_stamp: bool
     uv: str
     git: str | None
     python: str
@@ -190,7 +190,7 @@ class Plan:
                 "record_dir": str(self.record_dir) if self.record_dir else None,
                 "slack": self.slack, "idle_line": self.idle_line,
                 "takes": {name: str(where) for name, where in self.takes.items()},
-                "stamp": self.stamp, "uv": self.uv, "git": self.git,
+                "writes_stamp": self.writes_stamp, "uv": self.uv, "git": self.git,
                 "python": self.python, "python_version": self.python_version}
 
     def units(self) -> dict[str, str]:
@@ -208,7 +208,7 @@ class Plan:
                       f"ExecStart={exec_line(self.python, script, self.machine, self.python_version)}\n"
                       f"SuccessExitStatus=3\nTimeoutStartSec={SERVICE_TIMEOUT}\n"),
         }
-        if self.stamp and self.common_dir is not None:
+        if self.writes_stamp and self.common_dir is not None:
             reflog = _escape(str(self.common_dir / "logs" / "refs" / "heads" / "main"))
             out[STAMP_PATH] = (f"{mark}[Unit]\nDescription=moxi-dev timed: stamp the source "
                                f"when main moves\n\n[Path]\nPathChanged={reflog}\n"
@@ -269,7 +269,7 @@ def _put(target: Path, data: bytes, mode: int = 0o644) -> None:
         part.unlink(missing_ok=True)
 
 
-def _lock(source: Path, has_git: bool, tree: Path) -> int:
+def _lock(source: Path, tree: Path, *, has_git: bool) -> int:
     """The run lock of a run tree, taken without waiting; ScheduleError when it is held."""
     if has_git:
         record_dir = timed.common_record_dir(source)
@@ -408,8 +408,8 @@ class _Schedule:
                     run_dir=run_dir_of(source, env),
                     record_dir=_absolute(args.record_dir) if args.record_dir else None,
                     slack=args.slack, idle_line=args.idle_line, takes=takes,
-                    stamp=args.stamp, uv=uv, git=git if has_git else None, python=python,
-                    python_version=found[1], common_dir=common_dir)
+                    writes_stamp=args.stamp, uv=uv, git=git if has_git else None,
+                    python=python, python_version=found[1], common_dir=common_dir)
 
     def linger(self) -> None:
         """Check 4: say when linger is off; never stops."""
@@ -469,8 +469,8 @@ class _Schedule:
         plan = self.plan()
         self.linger()
         fresh = not plan.run_dir.exists()
-        fd = None if fresh or not plan.tree.exists() else _lock(plan.source, plan.has_git,
-                                                                plan.tree)
+        fd = None if fresh or not plan.tree.exists() else _lock(plan.source, plan.tree,
+                                                                has_git=plan.has_git)
         try:
             try:
                 self.make_tree(plan)
@@ -562,7 +562,7 @@ def unschedule(source: Path, env: Mapping[str, str],
     if not ours and not run_dir.exists():
         say(f"moxi-dev timed unschedule: nothing is scheduled from {source}")
         return 0
-    fd = _lock(source, has_git, tree) if tree.exists() else None
+    fd = _lock(source, tree, has_git=has_git) if tree.exists() else None
     try:
         started = [name for name in (TIMER, STAMP_PATH) if name in ours]
         if started:

@@ -244,7 +244,7 @@ def test_schedule_json_holds_the_ticks_fields_and_reads_back_through_the_tick(
     where = run_dir(clone, env)
     data = json.loads((where / tick.SCHEDULE_JSON).read_text())
     assert set(data) == {"format", "machine", "source", "has_git", "record_dir", "slack",
-                         "idle_line", "takes", "stamp", "uv", "git", "python",
+                         "idle_line", "takes", "writes_stamp", "uv", "git", "python",
                          "python_version"}
     assert data["python_version"] == "3.12.99"
     assert data["python"] == str(fakes.bin_dir / "python3.12")
@@ -255,7 +255,7 @@ def test_schedule_json_holds_the_ticks_fields_and_reads_back_through_the_tick(
     assert settings.has_git and settings.record_dir is None
     assert settings.slack == 2.5 and settings.idle_line == 1.5
     assert settings.takes == {"host-b": results}
-    assert not settings.stamp
+    assert not settings.writes_stamp
     assert settings.tree == where / "tree"
 
 
@@ -288,7 +288,7 @@ def test_schedule_stamp_adds_the_path_unit_on_mains_reflog(clone, env, fakes):
     assert argv[2].endswith('exec "$0" -I "$1" --stamp-only')
     assert argv[4] == str(where / "tick.py")
     assert fakes.active() == {schedule.TIMER, schedule.STAMP_PATH}
-    assert tick.read_settings(where).stamp
+    assert tick.read_settings(where).writes_stamp
 
 
 def test_schedule_on_a_tree_with_no_git_makes_the_first_verified_copy(

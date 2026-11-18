@@ -266,7 +266,7 @@ class Options:
     findings: Sequence[str] = ()
     packages: Sequence[str] = ()
     record_dir: Path | None = None
-    record: bool = True
+    keep_record: bool = True
     scheduled: bool = False
 
 
@@ -374,7 +374,7 @@ class _Run:
         result.waited_s = sum(float(gate.get("waited_s") or 0) for gate in gates)
         result.code = 1 if broke or result.counts["failed"] else (
             3 if result.counts["not measured"] else 0)
-        if not opts.record or tree.dirty:
+        if not opts.keep_record or tree.dirty:
             if tree.dirty:
                 print(f"moxi-dev timed: {tree.root} has changes of its own; no record kept",
                       flush=True)
@@ -495,7 +495,7 @@ def main(argv: list[str]) -> int:
                    wait_s=args.wait_s, line=args.idle_line, findings=args.finding,
                    packages=args.package,
                    record_dir=Path(args.record_dir).expanduser() if args.record_dir else None,
-                   record=not args.no_record, scheduled=args.scheduled)
+                   keep_record=not args.no_record, scheduled=args.scheduled)
     result = run_timed(Path.cwd(), opts)
     print(result.line(), flush=True)
     return result.code

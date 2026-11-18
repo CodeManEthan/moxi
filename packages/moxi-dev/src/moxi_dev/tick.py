@@ -13,8 +13,9 @@ its file's `format` field.
 `schedule.json` holds `format` (`SCHEDULE_FORMAT`), `machine`, `source` (the tree
 `schedule` ran from), `has_git` (whether the source is a git clone), `record_dir` (or
 null: the clone's own), `slack`, `idle_line` (or null: the verb's default), `takes` (a
-host's name to its results folder), `stamp` (whether this machine writes the stamp), and
-the absolute paths `uv`, `git` (null with no git) and `python`, with `python_version`.
+host's name to its results folder), `writes_stamp` (whether this machine writes the
+stamp), and the absolute paths `uv`, `git` (null with no git) and `python`, with
+`python_version`.
 
 `tick.py --stamp-only` writes the stamp, `.moxi-dev-stamp.json` at the source's root:
 its `format`, main's commit, the time it was written, the object hash git names (`sha1`
@@ -55,7 +56,7 @@ try:
 except ImportError:                     # Windows: `show` reads the numbers below there
     fcntl = None
 
-TICK_VERSION = 1
+TICK_VERSION = 2
 TICK_FORMAT = 1
 STAMP_FORMAT = 1
 SCHEDULE_FORMAT = 1
@@ -104,7 +105,7 @@ class Settings:
         self.idle_line = data.get("idle_line")
         self.takes = {str(name): Path(where)
                       for name, where in (data.get("takes") or {}).items()}
-        self.stamp = bool(data.get("stamp"))
+        self.writes_stamp = bool(data.get("writes_stamp"))
         self.uv = str(data["uv"])
         self.git = str(data["git"]) if data.get("git") else None
 
@@ -413,8 +414,8 @@ STEPS = ("lock", "stamp", "tree", "run", "take")
 class Tick:
     """One tick, scheduled or by hand (`main`'s doc)."""
 
-    def __init__(self, settings: Settings, *, hand: bool, slack: float) -> None:
-        self.settings, self.hand, self.slack = settings, hand, slack
+    def __init__(self, settings: Settings, *, by_hand: bool, slack: float) -> None:
+        self.settings, self.by_hand, self.slack = settings, by_hand, slack
         self.machine = settings.machine
         self.started = now_utc()
         self.steps = dict.fromkeys(STEPS, "skipped")
@@ -439,7 +440,7 @@ class Tick:
         try:
             if self.lock() and self.stamp() and self.tree():
                 self.run()
-                if not self.hand:
+                if not self.by_hand:
                     self.take()
             return self.finish()
         finally:
@@ -475,7 +476,7 @@ class Tick:
 
     # step 2
     def stamp(self) -> bool:
-        if self.hand or not self.settings.stamp:
+        if self.by_hand or not self.settings.writes_stamp:
             return True
         try:
             if not self.settings.git:
@@ -517,7 +518,7 @@ class Tick:
         settings = self.settings
         cmd = [settings.uv, "run", "--locked", "moxi-dev", "timed", "--machine",
                self.machine]
-        if not self.hand:
+        if not self.by_hand:
             cmd.insert(5, "--scheduled")
         if settings.record_dir is not None:
             cmd += ["--record-dir", str(settings.record_dir)]
@@ -612,7 +613,7 @@ class Tick:
             code = 1
         else:
             code = 2 if self.run_exit is None else self.run_exit
-        if not self.hand:
+        if not self.by_hand:
             try:
                 self.write_tick_file(code)
             except (TickError, OSError) as exc:
@@ -724,7 +725,7 @@ def main(argv: list[str] | None = None, *, run_dir: Path | None = None) -> int:
     if not (math.isfinite(slack) and slack >= 1):
         _say(settings.machine, f"--slack is a finite number of at least 1; it is {slack!r}")
         return 2
-    return Tick(settings, hand=args.hand, slack=slack).go()
+    return Tick(settings, by_hand=args.hand, slack=slack).go()
 
 
 if __name__ == "__main__":

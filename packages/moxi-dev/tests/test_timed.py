@@ -168,7 +168,7 @@ def test_a_dirty_tree_keeps_no_record(repo):
 
 
 def test_no_record_keeps_none(repo):
-    go(repo, Stand(PLAN), record=False)
+    go(repo, Stand(PLAN), keep_record=False)
     assert not (record_dir(repo) / "box").exists()
 
 

@@ -55,7 +55,7 @@ def schedule_json(run_dir, source, **kw):
     run_dir.mkdir(parents=True, exist_ok=True)
     data = {"format": tick.SCHEDULE_FORMAT, "machine": "host-a", "source": str(source),
             "has_git": True, "record_dir": None, "slack": 1.0, "idle_line": None,
-            "takes": {}, "stamp": False, "uv": "/nonexistent/uv", "git": "git",
+            "takes": {}, "writes_stamp": False, "uv": "/nonexistent/uv", "git": "git",
             "python": "/nonexistent/python3.12", "python_version": "3.12.0", **kw}
     (run_dir / tick.SCHEDULE_JSON).write_text(json.dumps(data))
     return run_dir
@@ -79,7 +79,7 @@ def ls_tree(root, commit):
 
 def test_stamp_only_writes_mains_commit_and_its_tree_part_file_then_rename(
         source, tmp_path, monkeypatch, capsys):
-    run_dir = schedule_json(tmp_path / "run", source, stamp=True)
+    run_dir = schedule_json(tmp_path / "run", source, writes_stamp=True)
     git(source, "checkout", "-q", "-b", "side")
     (source / "a.txt").write_text("staged, not main's\n")
     git(source, "add", "a.txt")
@@ -161,7 +161,7 @@ def test_with_the_stamp_lock_held_60_s_the_stamp_fails_with_its_line(
     fake = FakeClock()
     monkeypatch.setattr(tick, "_clock", fake.clock)
     monkeypatch.setattr(tick, "_sleep", fake.sleep)
-    run_dir = schedule_json(tmp_path / "run", source, stamp=True)
+    run_dir = schedule_json(tmp_path / "run", source, writes_stamp=True)
     try:
         assert tick.main(["--stamp-only"], run_dir=run_dir) == 2
     finally:
@@ -702,7 +702,7 @@ def test_a_take_runs_after_the_run_whatever_it_did_and_one_that_fails_exits_2(
 
 
 def test_a_tick_that_writes_the_stamp_writes_it_first(clone_run):
-    clone_run.settings(stamp=True)
+    clone_run.settings(writes_stamp=True)
     assert clone_run.tick() == 0
     assert stamp_of(clone_run.source)["commit"] == git(clone_run.source, "rev-parse",
                                                        "main").strip()
@@ -711,7 +711,7 @@ def test_a_tick_that_writes_the_stamp_writes_it_first(clone_run):
 
 def test_a_hand_tick_runs_unscheduled_at_its_factor_and_writes_no_tick_file(
         clone_run, tmp_path):
-    clone_run.settings(stamp=True, slack=3.1, takes={"host-b": str(tmp_path / "r")})
+    clone_run.settings(writes_stamp=True, slack=3.1, takes={"host-b": str(tmp_path / "r")})
     assert clone_run.tick("--hand", "--slack", "2") == 0
     [call] = clone_run.uv.calls()
     assert call["argv"] == ["run", "--locked", "moxi-dev", "timed", "--machine", "host-a"]
@@ -774,7 +774,7 @@ def test_tick_imports_nothing_outside_the_standard_library():
 
 #: `tick.py`'s digest at this `TICK_VERSION`. A change to `tick.py` raises `TICK_VERSION`
 #: and pins its new digest here, since every machine's copy is as old as its schedule.
-TICK_DIGEST = (1, "6f0bf574759ae3d242dde706a9aaff4a986a8588853968191bde02715ffb5a3d")
+TICK_DIGEST = (2, "eb2aa367c8f081594a06ef04986cf11c83d5ee2b69287df0f0b46672a0c0b01e")
 
 
 def test_tick_py_is_pinned_beside_its_version():
