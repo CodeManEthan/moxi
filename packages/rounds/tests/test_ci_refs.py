@@ -289,6 +289,34 @@ def test_an_armed_sweep_with_refs_removes_the_stale_ones(pushed, repo, bare, tmp
                                        "refs/heads/other"]
 
 
+def test_with_no_into_and_no_open_build_the_target_s_ref_is_kept(pushed, repo, bare,
+                                                                 configure, capsys):
+    dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567", run_by="lead")
+    configure(extra=ARMED)
+    repo.git("push", "-q", "origin", "main:refs/heads/ci/main")
+    capsys.readouterr()
+
+    assert main(["drop", "--leftovers", "--refs", "--remove", "--json"]) == 0
+
+    [ref] = json.loads(capsys.readouterr().out)["refs"]["refs"]
+    assert (ref["ref"], ref["fate"]) == ("ci/main", ci_refs.KEPT)
+    assert "the target main" in ref["why"]
+    assert remote_refs(repo, bare) == ["refs/heads/ci/main"]
+
+
+def test_every_ref_is_kept_while_the_target_can_t_be_read(repo, configure, monkeypatch):
+    from moxi_rounds import gitreads
+
+    def fails(self):
+        raise gitreads.GitError(["git"], "exited 128")
+
+    monkeypatch.setattr(gitreads.Git, "checked_out", fails)
+
+    why = ci_refs.keep("proj-a", settings.load()).why("ci/anything")
+
+    assert why is not None and "target can't be read" in why
+
+
 def test_a_sweep_without_refs_reaches_no_remote(pushed, repo, bare, tmp_path, configure,
                                                 capsys):
     configure(extra=ARMED)

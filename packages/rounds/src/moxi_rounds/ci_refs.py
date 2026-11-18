@@ -10,10 +10,12 @@ found.
 **The keep rule** (`Keep`), one rule for the removal at a build's end and for the sweep.
 A ref is kept when it is the branch name the setting's `ref` template, or the prefix the
 ref was pushed under, gives the branch of a build of that repo that has not ended, in
-any round of any project, or gives the repo's target branch (its `into`, and the target
-of each such build); and when a build that has not ended recorded pushing it. While any
-round's log can't be read, every ref is kept, since an open build may be recorded there.
-The rule is read again just before each deletion.
+any round of any project, or gives a target branch of the repo: the project's target
+(its `into`, else the branch checked out at its root, as a new build would take) and the
+target each such build recorded; and when a build that has not ended recorded pushing
+it. While any round's log, or the project's target, can't be read, every ref is kept,
+since an open build may be recorded there, or the ref may be the target's. The rule is
+read again just before each deletion.
 
 **Removal** (`remove`), run from the repo's root: `git ls-remote --heads` for each ref
 first, then `git push <remote> --delete refs/heads/<ref>` for each one there that the
@@ -109,7 +111,8 @@ class Keep:
     """What the keep rule reads for one repo: the `template` its setting names now
     (None for none), the branches of its builds that have not ended (`branches`, each
     with the round and stage), its `targets`, the refs those builds recorded pushing
-    (`pushed`), and the logs that can't be read (`unreadable`)."""
+    (`pushed`), and why any log, or the project's target, can't be read
+    (`unreadable`, each a reason the rule keeps every ref)."""
 
     template: str | None
     branches: Mapping[str, str]
@@ -121,8 +124,7 @@ class Keep:
         """Why the keep rule keeps `ref`, pushed under the `prefixes` besides the
         template's; None when it does not."""
         if self.unreadable:
-            return ("a round's log can't be read, and an open build may be recorded "
-                    f"there: {self.unreadable[0]}")
+            return self.unreadable[0]
         if ref in self.pushed:
             return f"a build that has not ended pushed it: {self.pushed[ref]}"
         known = dict.fromkeys(prefixes)
@@ -139,16 +141,22 @@ class Keep:
         return None
 
 
+#: What the keep rule says of a round's log it can't read.
+_LOG = "a round's log can't be read, and an open build may be recorded there: "
+
+
 def keep(repo: str, settings) -> Keep:
     """The keep rule for the project `repo`, read now from every round's log."""
     declared = ci.declared(settings, repo)
     template = None if declared is None else declared.ref
     homes, unresolved = folders.homes(settings)
-    unreadable = [exc.reason for exc in unresolved if isinstance(exc, SharedFolder)]
+    unreadable = [_LOG + exc.reason for exc in unresolved if isinstance(exc, SharedFolder)]
     branches: dict[str, str] = {}
     pushed: dict[str, str] = {}
-    targets = dict.fromkeys(
-        one for one in [_into(settings, repo)] if isinstance(one, str) and one)
+    target, why = _target(settings, repo)
+    if why is not None:
+        unreadable.append(why)
+    targets = dict.fromkeys([target] if target else [])
     for home in homes:
         for slug in folders.slugs(home.rounds_dir):
             name = f"{home.project}/{slug}"
@@ -157,10 +165,10 @@ def keep(repo: str, settings) -> Keep:
             except NoLog:  # removed since the folder was listed
                 continue
             except Unreadable as exc:
-                unreadable.append(exc.reason)
+                unreadable.append(_LOG + exc.reason)
                 continue
             except OSError as exc:
-                unreadable.append(f"the log of {name} can't be read: {exc}")
+                unreadable.append(f"{_LOG}the log of {name} can't be read: {exc}")
                 continue
             for build in builds.builds(state):
                 if build.ended is not None or build.repo != repo:
@@ -172,10 +180,21 @@ def keep(repo: str, settings) -> Keep:
     return Keep(template, branches, tuple(targets), pushed, tuple(unreadable))
 
 
-def _into(settings, repo: str):
+def _target(settings, repo: str) -> tuple[str | None, str | None]:
+    """The project's target, the branch a new build of `repo` would land on: its
+    `into`, else the branch checked out at its root (None for a detached head); and,
+    when that can't be read, why."""
     from . import settings as own
 
-    return own.build_setting(settings, repo, "into")
+    into = own.build_setting(settings, repo, "into")
+    if isinstance(into, str) and into:
+        return into, None
+    try:
+        _key, root = folders.root(repo)
+        return gitreads.Git(root).checked_out(), None
+    except RoundsError as exc:
+        return None, ("the project's target can't be read, and the ref may be its: "
+                      f"{exc.reason}")
 
 
 # -- removal -----------------------------------------------------------------------------
