@@ -315,9 +315,10 @@ uv run --locked moxi-dev timed schedule --machine NAME [--slack F] [--idle-line 
 
 On macOS it refuses, since the timer is Linux only (run `moxi-dev timed` by hand there),
 and on Windows too. On a git clone the run tree is a worktree of it, made with `git
-worktree add --detach`, and the record goes to the clone's git directory unless
-`--record-dir` says otherwise. On a tree with no git (a synced copy, below) the run tree is
-a verified copy, `--record-dir` is required and `--stamp` refused. The run directory,
+worktree add --force --detach` (so a run tree removed by hand is made again), and the
+record goes to the clone's git directory unless `--record-dir` says otherwise. On a tree
+with no git (a synced copy, below) the run tree is a verified copy, `--record-dir` is
+required and `--stamp` refused. The run directory,
 `<user cache>/moxi-dev/timed/<12 hex of the source's path>` (`~/.cache` unless
 `XDG_CACHE_HOME` says otherwise), holds the run tree (`tree/`), the machine's settings
 (`schedule.json`) and the tick script (`tick.py`). `--slack` is the machine's set factor,

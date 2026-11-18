@@ -5,7 +5,8 @@ scheduled timed run, as systemd user units (Linux only).
 [--stamp] [--take NAME=DIR]...` runs once from the tree the machine measures, the source,
 which is a uv workspace root:
 
-- a git clone: the run tree is a worktree of it, `git worktree add --detach <tree> main`,
+- a git clone: the run tree is a worktree of it, `git worktree add --force --detach <tree>
+  main` (`--force` takes over the path's stale entry when the tree was removed by hand),
   and the record goes to the clone's git directory unless `--record-dir` names another;
 - a tree with no git (a synced copy of a clone): the run tree is the tick's verified copy
   (`moxi_dev.tick.copy_tree`), `--record-dir` is required and `--stamp` refused.
@@ -425,8 +426,11 @@ class _Schedule:
     def make_tree(self, plan: Plan) -> None:
         """Check 5, after the lock: the run tree, then its environment."""
         if plan.has_git and not plan.tree.exists():
-            _need([plan.git, "worktree", "add", "--detach", str(plan.tree), "main"],
-                  self.env, plan.source)
+            # `--force` lets the add take the path over when the tree was removed by hand
+            # and the clone still lists it there. The path is schedule's own, and nothing
+            # else in the clone is pruned.
+            _need([plan.git, "worktree", "add", "--force", "--detach", str(plan.tree),
+                   "main"], self.env, plan.source)
         elif not plan.has_git:
             try:
                 tick.copy_tree(plan.source, plan.tree)
