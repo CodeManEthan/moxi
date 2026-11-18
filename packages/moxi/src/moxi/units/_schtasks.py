@@ -29,7 +29,9 @@ A foreign task is read and acted on as a timer unless its caller says it is a da
 Task Scheduler's success band (`TASK_STATUS_CODES`). Task Scheduler sees only the
 action's own process, so a task whose action starts a program and exits reads `inactive`
 while that program runs: such a task is a timer. Its acts read the task around `/run`
-and `/end`, which return before `State` changes (see `_act_foreign_daemon`).
+and `/end`, which return before `State` changes (see `_act_foreign_daemon`). For the same
+reason, removing a task reads it after its `/end` and deletes it only once it has stopped
+or `SETTLE_SECONDS` have passed (see `_remove`).
 """
 
 from __future__ import annotations
@@ -59,7 +61,8 @@ NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 #: The schedule's anchor: a fixed day in the past, local time.
 ANCHOR = "2000-01-01"
 #: How long an act on a foreign daemon task waits for the task's `State` to follow a
-#: `/run` or an `/end`, and how often it reads the task meanwhile, in seconds.
+#: `/run` or an `/end`, and the removal of a task for its `/end`, and how often each
+#: reads the task meanwhile, in seconds.
 SETTLE_SECONDS = 5.0
 SETTLE_EVERY = 0.25
 
@@ -75,8 +78,8 @@ class SchtasksBackend:
     `user` is the account the tasks run as and log on with, `DOMAIN\\user`; it is read
     from this process's token when first needed unless given. `task_dir` is the task
     folder (`\\Moxi\\`; a proof row uses another). `clock` (seconds, monotonic) and
-    `sleep` time the reads an act on a foreign daemon task makes while it waits for
-    `State` to follow; a test passes its own so nothing waits.
+    `sleep` time the reads an act on a foreign daemon task, or the removal of a task,
+    makes while it waits for `State` to follow; a test passes its own so nothing waits.
     """
 
     name = "schtasks"
@@ -259,8 +262,22 @@ class SchtasksBackend:
                     io.fail(change, ran)
 
     def _remove(self, change: UnitChange, io: ApplyIO) -> None:
+        """End the task, wait up to `SETTLE_SECONDS` for it to stop reading `Running`,
+        then delete it and drop its XML.
+
+        `/end` returns before `State` changes, and the gate's processes hold the
+        module's files (its `.exe` shims, its database, its logs) until they exit, so an
+        uninstall's later steps wait on this one. A task that still reads `Running` at the
+        deadline is deleted anyway, with a line saying so; one that isn't running costs
+        one read. When the read fails (no PowerShell, the task not found) the task is
+        deleted without a wait."""
         task = self.task(change.module, change.name)
         io.fence.run("/end", task)  # a task that is not running is no failure here
+        settled, info, _ = self._settle(
+            task, io.fence, lambda read: read.get("state") != "Running")
+        if not settled and info is not None:
+            io.say(change, f"{task} still runs {SETTLE_SECONDS:g} s after /end; deleted "
+                           "anyway, so its processes may still hold their files")
         ran = io.fence.run("/delete", task)
         if not ran.ok and self._listed(task, io.fence) is not False:
             io.fail(change, ran, "the task is left in place; fix the cause and run "

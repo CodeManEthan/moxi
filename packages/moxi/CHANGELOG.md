@@ -2,6 +2,11 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows, removing a unit (`moxi uninstall`, or a unit a module no longer declares)
+  ends its task and waits, up to 5 s, until the task no longer reads `Running` before it
+  deletes it, so the uninstall's package step no longer meets the daemon still holding
+  its `.exe` shim (os error 32). A task still running at 5 s is deleted anyway, with a
+  line saying so.
 - `moxi.proc.exec_env(lifeline_fd, env=None)` gives a process about to exec into a
   program the `"fd"` lifeline `spawn` gives a child it starts: it makes the pipe's read
   end inheritable and returns the environment with `MOXI_LIFELINE_FD` naming it, so the
