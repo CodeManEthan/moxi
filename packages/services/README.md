@@ -104,6 +104,11 @@ at `/m/services/`, and a block on the shell's home that counts the rows that are
 page. Each act on the page runs the same code as the `moxi services` command you would
 run in a terminal, and refuses where that command refuses.
 
+With projects' page in the shell too, each project's row there shows the services filed
+under it that failed (`docs failed at 18:00`), one you stopped by hand (`docs is
+stopped`) and a timer whose last run failed, each as its verdict gives it; an opened
+project lists every service filed under it in a `Services` row, first while one fails.
+
 - **The list.** Every row, grouped by project, with its verdict and reason, its health
   check's last result, its switch or on/off, and since when it runs or how its last run
   went. Open a row to see its command, unit, directory, schedule and the supervisor's own
