@@ -1,6 +1,7 @@
 """The launches running now on sessions' page, in a browser, through a real shell that
 starts sessions' real page server: `Keep warm` in the text colour, its press posting the
-launch's request id, disabled until the next value, and a refusal's note.
+launch's request id, disabled until the next value, and a refusal's note; and the line at
+a transcript's start that says a session was started by hand, from launcher's one answer.
 
 Launcher's `running` and `keep-warm` routes are answered in the browser (`LauncherStub`),
 so each test sets the launches it needs, and the shell's push stream is kept from bringing
@@ -32,6 +33,10 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
                                  reason="moxi-launcher is not installed")]
 
 PROMPT = "Run the suite and report every diff."
+PANEL = "#moxi-panel > moxi-sessions-page"
+#: A time as the page words one today: the hour and minute in the browser's locale.
+T = r"\d{1,2}:\d\d(?: [AP]M)?"
+START_LINE = "This is the start of the session."
 
 
 def iso_in(seconds: float) -> str:
@@ -186,3 +191,45 @@ def test_keep_warm_is_in_the_text_colour_and_posts_the_request_id(full_shell, ui
     stub.release()
     expect(row.get_by_role("button", name="Keep warm")).to_have_count(0)
     assert stub.presses == [{"request_id": "r-1"}, {"request_id": "r-1"}]
+
+
+def state_reads(page) -> list[str]:
+    """The address of each read of launcher's `/api/state` the page makes from now on."""
+    reads: list[str] = []
+    page.on("request", lambda request: reads.append(request.url) if "/m/launcher/api/state" in request.url else None)
+    return reads
+
+
+def start_line(page, route: str):
+    """The start line of `route`'s transcript, once the page has launcher's answer."""
+    with page.expect_response(lambda response: "/m/launcher/api/state" in response.url):
+        page.goto(f"/m/sessions/{route}")
+    line = page.locator(PANEL).locator('[data-line="start"]')
+    expect(line).to_be_visible()
+    return line
+
+
+def test_a_session_started_by_hand_says_so_at_its_start_from_one_read_of_launcher(full_shell, ui_contexts):
+    page = ui_contexts(full_shell).pages[0]
+    reads = state_reads(page)
+    # The real launcher, whose log holds no launch, refuses the session as not launched.
+    line = start_line(page, f"claude/{sid(2)}")
+    expect(line).to_have_text(re.compile(rf"^Started (?:today|yesterday) {T} in proj-b, by hand$"))
+    assert len(reads) == 1 and reads[0].endswith(f"/m/launcher/api/state?session={sid(2)}"), reads
+    # Refresh reads the turns again, not launcher.
+    page.locator(PANEL).locator('[data-action="refresh"]').click()
+    expect(line).to_contain_text("by hand")
+    assert len(reads) == 1, reads
+
+
+def test_a_session_a_launch_holds_keeps_the_plain_start_line(full_shell, ui_contexts):
+    page = ui_contexts(full_shell).pages[0]
+    held = {"state": "up", "detail": None, "refused": None,
+            "sessions": [{"session_id": sid(1), "request_id": "r-1", "harness": "claude"}]}
+    page.route("**/m/launcher/api/state?*", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(held)))
+    expect(start_line(page, f"claude/{sid(1)}")).to_have_text(START_LINE)
+    # A read that fails says nothing either.
+    page.unroute("**/m/launcher/api/state?*")
+    page.route("**/m/launcher/api/state?*", lambda route: route.fulfill(status=502, body="down"))
+    expect(start_line(page, f"claude/{sid(2)}")).to_have_text(START_LINE)

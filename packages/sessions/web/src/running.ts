@@ -15,6 +15,10 @@
 // the button disabled, for the route's answer and the next value of `running` after it,
 // or for `PRESS_WAIT_MS`. A refusal's words are the row's note until the next value.
 //
+// A session's transcript asks launcher once whether a launch holds the session
+// (`statePath`). Only launcher's refusal `not-launched` says it was started by hand; any
+// other answer, a failed read too, says nothing.
+//
 // Every string here goes into the page as text.
 
 /** Where a running launch runs. `folder` is its directory's last segment, never a path. */
@@ -86,6 +90,19 @@ export interface Answer {
 export interface Presses {
   waiting: Readonly<Record<string, boolean>>;
   notes: Readonly<Record<string, string>>;
+}
+
+/** The read of launcher's state of one session, relative to launcher's page. */
+export function statePath(session: string): string {
+  return `api/state?${new URLSearchParams({ session })}`;
+}
+
+/** Whether launcher's answer to `statePath` refuses the session as `not-launched`: no
+ * launch of Moxi's holds it. */
+export function notLaunched(answer: Answer): boolean {
+  const data = answer.data;
+  return answer.status === 200 && isTable(data) && data.state === "up" && isTable(data.refused)
+    && data.refused.code === "not-launched";
 }
 
 /** The route the list reads the running launches from, relative to launcher's page. */
