@@ -10,10 +10,13 @@ A git hook written by `moxi` run with the shell's Python runs repo's own pieces 
 hook starts `python -I`, which doesn't see the demo site. `hooked` writes a repo's entries
 with the hook environment's Python instead (`conftest.hook_env`), so a commit there runs
 the demo pieces, each doing what its `DEMO_<NAME>` variable says.
+
+The page's acts write only once the shell has a record of the user's terminal (`typed`).
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,6 +87,50 @@ def moxi(shell, *args: str, python: str | Path | None = None, env: dict | None =
 def git(shell, repo: Path, *args: str, env: dict | None = None,
         check: bool = True) -> subprocess.CompletedProcess:
     return run(shell, "git", *args, cwd=repo, env=env, check=check)
+
+
+def own_shell(ui_shells, options: dict):
+    """A shell of a test's own, started in the test, whose home is the folder the test's
+    fence anchors: its repos then lie under its home and are named in the `~` form."""
+    return ui_shells(home=Path(os.environ["MOXI_ANCHOR_HOME"]), **options)
+
+
+def hooked(shell, hook_env: dict, repo: Path, *pieces: str) -> None:
+    """Adds `pieces` to `repo` with the hook environment's Python, so its commits run the
+    demo pieces."""
+    moxi(shell, "repo", "git-hooks", "add", str(repo), *pieces, python=hook_env["python"])
+
+
+def typed(shell) -> None:
+    """Moxi's record of the terminal, as a command typed in the user's own terminal makes
+    it: the page's acts refuse to write without one."""
+    from moxi import paths, terminal
+
+    terminal.write(shell.env, path=paths.terminal_record(shell.env))
+
+
+def commit(shell, repo: Path, name: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Writes `name` in `repo` and commits it; the commit may be refused."""
+    (repo / name).write_text(f"{name}\n", encoding="utf-8")
+    git(shell, repo, "add", name)
+    return git(shell, repo, "commit", "-q", "-m", f"add {name}", env=env, check=False)
+
+
+def git_version() -> str:
+    """The version of the git on PATH, as the page writes it."""
+    return subprocess.run(["git", "version"], capture_output=True, text=True,
+                          check=True).stdout.split()[2]
+
+
+def records_file(shell) -> Path:
+    """repo's doctor records, under the shell's Moxi home."""
+    return Path(shell.env["MOXI_HOME"]) / "state" / "repo" / "doctor.json"
+
+
+def at_of(page, at: str) -> str:
+    """A record's `at` as the page writes a time today."""
+    return page.evaluate("at => new Date(Date.parse(at)).toLocaleTimeString([], "
+                         "{hour: '2-digit', minute: '2-digit'})", at)
 
 
 def anchor(shell) -> Path:
@@ -157,7 +204,7 @@ def seed(shell, hook_env: dict, old: Path) -> dict[str, Path]:
     - kestrel-web: the gate turned off, and commit-rules;
     - lumen-docs: the open lint check, which broke on a commit, and `oldmod/prose-check`,
       a closed piece no installed module declares, which refuses every commit;
-    - my-loadout: commit-rules alone.
+    - my-loadout: commit-rules, and its own pre-commit hook with no piece before it.
     """
     repos = {name: make_repo(shell, f"code/{name}") for name in
              ("atlas-api", "harbor-infra", "kestrel-web", "lumen-docs", "my-loadout")}
@@ -179,6 +226,9 @@ def seed(shell, hook_env: dict, old: Path) -> dict[str, Path]:
     sites = [p for p in shell.env.get("PYTHONPATH", "").split(":") if p]
     moxi(shell, *add, str(lumen), OLD_PIECE, env={"PYTHONPATH": ":".join([*sites, str(old)])})
     moxi(shell, *add, str(repos["my-loadout"]), "repo/commit-rules")
+    own = repos["my-loadout"] / ".git" / "hooks" / "pre-commit"
+    own.write_text(OWN_HOOK, encoding="utf-8")
+    own.chmod(0o755)
     return repos
 
 
