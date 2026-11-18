@@ -1355,7 +1355,10 @@ def _ci_checked(ran, args, out) -> int:
     from . import ci
 
     print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}, by CI", file=out)
-    if ran.pushed is not None:
+    if ran.pushed is not None and ran.already:
+        print(f"pushed: nothing, {ran.pushed} {ran.ref or 'the branch'} is already at "
+              "the tip", file=out)
+    elif ran.pushed is not None:
         print(f"pushed: {ran.pushed}" + ("" if ran.ref is None else f" {ran.ref}, forced"),
               file=out)
     local = ran.local

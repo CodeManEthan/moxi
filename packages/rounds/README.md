@@ -838,7 +838,9 @@ ci = { workflows = [{ path = ".github/workflows/ci.yml", jobs = ["linux", "web"]
 table of the `path` and the `jobs` of its run that are read, by the names the run gives
 them. `local` is required: the command, or `"none"` written out where CI does all of it.
 `remote`, when set, is where `check` pushes the tip before it reads, as a plain push to
-the build's own branch name. `ref` gives the branch to push to instead: a fixed prefix
+the build's own branch name; where `git ls-remote` shows the branch already at the tip,
+it pushes nothing, since git would still run the pre-push hook with no ref to push, and
+a push guard may refuse that. `ref` gives the branch to push to instead: a fixed prefix
 ending in `/`, then `{branch}`, which the build's branch name fills as it is, slashes
 kept (`ci/{branch}` sends build `a/b` to `ci/a/b`); it needs `remote`. That branch is
 CI's own: `check` pushes the tip there forced, so a rewritten build branch goes out

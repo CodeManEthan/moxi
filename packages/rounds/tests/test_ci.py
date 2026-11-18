@@ -700,6 +700,70 @@ def test_the_check_never_pushes_the_name_full_ref_gives(setup, stub, repo, tmp_p
     assert local["pushed"] == read["pushed"] == {"remote": "origin", "ref": "ci/work"}
 
 
+#: A pre-push hook that, like a push guard, refuses a push with no ref lines, and keeps
+#: each line it reads.
+NEEDS_A_LINE = ("#!/bin/sh\nread line || {{ echo 'no ref lines' >&2; exit 1; }}\n"
+                "echo \"$line\" >> {}\n")
+
+
+def test_a_check_again_at_a_tip_the_ref_already_holds_pushes_nothing_and_reads_ci(
+        setup, stub, repo, tmp_path, capsys):
+    read = tmp_path / "hook-read"
+    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    green_at(stub, tree.rev())
+    assert main(["check", ROUND, "B1"]) == 0
+    capsys.readouterr()
+
+    assert main(["check", ROUND, "B1"]) == 0
+
+    said = capsys.readouterr().out
+    assert "pushed: nothing, origin ci/work is already at the tip" in said
+    assert len(read.read_text().splitlines()) == 1
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
+    reads = events(path, ci.READ)
+    assert len(reads) == 2
+    assert reads[-1]["pushed"] == {"remote": "origin", "ref": "ci/work"}
+
+
+def test_a_ref_at_another_commit_is_pushed_again(setup, stub, repo, tmp_path):
+    read = tmp_path / "hook-read"
+    bare = bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    repo.git("push", "-q", "--no-verify", "origin", "main:refs/heads/ci/work")
+    green_at(stub, tree.rev())
+
+    assert checking.check(ROUND, "B1", by="coder").already is False
+
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
+    assert len(read.read_text().splitlines()) == 1
+
+
+def test_a_branch_ls_remote_lists_by_its_tail_alone_is_not_taken_for_the_ref(
+        setup, stub, repo, tmp_path):
+    bare = bare_remote(repo, tmp_path)
+    _path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    repo.git("push", "-q", "origin", f"{tree.rev()}:refs/heads/x/refs/heads/ci/work")
+    green_at(stub, tree.rev())
+
+    assert checking.check(ROUND, "B1", by="coder").already is False
+
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
+
+
+def test_without_a_ref_a_branch_already_at_the_tip_is_not_pushed_again(
+        setup, stub, repo, tmp_path):
+    read = tmp_path / "hook-read"
+    bare_remote(repo, tmp_path, NEEDS_A_LINE.format(read))
+    _path, tree, _made = setup(remote="origin")
+    green_at(stub, tree.rev())
+    assert checking.check(ROUND, "B1", by="coder").already is False
+
+    assert checking.check(ROUND, "B1", by="coder").already is True
+
+    assert len(read.read_text().splitlines()) == 1
+
+
 def test_without_a_ref_the_push_goes_to_the_branch_name_and_records_no_ref(
         setup, stub, repo, tmp_path):
     bare = bare_remote(repo, tmp_path)
