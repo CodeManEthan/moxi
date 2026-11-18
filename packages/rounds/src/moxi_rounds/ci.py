@@ -6,9 +6,12 @@ named by its file's path in the repo and read whole, or by the jobs of its run t
 names (`Workflow`); `local`, the short local run of what CI can't do, or the word `none`
 where CI does all of it; `remote`, where `check` pushes the branch before it reads;
 `ref`, a template of the branch name it pushes to, one fixed prefix ending in `/` and
-then `{branch}` (`ref_problem`), where the ref is CI's own; and the three commands that
-read CI, `status` (a commit's runs), `ids` (each workflow file's id) and `jobs` (one
-run's jobs), each bounded by `status_timeout_s`.
+then `{branch}` (`ref_problem`), where the ref is CI's own; `full_ref`, a second
+template under the same rules, whose prefix and `ref`'s are not one the start of the
+other, of a ref someone else pushes for a build's branch (`check` never pushes it),
+which removal and the sweep read beside `ref`'s; and the three commands that read CI,
+`status` (a commit's runs), `ids` (each workflow file's id) and `jobs` (one run's jobs),
+each bounded by `status_timeout_s`.
 
 **The read** (`read`). The commands run with no shell in the build's worktree, stdin
 closed, with the caller's environment less every `GIT_` variable, and only their
@@ -105,7 +108,8 @@ class Declared:
     """A repo's `ci` setting: the `workflows`, the words of the `local` command as
     written (None for `none`) and its `local_timeout_s`, the `remote` to push to, the
     `ref` template (None where the tip goes to the build's own branch name), the
-    `status`, `ids` and `jobs` commands, and `status_timeout_s`."""
+    `full_ref` template (None for none), the `status`, `ids` and `jobs` commands, and
+    `status_timeout_s`."""
 
     workflows: tuple[Workflow, ...]
     local: tuple[str, ...] | None
@@ -116,6 +120,12 @@ class Declared:
     status_timeout_s: float
     ref: str | None = None
     jobs: tuple[str, ...] = JOBS
+    full_ref: str | None = None
+
+    @property
+    def templates(self) -> tuple[str, ...]:
+        """The templates of CI's own refs that are set: `ref`'s, then `full_ref`'s."""
+        return tuple(one for one in (self.ref, self.full_ref) if one is not None)
 
     @property
     def reads_jobs(self) -> bool:
@@ -145,7 +155,8 @@ def declared(settings, repo: str) -> Declared | None:
         ids=tuple(found.get("ids") or IDS),
         status_timeout_s=found.get("status_timeout_s") or STATUS_TIMEOUT_S,
         ref=found.get("ref"),
-        jobs=tuple(found.get("jobs") or JOBS))
+        jobs=tuple(found.get("jobs") or JOBS),
+        full_ref=found.get("full_ref"))
 
 
 # -- the ref -----------------------------------------------------------------------------
@@ -168,6 +179,16 @@ def ref_problem(template: str) -> str | None:
                    for part in prefix[:-1].split("/"))):
         return (f"has the prefix {prefix!r}, which git takes as no start of a branch "
                 "name, or which holds another placeholder")
+    return None
+
+
+def overlap_problem(ref: str, full_ref: str) -> str | None:
+    """Why the templates `ref` and `full_ref` can't stand together: a prefix that starts
+    with the other's would let one ref name belong to both. None when they can."""
+    first, second = prefix_of(ref), prefix_of(full_ref)
+    if first.startswith(second) or second.startswith(first):
+        return (f"has the prefix {second!r}, and ref has {first!r}: one starts with the "
+                "other, so a ref name could belong to both")
     return None
 
 
@@ -408,5 +429,5 @@ def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
 
 __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_TIMEOUT_S",
            "GREEN", "PENDING", "RED", "ABSENT", "Workflow", "Declared", "declared",
-           "ref_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
+           "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
            "ReadFailed", "Reading", "reading", "read", "newest", "why_not", "met"]

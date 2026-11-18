@@ -370,7 +370,7 @@ def _check_check(file, where, value) -> None:
 
 
 #: The keys of `ci`.
-_CI_KEYS = ("workflows", "local", "remote", "ref", "status", "ids", "jobs",
+_CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
 _WORKFLOW_KEYS = ("path", "jobs")
@@ -378,8 +378,8 @@ _WORKFLOW_KEYS = ("path", "jobs")
 
 def _check_ci(file, where, value) -> None:
     """CI in place of the full check: the workflow files, each read whole or by the jobs
-    it names, the local part, where the tip is pushed, and the commands that read a
-    commit's runs and a run's jobs."""
+    it names, the local part, where the tip is pushed, the second template of CI's own
+    refs, and the commands that read a commit's runs and a run's jobs."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { workflows = [".github/workflows/ci.yml"], '
@@ -416,6 +416,9 @@ def _check_ci(file, where, value) -> None:
         if "remote" not in value:
             raise ConfigError(file, f"{where}.ref", "is set with no remote to push it to",
                               f'set {where}.remote too: remote = "origin"')
+    if "full_ref" in value:
+        _check_full_ref(file, f"{where}.full_ref", value["full_ref"], value.get("ref"),
+                        where=where)
     for key in ("status", "ids", "jobs"):
         if key in value:
             flows.check_argv(file, f"{where}.{key}", value[key])
@@ -454,16 +457,32 @@ def _check_workflow(file, where, entry) -> None:
                           "with no .. part")
 
 
-def _check_ref(file, where, value) -> None:
-    """`ci.ref`: one fixed prefix that ends in `/`, then `{branch}`, and nothing else."""
+def _check_ref(file, where, value, *, example: str = 'ref = "ci/{branch}"') -> None:
+    """`ci.ref`, or `ci.full_ref` with its own `example`: one fixed prefix that ends in
+    `/`, then `{branch}`, and nothing else."""
     from . import ci
 
     _check_string(file, where, value, "a branch name template")
     why = ci.ref_problem(value)
     if why is not None:
         raise ConfigError(file, where, why,
-                          'give a fixed prefix ending in / and then {branch}: '
-                          'ref = "ci/{branch}"')
+                          f"give a fixed prefix ending in / and then {{branch}}: {example}")
+
+
+def _check_full_ref(file, key, value, ref, *, where) -> None:
+    """`ci.full_ref`: a template under `ref`'s rules, set only beside `ref`, with a
+    prefix that `ref`'s does not start with and that does not start with `ref`'s."""
+    from . import ci
+
+    _check_ref(file, key, value, example='full_ref = "ci-full/{branch}"')
+    if ref is None:
+        raise ConfigError(file, key, "is set with no ref beside it",
+                          f'set {where}.ref too: ref = "ci/{{branch}}"')
+    why = ci.overlap_problem(ref, value)
+    if why is not None:
+        raise ConfigError(file, key, why,
+                          "give the two templates prefixes that neither start with the "
+                          'other: ref = "ci/{branch}", full_ref = "ci-full/{branch}"')
 
 
 def _check_finish(file, where, value) -> None:
