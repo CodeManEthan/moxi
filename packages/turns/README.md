@@ -138,8 +138,8 @@ runtime directory every 2 s and holds one watch per session; turns adds no daemo
   `working` (read, a turn open). The labels are `1 problem` or `<n> problems`, `<n> idle`
   and `<n> working`; a group with no row isn't drawn. Within a group the latest change
   comes first. A session with no first read yet isn't drawn until it has one.
-- **A row.** Line one is the session's name, a dim `where`, and at the right how long it
-  has been in its state (`since 09:40`, with a day word when it isn't today); a problem
+- **A row.** Line one is the session's name, a dim `where`, and at the right when it
+  came into its state (`since 09:40`, with a day word when it isn't today); a problem
   row says its state there too (`idle since 09:40`). The name is the working directory's
   last segment and when the session started (`parser · started today 08:20`); a session
   with no directory is `Claude Code session` or its harness's name. Line two is what is
@@ -160,12 +160,14 @@ runtime directory every 2 s and holds one watch per session; turns adds no daemo
   which don't, from what turns finds: an interactive Claude Code session shows from its
   start once its plugins are installed, a Claude Code session started by hand before
   `moxi install turns` can't show yet, and a Codex or OpenCode session shows only when
-  Moxi launched it. With Claude Code missing it says to run `moxi install turns` once it
-  is installed. Where the line names the command it carries `Copy`. `Settings › turns`
-  sits at its right.
+  Moxi launched it in a terminal or a slot, a Codex one only with turns' Codex host
+  installed (the `codex` extra). With Claude Code missing it says to run
+  `moxi install turns` once it is installed. Where the line names the command it carries
+  `Copy`. `Settings › turns` sits at its right.
 - **Launcher's join.** With `moxi-launcher` installed, a session Moxi launched in a
-  terminal or a slot takes its launch's name (`slot 2 · kestrel-web`) and `where`, paired
-  by session id. A launch with no session id, or an id two rows share, names nothing.
+  terminal or a slot takes its launch's name (`kestrel-builder`) and its `where`
+  (`slot 2 · kestrel-web`), paired by session id. A launch with no session id, or an id
+  two rows share, names nothing.
 - **States.** A read still out after 400 ms shows `Reading…`. When the page server stops
   answering, the first row says `Moxi can't read the live sessions` and what it answered,
   with when the list was last read, and the last rows stay dim with no `Open`. A scan that
