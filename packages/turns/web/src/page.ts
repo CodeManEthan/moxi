@@ -37,6 +37,8 @@ import {
   SETTINGS_LINK, SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import type { Address, Alert, Frame, ReachLine } from "./frame-model.ts";
+import { COPY_ID, LABELS, openedOf } from "./opened-model.ts";
+import type { AgentsLines } from "./opened-model.ts";
 import { LOCAL, rowLines } from "./rows-model.ts";
 import type { Group, RowLines } from "./rows-model.ts";
 
@@ -112,6 +114,16 @@ const STYLES = css`
   .foot .reach { min-width: 0; overflow-wrap: anywhere; }
   .foot a { flex: none; margin-left: auto; }
   .reach button, .first button { color: var(--moxi-text); }
+  /* The opened row: one line each, its dim label at the left. A busy agent's state is in
+     the text colour, the rest of the agents' states dim. */
+  .det { margin: 9px 0 3px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border); font-size: 13px; line-height: 18px;
+         cursor: auto; }
+  .det .r { display: grid; grid-template-columns: 92px minmax(0, 1fr); padding: 3px 0; align-items: baseline; }
+  .det .k, .det .d { color: var(--moxi-text-dim); }
+  .det .f { min-width: 0; overflow-wrap: anywhere; }
+  .det .f p { margin: 0; }
+  .det .foot { padding: 9px 0 0 92px; }
+  .det .foot button { color: var(--moxi-text); }
   .note { font-size: 13px; line-height: 18px; padding: 4px 2px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
 
   @media (max-width: 720px) {
@@ -120,6 +132,8 @@ const STYLES = css`
     .grp .gk { padding-top: 9px; font-size: 13px; }
     .quietline { padding-top: 60px; }
     .foot { flex-wrap: wrap; }
+    .det .r { grid-template-columns: minmax(0, 1fr); }
+    .det .foot { padding-left: 0; }
   }
 `;
 
@@ -207,9 +221,9 @@ export class TurnsPage extends LitElement {
     this.requestUpdate();
   }
 
-  #copyButton(what: string, text: string) {
+  #copyButton(what: string, text: string, label: string = COPY) {
     return html`<button type="button" data-action=${`copy-${what}`}
-      @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
+      @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : label}</button>`;
   }
 
   #link(module: string, route: string, text: string, action: string) {
@@ -236,6 +250,7 @@ export class TurnsPage extends LitElement {
     const reading = readingLine(frame, Date.now() - this.#openedAt);
     const today = LOCAL.day(Date.now() / 1000);
     const failed = frame.state === "failed";
+    const home = this.#feed?.value?.home ?? null;
     return html`<div data-state=${frame.state}>
       ${reading !== null ? html`<p class="waiting" data-line="reading" role="status">${reading}</p>` : nothing}
       ${frame.alert !== null ? this.#alert(frame.alert) : nothing}
@@ -243,7 +258,8 @@ export class TurnsPage extends LitElement {
         repeat(frame.groups, (group) => group.group, (group) => html`<section class="grp" data-group=${group.group}>
           <div class="gk" data-line="label">${group.label}</div>
           <div class="gl">${repeat(group.sessions, (session) => session.key,
-                                   (session) => this.#row(session, group.group, frame.open, !failed, today))}</div>
+                                   (session) => this.#row(session, group.group, frame.open, !failed, today,
+                                                          home))}</div>
         </section>`)}</div>` : nothing}
       ${frame.empty !== null ? html`<div class="quietline" data-line="empty">${frame.empty}</div>
         ${frame.reach !== null ? html`<div class="first" data-part="reach"><p>${this.#reach(frame.reach)}</p></div>`
@@ -269,7 +285,7 @@ export class TurnsPage extends LitElement {
       this.#copyButton("command", line.command)}` : nothing}${line.after ?? nothing}`;
   }
 
-  #row(session: Session, group: Group, openKey: string | null, acts: boolean, today: string) {
+  #row(session: Session, group: Group, openKey: string | null, acts: boolean, today: string, home: string | null) {
     const open = acts && session.key === openKey;
     const lines = rowLines(session, group, today);
     const toggle = (): void => this.#open(open ? null : session.key);
@@ -277,7 +293,31 @@ export class TurnsPage extends LitElement {
         @moxi-row-toggle=${toggle}>
       ${acts ? html`<button type="button" slot="acts-one" class="do" data-action="open"
         aria-expanded=${open ? "true" : "false"} @click=${toggle}>${open ? CLOSE : OPEN}</button>` : nothing}
+      ${open ? this.#opened(session, home, today) : nothing}
     </moxi-ui-row>`;
+  }
+
+  /** The opened row's lines, each under its label and only when its fact is there, then
+   * `Copy id` while the session has an id. */
+  #opened(session: Session, home: string | null, today: string) {
+    const opened = openedOf(session, home, today);
+    const line = (key: keyof typeof LABELS, body: unknown) => html`<div class="r" data-line=${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}>
+      <span class="k">${LABELS[key]}</span><div class="f">${body}</div></div>`;
+    return html`<div class="det" data-part="opened">
+      ${opened.now !== null ? line("now", opened.now) : nothing}
+      ${opened.agents !== null ? line("agents", this.#agents(opened.agents)) : nothing}
+      ${opened.promptBox !== null ? line("promptBox", opened.promptBox) : nothing}
+      ${line("session", opened.session)}
+      ${opened.details !== "" ? line("details", opened.details) : nothing}
+      ${opened.copyId !== null ? html`<div class="foot">${this.#copyButton("id", opened.copyId, COPY_ID)}</div>`
+        : nothing}
+    </div>`;
+  }
+
+  #agents(agents: AgentsLines) {
+    return html`${agents.entries.map((entry) => html`<p data-agent=${entry.id}>${entry.text} · <span
+        class=${entry.busy ? "" : "d"} data-busy=${entry.busy ? "true" : "false"}>${entry.state}</span></p>`)}${
+      agents.notKnown !== null ? html`<p class="d" data-line="not-known">${agents.notKnown}</p>` : nothing}`;
   }
 }
 

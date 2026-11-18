@@ -11,6 +11,10 @@ import { dayTime, dayWord, harnessName, isBusy, LOCAL, MAY_HOLD_DRAFT, sinceOf, 
 export const NOT_KNOWN = "not known · the list could not be read whole, so some may still run";
 /** The `Prompt box` line when the box was read empty. */
 export const EMPTY_BOX = "empty";
+/** The dim label at the left of each opened line, and the act that copies the id. */
+export const LABELS = { now: "Now", agents: "Agents", promptBox: "Prompt box", session: "Session",
+                        details: "Details" } as const;
+export const COPY_ID = "Copy id";
 
 /** One entry of the `Agents` line: its words before the state, and its state, set in the
  * text colour while it is busy and dim otherwise. */

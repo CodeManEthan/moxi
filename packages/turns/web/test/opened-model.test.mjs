@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentsLines, detailsLine, EMPTY_BOX, NOT_KNOWN, nowLine, openedOf, promptBoxLine, sessionLine, tildeForm,
+  agentsLines, COPY_ID, detailsLine, EMPTY_BOX, LABELS, NOT_KNOWN, nowLine, openedOf, promptBoxLine, sessionLine,
+  tildeForm,
 } from "../src/opened-model.ts";
 import { MAY_HOLD_DRAFT } from "../src/rows-model.ts";
 
@@ -102,4 +103,9 @@ test("Copy id copies the session id, and is absent while there is none", () => {
   assert.equal(openedOf(session(), "/home/u", TODAY, UTC).copyId, ID);
   assert.equal(openedOf(session({ session_id: null }), "/home/u", TODAY, UTC).copyId, null);
   assert.equal(openedOf(session({ session_id: "" }), "/home/u", TODAY, UTC).copyId, null);
+});
+
+test("the opened row's labels and its copy act", () => {
+  assert.deepEqual(Object.values(LABELS), ["Now", "Agents", "Prompt box", "Session", "Details"]);
+  assert.equal(COPY_ID, "Copy id");
 });
