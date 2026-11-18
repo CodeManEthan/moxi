@@ -121,7 +121,7 @@ modes = ["exec"]
 [trust_cwd]
 type = "bool"
 default = false
-doc = "Trust the launch's directory for this launch only."
+doc = "Trust the launch's directory for this launch only. Off: your Codex config decides; with no entry there, the folder runs trusted for this launch. The launcher never writes Codex's config."
 group = "access"
 sub = "Reach"
 label = "Trust the launch folder"

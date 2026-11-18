@@ -139,3 +139,99 @@ def test_a_check_with_nothing_to_drop_writes_nothing(rig):
     assert rig.daemon.books.drop_reserved() == []
     assert mid in rig.daemon.queue["main@proj-a"]
     assert rig.daemon.books.dropped_reason("main@proj-a", mid) is None
+
+
+# --------------------------------------------------------------------------- a program's name
+
+TICKER = "ticker"
+PLANNER = "planner@proj-a"
+
+
+def register(rig, **kw):
+    rig.clock.advance(1)
+    return reserved.register(TICKER, chain=secrets.from_config(), clock=rig.clock, **kw)
+
+
+def history(rig):
+    return rig.record.history(rig.names_channel)
+
+
+def test_mail_queued_before_a_program_takes_the_name_is_dropped(rig):
+    mid = queued(rig, "before the registration", to=(TICKER,))
+    # `register` counts the waiting rows in comms.db, which the daemon writes just after
+    # it queues the message in memory.
+    assert wait_until(lambda: any(m == mid for m, _, _ in store_rows(TICKER)))
+    result = register(rig, take=True)
+    assert result.lines[-1] == "1 message(s) waiting for ticker will be dropped"
+    rig.daemon._agents_query({})
+    assert TICKER not in rig.daemon.queue
+    assert rig.daemon.books.dropped_reason(TICKER, mid) == "reserved"
+
+
+def test_the_send_verb_refuses_a_programs_name_alone_or_among_others(rig):
+    register(rig)
+    rig.shim(name="planner", scope="proj-a")
+    before = len(history(rig))
+    for to in (TICKER, f"{PLANNER},{TICKER}"):
+        code, out = rig.cli(["send", "--posture", "none", to, "report"],
+                            name="captain", scope="proj-a")
+        assert code == moxi_exit.REFUSED, to
+        assert "ticker is a send-only identity and receives no mail" in out
+    assert len(history(rig)) == before
+
+
+def test_a_reply_to_a_programs_message_is_refused(rig):
+    from moxi_comms.client import DaemonClient
+    from moxi_comms.paths import daemon_socket
+    from moxi_comms.tokens import TokenStore
+
+    register(rig)
+    rig.shim(name="planner", scope="proj-a")
+    token = TokenStore().read_secret(reserved.program_owner(),
+                                     reserved.program_secret_id(TICKER))
+    c = DaemonClient(daemon_socket()).connect()
+    try:
+        mid = c.send(TICKER, token, machine_line.compose(
+            [PLANNER], "a notice", posture=machine_line.POSTURE_NONE))["message_id"]
+    finally:
+        c.close()
+    before = len(history(rig))
+    code, out = rig.cli(["send", "--reply-to", mid, TICKER, "thanks"],
+                        name="planner", scope="proj-a")
+    assert code == moxi_exit.REFUSED and "receives no mail" in out
+    assert len(history(rig)) == before
+
+
+def test_the_daemon_refuses_a_raw_send_naming_a_programs_name(rig):
+    from moxi_comms import wire
+    from moxi_comms.client import DaemonClient, DaemonError
+    from moxi_comms.paths import daemon_socket
+
+    register(rig)
+    c = DaemonClient(daemon_socket()).connect()
+    try:
+        token = c.bind(name="planner", scope="proj-a")["token"]
+        for names in ([TICKER], ["main@proj-a", TICKER]):
+            try:
+                c.send(PLANNER, token, machine_line.compose(names, "x"))
+            except DaemonError as exc:
+                assert exc.code == wire.NOT_MAILABLE
+            else:
+                raise AssertionError(f"a send to {names} was accepted")
+    finally:
+        c.close()
+
+
+def test_a_record_line_naming_a_programs_name_reaches_nobody_and_opens_no_ask(rig):
+    register(rig)
+    planner = rig.shim(name="planner", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
+    plain = post(rig, "by hand", to=(TICKER, PLANNER))
+    both = rig.record.post_as_identity("reviewer@proj-a", rig.names_channel,
+                                       machine_line.compose([TICKER, PLANNER], "which?",
+                                                            posture="once")).id
+    assert wait_until(lambda: any(p["message_id"] == plain for p in planner.queue)
+                      and both in rig.daemon.asks)
+    assert TICKER not in rig.daemon.queue
+    assert rig.daemon.asks[both]["open"] == {PLANNER}
+    assert not any(TICKER in a["open"] for a in rig.daemon.asks.values())

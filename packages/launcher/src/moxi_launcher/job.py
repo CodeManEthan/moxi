@@ -47,10 +47,16 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    go; still held: `relaunch-failed`.
 6. Respawn: the launch row made again (`api.ReplayRequest`), into the same slot's ended
    pane under the run's hold, which the respawn ends. A refusal or failure:
-   `relaunch-failed`.
+   `relaunch-failed`. The launch reads the new session at its startup screens and waits
+   for ready, a director's relaunch too, as any slot launch does; what it finds there (a
+   screen it won't answer, no ready in time) flags the relaunch, the launch's `finding`,
+   and never fails it.
 7. A self run's new session gets its handoff as its first turn; not sent:
-   `first-turn-not-sent`.
-8. `relaunched`, with the new request id on the run.
+   `first-turn-not-sent`. A flagged one gets none: the run ends `first-turn-not-sent` at
+   once, with the finding as its word and the launch's line, which names the screen and
+   the slot.
+8. `relaunched`, with the new request id on the run. A director's relaunch the launch
+   flagged ends `relaunched` with the finding as its word, and tells the directors.
 
 **A stop signal before step 3 ends the run `stopped`; from step 3 on it is recorded and
 deferred until step 6 has been tried.** **A job acts only while its run is open**: right
@@ -752,6 +758,13 @@ class RelaunchJob:
             self.end("relaunch-failed", result.reason, result.line,
                      new_request_id=result.request_id)
         self.held = None
+        finding = getattr(result, "finding", None)
+        if finding is not None:
+            self.event("flagged", {"code": finding, "request_id": result.request_id})
+            if request.handoff:
+                self.end("first-turn-not-sent", finding, result.line,
+                         new_request_id=result.request_id)
+            self.end("relaunched", finding, result.line, new_request_id=result.request_id)
         if request.handoff and sent is None:
             self.end("first-turn-not-sent", "not-sent", result.line,
                      new_request_id=result.request_id)
@@ -784,7 +797,7 @@ class RelaunchJob:
                     self.conn, run, session, wait_s=float(self.setting("relaunch.wait_s"))):
                 return
             outcome = notices.NOTE_NOT_TAKEN
-        elif outcome not in notices.NOTICE_OUTCOMES:
+        elif outcome not in notices.NOTICE_OUTCOMES and not notices.is_flagged(run):
             return
         events = store.run_events(self.conn, self.run_id)
         notices.notify(self.conn, run, self.row, outcome, comms=self.comms,
@@ -869,7 +882,9 @@ class RepairJob(RelaunchJob):
             self.event("stop-deferred", {"signal": self.stop_asked})
 
     def _tell(self) -> None:
-        if self.outcome in notices.NOTICE_OUTCOMES:
+        run = store.get_run(self.conn, self.run_id)
+        if self.outcome in notices.NOTICE_OUTCOMES or (run is not None
+                                                       and notices.is_flagged(run)):
             super()._tell()
 
 
