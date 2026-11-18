@@ -1,11 +1,13 @@
 """services' page and home block in a browser, through a real shell that starts services'
 real page server over a fake supervisor (`browser_kit`): the contract check on both, the
 block's count of rows by verdict, the page's frame (no heading of its own), the first
-group's risen rows (SV1), a running daemon's time (SV2), the groups by project and Moxi's
-(SV5), a project's address (SV7), each address and what the page writes back, the list's
-states, a confirmed act through the sheet to its status (done, and refused), Cancel
-sending nothing, a lost answer, the run sheet of a row that launches a session, the add
-form's 202 and the status it reads until the job ends, and the 360 px width check.
+group's risen rows (SV1), a running daemon's time (SV2), a timer's runs (SV3), a run that
+spends usage (SV4), the groups by project and Moxi's (SV5), a failed daemon's state and
+log (SV6), a project's address (SV7), each address and what the page writes back, the
+list's states, the opened row's lines, the acts on the closed row and in the foot as plain
+presses followed to their end (done, did not hold, refused, a lost answer), a Moxi
+daemon's stop by hand, the run sheet of a row that launches a session, the add form's 202
+and the status it reads until the job ends, and the 360 px width check.
 """
 
 from __future__ import annotations
@@ -26,8 +28,6 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
                                  reason="services' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
 
-#: An `Idempotency-Key` as the shell's confirm sheet mints one.
-KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 #: What a run of a row that launches a session adds to its sheet.
 SPENDS = "Each run launches an agent session, so this run spends usage."
 VERDICTS = ("ok", "warn", "fail", "off")
@@ -41,7 +41,7 @@ WEB_SINCE = time.time() - 60
 BACKUP_RAN = [time.time() - 60 * m for m in (15, 10, 5)]
 NOT_ANSWERING = "Services' page server isn't answering"
 
-#: The fake supervisor's units, by row name.
+#: The fake supervisor's units: his by row name, Moxi's by id, and the acts that fail.
 UNITS = {"written": {
     "web": {"kind": "daemon", "enabled": True, "active": True, "since": WEB_SINCE, "pid": 4242},
     "sync-down": {"kind": "daemon", "enabled": True, "active": False},
@@ -53,10 +53,15 @@ UNITS = {"written": {
     "agent-run": {"kind": "timer", "enabled": True},
     "stopme": {"kind": "daemon", "enabled": True, "active": True},
     "lostone": {"kind": "daemon", "enabled": False, "active": False},
+    "startme": {"kind": "daemon", "enabled": True, "active": False},
+    "nostart": {"kind": "daemon", "enabled": True, "active": False},
     "queue-worker": {"kind": "daemon", "enabled": True, "active": False, "failed": True},
     "dep-audit": {"kind": "timer", "enabled": True,
                   "runs": [{"at": "2026-11-08T18:00:00Z", "result": "ran", "exit": 1}]},
-}}
+}, "modules": {
+    # A Moxi daemon with no switch, running, for its Stop by hand.
+    "cache/watch": {"kind": "daemon", "enabled": True, "active": True},
+}, "fail": [["start", "nostart"]]}
 
 
 @pytest.fixture(scope="module")
@@ -71,8 +76,8 @@ def seeded(ui_shell) -> None:
     `sync-down` on and not running (fail), `paused` stopped by hand (warn), `spare` off,
     `backup` a timer every 5 minutes (ok) and `agent-run` a timer whose runs launch a
     session; `elsewhere` was added on another system; `queue-worker` failed (in alpha) and
-    `dep-audit` a timer whose last run exited 1. `stopme` and `lostone` are the
-    acts' own, so the tests run in any order."""
+    `dep-audit` a timer whose last run exited 1. `stopme`, `lostone`, `startme` and
+    `nostart` (whose start fails) are the acts' own, so the tests run in any order."""
     root = Path(ui_shell.env["HOME"]) / "work" / "alpha"
     root.mkdir(parents=True)
     moxi(ui_shell, "projects", "add", "alpha", "--root", str(root))
@@ -88,6 +93,8 @@ def seeded(ui_shell) -> None:
          written("elsewhere", platform=other),
          written("stopme"),
          written("lostone", enabled=False),
+         written("startme", after={"stopped": f"{STOPPED:%Y-%m-%dT%H:%M:%SZ}"}),
+         written("nostart", after={"stopped": f"{STOPPED:%Y-%m-%dT%H:%M:%SZ}"}),
          written("queue-worker", project="alpha"),
          written("dep-audit", kind="timer", every="1h", argv=["/usr/bin/false"]))
 
@@ -254,13 +261,6 @@ def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui
     expect(loose.locator('.item[data-id="services/backup"] moxi-ui-row')).to_have_attribute(
         "where", "true · every 5 minutes")
     expect(loose.locator('.item[data-id="services/spare"] moxi-ui-row')).to_have_attribute("fact", "off")
-
-    # Today's acts stay on each row until the page's own acts replace them.
-    agent = row(panel, "services/agent-run")
-    expect(agent.locator('[data-part="acts"] button')).to_have_text(
-        ["Run now", "Run again", "Stop run", "Enable", "Disable", "Remove…"])
-    expect(row(panel, "services/web").locator('[data-part="acts"] button')).to_have_text(
-        ["Start", "Stop", "Restart", "Enable", "Disable", "Remove…"])
 
 
 def test_sv5_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
@@ -641,48 +641,150 @@ def test_no_row_of_his_says_what_a_service_is(seeded, ui_shell, ui_page):
 
 # --- confirmed acts -------------------------------------------------------------------------
 
-def test_a_confirmed_stop_goes_through_the_sheet_to_done(seeded, ui_shell, ui_page):
+#: A job key as the page mints one for `/api/act`.
+JOB = re.compile(r"^[0-9a-f]{32}$")
+
+
+def status_of(body: dict, state: str, lines: list | None = None) -> dict:
+    """A job's status, as `/api/status` gives it, for the act `body` posted."""
+    return {"job": body["job"], "act": body["act"], "id": body["id"], "state": state, "code": None,
+            "lines": lines or [], "fix": None}
+
+
+def test_the_closed_row_offers_one_act_and_the_foot_the_rest(seeded, ui_page):
     panel = panel_of(ui_page)
-    posts = posts_to(ui_page, "api/stop")
+    expect(panel.locator('[data-part="acts"] button')).to_have_count(0)
+
+    def closed(ident: str):
+        return row(panel, ident).locator('moxi-ui-row > button[data-action]:not([data-action="open"])')
+
+    expect(closed("services/sync-down")).to_have_text(["Start"])
+    expect(closed("services/dep-audit")).to_have_text(["Run now"])
+    expect(closed("services/web")).to_have_count(0)
+    expect(closed("services/backup")).to_have_count(0)
+    part = opened(panel, "services/web", "web")
+    expect(part.locator('[data-part="foot"] button')).to_have_text(["Restart", "Stop", "Turn off", "Remove"])
+    expect(part.locator('[data-line="stop-lasts"]')).to_have_text(
+        "Stop lasts until the next login. Turn off keeps it off.")
+    part = opened(panel, "services/backup", "backup")
+    expect(part.locator('[data-part="foot"] button')).to_have_text(
+        ["Run now", "Turn off", "Remove", "Run again", "Stop run"])
+    expect(part.locator('[data-line="stop-lasts"]')).to_have_count(0)
+
+
+def test_start_from_a_closed_row_reads_starting_then_running(seeded, ui_shell, ui_page):
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    item = row(panel, "services/startme")
+    drawn = item.locator("moxi-ui-row")
+    expect(drawn).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    held: list = []
+
+    def first_running(route) -> None:
+        # The first read of the job says it runs, so the page shows it doing so.
+        if not held:
+            held.append(route.request.url)
+            route.fulfill(json=status_of(posts[0].post_data_json, "running"))
+        else:
+            route.continue_()
+
+    ui_page.route("**/m/services/api/status?job=*", first_running)
+    try:
+        item.get_by_role("button", name="Start startme", exact=True).click()
+        expect(drawn).to_have_attribute("fact", "starting")
+        expect(panel.get_by_role("button", name="Open web", exact=True)).to_be_enabled()
+        expect(drawn).to_have_attribute("fact", re.compile(r"^running since "))
+    finally:
+        ui_page.unroute("**/m/services/api/status?job=*")
+    assert len(posts) == 1, posts
+    body = posts[0].post_data_json
+    assert JOB.match(body.pop("job")) and body == {"act": "start", "id": "services/startme"}, body
+    assert "idempotency-key" not in posts[0].headers
+    expect(item.locator('[data-part="opened"]')).to_have_count(0)
+
+
+def test_a_start_that_does_not_hold_keeps_the_row_open_with_its_lines(seeded, ui_page):
+    panel = panel_of(ui_page)
+    item = row(panel, "services/nostart")
+    item.get_by_role("button", name="Start nostart", exact=True).click()
+    part = item.locator('[data-part="opened"]')
+    ended = part.locator('[data-line="ended"]')
+    expect(ended.locator('[data-line="heavy"]')).to_have_text("Start did not hold.")
+    expect(ended.locator('[data-line="job-line"]').first).to_contain_text("nostart")
+    expect(ended.get_by_role("button", name="Start again nostart", exact=True)).to_be_visible()
+    expect_path(ui_page, "/m/services/row/nostart")
+    # Closing the row lets it go.
+    item.get_by_role("button", name="Close nostart", exact=True).click()
+    item.get_by_role("button", name="Open nostart", exact=True).click()
+    expect(part.locator('[data-line="ended"]')).to_have_count(0)
+
+
+def test_a_stop_from_the_foot_reads_stopped_by_hand(seeded, ui_shell, ui_page):
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
     item = row(panel, "services/stopme")
-    sheet = ui_page.locator("moxi-ui-confirm").get_by_role("dialog")
-
-    # Cancel sends nothing.
-    item.get_by_role("button", name="Stop stopme", exact=True).click()
-    expect(sheet).to_contain_text("Stops stopme until the next login or start")
-    sheet.get_by_role("button", name="Cancel", exact=True).click()
-    expect(ui_page.locator("moxi-ui-confirm")).to_have_count(0)
-    assert posts == []
-
+    part = opened(panel, "services/stopme", "stopme")
     with ui_page.expect_response(lambda r: "/m/services/api/status?job=" in r.url
                                  and r.json().get("state") != "running") as ended:
-        item.get_by_role("button", name="Stop stopme", exact=True).click()
-        sheet.get_by_role("button", name="Confirm", exact=True).click()
+        part.get_by_role("button", name="Stop stopme", exact=True).click()
     assert ended.value.json()["state"] == "done", ended.value.json()
-    said = item.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "ok")
-    expect(said).to_contain_text("Stop stopme: Done.")
-    assert len(posts) == 1 and KEY.match(posts[0].headers["idempotency-key"])
-    assert posts[0].post_data_json == {"id": "services/stopme"}
-    # The page read the rows again: a stop by hand is recorded, and the fact says so.
+    body = posts[0].post_data_json
+    assert body["act"] == "stop" and body["id"] == "services/stopme" and JOB.match(body["job"]), body
     expect(item).to_have_attribute("data-verdict", "warn")
-    expect(item.locator('[data-line="fact"]')).to_contain_text("stopped by hand")
-    job = posts[0].headers["idempotency-key"]
-    status = get(ui_shell, f"api/status?job={job}")
-    assert (status["act"], status["id"], status["state"], status["code"]) == (
-        "stop", "services/stopme", "done", 0), status
+    expect(item.locator("moxi-ui-row")).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    expect(part.locator('[data-part="foot"] button').first).to_have_text("Start")
+    status = get(ui_shell, f"api/status?job={body['job']}")
+    assert (status["act"], status["id"], status["state"]) == ("stop", "services/stopme", "done"), status
 
 
-def test_an_act_the_job_refuses_shows_its_lines(seeded, ui_page):
+def test_a_moxi_daemon_stopped_by_hand_reads_so_and_does_not_rise(seeded, ui_shell, ui_page):
+    listed = {r["id"]: r for r in get(ui_shell, "api/rows")["rows"]}
+    assert "cache/watch" in listed, sorted(listed)
     panel = panel_of(ui_page)
-    item = row(panel, "services/elsewhere")
-    expect(item).to_have_attribute("data-verdict", "off")
-    item.get_by_role("button", name="Start elsewhere", exact=True).click()
-    ui_page.locator("moxi-ui-confirm").get_by_role("dialog").get_by_role("button", name="Confirm", exact=True).click()
-    said = item.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
-    expect(said).to_contain_text("Start elsewhere: Refused; nothing changed.")
-    expect(said).to_contain_text("elsewhere")
+    item = row(panel, "cache/watch")
+    part = opened(panel, "cache/watch", listed["cache/watch"]["name"])
+    foot = part.locator('[data-part="foot"] button')
+    expect(foot).to_have_text(["Restart", "Stop"])
+    expect(part.locator('[data-line="stop-lasts"]')).to_have_count(0)
+    foot.nth(1).click()
+    expect(item.locator("moxi-ui-row")).to_have_attribute("fact", re.compile(r"^stopped by hand"))
+    expect(item).to_have_attribute("data-verdict", "warn")
+    expect(item).to_have_attribute("data-cause", "stopped")
+    expect(panel.locator('section[data-part="first"] .item[data-id="cache/watch"]')).to_have_count(0)
+    expect(panel.locator('section[data-group="moxi"] .item[data-id="cache/watch"]')).to_have_count(1)
+    now = {r["id"]: r for r in get(ui_shell, "api/rows")["rows"]}
+    assert now["cache/watch"]["verdict"]["cause"] == "stopped", now["cache/watch"]
+
+
+def test_run_again_and_stop_run_on_the_opened_timer(seeded, ui_page):
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    part = opened(panel, "services/backup", "backup")
+    for name, act, extra in (("Run again", "run", {"restart": True}), ("Stop run", "stop", {})):
+        with ui_page.expect_response(lambda r: "/m/services/api/status?job=" in r.url
+                                     and r.json().get("state") != "running") as ended:
+            part.get_by_role("button", name=f"{name} backup", exact=True).click()
+        assert ended.value.json()["state"] == "done", ended.value.json()
+        body = posts[-1].post_data_json
+        assert JOB.match(body.pop("job")) and body == {"act": act, "id": "services/backup", **extra}, body
+        expect(part.locator('[data-line="ended"]')).to_have_count(0)
+    assert len({p.post_data_json["job"] for p in posts}) == 2
+
+
+def test_an_act_the_job_refuses_says_not_done(seeded, ui_page):
+    panel = panel_of(ui_page)
+    posts = posts_to(ui_page, "api/act")
+    ui_page.route("**/m/services/api/status?job=*", lambda route: route.fulfill(
+        json=status_of(posts[-1].post_data_json, "refused", ["web: not now"])))
+    try:
+        part = opened(panel, "services/web", "web")
+        part.get_by_role("button", name="Restart web", exact=True).click()
+        ended = part.locator('[data-line="ended"]')
+        expect(ended.locator('[data-line="heavy"]')).to_have_text("Not done.")
+        expect(ended.locator('[data-line="job-line"]')).to_have_text(["web: not now"])
+        expect(ended.get_by_role("button", name="Restart web", exact=True)).to_be_visible()
+    finally:
+        ui_page.unroute("**/m/services/api/status?job=*")
 
 
 def test_a_lost_answer_says_the_act_may_have_been_done(seeded, ui_page):
@@ -692,28 +794,24 @@ def test_a_lost_answer_says_the_act_may_have_been_done(seeded, ui_page):
         route.fetch()               # the act is taken, and its answer never arrives
         route.fulfill(status=504, json={"error": "timeout"})
 
-    ui_page.route("**/m/services/api/enable", lost)
+    ui_page.route("**/m/services/api/act", lost)
     try:
-        item = row(panel, "services/lostone")
-        item.get_by_role("button", name="Enable lostone", exact=True).click()
-        ui_page.locator("moxi-ui-confirm").get_by_role("dialog").get_by_role("button", name="Confirm", exact=True).click()
-        said = item.locator('[data-line="said"]')
+        part = opened(panel, "services/lostone", "lostone")
+        part.get_by_role("button", name="Turn on lostone", exact=True).click()
+        said = row(panel, "services/lostone").locator('[data-line="said"]')
         expect(said).to_have_attribute("data-tone", "warn")
-        expect(said).to_contain_text("it may have been done")
+        expect(said).to_have_text("Services' page server didn't answer; it may have been done.")
     finally:
-        ui_page.unroute("**/m/services/api/enable")
+        ui_page.unroute("**/m/services/api/act")
 
 
 def test_a_run_of_a_row_that_launches_a_session_says_it_spends_usage(seeded, ui_page):
     panel = panel_of(ui_page)
     posts = posts_to(ui_page, "api/run")
     sheet = ui_page.locator("moxi-ui-confirm").get_by_role("dialog")
-    row(panel, "services/agent-run").get_by_role("button", name="Run now agent-run", exact=True).click()
+    part = opened(panel, "services/agent-run", "agent-run")
+    part.get_by_role("button", name="Run now · spends usage agent-run", exact=True).click()
     expect(sheet).to_contain_text(SPENDS)
-    sheet.get_by_role("button", name="Cancel", exact=True).click()
-    row(panel, "services/backup").get_by_role("button", name="Run now backup", exact=True).click()
-    expect(sheet).to_contain_text("Runs backup once now")
-    expect(sheet).not_to_contain_text(SPENDS)
     sheet.get_by_role("button", name="Cancel", exact=True).click()
     expect(ui_page.locator("moxi-ui-confirm")).to_have_count(0)
     assert posts == []

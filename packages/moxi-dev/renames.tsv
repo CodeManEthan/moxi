@@ -11651,6 +11651,11 @@ services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["
 services	packages/services/tests/test_browser_page.py	assert {"services/queue-worker", "services/sync-down", "services/dep-audit"} <= set(want), want	keep	set	set
 services	packages/services/tests/test_browser_page.py	risen = set(ids(panel.locator('section[data-part="first"] .item')))	keep	set	set
 services	packages/services/tests/test_browser_page.py	@pytest.mark.parametrize(("route", "opened", "path"), [	keep	opened	opened
+services	packages/services/tests/test_browser_page.py	expect(closed("services/sync-down")).to_have_text(["Start"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/dep-audit")).to_have_text(["Run now"])	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/web")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	expect(closed("services/backup")).to_have_count(0)	keep	closed	closed
+services	packages/services/tests/test_browser_page.py	json=status_of(posts[-1].post_data_json, "refused", ["web: not now"])))	keep	refused	refused
 services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
 services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set

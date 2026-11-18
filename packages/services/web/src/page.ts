@@ -22,11 +22,16 @@
 //   nothing else; every row `unknown` for one reason, `Can't read the supervisor` and the
 //   reason, the rows dim in their groups; no row of his, `You have added no services yet.`
 //   and, under `Yours`, what a service is with `Add a service`.
-// - Each row's acts, in its line two: start, stop and restart for a daemon, run now and run again in place
-//   of start and restart for a timer, enable and disable, and remove for a row the user
-//   added. Every one is a confirmed act: its button opens the shell's confirm sheet,
-//   which mints a new key at each confirmation and sends the act once. A run of a row
-//   that launches a session says on its sheet that it spends usage.
+// - A row opened draws its labelled lines (`opened-model.ts`) from its own read,
+//   `/api/row`, and slots' server's `/api/ends`; then its foot's acts and a Moxi row's
+//   links.
+// - The acts (`acts-model.ts`), at the desk: at most one on the closed row's line, the
+//   rest in the opened row's foot, by the row's cause and kind. A press is a plain
+//   `/api/act` with a job key minted for it; while its job runs the row's fact says what
+//   is being done and every act is off; an act that didn't hold keeps the row open and
+//   says so in `State`, with its lines and the act again. Remove, and a run of a row whose
+//   runs launch a session, still go through the shell's confirm sheet. The phone keeps
+//   its row's acts under the row, each through the sheet.
 // - The add form: a command line to run, or a unit already on the system to adopt, with
 //   its schedule, directory, health command, project and doc. It is one plain request,
 //   no sheet, and the server checks it again.
@@ -49,7 +54,8 @@ import { api, components, confirm, gateway, gatewayActs, installed, navigate, su
 import { NO_SUCH_ADDRESS, NOTHING_OPEN, parseRoute, pathToWrite, resolve } from "./address.ts";
 import type { Address } from "./address.ts";
 
-import type { Ends } from "./acts-model.ts";
+import { actsOf, jobSaid, runningFact, STOP_LASTS, transportSaid, usageConfirm } from "./acts-model.ts";
+import type { Act as RowAct, Ends } from "./acts-model.ts";
 import { Feed, parseEnds, parseOne, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
 import type { Projects, Row, Rows, Status } from "./feed.ts";
 import {
@@ -60,7 +66,7 @@ import type { ListShape, PageState, RowView } from "./list-model.ts";
 import { footLinks, openedLines } from "./opened-model.ts";
 import type { Line, One, Opened } from "./opened-model.ts";
 import {
-  addBody, addRefused, DAYS, emptyForm, outcomeSaid, shownActs, statusLost, statusSaid,
+  actsOf as sheetActs, addBody, addRefused, DAYS, emptyForm, outcomeSaid, shownActs, statusLost, statusSaid,
 } from "./views.ts";
 import type { Act, AddForm, Said } from "./views.ts";
 
@@ -125,6 +131,7 @@ const STYLES = css`
   moxi-ui-row > button.do { padding: 0; margin: 0; border: 0; background: none; font: inherit; font-size: 13px;
                             line-height: 18px; color: var(--moxi-text-dim); cursor: pointer; }
   moxi-ui-row > button.do:hover:not(:disabled) { background: none; color: var(--moxi-text); }
+  moxi-ui-row > button.do.act { color: var(--moxi-text); }
   .filt { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px; padding: 0 2px; }
   .filt .k { margin-right: 8px; color: var(--moxi-text-dim); }
   .filt .sep { margin: 0 12px; color: var(--moxi-text-dim); }
@@ -154,10 +161,17 @@ const STYLES = css`
   .det button.copy:hover:not(:disabled) { background: none; }
   .det a { color: var(--moxi-text); text-decoration: none; }
   .det a:hover { text-decoration: underline; }
+  .det .foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px; padding: 8px 0 0 84px; }
+  .det button.act { padding: 0; margin: 0; border: 0; background: none; font: inherit; font-size: 13px;
+                    line-height: 18px; color: var(--moxi-text); cursor: pointer; }
+  .det button.act.d { color: var(--moxi-text-dim); }
+  .det button.act:hover:not(:disabled) { background: none; text-decoration: underline; }
+  .det .foot .note { flex: 1 1 14em; text-align: right; font-size: 13px; }
   .det .links { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 6px 0 0 84px; font-size: 13px; }
   @media (max-width: 480px) {
     .det .r { grid-template-columns: minmax(0, 1fr); }
-    .det details.r > .f, .det .links { padding-left: 0; }
+    .det details.r > .f, .det .links, .det .foot { padding-left: 0; }
+    .det .foot .note { text-align: left; }
   }
   .yours { color: var(--moxi-text-dim); padding: 7px 0; }
   .yours button { display: block; padding: 0; margin: 0; border: 0; background: none; font: inherit;
@@ -206,14 +220,34 @@ interface OpenReads {
   ends: Feed<Ends> | null;
 }
 
-/** The job the page follows. */
+/** The job the page follows; `act` is the row's act it runs, null for an add or an act
+ * sent through the shell's sheet. */
 interface Job {
   feed: Feed<Status>;
   label: string;
   where: string;
   fails: number;
   ended: boolean;
+  act: RowAct | null;
 }
+
+/** What a row's act that didn't hold says in its opened `State`: the heavy line, the job's
+ * lines and the act offered again. */
+interface Ended {
+  where: string;
+  heavy: string;
+  lines: string[];
+  again: { label: string; act: RowAct } | null;
+}
+
+/** A job's key for `/api/act`: 32 hex characters, new at each press. */
+function mintJob(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Acts whose foot button is in the text colour; the rest are dim. */
+const PLAIN_ACTS: ReadonlySet<string> = new Set(["start", "stop", "restart", "run"]);
 
 export class ServicesPage extends LitElement {
   static styles = STYLES;
@@ -232,6 +266,7 @@ export class ServicesPage extends LitElement {
   /** An act is being sent, or its confirm sheet is open. */
   #sending = false;
   #told: Told | null = null;
+  #ended: Ended | null = null;
   #form: AddForm = emptyForm();
   /** Whether the page came through the gateway, on the phone. */
   #phone = false;
@@ -433,6 +468,7 @@ export class ServicesPage extends LitElement {
     this.#open = this.#open === id ? null : id;
     this.#panel = null;
     this.#unknown = null;
+    if (this.#ended?.where !== this.#open) this.#ended = null;
     this.#write();
     this.requestUpdate();
   }
@@ -457,6 +493,35 @@ export class ServicesPage extends LitElement {
   }
 
   // -- acts --------------------------------------------------------------------------------
+
+  /** A press of a row's act: a plain `/api/act` with a new job key, followed to its end.
+   * Remove and a run that spends usage still go through the shell's sheet here. */
+  async #press(row: Row, a: RowAct): Promise<void> {
+    if (this.#busy) return;
+    if (a.name === "remove" || usageConfirm(row, a) !== null) {
+      const sheet = sheetActs(row).find((one) => one.name === a.name);
+      if (sheet !== undefined) void this.#act(row, sheet);
+      return;
+    }
+    this.#sending = true;
+    this.#told = null;
+    this.#ended = null;
+    this.requestUpdate();
+    try {
+      const answer = await api("services", "api/act", { ...a.body, job: mintJob() });
+      const status = answer.status === 202 ? (answer.data as { status?: unknown } | null)?.status : undefined;
+      if (status !== undefined) {
+        this.#follow(status, `${a.label} ${row.name}`, row.id, a);
+        return;
+      }
+      const said = transportSaid(answer.status, saidOf(answer.data));
+      this.#told = { where: row.id, said: { tone: said.reread ? "warn" : "error", lines: [said.text] } };
+      if (said.reread) void this.#rows?.refresh();
+    } finally {
+      this.#sending = false;
+      this.requestUpdate();
+    }
+  }
 
   async #act(row: Row, act: Act): Promise<void> {
     if (this.#busy) return;
@@ -509,7 +574,7 @@ export class ServicesPage extends LitElement {
   }
 
   /** Follows the job at the status link `status` until it ends. */
-  #follow(status: unknown, label: string, where: string): void {
+  #follow(status: unknown, label: string, where: string, act: RowAct | null = null): void {
     this.#job?.feed.close();
     clearTimeout(this.#jobTimer);
     const path = statusPathOf(status);
@@ -521,10 +586,29 @@ export class ServicesPage extends LitElement {
       return;
     }
     const job: Job = { feed: new Feed<Status>(() => api("services", path), parseStatus, () => this.#jobRead(job)),
-                       label, where, fails: 0, ended: false };
+                       label, where, fails: 0, ended: false, act };
     this.#job = job;
-    this.#told = { where, said: { tone: "muted", lines: [`${label}: sent…`] } };
+    if (act === null) this.#told = { where, said: { tone: "muted", lines: [`${label}: sent…`] } };
     void job.feed.refresh();
+  }
+
+  /** A row's act ended: `done` leaves the row to show its new state; one that didn't hold
+   * keeps the row open with what it came to; one whose end can't be read may have been
+   * done, and the rows are read again. */
+  #pressEnded(job: Job, a: RowAct, status: Status | null): void {
+    const said = jobSaid(a, status?.state ?? "unknown");
+    this.#readAgain(job.where);
+    if (said !== null) {
+      this.#ended = { where: job.where, heavy: said.heavy,
+                      lines: (status?.lines ?? []).filter((line): line is string => line !== null),
+                      again: said.again !== null ? { label: said.again, act: a } : null };
+      if (this.#open !== job.where) {
+        this.#open = job.where;
+        this.#panel = null;
+        this.#write();
+      }
+    }
+    void this.#rows?.refresh();
   }
 
   /** After an act on the opened row, its own reads are read again. */
@@ -540,7 +624,10 @@ export class ServicesPage extends LitElement {
     const feed = job.feed;
     job.fails = feed.failure !== null ? job.fails + 1 : 0;
     const value = feed.failure === null ? feed.value : null;
-    if (value !== null && value.state !== "running") {
+    if (job.act !== null && ((value !== null && value.state !== "running") || feed.gone || job.fails >= JOB_TRIES)) {
+      job.ended = true;
+      this.#pressEnded(job, job.act, value !== null && value.state !== "running" ? value : null);
+    } else if (value !== null && value.state !== "running") {
       job.ended = true;
       this.#told = { where: job.where, said: statusSaid(job.label, value) };
       this.#readAgain(job.where);
@@ -557,7 +644,7 @@ export class ServicesPage extends LitElement {
       this.#told = { where: job.where, said: statusLost(job.label, feed.failure) };
       void this.#rows?.refresh();
     } else {
-      if (value !== null) this.#told = { where: job.where, said: statusSaid(job.label, value) };
+      if (value !== null && job.act === null) this.#told = { where: job.where, said: statusSaid(job.label, value) };
       this.#jobTimer = setTimeout(() => { void feed.refresh(); }, JOB_POLL_MS);
     }
     this.requestUpdate();
@@ -657,22 +744,29 @@ export class ServicesPage extends LitElement {
     const row = item.row;
     const busy = this.#busy;
     const told = this.#told?.where === row.id ? this.#told.said : null;
-    const own = item.weight === "text";
+    // While its act's job runs, the row's fact says what is being done.
+    const job = this.#job;
+    const doing = job !== null && !job.ended && job.where === row.id && job.act !== null ? runningFact(job.act) : null;
+    const own = item.weight === "text" && doing === null;
+    const fact = doing ?? item.fact;
     // `Open` on the phone only where it runs acts.
     const opens = acts && (!this.#phone || gatewayActs());
     const open = opens && this.#open === row.id;
+    // The closed row's one act, at the desk; the phone keeps its sheet's acts under the row.
+    const closed = acts && !this.#phone && !open ? actsOf(row).closed : null;
     return html`<div class="item" data-id=${row.id} data-cause=${row.verdict.cause ?? ""} data-verdict=${row.verdict.state}
         data-weight=${item.weight} data-kind=${row.kind} data-open=${open ? "true" : "false"}>
-      <moxi-ui-row name=${item.name} where=${item.where ?? nothing} fact=${own ? nothing : item.fact}
-        ?fact-heavy=${item.weight === "heavy"} lead=${item.line ?? nothing} ?toggles=${opens} ?open=${open}
+      <moxi-ui-row name=${item.name} where=${item.where ?? nothing} fact=${own ? nothing : fact}
+        ?fact-heavy=${item.weight === "heavy" && doing === null} lead=${item.line ?? nothing} ?toggles=${opens} ?open=${open}
         @moxi-row-toggle=${() => this.#toggle(row.id)}>
         ${own ? html`<span slot="acts-one" class="fact" data-line="fact">${item.fact}</span>` : nothing}
+        ${closed !== null ? this.#button(row, closed, "closed") : nothing}
         ${opens ? html`<button type="button" slot="acts-one" class="do" data-action="open" aria-expanded=${open ? "true" : "false"}
           aria-label=${`${open ? "Close" : "Open"} ${row.name}`} @click=${() => this.#toggle(row.id)}>${open ? "Close" : "Open"}</button>`
           : nothing}
         ${open ? this.#opened(row) : nothing}
       </moxi-ui-row>
-      <div class="acts" data-part="acts">${(acts ? shownActs(row, this.#phone) : []).map((act) => html`
+      <div class="acts" data-part="acts">${(acts && this.#phone ? shownActs(row, true) : []).map((act) => html`
         <button type="button" class="do" data-action=${act.name} ?disabled=${busy}
           aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
           @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
@@ -689,11 +783,39 @@ export class ServicesPage extends LitElement {
     };
     const lines = openedLines(row, reads?.one.value ?? null, reads?.ends?.value ?? null, { now: Date.now() / 1000 }, opened);
     const links = footLinks(row, opened);
+    const ended = this.#ended?.where === row.id ? this.#ended : null;
     return html`<div class="det" data-part="opened">
-      ${lines.map((line) => line.label === "Details" ? this.#details(line) : this.#line(line))}
+      ${lines.map((line) => line.label === "Details" ? this.#details(line)
+        : line.label === "State" && ended !== null ? html`${this.#line(line)}${this.#endedPart(row, ended)}` : this.#line(line))}
+      ${this.#phone ? nothing : this.#foot(row)}
       ${links.length ? html`<div class="links" data-part="links">${links.map((link) =>
         this.#link(link, "module-link"))}</div>` : nothing}
     </div>`;
+  }
+
+  /** A row's act as a button: `closed` on the closed row's line, `foot` under its lines. */
+  #button(row: Row, a: RowAct, where: "closed" | "foot", label = a.label) {
+    const cls = where === "closed" ? "do act" : `act ${PLAIN_ACTS.has(a.name) && !a.tucked ? "" : "d"}`;
+    return html`<button type="button" slot=${where === "closed" ? "acts-one" : nothing} class=${cls} data-action=${a.name}
+      ?disabled=${this.#busy} aria-label=${`${label} ${row.name}`} @click=${() => void this.#press(row, a)}>${label}</button>`;
+  }
+
+  /** The opened row's foot: its acts, his daemon's word beside Stop, and the tucked acts. */
+  #foot(row: Row) {
+    const foot = actsOf(row).foot;
+    if (!foot.length) return nothing;
+    const lasts = row.form !== "module" && row.kind === "daemon" && foot.some((a) => a.name === "stop");
+    return html`<div class="foot" data-part="foot">${foot.map((a) => this.#button(row, a, "foot"))}${lasts
+      ? html`<span class="d note" data-line="stop-lasts">${STOP_LASTS}</span>` : nothing}</div>`;
+  }
+
+  /** In `State`, what a row's act that didn't hold came to, and the act again. */
+  #endedPart(row: Row, ended: Ended) {
+    return html`<div class="r" data-line="ended"><span class="k"></span><div class="f">
+      <p><b data-line="heavy">${ended.heavy}</b></p>
+      ${ended.lines.map((line) => html`<p class="d" data-line="job-line">${line}</p>`)}
+      ${ended.again !== null ? html`<p>${this.#button(row, ended.again.act, "foot", ended.again.label)}</p>` : nothing}
+    </div></div>`;
   }
 
   /** One labelled line: its text, or its command in mono with `Copy`, then dim words and
