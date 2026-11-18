@@ -24,6 +24,8 @@
   fixes it.
 - `git-hooks list --json` gives each event's `existing_hook`, the user's own git hook
   there, and each repo's `own_hooks`. A repo git can't read names git's reason.
+- A folder that isn't there now reads `no git work tree at <path>: not a directory`
+  (was `no git work tree at <path> is not a directory`), as git's own reasons read.
 - `moxi repo specs --json` gives a run of failing passes' start and count
   (`error_since`, `error_passes`), as for refused and index-busy passes, and
   `index_stale` once git's index lock has been held for five passes in a row. The
