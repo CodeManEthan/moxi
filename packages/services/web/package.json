@@ -1,7 +1,7 @@
 {
   "name": "moxi-services-web",
   "private": true,
-  "description": "The services module's web sources: its page, and the home block that counts the rows by verdict.",
+  "description": "The services module's web sources: its page, the home block that counts the rows by verdict, and the facts it gives the Projects page.",
   "license": "MIT",
   "type": "module",
   "scripts": {
