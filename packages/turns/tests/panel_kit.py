@@ -243,7 +243,7 @@ class LauncherStub:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
 
-def launch(session_id: str, name: str, *, target: str = "slot", slot: str | None = "2",
+def launch(session_id: str | None, name: str, *, target: str = "slot", slot: str | None = "2",
            project: str | None = "kestrel-web", segment: str = "kestrel-web") -> dict:
     """One running launch in launcher's declared shape (`RUNNING_LAUNCH`)."""
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 600))

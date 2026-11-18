@@ -1,8 +1,11 @@
 """turns' panel in a browser, through a real shell that starts turns' real page server, on
 the full install and on the small one: the contract check, the 360 px width check, and
 the panel's questions: which sessions are running, by folder and start time (TU1); which
-is idle and which working, each since when (TU2); and the planner's busy subagent on its
-row, with both its agents in the opened row (TU3).
+is idle and which working, each since when (TU2); the planner's busy subagent on its row,
+with both its agents in the opened row (TU3); a session in trouble and one whose live part
+did not read, both problems that keep their state (TU4); and the reach line, which asks for
+the install and then, in the same page, says the sessions show (TU5). Then a launch from
+launcher naming its row and where it runs.
 
 The shells, the stand-in `claude` and the helpers are `panel_kit`'s.
 """
@@ -16,8 +19,8 @@ import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (T, full, group, harness, key_of, keys, line, on, open_panel, own_panel, row, rows,
-                       small, started)
+from panel_kit import (T, full, group, harness, key_of, keys, launch, line, on, open_panel, own_panel, row,
+                       rows, small, started)
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -167,7 +170,103 @@ def test_the_planners_busy_subagent_is_on_line_two_and_both_agents_in_the_opened
     expect(line(opened, "session")).to_have_text(
         re.compile(rf"^Claude Code · started today {T} · /srv/work/planner$"))
     expect(line(opened, "details")).to_have_text(re.compile(r"^pid \d+ · turns \S+$"))
-    # The other row has no box: no prompt box line when it opens.
+    # The other row has no box and no agent: no prompt box line and no agents line when it
+    # opens.
     row(root, key_of(quiet)).locator('[data-action="open"]').click()
     expect(busy.locator('[data-part="opened"]')).to_have_count(0)
+    expect(row(root, key_of(quiet)).locator('[data-line="session"]')).to_have_count(1)
     expect(row(root, key_of(quiet)).locator('[data-line="prompt-box"]')).to_have_count(0)
+    expect(row(root, key_of(quiet)).locator('[data-line="agents"]')).to_have_count(0)
+
+
+# --- TU4: what is wrong, and what it still holds -----------------------------------------------
+
+#: A time of day with its seconds, as `can't read since` gives it.
+TS = r"\d{1,2}:\d\d:\d\d(?: [AP]M)?"
+
+
+def test_a_trouble_row_and_an_unread_one_are_problems_that_keep_their_state(
+        panel, make_endpoint, ui_contexts):
+    linked, linked_fake = make_endpoint(
+        harness("/srv/work/linked", trouble="the host is loading the thread"), session_id=SID)
+    # The live part throws, and the agent list the session gives is not whole.
+    unread, _ = make_endpoint(harness("/srv/work/unread", name="claude", live_fails=True,
+                                      agents_complete=False), session_id=SID2)
+    well, _ = make_endpoint(harness("/srv/work/well"), session_id=SID3)
+    panel.listed({key_of(linked), key_of(unread), key_of(well)})
+    linked_fake.start_turn()
+    page, root = open_panel(panel, ui_contexts, launches=None if panel.is_small else [])
+    problems = group(root, "problem")
+    expect(problems.locator('[data-line="label"]')).to_have_text("2 problems")
+    expect(problems.locator("moxi-ui-row")).to_have_count(2)
+    expect(group(root, "idle").locator('[data-line="label"]')).to_have_text("1 idle")
+    trouble = row(root, key_of(linked))
+    expect(trouble).to_have_attribute("lead", "Its link to Moxi has trouble")
+    expect(trouble).to_have_attribute("lead-heavy", "")
+    expect(trouble).to_have_attribute("rest", "the host is loading the thread")
+    expect(trouble).to_have_attribute("rest-strong", "")
+    # A problem row keeps its state on line one.
+    expect(trouble).to_have_attribute("fact", re.compile(rf"^working since {T}$"))
+    unread_row = row(root, key_of(unread))
+    expect(unread_row).to_have_attribute("lead", "Moxi can't read its live state")
+    expect(unread_row).to_have_attribute("rest", "its agent list could not be read whole")
+    expect(unread_row).to_have_attribute("fact", "idle")
+    expect(unread_row).to_have_attribute("note", "may hold a draft")
+
+    unread_row.locator('[data-action="open"]').click()
+    opened = unread_row.locator('[data-part="opened"]')
+    expect(line(opened, "now")).to_have_text("idle")
+    expect(opened.locator('[data-line="not-known"]')).to_have_text(
+        "not known · the list could not be read whole, so some may still run")
+    expect(line(opened, "prompt-box")).to_have_text("may hold a draft")
+    expect(line(opened, "details")).to_have_text(re.compile(rf" · can't read since {TS}$"))
+
+
+# --- TU5: the reach line, before and after an install ------------------------------------------
+
+def test_the_reach_line_asks_for_the_install_then_reads_start_with_no_reload(
+        own_panel, make_endpoint, ui_contexts):
+    panel = own_panel("setup", small=True)
+    ep, _ = make_endpoint(harness(), session_id=SID)
+    panel.listed({key_of(ep)}, reach="setup")
+    page, root = open_panel(panel, ui_contexts, permissions=["clipboard-read", "clipboard-write"])
+    reach = root.locator('[data-part="foot"] [data-line="reach"]')
+    expect(reach).to_have_text(re.compile(
+        r"^Interactive Claude Code sessions can't show here yet: run moxi install turns ?Copy\. "
+        r"Codex and OpenCode sessions started by hand don't\.$"))
+    expect(reach.locator("code")).to_have_text("moxi install turns")
+    copy = reach.locator('[data-action="copy-command"]')
+    copy.click()
+    expect(copy).to_have_text("Copied")
+    assert page.evaluate("() => navigator.clipboard.readText()") == "moxi install turns"
+    page.evaluate("() => { window.sameDocument = true; }")
+
+    # As an install does: the runner listed first, then `endpoint.json` written. The page
+    # server sees the file change at its next scan and reads the reach again, within the
+    # read's bound.
+    panel.stub.runner_listed()
+    panel.write_endpoint_file()
+    expect(reach).to_have_text(START_SMALL, timeout=20_000)
+    expect(reach.locator("button")).to_have_count(0)
+    assert page.evaluate("() => window.sameDocument") is True
+
+
+# --- launcher's names --------------------------------------------------------------------------
+
+def test_a_launch_names_its_row_and_where_it_runs(full_panel, make_endpoint, ui_contexts):
+    slotted, _ = make_endpoint(harness("/srv/work/kestrel-web"), session_id=SID)
+    termed, _ = make_endpoint(harness("/srv/work/parser"), session_id=SID2)
+    plain, _ = make_endpoint(harness("/srv/work/quiet"), session_id=SID3)
+    full_panel.listed({key_of(slotted), key_of(termed), key_of(plain)})
+    launches = [launch(SID, "kestrel-builder"),
+                launch(SID2, "parser-fix", target="terminal", slot=None, project=None, segment="parser"),
+                launch("dddddddd-4444-4444-8444-444444444444", "gone-one"),
+                launch(None, "no-id")]
+    _, root = open_panel(full_panel, ui_contexts, launches=launches)
+    expect(rows(root)).to_have_count(3)
+    expect(row(root, key_of(slotted))).to_have_attribute("name", "kestrel-builder")
+    expect(row(root, key_of(slotted))).to_have_attribute("where", "slot 2 · kestrel-web")
+    expect(row(root, key_of(termed))).to_have_attribute("name", "parser-fix")
+    expect(row(root, key_of(termed))).to_have_attribute("where", "terminal · parser")
+    expect(row(root, key_of(plain))).to_have_attribute("name", started("quiet"))
+    expect(row(root, key_of(plain))).not_to_have_attribute("where", re.compile("."))
