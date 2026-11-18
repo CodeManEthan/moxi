@@ -228,6 +228,108 @@ def test_check_3_wants_the_named_job_and_says_which_key_is_missing(repo, remote,
     failed(run_gate(repo, fake, "proj-a-v0.1.0"), 3, "has no check-job")
 
 
+def full_notes(verdict):
+    return [n for n in verdict.notes if n.startswith("ci.yml's ")]
+
+
+def test_check_3_notes_each_full_job_that_passed(released_repo, fake):
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    assert verdict.passed, verdict.lines()
+    sha = head(released_repo)[:12]
+    assert full_notes(verdict) == [f"ci.yml's other (windows-latest) at {sha}: success",
+                                   f"ci.yml's secrets-windows at {sha}: success"]
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "skipped", "timed_out",
+                                        "neutral"])
+def test_check_3_refuses_a_full_job_that_did_not_pass(released_repo, fake, conclusion):
+    fake.runs.clear()
+    fake.full_jobs = ["secrets-windows"]
+    fake.green(head(released_repo))
+    fake.green(head(released_repo), "other (windows-latest)", conclusion)
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    failed(verdict, 3, f"linux passed on a push to main at {head(released_repo)[:12]}, but "
+                       f"other (windows-latest) concluded {conclusion}")
+    assert "wait for it" not in verdict.checks[2].said
+    assert f"other (windows-latest) at {head(released_repo)[:12]}: {conclusion}" in \
+        "\n".join(full_notes(verdict))
+
+
+def test_check_3_waits_for_a_full_job_still_running(released_repo, fake):
+    fake.runs.clear()
+    fake.full_jobs = ["secrets-windows"]
+    fake.green(head(released_repo))
+    fake.green(head(released_repo), "other (windows-latest)", None)
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    failed(verdict, 3, "but other (windows-latest) is in_progress; wait for it")
+    assert any(n.endswith("other (windows-latest) at "
+                          f"{head(released_repo)[:12]}: in_progress")
+               for n in full_notes(verdict))
+
+
+def main_runs(fake, commit, *jobs_of_each):
+    """Set the runs from a push to main at `commit`, one per list of (job, conclusion)."""
+    fake.runs[commit] = [{"event": "push", "branch": "main", "jobs": list(jobs)}
+                         for jobs in jobs_of_each]
+
+
+@pytest.mark.parametrize("name, missing", [
+    ("secrets-windows (extra)", "secrets-windows"),
+    ("other (windows-latest, x)", "other (windows-latest)"),
+    ("other", "other (windows-latest)"),
+])
+def test_check_3_matches_a_full_job_by_its_exact_name(released_repo, fake, name, missing):
+    full = {"other (windows-latest)", "secrets-windows"}
+    main_runs(fake, head(released_repo), [("linux", "success"), (name, "success")] + [
+        (other, "success") for other in sorted(full - {missing})])
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    failed(verdict, 3, f"no job is named {missing!r}")
+    assert any(n.endswith(f"{missing} at {head(released_repo)[:12]}: no such job")
+               for n in full_notes(verdict))
+
+
+def test_check_3_reads_the_full_jobs_of_mains_own_run(released_repo, fake):
+    fake.runs.clear()
+    fake.full_jobs = []
+    fake.green(head(released_repo))
+    for name in ("other (windows-latest)", "secrets-windows"):
+        fake.green(head(released_repo), name, branch="ci-full/main")
+    failed(run_gate(released_repo, fake, "proj-a-v0.1.0"), 3,
+           "no job is named 'other (windows-latest)'; no job is named 'secrets-windows'")
+
+
+def test_check_3_counts_the_run_whose_full_jobs_passed(released_repo, fake):
+    passed = [("linux", "success"), ("other (windows-latest)", "success"),
+              ("secrets-windows", "success")]
+    red = [passed[0], ("other (windows-latest)", "failure"), passed[2]]
+    main_runs(fake, head(released_repo), red, passed)
+    verdict = run_gate(released_repo, fake, "proj-a-v0.1.0")
+    assert verdict.passed, verdict.lines()
+    assert all(n.endswith(": success") for n in full_notes(verdict))
+    git(released_repo, "tag", "-d", "proj-a-v0.1.0")
+    main_runs(fake, head(released_repo), red)
+    failed(run_gate(released_repo, fake, "proj-a-v0.1.0"), 3,
+           "other (windows-latest) concluded failure")
+
+
+@pytest.mark.parametrize("line, says", [
+    (None, "has no full-jobs, so nothing says which jobs beside linux"),
+    ("full-jobs = []\n", "has no full-jobs, so nothing says which jobs beside linux"),
+    ('full-jobs = "secrets-windows"\n', "full-jobs is not a list of job names"),
+    ('full-jobs = ["secrets-windows", ""]\n', "full-jobs is not a list of job names"),
+])
+def test_check_3_refuses_a_missing_or_bad_full_jobs(repo, remote, fake, line, says):
+    release_files(repo)
+    text = (repo / "pyproject.toml").read_text()
+    kept = [x for x in text.splitlines(keepends=True) if not x.startswith("full-jobs")]
+    write(repo, "pyproject.toml", "".join(kept) + (line or ""))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Full jobs")
+    git(repo, "push", "-q", "origin", "main")
+    fake.green(head(repo))
+    failed(run_gate(repo, fake, "proj-a-v0.1.0"), 3, says)
+
+
 def test_check_4_refuses_a_package_on_the_not_ready_list(repo, remote, fake):
     release_files(repo, not_ready=["proj-a"])
     git(repo, "add", "-A")
@@ -318,7 +420,7 @@ def core_repo(repo, remote, fake):
     """A workspace whose one member is the core, holding a catalogue."""
     write(repo, "pyproject.toml", '[tool.uv.workspace]\nmembers = ["packages/moxi", '
           '"packages/proj-b"]\n[tool.moxi-publishing]\ncheck-workflow = "ci.yml"\n'
-          'check-job = "linux"\n')
+          'check-job = "linux"\nfull-jobs = ["secrets-windows"]\n')
     write(repo, "packages/moxi/pyproject.toml", member_toml("moxi", "0.2.0"))
     write(repo, "packages/moxi/CHANGELOG.md", "## 0.2.0 (2026-01-07)\n\n- Core.\n")
     write(repo, "packages/proj-b/pyproject.toml", member_toml("moxi-proj-b", "0.1.0"))

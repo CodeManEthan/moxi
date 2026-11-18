@@ -279,6 +279,11 @@ not-ready = ["proj-a", "proj-b"]   # never released from a commit that lists the
 ready = ["proj-c"]                 # confirmed
 check-workflow = "ci.yml"          # the workflow of the check that must pass on main
 check-job = "linux"                # that check's job
+full-jobs = [                      # the jobs on the other systems that must pass too
+    "other (windows-latest)",
+    "other (macos-latest)",
+    "secrets-windows",
+]
 ```
 
 A package on `not-ready` is still built and tested; it moves to `ready` by its own commit
@@ -286,8 +291,10 @@ once you have confirmed it. `ready` is optional. When the table holds it, every 
 must be on exactly one of the two lists, so a package added to the workspace later is
 never ready until a commit says so: one on neither list or on both counts as not ready,
 and `moxi-dev check` refuses it. Without `ready`, only `not-ready` counts.
-`check-workflow` and `check-job` have no default: without them nothing is released, and
-the gate names the missing key.
+`check-workflow`, `check-job` and `full-jobs` have no default: without them nothing is
+released, and the gate names the missing key. `full-jobs` names each job by its exact
+name, a matrix leg as GitHub shows it (`other (windows-latest)`), so a leg missing from
+the run refuses rather than passing on its siblings.
 
 ### The tag gate
 
@@ -299,8 +306,9 @@ version V:
    member at C and V is its `project.version` there;
 2. **changelog**: D's `CHANGELOG.md` at C has `## V (YYYY-MM-DD)` as its first version
    heading;
-3. **main and green**: C is on the first-parent line of main, and GitHub has a
-   successful run of `check-job` in `check-workflow` from a push to main at C;
+3. **main and green**: C is on the first-parent line of main, and GitHub has a run of
+   `check-workflow` from a push to main at C in which `check-job` and every `full-jobs`
+   job concluded `success` (see [The jobs on other systems](#the-jobs-on-other-systems));
 4. **ready**: D is not on `not-ready` at C, and is on `ready` where the table keeps it;
 5. **siblings**: each requirement D places on another member admits at least one
    published version of it (an extra's are reported, not checked);
@@ -314,6 +322,25 @@ Checks 3, 5, 6 and 7 read GitHub's API and the package index, ten seconds at mos
 with the token `gh auth token` gives where there is one (sent to api.github.com only); a
 read that fails refuses. `MOXI_PUBLISHING_GITHUB_API_URL` and `MOXI_PUBLISHING_PYPI_URL`
 point the reads elsewhere.
+
+### The jobs on other systems
+
+Check 3 holds a release to more than `check-job`: in the same run of `check-workflow`,
+from a push to main at C, each name in `full-jobs` must match a job of exactly that name,
+and every such job must have concluded `success`. A name with no job in the run refuses,
+naming it, and so does a job concluded any other way (`failure`, `cancelled`, `skipped`,
+`timed_out`); a job still queued or running refuses with "wait for it". A
+`continue-on-error` job that failed reports `failure` to the jobs list, so it holds the
+release though the run went green. The jobs read are those of the run's latest attempt,
+which is what GitHub's list of a run's jobs gives by default: a job re-run to green
+counts as passed, and one that passed and then failed on a re-run counts as failed. When
+the check passes, each `full-jobs` job's conclusion goes in the gate's notes, which
+`moxi publishing tag` and `ci gate` print; when it refuses, the notes name each one too.
+
+Only the names in `full-jobs` are read. Moxi's own list names its eight Windows and macOS
+legs, and the gate doesn't read the Linux `browser` matrix (`browser (<module>,
+<browser>)`): Moxi's PyPI publishers are set up only once every job of main's run is
+green, that matrix included, which covers it.
 
 ### Setting the next version
 
