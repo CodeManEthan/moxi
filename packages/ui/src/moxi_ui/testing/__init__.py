@@ -74,6 +74,12 @@ A module's browser test, for example:
     def test_the_page_fits_a_phone(ui_page, ui_width_check):
         ui_width_check(ui_page, module="cache")
 
+A test that reads back what its page copied readies its context with
+`moxi_ui.testing.browser.ready_copying(context)` and reads the text with
+`moxi_ui.testing.browser.copied(page)`: the clipboard on Chromium, and elsewhere the text
+the page passed to `navigator.clipboard.writeText`, since Firefox refuses a
+`clipboard-read` grant and WebKit a `clipboard-write` one.
+
 Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, and
 `ui_shell.servers()` and `ui_shell.kill(module)` reach the page servers the shell runs.
 """
