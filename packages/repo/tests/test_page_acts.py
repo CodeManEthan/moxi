@@ -260,6 +260,11 @@ def test_a_refused_act_names_its_code_and_a_held_repo_is_busy(demo, copy, held):
                                  "text": f"demo/nothing is not registered in {repo}"}
     answer = sent("add", "relative/alpha-notes", None, ["demo/gate"])
     assert answer["refusal"]["code"] == "not-absolute"
+    # The plan and the act take one root: `~user` is refused by both, not looked up.
+    for root in ("~nobody/alpha-notes", "relative/alpha-notes"):
+        assert sent("add", root, None, ["demo/gate"])["refusal"]["code"] == "not-absolute"
+        refusal = plan_of("add", root, ["demo/gate"])["refusal"]
+        assert refusal == {"code": "not-absolute", "text": f"{root} is not an absolute path"}
     held(repo)
     plan = plan_of("enable", repo, ["demo/watch"])
     answer = sent("enable", repo, plan["digest"], ["demo/watch"])

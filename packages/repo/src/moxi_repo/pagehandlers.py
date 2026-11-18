@@ -37,6 +37,7 @@ import os
 import threading
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from . import api, committer, projects
@@ -285,23 +286,40 @@ def _expand(root: str) -> str:
     return os.path.join(home, root[2:]) if len(root) > 1 else home
 
 
+def _root(text: str) -> str:
+    """The repo root a plan or an act names: `text` with `~` expanded (`_expand`). Raises
+    `api.Usage` (`not-absolute`) for any root that is then not absolute, `~user`
+    included, so the plan and the act take one root and refuse the same ones."""
+    root = _expand(text)
+    if not os.path.isabs(root):
+        raise api.Usage(f"{root} is not an absolute path", reason="not-absolute")
+    return root
+
+
 def _ids(text: str | None) -> list[str]:
     return [part for part in (text or "").split(",") if part]
 
 
 def plan(call: Any) -> dict[str, Any]:
     """`GET /api/plan?act=add|enable|refresh&root=&pieces=`: what the act would write in
-    the repo at `root` (`~` expanded here), as `api.plan_add`, `plan_enable` and
+    the repo at `root` (`_root`: `~` expanded, and a root then not absolute is the refusal
+    `not-absolute`, as the acts refuse it), as `api.plan_add`, `plan_enable` and
     `plan_refresh` give it, kept to `within()`. `pieces` is the piece ids joined by `,`
     (turning on names one). A plan's refusal is its `refusal`; any other failure is
     `state` `error` with a fixed `detail`, logged once."""
     from moxi_repo import page
 
-    act, root = call.query["act"], _expand(call.query["root"])
+    act = call.query["act"]
     ids = _ids(call.query.get("pieces"))
     if act == "enable" and len(ids) != 1:
         raise page.lb.Refused("turning a piece on names one piece")
     home = within()
+    try:
+        root = _root(call.query["root"])
+    except api.Usage as exc:
+        found = api._plan_view(None, Path(_expand(call.query["root"])))
+        found["refusal"] = {"code": exc.reason, "text": exc.text}
+        return {"state": "up", "detail": None, "plan": found}
     try:
         if act == "add":
             found = api.plan_add(root, ids, within=home)
@@ -367,11 +385,9 @@ def _act(call: Any, verb: Any) -> dict[str, Any]:
     """Run `verb(root, expect=digest, within=within())` for an act's body, after the
     repo is checked against `within()` and then against ui's check; answer what came of
     it (module doc)."""
-    root = _expand(call.body["root"])
     home = within()
     try:
-        if not os.path.isabs(root):
-            raise api.Usage(f"{root} is not an absolute path", reason="not-absolute")
+        root = _root(call.body["root"])
         api._resolve(root, home)  # the copy's check comes before ui's
         line = _terminal_line()
         if line:
