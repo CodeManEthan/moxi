@@ -106,6 +106,10 @@ const STYLES = css`
   .item .acts:empty { display: none; }
   .item .acts button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
   .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
+  /* On a phone a fact in the text colour wraps, so it and Open stay inside the row. */
+  @media (max-width: 480px) {
+    .item moxi-ui-row > .fact { display: inline-block; max-width: 8em; white-space: normal; text-align: right; }
+  }
   .one { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; padding: 7px 0;
          flex-wrap: wrap; }
   .one .read { margin-left: auto; color: var(--moxi-text-dim); font-variant-numeric: tabular-nums; }
@@ -519,7 +523,7 @@ export class ServicesPage extends LitElement {
         : nothing}</div>
         <div class="gl">${state.line !== null ? html`<div class="one state" role="status"><span data-line=${state.state}>${
             state.line}</span>${state.more !== null ? html`<span class="more" data-line="state-more">${state.more}</span>`
-            : nothing}</div>` : html`${repeat(shape.risen, (item) => item.row.id, row)}
+            : nothing}</div>` : nothing}${repeat(shape.risen, (item) => item.row.id, row)}${state.line !== null ? nothing : html`
           ${shape.sentence !== null || shape.read !== null ? html`<div class="one">
             ${shape.sentence !== null ? html`<span data-line="sentence">${shape.sentence}${shape.more !== null
               ? html` <span class="muted" data-line="sentence-more">${shape.more}</span>` : nothing}</span>` : nothing}
@@ -570,6 +574,7 @@ export class ServicesPage extends LitElement {
   /** `Add a service`: the add form, on its way for a command, and the address says so. */
   #toAdd(): void {
     this.#panel = "add";
+    this.#open = null;
     this.#unknown = null;
     this.#menu = false;
     this.#form = { ...this.#form, source: "command" };

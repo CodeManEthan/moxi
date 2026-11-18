@@ -424,18 +424,16 @@ def test_open_close_and_add_rewrite_the_address_and_back_leaves_the_page(seeded,
 def test_the_first_read_shows_reading_until_it_answers(seeded, ui_page):
     held: list = []
     ui_page.route("**/m/services/api/rows", lambda route: held.append(route))
-    try:
-        ui_page.goto("/m/services/")
-        panel = ui_page.locator("#moxi-panel > moxi-services-page")
-        expect(list_part(panel)).to_have_attribute("data-state", "loading")
-        reading = list_part(panel).locator('[data-line="loading"]')
-        expect(reading).to_have_text("Reading…")
-        expect(panel.locator("moxi-ui-row")).to_have_count(0)
-        expect(panel.get_by_role("button", name="Add a service")).to_have_count(0)
-    finally:
-        ui_page.unroute("**/m/services/api/rows")
-        for route in held:
-            route.continue_()
+    ui_page.goto("/m/services/")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "loading")
+    reading = list_part(panel).locator('[data-line="loading"]')
+    expect(reading).to_have_text("Reading…")
+    expect(panel.locator("moxi-ui-row")).to_have_count(0)
+    expect(panel.get_by_role("button", name="Add a service")).to_have_count(0)
+    for route in held:
+        route.continue_()
+    ui_page.unroute("**/m/services/api/rows")
     expect(list_part(panel)).to_have_attribute("data-state", "up")
     expect(reading).to_have_count(0)
 
@@ -504,7 +502,11 @@ def test_every_row_unknown_for_one_reason_says_the_supervisor_cant_be_read(seede
 
 def test_no_row_of_his_says_what_a_service_is(seeded, ui_shell, ui_page):
     value = get(ui_shell, "api/rows")
+    # Moxi's rows only, running: the fake supervisor reads no module unit, and every row
+    # unknown for one reason is a state of its own.
     value["rows"] = [r for r in value["rows"] if r["form"] == "module"]
+    for r in value["rows"]:
+        r["verdict"] = {"state": "ok", "reason": "running", "fix": None, "unknown": False, "cause": "running"}
     value["problems"] = [{"module": "notes", "reason": "its declarations failed: boom"}]
     shown_without_the_topic(ui_page)
     as_rows(ui_page, value)
