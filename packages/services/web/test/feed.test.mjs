@@ -27,12 +27,13 @@ test("every row form and kind parses, and the value is a copy", () => {
 test("on the phone every redacted text is null, and the rows still parse", () => {
   const phone = row({
     doc: null, detail: null, argv: null, health: null, cwd: "@h/0123456789ab/docs",
-    verdict: { state: "fail", reason: null, fix: null, unknown: false },
+    verdict: { state: "fail", reason: null, fix: null, unknown: false, cause: "not-running" },
     checked: { state: "fail", line: null },
   });
   const value = parseRows(rows([phone, timer({ last_run: { failed: true, text: null, at: null } })],
                               { problems: [{ module: "notes", reason: null }] }));
   assert.equal(value.rows[0].verdict.reason, null);
+  assert.equal(value.rows[0].verdict.cause, "not-running");
   assert.equal(value.rows[1].last_run.text, null);
   assert.deepEqual(value.problems, [{ module: "notes", reason: null }]);
 });
@@ -41,7 +42,9 @@ test("a row that isn't one makes the whole list unreadable", () => {
   for (const bad of [
     { ...row(), form: "foreign" },
     { ...row(), kind: "socket" },
-    { ...row(), verdict: { state: "bad", reason: "x", fix: null, unknown: false } },
+    { ...row(), verdict: { state: "bad", reason: "x", fix: null, unknown: false, cause: null } },
+    { ...row(), verdict: { state: "fail", reason: "x", fix: null, unknown: false, cause: 3 } },
+    { ...row(), verdict: { state: "fail", reason: "x", fix: null, unknown: false } },
     { ...row(), pid: 1.5 },
     { ...row(), argv: "/bin/true" },
     { ...row(), last_run: { failed: "no", text: "ok", at: null } },

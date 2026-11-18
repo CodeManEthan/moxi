@@ -43,8 +43,9 @@ STORES = {"registry": {"root": "data", "path": "services.db", "kind": "sqlite",
 DOCTOR = "moxi_services.doctor:rows"
 #: services' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_services.page:PAGE"
-#: The page, and the block the shell's home places: how many rows are ok, warn, fail
-#: and off, linking to the page.
+#: The page; the block the shell's home places: how many rows are ok, warn, fail and
+#: off, linking to the page; and the facts the Projects page places, which report each
+#: project's failed services and warnings and the opened project's `Services` row.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Services", "contract": 1, "place": "page",
              "group": "setup", "order": 30,
@@ -53,4 +54,12 @@ COMPONENTS = {
     "summary": {"script": "summary.js", "title": "Services", "contract": 1,
                 "place": "block", "home": True,
                 "doc": "How many rows are ok, warn, fail and off, linking to the page"},
+    "project-facts": {"script": "project-facts.js", "title": "Services",
+                      "doc": "Each project's failed services and warnings, for the Projects "
+                             "page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }

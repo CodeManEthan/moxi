@@ -15,12 +15,15 @@ export const VERDICTS = ["ok", "warn", "fail", "off"] as const;
 export type VerdictState = (typeof VERDICTS)[number];
 
 /** A row's verdict. `unknown` is true for a `warn` given because a value couldn't be
- * read. */
+ * read. `cause` is one word for the case that gave it (`not-running`, `stopped`,
+ * `last-run`), or null; services may add words, so a reader treats one it doesn't know
+ * as null. */
 export interface Verdict {
   state: VerdictState;
   reason: string | null;
   fix: string | null;
   unknown: boolean;
+  cause: string | null;
 }
 
 /** A timer's last run: a few words (`ok`, `exit 1`, ...) and when. */
@@ -150,8 +153,10 @@ const isWords = (value: unknown): value is (string | null)[] | null =>
 
 function verdictOf(value: unknown): Verdict | null {
   if (!isObj(value) || !isStr(value.state) || !VERDICT_SET.has(value.state)
-      || !isStrOrNull(value.reason) || !isStrOrNull(value.fix) || !isBool(value.unknown)) return null;
-  return { state: value.state as VerdictState, reason: value.reason, fix: value.fix, unknown: value.unknown };
+      || !isStrOrNull(value.reason) || !isStrOrNull(value.fix) || !isBool(value.unknown)
+      || !isStrOrNull(value.cause)) return null;
+  return { state: value.state as VerdictState, reason: value.reason, fix: value.fix, unknown: value.unknown,
+           cause: value.cause };
 }
 
 function lastRunOf(value: unknown): LastRun | null | undefined {
