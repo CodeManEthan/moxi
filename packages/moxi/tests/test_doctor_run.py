@@ -1380,7 +1380,6 @@ def test_costs_rows_against_budgets_and_the_samples_kept(d, monkeypatch):
     assert not any(name.startswith("cost") for _, name in d.rows("demo"))
 
 
-
 class _FakeProcess:
     """A psutil process as `process_measure` reads it, with one child: each has 50 open
     fds, or 116 open handles where psutil counts handles."""
