@@ -167,6 +167,8 @@ meets.
 | `moxi comms cache` | how cold each agent's prompt cache is (for the callers `[policy] cache_callers` names) |
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
 | `moxi comms whoami` | which comms identity this session holds |
+| `moxi comms send --as <name> <to> "text"` | send under a send-only name a program registered, from outside every session, with no reply |
+| `moxi comms send-only add\|renew\|remove <name>` | register a send-only name for a program (any program or service, not only a module), replace its token, or free it; inside a session, only a plain `add` of an unused name |
 | `moxi comms exit-session <name> [--scope S \| --global]` | end a headless session by its name, and wait for the name to be released |
 | `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
@@ -318,7 +320,8 @@ bottom:
   days before that (`Before yesterday`, `Before <date>`).
 - **`Other names · <names> · Show`**: the standing names with no session, mail or ask;
   a scoped address with neither mail nor a session, by its full address; and the
-  send-only names a module declared, `sent by <module>`. Each but a send-only name has
+  send-only names, `sent by <module>` for a module's and `sent by a program` for one a
+  program registered. Each but a send-only name has
   `Message`.
 - **The foot**: `Comms is answering · read <time>` and `Comms settings`. Under it, one
   dim line each while it holds: a read that failed and why, and an address the page

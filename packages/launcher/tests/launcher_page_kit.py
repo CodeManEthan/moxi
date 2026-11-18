@@ -40,31 +40,36 @@ LAUNCHES = "/m/launcher/api/launches"
 HARNESSES = ("claude", "codex")
 
 FAKE = """#!{python}
-import json, os, sys
+import json, os, sys, time
 record = {{"argv": sys.argv, "cwd": os.getcwd()}}
 tmp = os.path.join({seen!r}, ".%d.tmp" % os.getpid())
 with open(tmp, "w") as f:
     json.dump(record, f)
 os.replace(tmp, os.path.join({seen!r}, "%d.json" % os.getpid()))
 print("the fake harness ran", flush=True)
+time.sleep({stay_s})
 sys.exit(0)
 """
+#: How long a fake that stays keeps running, at most, before it exits on its own.
+STAY_S = 600
 
 
 class Harness:
     """A fake `claude` and `codex` under `root/bin`. Each run records its argv and
     directory as one JSON file under `root/seen` (a path written into the script, since a
     test shell hands its page servers no variable of the test's), prints one line and
-    exits 0."""
+    exits 0: at once, or with `stay` after `STAY_S` or when killed, as a session in a real
+    slot must keep running past the launcher's startup watch."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, stay: bool = False):
         self.bin = root / "bin"
         self.seen = root / "seen"
         self.bin.mkdir(parents=True, exist_ok=True)
         self.seen.mkdir(parents=True, exist_ok=True)
         for name in HARNESSES:
             path = self.bin / name
-            path.write_text(FAKE.format(python=sys.executable, seen=str(self.seen)))
+            path.write_text(FAKE.format(python=sys.executable, seen=str(self.seen),
+                                        stay_s=STAY_S if stay else 0))
             path.chmod(0o755)
 
     def runs(self) -> list[dict]:

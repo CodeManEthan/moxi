@@ -15,7 +15,8 @@ export interface FeedState {
 export interface RowView {
   qualified: string;
   live: boolean;
-  /** "live" or "standing", then "send-only" and "reserved by <module>" when they apply. */
+  /** "live" or "standing", then "send-only" and "reserved by <module>" or "registered by a program"
+   * when they apply. */
   tags: string[];
   adapter: string | null;
   /** How long the session has held the name, "bound for 2h4m"; null when not live. */
@@ -54,7 +55,8 @@ export function span(seconds: number): string {
 export function rowView(row: RosterRow, now: number | null): RowView {
   const tags = [row.live ? "live" : "standing"];
   if (row.kind === "send-only" || row.adapter === "send-only") tags.push("send-only");
-  if (row.module) tags.push(`reserved by ${row.module}`);
+  if (row.holder === "program") tags.push("registered by a program");
+  else if (row.module) tags.push(`reserved by ${row.module}`);
   const counted = row.live && typeof row.bound_at === "number" && Number.isFinite(row.bound_at) && now !== null;
   return {
     qualified: row.qualified,

@@ -14,7 +14,7 @@ The first version.
   stores it, with the allowlists of the index; a merge is judged by its own lines.
 - The push piece, `publishing/push`: refuses a push that rewrites a branch, deletes
   `main`, a protected branch or one not merged, moves a release tag, moves another ref no
-  `free-ref` pattern names, or creates more than three tags; and judges every commit and
+  `free-ref` pattern names, or creates more than one tag; and judges every commit and
   tag object new to the remote as a commit would have been judged. A passing push is
   logged.
 - `moxi publishing scan`: a commit's whole tree and its path names, judged the same way;
@@ -38,7 +38,10 @@ The first version.
   verify job before it runs the gate with the build's files.
 - `moxi publishing github show` and `github apply`: the rulesets, secret scanning and
   `pypi` environment a public repo expects of GitHub, read with `gh` and printed field
-  by field, or written.
+  by field, or written. `moxi-main` requires the root `pyproject.toml`'s `check-job`
+  from the GitHub Actions app, and both commands say what that asks of the CI workflow;
+  the tag-creation ruleset is `moxi-tags-create`; a rule is compared with its
+  parameters, not by type alone, and a rewrite keeps the ones publishing doesn't set.
 - `moxi doctor publishing`: fails a hook command running another interpreter than the
   recorded one, and a later commit-msg hook while `drop-trailer` names `Commit-Check`;
   warns on an unset GitHub repo, a workflow file unlike its template, an empty private

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `moxi notes home-paths [--apply] [--json] [--limit N]`: across the notes folder's files,
+  each path under your home folder becomes `~` and each Claude Code session path becomes
+  its session id, and links into the notes folder become relative. A dry run unless
+  `--apply`, which changes only committed files and commits nothing. A home path right
+  after a quote or a non-assignment `=` outside JSON stays as written. Its `--json`
+  shape is new and stable.
+- The home-paths guard, `notes.home-paths`, registered with turns: an agent's file write
+  under the notes root that spells your home folder or your login reads one line after
+  it saying how to write it instead. It tells and never refuses. Its switch is the new
+  setting `guard.home_paths`, off by default; setup asks about it with yes as the
+  default, and says that with it off nothing warns.
+- Setup's preview, when files it found spell your home folder, names `moxi notes
+  home-paths` above the allowance lines, and the README says the same before them.
+- The `prefix` setting's text, its two errors and the README's settings table no longer
+  suggest your user name: the example is `work`, and the setting's text says notes are
+  often pushed and shared, so pick a plain word, not your login.
 - Every setting carries page fields, which `moxi config notes show --json` prints
   and the settings page draws: a plain label, a line where the label can't carry it,
   a unit on the largest file and the snapshot interval, and words for each way a

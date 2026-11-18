@@ -7,7 +7,7 @@ const settled = () => new Promise((done) => setImmediate(done));
 
 const ROW = { qualified: "core/alpha", name: "alpha", scope: "core", live: true, kind: null, module: null,
               tier: "worker", adapter: "claude", directors: ["core/lead"], session_id: "s1",
-              bound_at: 100, awaiting: [], cache: null };
+              bound_at: 100, awaiting: [], cache: null, holder: null };
 const UP = { now: 1000, state: "up", detail: null, rows: [ROW] };
 
 /** A feed over `answers`, read in order; the clock reads 400. */
@@ -34,6 +34,14 @@ test("the route's three states, and what isn't one", () => {
   assert.equal(value.rows.length, 1);
   assert.deepEqual(value.rows[0].directors, []);
   assert.deepEqual(value.rows[0].awaiting, ["a"]);
+});
+
+test("a send-only row's holder is kept when it is a string, else null", () => {
+  const holder = (value) => parseRoster({ state: "up", detail: null, rows: [{ ...ROW, holder: value }] }).rows[0].holder;
+  assert.equal(holder("program"), "program");
+  assert.equal(holder("module"), "module");
+  assert.equal(holder(undefined), null);
+  assert.equal(holder(3), null);
 });
 
 test("a row's cache fact is kept when it is one, else null", () => {

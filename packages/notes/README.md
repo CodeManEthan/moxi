@@ -40,12 +40,13 @@ moxi doctor notes
 | `moxi notes setup` | ask setup's questions again and write what they change |
 | `moxi notes validate [--json] [--unfiled] [--limit N]` | check every note's frontmatter against the types file; writes nothing; exit 1 only when the types file can't be used or the root is not a folder |
 | `moxi notes backfill [--apply] [--json] [--limit N]` | the required keys each filed note lacks and that can be inferred; a dry run unless `--apply` |
+| `moxi notes home-paths [--apply] [--json] [--limit N]` | write each path under your home folder as `~` and each session path as its session id; a dry run unless `--apply` |
 
 `MOXI_NOTES_DIR`, set by the launcher for one launch, overrides the computed folder for
 that session and for `moxi notes` run in it. Exit codes: 0 done, 1 an error, no notes
 directory, a scan that finds a file a snapshot would leave out, a types file validate or
-backfill can't use, or a backfill write that failed, 2 bad arguments or a bad setting, 3
-refused.
+backfill can't use, a backfill write that failed, or a home-paths run that left a file
+alone, 2 bad arguments or a bad setting, 3 refused.
 
 `moxi notes scan` judges the notes folder's files the way the setup preview does, which
 is the way a snapshot does. Under `leave-out` it lists every file with a finding. Under
@@ -92,7 +93,11 @@ prints the command that would change each, and goes on.
    text. Read the warning below before you choose redact.
 3. **Where snapshots are pushed**, when the repo has remotes and no push remote is set.
    Enter or `none` means no push.
-4. **A preview** of what the snapshots would hold back, before the first one runs (below).
+4. **The home-paths guard** (below): whether an agent is told when a note it writes
+   spells your home folder or your login. The default answer is yes; once you have
+   answered, your answer is the default. With nobody at the keyboard it stays as it is,
+   off at first. **With it off, nothing warns when such a note is written.**
+5. **A preview** of what the snapshots would hold back, before the first one runs (below).
 
 Then it writes the settings, registers the two gates in the notes repo (and enables one
 you had disabled), writes or removes the clean filter for the action you chose, and saves
@@ -116,6 +121,13 @@ note: on one real notes tree that was 3,250 of 6,869 tracked files. Until you al
   that reads the pushed copy sees them blanked;
 - a commit you make by hand under that name is refused at push, because the push gate
   scans each commit's author and committer for private names.
+
+Most of those hits are paths, and two kinds of path need not spell your login at all: a
+path under your home written out in full, and a Claude Code session path, whose folder
+name is built from your home folder. Run `moxi notes home-paths` and read what it would
+change, then run it with `--apply` and commit (Home paths, below): the paths become `~/...`
+and session ids, and the hits they made go away. When files the preview found spell your
+home folder, it prints a line that says so above the allowance lines.
 
 So the preview ends with the allowance lines that would keep what it found, and the full
 path of the private allowlist they go in, `<common git dir>/secrets-allow-private` (for a
@@ -265,6 +277,91 @@ is there, and gives no proposal for a note whose frontmatter it can't read or wh
 is a tie. It writes only with `--apply`, only regular files under the root, and never
 through a symlink; a second run adds nothing. The next snapshot commits what it wrote.
 
+## Home paths
+
+A note that spells a path under your home folder (`/home/you/x`) spells your login, and
+so does a Claude Code session path, whose folder name is built from it
+(`~/.claude/projects/-home-you-x/<id>.jsonl`). `moxi notes home-paths` rewrites both
+across the notes folder's files (tracked and untracked, ignored files and nested repos
+aside). It takes your home folder from the OS, so it needs no setup beyond notes' `root`.
+
+- A session path becomes the part of it that starts at its session id:
+  `~/.claude/projects/-home-you-x/<id>.jsonl` becomes `<id>`, and
+  `/tmp/claude-1000/-home-you-x/<id>/scratchpad/probe.py` becomes
+  `<id>/scratchpad/probe.py`. `moxi sessions find <id>` still finds the session.
+- A path under your home folder, where a word starts, becomes `~`: `/home/you/x` becomes
+  `~/x`. A URL (`file:///home/you/x`), a longer path (`/var/home/you`), another user's
+  home (`/home/you2`) and another case stay.
+- Outside `.json` and `.jsonl` files, a home path right after `"`, `'`, or a `=` that is not
+  a shell assignment's (`--opt=`, `key = "...`) stays as written, since no shell or config
+  reader expands `~` there. Such a file is listed `quoted`.
+- A symbolic link whose target is under your home folder and inside the notes folder
+  becomes a relative link to the same target.
+- Every byte outside a change stays as it was: encoding, line endings, a missing final
+  newline. A binary file (a NUL byte in its first 8 KiB) and one over `max_mib` are
+  listed, not read.
+
+Run it with no flag first. It writes nothing and prints a summary (home paths, session
+paths and the sessions they name, places left `quoted`), then each change as
+`line: before -> after`, files sorted by a review class: `code` (a change in a fenced
+block or a code span), `data` (`.json`, `.jsonl`, `.tsv`, `.csv`), `diff` (`.diff`,
+`.patch`), `quote` (a change on a `>` line) and `prose`. Read the first four in full and
+sample prose. Every class is rewritten by the same rules.
+
+`--apply` writes only files git tracks that match the index and `HEAD`: while any file it
+would change is untracked or modified, it refuses the whole run, changes nothing and
+names them. A file that changes while it runs is left alone and named; commit or drop
+that change, then run again. It commits nothing: its last line prints the commit,
+`git -C <root> commit -am "notes: home paths written as ~, session paths as ids"`, so
+the rewrite is one commit you can revert. A second run changes nothing.
+
+What it leaves, each file listed under `left` with its reason: `binary`, `too-large`,
+`link-outside` (a link whose target is outside the notes folder), `untracked` and
+`modified` (an `--apply` refused), `read-only`, `changed`, `quoted`, and `login`, a file
+that still spells your login after the pass (a bare mention, another case, a project
+folder name with no session id after it). The text report counts the long lists;
+`--json` prints every change and every file left, and other tools read it, so the shape
+stays stable:
+
+```text
+{"root": str, "home": str,
+ "files": [{"path": str, "class": str,
+            "changes": [{"line": int, "kind": "home" | "session" | "link",
+                         "before": str, "after": str}]}],
+ "left": [{"path": str, "reason": str}],
+ "counts": {"files": int, "changes": int, "by_class": {str: int}, "by_kind": {str: int},
+            "sessions": int, "quoted_left": int},
+ "error": str | null}
+```
+
+A change's `line` is 1-based, 0 for a link; `before` and `after` hold about 40
+characters around it. `sessions` counts the distinct session ids kept; `quoted_left` the
+places left `quoted`. `error` names a refused run.
+
+### The home-paths guard
+
+`notes.home-paths` is a guard turns runs before an agent's file write: Claude Code's
+`Write` and `Edit`, Codex's `apply_patch` and OpenCode's `write` and `edit` (turns reaches
+no OpenCode call before it runs yet), the main loop's and every subagent's. When the file
+is under the notes root and the text spells your home folder's path where `moxi notes
+home-paths` would write `~`, or your login as a word (any case, no letter or digit beside
+it), the write goes ahead and the agent reads one line after it:
+
+```text
+This note spells your home folder or your login. Write `~/` for a path under your home, cite a session by its id, not its transcript's path, and write `{user}` where `~` can't stand.
+```
+
+It tells and never refuses. It reads no allowlist, so an allowance that keeps your login
+in the snapshots does not quiet it. A login shorter than three characters is not looked
+for. When a real folder named like your login sits at the top of the notes root, or
+`prefix` is your login, a pointer into that folder (`~/notes/<login>/x`, or `<login>/x`
+where `x` is in that folder) doesn't count. A write it doesn't see, such as a shell
+redirect, goes unremarked; `moxi notes home-paths` lists the file at its next dry run.
+
+Its switch is `guard.home_paths`, off until setup asks; naming `notes.home-paths` on
+turns' `guards.run` runs it too. **While it is off, nothing warns when a note that spells
+your home folder or your login is written.**
+
 ## Doctor
 
 `moxi doctor notes` shows these rows:
@@ -288,7 +385,7 @@ at the next read.
 | key | default | what |
 |---|---|---|
 | `root` | `~/notes` | the folder that holds your notes; a git repo for snapshots |
-| `prefix` | `""` | a subfolder under the root for the computed folders, topics and inbox, such as your user name |
+| `prefix` | `""` | a subfolder under the root for the computed folders, topics and inbox, such as `work` |
 | `exclude` | `[]` | folders whose sessions get no notes directory |
 | `action` | `leave-out` | what a commit does with a file that holds a secret: `leave-out` or `redact` |
 | `max_mib` | `10` | the largest file a snapshot takes and a gate reads |
@@ -299,6 +396,7 @@ at the next read.
 | `snapshot.author_name` | `moxi notes` | the name on snapshot commits |
 | `snapshot.author_email` | `""` | the email on snapshot commits; empty means one per machine at `moxi.invalid` |
 | `snapshot.timer` | `false` | also snapshot every 15 minutes outside sessions |
+| `guard.home_paths` | `false` | the home-paths guard: tell an agent when a note it writes spells your home folder or login; off, nothing warns |
 
 ## Uninstall
 
@@ -331,7 +429,8 @@ the gates through repo's shim mode.
 
 ## Dependencies
 
-`moxi`, Moxi's core; `moxi-turns`, which calls the start line and the snapshot trigger;
+`moxi`, Moxi's core; `moxi-turns`, which calls the start line and the snapshot trigger
+and runs the home-paths guard;
 `moxi-repo`, the committer and the git hook runner; and `moxi-secrets`, the pattern sets.
 The `projects` extra (`moxi-projects`) adds a project's own notes folder, the `topic` kind
 and projects' remove check. notes reads every other module through its Python API and

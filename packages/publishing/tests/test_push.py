@@ -167,12 +167,42 @@ def test_a_ref_outside_the_commit_and_tag_chain_is_refused(repo, names, remote):
     refused(push(repo, "origin", "docs/tree"), "not a commit")
 
 
-def test_four_tags_in_one_push_are_refused(repo, names, remote):
+@pytest.mark.parametrize("count", [2, 3, 4])
+def test_a_push_creating_more_than_one_tag_is_refused_naming_the_count(
+        repo, names, remote, count):
     public_repo(repo, PIECE, sets=("main=main", "free-ref=refs/tags/docs/*"))
-    for n in range(4):
+    for n in range(count):
         git(repo, "tag", f"docs/t{n}")
-    refused(push(repo, "origin", *[f"docs/t{n}" for n in range(4)]), "4 tags")
-    passed(push(repo, "origin", *[f"docs/t{n}" for n in range(3)]))
+    done = push(repo, "origin", *[f"docs/t{n}" for n in range(count)])
+    refused(done, f"the push creates {count} tags; a push creates at most one tag, so "
+                  "each gets its own push event and release run: push them one at a time")
+    assert git(remote, "tag", "--list").stdout == ""
+    assert log_lines() == []
+    # One at a time, each passes.
+    for n in range(count):
+        passed(push(repo, "origin", f"docs/t{n}"))
+
+
+def test_one_tag_per_push_counts_tags_of_every_kind(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main", "free-ref=refs/tags/docs/*",
+                                   "free-ref=refs/tags/note-*"))
+    git(repo, "tag", "docs/light")
+    git(repo, "tag", "-a", "-m", "annotated", "note-annotated")
+    refused(push(repo, "origin", "docs/light", "note-annotated"), "creates 2 tags")
+
+
+def test_one_tag_per_push_counts_only_tags_it_creates(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main", "free-ref=refs/tags/docs/*"))
+    for name in ("docs/old", "docs/moved"):
+        git(repo, "tag", name)
+    passed(push(repo, "origin", "docs/old"))
+    passed(push(repo, "origin", "docs/moved"))
+    commit(repo, "Add")
+    git(repo, "tag", "-f", "docs/moved")
+    git(repo, "tag", "docs/new")
+    # One created, one moved, one deleted, and a branch: one tag created, so it passes.
+    passed(push(repo, "-f", "origin", "main", "docs/new", "docs/moved", ":refs/tags/docs/old"))
+    assert sorted(git(remote, "tag", "--list").stdout.split()) == ["docs/moved", "docs/new"]
 
 
 def test_a_ref_name_holding_a_private_name_is_refused(pub):

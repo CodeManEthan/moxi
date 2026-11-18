@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- Three more Claude Code screens are on the startup list with no setting, so a slot launch
+  held on one fails at once, `screen-not-answered`, naming the screen: the first-run
+  theme picker and welcome screen (the line says to run `claude` once in a terminal with
+  the same `CLAUDE_CONFIG_DIR` and finish its setup) and the "Claude in Chrome extension
+  detected" dialog (the line says to answer it once in a terminal session). The launcher
+  never answers them. Needs slots with `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME` and
+  `CLAUDE_CHROME_DIALOG`.
+- The `no-ready` line now reads "not ready: turns never reported the session ready; a
+  screen the launcher does not know may be waiting, or turns may not be running in the
+  session; attach to slot N", naming both causes.
+- A Claude slot launch watches for every screen on the launcher's startup list (folder
+  trust, development channels, the bypass-permissions warning) whatever the settings say.
+  A screen whose `startup.*` setting is off now ends the launch at once,
+  `screen-not-answered` (exit 1), with nothing pressed, the rows the screen showed and the
+  setting that would answer it. Before, the launch waited out its watch. New setting
+  `startup.bypass_warning` (off, asked at install) lets the launcher accept the bypass
+  warning, after which Claude Code writes `skipDangerousModePermissionPrompt: true` into
+  `~/.claude/settings.json`.
+- With `startup.trust_dialog` on, a Claude slot launch marks its folder's git root trusted
+  in Claude Code's `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set) just
+  before the session starts, and records a `trust-seed` event.
+- Every slot launch waits for ready, up to `ready.wait_s`, whether or not it owes a first
+  turn. A fresh launch or a resume not ready in time now ends `failed`, `no-ready`, exit 1,
+  where it used to end `started`, so a slow but healthy session can read `failed`; the
+  session is left running. With nothing that can report ready (no turns) the launch ends
+  `started` with the reason `ready-unknown`, and a Claude slot launch then takes
+  `startup.wait_s` before it returns.
+- A relaunch is flagged, never failed, by a screen the launcher won't answer or no ready:
+  its row stays `started` with a `flagged` event and the result's `finding`. A self
+  relaunch's run ends `first-turn-not-sent` with the finding as its word (a self
+  relaunch's `no-ready` row used to end `failed`); a director's ends `relaunched` with the
+  finding as its word and now tells the directors. `relaunch-failed` stays for a new
+  session that is not running.
+- A `bypassPermissions` Claude slot launch passes `--settings <request id>.settings.json`,
+  a run file holding `skipDangerousModePermissionPrompt: true` for that launch only, merged
+  with the launch's own `--settings` (a JSON string, or a file read and never changed),
+  which it replaces on the argv. The run-file sweep removes it.
+- A Codex launch, in interactive, host and exec mode, settles its folder's trust on its
+  own argv: `trusted` with `trust_cwd` on; with it off, nothing when your Codex config gives
+  the folder or its git project a trust level, else `trusted` for that launch only. The
+  launch records the case as its `trust` value and `preview` prints it. Codex no longer
+  writes a trust entry for a launch. Earlier Codex launches under turns' host, or headless,
+  may have left `[projects."<path>"]` tables with `trust_level = "trusted"` in
+  `~/.codex/config.toml` (`$CODEX_HOME/config.toml`), sometimes for a whole repository;
+  they look like your own entries, so check that file. The no-ready line of a Codex slot
+  launch no longer suggests the trust prompt.
+- README: a section "What the launcher changes on your machine".
+- A launch whose comms identity is a send-only name a program registered is refused as
+  `identity <name> is a send-only name a program registered`, where it used to say the
+  name had no owner.
 - A headless launch with a comms identity runs where comms' wrapper takes the headless
   flags: comms' API names those harnesses in `HEADLESS` (read by
   `presets.comms_headless`), today Codex, which then runs `moxi comms codex ...
@@ -20,7 +70,6 @@
   `[defaults]` it is left out without one, as `director` and `scope` are. `keep_warm`
   and `recycle_on_expiry` are left out of a headless launch with an identity with a
   warning. The size checks count the brief on `--brief` as the opening prompt.
-
 - Every setting but the two name templates carries page fields, which `moxi config
   launcher show --json` prints and the settings page draws: a plain label, a line where
   the label can't carry it, the unit of each wait and count, six settings shown first

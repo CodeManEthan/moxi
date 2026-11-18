@@ -390,18 +390,26 @@ def post_modern(daemon, method: str, *, token, timeout=10.0, **params):
         conn.close()
 
 
-@pytest.mark.timed
-def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open(
-        serving, sessions):
+#: How long the refusal of `subscriptions/listen` may take, in seconds.
+LISTEN_REFUSED_S = 2.0
+#: The land-check tests' bounds are five times the timed ones, so load alone doesn't
+#: fail them and an answer that never came does (each client waits twice as long).
+LOOSE = 5
+
+
+def _refuse_subscriptions_listen(serving, sessions) -> float:
+    """Ask for `subscriptions/listen`, check it is refused as JSON and that the
+    protocol's other requests are still served, and return how long the refusal took."""
     daemon = serving(tools=whoami_tool)
     s = sessions()
     s.bind()
     started = time.monotonic()
-    # What Claude Code 2.1.316 asks for: the tool list's changes.
+    # What Claude Code 2.1.316 asks for: the tool list's changes. The client waits
+    # twice the loose bound, so a stream held open fails on the bound.
     status, headers, body, _ = post_modern(daemon, "subscriptions/listen", token=s.token,
-                                           timeout=3,
+                                           timeout=2 * LOOSE * LISTEN_REFUSED_S,
                                            notifications={"toolsListChanged": True})
-    assert time.monotonic() - started < 2 * timed_slack()
+    took = time.monotonic() - started
     assert headers["content-type"].startswith("application/json")
     error = json.loads(body)["error"]
     assert (status, error["code"]) == (404, -32601), body
@@ -409,6 +417,22 @@ def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open(
     status, _, body, _ = post_modern(daemon, "tools/list", token=s.token)
     assert status == 200
     assert [t["name"] for t in json.loads(body)["result"]["tools"]] == ["whoami"]
+    return took
+
+
+def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open(
+        serving, sessions):
+    took = _refuse_subscriptions_listen(serving, sessions)
+    assert took < LOOSE * LISTEN_REFUSED_S, took
+
+
+@pytest.mark.timed
+def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open_in_time(
+        serving, sessions, timed_reading):
+    """As above, with the refusal under 2 s."""
+    took = _refuse_subscriptions_listen(serving, sessions)
+    timed_reading(took, LISTEN_REFUSED_S, "s")
+    assert took < LISTEN_REFUSED_S * timed_slack(), took
 
 
 def test_the_capabilities_advertise_no_list_changed_and_no_subscribe(serving, sessions):
@@ -672,9 +696,12 @@ def test_run_on_loop_refuses_from_the_loop_and_without_one(rig):
         unstarted.run_on_loop(asyncio.sleep(0))
 
 
-@pytest.mark.timed
-def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound(serving, sessions,
-                                                                monkeypatch):
+#: How long a stop may take with a request in flight, in seconds.
+STOP_IN_FLIGHT_S = 5.0
+
+
+def _stop_with_a_request_in_flight(serving, sessions, monkeypatch) -> float:
+    """Stop the daemon while a tool call hangs, and return how long the stop took."""
     monkeypatch.setattr(mcp_server, "GRACE", 1)
     monkeypatch.setattr(mcp_server, "STOP_WAIT", 2.0)
     entered = threading.Event()
@@ -689,14 +716,33 @@ def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound(serving, sessions
     daemon = serving(tools=tools)
     s = sessions()
     s.bind()
+    # The caller waits twice the loose bound, so a stop that waits on it fails on the
+    # bound.
     caller = threading.Thread(
-        target=lambda: _quietly(post, daemon, call("hang"), token=s.token, timeout=10))
+        target=lambda: _quietly(post, daemon, call("hang"), token=s.token,
+                                timeout=2 * LOOSE * STOP_IN_FLIGHT_S))
     caller.start()
     assert entered.wait(10)
     started = time.monotonic()
     daemon.stop()
-    assert time.monotonic() - started < 5 * timed_slack()
+    took = time.monotonic() - started
     caller.join(10)
+    return took
+
+
+def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound(serving, sessions,
+                                                                monkeypatch):
+    took = _stop_with_a_request_in_flight(serving, sessions, monkeypatch)
+    assert took < LOOSE * STOP_IN_FLIGHT_S, took
+
+
+@pytest.mark.timed
+def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound_in_time(
+        serving, sessions, monkeypatch, timed_reading):
+    """As above, with the stop under 5 s."""
+    took = _stop_with_a_request_in_flight(serving, sessions, monkeypatch)
+    timed_reading(took, STOP_IN_FLIGHT_S, "s")
+    assert took < STOP_IN_FLIGHT_S * timed_slack(), took
 
 
 def _quietly(fn, *a, **kw):
@@ -803,10 +849,11 @@ def _import_ms(module: str) -> float:
 
 
 @pytest.mark.timed
-def test_the_endpoints_import_is_paid_by_the_daemon_start_alone():
+def test_the_endpoints_import_is_paid_by_the_daemon_start_alone(timed_reading):
     """The daemon's own module stays far under what the endpoint's libraries cost, which
     are paid once, at a daemon start with `[mcp] enabled`."""
     endpoint = statistics.median(_import_ms("moxi_comms.mcp.server") for _ in range(3))
     daemon = statistics.median(_import_ms("moxi_comms.daemon") for _ in range(3))
+    timed_reading(endpoint, 1500, "ms", clock="child")
     assert endpoint < 1500 * timed_slack(), endpoint
     assert daemon < endpoint / 2, (daemon, endpoint)

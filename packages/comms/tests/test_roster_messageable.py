@@ -261,14 +261,14 @@ def test_the_unanswered_line_still_rides_the_authors_delta(monkeypatch, tmp_path
 # ------------------------------------------------------------------- send-only names
 
 CONSOLE = {"qualified": "console", "name": "console", "scope": "global",
-           "kind": "send-only", "module": "launcher"}
+           "kind": "send-only", "module": "launcher", "holder": "module"}
 RELAY = {"qualified": "relay", "name": "relay", "scope": "global", "kind": "send-only",
-         "module": None}
+         "module": None, "holder": None}
 HERALD = {"qualified": "herald", "name": "herald", "scope": "global", "kind": "agent",
           "module": None}
 SEND_ONLY_ROWS = [
     "console                  send-only, reserved for launcher",
-    "relay                    send-only, no module holds it (kept from an older comms)"]
+    "relay                    send-only, nothing holds it (kept from an older comms)"]
 
 
 def test_a_reserved_name_is_a_send_only_row_after_the_bindings():

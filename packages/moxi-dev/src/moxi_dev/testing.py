@@ -114,12 +114,15 @@ starts with, else it is skipped.
 
 Timed tests. A test that asserts a wall-clock budget (a median under so many
 milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
-its tier. Beside other tests on a loaded machine such a test measures the machine, so
-`moxi-dev check` never runs one beside another: its parallel pass holds the timed tests
-back and a serial pass afterwards runs them alone. A test whose bound only tells a
+its tier. On a loaded machine such a test measures the machine, so `moxi-dev check`
+runs no timed test: it holds every one back, and `moxi-dev timed` runs them on their
+own. A test whose bound only tells a
 deadline or timeout that fired from one that never did (a 0.3 s timeout that must return
-in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
-timed test where it falls, like any other.
+in under 0.9 s) splits in two. The land-check test carries no `timed`, keeps every
+behaviour assertion, and holds five times the bound with no factor, so a guard that never
+fired fails it and load alone doesn't. Its twin, named `<test>_in_time`, carries `timed`
+and holds the bound times `timed_slack()`. A plain `pytest`, with neither of the values
+below, runs a timed test where it falls, like any other.
 
 `MOXI_TEST_TIMED_SLACK=<factor>`, read once from the environment pytest starts with, is
 how much slower than the machine that set the budgets this one may be: a finite number
@@ -128,7 +131,44 @@ test too. In a `timed` test, every upper bound on a wall-clock measurement of th
 itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied by
 `timed_slack()`. Lower bounds (a wait that must have happened), ratios between two
 measurements of the same run and counts are left alone: a slower machine slows both
-sides of a ratio. A test marked `timed` follows this rule whenever it is marked.
+sides of a ratio. A test marked `timed` follows this rule whenever it is marked. A
+scheduled run of `moxi-dev timed` measures at its machine's set factor: its tick sets the
+variable to the factor `moxi-dev timed schedule --slack` set on that machine, 1 by default.
+
+The idle gate. `MOXI_TEST_IDLE=<line>@<deadline>`, read from the environment pytest
+starts with, gates every `timed` test the run runs: `<line>` is how much other work, in
+CPUs, may run on the machine while a test measures (a number above 0), and `<deadline>`
+is the run's last moment to wait for that, in Unix seconds. `moxi-dev timed` sets it;
+unset, nothing is gated. Before a timed test's call phase (its fixtures already built)
+the kit samples the gauge for `GATE_SAMPLE_S` (0.5 s). Under the line, the test runs.
+Over it, the kit samples again every `GATE_RESAMPLE_S` (10 s) while the next sample would
+start by the deadline; if none reads under the line, the test is "not measured" and
+doesn't run. The deadline bounds only the waiting: a test past it still takes its one
+sample, and never waits for another, so one deadline shared by every session of a run
+spends its wait once. A test that starts within `GATE_CHAIN_S` (1 s) of the previous
+timed test's end, when that test's window read under the line, takes no sample: its
+window begins where that one ended. After the call phase the kit reads the gauge again.
+A test's window runs from the start of the gate's last sample to the end of its call
+phase, and a test whose window read at or over the line is "not measured" whatever it
+read, a pass or a failure alike. Each timed test ends `passed`, `failed`, `not measured`
+or `skipped` (its own skip, as pytest says). pytest reports "not measured" as a skip whose
+reason starts `not measured:` and names the other work, the line and the wait; a failure
+it voided keeps its text in `durations.json`, not among pytest's failures.
+
+The gauge (`Gauge`). On Linux it reads the first line of `/proc/stat`, every CPU's time
+in clock ticks (user, nice, system, irq, softirq and steal are busy; idle and iowait are
+not), and this process's CPU time with its reaped children's, from `os.times`. Other
+work over an interval is the busy ticks' rise less this process's CPU time in ticks,
+divided by the interval's ticks per CPU. Where there is no `/proc/stat` (macOS) it falls
+back to the one-minute load average, read when the gate samples and after the call, the
+higher judged against the line in the load average's own units; it can miss a burst
+shorter than about 20 s. Where neither exists (Windows) there is no gauge, and every timed
+test the gate meets is "not measured: no gauge on this system".
+
+A timed test reports what it measured through the `timed_reading` fixture, called once:
+`timed_reading(value, budget, unit)`, with `clock="child"` when a child process measured
+itself and the test read what it printed. A test that doesn't call it still records its
+outcome.
 
 Selection. Five variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
@@ -160,7 +200,13 @@ A test put back gets the marker `lifted`, and the run's `-m` expression becomes
 Durations. Each run writes `durations.json`: every test's seconds by phase (`setup`,
 `call`, `teardown`), its outcome and, for a test this run put back, `lifted` with its
 tiers, from the reports the main process sees (under xdist, the controller's), and,
-under `MOXI_TEST_TIMED=hold`, the `held` tests' ids. It goes to the path in
+under `MOXI_TEST_TIMED=hold`, the `held` tests' ids. Under the idle gate each timed test
+has a `timed` entry: `outcome`, `clock` (`wall` or `child`), `gauge` (`stat`, `loadavg`
+or `none`), `other` (other work over its window, or at the gate's last sample when it
+never ran), `line`, `reading`, `budget` and `unit` (from `timed_reading`, else null),
+`failure` (a failure's text, kept when the gate voided it) and `waited_s`; and the file
+has a `gate` entry: the gauge, the line, the deadline, the gate's first sample and the
+seconds it waited in all. It goes to the path in
 `MOXI_TEST_DURATIONS`, else to
 `moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
 off) nothing is written.
@@ -187,7 +233,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
@@ -214,8 +260,8 @@ MARKERS = {
     "touches(*globs)": "the repository paths whose change puts this test back in "
                        "moxi-dev check",
     "finding(tag)": "the finding this test holds",
-    "timed": "asserts a wall-clock budget; moxi-dev check runs it alone, in a serial "
-             "pass after the parallel one",
+    "timed": "asserts a wall-clock budget; moxi-dev check holds it back, and "
+             "moxi-dev timed runs it",
     "honest_fsync": "os.fsync is the real one in this test",
     "honest_ports": "the unit plan's listener check makes its real TCP connect in this "
                     "test",
@@ -238,6 +284,9 @@ TIMED_MODES = ("hold", "only")
 #: A factor of at least 1 for every upper bound of a `timed` test (module doc, Timed
 #: tests).
 TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
+#: The descriptor, open on the run lock, that a scheduled tick hands the `moxi-dev timed`
+#: run it starts, which the run locks again in place of opening its own (`moxi_dev.timed`).
+TIMED_LOCK_FD_ENV = "MOXI_TEST_TIMED_LOCK_FD"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 
@@ -695,6 +744,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # fenced test sees the fenced one, so the outer run's selection never reaches it.
     config.stash[_SELECTION] = selection(os.environ)
     config.pluginmanager.register(_TimedSplit(), "moxi-dev-timed")
+    asked = idle(os.environ)
+    if asked is not None:
+        config.stash[_GATE] = gate = _Gate(config, asked)
+        config.pluginmanager.register(gate, "moxi-dev-gate")
     if not hasattr(config, "workerinput"):          # an xdist worker reports to the main
         config.pluginmanager.register(_Durations(config), "moxi-dev-durations")
     # Read once, from the environment this process started with: a pytest run inside a
@@ -930,6 +983,13 @@ class _Durations:
             entry["outcome"] = "skipped"
         else:
             entry.setdefault("outcome", "passed")
+        timed = getattr(report, _TIMED_REPORT, None)
+        if timed is not None:
+            entry["timed"] = timed
+        elif report.when == "teardown" and report.failed and "timed" in entry:
+            # A teardown that failed fails the test, whatever its window read.
+            entry["timed"] = {**entry["timed"], "outcome": "failed",
+                              "failure": entry["timed"]["failure"] or report.longreprtext}
 
     def path(self) -> Path | None:
         given = os.environ.get(DURATIONS_ENV)
@@ -948,9 +1008,383 @@ class _Durations:
         chosen = self.config.stash.get(_SELECTION, None)
         if chosen is not None and chosen.timed == "hold":
             body["held"] = sorted(self.held | set(self.config.stash.get(_HELD, [])))
+        gate = self.config.stash.get(_GATE, None)
+        if gate is not None:
+            body["gate"] = gate.summary()
         part.write_text(json.dumps(body, indent=1, sort_keys=True) + "\n",
                         encoding="utf-8")
         os.replace(part, path)
+
+
+# --- the idle gate ---------------------------------------------------------------------
+
+#: `<line>@<deadline>`: how much other work, in CPUs, may run while a `timed` test
+#: measures, and the run's last moment to wait for that, in Unix seconds (module doc,
+#: The idle gate).
+IDLE_ENV = "MOXI_TEST_IDLE"
+
+#: The kernel's count of every CPU's time, in clock ticks, which the Linux gauge reads.
+PROC_STAT = "/proc/stat"
+
+#: How long the gate samples the gauge before a timed test, in seconds.
+GATE_SAMPLE_S = 0.5
+#: How often the gate samples again while other work is over the line, in seconds.
+GATE_RESAMPLE_S = 10.0
+#: How soon after the previous timed test's end a test must start to carry on its
+#: window without a sample of its own, in seconds.
+GATE_CHAIN_S = 1.0
+
+#: The gauges, as the record names them: the kernel's CPU counters, the one-minute load
+#: average, or none on this system.
+GAUGES = ("stat", "loadavg", "none")
+
+#: The clocks `timed_reading` takes: the test's own wall clock, or a child process that
+#: measured itself and printed its reading.
+TIMED_CLOCKS = ("wall", "child")
+
+#: The outcome of a timed test whose result the gate didn't count.
+NOT_MEASURED = "not measured"
+
+#: The attribute a report carries the test's `timed` entry in, which xdist hands on.
+_TIMED_REPORT = "moxi_dev_timed"
+#: The key under which an xdist worker hands the controller its gate's figures.
+_GATE_KEY = "moxi_dev_gate"
+#: `/proc/stat`'s busy fields, after the line's `cpu` (guest time is inside user's).
+_BUSY_FIELDS = (0, 1, 2, 5, 6, 7)          # user, nice, system, irq, softirq, steal
+_IDLE_FIELDS = (3, 4)                      # idle, iowait
+_PER_CPU = re.compile(r"cpu[0-9]+")
+
+
+@dataclasses.dataclass(frozen=True)
+class Idle:
+    """What `MOXI_TEST_IDLE` asks of the gate."""
+
+    #: Other work, in CPUs (the load average's own units on its gauge), a test's window
+    #: must stay under.
+    line: float
+    #: The run's last moment to wait for the line, in Unix seconds.
+    deadline: float
+
+
+def idle(env: Mapping[str, str]) -> Idle | None:
+    """The gate `env` asks for, None when it asks for none; `pytest.UsageError` for a bad
+    value."""
+    raw = env.get(IDLE_ENV, "").strip()
+    if not raw:
+        return None
+    line_text, sep, deadline_text = raw.partition("@")
+    try:
+        line, deadline = float(line_text), float(deadline_text)
+    except ValueError:
+        line = deadline = math.nan
+    if not (sep and math.isfinite(line) and line > 0 and math.isfinite(deadline)):
+        raise pytest.UsageError(
+            f"{IDLE_ENV} is <line>@<deadline>: other work in CPUs, above 0, and the last "
+            f"moment to wait, in Unix seconds; it is {raw!r}")
+    return Idle(line=line, deadline=deadline)
+
+
+# The gauge's sources, one function each so a test can put a stand-in machine in their
+# place.
+
+def _read_proc_stat() -> str | None:
+    """`/proc/stat`'s text, None where it can't be read."""
+    try:
+        with open(PROC_STAT, encoding="ascii") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _load_average() -> float | None:
+    """The one-minute load average, None where the system has none."""
+    try:
+        return os.getloadavg()[0]
+    except (AttributeError, OSError):
+        return None
+
+
+def _own_cpu_s() -> float:
+    """This process's CPU time and its reaped children's, in seconds."""
+    spent = os.times()
+    return spent.user + spent.system + spent.children_user + spent.children_system
+
+
+def _ticks_per_s() -> int:
+    """How many clock ticks `/proc/stat` counts in a second."""
+    try:
+        return os.sysconf("SC_CLK_TCK")
+    except (AttributeError, ValueError, OSError):
+        return 100
+
+
+def _now() -> float:
+    """Now, in Unix seconds."""
+    return time.time()
+
+
+def _pause(seconds: float) -> None:
+    """Wait `seconds`."""
+    time.sleep(seconds)
+
+
+def stat_counts(text: str) -> tuple[int, int, int]:
+    """From `/proc/stat`'s text: the busy ticks and every tick over all CPUs, and how many
+    CPUs it lists. Busy is user, nice, system, irq, softirq and steal; idle and iowait
+    are not. `ValueError` when it has no `cpu` line."""
+    busy = total = cpus = 0
+    found = False
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] == "cpu":
+            values = [int(value) for value in fields[1:9]]
+            values += [0] * (8 - len(values))
+            busy = sum(values[i] for i in _BUSY_FIELDS)
+            total = busy + sum(values[i] for i in _IDLE_FIELDS)
+            found = True
+        elif _PER_CPU.fullmatch(fields[0]):
+            cpus += 1
+    if not found:
+        raise ValueError(f"{PROC_STAT} has no line for all CPUs")
+    return busy, total, cpus or os.cpu_count() or 1
+
+
+@dataclasses.dataclass(frozen=True)
+class GaugeReading:
+    """One reading of the gauge."""
+
+    #: When it was taken, in Unix seconds.
+    at: float
+    #: `stat`: the busy ticks and every tick over all CPUs, and the CPU count.
+    busy: int = 0
+    total: int = 0
+    cpus: int = 1
+    #: `stat`: this process's CPU time and its reaped children's, in seconds.
+    own_s: float = 0.0
+    #: `loadavg`: the one-minute load average.
+    load: float = 0.0
+
+
+@dataclasses.dataclass(frozen=True)
+class Gauge:
+    """How much other work runs on this machine (module doc, The idle gate)."""
+
+    #: One of `GAUGES`.
+    kind: str
+
+    @classmethod
+    def find(cls) -> Gauge:
+        """The gauge this system has: `stat`, else `loadavg`, else `none`."""
+        if _read_proc_stat() is not None:
+            return cls("stat")
+        if _load_average() is not None:
+            return cls("loadavg")
+        return cls("none")
+
+    def read(self) -> GaugeReading:
+        """A reading now."""
+        at = _now()
+        if self.kind == "stat":
+            busy, total, cpus = stat_counts(_read_proc_stat() or "")
+            return GaugeReading(at=at, busy=busy, total=total, cpus=cpus,
+                                own_s=_own_cpu_s())
+        if self.kind == "loadavg":
+            return GaugeReading(at=at, load=_load_average() or 0.0)
+        return GaugeReading(at=at)
+
+    def other(self, start: GaugeReading, end: GaugeReading) -> float:
+        """Other work between two readings. `stat`: the busy ticks' rise less this
+        process's CPU time in ticks, divided by the interval's ticks per CPU, in CPUs.
+        `loadavg`: the higher of the two load averages."""
+        if self.kind == "loadavg":
+            return max(start.load, end.load)
+        if self.kind != "stat":
+            return 0.0
+        total = end.total - start.total
+        if total <= 0:
+            return 0.0
+        own = (end.own_s - start.own_s) * _ticks_per_s()
+        return max(0.0, end.busy - start.busy - own) / (total / end.cpus)
+
+    def sample(self) -> tuple[GaugeReading, float]:
+        """One sample before a test: its first reading, and other work over it. On
+        `stat` it lasts `GATE_SAMPLE_S`; the load average is read once."""
+        start = self.read()
+        if self.kind != "stat":
+            return start, self.other(start, start)
+        _pause(GATE_SAMPLE_S)
+        return start, self.other(start, self.read())
+
+    def describe(self, other: float) -> str:
+        """Other work in words: CPUs, or the load average in its own units."""
+        if self.kind == "loadavg":
+            return f"load average {other:.2f}"
+        return f"other work {other:.2f} CPUs"
+
+
+@dataclasses.dataclass
+class _Window:
+    """A timed test's window: where it starts, and what the gate waited for it."""
+
+    start: GaugeReading
+    waited_s: float
+
+
+_WINDOW = pytest.StashKey[_Window]()
+#: Why the gate kept a test from running, and other work at its last sample (None with
+#: no gauge).
+_KEPT_OUT = pytest.StashKey[tuple[str, float | None, float]]()
+_READING = pytest.StashKey[dict[str, Any]]()
+_GATE = pytest.StashKey["_Gate"]()
+
+
+class _Gate:
+    """The idle gate around every `timed` test (module doc, The idle gate)."""
+
+    def __init__(self, config: pytest.Config, asked: Idle) -> None:
+        self.config = config
+        self.line = asked.line
+        self.deadline = asked.deadline
+        self.gauge = Gauge.find()
+        #: The end of the previous timed test's window, when it read under the line.
+        self.last: GaugeReading | None = None
+        self.first_sample: float | None = None
+        self.waited_s = 0.0
+
+    def summary(self) -> dict[str, Any]:
+        """The gate's figures for `durations.json`."""
+        return {"gauge": self.gauge.kind, "line": self.line, "deadline": self.deadline,
+                "first_sample": _rounded(self.first_sample),
+                "waited_s": round(self.waited_s, 3)}
+
+    def _keep_out(self, item: pytest.Item, reason: str, other: float | None,
+                  waited_s: float) -> None:
+        item.stash[_KEPT_OUT] = (reason, other, waited_s)
+        pytest.skip(reason)
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_call(self, item: pytest.Item) -> None:
+        """Before the test's call phase: carry on the previous window, or sample until
+        other work is under the line, or keep the test out."""
+        if not item.get_closest_marker(TIMED):
+            return
+        if self.gauge.kind == "none":
+            self._keep_out(item, f"{NOT_MEASURED}: no gauge on this system", None, 0.0)
+        last, self.last = self.last, None
+        if last is not None and _now() - last.at <= GATE_CHAIN_S:
+            item.stash[_WINDOW] = _Window(start=last, waited_s=0.0)
+            return
+        start, other = self.gauge.sample()
+        sampled = _now()
+        if self.first_sample is None:
+            self.first_sample = other
+        # The deadline bounds the waiting only: a test past it still takes its one
+        # sample, and never another.
+        while other >= self.line and start.at + GATE_RESAMPLE_S <= self.deadline:
+            _pause(max(0.0, start.at + GATE_RESAMPLE_S - _now()))
+            start, other = self.gauge.sample()
+        waited = max(0.0, _now() - sampled)
+        self.waited_s += waited
+        if other >= self.line:
+            self._keep_out(item, f"{NOT_MEASURED}: machine busy, "
+                                 f"{self.gauge.describe(other)} at or over the line "
+                                 f"{self.line:g}, waited {waited:.0f} s", other, waited)
+        item.stash[_WINDOW] = _Window(start=start, waited_s=waited)
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_runtest_makereport(self, item: pytest.Item,
+                                  call: pytest.CallInfo[None]
+                                  ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+        """After the call phase: read the gauge, judge the window, and put the test's
+        `timed` entry on its report."""
+        if not item.get_closest_marker(TIMED) or call.when == "teardown":
+            return (yield)
+        window = item.stash.get(_WINDOW, None) if call.when == "call" else None
+        end = self.gauge.read() if window is not None else None
+        report = yield
+        if call.when == "setup" and report.passed:
+            return report
+        entry: dict[str, Any] = {
+            "outcome": report.outcome, "clock": "wall", "gauge": self.gauge.kind,
+            "other": None, "line": self.line, "reading": None, "budget": None,
+            "unit": None, "failure": report.longreprtext if report.failed else None,
+            "waited_s": 0.0}
+        entry.update(item.stash.get(_READING, {}))
+        kept_out = item.stash.get(_KEPT_OUT, None) if call.when == "call" else None
+        if kept_out is not None:
+            _, other, waited = kept_out
+            entry.update(outcome=NOT_MEASURED, other=_rounded(other),
+                         waited_s=round(waited, 3))
+        elif window is not None and end is not None:
+            other = self.gauge.other(window.start, end)
+            under = other < self.line
+            entry.update(other=_rounded(other), waited_s=round(window.waited_s, 3))
+            self.last = end if under else None
+            if not under and (report.passed or report.failed) \
+                    and not hasattr(report, "wasxfail"):
+                entry["outcome"] = NOT_MEASURED
+                where, line = item.reportinfo()[:2]
+                reason = (f"{NOT_MEASURED}: machine busy, {self.gauge.describe(other)} "
+                          f"over the test's window, at or over the line {self.line:g}, "
+                          f"waited {window.waited_s:.0f} s")
+                report.outcome = "skipped"
+                # The shape pytest gives a skip: where, and the reason after `Skipped: `.
+                report.longrepr = (os.fspath(where), (line or 0) + 1, f"Skipped: {reason}")
+        setattr(report, _TIMED_REPORT, entry)
+        return report
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        output = getattr(self.config, "workeroutput", None)
+        if output is not None:                  # an xdist worker hands its figures on
+            output[_GATE_KEY] = {"first_sample": self.first_sample,
+                                 "waited_s": self.waited_s}
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node: Any, error: Any) -> None:
+        """An xdist worker is done: add its waits to the run's."""
+        figures = (getattr(node, "workeroutput", None) or {}).get(_GATE_KEY) or {}
+        if self.first_sample is None:
+            self.first_sample = figures.get("first_sample")
+        self.waited_s += figures.get("waited_s") or 0.0
+
+
+def _rounded(value: float | None) -> float | None:
+    return None if value is None else round(value, 3)
+
+
+@pytest.fixture
+def timed_reading(request: pytest.FixtureRequest) -> Callable[..., None]:
+    """The reporter a `timed` test calls once with what it measured (module doc, The
+    idle gate): `timed_reading(value, budget, unit, *, clock="wall")`.
+
+    `value` and `budget` are finite numbers in `unit` (`"ms"`, `"s"`, `"us"`, a ratio's
+    `"x"`); `clock` is `"child"` when a child process measured itself and the test read
+    what it printed. Under the gate the kit writes them into the test's `timed` entry in
+    `durations.json`. A test not marked `timed` that asks for it fails at setup, and a
+    second call raises `ValueError`."""
+    item = request.node
+    if not item.get_closest_marker(TIMED):
+        pytest.fail("timed_reading is for a test marked timed", pytrace=False)
+
+    def report(value: float, budget: float, unit: str, *, clock: str = "wall") -> None:
+        if _READING in item.stash:
+            raise ValueError("a timed test reports its reading once")
+        for name, number in (("value", value), ("budget", budget)):
+            if isinstance(number, bool) or not isinstance(number, (int, float)) \
+                    or not math.isfinite(number):
+                raise ValueError(f"timed_reading's {name} is a finite number; it is "
+                                 f"{number!r}")
+        if not isinstance(unit, str) or not unit.strip():
+            raise ValueError(f"timed_reading's unit names the unit; it is {unit!r}")
+        if clock not in TIMED_CLOCKS:
+            raise ValueError(f"timed_reading's clock is one of {', '.join(TIMED_CLOCKS)}; "
+                             f"it is {clock!r}")
+        item.stash[_READING] = {"reading": float(value), "budget": float(budget),
+                                "unit": unit, "clock": clock}
+
+    return report
 
 
 # --- a seam with two implementations -------------------------------------------------------
@@ -1332,11 +1766,13 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
-           "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
-           "MARKERS", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
-           "TIERS_ENV", "TIMED", "TIMED_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES",
-           "WINDOWS_KEPT_ENV",
-           "console_script", "fence", "findings_of", "param_id", "selection", "served",
-           "short_dir", "terminal_record", "timed_slack", "touches_match", "uv_env", "wait_for",
-           "write_sqlite"]
+__all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
+           "GATE_CHAIN_S", "GATE_RESAMPLE_S", "GATE_SAMPLE_S", "GAUGES", "Fence",
+           "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
+           "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
+           "PROC_STAT", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam",
+           "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_CLOCKS", "TIMED_ENV",
+           "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "console_script", "fence", "findings_of", "idle", "param_id", "selection",
+           "served", "short_dir", "stat_counts", "terminal_record", "timed_reading",
+           "timed_slack", "touches_match", "uv_env", "wait_for", "write_sqlite"]

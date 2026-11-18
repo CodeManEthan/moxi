@@ -43,7 +43,7 @@ def test_the_runner_imports_only_its_own_two_modules_and_the_standard_library(de
 
 
 @pytest.mark.timed
-def test_the_runner_imports_in_under_10_ms(demo):
+def test_the_runner_imports_in_under_10_ms(demo, timed_reading):
     python = str(demo.hook_env["python"])
     # The suite's other workers can load the machine (eight parallel committer passes, a
     # pass over thousands of files), so a median over the bound is measured again, twice.
@@ -52,6 +52,7 @@ def test_the_runner_imports_in_under_10_ms(demo):
         if statistics.median(times) < 10_000:
             break
         time.sleep(1)
+    timed_reading(statistics.median(times), 10_000, "us", clock="child")
     assert statistics.median(times) < 10_000 * timed_slack(), times
 
 
@@ -72,7 +73,7 @@ def _import_times(python: str) -> list[int]:
 
 
 @pytest.mark.timed
-def test_a_git_hook_costs_under_twice_a_bare_interpreter(demo):
+def test_a_git_hook_costs_under_twice_a_bare_interpreter(demo, timed_reading):
     repo = demo.repo()
     api.add(repo, ["demo/lint"])
     git(repo, "config", "moxi-repo.piece.demo/lint.enabled", "false")
@@ -91,5 +92,6 @@ def test_a_git_hook_costs_under_twice_a_bare_interpreter(demo):
         runner = wall([python, "-I", "-m", "moxi_repo.run", "pre-commit"])
         if runner < 2 * floor:
             break
+    timed_reading(runner / floor, 2, "x")
     assert runner < 2 * floor, (runner, floor)
     assert sys.platform != "win32"

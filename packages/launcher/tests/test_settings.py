@@ -17,6 +17,7 @@ DEFAULTS = {
     "startup.wait_s": 20,
     "startup.trust_dialog": False,
     "startup.dev_channels_dialog": False,
+    "startup.bypass_warning": False,
     "runs.keep_days": 30,
     "relaunch.wait_s": 900,
     "relaunch.person_s": 120,
@@ -56,7 +57,8 @@ def test_the_schema_declares_exactly_these_keys():
 
 def test_the_startup_keys_need_slots():
     schema = settings.schema()
-    for key in ("startup.wait_s", "startup.trust_dialog", "startup.dev_channels_dialog"):
+    for key in ("startup.wait_s", "startup.trust_dialog", "startup.dev_channels_dialog",
+                "startup.bypass_warning"):
         assert schema.keys[key].needs == "slots"
 
 
@@ -75,8 +77,8 @@ def test_a_key_set_in_the_file_wins():
 # -- page fields: how the settings page shows each key --------------------------------------
 
 #: The keys the settings page shows before More, in schema order.
-COMMON = ["startup.trust_dialog", "startup.dev_channels_dialog", "runs.keep_days",
-          "relaunch.fallback", "relaunch.pass_env", "records.keep_days"]
+COMMON = ["startup.trust_dialog", "startup.dev_channels_dialog", "startup.bypass_warning",
+          "runs.keep_days", "relaunch.fallback", "relaunch.pass_env", "records.keep_days"]
 #: The sub-heads behind More, in the order they first appear, and the keys under each.
 GROUPS = {
     "Waits": ["ready.wait_s", "first.wait_s", "startup.wait_s", "recycle.limit_wait_s",
@@ -107,14 +109,15 @@ def test_show_json_gives_every_key_but_the_templates_a_label(capsys):
     keys = show_json(capsys)
     assert {name for name, key in keys.items() if not key["label"]} == TEMPLATES
     assert keys["runs.keep_days"]["label"] == "Keep run files for"
-    assert keys["runs.keep_days"]["line"] == "A launch's prompt file and headless log."
+    assert keys["runs.keep_days"]["line"] == ("A launch's prompt file, settings file and "
+                                                 "headless log.")
     assert keys["ready.wait_s"]["label"] == "For a started session to be ready"
     assert keys["keep_warm.subagent_cap"]["label"] == "Nudges in a row, waiting on subagents"
     for key in keys.values():
         assert key["choices"] is None and key["pick"] is False and key["terminal"] is None
 
 
-def test_show_json_marks_six_keys_common_and_groups_the_rest(capsys):
+def test_show_json_marks_seven_keys_common_and_groups_the_rest(capsys):
     keys = show_json(capsys)
     assert [name for name, key in keys.items() if key["common"]] == COMMON
     assert all(keys[name]["group"] is None for name in COMMON)
@@ -137,14 +140,19 @@ def test_show_json_gives_each_wait_and_count_its_unit(capsys):
             assert key["unit"] is None, name
 
 
-def test_show_json_marks_the_four_changes_that_can_hurt(capsys):
+def test_show_json_marks_the_five_changes_that_can_hurt(capsys):
     keys = show_json(capsys)
     hurts = {name: key["hurts"] for name, key in keys.items() if key["hurts"]}
     assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",
-                          "relaunch.pass_env", "relaunch.director_pass_env"}
+                          "startup.bypass_warning", "relaunch.pass_env",
+                          "relaunch.director_pass_env"}
     trust = hurts["startup.trust_dialog"]
     assert (trust["when"], trust["stays"]) == ("on", True)
-    assert trust["says"] == "answers the trust question for every slot launch"
+    assert trust["says"] == "trusts the folder of every slot launch"
+    assert "~/.claude.json" in trust["confirm"]
+    bypass = hurts["startup.bypass_warning"]
+    assert (bypass["when"], bypass["stays"]) == ("on", True)
+    assert "~/.claude/settings.json" in bypass["confirm"]
     assert (hurts["startup.dev_channels_dialog"]["when"],
             hurts["startup.dev_channels_dialog"]["stays"]) == ("on", False)
     assert hurts["relaunch.pass_env"]["when"] == "add"

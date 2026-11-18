@@ -515,7 +515,7 @@ def test_a_codex_launch_stamps_the_pair_for_the_host_and_names_the_tools(
 # ------------------------------------------------------------------- import cost
 
 @pytest.mark.timed
-def test_the_contributor_and_listener_import_light():
+def test_the_contributor_and_listener_import_light(timed_reading):
     """turns imports both at every launch and session start: under 10 ms together, and
     none of the endpoint's libraries.
 
@@ -547,4 +547,5 @@ def test_the_contributor_and_listener_import_light():
         totals.append(total)
         if total < bound:
             break
+    timed_reading(min(totals), 10_000 * 1.25, "us", clock="child")
     assert min(totals) < bound, totals

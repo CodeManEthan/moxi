@@ -368,10 +368,11 @@ def test_agents_json_prints_exactly_what_roster_rows_returns(monkeypatch):
         "qualified": LEAD, "name": "lead", "scope": "proj-a", "live": True, "kind": None,
         "module": None, "tier": "chosen", "adapter": "codex", "directors": ["boss"],
         "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN],
-        "cache": {"kind": "warm", "until": 1300.0}}, {
+        "cache": {"kind": "warm", "until": 1300.0}, "holder": None}, {
         "qualified": "herald", "name": "herald", "scope": "global", "live": False,
         "kind": "agent", "module": None, "tier": None, "adapter": None, "directors": [],
-        "session_id": None, "bound_at": None, "awaiting": [], "cache": None}]})
+        "session_id": None, "bound_at": None, "awaiting": [], "cache": None,
+        "holder": None}]})
     assert asked == [{"timeout_s": api.READ_DEADLINE}]
     agents_json(deadline=3)
     assert asked[-1] == {"timeout_s": 3}
@@ -404,3 +405,34 @@ def test_agents_takes_seats_or_json_not_both(capsys):
         cli.main(["agents", "--seats", "--json"], ctx=cli.Context(out=io.StringIO()))
     assert exit_.value.code == moxi_exit.USAGE
     assert "not allowed with" in capsys.readouterr().err
+
+
+def test_a_send_only_row_says_who_holds_it_in_text_and_json(rig):
+    """A program's name reads `send-only, registered`, one an older comms kept `send-only,
+    nothing holds it`, and every send-only row of `--json` carries `holder`."""
+    from moxi_comms import reserved, secrets
+
+    reserved.register("ticker", chain=secrets.from_config())
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    from moxi.store import transaction
+    from moxi_comms.store import open_write
+
+    conn = open_write()
+    try:
+        with transaction(conn) as c:
+            c.execute("INSERT INTO reserved(name, state) VALUES ('relay', 'unowned')")
+    finally:
+        conn.close()
+    code, out = rig.cli(["agents"])
+    assert code == moxi_exit.OK, out
+    assert f"{'ticker':<24} send-only, registered" in out.splitlines()
+    assert f"{'console':<24} send-only, reserved for launcher" in out.splitlines()
+    assert (f"{'relay':<24} send-only, nothing holds it (kept from an older comms)"
+            in out.splitlines())
+    code, out = rig.cli(["agents", "--json"])
+    holders = {r["qualified"]: r["holder"] for r in json.loads(out)["rows"]
+               if r["kind"] == "send-only"}
+    assert holders == {"ticker": "program", "console": "module", "relay": None}
+    rows = {r.qualified: r for r in api.roster_rows()}
+    assert (rows["ticker"].kind, rows["ticker"].module, rows["ticker"].holder) == (
+        "send-only", None, "program")

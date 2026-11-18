@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from moxi_dev import check, cli, contract, new, rename, stamp
+from moxi_dev import check, cli, contract, new, rename, stamp, timed
 
 
 def test_help_lists_every_verb():
@@ -16,12 +16,12 @@ def test_help_lists_every_verb():
     proc = subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert all(verb in proc.stdout for verb in ("check", "contract", "new", "rename",
-                                                "stamp"))
+                                                "stamp", "timed"))
 
 
 @pytest.mark.parametrize("verb, module", [("check", check), ("contract", contract),
                                           ("new", new), ("rename", rename),
-                                          ("stamp", stamp)])
+                                          ("stamp", stamp), ("timed", timed)])
 def test_each_verb_gets_the_arguments_after_it(monkeypatch, verb, module):
     seen = []
     monkeypatch.setattr(module, "main", lambda argv: seen.append(argv) or 7)

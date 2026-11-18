@@ -33,6 +33,11 @@ test("send-only by kind or adapter, and reserved by a module", () => {
   assert.deepEqual(rowView(row({ adapter: "send-only" }), NOW).tags, ["live", "send-only"]);
 });
 
+test("a send-only name a program registered says so, with no module", () => {
+  assert.deepEqual(rowView(row({ live: false, kind: "send-only", module: null, holder: "program", session_id: null }),
+                           NOW).tags, ["standing", "send-only", "registered by a program"]);
+});
+
 test("the time held counts on the server's clock", () => {
   assert.equal(rowView(row({ bound_at: NOW - 30 }), NOW).bound, "bound for 30s");
   assert.equal(rowView(row({ bound_at: NOW + 5 }), NOW).bound, "bound for 0s");

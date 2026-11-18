@@ -133,16 +133,19 @@ TYPES = _types(
                "builder", "record", "host", "build")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
     # with the target, the argv, and how it went: its exit code (None for a run ended at
-    # its time limit), its duration and the file its output went to.
+    # its time limit), its duration and the file its output went to. A check by CI's
+    # local part that pushed the tip to CI's own ref names the remote and that ref
+    # (`pushed`).
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
-               "output")),
-    # CI was read for a build: the commit, its merge-base with the target, the two
-    # argvs that ran, each workflow by path with the id it read as, its reading and its
-    # run's url, and the whole reading.
+               "output", "pushed")),
+    # CI was read for a build: the commit, its merge-base with the target, the argvs
+    # that ran, each workflow by path with the id it read as, its reading and its
+    # run's url, and for one read by its jobs each job's reading and url, the whole
+    # reading, and the remote and CI's own ref the tip was pushed to (`pushed`).
     EventType("ci.read",
-              ("stage", "commit", "merge_base", "status_argv", "ids_argv", "workflows",
-               "reading")),
+              ("stage", "commit", "merge_base", "status_argv", "ids_argv", "jobs_argvs",
+               "workflows", "reading", "pushed")),
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),

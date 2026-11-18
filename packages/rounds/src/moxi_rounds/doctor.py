@@ -14,7 +14,8 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   it differs on. Every read still answers right, from the log itself; `moxi rounds
   list` brings the index up to the logs.
 - ci: for each repo that declares `ci`, `warn` when the first word of its `status` or
-  `ids` command is not on PATH, or, where they are the default `gh` commands, when
+  `ids` command, or of its `jobs` command where a workflow is read by its jobs, is not
+  on PATH, or, where they are the default `gh` commands, when
   `gh auth status` does not exit 0 (only its exit code is read), naming `moxi rounds
   check --full` as the way through; else `ok`. A repo whose `ci.local` is `"none"` is
   named as meeting the check gate on CI alone.
@@ -102,8 +103,8 @@ def _ci() -> Iterator[Row]:
         # Each such repo is named at any level of its row: its check rests on CI.
         alone = (" It meets the check gate on CI alone: its ci.local is \"none\"."
                  if found.local is None else "")
-        missing = [argv[0] for argv in (found.status, found.ids)
-                   if shutil.which(argv[0]) is None]
+        commands = (found.status, found.ids, *((found.jobs,) if found.reads_jobs else ()))
+        missing = [argv[0] for argv in commands if shutil.which(argv[0]) is None]
         if missing:
             yield Row(MODULE, name, "warn",
                       f"{', '.join(dict.fromkeys(missing))} is not on PATH, so CI can't be "

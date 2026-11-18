@@ -372,3 +372,76 @@ def test_comms_own_uninstall_revokes_every_tool_token(chain, monkeypatch):
     assert whys == {"a" * 64: "uninstall", "b" * 64: "uninstall", "c" * 64: "superseded"}
     assert "comms: 2 session token(s) for comms' tools revoked" in result.lines
     assert not [line for line in reserved.release_all().lines if "comms' tools" in line]
+
+
+# --------------------------------------------------------------------------- a program's names
+
+def program_row(chain, name="ticker"):
+    reserved.register(name, chain=chain)
+    return row(name)
+
+
+def test_every_row_a_module_declaration_writes_says_module(chain):
+    reserved.reconcile(declared={"launcher": ["console", "operator"], "pager": ["pager"],
+                                 "herald": ["pager"]}, chain=chain)
+    assert (row("console")["state"], row("console")["holder"]) == ("active", "module")
+    assert (row("pager")["state"], row("pager")["holder"]) == ("conflict", "module")
+
+
+def test_reconcile_leaves_a_name_a_program_registered_alone(chain, store):
+    before = program_row(chain)
+    result = reserved.reconcile(declared=LAUNCHER, chain=chain)
+    assert result.freed == [] and "ticker" not in " ".join(result.lines)
+    after = row("ticker")
+    assert tuple(after) == tuple(before)
+    assert (after["state"], after["holder"], after["module"]) == ("active", "program", None)
+    assert store.read_secret(reserved.program_owner(), reserved.program_secret_id("ticker"))
+
+
+@pytest.mark.parametrize("declared", [
+    {"launcher": ["ticker"]},
+    {"launcher": ["ticker"], "pager": ["ticker"]},
+])
+def test_a_module_declaring_a_programs_name_gets_a_conflict_line_and_no_write(chain,
+                                                                             declared):
+    """Each module that declares it gets the line, two at once included, and the row
+    stays the program's: active, with its hash, and still refusing mail."""
+    before = tuple(program_row(chain))
+    result = reserved.reconcile(declared=declared, chain=chain)
+    assert sorted(result.lines) == sorted(
+        f"{module}: ticker isn't reserved: a program registered it" for module in declared)
+    assert tuple(row("ticker")) == before
+
+
+def test_a_module_declaring_a_programs_name_is_a_doctor_warning(chain):
+    program_row(chain)
+    rows_ = reserved.doctor_rows(declared={"launcher": ["ticker"]}, chain=chain)
+    assert [(r.state, r.detail) for r in rows_] == [
+        ("warn", "launcher: ticker isn't reserved: a program registered it")]
+
+
+def test_comms_own_uninstall_frees_a_programs_name_and_every_send_only_token(
+        chain, store, monkeypatch):
+    program_row(chain)
+    store.write_secret(reserved.program_owner(), reserved.program_secret_id("left"), "x")
+    monkeypatch.setattr(reserved, "_chain", lambda c, env: chain)
+    monkeypatch.setattr(reserved, "declared_names", lambda gone=None: {})
+    result = reserved.release_all()
+    assert row("ticker")["freed_at"] is not None and row("ticker")["token_hash"] is None
+    assert intervals("ticker")[-1]["released_at"] is not None
+    assert store.secret_ids(reserved.program_owner()) == []
+    assert "send-only: ticker freed" in result.lines
+    assert "send-only: left's leftover token removed" in result.lines
+
+
+def test_reserved_renew_refuses_a_programs_name(chain, capsys):
+    from moxi import exit as moxi_exit
+    from moxi_comms import cli
+
+    reserved.register("ticker", chain=secrets.from_config())
+    before = row("ticker")["token_hash"]
+    with pytest.raises(reserved.Refused, match="moxi comms send-only renew ticker"):
+        reserved.renew("ticker", chain=chain)
+    assert cli.main(["reserved", "renew", "ticker"]) == moxi_exit.REFUSED
+    assert "moxi comms send-only renew ticker" in capsys.readouterr().out
+    assert row("ticker")["token_hash"] == before
