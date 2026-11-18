@@ -222,7 +222,10 @@ def test_schedule_on_a_clone_makes_the_worktree_and_writes_the_timer_and_service
 
 
 def test_schedule_again_over_a_run_dir_removed_by_hand_makes_the_tree_again(
-        clone, env, fakes):
+        clone, env, fakes, tmp_path):
+    stale = tmp_path / "stale"
+    git(clone, "worktree", "add", "--detach", str(stale), "main")
+    shutil.rmtree(stale)
     assert do_schedule(clone, env) == 0
     where = run_dir(clone, env)
     tree = where / "tree"
@@ -230,9 +233,10 @@ def test_schedule_again_over_a_run_dir_removed_by_hand_makes_the_tree_again(
     assert str(tree) in git(clone, "worktree", "list")
     assert do_schedule(clone, env) == 0
     assert git(tree, "rev-parse", "HEAD") == git(clone, "rev-parse", "main")
-    listed = [line for line in git(clone, "worktree", "list", "--porcelain").splitlines()
-              if line == f"worktree {tree}"]
-    assert len(listed) == 1
+    listed = git(clone, "worktree", "list", "--porcelain").splitlines()
+    assert listed.count(f"worktree {tree}") == 1
+    # Another stale entry in the clone is left as it was.
+    assert listed.count(f"worktree {stale}") == 1
 
 
 def test_schedule_json_holds_the_ticks_fields_and_reads_back_through_the_tick(

@@ -5,9 +5,10 @@ scheduled timed run, as systemd user units (Linux only).
 [--stamp] [--take NAME=DIR]...` runs once from the tree the machine measures, the source,
 which is a uv workspace root:
 
-- a git clone: the run tree is a worktree of it, `git worktree add --force --detach <tree>
-  main` (`--force` takes over the path's stale entry when the tree was removed by hand),
-  and the record goes to the clone's git directory unless `--record-dir` names another;
+- a git clone: the run tree is a worktree of it, `git worktree add --detach <tree> main`
+  (when the tree was removed by hand and the clone still lists it, `git worktree remove
+  <tree>` drops that one entry first), and the record goes to the clone's git directory
+  unless `--record-dir` names another;
 - a tree with no git (a synced copy of a clone): the run tree is the tick's verified copy
   (`moxi_dev.tick.copy_tree`), `--record-dir` is required and `--stamp` refused.
 
@@ -246,6 +247,14 @@ def _need(argv: Sequence[str], env: Mapping[str, str], cwd: Path | None = None) 
     return proc.stdout
 
 
+def _listed(git: str, source: Path, tree: Path, env: Mapping[str, str]) -> bool:
+    """Whether the clone at `source` lists a worktree at `tree`."""
+    out = _need([git, "worktree", "list", "--porcelain"], env, source)
+    want = tree.resolve()
+    return any(Path(line.removeprefix("worktree ")).resolve() == want
+               for line in out.splitlines() if line.startswith("worktree "))
+
+
 def _which(name: str, env: Mapping[str, str]) -> str:
     found = shutil.which(name, path=env.get("PATH"))
     if not found:
@@ -426,11 +435,13 @@ class _Schedule:
     def make_tree(self, plan: Plan) -> None:
         """Check 5, after the lock: the run tree, then its environment."""
         if plan.has_git and not plan.tree.exists():
-            # `--force` lets the add take the path over when the tree was removed by hand
-            # and the clone still lists it there. The path is schedule's own, and nothing
-            # else in the clone is pruned.
-            _need([plan.git, "worktree", "add", "--force", "--detach", str(plan.tree),
-                   "main"], self.env, plan.source)
+            if _listed(plan.git, plan.source, plan.tree, self.env):
+                # The tree was removed by hand and the clone still lists it: drop that one
+                # entry, the path being schedule's own. No other entry is pruned.
+                _need([plan.git, "worktree", "remove", str(plan.tree)], self.env,
+                      plan.source)
+            _need([plan.git, "worktree", "add", "--detach", str(plan.tree), "main"],
+                  self.env, plan.source)
         elif not plan.has_git:
             try:
                 tick.copy_tree(plan.source, plan.tree)
