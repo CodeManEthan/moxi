@@ -296,6 +296,17 @@ export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
   return view;
 }
 
+/** The question over a closed row's `Add`, which puts the repo in repo's list with the
+ * pieces its settings imply. */
+export function rowAddTitle(repo: string): string {
+  return `Add ${repo}?`;
+}
+
+/** The repo's `Refresh` command, for `partial`'s answer; null when it has none. */
+export function refreshCommand(repo: Pick<RepoRow, "commands"> | null | undefined): Command | null {
+  return repo?.commands.find((command) => command.label === "Refresh") ?? null;
+}
+
 /** `Add a repo`'s line under the folder: `a git repo · git 2.56.0`, or why it can't be
  * added. */
 export function folderLine(plan: Pick<Plan, "is_repo" | "git_version" | "refusal">): string {

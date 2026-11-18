@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actRequest, addRows, answerView, confirmView, folderLine, placeWords, planFailWords, planPath, transportView, writesOf,
+  actRequest, addRows, answerView, confirmView, folderLine, placeWords, planFailWords, planPath, refreshCommand,
+  rowAddTitle, transportView, writesOf,
 } from "../src/acts-model.ts";
 import { answer, HOME, offered, piece, plan, planned, repo, write } from "./fixtures.mjs";
 
@@ -256,4 +257,13 @@ test("requests: the plan's query and each act's body with the digest", () => {
                    { path: "api/enable", body: { root: "/r", piece: "notes/secret-gate", digest: "d1" } });
   assert.deepEqual(actRequest("refresh", "/r", [], "d1"), { path: "api/refresh", body: { root: "/r", digest: "d1" } });
   assert.deepEqual(actRequest("add-repo", "/r", [], "d1"), { path: "api/add", body: { root: "/r", pieces: [], digest: "d1" } });
+});
+
+test("a closed row's Add asks by the repo's name, and partial's command is the repo's Refresh", () => {
+  assert.equal(rowAddTitle("orbit-cli"), "Add orbit-cli?");
+  const refresh = { label: "Refresh", command: "moxi repo git-hooks refresh /r" };
+  assert.deepEqual(refreshCommand(repo({ commands: [{ label: "List", command: "moxi repo git-hooks list" }, refresh] })),
+                   refresh);
+  assert.equal(refreshCommand(repo({ commands: [] })), null);
+  assert.equal(refreshCommand(undefined), null);
 });

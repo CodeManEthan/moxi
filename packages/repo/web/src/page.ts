@@ -35,10 +35,15 @@ import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, navigate } from "/m/ui/client.js";
 
-import { Feed } from "./feed.ts";
-import type { Command, RecordRow, Repos } from "./feed.ts";
 import {
-  NOTHING_OPEN, noSuchRepo, pageState, parseRoute, pathToWrite, READING_AFTER_MS, REFRESH_MS, rowAddress, rowNamed,
+  actRequest, addRows, answerView, confirmView, planFailWords, planPath, refreshCommand, rowAddTitle, transportView,
+} from "./acts-model.ts";
+import type { Act, AnswerView, ConfirmView } from "./acts-model.ts";
+import { Feed, parseAnswer, parsePlanned } from "./feed.ts";
+import type { Command, Plan, RecordRow, Repos } from "./feed.ts";
+import {
+  NOTHING_OPEN, noSuchRepo, pageState, parseRoute, pathToWrite, READING, READING_AFTER_MS, REFRESH_MS, rowAddress,
+  rowNamed, SERVER_ERROR,
 } from "./frame-model.ts";
 import type { Address, PageState } from "./frame-model.ts";
 import { foldedLine, itemsOf, timeWords, verdict } from "./items-model.ts";
@@ -72,6 +77,16 @@ const RULES = "Rules";
 const GIT = "Git";
 const COMMANDS = "Commands";
 const SETTINGS_LINK = "Settings › repo";
+const ADD = "Add";
+const ADD_A_PIECE = "Add a piece";
+const REFRESH = "Refresh";
+const TURN_ON = "Turn on";
+const CANCEL = "Cancel";
+const WRITES = "Writes";
+const THEN = "Then";
+const LEAVES = "Leaves";
+/** `Add a piece` with every offered piece already in the repo. */
+const NONE_TO_ADD = "Every piece offered is here already.";
 /** How long a `Copy` reads `Copied`, in milliseconds. */
 const COPIED_MS = 1500;
 
@@ -171,11 +186,33 @@ const STYLES = css`
   .pc { padding-top: 10px; }
   .pc .d.git { margin-left: 6px; }
   .said { padding-top: 10px; color: var(--moxi-text-dim); }
+  .cmd .acts { flex: none; display: inline-flex; gap: 14px; }
+  moxi-ui-row > button.do.on { color: var(--moxi-text); }
+
+  /* The acts in place: the question heavy, each line under its label, the button and
+     Cancel; the answer under the question. No accent and no warning colour. */
+  .cf { margin: 10px 0 4px; border-top: 1px solid var(--moxi-border); padding-top: 10px; }
+  .prob .cf { margin-top: 8px; }
+  .cf .q { font-weight: 600; padding-bottom: 4px; }
+  .cf .cr { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline;
+            font-size: 13px; line-height: 18px; }
+  .det .cf .cr { grid-template-columns: 118px minmax(0, 1fr) auto; }
+  .cf .cr > .k { color: var(--moxi-text-dim); }
+  .cf .cr > .f { min-width: 0; overflow-wrap: anywhere; }
+  .cf .cr > .x { padding-left: 18px; }
+  .cf .cr .cmd { margin-top: 2px; }
+  .cf .btns { display: flex; gap: 18px; align-items: center; padding: 10px 0 2px; }
+  button.btn { color: var(--moxi-text); border: 1px solid var(--moxi-border-strong); border-radius: 7px; padding: 5px 13px; }
+  button.btn:disabled { color: var(--moxi-text-dim); border-color: var(--moxi-border); }
+  button.lnk { color: var(--moxi-text-dim); }
+  .ans { padding: 2px 0; font-size: 13px; line-height: 18px; }
+  .ans > * + * { margin-top: 3px; }
 
   @media (max-width: 720px) {
     :host { padding-top: 10px; }
     .det .r { grid-template-columns: minmax(0, 1fr); }
     .det .foot, .det .cmds { padding-left: 0; }
+    .det .cf .cr { grid-template-columns: 76px minmax(0, 1fr) auto; }
     .grp { display: block; padding: 8px 0 10px; }
     .grp.rows { padding: 4px 0 6px; }
     /* The label above its lines, its act beside it at the right. */
@@ -185,6 +222,31 @@ const STYLES = css`
     .grp:not(.rows) .gk { padding-bottom: 4px; }
   }
 `;
+
+/** An act in place: its confirm, drawn from the plan read as it opens, then its answer. */
+interface Acting {
+  act: Act;
+  /** The repo's root, or the folder typed in `Add a repo`. */
+  root: string;
+  /** The pieces picked or turned on, by id. */
+  picked: string[];
+  /** Where it is drawn: `foot:<root>` under an opened repo's foot, `item:<key>` under an
+   * item in `Hooks`, `row:<root>` under a closed row, or `add` in `Add a repo`. */
+  at: string;
+  /** The repo's name in its question. */
+  repo: string;
+  plan: Plan | null;
+  /** Why the plan can't be read. */
+  failed: string | null;
+  /** From press to answer. */
+  sending: boolean;
+  /** The answer's outcome once answered, `unread` when no readable answer came. */
+  outcome: string | null;
+  answer: AnswerView | null;
+}
+
+/** Where an act goes when the place it opened at is no longer drawn: `Hooks`' foot. */
+const HOOKS_END = "hooks";
 
 /** What the page draws from one value: the items and verdict, the rows and `Pieces`. */
 interface Drawn {
@@ -229,6 +291,10 @@ export class RepoPage extends LitElement {
   #commandsShown = false;
   /** The piece whose `Turn off` block is open, as `<root>\n<id>`. */
   #turnOff: string | null = null;
+  /** The act open in place, or null. */
+  #acting: Acting | null = null;
+  /** The pieces picked in the open repo's `Add a piece`, in run order. */
+  #picked: string[] = [];
   /** An address that named no repo: the dim line at the foot. */
   #unknown: string | null = null;
   /** The opened row takes the view once drawn. */
@@ -353,6 +419,8 @@ export class RepoPage extends LitElement {
     this.#commandsShown = false;
     this.#turnOff = null;
     this.#openAdd = false;
+    this.#picked = [];
+    this.#acting = null;
     this.#adding = false;
     this.#piecesShown = false;
   }
@@ -401,6 +469,107 @@ export class RepoPage extends LitElement {
       @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
   }
 
+  // -- the acts in place -------------------------------------------------------------------
+
+  /** Opens an act's confirm at `at` and reads its plan. */
+  #startAct(act: Act, root: string, picked: string[], at: string, repo: string): void {
+    const acting: Acting = {
+      act, root, picked, at, repo, plan: null, failed: null, sending: false, outcome: null, answer: null,
+    };
+    this.#acting = acting;
+    if (act !== "add") this.#picked = [];
+    void this.#readPlan(acting);
+    this.requestUpdate();
+  }
+
+  /** An act on a closed row or an item: whatever is open closes first. */
+  #startOutside(act: Act, root: string, at: string, repo: string): void {
+    this.#close();
+    this.#unknown = null;
+    this.#write();
+    this.#startAct(act, root, [], at, repo);
+  }
+
+  async #readPlan(acting: Acting): Promise<void> {
+    const result = await api("repo", planPath(acting.act, acting.root, acting.picked));
+    if (this.#acting !== acting) return;
+    const planned = result.status === 200 ? parsePlanned(result.data) : null;
+    if (planned === null) acting.failed = planFailWords({ status: result.status });
+    else if (planned.plan === null) acting.failed = planFailWords({ detail: planned.detail ?? SERVER_ERROR });
+    else acting.plan = planned.plan;
+    this.requestUpdate();
+  }
+
+  /** Sends the act with the digest of the plan its confirm drew, and draws the answer. */
+  async #send(acting: Acting): Promise<void> {
+    const digest = acting.plan?.digest ?? null;
+    if (digest === null || acting.sending) return;
+    acting.sending = true;
+    this.requestUpdate();
+    const request = actRequest(acting.act, acting.root, acting.picked, digest);
+    const result = await api("repo", request.path, request.body);
+    const answer = result.status === 200 ? parseAnswer(result.data) : null;
+    const value = this.#feed?.value ?? null;
+    const view = answer === null ? transportView(result.status) : answerView(answer, {
+      home: value?.home ?? null, command: refreshCommand(value?.repos.find((repo) => repo.root === acting.root)),
+    });
+    if (view.reread) void this.#feed?.refresh();
+    if (this.#acting !== acting) return;
+    acting.sending = false;
+    acting.outcome = answer?.outcome ?? "unread";
+    acting.answer = view;
+    if (view.plan !== null) acting.plan = view.plan;
+    else if (acting.act === "add") this.#picked = [];
+    this.requestUpdate();
+  }
+
+  /** `Cancel`, or `Close` under an answer: the act closes, and its picks with it. */
+  #cancel(acting: Acting): void {
+    if (this.#acting !== acting) return;
+    this.#acting = null;
+    if (acting.act === "add") this.#picked = [];
+    this.requestUpdate();
+  }
+
+  /** `Add a piece` at an opened repo's foot: its list shows or folds, and the address
+   * says so. */
+  #toggleAddList(): void {
+    this.#openAdd = !this.#openAdd;
+    this.#picked = [];
+    if (this.#acting?.act === "add") this.#acting = null;
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** `Add` or `Picked` in `Add a piece`: the confirm is read again for what is picked. */
+  #pick(row: RowView, id: string, order: readonly string[]): void {
+    const picked = new Set(this.#picked);
+    if (picked.has(id)) picked.delete(id);
+    else picked.add(id);
+    this.#picked = order.filter((one) => picked.has(one));
+    if (this.#picked.length === 0) {
+      if (this.#acting?.act === "add") this.#acting = null;
+      this.requestUpdate();
+      return;
+    }
+    this.#startAct("add", row.key, this.#picked, `foot:${row.key}`, row.name);
+  }
+
+  /** Where the open act is drawn: where it opened while that is drawn, else `Hooks`' foot. */
+  #placeOf(acting: Acting, drawn: Drawn): string {
+    const at = acting.at;
+    if (at === "add") return this.#adding ? at : HOOKS_END;
+    if (at.startsWith("foot:")) return this.#open === at.slice(5) ? at : HOOKS_END;
+    if (at.startsWith("row:")) {
+      const key = at.slice(4);
+      return this.#open !== key && drawn.repos.rows.some((row) => row.key === key) ? at : HOOKS_END;
+    }
+    const key = at.slice(5);
+    const v = drawn.verdict;
+    const drawnItems = this.#foldShown ? [...v.shown, ...v.folded] : v.shown;
+    return drawnItems.some((item) => itemKey(item) === key) ? at : HOOKS_END;
+  }
+
   // -- drawing -----------------------------------------------------------------------------
 
   render() {
@@ -435,19 +604,21 @@ export class RepoPage extends LitElement {
       <div class="line"><span data-line="verdict"><span class=${v.heavy ? "h" : ""}>${v.head}</span>${v.rest === null
         ? nothing : v.heavy ? html`<span>${v.rest}</span>` : html` <span class="d">${v.rest}</span>`}</span>${now === null
         ? nothing : html`<span class="r d" data-line="read">read ${LOCAL.time(now)}</span>`}</div>
-      ${repeat(v.shown, (item) => itemKey(item), (item) => this.#item(item, drawn.value.today, acts))}
+      ${repeat(v.shown, (item) => itemKey(item), (item) => this.#item(item, drawn, acts))}
       ${folded !== null ? html`<div class="line prob" data-line="folded"><span class="d">${folded}</span><button type="button"
         class="act on" data-action="show-warnings" aria-expanded=${this.#foldShown ? "true" : "false"}
         @click=${() => { this.#foldShown = !this.#foldShown; this.requestUpdate(); }}>${this.#foldShown ? HIDE : SHOW}</button></div>
-        ${this.#foldShown ? repeat(v.folded, (item) => itemKey(item), (item) => this.#item(item, drawn.value.today, acts))
+        ${this.#foldShown ? repeat(v.folded, (item) => itemKey(item), (item) => this.#item(item, drawn, acts))
           : nothing}` : nothing}
+      ${this.#actAt(HOOKS_END, drawn, acts)}
     </div></section>`;
   }
 
   /** One item in three lines: the title and its time, the dim line with `Show` for its
    * record, and the fix. */
-  #item(item: Item, today: string | null, _acts: boolean) {
+  #item(item: Item, drawn: Drawn, acts: boolean) {
     const key = itemKey(item);
+    const today = drawn.value.today;
     const need = item.weight === "need";
     const time = timeWords(item, today, LOCAL);
     const record = item.record;
@@ -460,17 +631,25 @@ export class RepoPage extends LitElement {
         aria-expanded=${shown ? "true" : "false"} @click=${() => this.#toggleRecord(key)}>${shown ? HIDE : SHOW}</button>`
         : nothing}</div>` : nothing}
       ${shown && record !== null ? recordText(record) : nothing}
-      ${this.#fix(item, key)}
+      ${this.#fix(item, key, acts)}
+      ${this.#actAt(`item:${key}`, drawn, acts)}
     </div>`;
   }
 
-  #fix(item: Item, key: string) {
+  /** An item's fix: a label over a command with `Copy`, one sentence, or the `Refresh`
+   * act, which opens its confirm under the item. */
+  #fix(item: Item, key: string, acts: boolean) {
     const fix = item.fix;
-    if (fix === null || fix.text === null) return nothing;
-    if (!fix.copy) return html`<p class="sm" data-line="fix">${fix.text}</p>`;
+    if (fix === null) return nothing;
+    const refreshing = this.#acting !== null && this.#acting.at === `item:${key}`;
+    const refresh = fix.refresh && acts ? html`<button type="button" class="act ${refreshing ? "on" : ""}"
+      data-action="refresh" @click=${() => this.#startOutside("refresh", item.repo.root, `item:${key}`, item.name)}>${
+      REFRESH}</button>` : nothing;
+    if (fix.text === null) return fix.refresh ? html`<div class="line sm" data-line="fix"><span></span>${refresh}</div>` : nothing;
+    if (!fix.copy) return html`<div class="line sm" data-line="fix"><span>${fix.text}</span>${refresh}</div>`;
     return html`<div class="cmd sm" data-line="fix"><span>${fix.label !== null
-      ? html`<span class="d lbl">${fix.label}</span>` : nothing}<code>${fix.text}</code></span>${
-      this.#copyButton(`item:${key}`, fix.text)}</div>`;
+      ? html`<span class="d lbl">${fix.label}</span>` : nothing}<code>${fix.text}</code></span><span class="acts">${
+      this.#copyButton(`item:${key}`, fix.text)}${refresh}</span></div>`;
   }
 
   #toggleRecord(key: string): void {
@@ -496,13 +675,20 @@ export class RepoPage extends LitElement {
       name: row.name, where: row.where === "" ? null : row.where, fact: row.fact, "fact-heavy": flag(row.factHeavy),
       lead: row.lead, note: row.note, toggles: flag(acts && row.open), open: flag(open),
     };
+    const rowAct = this.#acting !== null && this.#acting.at === `row:${row.key}` ? this.#acting.act : null;
     return html`<moxi-ui-row data-key=${row.key} ${attributes(values)}
         @moxi-row-toggle=${() => { if (acts && row.open) this.#toggle(row); }}>
+      ${acts && !open && row.refresh ? html`<button type="button" slot="acts-one" class="do ${rowAct === "refresh" ? "on" : ""}"
+        data-action="refresh" @click=${() => this.#startOutside("refresh", row.key, `row:${row.key}`, row.name)}>${
+        REFRESH}</button>` : nothing}
+      ${acts && !open && row.add ? html`<button type="button" slot="acts-one" class="do ${rowAct === "add-repo" ? "on" : ""}"
+        data-action="add" @click=${() => this.#startOutside("add-repo", row.key, `row:${row.key}`, row.name)}>${
+        ADD}</button>` : nothing}
       ${acts && row.open ? html`<button type="button" slot="acts-one" class="do" data-action="open"
         aria-expanded=${open ? "true" : "false"} @click=${() => this.#toggle(row)}>${open ? CLOSE : OPEN}</button>`
         : nothing}
       ${open && row.repo !== null ? this.#opened(row, drawn) : nothing}
-    </moxi-ui-row>`;
+    </moxi-ui-row>${this.#actAt(`row:${row.key}`, drawn, acts)}`;
   }
 
   // -- the opened repo ---------------------------------------------------------------------
@@ -521,7 +707,7 @@ export class RepoPage extends LitElement {
       ${view.rules !== null ? this.#rules(view.rules) : nothing}
       <div class="r" data-part="git"><span class="k">${GIT}</span><div class="f"><span data-line="git">${view.git}</span>
         ${view.moved !== null ? html`<span class="sub" data-line="moved">${view.moved}</span>` : nothing}</div></div>
-      ${this.#foot(row, view)}
+      ${this.#foot(row, view, drawn)}
     </div>`;
   }
 
@@ -543,6 +729,9 @@ export class RepoPage extends LitElement {
         ? html`<span class="d"> · ${rest.join(" · ")}</span>` : nothing}</span>${line.act === "turn-off"
         ? html`<button type="button" class="act ${offOpen ? "on" : ""}" data-action="turn-off"
           aria-expanded=${offOpen ? "true" : "false"} @click=${() => this.#toggleTurnOff(key)}>${TURN_OFF}</button>`
+        : line.act === "turn-on" ? html`<button type="button" class="act ${this.#turningOn(row, line) ? "on" : ""}"
+          data-action="turn-on" @click=${() => this.#startAct("enable", row.key, [line.piece.id], `foot:${row.key}`,
+                                                              row.name)}>${TURN_ON}</button>`
         : nothing}</div>
       ${line.settings.length > 0 && line.tucked ? html`<div class="line"><span class="d">${SETTINGS}</span><button
         type="button" class="act" data-action="show-settings" aria-expanded=${settingsShown ? "true" : "false"}
@@ -605,9 +794,15 @@ export class RepoPage extends LitElement {
     </div></div>`;
   }
 
-  #foot(row: RowView, view: OpenedView) {
+  #foot(row: RowView, view: OpenedView, drawn: Drawn) {
     const shown = this.#commandsShown;
+    const acting = this.#acting;
+    const footAct = acting !== null && acting.at === `foot:${row.key}` ? acting.act : null;
     return html`<div class="foot" data-part="foot">
+        <button type="button" class=${this.#openAdd ? "on" : ""} data-action="add-piece"
+          aria-expanded=${this.#openAdd ? "true" : "false"} @click=${() => this.#toggleAddList()}>${ADD_A_PIECE}</button>
+        <button type="button" class=${footAct === "refresh" ? "on" : ""} data-action="refresh"
+          @click=${() => this.#startAct("refresh", row.key, [], `foot:${row.key}`, row.name)}>${REFRESH}</button>
         ${view.project !== null ? html`<button type="button" data-action="project"
           @click=${() => navigate("projects", `open/${encodeURIComponent(view.project ?? "")}`)}>Project ${view.project}</button>`
           : nothing}
@@ -616,7 +811,15 @@ export class RepoPage extends LitElement {
           @click=${() => { this.#commandsShown = !shown; this.requestUpdate(); }}>${COMMANDS} · ${shown ? HIDE : SHOW}</button>
       </div>
       ${shown ? html`<div class="cmds" data-part="commands">${view.commands.map((command) =>
-        this.#command(command.label, command, `command:${row.key}\n${command.label}`))}</div>` : nothing}`;
+        this.#command(command.label, command, `command:${row.key}\n${command.label}`))}</div>` : nothing}
+      ${this.#openAdd ? this.#addList(row, drawn) : nothing}
+      ${this.#actAt(`foot:${row.key}`, drawn, true)}`;
+  }
+
+  /** Whether `Turn on`'s confirm for this piece is open. */
+  #turningOn(row: RowView, line: PieceLine): boolean {
+    const acting = this.#acting;
+    return acting !== null && acting.act === "enable" && acting.root === row.key && acting.picked[0] === line.piece.id;
   }
 
   #toggleTurnOff(key: string): void {
@@ -628,6 +831,88 @@ export class RepoPage extends LitElement {
     if (set.has(key)) set.delete(key);
     else set.add(key);
     this.requestUpdate();
+  }
+
+  // -- confirms and answers ----------------------------------------------------------------
+
+  /** The open act, when it is drawn at `at`. */
+  #actAt(at: string, drawn: Drawn, acts: boolean) {
+    const acting = this.#acting;
+    if (acting === null || this.#placeOf(acting, drawn) !== at) return nothing;
+    return this.#confirm(acting, drawn, acts);
+  }
+
+  /** The confirm in place: its question, the plan's lines (or why it can't be read), the
+   * button and `Cancel`; once answered, the answer under the question and `Close`. After
+   * `changed` the answer's line comes first and the new plan's confirm under it. */
+  #confirm(acting: Acting, drawn: Drawn, acts: boolean) {
+    const value = drawn.value;
+    const view = acting.plan === null ? null : confirmView(acting.plan, {
+      act: acting.act, repo: acting.repo, picked: acting.picked, offered: value.offered, home: value.home,
+    });
+    const asking = acting.outcome === null || acting.outcome === "changed";
+    const title = acting.act !== "add-repo" ? view?.title ?? null : acting.at === "add" ? null : rowAddTitle(acting.repo);
+    return html`<div class="cf" data-part="confirm" data-act=${acting.act} role="group" aria-label=${title ?? acting.act}>
+      ${title !== null ? html`<p class="q" data-line="question">${title}</p>` : nothing}
+      ${acting.outcome === "changed" ? this.#answer(acting) : nothing}
+      ${asking ? this.#planLines(acting, view) : this.#answer(acting)}
+      <div class="btns">${asking && view?.go != null ? html`<button type="button" class="btn" data-action="go"
+          ?disabled=${!acts || acting.sending} @click=${() => void this.#send(acting)}>${view.go}</button>` : nothing}
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#cancel(acting)}>${
+          asking ? CANCEL : CLOSE}</button></div>
+    </div>`;
+  }
+
+  /** A plan's lines: `Writes`, `Then` with any line to add to another tool's hook, and
+   * `Leaves`; or the plan's refusal; or `Reading…`, or why the plan can't be read. */
+  #planLines(acting: Acting, view: ConfirmView | null) {
+    if (acting.failed !== null) return html`<p class="sm" data-line="plan-failed">${acting.failed}</p>`;
+    if (view === null) return html`<p class="sm d" data-line="reading">${READING}</p>`;
+    if (view.refusal !== null) return html`<p class="sm" data-line="refusal">${view.refusal}</p>`;
+    const key = `${acting.at}\n${acting.act}`;
+    return html`${view.writes.map((line, at) => labelled(at === 0 ? WRITES : "", line, "writes"))}
+      ${view.then.map((line, at) => labelled(at === 0 ? THEN : "", line, "then", false))}
+      ${view.chain.map((chain, at) => html`<div class="cr" data-line="chain"><span class="k">${
+        view.then.length === 0 && at === 0 ? THEN : ""}</span><span class="f">${chain.text}<span class="cmd"><code>${
+        chain.line}</code>${this.#copyButton(`chain:${key}\n${at}`, chain.line)}</span></span></div>`)}
+      ${view.leaves !== null ? labelled(LEAVES, view.leaves, "leaves") : nothing}`;
+  }
+
+  /** An act's answer: its first line, the verb's lines, what to copy, and after `partial`
+   * the `Refresh` act with the refresh command. */
+  #answer(acting: Acting) {
+    const view = acting.answer;
+    if (view === null) return nothing;
+    const key = `${acting.at}\n${acting.act}`;
+    return html`<div class="ans" data-part="answer" data-outcome=${acting.outcome ?? ""}>
+      ${view.head !== null ? html`<p class=${view.heavy ? "h" : ""} data-line="answer">${view.head}</p>` : nothing}
+      ${view.lines.map((line) => html`<p class=${view.dim ? "d" : ""} data-line="said">${line}</p>`)}
+      ${view.copies.map((copy, at) => html`<div data-line="copy">${copy.text === copy.copy
+        ? html`<div class="cmd"><span>${copy.text}</span>${this.#copyButton(`answer:${key}\n${at}`, copy.copy)}</div>`
+        : html`<p>${copy.text}</p><div class="cmd"><code>${copy.copy}</code>${
+          this.#copyButton(`answer:${key}\n${at}`, copy.copy)}</div>`}</div>`)}
+      ${view.refresh ? html`<div class="line"><button type="button" class="act on" data-action="refresh"
+        @click=${() => this.#startAct("refresh", acting.root, [], acting.at, acting.repo)}>${REFRESH}</button></div>`
+        : nothing}
+      ${view.command !== null ? this.#command(view.command.label, view.command, `answer:${key}\nrefresh`) : nothing}
+    </div>`;
+  }
+
+  /** The open repo's `Add a piece`: each offered piece not in it, with its place and doc,
+   * and `Add` or `Picked`. */
+  #addList(row: RowView, drawn: Drawn) {
+    const repo = row.repo;
+    if (repo === null) return nothing;
+    const rows = addRows(repo, drawn.value.offered, new Set(this.#picked));
+    const order = rows.map((one) => one.piece.id);
+    return html`<div class="cf" data-part="add-piece">
+      <p class="q" data-line="question">${ADD_A_PIECE} to ${row.name}</p>
+      ${rows.length === 0 ? html`<p class="sm d" data-line="none">${NONE_TO_ADD}</p>` : rows.map((one) => html`<div
+        class="cr" data-piece=${one.piece.id}><span class="k">${one.name}</span><span class="f d">${one.where} · ${
+        one.doc}</span><button type="button" class="x act ${one.picked ? "on" : ""}" data-action="pick"
+        aria-pressed=${one.picked ? "true" : "false"} @click=${() => this.#pick(row, one.piece.id, order)}>${
+        one.button}</button></div>`)}
+    </div>`;
   }
 
   // -- Pieces ------------------------------------------------------------------------------
@@ -654,6 +939,14 @@ export class RepoPage extends LitElement {
 /** One key per item: its repo, what it was made from and its title. */
 function itemKey(item: Item): string {
   return `${item.repo.root}\n${item.source}\n${item.title}`;
+}
+
+/** A confirm's row: its label at the left, then the line, its first phrase in the text's
+ * colour and the rest (from the first ` · `) dim. */
+function labelled(label: string, line: string, part: string, split = true) {
+  const cut = split ? line.indexOf(" · ") : -1;
+  return html`<div class="cr" data-line=${part}><span class="k">${label}</span><span class="f">${cut < 0 ? line
+    : html`${line.slice(0, cut)}<span class="d">${line.slice(cut)}</span>`}</span></div>`;
 }
 
 /** A record's whole text, as `Show` opens it. */
