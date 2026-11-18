@@ -23,6 +23,8 @@ from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
@@ -292,7 +294,7 @@ def small(ui_shells, tmp_path_factory, on_path):
 def test_without_projects_a_place_is_a_dir_and_a_pick_of_it_launches_in_that_dir(
         small, ui_contexts):
     context = ui_contexts(small)
-    kit.ready_copying(context)
+    _copying.ready_copying(context)
     page = context.pages[0]
     piece = kit.open_home(page)
     expect(where(piece)).to_have_attribute("data-word", "Folder")

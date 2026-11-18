@@ -270,6 +270,13 @@ var ht=globalThis,ft=ht.ShadowRoot&&(ht.ShadyCSS===void 0||ht.ShadyCSS.nativeSha
   .help ~ .aside { max-width: 440px; border-top: 0; padding: 8px 0 0; }
   .hit { color: var(--moxi-text); text-decoration: underline; text-decoration-color: var(--moxi-text-dim);
          text-underline-offset: 3px; }
+  /* On a wide page a row's control keeps its label's first line in any face: the label
+     and key take the width left beside it and wrap there. */
+  @media not all and (max-width: 720px) {
+    .l1 { flex-wrap: nowrap; align-items: flex-start; }
+    .lb { flex: 1 1 auto; padding-top: 4px; }
+    .ctl { flex: none; max-width: 60%; min-height: 28px; }
+  }
   @media (max-width: 720px) {
     .cols { grid-template-columns: minmax(0, 1fr); }
     .cols.res .mods { display: flex; column-gap: 10px; align-items: baseline; border-bottom: 0; padding: 10px 0 0; }
@@ -342,7 +349,7 @@ var ht=globalThis,ft=ht.ShadowRoot&&(ht.ShadyCSS===void 0||ht.ShadyCSS.nativeSha
         @keydown=${S=>{(S.key==="Enter"||S.key===" ")&&(S.preventDefault(),this.#b(d.name))}}
       >${this.#q(d.name,r)}</code>`,b=f!==void 0||d.lines.length>0||d.defaults!==null||h!==null,w=["set",h!==null?"un":"",m?"dg":""].filter(Boolean).join(" ");return u`<div class=${w} data-key=${d.name} ?data-locked=${c} ?data-held=${h!==null}>
       <div class="l1">
-        <span class="lb">${d.labelled?u`<span data-line="label">${this.#q(d.label,r)}</span>${x}`:x}${g}</span>
+        <span class="lb">${d.labelled?u`<span data-line="label">${this.#q(d.label,r)}</span><wbr>${x}`:x}${g}</span>
         <span class="ctl">${this.#wt(o,n,d,c)}</span>
       </div>
       ${d.control.kind==="switches"?p:this.#st(o,n,d,c)}

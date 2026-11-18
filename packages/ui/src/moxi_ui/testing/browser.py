@@ -1,8 +1,9 @@
 """The browser checks every module runs on its own components: the contract check and the
-360 px width check.
+360 px width check; and the two helpers a test uses to read back what its page copied,
+`ready_copying` and `copied`, in any engine.
 
-Both take a Playwright page (the sync API) already on the shell's document, signed in
-(`TestShell.sign_in`). They call only the page's own methods, so this module imports
+Both checks take a Playwright page (the sync API) already on the shell's document, signed
+in (`TestShell.sign_in`). They call only the page's own methods, so this module imports
 nothing of Playwright. A failed check raises `AssertionError` saying what was wrong.
 """
 
@@ -389,3 +390,44 @@ def check_width(page: Any, *, module: str | None = None, name: str = "page",
         raise AssertionError(f"{what} reaches past the right edge at {width} px, cut off "
                              "where it doesn't scroll: " + "; ".join(seen["wide"]))
     return seen
+
+
+# The page's copies, kept where a test can read them back. The kit grants the clipboard
+# only on Chromium (Firefox refuses a `clipboard-read` grant and WebKit a `clipboard-write`
+# one), so elsewhere each document wraps `navigator.clipboard.writeText` to keep the last
+# text in `window.__copied`, then calls the real one. Guarded, so a second run in the same
+# document wraps nothing.
+_KEEP_COPIED = """(() => {
+  const clipboard = navigator.clipboard;
+  if (!clipboard || clipboard.__keepsCopied) return;
+  const write = clipboard.writeText.bind(clipboard);
+  clipboard.writeText = (text) => { window.__copied = text; return write(text); };
+  clipboard.__keepsCopied = true;
+})()"""
+
+
+def _on_chromium(context: Any) -> bool:
+    return context.browser.browser_type.name == "chromium"
+
+
+def ready_copying(context: Any) -> None:
+    """Ready the Playwright browser `context` for a test that reads back what its page
+    copies, in any engine: on Chromium, grant `clipboard-read` and `clipboard-write`;
+    elsewhere, keep the text each copy passes to `navigator.clipboard.writeText`, in every
+    document the context opens from now on and in each page already open. Read it back
+    with `copied`."""
+    if _on_chromium(context):
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        return
+    context.add_init_script(_KEEP_COPIED)
+    for page in context.pages:
+        page.evaluate(_KEEP_COPIED)
+
+
+def copied(page: Any) -> str | None:
+    """The text `page` last copied, in a context `ready_copying` readied: the clipboard's
+    on Chromium, the text the document last passed to `navigator.clipboard.writeText`
+    elsewhere (None when it copied nothing)."""
+    if _on_chromium(page.context):
+        return page.evaluate("navigator.clipboard.readText()")
+    return page.evaluate("window.__copied ?? null")
