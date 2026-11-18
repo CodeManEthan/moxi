@@ -15,6 +15,8 @@ from typing import Iterable, Sequence
 
 KINDS = frozenset({"name", "kwonly", "use", "keep"})
 VENDORED = "packages/moxi/src/moxi/_vendor/"
+#: The repository's own table, from its root.
+TABLE = PurePosixPath("packages/moxi-dev/renames.tsv")
 
 
 class RenameError(Exception):
@@ -1336,14 +1338,27 @@ def apply_rows(root: Path, rows: Sequence[Row], texts: dict[str, str] | None = N
                   for row in rows]
 
 
-def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None = None) -> int:
-    rows = read_table(table)
+@dataclass(frozen=True)
+class Reading:
+    """What a run reads of a tree under a table before it writes anything: each row's
+    state (`to apply` for a row any pass applies, `applied`, `not here` or `dead`), the
+    rows refused by index with why, the leftovers once every row has applied, what the
+    comparison with main did, and the texts and paths a run writes. When a row is
+    refused the states are the first pass's and no leftover is looked for."""
+    rows: list[Row]
+    states: list[str]
+    refused_rows: dict[int, str]
+    leftovers: list[Leftover]
+    comparison: str
+    texts: dict[str, str]
+    written: set[str]
+
+
+def read(root: Path, rows: list[Row], *, main_ref: str | None = None) -> Reading:
+    """Read the tree at `root` under `rows`, as `run` does, without writing a file."""
     texts, states, refused, written = apply_rows(root, rows)
     if refused:
-        for _index, one in sorted(refused.items()):
-            print(f"moxi-dev rename: refused: {table.name} {one}")
-        print(f"moxi-dev rename: {len(refused)} rows refused; nothing was written")
-        return 2
+        return Reading(rows, states, refused, [], "", texts, written)
     after = Project(root, texts, rows=rows)
     states = ["dead" if _dead(after, row)
               else line_state(texts, row, rows) if row.kind == "keep" else status
@@ -1351,10 +1366,58 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
     remaining = leftovers(after, rows)
     moved, comparison = main_leftovers(root, after, rows, states, main_ref)
     remaining = sorted(set(remaining + moved))
+    return Reading(rows, states, {}, remaining, comparison, texts, written)
+
+
+@dataclass(frozen=True)
+class Unsettled:
+    """One thing that keeps a tree from being settled under its table: a row refused, a
+    row still to apply, or a leftover. `path` is the file it is about."""
+    state: str          # "refused", "to apply" or "leftover"
+    path: str
+    text: str
+
+    def __str__(self) -> str:
+        return f"{self.state}: {self.text}"
+
+
+def unsettled(reading: Reading, table_name: str) -> list[Unsettled]:
+    """What keeps the tree `reading` read from being settled: every row refused, then
+    every row still to apply, then every leftover. Empty when the tree is settled; a
+    dead row does not unsettle it."""
+    found = [Unsettled("refused", reading.rows[index].path, f"{table_name} {why}")
+             for index, why in sorted(reading.refused_rows.items())]
+    if reading.refused_rows:
+        return found
+    found += [Unsettled("to apply", row.path, f"{table_name} row {row.line}: {row.path} "
+                                              f"{row.kind} {row.old} -> {row.new}")
+              for row, status in zip(reading.rows, reading.states) if status == "to apply"]
+    return found + [Unsettled("leftover", leftover.path, str(leftover))
+                    for leftover in reading.leftovers]
+
+
+def scan(root: Path, table: Path | None = None) -> list[Unsettled]:
+    """What keeps the tree at `root` from being settled under `table` (by default the
+    tree's own, `TABLE`), read as `moxi-dev rename --dry-run` reads it with no `--main`;
+    empty when it is settled. RenameError when the table or tree cannot be read."""
+    table = root / TABLE if table is None else table
+    return unsettled(read(root, read_table(table)), table.name)
+
+
+def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None = None) -> int:
+    rows = read_table(table)
+    reading = read(root, rows, main_ref=main_ref)
+    if reading.refused_rows:
+        for _index, one in sorted(reading.refused_rows.items()):
+            print(f"moxi-dev rename: refused: {table.name} {one}")
+        print(f"moxi-dev rename: {len(reading.refused_rows)} rows refused; nothing was "
+              f"written")
+        return 2
+    states, remaining = reading.states, reading.leftovers
     counts = {word: states.count(word) for word in ("to apply", "applied", "not here",
                                                      "dead")}
     print("moxi-dev rename: " + ", ".join(f"{counts[word]} {word}" for word in counts))
-    print(f"moxi-dev rename: {comparison}")
+    print(f"moxi-dev rename: {reading.comparison}")
     listed = set(_git(root, "ls-files", "-z", "--cached", "--others",
                       "--exclude-standard").stdout.split("\0"))
     for row, status in zip(rows, states):
@@ -1365,8 +1428,8 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
         print(f"moxi-dev rename: leftover: {leftover}")
     print(f"moxi-dev rename: {len(remaining)} leftovers")
     if not dry_run:
-        for path in sorted(written):
-            (root / path).write_text(texts[path], encoding="utf-8")
+        for path in sorted(reading.written):
+            (root / path).write_text(reading.texts[path], encoding="utf-8")
     return 1 if remaining else 0
 
 
@@ -1397,7 +1460,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
 
-__all__ = ["KINDS", "Leftover", "RenameError", "Row", "main", "read_table", "refusals", "run"]
+__all__ = ["KINDS", "TABLE", "Leftover", "Reading", "RenameError", "Row", "Unsettled", "main",
+           "read", "read_table", "refusals", "run", "scan", "unsettled"]
 
 
 if __name__ == "__main__":

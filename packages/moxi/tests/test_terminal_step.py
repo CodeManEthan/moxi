@@ -475,7 +475,7 @@ UNCHANGED_MS = 5.0 if WINDOWS else 2.0
 
 @pytest.mark.slow
 @pytest.mark.timed
-def test_an_unchanged_step_costs_under_two_milliseconds(fence):
+def test_an_unchanged_step_costs_under_two_milliseconds(fence, timed_reading):
     """Measured as test_import_cost.py measures: the lower quartile of 51 pairs, each a
     run that imports what the `moxi` command imports anyway, then one that also runs the
     step over a record that already holds the environment."""
@@ -498,4 +498,5 @@ def test_an_unchanged_step_costs_under_two_milliseconds(fence):
         before = ms(base)
         differences.append(ms(step) - before)
     cost = statistics.quantiles(differences, n=4, method="inclusive")[0]
+    timed_reading(cost, UNCHANGED_MS, "ms")
     assert cost < UNCHANGED_MS * timed_slack(), f"an unchanged step costs {cost:.2f} ms"

@@ -583,7 +583,7 @@ def test_a_slot_whose_codex_wrapper_had_no_answer_fails_with_its_cause(tmp_path,
 def test_a_slot_whose_wrapper_bound_the_name_is_started(tmp_path, monkeypatch, rig):
     rig.plan(placed=4, pane_pid=os.getpid(), exec="started")
     got = slot_launch(tmp_path, monkeypatch, comms(state("held", holder=Holder(SID))))
-    assert got.state == "started" and got.reason is None
+    assert got.state == "started" and got.reason == targets.READY_UNKNOWN
 
 
 # -- the composed line against comms' wrapper as built --------------------------------------

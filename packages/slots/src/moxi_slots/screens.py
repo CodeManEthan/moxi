@@ -1,8 +1,12 @@
 """The screens drawn outside a session, as data, and the one rule that matches them.
 
 slots types only on screens no session has control of: Claude Code's startup warnings
-and its exit dialog. Each is a `Screen` here, and `answer_screen` presses a key only
-after a full match against one of them (see `answer`).
+(folder trust, development channels, the bypass-permissions warning) and its exit
+dialog. Each is a `Screen` here, and `answer_screen` presses a key only after a full
+match against one of them (see `answer`). Three more screens are declared to be read and
+never answered (`answerable` False): Claude Code's first-run theme picker and welcome
+screen, and its Claude-in-Chrome dialog. A caller can name them, so it knows what holds a
+session, and `answer_screen` refuses them.
 
 The matcher reads plain text: `capture-pane -p`, or an `-e` capture with its escape
 sequences removed (`plain`), since a capture with colour can put a colour change between
@@ -10,13 +14,15 @@ the words of one phrase. Claude Code draws a no-break space after its marker; it
 as a space.
 
 The region of a screen is the rows below the last full-width rule: a row of `─` at
-least as wide as the pane at the read. A screen with no such row has no region, so it
-matches nothing.
+least as wide as the pane at the read. A pane with no such row has no region for it, so
+it matches nothing. A screen Claude Code draws with no rule (`ruled` False: the
+first-run theme picker and welcome screen) has the whole pane as its region.
 
 The rule: a screen fully matches when every phrase is in its region in order, its
 option row is there, exactly one row in the region is marked, its item rows are only of
 the kinds allowed, and the pane is not in copy mode. Where the marker sits is not part of
-the match; it decides the key.
+the match; it decides the key. A screen slots never answers needs no marked row, since
+no key is decided on it.
 
 An option row is a region row whose text, without the marker, spaces and any
 `<digits>. ` index, equals the option. A marked row is a region row whose text starts
@@ -67,7 +73,9 @@ class Screen:
     `marker` marks the chosen row; `items`, when set, limits the item rows to its kinds;
     `move` says whether Up and Down may move the marker toward the option (when it is
     False the key is Enter alone); `then` is what must follow Enter: `ended` (the pane
-    dies) or `gone` (the screen leaves)."""
+    dies) or `gone` (the screen leaves). `ruled` False means the screen draws no
+    full-width rule and is read over the whole pane. `answerable` False means slots
+    reads the screen and never presses a key on it."""
 
     name: str
     phrases: tuple[str, ...]
@@ -76,6 +84,8 @@ class Screen:
     then: str
     marker: str = MARKER
     items: Items | None = None
+    ruled: bool = True
+    answerable: bool = True
 
     def __post_init__(self):
         if self.then not in (ENDED, GONE):
@@ -87,7 +97,8 @@ class Screen:
         return {"name": self.name, "phrases": list(self.phrases), "option": self.option,
                 "move": self.move, "then": self.then, "marker": self.marker,
                 "items": None if self.items is None else
-                {"after": self.items.after, "kinds": list(self.items.kinds)}}
+                {"after": self.items.after, "kinds": list(self.items.kinds)},
+                "ruled": self.ruled, "answerable": self.answerable}
 
 
 #: Claude Code's exit dialog with background work running. Its one key is Enter, on
@@ -111,8 +122,43 @@ CLAUDE_DEV_CHANNELS = Screen(
     phrases=("Loading development channels", "Enter to confirm"),
     option="I am using this for local development", move=True, then=GONE)
 
+#: The warning a `bypassPermissions` session draws before it starts, with the marker on
+#: "No, exit" above the option. Answering it makes Claude Code write
+#: `skipDangerousModePermissionPrompt: true` into its user settings.
+CLAUDE_BYPASS_WARNING = Screen(
+    name="CLAUDE_BYPASS_WARNING",
+    phrases=("WARNING: Claude Code running in Bypass Permissions mode",
+             "By proceeding, you accept"),
+    option="Yes, I accept", move=True, then=GONE)
+
+#: Claude Code's first-run theme picker, the first screen in a config folder it has never
+#: run in. It draws no full-width rule. slots never answers it: the choice is the
+#: person's.
+CLAUDE_THEME_PICKER = Screen(
+    name="CLAUDE_THEME_PICKER",
+    phrases=("Let's get started.",
+             "Choose the text style that looks best with your terminal"),
+    option="Dark mode", move=True, then=GONE, ruled=False, answerable=False)
+
+#: Claude Code's first-run welcome screen with its security notes, drawn after the theme
+#: picker. It has no rule and no option row but its prompt line. slots never answers it.
+CLAUDE_WELCOME = Screen(
+    name="CLAUDE_WELCOME",
+    phrases=("Welcome to Claude Code", "Security notes:", "Press Enter to continue"),
+    option="Press Enter to continue…", move=False, then=GONE, ruled=False,
+    answerable=False)
+
+#: The dialog Claude Code draws once onboarding is done, when it finds the Claude in Chrome
+#: extension, until it is answered once. slots never answers it, so it never presses
+#: "Yes, use my browser".
+CLAUDE_CHROME_DIALOG = Screen(
+    name="CLAUDE_CHROME_DIALOG",
+    phrases=("Claude in Chrome extension detected", "Enter to confirm"),
+    option="No, keep browser tools off", move=True, then=GONE, answerable=False)
+
 #: Every screen slots ships.
-SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS)
+SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING,
+           CLAUDE_THEME_PICKER, CLAUDE_WELCOME, CLAUDE_CHROME_DIALOG)
 
 
 def plain(text: str) -> str:
@@ -134,13 +180,13 @@ def is_rule(row: str, width: int) -> bool:
     return len(row) >= max(width, 1) and set(row) == {RULE}
 
 
-def region(text: str, width: int) -> tuple[str, ...] | None:
+def region(text: str, width: int, *, ruled: bool = True) -> tuple[str, ...] | None:
     """The rows below the last full-width rule (trailing blank rows dropped), or None
-    when there is no such rule."""
+    when there is no such rule. With `ruled` False, every row of the capture."""
     found = rows(text)
-    last = None
+    last = None if ruled else -1
     for i, row in enumerate(found):
-        if is_rule(row, width):
+        if ruled and is_rule(row, width):
             last = i
     if last is None:
         return None
@@ -214,7 +260,7 @@ def _items_why(screen: Screen, region_rows: tuple[str, ...]) -> str:
 
 def match(screen: Screen, text: str, width: int, *, in_mode: bool = False) -> Match:
     """Hold `screen` against a capture `text` of a pane `width` columns wide."""
-    found = region(text, width)
+    found = region(text, width, ruled=screen.ruled)
     if found is None:
         return Match(screen, present=False, full=False,
                      why="no full-width rule on screen", rows=())
@@ -233,7 +279,7 @@ def match(screen: Screen, text: str, width: int, *, in_mode: bool = False) -> Ma
         why = "the pane is in copy mode"
     elif option is None:
         why = f"no row is the option {screen.option!r}"
-    elif len(marks) != 1:
+    elif len(marks) != 1 and screen.answerable:
         why = f"{len(marks)} rows are marked with {screen.marker!r}, not one"
     elif screen.items is not None:
         why = _items_why(screen, found)
@@ -252,5 +298,7 @@ def find(screens: Sequence[Screen], text: str, width: int, *,
 
 
 __all__ = ["MARKER", "RULE", "ENDED", "GONE", "Items", "Screen", "CLAUDE_EXIT_DIALOG",
-           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "SCREENS", "plain", "rows",
+           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+           "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG", "SCREENS",
+           "plain", "rows",
            "is_rule", "region", "bare", "marked", "Match", "match", "find"]
