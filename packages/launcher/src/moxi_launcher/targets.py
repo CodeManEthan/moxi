@@ -741,7 +741,8 @@ def _comms_words(row: store.LaunchRow, state: Any) -> str:
     return identity.words(
         getattr(state, "qualified", None) or identity.shown(row.identity, row.scope),
         state.state, str(state.holder) if getattr(state, "holder", None) else None,
-        module=getattr(state, "module", None), reason=getattr(state, "reason", None))
+        module=getattr(state, "module", None), reason=getattr(state, "reason", None),
+        registered=bool(getattr(state, "registered", False)))
 
 
 def _ran_out(conn: sqlite3.Connection, row: store.LaunchRow, comms: Any, state: Any,

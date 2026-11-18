@@ -16,7 +16,8 @@
 
 - A launch whose comms identity is a send-only name a program registered is refused as
   `identity <name> is a send-only name a program registered`, where it used to say the
-  name had no owner.
+  name had no owner. A launch whose wrapper ended, or ran out its bind wait, on such a
+  name says the same in its failure line.
 
 - A headless launch with a comms identity runs where comms' wrapper takes the headless
   flags: comms' API names those harnesses in `HEADLESS` (read by
