@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BUCKETS, bucketOf, commandWords, counts, countsLine, FACTS, FALLBACK, grouped, lastRunLine, listShape, MOXI,
-  named, NO_PROJECT, NOTHING_DOWN, OTHER, risen, rowFact, servicesLabel, systemWord, timingWords, whereOf, YOURS,
+  BUCKETS, bucketOf, commandWords, counts, countsLine, FACTS, FALLBACK, filtered, grouped, lastReadLine, lastRunLine,
+  listShape, MOXI, named, NO_PROJECT, NO_SUPERVISOR, NOT_ANSWERING, NOTHING_ADDED, NOTHING_DOWN, OTHER, pageState,
+  problemLines, projectKeys, READING, READING_AFTER_MS, risen, rowFact, servicesLabel, STORE_UNREAD, systemWord,
+  timingWords, whereOf, YOURS,
 } from "../src/list-model.ts";
-import { moduleRow, row, timer } from "./fixtures.mjs";
+import { moduleRow, row, rows, timer } from "./fixtures.mjs";
 
 const UTC = {
   time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -254,4 +256,83 @@ test("the list's shape: the first group, its risen rows or sentence and counts, 
   // No row: no counts.
   const none = listShape([], AT, false, WHEN);
   assert.deepEqual([none.label, none.sentence, none.counts, none.groups], ["0 services", NOTHING_DOWN, null, []]);
+});
+
+// -- the filter and the page's states ---------------------------------------------------------
+
+test("the filter keeps one project's rows of his and counts them against every row", () => {
+  const list = [of("running", "ok", { id: "services/a", name: "a", project: "atlas" }),
+                of("running", "ok", { id: "services/b", name: "b", project: "beta" }),
+                of("running", "ok", { id: "services/c", name: "c", project: null }),
+                moduleRow({ verdict: verdict("running", "ok"), project: "atlas" })];
+  const found = filtered(list, "atlas");
+  assert.deepEqual(found.rows.map((r) => r.id), ["services/a"]);
+  assert.equal(found.shown, "1 of 4 services");
+  assert.equal(filtered(list, "none").shown, "0 of 4 services");
+  assert.deepEqual(projectKeys(list), ["atlas", "beta"]);
+});
+
+const read = (value, more = {}) => ({ value, failure: null, gone: false, ...more });
+const LOST = { status: 0, why: "no answer from the shell", said: null };
+
+test("the page's states, each with its first row", () => {
+  assert.deepEqual(pageState(read(null), 0, false, WHEN),
+                   { state: "loading", line: null, more: null, rows: false, acts: false, dim: false });
+  assert.equal(pageState(read(null), READING_AFTER_MS, false, WHEN).line, READING);
+  assert.equal(pageState(read(null, { gone: true }), 0, false, WHEN).state, "gone");
+
+  // Not answering: the rows last read, dim and with no act, and when they were read.
+  const down = pageState(read(rows([row()]), { failure: LOST }), 0, false, WHEN);
+  assert.deepEqual(down, { state: "down", line: NOT_ANSWERING, more: "Last read 10:05. It may have changed since.",
+                           rows: true, acts: false, dim: true });
+  assert.deepEqual(pageState(read(null, { failure: LOST }), 0, false, WHEN),
+                   { state: "down", line: NOT_ANSWERING, more: null, rows: false, acts: false, dim: true });
+
+  // The store can't be read: its sentence at the desk, the phone's own words.
+  const error = rows([], { state: "error", detail: "the store is too new; fix: upgrade", at: null });
+  assert.deepEqual(pageState(read(error), 0, false, WHEN),
+                   { state: "error", line: "the store is too new; fix: upgrade", more: null, rows: false, acts: false,
+                     dim: false });
+  assert.equal(pageState(read(error), 0, true, WHEN).line, STORE_UNREAD);
+  assert.equal(pageState(read({ ...error, detail: null }), 0, false, WHEN).line, STORE_UNREAD);
+
+  // Every row unknown for one reason: the supervisor can't be read.
+  const why = { verdict: verdict("warn", "unknown", { reason: "the supervisor didn't answer" }) };
+  const unread = pageState(read(rows([row(why), moduleRow(why)])), 0, false, WHEN);
+  assert.deepEqual(unread, { state: "unread", line: NO_SUPERVISOR, more: "the supervisor didn't answer", rows: true,
+                             acts: true, dim: true });
+  const two = [row(why), moduleRow({ verdict: verdict("warn", "unknown", { reason: "another" }) })];
+  assert.equal(pageState(read(rows(two)), 0, false, WHEN).state, "up");
+  assert.equal(pageState(read(rows([row(why), moduleRow()])), 0, false, WHEN).state, "up");
+  assert.equal(pageState(read(rows([])), 0, false, WHEN).state, "up");
+  assert.equal(lastReadLine(null, WHEN), null);
+});
+
+test("with the supervisor unread nothing rises, and with no row of his the first group says so", () => {
+  const why = { verdict: verdict("warn", "unknown") };
+  const quiet = listShape([row(why)], null, false, WHEN, { quiet: true });
+  assert.deepEqual(quiet.risen, []);
+  assert.deepEqual(quiet.groups.map((g) => g.group.label), [YOURS]);
+  assert.equal(listShape([row(why)], null, false, WHEN).risen.length, 1);
+
+  const shell = moduleRow({ id: "ui/shell", module: "ui", name: "shell", verdict: verdict("ok", "running") });
+  const empty = listShape([shell], "2026-11-03T10:05:00Z", true, WHEN);
+  assert.equal(empty.his, false);
+  assert.equal(empty.label, "1 service");
+  assert.equal(empty.sentence, NOTHING_DOWN);
+  assert.equal(empty.more, NOTHING_ADDED);
+  assert.equal(empty.counts, null);
+  assert.equal(empty.read, "read 10:05");
+  assert.deepEqual(empty.groups.map((g) => g.group.label), [MOXI]);
+  const mine = listShape([shell, of("running", "ok")], null, true, WHEN);
+  assert.equal(mine.his, true);
+  assert.equal(mine.more, null);
+  assert.equal(mine.counts, "2 running");
+});
+
+test("a module whose declarations failed is one line at the foot", () => {
+  assert.deepEqual(problemLines(rows([], { problems: [{ module: "notes", reason: "UNITS_FROM failed: boom" },
+                                                       { module: "tunnel", reason: null }] })),
+                   ["notes: UNITS_FROM failed: boom; its static daemons and timers are listed",
+                    "tunnel: hidden here; its static daemons and timers are listed"]);
 });

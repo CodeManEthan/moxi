@@ -11650,6 +11650,7 @@ services	packages/services/tests/test_browser_page.py	assert any(url.endswith(li
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
 services	packages/services/tests/test_browser_page.py	assert {"services/queue-worker", "services/sync-down", "services/dep-audit"} <= set(want), want	keep	set	set
 services	packages/services/tests/test_browser_page.py	risen = set(ids(panel.locator('section[data-part="first"] .item')))	keep	set	set
+services	packages/services/tests/test_browser_page.py	@pytest.mark.parametrize(("route", "opened", "path"), [	keep	opened	opened
 services	packages/services/tests/test_browser_project_facts.py	if check(last):	keep	ok	ok
 services	packages/services/tests/test_browser_project_facts.py	report = _reported(page, lambda r: "sections" in r["projects"]["atlas-api"], "opened")	keep	opened	opened
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set

@@ -1,7 +1,9 @@
 """services' page and home block in a browser, through a real shell that starts services'
 real page server over a fake supervisor (`browser_kit`): the contract check on both, the
 block's count of rows by verdict, the page's frame (no heading of its own), the first
-group's risen rows (SV1), the groups by project and Moxi's (SV5), a confirmed act through the sheet to its status (done, and refused), Cancel
+group's risen rows (SV1), a running daemon's time (SV2), the groups by project and Moxi's
+(SV5), a project's address (SV7), each address and what the page writes back, the list's
+states, a confirmed act through the sheet to its status (done, and refused), Cancel
 sending nothing, a lost answer, the run sheet of a row that launches a session, the add
 form's 202 and the status it reads until the job ends, and the 360 px width check.
 """
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,10 +35,13 @@ VERDICTS = ("ok", "warn", "fail", "off")
 #: holds (a stop from before the boot is dropped, and a fixed time fails on any machine
 #: booted since).
 STOPPED = datetime.now(timezone.utc).replace(microsecond=0)
+#: When `web` started, in seconds since the epoch: a minute ago, so it reads a time today.
+WEB_SINCE = time.time() - 60
+NOT_ANSWERING = "Services' page server isn't answering"
 
 #: The fake supervisor's units, by row name.
 UNITS = {"written": {
-    "web": {"kind": "daemon", "enabled": True, "active": True},
+    "web": {"kind": "daemon", "enabled": True, "active": True, "since": WEB_SINCE, "pid": 4242},
     "sync-down": {"kind": "daemon", "enabled": True, "active": False},
     "paused": {"kind": "daemon", "enabled": True, "active": False},
     "spare": {"kind": "daemon", "enabled": False, "active": False},
@@ -96,6 +102,36 @@ def row(panel, ident: str):
 
 def ids(items) -> list[str]:
     return [item.get_attribute("data-id") for item in items.all()]
+
+
+def list_part(panel):
+    return panel.locator('section[data-part="list"]')
+
+
+def expect_path(page, path: str) -> None:
+    page.wait_for_function("path => location.pathname === path", arg=path)
+
+
+def services(n: int) -> str:
+    return "1 service" if n == 1 else f"{n} services"
+
+
+def clock(page, at: float) -> re.Pattern:
+    """The fact a time `at` (epoch seconds) of today reads in the browser, as a pattern
+    that also takes it a minute past midnight."""
+    time_words = page.evaluate(
+        "at => new Date(at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})", at)
+    return re.compile(rf"(yesterday )?{re.escape(time_words)}")
+
+
+def shown_without_the_topic(page) -> None:
+    """From now on the shell's stream for services' topic `rows` is refused, so what a test
+    gives `/api/rows` is what the page shows."""
+    page.route(re.compile(r".*/m/ui/api/push\?topics=.*services\.rows.*"), lambda route: route.abort())
+
+
+def as_rows(page, value: dict) -> None:
+    page.route("**/m/services/api/rows", lambda route: route.fulfill(json=value))
 
 
 def posts_to(page, path: str) -> list:
@@ -206,7 +242,7 @@ def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui
     web = alpha.locator('.item[data-id="services/web"] moxi-ui-row')
     expect(web).to_have_attribute("name", "web")
     expect(web).to_have_attribute("where", "serves the docs")
-    expect(web).to_have_attribute("fact", "running")
+    expect(web).to_have_attribute("fact", re.compile(r"^running since "))
     expect(web).not_to_have_attribute("lead", re.compile(".*"))
     expect(alpha.locator('.item[data-id="services/agent-run"] moxi-ui-row')).to_have_attribute(
         "where", "true · every hour · spends usage")
@@ -241,6 +277,253 @@ def test_sv5_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
         expect(drawn).to_have_attribute("where", re.compile(rf"^{re.escape(r['module'])}\b"))
     # No row of his is in it.
     assert not [i for i in ids(moxi.locator(".item")) if i.startswith("services/")]
+
+
+def test_sv2_a_running_daemon_says_since_when(seeded, ui_page):
+    panel = panel_of(ui_page)
+    web = row(panel, "services/web").locator("moxi-ui-row")
+    since = clock(ui_page, WEB_SINCE)
+    expect(web).to_have_attribute("fact", re.compile(rf"^running since {since.pattern}$"))
+    expect(web).not_to_have_attribute("fact-heavy", "")
+
+
+def test_sv7_a_project_address_shows_its_rows_alone_until_show_all(seeded, ui_shell, ui_page):
+    ui_page.goto("/m/services/project/alpha")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    listed = get(ui_shell, "api/rows")["rows"]
+    mine = [r["id"] for r in listed if r["form"] != "module" and r["project"] == "alpha"]
+    filt = panel.locator('[data-part="filter"]')
+    expect(filt).to_contain_text("Project")
+    expect(filt.locator('[data-line="project"]')).to_have_text("alpha")
+    expect(filt.locator('[data-line="shown"]')).to_have_text(f"{len(mine)} of {services(len(listed))}")
+    expect(panel.locator('section[data-part="first"] [data-line="count"]')).to_have_text(services(len(mine)))
+    expect(panel.locator(".item")).to_have_count(len(mine))
+    assert sorted(ids(panel.locator(".item"))) == sorted(mine)
+    # The failed row of alpha still rises; Moxi's rows and the other groups are not shown.
+    expect(panel.locator('section[data-part="first"] .item[data-id="services/queue-worker"]')).to_have_count(1)
+    expect(panel.locator('section[data-group="moxi"], section[data-group="his"]')).to_have_count(0)
+    expect_path(ui_page, "/m/services/project/alpha")
+
+    # The menu names the projects his rows carry.
+    filt.locator('[data-action="pick"]').click()
+    expect(filt.get_by_role("menuitem")).to_have_text(["alpha"])
+    filt.get_by_role("menuitem", name="alpha").click()
+    expect(filt.get_by_role("menuitem")).to_have_count(0)
+    expect_path(ui_page, "/m/services/project/alpha")
+
+    # A row opened in it keeps the filter in the address.
+    row(panel, "services/web").get_by_role("button", name="Open web", exact=True).click()
+    expect_path(ui_page, "/m/services/project/alpha/row/web")
+    filt.get_by_role("button", name="Show all", exact=True).click()
+    expect(filt).to_have_count(0)
+    expect_path(ui_page, "/m/services/row/web")
+    expect(panel.locator(".item")).to_have_count(len(listed))
+
+
+# --- addresses ------------------------------------------------------------------------------
+
+@pytest.mark.parametrize(("route", "opened", "path"), [
+    ("", None, "/m/services/"),
+    ("row/web", "services/web", "/m/services/row/web"),
+    ("row/services/web", "services/web", "/m/services/row/web"),
+    ("project/alpha/row/web", "services/web", "/m/services/project/alpha/row/web"),
+    ("add", None, "/m/services/add"),
+    ("adopt", None, "/m/services/adopt"),
+])
+def test_each_address_opens_what_it_names(seeded, ui_page, route, opened, path):
+    ui_page.goto(f"/m/services/{route}")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    if opened is None:
+        expect(panel.locator("moxi-ui-row[open]")).to_have_count(0)
+    else:
+        item = row(panel, opened)
+        expect(item.locator("moxi-ui-row")).to_have_attribute("open", "")
+        expect(panel.locator("moxi-ui-row[open]")).to_have_count(1)
+        expect(item.locator('[data-action="open"]')).to_have_text("Close")
+        expect(item).to_be_in_viewport()
+    expect_path(ui_page, path)
+    expect(list_part(panel).locator('[data-line="unknown"]')).to_have_count(0)
+    form = panel.locator('section[data-part="add"] form')
+    if route == "add":
+        expect(form.get_by_label("Name", exact=True)).to_be_focused()
+    elif route == "adopt":
+        expect(form.get_by_label("a unit already here")).to_be_checked()
+        expect(form.get_by_role("textbox", name="Unit")).to_be_focused()
+
+
+def test_a_moxi_rows_address_is_its_module_and_name(seeded, ui_shell, ui_page):
+    ident = next(r["id"] for r in get(ui_shell, "api/rows")["rows"] if r["form"] == "module")
+    ui_page.goto(f"/m/services/row/{ident}")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(row(panel, ident).locator("moxi-ui-row")).to_have_attribute("open", "")
+    expect_path(ui_page, f"/m/services/row/{ident}")
+
+
+@pytest.mark.parametrize(("route", "line"), [
+    ("row/nosuch", "No service is named nosuch."),
+    ("row/ui/nosuch", "No service is named ui/nosuch."),
+    ("project/nope", "No project is named nope."),
+    ("project/nope/row/web", "No project is named nope."),
+    ("bogus/x", "This address names nothing on this page."),
+])
+def test_an_address_naming_nothing_here_opens_the_page_and_says_so(seeded, ui_page, route, line):
+    ui_page.goto(f"/m/services/{route}")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    said = list_part(panel).locator('[data-line="unknown"]')
+    expect(said).to_have_text(line)
+    expect(panel.locator("moxi-ui-row[open]")).to_have_count(0)
+    expect(panel.locator('[data-part="filter"]')).to_have_count(0)
+    expect_path(ui_page, "/m/services/")
+    # Opening a row takes the line away.
+    row(panel, "services/web").get_by_role("button", name="Open web", exact=True).click()
+    expect(said).to_have_count(0)
+
+
+def test_open_close_and_add_rewrite_the_address_and_back_leaves_the_page(seeded, ui_page):
+    ui_page.goto("/m/ui/")
+    ui_page.evaluate("""async () => (await import("/m/ui/client.js")).navigate("services", "")""")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    entries = ui_page.evaluate("() => history.length")
+
+    web = row(panel, "services/web")
+    web.get_by_role("button", name="Open web", exact=True).click()
+    expect(web.locator("moxi-ui-row")).to_have_attribute("open", "")
+    expect_path(ui_page, "/m/services/row/web")
+    # One thing open at a time.
+    row(panel, "services/spare").get_by_role("button", name="Open spare", exact=True).click()
+    expect(panel.locator("moxi-ui-row[open]")).to_have_count(1)
+    expect_path(ui_page, "/m/services/row/spare")
+    row(panel, "services/spare").get_by_role("button", name="Close spare", exact=True).click()
+    expect(panel.locator("moxi-ui-row[open]")).to_have_count(0)
+    expect_path(ui_page, "/m/services/")
+    # The row's own line opens it too.
+    web.locator("moxi-ui-row .l1").click()
+    expect_path(ui_page, "/m/services/row/web")
+
+    panel.get_by_role("button", name="Add a service", exact=True).click()
+    expect(panel.locator("moxi-ui-row[open]")).to_have_count(0)
+    expect_path(ui_page, "/m/services/add")
+    form = panel.locator('section[data-part="add"] form')
+    expect(form.get_by_label("Name", exact=True)).to_be_focused()
+    form.get_by_label("a unit already here").check()
+    expect_path(ui_page, "/m/services/adopt")
+    form.get_by_label("a command line").check()
+
+    # No entry was added, so Back leaves the page.
+    assert ui_page.evaluate("() => history.length") == entries
+    ui_page.go_back()
+    expect_path(ui_page, "/m/ui/")
+
+
+# --- the list's states ----------------------------------------------------------------------
+
+def test_the_first_read_shows_reading_until_it_answers(seeded, ui_page):
+    held: list = []
+    ui_page.route("**/m/services/api/rows", lambda route: held.append(route))
+    try:
+        ui_page.goto("/m/services/")
+        panel = ui_page.locator("#moxi-panel > moxi-services-page")
+        expect(list_part(panel)).to_have_attribute("data-state", "loading")
+        reading = list_part(panel).locator('[data-line="loading"]')
+        expect(reading).to_have_text("Reading…")
+        expect(panel.locator("moxi-ui-row")).to_have_count(0)
+        expect(panel.get_by_role("button", name="Add a service")).to_have_count(0)
+    finally:
+        ui_page.unroute("**/m/services/api/rows")
+        for route in held:
+            route.continue_()
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    expect(reading).to_have_count(0)
+
+
+def test_a_page_server_that_isnt_answering_keeps_the_last_rows_dim_with_no_acts(seeded, ui_page):
+    ui_page.goto("/m/services/row/web")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    web = row(panel, "services/web").locator("moxi-ui-row")
+    expect(web).to_have_attribute("open", "")
+    drawn = panel.locator(".item").count()
+    ui_page.route("**/m/services/api/rows", lambda route: route.abort())
+    try:
+        ui_page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+        expect(list_part(panel)).to_have_attribute("data-state", "down")
+        first = panel.locator('section[data-part="first"]')
+        expect(first.locator('[data-line="down"]')).to_have_text(NOT_ANSWERING)
+        expect(first.locator('[data-line="state-more"]')).to_have_text(
+            re.compile(r"^Last read .+\. It may have changed since\.$"))
+        expect(panel.locator(".item")).to_have_count(drawn)
+        expect(panel.locator(".grps.dim")).to_have_count(1)
+        for gone in ('[data-action="open"]', '[data-part="acts"] button', 'section[data-part="first"] [data-action="add"]',
+                     "moxi-ui-row[open]", "moxi-ui-row[toggles]"):
+            expect(panel.locator(gone)).to_have_count(0)
+        dim = panel.evaluate("""page => {
+          const style = getComputedStyle(page.shadowRoot.querySelector(".grps.dim"));
+          return [style.getPropertyValue("--moxi-text").trim(), style.getPropertyValue("--moxi-text-dim").trim()];
+        }""")
+        assert dim[0] == dim[1] and dim[0] != "", dim
+    finally:
+        ui_page.unroute("**/m/services/api/rows")
+    ui_page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    expect(web).to_have_attribute("open", "")
+
+
+def test_a_store_that_cant_be_read_shows_its_sentence_and_no_rows(seeded, ui_page):
+    shown_without_the_topic(ui_page)
+    detail = "services' store is newer than this Moxi; fix: upgrade Moxi"
+    as_rows(ui_page, {"state": "error", "detail": detail, "at": None, "rows": [], "problems": []})
+    ui_page.goto("/m/services/")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "error")
+    expect(list_part(panel).locator('[data-line="error"]')).to_have_text(detail)
+    expect(panel.locator("moxi-ui-row")).to_have_count(0)
+    expect(panel.get_by_role("button", name="Add a service")).to_have_count(0)
+
+
+def test_every_row_unknown_for_one_reason_says_the_supervisor_cant_be_read(seeded, ui_shell, ui_page):
+    value = get(ui_shell, "api/rows")
+    reason = "the supervisor didn't answer in time"
+    for r in value["rows"]:
+        r["verdict"] = {"state": "warn", "reason": reason, "fix": None, "unknown": True, "cause": "unknown"}
+    shown_without_the_topic(ui_page)
+    as_rows(ui_page, value)
+    ui_page.goto("/m/services/")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "unread")
+    first = panel.locator('section[data-part="first"]')
+    expect(first.locator('[data-line="unread"]')).to_have_text("Can't read the supervisor")
+    expect(first.locator('[data-line="state-more"]')).to_have_text(reason)
+    # None rises: each stays in its group, dim.
+    expect(first.locator(".item")).to_have_count(0)
+    expect(panel.locator('section[data-part="group"] .item')).to_have_count(len(value["rows"]))
+    expect(panel.locator(".grps.dim")).to_have_count(1)
+
+
+def test_no_row_of_his_says_what_a_service_is(seeded, ui_shell, ui_page):
+    value = get(ui_shell, "api/rows")
+    value["rows"] = [r for r in value["rows"] if r["form"] == "module"]
+    value["problems"] = [{"module": "notes", "reason": "its declarations failed: boom"}]
+    shown_without_the_topic(ui_page)
+    as_rows(ui_page, value)
+    ui_page.goto("/m/services/")
+    panel = ui_page.locator("#moxi-panel > moxi-services-page")
+    expect(list_part(panel)).to_have_attribute("data-state", "up")
+    first = panel.locator('section[data-part="first"]')
+    expect(first.locator('[data-line="sentence"]')).to_have_text(
+        "Nothing is down. You have added no services yet.")
+    expect(first.locator('[data-line="counts"]')).to_have_count(0)
+    expect(first.locator('[data-action="add"]')).to_have_count(0)
+    yours = panel.locator('section[data-part="group"][data-group="his"]')
+    expect(yours.locator('[data-line="group"]')).to_have_text("Yours")
+    expect(yours.locator('[data-line="what"]')).to_have_text(
+        "A service is a command this computer keeps running, such as a dev server, or runs on a "
+        "schedule, such as a nightly backup.")
+    expect(yours.get_by_role("button", name="Add a service", exact=True)).to_have_count(1)
+    expect(list_part(panel).locator('[data-line="module-problem"]')).to_have_text(
+        "notes: its declarations failed: boom; its static daemons and timers are listed")
 
 
 # --- confirmed acts -------------------------------------------------------------------------

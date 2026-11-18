@@ -1,5 +1,5 @@
-// What services' page and summary block show, as plain data: the rows grouped by
-// project, each row's lines, the acts it offers with the confirm sheet of each, what an
+// What services' page and summary block show, as plain data: each row's lines, the acts
+// it offers with the confirm sheet of each, what an
 // act came to, the add form's body, and the count by verdict. No DOM and no Lit here, so
 // the Node tests check it directly.
 
@@ -12,8 +12,6 @@ import type { Failure, Row, Rows, Status, Verdict, VerdictState } from "./feed.t
 export const HIDDEN = "hidden here";
 /** What an act whose answer was lost may have done. */
 export const MAY_HAVE_ACTED = "No answer says how the act went, so it may have been done; the list shows what stands now.";
-/** The group of the rows that name no project. */
-export const NO_PROJECT = "No project";
 
 export type Tone = "ok" | "warn" | "error" | "muted";
 
@@ -31,69 +29,6 @@ export interface FeedState<V> {
 export function when(iso: string): string {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(:\d{2}(\.\d+)?)?Z$/.exec(iso);
   return match ? `${match[1]} ${match[2]} UTC` : iso;
-}
-
-// -- the list -----------------------------------------------------------------------------
-
-export interface Group {
-  /** The project key, null for the rows that name none. */
-  project: string | null;
-  label: string;
-  rows: Row[];
-}
-
-/** The rows grouped by project: each project's key in order, ignoring case, and then the
- * rows that name none. Rows keep their order within a group. */
-export function groups(rows: readonly Row[]): Group[] {
-  const by = new Map<string, Row[]>();
-  const loose: Row[] = [];
-  for (const row of rows) {
-    if (row.project === null) {
-      loose.push(row);
-      continue;
-    }
-    const list = by.get(row.project) ?? [];
-    list.push(row);
-    by.set(row.project, list);
-  }
-  const keys = [...by.keys()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()) || a.localeCompare(b));
-  const found: Group[] = keys.map((key) => ({ project: key, label: key, rows: by.get(key)! }));
-  if (loose.length) found.push({ project: null, label: NO_PROJECT, rows: loose });
-  return found;
-}
-
-export interface ListView {
-  state: "loading" | "up" | "empty" | "error" | "failed" | "gone";
-  /** The line to show for every state but `up` and `loading`. */
-  line: string | null;
-  groups: Group[];
-  /** The modules whose run-time declarations failed, each as a line. */
-  problems: string[];
-}
-
-/** The list part's view. A failed read keeps the rows last read, and says so. */
-export function listView(feed: FeedState<Rows>): ListView {
-  if (feed.gone) return { state: "gone", line: "services is no longer installed.", groups: [], problems: [] };
-  const value = feed.value;
-  const problems = (value?.problems ?? []).map((p) =>
-    `${p.module}: ${p.reason ?? HIDDEN}; its static daemons and timers are listed`);
-  const found = groups(value?.rows ?? []);
-  if (value === null) {
-    if (feed.loading) return { state: "loading", line: null, groups: [], problems: [] };
-    return { state: "failed", line: `The rows can't be read: ${failureLine(feed.failure)}.`, groups: [], problems: [] };
-  }
-  if (feed.failure !== null) {
-    return { state: "failed", line: `The rows can't be read again: ${failureLine(feed.failure)}. These are the rows last read.`,
-             groups: found, problems };
-  }
-  if (value.state === "error") {
-    return { state: "error", line: `The rows can't be listed: ${value.detail ?? HIDDEN}`, groups: [], problems };
-  }
-  if (value.rows.length === 0) {
-    return { state: "empty", line: "No daemon or timer yet: no installed module declares one and none was added.",
-             groups: [], problems };
-  }
-  return { state: "up", line: null, groups: found, problems };
 }
 
 function failureLine(failure: Failure | null): string {

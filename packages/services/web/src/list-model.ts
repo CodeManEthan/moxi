@@ -10,7 +10,7 @@
 
 import { epochOf, LOCAL, whenWord } from "./facts.ts";
 import type { When } from "./facts.ts";
-import type { Row, Timing } from "./feed.ts";
+import type { Failure, Row, Rows, Timing } from "./feed.ts";
 
 /** How a fact is drawn: heavy, in the text colour, or dim. */
 export type Weight = "heavy" | "text" | "dim";
@@ -240,9 +240,10 @@ export interface Group {
 /** The list: the risen rows, in order, and the groups of the rest, each with rows. With
  * projects, one group per project key his rows carry (by key), then `No project`; without,
  * `Yours`. Then `Moxi`. A risen row is lifted out of its group. Within a group by name;
- * in `Moxi` by module then name, rows switched off last. */
-export function grouped(rows: readonly Row[], projects: boolean, when: When): { risen: Row[]; groups: Group[] } {
-  const up = risen(rows, when);
+ * in `Moxi` by module then name, rows switched off last. With `quiet`, no row rises. */
+export function grouped(rows: readonly Row[], projects: boolean, when: When,
+                        quiet = false): { risen: Row[]; groups: Group[] } {
+  const up = quiet ? [] : risen(rows, when);
   const lifted = new Set(up.map((row) => row.id));
   const by = new Map<string, Row[]>();
   const loose: Row[] = [];
@@ -364,10 +365,17 @@ export interface ListShape {
   risen: RowView[];
   /** `Nothing is down.` when no row rises, else null. */
   sentence: string | null;
-  /** The dim counts when no row rises, else null; null too when there is no row. */
+  /** The sentence's dim words after it: `You have added no services yet.` when no row is
+   * his; else null. */
+  more: string | null;
+  /** The dim counts when no row rises, else null; null too when there is no row, and
+   * when no row is his. */
   counts: string | null;
   /** `read <time>` from the rows' `at`, null without one. */
   read: string | null;
+  /** Some row is his: `Add a service` goes under the label. With none, the page draws
+   * `Yours` with what a service is and `Add a service` there. */
+  his: boolean;
   groups: { group: Group; rows: RowView[] }[];
 }
 
@@ -378,17 +386,129 @@ export function rowView(row: Row, options: { projects: boolean; risen: boolean }
            line: options.risen ? found.line : null };
 }
 
-/** The list the page draws for `rows`, read at `at`. */
-export function listShape(rows: readonly Row[], at: string | null, projects: boolean, when: When): ListShape {
-  const { risen: up, groups } = grouped(rows, projects, when);
+/** The list the page draws for `rows`, read at `at`. With `quiet`, no row rises: the page
+ * says in the first group's place why (every row `unknown` for one reason). */
+export function listShape(rows: readonly Row[], at: string | null, projects: boolean, when: When,
+                          { quiet = false }: { quiet?: boolean } = {}): ListShape {
+  const { risen: up, groups } = grouped(rows, projects, when, quiet);
   const read = timeWords(at, when);
   const found = counts(rows, when);
+  const his = rows.some((row) => row.form !== "module");
   return {
     label: servicesLabel(rows.length),
     risen: up.map((row) => rowView(row, { projects, risen: true }, when)),
     sentence: up.length ? null : NOTHING_DOWN,
-    counts: up.length || !found.length ? null : countsLine(found),
+    more: up.length || his ? null : NOTHING_ADDED,
+    counts: up.length || !found.length || !his ? null : countsLine(found),
     read: read === null ? null : `read ${read}`,
+    his,
     groups: groups.map((group) => ({ group, rows: group.rows.map((row) => rowView(row, { projects, risen: false }, when)) })),
   };
+}
+
+// -- the filter ---------------------------------------------------------------------------
+
+/** The filter line's words and the rows it keeps: his rows of project `key`, and `3 of 14
+ * services`, against every row. */
+export function filtered(rows: readonly Row[], key: string): { rows: Row[]; shown: string } {
+  const kept = rows.filter((row) => row.form !== "module" && row.project === key);
+  return { rows: kept, shown: `${kept.length} of ${servicesLabel(rows.length)}` };
+}
+
+/** The filter line's label, before the key. */
+export const PROJECT = "Project";
+/** The filter line's act: every row again. */
+export const SHOW_ALL = "Show all";
+
+/** The project keys his rows carry, by key: the projects the filter can name. */
+export function projectKeys(rows: readonly Row[]): string[] {
+  const keys = new Set<string>();
+  for (const row of rows) if (row.form !== "module" && row.project !== null) keys.add(row.project);
+  return [...keys].sort((a, b) => a.localeCompare(b));
+}
+
+// -- the page's states --------------------------------------------------------------------
+
+/** How long the first read shows nothing before `Reading…`, in milliseconds. */
+export const READING_AFTER_MS = 400;
+export const READING = "Reading…";
+/** The first row while services' page server doesn't answer. */
+export const NOT_ANSWERING = "Services' page server isn't answering";
+/** The first row when services' store can't be read, on the phone (the desk shows the
+ * page server's own sentence, which the phone doesn't get). */
+export const STORE_UNREAD = "Services' store can't be read.";
+/** The first row when every row is `unknown` for one reason. */
+export const NO_SUPERVISOR = "Can't read the supervisor";
+/** The sentence's dim words when no row is his. */
+export const NOTHING_ADDED = "You have added no services yet.";
+/** What `Yours` says when no row is his. */
+export const WHAT_A_SERVICE_IS = "A service is a command this computer keeps running, such as a dev server, "
+  + "or runs on a schedule, such as a nightly backup.";
+/** What the page says when services went away while it was open. */
+export const GONE = "services is no longer installed.";
+
+/** One dim line per module whose run-time declarations failed, for the foot. */
+export function problemLines(rows: Rows): string[] {
+  return rows.problems.map((p) => `${p.module}: ${p.reason ?? "hidden here"}; its static daemons and timers are listed`);
+}
+
+/** `Last read <time>. It may have changed since.`, under `NOT_ANSWERING` once a read
+ * answered; null before. */
+export function lastReadLine(at: string | null, when: When): string | null {
+  const time = timeWords(at, when);
+  return time === null ? null : `Last read ${time}. It may have changed since.`;
+}
+
+/** The page as it draws its list:
+ * - `loading`: the first read is out; `line` is `Reading…` once `READING_AFTER_MS` have gone.
+ * - `down`: services' page server isn't answering; the rows last read are drawn dim, with
+ *   no act, and `more` says when they were read.
+ * - `error`: the store can't be read; `line` is its sentence, and no row is drawn.
+ * - `unread`: every row is `unknown` for one reason: `Can't read the supervisor` and the
+ *   reason in the first group's place; the rows dim in their groups, none risen.
+ * - `up`: read (`empty` too: no row is his, which `ListShape.his` says).
+ * - `gone`: services went away while the page was open. */
+export interface PageState {
+  state: "loading" | "down" | "error" | "unread" | "up" | "gone";
+  /** The first row's words, or `Reading…`; null for none. */
+  line: string | null;
+  /** Dim words under it; null for none. */
+  more: string | null;
+  /** The rows are drawn. */
+  rows: boolean;
+  /** Acts are offered: `Add a service`, `Open` and each row's acts. */
+  acts: boolean;
+  /** The rows are drawn dim. */
+  dim: boolean;
+}
+
+/** The one reason every row is `unknown` for; null when some row isn't, or they differ. */
+function oneUnknown(rows: readonly Row[]): { reason: string | null } | null {
+  if (rows.length === 0 || rows.some((row) => row.verdict.cause !== "unknown")) return null;
+  const reasons = new Set(rows.map((row) => row.verdict.reason));
+  return reasons.size === 1 ? { reason: rows[0].verdict.reason } : null;
+}
+
+/** The page's state from its read of `/api/rows`: the last value, the last failure,
+ * whether services went away, how long the first read has been out, and whether it is the
+ * phone. */
+export function pageState(read: { value: Rows | null; failure: Failure | null; gone: boolean },
+                          waitedMs: number, phone: boolean, when: When): PageState {
+  const none = { more: null, rows: false, acts: false, dim: false };
+  if (read.gone) return { ...none, state: "gone", line: GONE };
+  const value = read.value;
+  if (read.failure !== null) {
+    const rows = value !== null && value.state === "up";
+    return { state: "down", line: NOT_ANSWERING, more: value === null ? null : lastReadLine(value.at, when),
+             rows, acts: false, dim: true };
+  }
+  if (value === null) return { ...none, state: "loading", line: waitedMs >= READING_AFTER_MS ? READING : null };
+  if (value.state === "error") {
+    return { ...none, state: "error", line: phone || !value.detail ? STORE_UNREAD : value.detail };
+  }
+  const unknown = oneUnknown(value.rows);
+  if (unknown !== null) {
+    return { state: "unread", line: NO_SUPERVISOR, more: unknown.reason, rows: true, acts: true, dim: true };
+  }
+  return { state: "up", line: null, more: null, rows: true, acts: true, dim: false };
 }

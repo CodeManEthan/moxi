@@ -2,41 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actsOf, addBody, addRefused, commandLine, counts, emptyForm, flagLine, groups, healthLine, HIDDEN, listView,
-  MAY_HAVE_ACTED, NO_PROJECT, outcomeSaid, rowFacts, shownActs, SPENDS, statusLost, statusSaid, summaryView,
+  actsOf, addBody, addRefused, commandLine, counts, emptyForm, flagLine, healthLine, HIDDEN,
+  MAY_HAVE_ACTED, outcomeSaid, rowFacts, shownActs, SPENDS, statusLost, statusSaid, summaryView,
   timeLine, verdictLine, when,
 } from "../src/views.ts";
 import { moduleRow, row, rows, timer } from "./fixtures.mjs";
 
 const fed = (value, more = {}) => ({ value, failure: null, gone: false, loading: false, ...more });
-
-test("rows group by project, keys in order ignoring case, and the rows of none last", () => {
-  const list = [row({ id: "services/a", project: "zeta" }), moduleRow(), row({ id: "services/b", project: "Alpha" }),
-                row({ id: "services/c", project: "zeta" }), row({ id: "services/d", project: "beta" })];
-  const found = groups(list);
-  assert.deepEqual(found.map((g) => g.label), ["Alpha", "beta", "zeta", NO_PROJECT]);
-  assert.deepEqual(found[2].rows.map((r) => r.id), ["services/a", "services/c"]);
-  assert.equal(found[3].project, null);
-  assert.deepEqual(groups([]), []);
-});
-
-test("the list view's states", () => {
-  assert.equal(listView(fed(null, { loading: true })).state, "loading");
-  assert.equal(listView(fed(null, { gone: true })).state, "gone");
-  const failed = listView(fed(null, { failure: { status: 0, why: "no answer from the shell", said: null } }));
-  assert.equal(failed.state, "failed");
-  assert.equal(failed.line, "The rows can't be read: no answer from the shell.");
-  const stale = listView(fed(rows([row()]), { failure: { status: 504, why: "services' page server answered 504", said: null } }));
-  assert.equal(stale.state, "failed");
-  assert.equal(stale.groups[0].rows.length, 1);
-  assert.match(stale.line, /rows last read/);
-  const error = listView(fed({ state: "error", detail: "the store is too new; fix: upgrade", rows: [], problems: [] }));
-  assert.equal(error.line, "The rows can't be listed: the store is too new; fix: upgrade");
-  assert.equal(listView(fed(rows([]))).state, "empty");
-  const up = listView(fed(rows([row()], { problems: [{ module: "notes", reason: "UNITS_FROM failed: boom" }] })));
-  assert.equal(up.state, "up");
-  assert.deepEqual(up.problems, ["notes: UNITS_FROM failed: boom; its static daemons and timers are listed"]);
-});
 
 test("a row's lines: verdict, flag or switch, since or last run, health", () => {
   assert.equal(when("2026-11-03T09:15:00Z"), "2026-11-03 09:15 UTC");
