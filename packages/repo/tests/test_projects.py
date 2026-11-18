@@ -242,6 +242,33 @@ def test_listings_show_keys_and_list_projects_adds_untouched_repos(demo, project
     assert f"{alpha}  project alpha  git " in out
 
 
+def test_each_project_repo_not_indexed_costs_one_rev_parse_and_one_config_read(demo, projects):
+    import moxi_repo
+    from moxi_repo import gitrun
+
+    roots = [demo.repo(f"untouched-{n}") for n in range(3)]
+    for n, root in enumerate(roots):
+        projects.add(f"untouched-{n}", root)
+    real = gitrun.git
+    calls: list[tuple[str, tuple]] = []
+
+    def counted(root, *args, **kwargs):
+        calls.append((str(root), args))
+        return real(root, *args, **kwargs)
+
+    for name, module in list(sys.modules.items()):
+        if name.startswith("moxi_repo") and getattr(module, "git", None) is real:
+            projects.mp.setattr(module, "git", counted)
+    repos, _ = link.with_projects([], link.api(), add=True, with_rules=True)
+    assert sorted(r["project"] for r in repos) == ["untouched-0", "untouched-1", "untouched-2"]
+    for root in roots:
+        ran = [args for where, args in calls if Path(where).resolve() == root.resolve()]
+        verbs = sorted(next(a for a in args if not a.startswith("-")) for args in ran)
+        assert verbs == ["config", "rev-parse"], (root, ran)
+    # git's version is read once for them all.
+    assert sum("version" in args for _, args in calls) == 1, calls
+
+
 @POSIX_ONLY
 def test_a_subdirectory_and_a_linked_worktree_take_their_main_repos_key(demo, projects,
                                                                         capsys):
