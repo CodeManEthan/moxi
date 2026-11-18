@@ -15,7 +15,7 @@ the test writes; its placed copy is in the shell's own data folder.
 Launcher's `running` is answered in the browser by `LauncherStub`, in launcher's declared
 shape, its entries joined to the endpoints' session ids: its route, and its topic on the
 shell's push stream, so a value the full install's real launcher publishes never replaces
-the stub's. These tests import no other package's kit.
+the stub's. Beyond ui's testing kit, these tests import no other package's kit.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from moxi.paths import Layout
 from conftest import FAKE_CLAUDE
 from fake_harness import FakeHarness
 from moxi_dev.testing import short_dir
+from moxi_ui.testing.browser import copied, ready_copying
 
 #: The modules the small install keeps: the core's own, ui and turns.
 SMALL = ("moxi", "ui", "turns")
@@ -301,15 +302,19 @@ _PUSHED = r"""(() => {
 
 
 def open_panel(panel: Panel, ui_contexts, *, route: str = "", launches: list[dict] | None = None,
-               before=None, **context_args) -> tuple[Any, Any]:
+               before=None, copying: bool = False, **context_args) -> tuple[Any, Any]:
     """A signed-in page on the shell's turns panel at `route`, once the shell's push stream
     has brought the modules; with `launches`, the launcher stub serves them. `before(page)`
-    runs before the page opens (a route of its own). The page and the panel's root.
+    runs before the page opens (a route of its own). With `copying`, `copied(page)` reads
+    back what a Copy wrote, in any browser (ui's `ready_copying`). The page and the panel's
+    root.
 
     The shell places the page again on a modules event when the address differs from the
     one it placed, and the page writes its address as a row opens; waiting for the stream's
     first value keeps a test from acting on a page about to be placed anew."""
     page = ui_contexts(panel.shell, **context_args).pages[0]
+    if copying:
+        ready_copying(page.context)
     page.add_init_script(_PUSHED)
     if launches is not None:
         LauncherStub(page, launches)
