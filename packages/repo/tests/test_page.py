@@ -112,9 +112,9 @@ def test_no_declared_route_is_the_gateways():
     assert [route["path"] for route in exported if route["gateway"]] == []
 
 
-def test_the_page_declares_one_read_and_its_built_assets():
+def test_the_page_declares_its_list_and_its_built_assets():
     exported = loopback().export(page.PAGE)
-    [route] = exported["routes"]
+    route = exported["routes"][0]
     assert (route["path"], route["kind"], route["stream"]) == ("/api/repos", "read", False)
     assert exported["assets"] == ["build-stamp.txt", "page.js"]
 
@@ -132,7 +132,7 @@ def _marks(shape: dict, at: str = "") -> dict[str, str]:
 
 
 def test_every_value_that_can_hold_a_path_carries_a_mark():
-    [route] = loopback().export(page.PAGE)["routes"]
+    route = loopback().export(page.PAGE)["routes"][0]
     marks: dict[str, str] = {}
     for key, shape in route["returns"].items():
         marks.update(_marks(shape, key))

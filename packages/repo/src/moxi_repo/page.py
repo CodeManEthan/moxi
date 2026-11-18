@@ -1,16 +1,28 @@
-"""repo's page: the one route its page server answers, declared as data.
+"""repo's page: the routes its page server answers, declared as data.
 
-    GET /api/repos   each indexed repo's git hooks and committer specs, the pieces
-                     installed modules offer, the projects with no hooks yet, and the
-                     server's `now` and `today`
+    GET  /api/repos     each indexed repo's git hooks and committer specs, the pieces
+                        installed modules offer, the projects with no hooks yet, and the
+                        server's `now` and `today`
+    GET  /api/plan      what an add, a turn on or a refresh would write in one repo
+    POST /api/add       add pieces to a repo, or the repo alone to the list
+    POST /api/enable    turn a registered piece on
+    POST /api/refresh   refresh one repo
 
-It answers from `api.status()` and `api.specs(sweep=False)`, what `moxi repo git-hooks
-list --json` and `moxi repo specs --json` print, so the page shows what those commands
-show, and from `api.available()`. With projects installed it lists project repos as
-`git-hooks list --projects` does. The route is a read and writes nothing: the listing of
-specs runs without the record sweep, and a repo's rules are read without the commit-proof
-line, whose `git write-tree` writes. It is not the gateway's. Every command the page
-offers is a line to copy and run in a terminal; the page runs none.
+`/api/repos` answers from `api.status()` and `api.specs(sweep=False)`, what `moxi repo
+git-hooks list --json` and `moxi repo specs --json` print, so the page shows what those
+commands show, and from `api.available()`. With projects installed it lists project repos
+as `git-hooks list --projects` does. It is a read and writes nothing: the listing of specs
+runs without the record sweep, and a repo's rules are read without the commit-proof line,
+whose `git write-tree` writes. `/api/plan` reads too (`api.plan_add`, `plan_enable`,
+`plan_refresh`).
+
+The three acts are plain acts: each sends the digest of the plan its confirm drew, and the
+verb writes only when the plan it makes under the repo's lock has that digest, so nothing
+is written that the confirm didn't show and a repeated send writes nothing. In a copy of
+Moxi (`MOXI_ANCHOR_HOME` set) a plan or act on a repo outside the copy's folder is
+refused; an act is then checked with ui, as every page that writes is, so it writes no
+store the user's terminal wouldn't find. None of them disables, removes or changes a
+setting: those are lines to copy and run in a terminal. No route is the gateway's.
 
 Every value that can hold a path carries a mark: `root`, `hook` and `existing_hook` are
 `path`, and each sentence, rule or command line that can name a path or a remote is
@@ -188,12 +200,87 @@ REPOS = {
     "unindexed": lb.Out("list", items=UNINDEXED, nullable=True),
 }
 
+#: One item an act writes: `place` is `config`, `hooks`, `chain` or `index`; a `config`
+#: item's `key` with its value before and after (`to` null for a seeded value drawn as
+#: it is written, `seed` true), a `hooks` item's `key` (`shim`, `hook`, `launcher`) and
+#: the file it writes or moves, a `chain` item's hook file and line, an `index` item's
+#: root there before.
+WRITE = lb.Out("table", items={
+    "place": _TEXT,
+    "piece": _MAYBE,
+    "event": _MAYBE,
+    "key": _MAYBE,
+    "from": _MAYBE_SAYS,
+    "to": _MAYBE_SAYS,
+    "seed": _FLAG,
+})
+
+#: What an act would write in one repo (`api.plan_add`'s shape): `refusal` `{code, text}`
+#: when it would be refused, with no `writes` and no `digest`.
+PLAN = lb.Out("table", items={
+    "root": _PATH,
+    "name": _TEXT,
+    "is_repo": _FLAG,
+    "git_version": _MAYBE,
+    "mode": _MAYBE,
+    "indexed": _FLAG,
+    "pieces": lb.Out("list", items=lb.Out("table", items={
+        "id": _TEXT, "event": _MAYBE, "new": _FLAG, "implied_by": _MAYBE,
+        "seeds": lb.Out("list", items=_TEXT)})),
+    "mode_change": lb.Out("table", items={"from": _TEXT, "to": _TEXT}, nullable=True),
+    "own_hooks": lb.Out("list", items=_TEXT),
+    "in_progress": _MAYBE,
+    "writes": lb.Out("list", items=WRITE),
+    "refusal": lb.Out("table", items={"code": _MAYBE, "text": _SAYS}, nullable=True),
+    "digest": _MAYBE,
+}, nullable=True)
+
+#: `/api/plan`: `state` `up` with the plan, or `error` with `detail` and no plan.
+PLANNED = {"state": _TEXT, "detail": _MAYBE_SAYS, "plan": PLAN}
+
+#: An act's answer: `outcome` is `done`, `nothing`, `changed` (with the new `plan`),
+#: `refused` (`refusal` its code and text), `partial` (`refusal` the text of a failure
+#: after the first write) or `failed` (`refusal` a fixed text); `lines`, `problems` and
+#: `chain` are the verb's report.
+ANSWER = {
+    "outcome": _TEXT,
+    "lines": lb.Out("list", items=_SAYS),
+    "problems": lb.Out("list", items=_SAYS),
+    "chain": lb.Out("list", items=lb.Out("table", items={
+        "event": _TEXT, "hook": _PATH, "line": _TEXT, "present": _FLAG})),
+    "plan": PLAN,
+    "refusal": lb.Out("table", items={"code": _MAYBE, "text": _SAYS}, nullable=True),
+}
+
+#: The longest path and piece id a request may carry, and the most pieces in one add.
+PATH_MAX = 4096
+ID_MAX = 256
+PIECES_MAX = 64
+_ROOT = lb.Field("string", max=PATH_MAX)
+_ID = lb.Field("string", max=ID_MAX)
+_DIGEST = lb.Field("string", max=64)
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/repos", "read", "moxi_repo.pagehandlers:repos", returns=REPOS),
+        lb.Route("/api/plan", "read", "moxi_repo.pagehandlers:plan",
+                 query={"act": lb.Field("enum", values=("add", "enable", "refresh")),
+                        "root": _ROOT,
+                        "pieces": lb.Field("string", required=False,
+                                           max=PIECES_MAX * (ID_MAX + 1))},
+                 returns=PLANNED),
+        lb.Route("/api/add", "act", "moxi_repo.pagehandlers:add",
+                 body={"root": _ROOT, "digest": _DIGEST,
+                       "pieces": lb.Field("list", required=False, max=PIECES_MAX,
+                                          items=_ID)},
+                 returns=ANSWER),
+        lb.Route("/api/enable", "act", "moxi_repo.pagehandlers:enable",
+                 body={"root": _ROOT, "piece": _ID, "digest": _DIGEST}, returns=ANSWER),
+        lb.Route("/api/refresh", "act", "moxi_repo.pagehandlers:refresh",
+                 body={"root": _ROOT, "digest": _DIGEST}, returns=ANSWER),
     ),
     assets="web",
 )
 
-__all__ = ["EVENT", "OFFERED", "PAGE", "PIECE", "PROBLEM", "RECORD", "REFUSED", "REPO",
-           "REPOS", "SPEC", "UNINDEXED"]
+__all__ = ["ANSWER", "EVENT", "OFFERED", "PAGE", "PIECE", "PLAN", "PLANNED", "PROBLEM",
+           "RECORD", "REFUSED", "REPO", "REPOS", "SPEC", "UNINDEXED", "WRITE"]

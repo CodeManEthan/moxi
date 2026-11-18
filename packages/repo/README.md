@@ -561,8 +561,27 @@ With the `ui` extra, the browser UI shell shows a git hooks page: for each index
 its problems, each git event with its pieces in the order they run, the existing git hook
 and the chain line's state, each committer spec's last pass, last commit and pushes, and
 the doctor records repo has open. The page reads what `moxi repo git-hooks list --json`
-and `moxi repo specs --json` print, and changes nothing: each action is a `moxi repo`
-command to copy and run in a terminal.
+and `moxi repo specs --json` print.
+
+The page can do three things itself: add pieces to a repo (or add the repo alone to the
+list), turn a registered piece on, and refresh a repo. Each first reads what it would
+write, the same plan `moxi repo git-hooks add`, `enable` and `refresh` make, and draws
+every key, hook file and index entry of it, with the old value of any key it puts back.
+What you press sends that plan's digest, and the verb writes only if the plan it makes
+again, under the repo's lock, has the same one; otherwise it writes nothing and shows the
+new plan. A press sent twice writes nothing the second time. Before writing, the page
+checks with ui that it would write where your terminal does, as every page that writes
+does. It never disables, removes or changes a setting: those stay commands to copy and
+run in a terminal.
+
+Who can press them: anyone holding the page server's token, as with every page act. Any
+process running as you can already run `moxi repo git-hooks add`, so the page reaches no
+repo that process couldn't.
+
+In a copy of Moxi (one whose environment sets `MOXI_ANCHOR_HOME`, such as a preview), the
+page changes no repo outside the copy's folder: a repo whose work tree, git folder or hooks
+folder lies outside it is refused, and the page only reads it. A `moxi repo` command typed
+in the copy's terminal acts as typed.
 
 ## Install
 

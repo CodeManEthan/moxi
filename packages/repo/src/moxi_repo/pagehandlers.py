@@ -252,4 +252,145 @@ def repos(call: Any) -> dict[str, Any]:
     return {"now": time.time(), **value}
 
 
-__all__ = ["gather", "repos", "within"]
+# -- the plan and the acts ------------------------------------------------------------------
+
+#: What `failed` says, whatever the exception was.
+FAILED = "repo's page server hit an error; its log has the details"
+
+
+def _expand(root: str) -> str:
+    """`root` with a leading `~` (alone, or before a separator) taken as the home
+    `moxi.paths.home()` places; anything else, `~user` included, as sent."""
+    from moxi import paths
+
+    seps = ("/", "\\") if os.name == "nt" else ("/",)
+    if root != "~" and not root.startswith(tuple("~" + sep for sep in seps)):
+        return root
+    try:
+        home = str(paths.home())
+    except LookupError:
+        return root
+    return os.path.join(home, root[2:]) if len(root) > 1 else home
+
+
+def _ids(text: str | None) -> list[str]:
+    return [part for part in (text or "").split(",") if part]
+
+
+def plan(call: Any) -> dict[str, Any]:
+    """`GET /api/plan?act=add|enable|refresh&root=&pieces=`: what the act would write in
+    the repo at `root` (`~` expanded here), as `api.plan_add`, `plan_enable` and
+    `plan_refresh` give it, kept to `within()`. `pieces` is the piece ids joined by `,`
+    (turning on names one). A plan's refusal is its `refusal`; any other failure is
+    `state` `error` with a fixed `detail`, logged once."""
+    from moxi_repo import page
+
+    act, root = call.query["act"], _expand(call.query["root"])
+    ids = _ids(call.query.get("pieces"))
+    if act == "enable" and len(ids) != 1:
+        raise page.lb.Refused("turning a piece on names one piece")
+    home = within()
+    try:
+        if act == "add":
+            found = api.plan_add(root, ids, within=home)
+        elif act == "enable":
+            found = api.plan_enable(root, ids[0], within=home)
+        else:
+            found = api.plan_refresh(root, within=home)
+    except Exception as exc:
+        _log_once(exc, "planning an act failed")
+        return {"state": "error", "detail": f"{FAILED} ({type(exc).__name__})", "plan": None}
+    return {"state": "up", "detail": None, "plan": found}
+
+
+def _answer(outcome: str, *, report: api.Report | None = None, plan: dict | None = None,
+            code: str | None = None, text: str | None = None) -> dict[str, Any]:
+    return {"outcome": outcome,
+            "lines": list(report.lines) if report else [],
+            "problems": [str(p) for p in report.problems] if report else [],
+            "chain": [{"event": event, "hook": hook, "line": line, "present": present}
+                      for _root, event, hook, line, present in report.chain] if report
+                     else [],
+            "plan": plan,
+            "refusal": None if text is None else {"code": code, "text": text}}
+
+
+def _places(env: Mapping[str, str]) -> dict[str, str]:
+    """Where an act's write lands that the terminal must find too: repo's index folder."""
+    from moxi import paths
+
+    return {"repo's index folder": str(paths.Layout(api.MODULE).state_dir(env))}
+
+
+def _anchor_clause() -> str:
+    """The clause ui's check ends a line with when this server's environment sets
+    `MOXI_ANCHOR_HOME`, saying to take it out. In a copy of Moxi that variable is what
+    keeps the copy's acts at home, so the page answers without it."""
+    from moxi import paths
+
+    return (f" This page's environment sets {paths.ANCHOR_HOME_ENV}, which only test kits "
+            "set; take it out of the browser shell's environment.")
+
+
+def _terminal_line() -> str | None:
+    """None when an act may write here; else ui's line that refuses it (module doc)."""
+    from moxi import modules, terminal
+
+    found = modules.load("ui", interface=3)
+    if not found.ok:
+        return (f"this page checks with ui that it writes where your terminal does, and "
+                f"can't load ui's check ({found.reason}), so it refuses to write; run the "
+                "command in a terminal")
+    try:
+        line = found.api.check(_places)
+    except ValueError as exc:
+        return (f"this page can't compare where it writes with your terminal ({exc}), so "
+                "it refuses to write; run the command in a terminal")
+    if line and terminal.anchor_set():
+        line = line.removesuffix(_anchor_clause())
+    return line
+
+
+def _act(call: Any, verb: Any) -> dict[str, Any]:
+    """Run `verb(root, expect=digest, within=within())` for an act's body, after the
+    repo is checked against `within()` and then against ui's check; answer what came of
+    it (module doc)."""
+    root = _expand(call.body["root"])
+    home = within()
+    try:
+        if not os.path.isabs(root):
+            raise api.Usage(f"{root} is not an absolute path", reason="not-absolute")
+        api._resolve(root, home)  # the copy's check comes before ui's
+        line = _terminal_line()
+        if line:
+            return _answer("refused", text=line)
+        report = verb(root, expect=call.body["digest"], within=home)
+    except api.Changed as exc:
+        return _answer("changed", plan=exc.plan)
+    except api.Failure as exc:
+        return _answer("partial" if exc.partial else "refused", code=exc.reason,
+                       text=exc.text)
+    except Exception as exc:
+        _log_once(exc, "an act failed")
+        return _answer("failed", text=FAILED)
+    return _answer("nothing" if report.already else "done", report=report)
+
+
+def add(call: Any) -> dict[str, Any]:
+    """`POST /api/add` `{root, pieces, digest}`: `api.add` with the plan's digest."""
+    ids = list(call.body.get("pieces") or [])
+    return _act(call, lambda root, **kw: api.add(root, ids, **kw))
+
+
+def enable(call: Any) -> dict[str, Any]:
+    """`POST /api/enable` `{root, piece, digest}`: `api.enable` with the plan's digest."""
+    return _act(call, lambda root, **kw: api.enable(root, call.body["piece"], **kw))
+
+
+def refresh(call: Any) -> dict[str, Any]:
+    """`POST /api/refresh` `{root, digest}`: `api.refresh` of that repo with the plan's
+    digest."""
+    return _act(call, lambda root, **kw: api.refresh(root, **kw))
+
+
+__all__ = ["FAILED", "gather", "repos", "within", "plan", "add", "enable", "refresh"]
