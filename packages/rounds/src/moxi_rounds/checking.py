@@ -488,13 +488,15 @@ class _ByCi:
     """What the act of a check by CI did: the `pushed` remote, the `local` run as
     `_run` gives it (None when none ran), the `reading`, or the read that `failed`, and
     the branch name of CI's own `ref` the tip went to (None for a push to the build's
-    own branch name, or none)."""
+    own branch name, or none), and whether the remote's branch was `already` at the
+    tip, so nothing was pushed."""
 
     pushed: str | None
     local: tuple | None
     reading: object = None
     failed: object = None
     ref: str | None = None
+    already: bool = False
 
 
 @dataclass(frozen=True)
@@ -503,8 +505,9 @@ class CiChecked:
     `commit` (the tip), the remote it `pushed` to, the `local` run recorded now (None
     when none ran: `local_passed` then says whether one passed at the tip before, or
     the repo has none), the `ci.read` event (`reading`, None when the read failed), the
-    `read_failed` line, the after-append callbacks that `failed`, and the branch name
-    of CI's own `ref` the tip was pushed to (None where the setting names no `ref`)."""
+    `read_failed` line, the after-append callbacks that `failed`, the branch name of
+    CI's own `ref` the tip was pushed to (None where the setting names no `ref`), and
+    whether that branch was `already` at the tip, so nothing was pushed."""
 
     name: str
     stage: str
@@ -516,6 +519,7 @@ class CiChecked:
     read_failed: str | None
     failed: tuple = ()
     ref: str | None = None
+    already: bool = False
 
     @property
     def passed(self) -> bool:
@@ -528,16 +532,54 @@ class CiChecked:
                 and self.reading.get("reading") == ci.GREEN)
 
 
-def _push(found: _Look, *, again: str) -> str | None:
+def _git_out(found: _Look, argv: list[str]) -> str | None:
+    """`argv`'s output, run in the worktree under the push time limit, or None when it
+    fails or runs past the limit."""
+    try:
+        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
+                        cwd=found.worktree)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if done.returncode != 0:
+        return None
+    return (done.stdout or b"").decode(errors="replace")
+
+
+def _at_tip(found: _Look, remote: str, name: str) -> bool:
+    """Whether the remote's branch `name` is already at the tip at every URL `git push`
+    sends to: each push URL `git remote get-url --push --all` lists is read with
+    `git ls-remote`, under the push time limit. A read that fails, a remote with no
+    URL listed, or a URL that lists no branch of exactly that name reads as not at the
+    tip, so the push goes ahead and says what is wrong."""
+    said = _git_out(found, ["git", "remote", "get-url", "--push", "--all", remote])
+    urls = [] if said is None else [url for url in said.splitlines() if url.strip()]
+    return bool(urls) and all(_url_at_tip(found, url, name) for url in urls)
+
+
+def _url_at_tip(found: _Look, url: str, name: str) -> bool:
+    said = _git_out(found, ["git", "ls-remote", "--heads", url, f"refs/heads/{name}"])
+    for line in (said or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == f"refs/heads/{name}":
+            return parts[0] == found.tip
+    return False
+
+
+def _push(found: _Look, *, again: str) -> tuple[str | None, bool]:
     """Push the tip to the remote the setting names: where it names a `ref`, forced to
-    the branch name the template gives the build's branch, and that name is returned;
-    else as a plain push to the build's own branch name, and None is returned. The push
-    runs through the repo's hooks. Raises `Refused` with git's message, and the hooks',
-    when the push is refused."""
+    the branch name the template gives the build's branch; else as a plain push to the
+    build's own branch name. Returns that `ref` name (None for the build's own branch
+    name), and whether the remote's branch was already at the tip at each of its push
+    URLs: then nothing is pushed, since git would run the pre-push hook with no ref to
+    push, which a guard may refuse. The name `full_ref` gives is never pushed here.
+    The push runs through the repo's hooks. Raises `Refused` with git's message, and
+    the hooks', when the push is refused."""
     from . import ci
 
     remote, branch, template = found.ci.remote, found.build.branch, found.ci.ref
     ref = None if template is None else ci.ref_for(template, branch)
+    if _at_tip(found, remote, branch if ref is None else ref):
+        return ref, True
     argv = (["git", "push", remote, f"+{found.tip}:refs/heads/{ref}"] if ref is not None
             else ["git", "push", remote, f"{found.tip}:refs/heads/{branch}"])
     try:
@@ -547,7 +589,7 @@ def _push(found: _Look, *, again: str) -> str | None:
         raise Refused([Unmet(f"{shlex.join(argv)} ran past {PUSH_TIMEOUT_S:g} s, so CI "
                              "was not read and nothing is recorded", again)]) from None
     if done.returncode == 0:
-        return ref
+        return ref, False
     said = (done.stderr or b"").decode(errors="replace").strip()
     said = f"{shlex.join(argv)} was refused, so nothing is recorded: " + (
         said or f"exit {done.returncode}")
@@ -567,8 +609,9 @@ def _by_ci(found: _Look, *, again: str) -> _ByCi:
     from . import ci
 
     pushed = ref = None
+    already = False
     if found.ci.remote:
-        ref = _push(found, again=again)
+        ref, already = _push(found, again=again)
         pushed = found.ci.remote
     local = None
     if found.local_due:
@@ -576,12 +619,12 @@ def _by_ci(found: _Look, *, again: str) -> _ByCi:
                      f"fix ci.local in the settings, then {again}")
         if local[0] != 0:
             # A failed local run stops the check there: CI is not read.
-            return _ByCi(pushed, local, ref=ref)
+            return _ByCi(pushed, local, ref=ref, already=already)
     try:
         reading = ci.read(found.ci, values=found.values, cwd=found.worktree)
     except ci.ReadFailed as exc:
-        return _ByCi(pushed, local, failed=exc, ref=ref)
-    return _ByCi(pushed, local, reading=reading, ref=ref)
+        return _ByCi(pushed, local, failed=exc, ref=ref, already=already)
+    return _ByCi(pushed, local, reading=reading, ref=ref, already=already)
 
 
 def _read_failed(name: str, stage: str, error) -> Unmet:
@@ -630,7 +673,8 @@ def _ci_checked(before: _Look, written, *, name: str, stage: str) -> CiChecked:
               else _read_failed(name, stage, result.failed).reason)
     return CiChecked(name=name, stage=stage, commit=before.tip, pushed=result.pushed,
                      local=local, local_passed=not before.local_due, reading=reading,
-                     read_failed=failed, failed=written.failed, ref=result.ref)
+                     read_failed=failed, failed=written.failed, ref=result.ref,
+                     already=result.already)
 
 
 def _step_name(name: str, stage: str, step: str | None) -> None:
