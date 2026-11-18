@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows usage depends on `tzdata`, so a zone named by its IANA name (`Europe/Paris`)
+  resolves there: Windows has no IANA time zone database of its own for `zoneinfo` to
+  read.
 - Every setting carries page fields, which `moxi config usage show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, the
   unit of each wait, age and token count, seven settings shown first (the default
