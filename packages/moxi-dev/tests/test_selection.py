@@ -362,6 +362,19 @@ def test_hold_leaves_out_what_only_runs(timed_package, monkeypatch, var, value, 
     assert "held" not in json.loads((timed_package.path / "only.json").read_text())
 
 
+def test_a_release_run_under_hold_runs_its_plain_tests_and_puts_back_no_tier(
+        timed_package, monkeypatch):
+    """A release's test run sets only the hold, over the package's own `-m`: its plain
+    tests run, its plain-tier timed tests are held, and no tier test comes back."""
+    for var in (testing.TIERS_ENV, testing.CHANGED_ENV, testing.FINDING_ENV,
+                testing.DURATIONS_ENV):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv(testing.TIMED_ENV, "hold")
+    result = timed_package.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == {"test_unit"}
+    result.assert_outcomes(passed=1)
+
+
 def test_hold_names_the_held_tests_under_workers(timed_package, monkeypatch):
     out = timed_package.path / "out" / "durations.json"
     monkeypatch.setenv(testing.TIERS_ENV, "all")

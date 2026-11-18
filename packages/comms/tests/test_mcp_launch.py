@@ -521,10 +521,10 @@ def test_the_contributor_and_listener_import_light(timed_reading):
 
     The cost is the best of up to five imports. Load from outside the check (another
     suite on the machine) only ever adds to a run's time, so one quiet run shows what
-    the import costs; a quiet machine passes on the first. A machine shared with other
-    work slows every run, so the bound sits a quarter over the budget: a cost that grew
-    by more than that still fails."""
-    bound = 10_000 * 1.25 * timed_slack()
+    the import costs; a quiet machine passes on the first. The test runs only in
+    `moxi-dev timed`, which measures when other work on the machine is light, so the
+    bound is the budget itself, times the run's `timed_slack()`."""
+    bound = 10_000 * timed_slack()
     mods = ("moxi_comms", "moxi_comms.mcp", "moxi_comms.mcp.additions",
             "moxi_comms.listener")
     code = ("import sys, moxi_comms.mcp.additions as a, moxi_comms.listener\n"
@@ -547,5 +547,5 @@ def test_the_contributor_and_listener_import_light(timed_reading):
         totals.append(total)
         if total < bound:
             break
-    timed_reading(min(totals), 10_000 * 1.25, "us", clock="child")
+    timed_reading(min(totals), 10_000, "us", clock="child")
     assert min(totals) < bound, totals

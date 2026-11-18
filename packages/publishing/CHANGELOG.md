@@ -63,3 +63,6 @@ The first version.
   `moxi-publishing.github` passes only when GitHub has, at its new tip, a run of
   `check-workflow` from a push to a standing branch whose `check-job` passed in the run's
   latest attempt. A repo with no pattern, or a push to another URL, reads no CI.
+- `moxi publishing ci siblings` runs the suite with `MOXI_TEST_TIMED=hold`, over any value
+  the job had, so a release's test run holds every timed test as the land check does;
+  they run only in `moxi-dev timed`.
