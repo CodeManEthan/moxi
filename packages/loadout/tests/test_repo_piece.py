@@ -299,7 +299,7 @@ def test_the_piece_imports_nothing_but_the_standard_library():
 
 
 @pytest.mark.timed
-def test_the_piece_imports_in_under_10_ms():
+def test_the_piece_imports_in_under_10_ms(timed_reading):
     """Repo's runner pays this import on every commit; the median of five runs, measured
     again twice if the machine was busy."""
     import statistics
@@ -320,6 +320,7 @@ def test_the_piece_imports_in_under_10_ms():
         if statistics.median(times) < 10_000:
             break
         time.sleep(1)
+    timed_reading(statistics.median(times), 10_000, "us", clock="child")
     assert statistics.median(times) < 10_000 * timed_slack(), times
 
 

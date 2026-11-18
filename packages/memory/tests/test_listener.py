@@ -7,7 +7,7 @@ import time
 
 import moxi_turns as turns
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import timed_slack, wait_for
 
 from moxi_memory import (clock, index, links, listener, listeners, settings, start, state,
                          table)
@@ -50,7 +50,8 @@ class FakeComms:
         if self.check is not None:
             self.check()
         if self.block is not None:
-            self.block.wait(10)
+            # A blocked ask lasts a minute, past twice every loose bound below.
+            self.block.wait(60)
             return None
         if self.delay:
             time.sleep(self.delay)
@@ -309,38 +310,78 @@ def test_the_row_is_written_before_the_identity_is_asked(comms, conn, shop):
     assert table.row(conn, "claude", "me").identity == "planner"
 
 
-@pytest.mark.timed
-def test_a_late_identity_keeps_the_project_list_and_is_written_when_it_comes(
-        comms, conn, shop):
+# Each hang guard below is checked twice. The land-check test keeps every behaviour
+# assertion and holds the time to `LOOSE` times the tight bound, with no factor: a guard
+# that never fired fails it, and load alone doesn't. Its `_in_time` twin is `timed`, holds
+# the tight bound times `timed_slack()`, and reports its reading.
+LOOSE = 5
+
+
+def _late_identity(comms, conn, shop) -> float:
+    """Ask for the lists while comms answers the identity after `IDENTITY_WAIT`: the
+    project list comes without it, and the identity is written when it comes."""
     fake = comms(FakeComms("planner", delay=0.8))
     listed(conn, "claude", "own", identity="planner", label="far", newest=11.0)
     listed(conn, "codex", "p", newest=10.0)
     began = time.monotonic()
     text = listener.lists(event(cwd=shop, env={"MOXI_COMMS_CLAIM": "x"}))
     took = time.monotonic() - began
-    assert took < listener.DEADLINE
     assert text == f"recent sessions in shop:\n- p  {when(10.0)}  codex"
     assert fake.asked == [{"MOXI_COMMS_CLAIM": "x"}]
     wait_for(lambda: table.row(conn, "claude", "me").identity == "planner", timeout=5)
+    return took
+
+
+def test_a_late_identity_keeps_the_project_list_and_is_written_when_it_comes(
+        comms, conn, shop):
+    took = _late_identity(comms, conn, shop)
+    assert took < LOOSE * listener.DEADLINE, took
 
 
 @pytest.mark.timed
-def test_a_claim_socket_that_never_answers_costs_only_the_agent_list(comms, conn, shop):
+def test_a_late_identity_keeps_the_project_list_and_is_written_when_it_comes_in_time(
+        comms, conn, shop, timed_reading):
+    took = _late_identity(comms, conn, shop)
+    timed_reading(took, listener.DEADLINE, "s")
+    assert took < listener.DEADLINE * timed_slack(), took
+
+
+def _claim_never_answers(comms, conn, shop) -> float:
+    """Ask for the lists while comms never answers the identity: only the agent list is
+    lost, and the identity is never written."""
     hung = threading.Event()
     comms(FakeComms("planner", block=hung))
     listed(conn, "codex", "p", newest=10.0)
     began = time.monotonic()
     text = listener.lists(event(cwd=shop))
-    assert time.monotonic() - began < listener.DEADLINE
+    took = time.monotonic() - began
     assert text == f"recent sessions in shop:\n- p  {when(10.0)}  codex"
     hung.set()
     time.sleep(0.1)
     assert table.row(conn, "claude", "me").identity is None
+    return took
+
+
+def test_a_claim_socket_that_never_answers_costs_only_the_agent_list(comms, conn, shop):
+    took = _claim_never_answers(comms, conn, shop)
+    assert took < LOOSE * listener.DEADLINE, took
 
 
 @pytest.mark.timed
-def test_a_held_state_store_makes_lists_skip_its_write_within_its_cap(no_comms, conn,
-                                                                      shop):
+def test_a_claim_socket_that_never_answers_costs_only_the_agent_list_in_time(
+        comms, conn, shop, timed_reading):
+    took = _claim_never_answers(comms, conn, shop)
+    timed_reading(took, listener.DEADLINE, "s")
+    assert took < listener.DEADLINE * timed_slack(), took
+
+
+#: The held state store's bound: the row write's wait, one query's, and 0.2 s besides.
+HELD_STORE_S = listener.ROW_WAIT + listener.QUERY_WAIT + 0.2
+
+
+def _held_state_store(conn, shop) -> float:
+    """Ask for the lists while another connection holds the store's write lock: the row
+    isn't written, and the reads still run beside the lock."""
     listed(conn, "codex", "p", newest=10.0)
     holder = state.connect()
     holder.execute("BEGIN IMMEDIATE")
@@ -352,44 +393,73 @@ def test_a_held_state_store_makes_lists_skip_its_write_within_its_cap(no_comms, 
         holder.execute("ROLLBACK")
         holder.close()
     assert table.row(conn, "claude", "me") is None
-    # The write waited its 250 ms; the reads still ran beside the held write lock.
-    assert took < listener.ROW_WAIT + listener.QUERY_WAIT + 0.2
     assert text == f"recent sessions in shop:\n- p  {when(10.0)}  codex"
+    return took
+
+
+def test_a_held_state_store_makes_lists_skip_its_write_within_its_cap(no_comms, conn,
+                                                                      shop):
+    took = _held_state_store(conn, shop)
+    assert took < LOOSE * HELD_STORE_S, took
 
 
 @pytest.mark.timed
-def test_a_query_past_its_bound_is_interrupted_and_leaves_its_list_out(monkeypatch, comms,
-                                                                      conn, shop):
+def test_a_held_state_store_makes_lists_skip_its_write_within_its_cap_in_time(
+        no_comms, conn, shop, timed_reading):
+    took = _held_state_store(conn, shop)
+    timed_reading(took, HELD_STORE_S, "s")
+    # The write waited its 250 ms; the reads still ran beside the held write lock.
+    assert took < HELD_STORE_S * timed_slack(), took
+
+
+def _endless(c, *a, **k):
+    """A query that never ends until it is interrupted."""
+    return c.execute("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n) "
+                     "SELECT count(*) FROM n").fetchall()
+
+
+def _query_past_its_bound(monkeypatch, comms, conn, shop) -> float:
+    """Ask for the lists while the agent list's query never ends: it is cut at
+    `QUERY_WAIT` and its list left out, and the project list still comes."""
     comms(FakeComms("planner"))
     listed(conn, "claude", "own", identity="planner", label="far", newest=11.0)
     listed(conn, "codex", "p", newest=10.0)
-
-    def endless(c, *a, **k):
-        return c.execute("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n) "
-                         "SELECT count(*) FROM n").fetchall()
-
-    monkeypatch.setattr(table, "agent_sessions", endless)
+    monkeypatch.setattr(table, "agent_sessions", _endless)
     began = time.monotonic()
     text = listener.lists(event(cwd=shop))
     took = time.monotonic() - began
-    assert listener.QUERY_WAIT <= took < listener.DEADLINE
+    assert listener.QUERY_WAIT <= took, took
     assert text == f"recent sessions in shop:\n- p  {when(10.0)}  codex"
     assert table.row(conn, "claude", "me").identity == "planner"
+    return took
+
+
+def test_a_query_past_its_bound_is_interrupted_and_leaves_its_list_out(monkeypatch, comms,
+                                                                      conn, shop):
+    took = _query_past_its_bound(monkeypatch, comms, conn, shop)
+    assert took < LOOSE * listener.DEADLINE, took
 
 
 @pytest.mark.timed
-def test_lists_answers_inside_its_deadline_when_every_step_reaches_its_cap(
-        monkeypatch, comms, conn, shop):
+def test_a_query_past_its_bound_is_interrupted_and_leaves_its_list_out_in_time(
+        monkeypatch, comms, conn, shop, timed_reading):
+    took = _query_past_its_bound(monkeypatch, comms, conn, shop)
+    timed_reading(took, listener.DEADLINE, "s")
+    assert took < listener.DEADLINE * timed_slack(), took
+
+
+#: Every step at its cap: the deadline, and 0.1 s besides.
+EVERY_CAP_S = listener.DEADLINE + 0.1
+
+
+def _every_step_at_its_cap(monkeypatch, comms, shop) -> float:
+    """Ask for the lists while comms never answers, the store's write lock is held and
+    the project query never ends: no list comes."""
     hung = threading.Event()
     comms(FakeComms("planner", block=hung))
     holder = state.connect()
     holder.execute("BEGIN IMMEDIATE")
-
-    def endless(c, *a, **k):
-        return c.execute("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n) "
-                         "SELECT count(*) FROM n").fetchall()
-
-    monkeypatch.setattr(table, "project_sessions", endless)
+    monkeypatch.setattr(table, "project_sessions", _endless)
     try:
         began = time.monotonic()
         text = listener.lists(event(cwd=shop))
@@ -399,7 +469,21 @@ def test_lists_answers_inside_its_deadline_when_every_step_reaches_its_cap(
         holder.close()
         hung.set()
     assert text is None
-    assert took < listener.DEADLINE + 0.1
+    return took
+
+
+def test_lists_answers_inside_its_deadline_when_every_step_reaches_its_cap(
+        monkeypatch, comms, conn, shop):
+    took = _every_step_at_its_cap(monkeypatch, comms, shop)
+    assert took < LOOSE * EVERY_CAP_S, took
+
+
+@pytest.mark.timed
+def test_lists_answers_inside_its_deadline_when_every_step_reaches_its_cap_in_time(
+        monkeypatch, comms, conn, shop, timed_reading):
+    took = _every_step_at_its_cap(monkeypatch, comms, shop)
+    timed_reading(took, EVERY_CAP_S, "s")
+    assert took < EVERY_CAP_S * timed_slack(), took
 
 
 def test_the_start_line_needs_nothing_lists_reads(monkeypatch, shop):
