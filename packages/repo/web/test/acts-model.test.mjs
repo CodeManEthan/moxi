@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actRequest, addRows, answerView, confirmView, folderLine, placeWords, planFailWords, planPath, refreshCommand,
+  actRequest, addRows, answerView, confirmView, folderLine, IDLE, placeWords, planFailWords, planPath, refreshCommand,
   rowAddTitle, sentPieces, transportView, writesOf,
 } from "../src/acts-model.ts";
 import { answer, HOME, offered, piece, plan, planned, repo, write } from "./fixtures.mjs";
@@ -134,7 +134,7 @@ test("Turn on: the piece turned on and its entries back, then its doc", () => {
   assert.deepEqual([view.leaves, view.go], ["the repo's files and its other hooks as they are", "Turn it on"]);
 });
 
-test("Refresh: a hand edit put back is drawn with both values; nothing left reads so", () => {
+test("Refresh: a hand edit put back is drawn with both values", () => {
   const view = confirmView(plan({
     pieces: [planned({ id: "repo/commit-rules", new: false })],
     writes: [write("config", "moxi-repo.piece.repo/commit-rules.fail", "open", "closed", { piece: "repo/commit-rules" }),
@@ -144,7 +144,32 @@ test("Refresh: a hand edit put back is drawn with both values; nothing left read
   assert.deepEqual(view.writes, ["into this repo's git config · commit-rules, rewritten · puts commit-rules's fail back "
     + "to closed (it reads open here) · puts commit-rules's target back to x (it isn't set here)"]);
   assert.deepEqual([view.then, view.leaves, view.go], [[], "the repo's files and its other hooks as they are", "Refresh"]);
-  assert.deepEqual(confirmView(plan(), context("refresh")).writes, ["nothing; it is already so"]);
+  assert.deepEqual(writesOf(plan(), { act: "refresh" }).lines, ["nothing; it is already so"]);
+});
+
+test("an act that would change nothing is not offered: one line says so, with Close", () => {
+  const said = (view) => [view.idle, view.writes, view.then, view.leaves, view.go, view.cancel];
+  const idle = ["Nothing to write: it is already so.", [], [], null, null, "Close"];
+  // Refresh with nothing to put back.
+  assert.deepEqual(said(confirmView(plan(), context("refresh"))), idle);
+  // An add whose pieces another hand put in, though the plan writes an entry.
+  const added = confirmView(plan({
+    pieces: [planned({ id: "repo/commit-rules", new: false })], writes: entries("commit-msg"),
+  }), context("add", ["repo/commit-rules"]));
+  assert.deepEqual([added.title, ...said(added)], ["Add commit-rules to atlas-api?", ...idle]);
+  // A piece turned on already.
+  const on = confirmView(plan({ pieces: [planned({ id: "notes/secret-gate", event: "pre-commit", new: false })] }),
+                         context("enable", ["notes/secret-gate"]));
+  assert.deepEqual(said(on), idle);
+  // A line he still adds to another tool's hook stays, with Copy.
+  const chained = confirmView(plan({ writes: [write("chain", null, "/r/.husky/pre-commit", "moxi-repo run", {
+    event: "pre-commit" })] }), context("refresh"));
+  assert.deepEqual([chained.idle, chained.go, chained.chain.length], [IDLE, null, 1]);
+  // Add a repo that is in the list already, with nothing picked.
+  assert.deepEqual(said(confirmView(plan(), context("add-repo"))), idle);
+  // An act that writes something is offered, Cancel beside it.
+  const back = confirmView(plan({ writes: entries("commit-msg") }), context("refresh"));
+  assert.deepEqual([back.idle, back.go, back.cancel], [null, "Refresh", "Cancel"]);
 });
 
 test("a merge in progress with commit-proof planned says its commit is refused", () => {

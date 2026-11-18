@@ -956,7 +956,7 @@ export class RepoPage extends LitElement {
           data-action="go" ?disabled=${!acts || acting.sending} @click=${() => void this.#send(acting)}>${view.go}</button>`
           : nothing}
         <button type="button" class="lnk" data-action="cancel" @click=${() => this.#toggleAdding(null)}>${
-          asking ? CANCEL : CLOSE}</button></div>
+          asking && view?.idle == null ? CANCEL : CLOSE}</button></div>
     </div>`;
   }
 
@@ -986,22 +986,25 @@ export class RepoPage extends LitElement {
       <div class="btns">${asking && view?.go != null ? html`<button type="button" class="btn" data-action="go"
           ?disabled=${!acts || acting.sending} @click=${() => void this.#send(acting)}>${view.go}</button>` : nothing}
         <button type="button" class="lnk" data-action="cancel" @click=${() => this.#cancel(acting)}>${
-          asking ? CANCEL : CLOSE}</button></div>
+          asking && view?.idle == null ? CANCEL : CLOSE}</button></div>
     </div>`;
   }
 
   /** A plan's lines: `Writes`, `Then` with any line to add to another tool's hook, and
-   * `Leaves`; or the plan's refusal; or `Reading…`, or why the plan can't be read. */
+   * `Leaves`; or, when the act would change nothing, the line that says so and any line
+   * still to add; or the plan's refusal; or `Reading…`, or why the plan can't be read. */
   #planLines(acting: Acting, view: ConfirmView | null) {
     if (acting.failed !== null) return html`<p class="sm" data-line="plan-failed">${acting.failed}</p>`;
     if (view === null) return html`<p class="sm d" data-line="reading">${READING}</p>`;
     if (view.refusal !== null) return html`<p class="sm" data-line="refusal">${view.refusal}</p>`;
     const key = `${acting.at}\n${acting.act}`;
+    const chain = view.chain.map((one, at) => html`<div class="cr" data-line="chain"><span class="k">${
+      view.then.length === 0 && at === 0 ? THEN : ""}</span><span class="f">${one.text}<span class="cmd"><code>${
+      one.line}</code>${this.#copyButton(`chain:${key}\n${at}`, one.line)}</span></span></div>`);
+    if (view.idle !== null) return html`<p class="sm" data-line="idle">${view.idle}</p>${chain}`;
     return html`${view.writes.map((line, at) => labelled(at === 0 ? WRITES : "", line, "writes"))}
       ${view.then.map((line, at) => labelled(at === 0 ? THEN : "", line, "then", false))}
-      ${view.chain.map((chain, at) => html`<div class="cr" data-line="chain"><span class="k">${
-        view.then.length === 0 && at === 0 ? THEN : ""}</span><span class="f">${chain.text}<span class="cmd"><code>${
-        chain.line}</code>${this.#copyButton(`chain:${key}\n${at}`, chain.line)}</span></span></div>`)}
+      ${chain}
       ${view.leaves !== null ? labelled(LEAVES, view.leaves, "leaves") : nothing}`;
   }
 

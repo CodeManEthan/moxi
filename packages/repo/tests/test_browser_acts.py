@@ -1,8 +1,9 @@
 """The Git hooks page's acts pressed in a browser, end to end, through a real shell that
 starts repo's real page server: add a piece, add one after the repo changed under the
-confirm, turn one on, refresh, add a repo, the copy's refusal of a repo outside its home,
-and `Turn off`, which runs nothing. Each test has a shell of its own, since acts change
-its repos, and every repo it acts on is made inside the shell's anchor folder.
+confirm, turn one on, refresh, a refresh with nothing to do, add a repo, the copy's
+refusal of a repo outside its home, and `Turn off`, which runs nothing. Each test has a
+shell of its own, since acts change its repos, and every repo it acts on is made inside
+the shell's anchor folder.
 """
 
 from __future__ import annotations
@@ -124,6 +125,20 @@ def test_refresh_puts_back_an_entry_taken_out_by_hand(world):
     expect(confirm.locator("[data-line=said]")).to_have_text(f"refreshed {world.atlas}")
     assert config(world, world.atlas, key) == entry
     expect(panel.locator("[data-group=hooks] .prob")).to_have_count(0)
+
+
+def test_a_refresh_that_would_change_nothing_offers_no_button(world):
+    panel = kit.open_page(world.page)
+    opened = kit.opened(panel, world.atlas)
+    opened.locator("[data-part=foot] [data-action=refresh]").click()
+    confirm = opened.locator("[data-part=confirm][data-act=refresh]")
+    expect(confirm.locator("[data-line=question]")).to_have_text("Refresh ~/code/atlas-api?")
+    expect(confirm.locator("[data-line=idle]")).to_have_text("Nothing to write: it is already so.")
+    expect(confirm.locator("[data-line=writes]")).to_have_count(0)
+    expect(confirm.locator("[data-action=go]")).to_have_count(0)
+    expect(confirm.locator("[data-action=cancel]")).to_have_text("Close")
+    confirm.locator("[data-action=cancel]").click()
+    expect(confirm).to_have_count(0)
 
 
 def test_a_repo_added_from_the_page_joins_the_list_with_its_pieces(world):

@@ -80,6 +80,9 @@ export interface ConfirmView {
   title: string | null;
   /** The plan's refusal as a sentence: no lines and no button then. */
   refusal: string | null;
+  /** When the act would change nothing, the one line that says so: no button then, and
+   * `Close`. */
+  idle: string | null;
   /** Each line after `Writes`, by place. */
   writes: string[];
   /** The lines after `Then`. */
@@ -269,6 +272,16 @@ export function sentPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readon
   return picked.filter((id) => !idle.has(id));
 }
 
+/** What a confirm says in place of its lines when the act would change nothing. */
+export const IDLE = "Nothing to write: it is already so.";
+
+/** Whether the act would change nothing: its plan writes nothing (a chain line is his to
+ * add, not a write), or he picked pieces to add or turn on and it writes none of them. */
+function idleOf(plan: Pick<Plan, "writes" | "pieces">, act: Act, picked: readonly string[]): boolean {
+  if (plan.writes.every((item) => item.place === "chain")) return true;
+  return (act === "add" || act === "enable") && picked.length > 0 && sentPieces(plan, picked).length === 0;
+}
+
 /** The pieces a confirm names: those the act sends; with none left, every one he
  * picked. */
 export function namedPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
@@ -277,7 +290,8 @@ export function namedPieces(plan: Pick<Plan, "writes" | "pieces">, picked: reado
 }
 
 /** The confirm of an act, drawn from its plan. The question and button name what the plan
- * writes, so after `changed` they follow the new plan. */
+ * writes, so after `changed` they follow the new plan. An act that would change nothing is
+ * not offered: one line says so, with `Close` and no button. */
 export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
   const { act, repo, offered, home } = context;
   const picked = namedPieces(plan, context.picked);
@@ -288,9 +302,14 @@ export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
     : act === "enable" ? `Turn ${names} on in ${repo}?`
     : act === "refresh" ? `Refresh ${repo}?` : null;
   const view: ConfirmView = {
-    title, refusal: null, writes: [], then: [], chain: [], leaves: null, go: null, cancel: "Cancel", digest: null,
+    title, refusal: null, idle: null, writes: [], then: [], chain: [], leaves: null, go: null, cancel: "Cancel",
+    digest: null,
   };
   if (plan.refusal !== null) return { ...view, refusal: sentence(plan.refusal.text) };
+  view.chain = plan.writes.filter((item) => item.place === "chain" && item.to !== null).map((item) => ({
+    text: `the pieces run once this line is in ${homeForm(item.from ?? "", home)}:`, line: item.to ?? "",
+  }));
+  if (idleOf(plan, act, context.picked)) return { ...view, idle: IDLE, cancel: "Close" };
 
   view.writes = writesOf(plan, { act, offered, home }).lines;
   const docs = (act === "enable" ? picked : plan.pieces.filter((piece) => piece.new).map((piece) => piece.id))
@@ -301,9 +320,6 @@ export function confirmView(plan: Plan, context: ConfirmContext): ConfirmView {
     view.then.push(`A ${plan.in_progress} is in progress here: its commit is refused until its message carries the `
                    + "Commit-Check line.");
   }
-  view.chain = plan.writes.filter((item) => item.place === "chain" && item.to !== null).map((item) => ({
-    text: `the pieces run once this line is in ${homeForm(item.from ?? "", home)}:`, line: item.to ?? "",
-  }));
 
   const moves = plan.writes.some((item) => item.place === "hooks" && item.key === "hook");
   const added = plan.pieces.filter((piece) => writesPiece(plan, piece)).length;
