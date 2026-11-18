@@ -11,7 +11,8 @@ atlas-api, and quill-mobile, which has no hooks.
 - At 1280 and 400 px nothing reaches past the right edge, with every part open in turn.
 - In the light theme and the dark: no heading of the page's own, and no colour but the
   text's and the surface's tokens, and the warning colour only in a `Turn off` block: on
-  its title, its rule, its commands and their `Copy` buttons, drawn in the drawing's colour.
+  its title, its rule, its commands and their `Copy` buttons, drawn in the drawing's colour;
+  an opened repo's foot draws its two acts in the text's colour and its links dim.
 """
 
 from __future__ import annotations
@@ -221,6 +222,11 @@ RENDERED = """(block) => {
 }"""
 
 
+#: The colour each of the opened repo's foot buttons renders, by its action.
+FOOT = """(foot) => Object.fromEntries([...foot.querySelectorAll("button[data-action]")]
+  .map((button) => [button.dataset.action, getComputedStyle(button).color]))"""
+
+
 def walk(page, scheme: str) -> dict:
     """In `scheme`, each colour token the page reaches and where, with no colour reached
     but the text's, the surface's and the warning's (ui's danger token)."""
@@ -270,3 +276,7 @@ def test_in_both_themes_no_heading_and_no_colour_but_text_and_turn_offs_warning(
         assert drawn["copies"] == [warning, warning], (scheme, drawn)
         assert drawn["labels"] == [text, text], (scheme, drawn)
         assert drawn["stays"] == text, (scheme, drawn)
+        # The opened repo's foot: its two acts in the text's colour, its links dim.
+        foot = opened.locator("[data-part=foot]").evaluate(FOOT)
+        assert foot["add-piece"] == foot["refresh"] == text, (scheme, foot)
+        assert foot["project"] == foot["settings"] != text, (scheme, foot)

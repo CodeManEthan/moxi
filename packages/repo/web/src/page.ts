@@ -179,8 +179,9 @@ const STYLES = css`
   .det .sub { display: block; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
   .det .tm { display: inline-block; min-width: 46px; font-variant-numeric: tabular-nums; }
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 118px; }
+  /* The foot: its two acts in the text's colour, its links dim. */
   .det .foot button { color: var(--moxi-text-dim); }
-  .det .foot button.on { color: var(--moxi-text); }
+  .det .foot button.a { color: var(--moxi-text); }
   .det .cmds { padding: 6px 0 0 118px; }
   .det .cmds .cmd + .cmd { margin-top: 4px; }
   /* Turn off: the one block in the warning colour (ui's danger token), on its title, its
@@ -887,12 +888,10 @@ export class RepoPage extends LitElement {
 
   #foot(row: RowView, view: OpenedView, drawn: Drawn) {
     const shown = this.#commandsShown;
-    const acting = this.#acting;
-    const footAct = acting !== null && acting.at === `foot:${row.key}` ? acting.act : null;
     return html`<div class="foot" data-part="foot">
-        <button type="button" class=${this.#openAdd ? "on" : ""} data-action="add-piece"
+        <button type="button" class="a" data-action="add-piece"
           aria-expanded=${this.#openAdd ? "true" : "false"} @click=${() => this.#toggleAddList()}>${ADD_A_PIECE}</button>
-        <button type="button" class=${footAct === "refresh" ? "on" : ""} data-action="refresh"
+        <button type="button" class="a" data-action="refresh"
           @click=${() => this.#startAct("refresh", row.key, [], `foot:${row.key}`, row.name)}>${REFRESH}</button>
         ${view.project !== null ? html`<button type="button" data-action="project"
           @click=${() => navigate("projects", `open/${encodeURIComponent(view.project ?? "")}`)}>Project ${view.project}</button>`

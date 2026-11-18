@@ -60,8 +60,9 @@ var pe=globalThis,he=pe.ShadowRoot&&(pe.ShadyCSS===void 0||pe.ShadyCSS.nativeSha
   .det .sub { display: block; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
   .det .tm { display: inline-block; min-width: 46px; font-variant-numeric: tabular-nums; }
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 118px; }
+  /* The foot: its two acts in the text's colour, its links dim. */
   .det .foot button { color: var(--moxi-text-dim); }
-  .det .foot button.on { color: var(--moxi-text); }
+  .det .foot button.a { color: var(--moxi-text); }
   .det .cmds { padding: 6px 0 0 118px; }
   .det .cmds .cmd + .cmd { margin-top: 4px; }
   /* Turn off: the one block in the warning colour (ui's danger token), on its title, its
@@ -215,10 +216,10 @@ ${s.spec.name}`;return d`<div data-spec=${s.spec.name}>
       ${s&&t.lines.length>0?d`<pre data-line="rules-text">${t.lines.join(`
 `)}</pre>
         ${t.after.map(i=>d`<span class="sub">${i}</span>`)}`:u}
-    </div></div>`}#pe(t,s,i){let o=this.#A,r=this.#e,l=r!==null&&r.at===`foot:${t.key}`?r.act:null;return d`<div class="foot" data-part="foot">
-        <button type="button" class=${this.#s?"on":""} data-action="add-piece"
+    </div></div>`}#pe(t,s,i){let o=this.#A;return d`<div class="foot" data-part="foot">
+        <button type="button" class="a" data-action="add-piece"
           aria-expanded=${this.#s?"true":"false"} @click=${()=>this.#Y()}>${Fn}</button>
-        <button type="button" class=${l==="refresh"?"on":""} data-action="refresh"
+        <button type="button" class="a" data-action="refresh"
           @click=${()=>this.#m("refresh",t.key,[],`foot:${t.key}`,t.name)}>${De}</button>
         ${s.project!==null?d`<button type="button" data-action="project"
           @click=${()=>Mn("projects",`open/${encodeURIComponent(s.project??"")}`)}>Project ${s.project}</button>`:u}
@@ -226,8 +227,8 @@ ${s.spec.name}`;return d`<div data-spec=${s.spec.name}>
         <button type="button" data-action="show-commands" aria-expanded=${o?"true":"false"}
           @click=${()=>{this.#A=!o,this.requestUpdate()}}>${_i} · ${o?z:B}</button>
       </div>
-      ${o?d`<div class="cmds" data-part="commands">${s.commands.map(a=>this.#g(a.label,a,`command:${t.key}
-${a.label}`))}</div>`:u}
+      ${o?d`<div class="cmds" data-part="commands">${s.commands.map(r=>this.#g(r.label,r,`command:${t.key}
+${r.label}`))}</div>`:u}
       ${this.#s?this.#we(t,i):u}
       ${this.#k(`foot:${t.key}`,i,!0)}`}#he(t,s){let i=this.#e;return i!==null&&i.act==="enable"&&i.root===t.key&&i.picked[0]===s.piece.id}#fe(t){this.#v=this.#v===t?null:t,this.requestUpdate()}#me(t,s){t.has(s)?t.delete(s):t.add(s),this.requestUpdate()}#ge(t,s){let i=this.#e!==null&&this.#e.at==="add"?this.#e:null,o=ce(t.value.offered),r=new Set(this.#d),l=i?.plan??null,a=i===null?null:i.failed??(l===null?Le:kn(l)),c=i===null||i.outcome===null||i.outcome==="changed",h=i===null||l===null||l.refusal!==null?null:at(l,{act:"add-repo",repo:i.repo,picked:i.picked,offered:t.value.offered,home:t.value.home});return d`<div class="cf add" data-part="add-repo" role="group" aria-label=${gt}>
       <p class="q">${gt}</p>
