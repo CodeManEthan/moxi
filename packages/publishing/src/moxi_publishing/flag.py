@@ -10,7 +10,9 @@ repo without it refuses.
 piece's settings seeded from publishing's `defaults.*` keys and overridden by `--set`.
 A seed is written only where the piece is first registered: enabling a repo again leaves
 the settings it has, as repo does with its own seeds. Every `--set` for one key together
-give that key's whole list, replacing the seed or what the repo had. `disable` removes the
+give that key's whole list, replacing the seed or what the repo had. A call that sets the
+push piece's `standing-branch`, `main` or `protected` is refused, writing nothing, when a
+`standing-branch` pattern would then be bad (`push.Standing`). `disable` removes the
 pieces, then the flag.
 """
 
@@ -188,6 +190,22 @@ def _check_sets(planned: dict[str, list[str]]) -> None:
                           "nothing was written", 2)
 
 
+def _check_standing(planned: dict[str, list[str]], current: dict[str, list[str]]) -> None:
+    """Refuse a call that would leave a bad `standing-branch` pattern: each must be a fixed
+    prefix ending in `/` then `*`, matching neither `main` nor a `protected` branch, read
+    as they will stand after the call (`current` is the push piece's settings now, or its
+    seeds where it isn't registered yet). Judged only when the call sets one of the three
+    keys, so a call that touches none of them never fails on a value already there."""
+    from moxi_publishing import push
+
+    keys = (push.STANDING_BRANCH, push.MAIN, push.PROTECTED)
+    if not any(key in planned for key in keys):
+        return
+    after = {key: planned[key] if key in planned else current.get(key, []) for key in keys}
+    for problem in push.Standing(after).problems:
+        raise Failure(f"--set {push.STANDING_BRANCH}: {problem}; nothing was written", 2)
+
+
 def _seeds() -> dict[str, dict[str, list[str]]]:
     """The settings each piece starts with where it is first registered."""
     from moxi import config
@@ -235,6 +253,7 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
         raise Failure(f"--github {github!r}: write it OWNER/REPO; nothing was written", 2)
     seeds = _seeds()
     have = registered(root)
+    _check_standing(planned, have[PUSH]["settings"] if PUSH in have else seeds[PUSH])
     given = list(sets)
     for piece in PIECES:
         if piece in have:
