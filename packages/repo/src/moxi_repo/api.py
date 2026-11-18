@@ -807,7 +807,9 @@ def _write(plan: _Plan, expect: str | None) -> Report:
         return report
     if expect is not None and plan.digest != expect:
         raise Changed(_plan_view(plan, plan.repo.root))
-    wrote = False
+    # A step can make several writes, so a failure partway through the first one is
+    # partial too: git's own count of the config writes it made says so.
+    wrote, start = False, gitconf.writes_made()
     try:
         for step in plan.steps:
             step.run()
@@ -817,7 +819,7 @@ def _write(plan: _Plan, expect: str | None) -> Report:
                 done.lines += step.run() or []
                 wrote = True
     except gitconf.GitError as exc:
-        raise _GitFailed(str(exc), partial=wrote) from None
+        raise _GitFailed(str(exc), partial=wrote or gitconf.writes_made() != start) from None
     report.lines += plan.lines
     report.take(plan.repo.root, done)
     return report

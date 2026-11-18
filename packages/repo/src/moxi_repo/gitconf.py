@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import threading
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -306,9 +307,23 @@ class State:
         return out
 
 
+#: The `git config` options that write, and each thread's count of the writes git made
+#: with them, so a writer can tell whether a failure came after one of its writes landed.
+_WRITES = frozenset({"--replace-all", "--unset-all", "--remove-section", "--add"})
+_written = threading.local()
+
+
 def config(repo: Repo, *args: str):
     """`git config --local <args>` in the repo."""
-    return git(repo.root, *repo.git_args, "config", "--local", *args)
+    done = git(repo.root, *repo.git_args, "config", "--local", *args)
+    if done.returncode == 0 and args and args[0] in _WRITES:
+        _written.count = writes_made() + 1
+    return done
+
+
+def writes_made() -> int:
+    """How many config writes git has made on this thread."""
+    return getattr(_written, "count", 0)
 
 
 def _get_regexp(repo: Repo, pattern: str) -> list[tuple[str, str | None]]:

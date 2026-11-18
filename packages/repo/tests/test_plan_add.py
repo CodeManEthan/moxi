@@ -6,6 +6,7 @@ dir before and after, and checks that what changed is what the plan named."""
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from pathlib import Path
 
@@ -210,6 +211,32 @@ def test_a_git_error_after_the_first_write_is_partial_and_one_before_it_is_not(d
     with pytest.raises(api.Failure) as caught:
         api.add(other, ["demo/gate"], expect=api.plan_add(other, ["demo/gate"])["digest"])
     assert not caught.value.partial
+
+
+def test_a_git_error_on_the_first_steps_second_write_is_partial(demo):
+    repo = demo.repo()
+    api.add(repo)
+    where = api._resolve(repo)
+    plan = api._Plan("add", where, None)
+    # One step that gives a key two values: two writes.
+    plan.steps.append(gitconf._value_step(where, "moxi-repo.piece.demo/gate.tag-pattern", None,
+                                          ["one", "two"]))
+    run = gitconf.git
+    adds: list[tuple] = []
+
+    def failing(root, *args, **kwargs):
+        if "--add" in args:
+            adds.append(args)
+            if len(adds) == 2:
+                return subprocess.CompletedProcess(args, 4, "", "error: no room")
+        return run(root, *args, **kwargs)
+
+    demo.mp.setattr(gitconf, "git", failing)
+    with pytest.raises(api.Failure) as caught:
+        api._write(plan, None)
+    assert caught.value.partial and "no room" in caught.value.text
+    assert git(repo, "config", "--get-all",
+               "moxi-repo.piece.demo/gate.tag-pattern").stdout == "one\n"
 
 
 # -- refusals -------------------------------------------------------------------------------
