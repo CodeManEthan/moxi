@@ -1277,18 +1277,23 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
     _records.sweep(p.where.cgd)
 
 
+def _passes(n: int) -> str:
+    """`1 pass`, `2 passes`."""
+    return f"{n} pass" if n == 1 else f"{n} passes"
+
+
 def _commit_text(p: _Pass, entry: dict, *, stale: bool) -> str | None:
     """The commit record's text, or None when the pass has none of its conditions."""
     if stale:
         return (f"repo: {p.name}: git's index lock {p.where.git_dir / 'index.lock'} has "
-                f"been held for {entry['index_busy_passes']} passes in a row, since "
+                f"been held for {_passes(int(entry['index_busy_passes']))} in a row, since "
                 f"{_stamp(entry.get('index_busy_since'))}")
     if not (p.status in ("refused", "error") or p.dropped or p.unjudged or p.hook_lines):
         return None
     text = p.result().line()
     if p.status == "refused":
         text += (f" (refused since {_stamp(entry.get('refused_since'))}, "
-                 f"{entry.get('refused_passes', 1)} passes)")
+                 f"{_passes(int(entry.get('refused_passes', 1)))})")
     lines = p.hook_lines[:40]
     text += "".join(f"\n  {x}" for x in lines)
     if len(p.hook_lines) > len(lines):

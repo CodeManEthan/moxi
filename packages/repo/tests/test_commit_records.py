@@ -79,12 +79,12 @@ def test_a_refusal_writes_one_record_that_counts_its_passes_and_a_good_pass_clea
     assert first.status == "refused"
     key = commit_key(repo)
     assert is_open(key) == OPEN
-    assert "refused since" in text(key) and "1 passes" in text(key)
+    assert "refused since" in text(key) and ", 1 pass)" in text(key)
     assert "gate says no" in text(key)
     assert doctor_records()[key]["fix"].endswith(f"moxi repo specs remove {repo} demo/snap")
     moxi_repo.commit(spec(repo))
     mine = [k for k in doctor_records() if "::spec::demo/snap::" in k]
-    assert mine == [key] and "2 passes" in text(key)
+    assert mine == [key] and ", 2 passes)" in text(key)
     assert state(repo)["refused_passes"] == 2
     since = state(repo)["refused_since"]
     demo.act(gate="ok")
@@ -114,7 +114,7 @@ def test_throttled_busy_and_index_busy_passes_leave_the_record(demo):
         assert moxi_repo.commit(spec(repo)).status == "index-busy"
     finally:
         (cgd(repo) / "index.lock").unlink()
-    assert is_open(key) == OPEN and "1 passes" in text(key)
+    assert is_open(key) == OPEN and ", 1 pass)" in text(key)
     assert moxi_repo.commit(spec(repo)).status == "committed"
     assert is_open(key) == set()
 
