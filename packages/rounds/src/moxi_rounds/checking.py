@@ -486,12 +486,15 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
 @dataclass(frozen=True)
 class _ByCi:
     """What the act of a check by CI did: the `pushed` remote, the `local` run as
-    `_run` gives it (None when none ran), the `reading`, or the read that `failed`."""
+    `_run` gives it (None when none ran), the `reading`, or the read that `failed`, and
+    the branch name of CI's own `ref` the tip went to (None for a push to the build's
+    own branch name, or none)."""
 
     pushed: str | None
     local: tuple | None
     reading: object = None
     failed: object = None
+    ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -500,7 +503,8 @@ class CiChecked:
     `commit` (the tip), the remote it `pushed` to, the `local` run recorded now (None
     when none ran: `local_passed` then says whether one passed at the tip before, or
     the repo has none), the `ci.read` event (`reading`, None when the read failed), the
-    `read_failed` line, and the after-append callbacks that `failed`."""
+    `read_failed` line, the after-append callbacks that `failed`, and the branch name
+    of CI's own `ref` the tip was pushed to (None where the setting names no `ref`)."""
 
     name: str
     stage: str
@@ -511,6 +515,7 @@ class CiChecked:
     reading: dict | None
     read_failed: str | None
     failed: tuple = ()
+    ref: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -523,11 +528,18 @@ class CiChecked:
                 and self.reading.get("reading") == ci.GREEN)
 
 
-def _push(found: _Look, *, again: str) -> None:
-    """Push the tip to the remote the setting names, as a plain push. Raises `Refused`
-    with git's message when the push is refused."""
-    remote, branch = found.ci.remote, found.build.branch
-    argv = ["git", "push", remote, f"{found.tip}:refs/heads/{branch}"]
+def _push(found: _Look, *, again: str) -> str | None:
+    """Push the tip to the remote the setting names: where it names a `ref`, forced to
+    the branch name the template gives the build's branch, and that name is returned;
+    else as a plain push to the build's own branch name, and None is returned. The push
+    runs through the repo's hooks. Raises `Refused` with git's message, and the hooks',
+    when the push is refused."""
+    from . import ci
+
+    remote, branch, template = found.ci.remote, found.build.branch, found.ci.ref
+    ref = None if template is None else ci.ref_for(template, branch)
+    argv = (["git", "push", remote, f"+{found.tip}:refs/heads/{ref}"] if ref is not None
+            else ["git", "push", remote, f"{found.tip}:refs/heads/{branch}"])
     try:
         done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
                         cwd=found.worktree)
@@ -535,22 +547,28 @@ def _push(found: _Look, *, again: str) -> None:
         raise Refused([Unmet(f"{shlex.join(argv)} ran past {PUSH_TIMEOUT_S:g} s, so CI "
                              "was not read and nothing is recorded", again)]) from None
     if done.returncode == 0:
-        return
+        return ref
     said = (done.stderr or b"").decode(errors="replace").strip()
-    # git's words are shown, not read: the way on names both cases.
-    raise Refused([Unmet(
-        f"{shlex.join(argv)} was refused, so nothing is recorded: "
-        f"{said or f'exit {done.returncode}'}",
-        f"fix what git says, then {again}; where the branch was rebased and the push is "
-        "not a fast-forward, push it yourself with --force-with-lease first")])
+    said = f"{shlex.join(argv)} was refused, so nothing is recorded: " + (
+        said or f"exit {done.returncode}")
+    if ref is None:
+        # git's words are shown, not read: the way on names both cases.
+        raise Refused([Unmet(
+            said, f"fix what git says, then {again}; where the branch was rebased and the "
+            "push is not a fast-forward, push it yourself with --force-with-lease first")])
+    raise Refused([Unmet(said, (
+        f"where a guard's hit is in a commit of {branch}'s own, fix it there (reword or "
+        f"rewrite your own commits), then {again}; where it is in a commit you did not "
+        "make, or looks false, stop and give this text to your lead. Never push with "
+        "--no-verify, set a push word, or push to another remote or ref"))])
 
 
 def _by_ci(found: _Look, *, again: str) -> _ByCi:
     from . import ci
 
-    pushed = None
+    pushed = ref = None
     if found.ci.remote:
-        _push(found, again=again)
+        ref = _push(found, again=again)
         pushed = found.ci.remote
     local = None
     if found.local_due:
@@ -558,12 +576,12 @@ def _by_ci(found: _Look, *, again: str) -> _ByCi:
                      f"fix ci.local in the settings, then {again}")
         if local[0] != 0:
             # A failed local run stops the check there: CI is not read.
-            return _ByCi(pushed, local)
+            return _ByCi(pushed, local, ref=ref)
     try:
         reading = ci.read(found.ci, values=found.values, cwd=found.worktree)
     except ci.ReadFailed as exc:
-        return _ByCi(pushed, local, failed=exc)
-    return _ByCi(pushed, local, reading=reading)
+        return _ByCi(pushed, local, failed=exc, ref=ref)
+    return _ByCi(pushed, local, reading=reading, ref=ref)
 
 
 def _read_failed(name: str, stage: str, error) -> Unmet:
@@ -577,19 +595,26 @@ def _ci_entries(before: _Look, result: _ByCi, *, stage: str, name: str) -> list:
     from . import ci
 
     entries = []
+    # Each record of the check names CI's own ref it pushed, so the build's end knows
+    # what to remove whatever the setting says by then.
+    pushed = ({} if result.ref is None
+              else {"pushed": {"remote": result.pushed, "ref": result.ref}})
     if result.local is not None:
         code, duration_s, output = result.local
         entries.append(write.Entry(RAN, {
             "stage": stage, "step": ci.LOCAL, "commit": before.tip,
             "merge_base": before.merge_base, "argv": list(before.local_argv),
-            "exit_code": code, "duration_s": duration_s, "output": str(output)}))
+            "exit_code": code, "duration_s": duration_s, "output": str(output),
+            **pushed}))
     if result.reading is not None:
         found = result.reading
+        jobs = {} if not found.jobs_argvs else {
+            "jobs_argvs": [list(one) for one in found.jobs_argvs]}
         entries.append(write.Entry(ci.READ, {
             "stage": stage, "commit": before.tip, "merge_base": before.merge_base,
             "status_argv": list(found.status_argv), "ids_argv": list(found.ids_argv),
-            "workflows": [dict(one) for one in found.workflows],
-            "reading": found.whole}))
+            **jobs, "workflows": [dict(one) for one in found.workflows],
+            "reading": found.whole, **pushed}))
     if not entries and result.failed is not None:
         raise Refused([_read_failed(name, stage, result.failed)])
     return entries
@@ -605,7 +630,7 @@ def _ci_checked(before: _Look, written, *, name: str, stage: str) -> CiChecked:
               else _read_failed(name, stage, result.failed).reason)
     return CiChecked(name=name, stage=stage, commit=before.tip, pushed=result.pushed,
                      local=local, local_passed=not before.local_due, reading=reading,
-                     read_failed=failed, failed=written.failed)
+                     read_failed=failed, failed=written.failed, ref=result.ref)
 
 
 def _step_name(name: str, stage: str, step: str | None) -> None:
@@ -733,20 +758,31 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.argv = fill(words, found.values)
     found.timeout_s = timeout_s if timeout_s is not None else own_timeout_s
     if by_ci:
-        _by_ci_look(found, state, settings, timeout_s=timeout_s)
+        _by_ci_look(found, state, settings, timeout_s=timeout_s, name=name)
     return found
 
 
 def _by_ci_look(found: _Look, state: states.State, settings, *,
-                timeout_s: float | None) -> None:
+                timeout_s: float | None, name: str) -> None:
     """Fill in what a check by CI needs, where the build's repo declares `ci`: the
-    setting, the local argv, and whether the local part is to run at the tip."""
+    setting, the local argv, and whether the local part is to run at the tip. A build
+    on its repo's target is refused where the setting names a `ref`."""
     from . import ci
 
     declared_ci = ci.declared(settings, found.build.repo)
     if declared_ci is None:
         return
     found.ci = declared_ci
+    build = found.build
+    targets = {build.target, own.build_setting(settings, build.repo, "into")}
+    if declared_ci.ref is not None and declared_ci.remote and build.branch in targets:
+        # The ref the template gives the target is the lead's, pushed by hand before
+        # the target goes public, so no build pushes it.
+        found.unmet.append(Unmet(
+            f"{build.branch} is the target of {build.repo}, and "
+            f"{ci.ref_for(declared_ci.ref, build.branch)} is the lead's to push, so a "
+            "check by CI pushes nothing for it",
+            f"check it by the full check: moxi rounds check {name} {build.stage} --full"))
     found.timeout_s = timeout_s if timeout_s is not None else declared_ci.local_timeout_s
     if declared_ci.local is None or found.values is None:
         return
