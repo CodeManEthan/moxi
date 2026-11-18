@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `moxi-dev check` (any form but `--only`) runs its steps in a memory-capped
+  `systemd-run --user --scope` of its own: MemoryHigh 2496 MiB plus 512 MiB per worker,
+  MemoryMax 1536 MiB above it, no swap (`MOXI_TEST_MEMORY_HIGH_MIB` and
+  `MOXI_TEST_MEMORY_MAX_MIB` replace them; `none` runs uncapped). A check that holds its
+  unreclaimable memory at 95 % of MemoryHigh for 5 s at MemoryHigh is ended with exit 1
+  and a line saying why; a kernel kill at MemoryMax is named the same way. The summary
+  line gains a `memory` field before `total`. No scope is made off Linux, in CI, or
+  without a systemd user manager with the memory controller; where one is expected and
+  can't be made, the check exits 2. A caller's SIGINT, SIGTERM or SIGHUP prints the
+  scope's memory state, stops the scope and ends the check by the same signal.
+- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of scope.
+- `python -m moxi_dev` runs the `moxi-dev` command.
 - The test fence keeps `MOXI_TEST_REAL_SUPERVISOR` as pytest started with it, and leaves
   it unset when it was. Before, a fenced test lost it at call time, so every proof row on
   a real supervisor failed with `SupervisorRefused` (or skipped, where the row read it in

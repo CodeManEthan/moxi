@@ -889,6 +889,7 @@ LINE = re.compile(
     r"timed (?P<timed>held \d+|none|not run) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
+    r"memory (?P<memory>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
 

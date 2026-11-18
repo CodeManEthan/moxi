@@ -2,8 +2,16 @@
 
 Run from the repository's root as
 `uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`.
-It first reads the workspace, the worker count and the changed paths; a bad workspace,
-worker count or base stops it there, before any step runs. Then, in order:
+It first reads the worker count and the memory figures, and runs the check in a memory
+scope of its own (`moxi_dev.scope`): the `moxi-dev` the caller started stays outside
+the scope and watches it, and the steps below run in the scope, as `python -m moxi_dev
+check` with the same arguments. A bad worker count or figure stops it there. Where no
+scope is made (`MOXI_TEST_MEMORY_MAX_MIB=none`, not Linux, CI, no systemd user manager
+with the memory controller) the steps run in place, and the summary's memory field says
+why. `--only` runs no tests and makes no scope.
+
+The check then reads the workspace and the changed paths; a bad workspace or base stops
+it there, before any step runs. Then, in order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
@@ -85,15 +93,26 @@ worker count or base stops it there, before any step runs. Then, in order:
    Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
    held back (`timed none` when they held none, `timed not run` when the suites never
    ran), the tests' own seconds with the slowest 5 %'s share of them and the delta
-   against main, the total and the exit code.
+   against main, the memory field, the total and the exit code. Before it, the check
+   ends any process it left running in its scope and says how many, and it warns when it
+   held 90 % of its line or more, or waited on memory for 10 s or more.
+
+   The memory field names the scope's peak, the most memory it held that it couldn't
+   give back (`held`), its line (95 % of MemoryHigh), MemoryHigh, MemoryMax and the
+   seconds it stalled on memory; or `not capped (<why>)`; or how a memory end ended it:
+   `ended past its line (...)`, `killed at its cap (...)`, `killed while the machine ran
+   short (...)`. A caller's SIGINT, SIGTERM or SIGHUP prints the scope's memory state at
+   once and ends the check by that signal, with no summary.
 
 The tags, references, names, Ruff, renames and release steps, each package's lint and each
 package's tests all run even when one before them failed, so one run shows every failure.
 
-The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
-could not start or a step could not be run (not in a workspace, a member with no readable
-`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS` or
-`--finding`, `uv` not on PATH). The summary line is printed in every case.
+The exit code is 0 only when every step passed, 1 when one failed or the check was ended
+for memory, and 2 when the check could not start or a step could not be run (not in a
+workspace, a member with no readable `pyproject.toml` or no project name, no merge base, a
+bad `MOXI_TEST_WORKERS`, `MOXI_TEST_MEMORY_HIGH_MIB`, `MOXI_TEST_MEMORY_MAX_MIB` or
+`--finding`, a memory scope that could not be made where one was expected, `uv` not on
+PATH). The summary line is printed in every case but a caller's signal.
 """
 
 from __future__ import annotations
@@ -110,8 +129,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, naming, refs, release, rename, ruff_check, stamp, tags
-from .scope import WORKERS_ENV
+from . import durations, lint, naming, refs, release, rename, ruff_check, scope, stamp, tags
+from .scope import SCOPE_ENV, WORKERS_ENV
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -321,9 +340,11 @@ def _base_env(env: Mapping[str, str]) -> dict[str, str]:
 
 #: Dropped from the suites' environment: either can make the run serial, or run less
 #: than the package's own configuration says; the kit's selection and durations
-#: variables are the check's own to set.
+#: variables are the check's own to set, and the memory scope's marker names the
+#: check's own scope.
 SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS", TIERS_ENV,
-                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV, TIMED_ENV, LEAVE_OUT_ENV)
+                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV, TIMED_ENV, LEAVE_OUT_ENV,
+                     SCOPE_ENV)
 
 #: pytest's exit code when it ran no test.
 NO_TESTS = 5
@@ -392,6 +413,9 @@ class Result:
     durations: durations.Summary | None = None
     delta: durations.Delta | None = None
     kept: Path | None = None             # the commit's durations record, when kept
+    #: The memory scope's field (`moxi_dev.scope`): what the scope held, how it ended,
+    #: or why there was none.
+    memory: str = "not run"
     seconds: float = 0.0
     code: int = 0
 
@@ -431,7 +455,7 @@ class Result:
                 f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
-                f"total {self.seconds:.1f}s | exit {self.code}")
+                f"memory {self.memory} | total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -852,6 +876,78 @@ def main(argv: list[str]) -> int:
         return result.code
     if args.only:
         return only(root, args.only, args.paths)
+    unit = scope.inner_unit(os.environ)
+    if unit is None:
+        # A marker that names no scope this process is in counts for nothing.
+        os.environ.pop(SCOPE_ENV, None)
+        return _outer(root, args, argv)
+    return _inner(root, args, unit)
+
+
+def _say(text: str) -> None:
+    print(text, flush=True)
+
+
+def _commit_or_unknown(root: Path) -> str:
+    try:
+        return _commit(root)
+    except CheckError:
+        return "unknown"
+
+
+def _outer(root: Path, args: argparse.Namespace, argv: list[str]) -> int:
+    """Run the check in a memory scope of its own (`moxi_dev.scope`), or in place where
+    there is none, and return its exit code."""
+    env = os.environ
+    started = time.monotonic()
+    try:
+        found = scope.figures(env, int(worker_args(env)[1]))
+    except (CheckError, scope.ScopeError) as exc:
+        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+        result = Result(commit=_commit_or_unknown(root), code=2)
+        print(result.line(), flush=True)
+        return result.code
+    system = scope.System(env=env)
+    host = scope.find_host(system) if found is not None else None
+    why = scope.skip_reason(found, host)
+    if why is not None:
+        result = check(root, full=args.full, base=args.base, finding=args.finding)
+        result.memory = f"not capped ({why})"
+        print(result.line(), flush=True)
+        return result.code
+    warning = scope.below_default(found)
+    if warning:
+        _say(f"moxi-dev check: {warning}")
+    outer = scope.Outer(kind="check",
+                        command=[sys.executable, "-m", "moxi_dev", "check", *argv],
+                        found=found, host=host, system=system,
+                        description=f"moxi-dev check in {root}", say=_say)
+    outcome = outer.run(env)
+    if outcome.signum is not None:
+        scope.die_by(outcome.signum)
+        return outcome.code
+    if outcome.memory is not None:
+        # The inner printed no summary: the outer's is the last line.
+        result = Result(commit=_commit_or_unknown(root), code=outcome.code,
+                        memory=outcome.memory, seconds=time.monotonic() - started)
+        print(result.line(), flush=True)
+    return outcome.code
+
+
+def _inner(root: Path, args: argparse.Namespace, unit: str) -> int:
+    """Run the check inside its scope: sample what it holds, end what it leaves running,
+    and print the summary with the scope's memory field."""
+    cgroup_dir = scope.own_cgroup()
+    sampler = scope.Sampler(cgroup_dir).start()
     result = check(root, full=args.full, base=args.base, finding=args.finding)
+    held = sampler.stop()
+    if cgroup_dir is not None and unit.startswith("moxi-dev-check-"):
+        count = scope.end_leftovers(cgroup_dir, keep=os.getpid())
+        if count:
+            _say(f"moxi-dev check: {scope.ended_line(count, 'check')}")
+    report = scope.memory_report(cgroup_dir, held)
+    for line in report.lines:
+        _say(f"moxi-dev check: {line}")
+    result.memory = report.field
     print(result.line(), flush=True)
     return result.code
