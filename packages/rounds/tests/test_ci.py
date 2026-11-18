@@ -157,7 +157,8 @@ def test_a_named_job_reads_from_the_first_job_of_that_name(fields, run_fields, w
 def test_a_workflow_read_by_its_jobs_with_no_run_at_the_tip_reads_absent_unasked():
     flow, whole, asked = by_jobs(["linux"], [job("linux")], headSha="b" * 40)
 
-    assert (flow["reading"], flow["jobs"], whole, asked) == (ci.ABSENT, [], ci.ABSENT, [])
+    assert (flow["reading"], whole, asked) == (ci.ABSENT, ci.ABSENT, [])
+    assert flow["jobs"] == [{"name": "linux", "reading": ci.ABSENT, "url": None}]
 
 
 # -- the setting -------------------------------------------------------------------------
@@ -553,6 +554,19 @@ def test_a_check_reads_the_jobs_named_and_records_each(setup, stub):
     assert f"named now are {FLOW} (jobs linux)" in owes
     setup(ci.NONE, workflows=[FLOW])
     assert "the workflows named now are" in check_step(path).owes[1]
+
+
+def test_with_no_run_at_the_tip_a_workflow_read_by_its_jobs_owes_ci_reading_absent(
+        setup, stub):
+    path, tree, _made = setup(ci.NONE, workflows=[(FLOW, ("linux", "web (ubuntu-latest)"))])
+    stub.runs([])
+
+    checking.check(ROUND, "B1", by="coder")
+
+    [read] = events(path, ci.READ)
+    assert [(one["name"], one["reading"]) for one in read["workflows"][0]["jobs"]] == [
+        ("linux", ci.ABSENT), ("web (ubuntu-latest)", ci.ABSENT)]
+    assert check_step(path).owes[1] == f"by CI: CI reads absent at {tree.rev()[:12]}"
 
 
 def test_a_failed_job_read_records_nothing(setup, stub):

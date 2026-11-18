@@ -30,7 +30,8 @@ reads `absent`. A workflow read whole reads its run: `green` (completed, with su
 `pending` (not completed) or `red` (completed, with any other conclusion). A workflow
 read by its jobs reads each job it names from the first of the run's jobs with exactly
 that name, in the same words; a name no job has reads `pending` while the run is not
-completed and `absent` once it is. Such a workflow reads `green` only when every job it
+completed and `absent` once it is, and with no run at the tip each job it names reads
+`absent`, unasked. Such a workflow reads `green` only when every job it
 names does, else the first of `red`, `absent` and `pending` that one reads; so does the
 whole reading of every workflow.
 
@@ -294,7 +295,7 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
     """Each workflow of `workflows` as `{"path", "id", "reading", "url"}`, read from the
     `ids` by path and the `runs` at `tip`, and the whole reading. A workflow read by its
     jobs also holds `jobs`, each as `{"name", "reading", "url"}`, read from what
-    `jobs_of` gives for its run."""
+    `jobs_of` gives for its run, or each `absent` where it has no run at `tip`."""
     each = []
     for flow in workflows:
         flow = flow if isinstance(flow, Workflow) else Workflow(flow)
@@ -310,12 +311,13 @@ def reading(workflows: Sequence[str | Workflow], ids: Mapping[str, object],
         one = {"path": flow.path, "id": wanted,
                "reading": ABSENT if newest is None else _word(newest),
                "url": None if newest is None else newest.get("url")}
-        if flow.jobs is not None:
-            jobs = [] if newest is None else _job_words(
+        if flow.jobs is not None and newest is None:
+            one["jobs"] = [{"name": name, "reading": ABSENT, "url": None}
+                           for name in flow.jobs]
+        elif flow.jobs is not None:
+            one["jobs"] = _job_words(
                 flow.jobs, newest, jobs_of(newest) if jobs_of is not None else ())
-            one["jobs"] = jobs
-            if newest is not None:
-                one["reading"] = _whole([job["reading"] for job in jobs])
+            one["reading"] = _whole([job["reading"] for job in one["jobs"]])
         each.append(one)
     return tuple(each), _whole([one["reading"] for one in each])
 
