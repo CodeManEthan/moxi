@@ -52,7 +52,8 @@ LINE = ("This note spells your home folder or your login. Write `~/` for a path 
         "where `~` can't stand.")
 #: The shortest login it looks for.
 SHORT_LOGIN = 3
-#: The characters after which a pointer's token starts (Rule P's set; a line start counts).
+#: The characters after which a pointer's token starts: whitespace, a quote, a backtick,
+#: `(`, `[`, `<`, `=` or `:`. A line start counts too.
 P_START = b" \t\n\r\x0b\x0c\"'`([<=:"
 #: Where a pointer's `notes/` may follow: one of `P_START` or a `/`.
 POINTER_START = P_START + b"/"
