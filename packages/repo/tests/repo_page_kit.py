@@ -49,6 +49,29 @@ def shell_options(tmp_path_factory, hook_env: dict) -> dict:
             "env": {"GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
 
 
+#: What the small install holds beside the core: ui and repo, and the demo pieces.
+SMALL_INSTALL = ("ui", "repo", "demo")
+
+
+def small_options(tmp_path_factory, hook_env: dict) -> dict:
+    """`shell_options` for the small install, the core, ui and repo: the shell's snapshot
+    leaves every other module of this environment out, and a site first on its
+    `PYTHONPATH` holds a distribution of each such name that declares no module, so repo,
+    its page server and every `moxi` command the shell runs find none of them, as on a
+    machine without them."""
+    from moxi import modules
+
+    gone = sorted(found.name for found in modules.scan() if found.name not in SMALL_INSTALL)
+    site = tmp_path_factory.mktemp("small-site")
+    for name in gone:
+        info = site / f"moxi_{name}-0.0.0.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: moxi-{name}\nVersion: 0.0.0\n", encoding="utf-8")
+    options = shell_options(tmp_path_factory, hook_env)
+    return {**options, "site": [str(site), *options["site"]], "leave_out": gone}
+
+
 def old_site(tmp_path_factory) -> Path:
     """A site declaring `oldmod/prose-check`, put on `PYTHONPATH` only for the add that
     registers it."""
@@ -230,6 +253,68 @@ def seed(shell, hook_env: dict, old: Path) -> dict[str, Path]:
     own.write_text(OWN_HOOK, encoding="utf-8")
     own.chmod(0o755)
     return repos
+
+
+# -- colours ---------------------------------------------------------------------------------
+
+#: The colour tokens the page may draw with anywhere: the text's and the surface's.
+TEXT_TOKENS = {"text", "text-dim", "text-faint", "border", "border-strong", "bg", "bg-raised",
+               "bg-sunken", "bg-hover"}
+#: For each colour token the shell's style sheets define, the nodes under the page whose
+#: colours change when that token alone changes on the page's element, and in which
+#: property; a node inside a `Turn off` block is marked `off:`. The walk goes into every
+#: shadow tree under the page. Focus is taken off first, and the outline's colour is left
+#: out: a focus ring takes the accent on every element.
+REACHED = """async () => {
+  const panel = document.querySelector("#moxi-panel > moxi-repo-page");
+  function* tree(root) {
+    for (const node of root.querySelectorAll("*")) {
+      yield node;
+      if (node.shadowRoot) yield* tree(node.shadowRoot);
+    }
+  }
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+  focused?.blur?.();
+  const nodes = [panel, ...tree(panel.shadowRoot), ...tree(panel)];
+  const props = ["color", "background-color", "background-image", "border-top-color",
+                 "border-right-color", "border-bottom-color", "border-left-color",
+                 "text-decoration-color", "box-shadow", "fill", "stroke", "stop-color"];
+  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const colours = () => nodes.map((node) => {
+    const style = getComputedStyle(node);
+    return props.map((name) => style.getPropertyValue(name));
+  });
+  const names = new Set();
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch { continue; }
+    for (const rule of rules) {
+      if (!rule.style) continue;
+      for (const name of rule.style) if (name.startsWith("--moxi-")) names.add(name.slice(7));
+    }
+  }
+  const what = (node) => (node.closest?.("[data-part=turn-off]") ? "off:" : "") + node.localName
+    + (node.dataset?.action ? `[${node.dataset.action}]` : "")
+    + (node.className && typeof node.className === "string" ? `.${node.className.split(" ").join(".")}` : "");
+  await frames();
+  const before = colours();
+  const reached = {};
+  for (const token of [...names].sort()) {
+    if (/^(font|radius|gap)/.test(token)) continue;
+    panel.style.setProperty(`--moxi-${token}`, "rgb(1, 2, 3)");
+    await frames();
+    const after = colours();
+    panel.style.removeProperty(`--moxi-${token}`);
+    const changed = [];
+    after.forEach((seen, n) => seen.forEach((value, i) => {
+      if (value !== before[n][i]) changed.push(`${what(nodes[n])} ${props[i]}`);
+    }));
+    if (changed.length) reached[token] = [...new Set(changed)];
+  }
+  await frames();
+  return {reached, text: getComputedStyle(panel).color};
+}"""
 
 
 # -- copying ---------------------------------------------------------------------------------
