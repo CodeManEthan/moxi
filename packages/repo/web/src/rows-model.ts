@@ -3,7 +3,7 @@
 // read it.
 
 import type { PieceRow, RepoRow, Repos, SpecRow, Unindexed } from "./feed.ts";
-import { type Item, itemOrder, leadOrder, repoItems, type Weight } from "./items-model.ts";
+import { type Item, itemOrder, leadOrder, repoItems, stopsEvery, type Weight } from "./items-model.ts";
 import {
   byGitOrder, canRefuse, type Clock, eventWords, LOCAL, pieceName, recordSeconds, refuseWord, repoName, whenWord,
 } from "./words.ts";
@@ -138,11 +138,11 @@ export function specNews(spec: SpecRow, today: string | null, clock: Clock = LOC
 }
 
 /** The row's news, led by its heaviest: each open `piece` record's break, and each spec's
- * line, ordered as their items are (`leadOrder`); a spec's line with no item comes after
+ * line, ordered as their items are (`leadOrder`, a break that stops every act first); a spec's line with no item comes after
  * them, newest commit first. */
 export function newsOf(repo: RepoRow, names: Map<string, string>, today: string | null, clock: Clock = LOCAL,
                        items: readonly Item[] = []): string[] {
-  const news: { text: string; weight: Weight | null; time: number | null }[] = [];
+  const news: { text: string; weight: Weight | null; time: number | null; stops: boolean }[] = [];
   const heaviest = (of: (item: Item) => boolean): Item | undefined => [...items].filter(of).sort(leadOrder)[0];
   for (const record of repo.records) {
     if (record.kind !== "piece") continue;
@@ -150,17 +150,19 @@ export function newsOf(repo: RepoRow, names: Map<string, string>, today: string 
     const time = recordSeconds(record.at);
     const text = time === null ? `${name} broke` : `${name} broke at ${whenWord(time, today, clock)}`;
     const item = heaviest((one) => one.record === record);
-    news.push({ text, weight: item?.weight ?? "need", time: item?.time ?? time });
+    news.push({ text, weight: item?.weight ?? "need", time: item?.time ?? time, stops: item !== undefined && stopsEvery(item) });
   }
   for (const spec of repo.specs) {
     const text = specNews(spec, today, clock);
     if (text === null) continue;
     const item = heaviest((one) => one.spec === spec);
-    news.push({ text, weight: item?.weight ?? null, time: item === undefined ? spec.last_commit_time : item.time });
+    news.push({ text, weight: item?.weight ?? null, time: item === undefined ? spec.last_commit_time : item.time,
+                stops: false });
   }
   const weighed = (one: { weight: Weight | null }): number => (one.weight === "need" ? 0 : one.weight === "warn" ? 1 : 2);
   return news
-    .sort((a, b) => weighed(a) - weighed(b) || leadOrder({ weight: "need", time: a.time }, { weight: "need", time: b.time }))
+    .sort((a, b) => weighed(a) - weighed(b)
+      || leadOrder({ weight: "need", time: a.time, stops: a.stops }, { weight: "need", time: b.time, stops: b.stops }))
     .map((one) => one.text);
 }
 

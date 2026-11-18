@@ -250,11 +250,22 @@ export function itemOrder(a: Item, b: Item): number {
   return a.time - b.time;
 }
 
-/** A repo's items as its row leads with them: by weight (a need before a warning), then
- * newest first, an item with no time after those of its weight with one. Items that tie
- * keep their order. */
-export function leadOrder(a: Pick<Item, "weight" | "time">, b: Pick<Item, "weight" | "time">): number {
-  const weight = Number(a.weight === "warn") - Number(b.weight === "warn");
+/** Whether the item stops every act its hook guards: a piece with no module on an event
+ * that can refuse (`refuses every commit`). */
+export function stopsEvery(item: Pick<Item, "source" | "problem">): boolean {
+  return item.source === "no-module" && canRefuse(item.problem?.event ?? "");
+}
+
+/** What `leadOrder` weighs: an item's weight and time, and whether it stops every act. */
+export type Lead = Pick<Item, "weight" | "time"> & { stops?: boolean };
+
+/** A repo's items as its row leads with them: by weight (a need before a warning, and
+ * among needs one that stops every act first), then newest first, an item with no time
+ * after those of its weight with one. Items that tie keep their order. */
+export function leadOrder(a: Lead | Item, b: Lead | Item): number {
+  const rank = (one: Lead | Item): number =>
+    one.weight === "warn" ? 2 : ("source" in one ? stopsEvery(one) : one.stops === true) ? 0 : 1;
+  const weight = rank(a) - rank(b);
   if (weight !== 0) return weight;
   if (a.time === null || b.time === null) return Number(a.time === null) - Number(b.time === null);
   return b.time - a.time;

@@ -81,11 +81,12 @@ def test_what_needs_him_comes_first_each_with_its_fix(cast, page):
     broke.locator("[data-action=show-record]").click()
     expect(broke.locator("[data-line=record]")).to_contain_text("ValueError: lint fell over")
 
-    # The repo they're in comes first among the rows, its fact heavy, the break its news.
+    # The repo they're in comes first among the rows, its fact heavy: the piece that stops
+    # every commit leads over the newer break, which is its news.
     first = rows(panel).first
     expect(first).to_have_attribute("data-key", str(lumen))
     expect(first).to_have_attribute("name", "~/code/lumen-docs")
-    expect(first).to_have_attribute("fact", "a piece broke")
+    expect(first).to_have_attribute("fact", "refuses every commit")
     expect(first).to_have_attribute("fact-heavy", "")
     expect(first).to_have_attribute("lead", re.compile(r"^lint broke at \d{1,2}:\d{2}"))
     for other in ("atlas-api", "harbor-infra", "kestrel-web", "my-loadout"):

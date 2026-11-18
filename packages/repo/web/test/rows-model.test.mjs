@@ -62,7 +62,7 @@ test("line two and the note: led by the heaviest, newest first, no time after a 
   assert.deepEqual([quiet.open, quiet.refresh, quiet.add], [true, false, false]);
 });
 
-test("a repo leads with its heaviest item: a need before a warning, then the newest, untimed last", () => {
+test("a repo leads with its heaviest item: one that stops every commit, a need before a warning, then the newest, untimed last", () => {
   const left = problem({ code: "no-module", piece: "inkwell/prose-check", event: "pre-commit" });
   const lead = (row) => { const drawn = repoRow(row, opts); return [drawn.fact, drawn.lead]; };
   // A hook that refuses every commit and broke leads over an older break.
@@ -73,8 +73,15 @@ test("a repo leads with its heaviest item: a need before a warning, then the new
   assert.deepEqual(lead(repo({ records: [record({ piece: "a/b", at: AT("16:40") })],
                                specs: [spec({ refused_since: T("18:45") })] })),
                    ["auto-commit refused", "Auto-commit notes/snapshot: refused since 18:45 · last commit 18:30"]);
-  // A need with no time comes after a timed need, but before any warning.
+  // A need that stops every commit leads over a newer break, timed or not.
   assert.deepEqual(lead(repo({ problems: [left], records: [record({ piece: "a/b", at: AT("08:00") })] })),
+                   ["refuses every commit", "b broke at 08:00"]);
+  assert.deepEqual(lead(repo({ problems: [left], records: [
+    record({ piece: "a/b", at: AT("18:00") }), record({ piece: "inkwell/prose-check", at: AT("09:00") })] })),
+  ["refuses every commit", "prose-check broke at 09:00"]);
+  // A need with no time comes after a timed need of its rank, but before any warning.
+  const hookless = { ...left, event: "post-commit" };
+  assert.deepEqual(lead(repo({ problems: [hookless], records: [record({ piece: "a/b", at: AT("08:00") })] })),
                    ["a piece broke", "b broke at 08:00"]);
   assert.deepEqual(lead(repo({ problems: [problem({ state: "warn", detail: "late" }), left] })),
                    ["refuses every commit", null]);
