@@ -419,6 +419,19 @@ LEAD_ROW = api.RosterRow(qualified="lead", name="lead", scope="global", live=Tru
                          kind=None, module=None, tier="chosen", adapter="claude-shim")
 
 
+def test_a_send_only_rows_holder_reaches_the_page(monkeypatch):
+    """The page tells a name a program registered from a module's and from one nothing
+    holds by `holder`, as `agents` does."""
+    ticker = api.RosterRow(qualified="ticker", name="ticker", scope="global", live=False,
+                           kind="send-only", module=None, tier=None, adapter=None,
+                           holder="program")
+    stub_rows(monkeypatch, (ticker, LEAD_ROW))
+    status, body = run(get(served(), "/api/roster"))
+    assert (status, body["state"]) == (200, "up")
+    assert {r["qualified"]: r["holder"] for r in body["rows"]} == {"ticker": "program",
+                                                                   "lead": None}
+
+
 @pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},
                                  {"awaiting": (7,)}, {"tier": 3},
                                  {"bound_at": float("inf")}, {"bound_at": 10 ** 400},

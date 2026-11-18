@@ -84,6 +84,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     cwd: '/work' as unknown,
     /** How many times the runner read `$.session.cwd()`. */
     cwdReads: 0,
+    /** Every line the runner wrote to the debug log, in order. */
+    logs: [] as string[],
+    /** When set, classic.SessionStart's `next` waits on it: the hooks beneath still run. */
+    beneathSessionStart: null as Promise<void> | null,
   }
   const endpointJson = options.endpointJson === undefined ? JSON.stringify({ argv: ROOT_ARGV }) : options.endpointJson
 
@@ -104,7 +108,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     return { turnId: e.turnId }
   })
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('classic.SessionStart', async () => ({}))
+  on('classic.SessionStart', async () => {
+    if (w.beneathSessionStart !== null) await w.beneathSessionStart
+    return {}
+  })
   on('classic.UserPromptSubmit', async () => ({}))
   on('classic.Stop', async () => ({}))
   on('classic.PermissionRequest', async () => ({}))
@@ -128,6 +135,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     return { value: w.usage as never }
   })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('ui.log', async ($, e) => {
+    w.logs.push(e.text)
+    return { value: undefined } as never
+  })
   on('prompt.submit', async ($, e) => {
     if (w.classicInSubmit) await w.classicInSubmit(w.rewrite ? w.rewrite(e.text) : e.text)
     w.submits.push(e.text)

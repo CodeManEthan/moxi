@@ -21,8 +21,8 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
   app-server) and `opencode` (an OpenCode server). The kind `connector` is comms'
   provider in the connector, which serves the Claude apps; it is a person kind, so its
   mail is never held.
-  A reserved name is one a module sends under and nobody binds or mails
-  ([adapters.md](adapters.md#reserved-send-only-names)).
+  A send-only name is one a module or a registered program sends under and nobody binds
+  or mails ([adapters.md](adapters.md#send-only-names)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
   nothing is sent: a send exits 75 and says so.
 
@@ -207,8 +207,8 @@ The frame line prints only what the reader can't get elsewhere:
 
 No mark means `chosen` and `verified`. Deviations print in one parenthetical, tier
 first: `(standing)`, `(ephemeral)`, `(send-only)`, `(unverified)`. `(send-only)` is a
-message a module sent under a name it holds reserved, from the time the name was
-reserved until it was freed. `in <room>` prints
+message a module or a registered program sent under its send-only name, from the time
+the name was reserved or registered until it was freed. `in <room>` prints
 only outside `#names`. Control and format characters are removed from bodies, and a
 body line can never start at column zero, so a frame line forged inside a body is
 visibly indented.
@@ -461,8 +461,8 @@ credential, and `content`, line zero and body; answers `message_id`), `remove` (
 the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
 `max_id`, `last_digest`, `replies_to` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
-identity, the operator's credential for `operator`, or a reserved name's token for a
-reserved name.
+identity, the operator's credential for `operator`, or a send-only name's token for a
+send-only name: a module's, or the one a program registered it with.
 
 An adapter's methods, on the connection that holds its binding: `bind` (answers the
 identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
@@ -509,7 +509,8 @@ the tools now), when the hello listed `mcp`. The daemon keeps only the hash, map
 that claim and the bound identity. The same claim's hash after a reconnect or a daemon
 restart binds the row again; a new hash from the same claim revokes the old one. Another
 claim's hash, or this claim's for another name, is refused `mcp-token-taken`, a revoked
-one `mcp-token-revoked`, and a reserved name `name-reserved`. A token is revoked only on
+one `mcp-token-revoked`, and a send-only name (a module's or a program's)
+`name-reserved`. A token is revoked only on
 positive evidence: its session ended (its claim file gone, or every root process it
 names gone or reused), its name bound under another claim, a newer token from its
 claim, the tools' port held by another process, or comms' uninstall. A release, and the
@@ -706,9 +707,9 @@ binding's `handed`.
 
 | path | written by | what |
 |---|---|---|
-| `STATE/comms/comms.db` | the daemon; provisioning and the reserved-names listener their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, reserved names, dropped mail and the hashes of the tools' tokens (0600, WAL) |
+| `STATE/comms/comms.db` | the daemon; provisioning, the reserved-names listener and `moxi comms send-only` their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, send-only names (a module's or a registered program's, by `reserved.holder`), dropped mail and the hashes of the tools' tokens (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
-| `STATE/comms/tokens/` | provisioning, the reserved-names listener | the credential chain's token store (0600) |
+| `STATE/comms/tokens/` | provisioning, the reserved-names listener, `moxi comms send-only` | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
 | `RUNTIME/comms/daemon.sock` | the daemon | the daemon socket |
 | `RUNTIME/comms/claim-<key>.sock` | each adapter | its session's claim socket (Moxi's short socket path when this one is too long) |

@@ -1,0 +1,12 @@
+
+[38;5;153m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [1m[38;5;153mClaude[0m [1m[38;5;153min[0m [1m[38;5;153mChrome[0m [1m[38;5;153mextension[0m [1m[38;5;153mdetected[0m
+
+  Claude will use your Chrome browser by default — navigating sites, filling forms, and capturing screenshots in your existing session.
+
+  [38;5;246mBrowser[39m [38;5;246mactions[39m [38;5;246mstill[39m [38;5;246mgo[39m [38;5;246mthrough[39m [38;5;246mClaude's[39m [38;5;246mregular[39m [38;5;246mpermission[39m [38;5;246mprompts[39m [38;5;246mbefore[39m [38;5;246mthey[39m [38;5;246mrun.[39m [38;5;246mTurn[39m [38;5;246mbrowser[39m [38;5;246mtools[39m [38;5;246moff[39m [38;5;246mfor[39m [38;5;246mfuture[39m [38;5;246msessions[39m [38;5;246mwith[39m [1m[38;5;153m/chrome[0m[38;5;246m.[39m
+
+  [38;5;153m❯[39m [38;5;153mNo,[39m [38;5;153mkeep[39m [38;5;153mbrowser[39m [38;5;153mtools[39m [38;5;153moff[39m
+    Yes, use my browser
+
+  [3m[38;5;246mEnter[0m [3m[38;5;246mto[0m [3m[38;5;246mconfirm[0m [3m[38;5;246m·[0m [3m[38;5;246mEsc[0m [3m[38;5;246mto[0m [3m[38;5;246mkeep[0m [3m[38;5;246mbrowser[0m [3m[38;5;246mtools[0m [3m[38;5;246moff

@@ -11,7 +11,12 @@ outside comms.
   `SendResult`. `check(...)`, with the same arguments, runs every check and posts
   nothing (`moxi comms send --check`).
 * `send_as(module, name, to, text, *, expires, interrupt)` sends under a send-only name
-  reserved for `module`, from that module's own code, outside every session.
+  reserved for `module`, from that module's own code, outside every session. Given a
+  name a program registered, it is refused `not-reserved`.
+* `send_under(name, to, text, *, expires, interrupt)` sends under a send-only name a
+  program registered (`moxi comms send-only add`), outside every session, as `moxi
+  comms send --as` does. Refused `not-registered` for a name no program registered,
+  `module-reserved` for a module's, and `credential` when the token can't be read.
 * `Sender`: who sends. `Sender.session()` (this process's stamps and its session's claim
   socket), `Sender.socket(path)`, `Sender.claim(server)` (a `ClaimServer` this process
   holds) or `Sender.operator(user_id)` (the operator's lane).
@@ -19,8 +24,8 @@ outside comms.
   `message_id`, `recipients` (one `Recipient` per resolved name, its `delivery` one of
   `DELIVERIES`), `refusal` (a `Refusal`, `code` and `text`, when nothing was posted),
   `notes`, and `lines()`, the verb's text. Branch on the data, never on the text.
-* `send`, `check`, `send_as` and `delete` each close the record they opened before they
-  return, so no connection to it outlives the call.
+* `send`, `check`, `send_as`, `send_under` and `delete` each close the record they opened
+  before they return, so no connection to it outlives the call.
 
 **The other surfaces.**
 
@@ -29,7 +34,8 @@ outside comms.
   `roster()` (a `Roster`: `bound`, `standing`, and `waiting`, one `Waiting` per name
   with mail queued), `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
   roster joined with each live name's session, its cache (a `CacheFact`) and whom it
-  awaits),
+  awaits). A send-only entry of either carries `holder`: `module`, `program`, or None
+  for a name an older comms kept,
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
@@ -187,20 +193,43 @@ def send_as(module: str, name: str, to, text: str, *, expires=None,
     presented to the daemon, which refuses a sender inside a live session. The posture is
     always `[no reply]`, since nobody can mail a reserved name. A refusal is the result's
     `outcome` and `refusal` (`credential` when the token can't be read: run `moxi
-    doctor`), as for `send`; it raises only for arguments `send` would refuse."""
+    doctor`; `not-reserved` for a name a program registered), as for `send`; it raises
+    only for arguments `send` would refuse."""
+    return _send_only("send_as", str(module), name, to, text, expires=expires,
+                      interrupt=interrupt, timeout_s=timeout_s)
+
+
+def send_under(name: str, to, text: str, *, expires=None, interrupt: bool = False,
+               timeout_s: float = 30.0) -> SendResult:
+    """Send `text` to `to` under `name`, a send-only name a program registered with
+    `moxi comms send-only add`: its token is read through this process's credential
+    chain and presented to the daemon, which refuses a sender inside a live session (so
+    does this call, before it reads the token). The posture is always `[no reply]`. A
+    refusal is the result's `outcome` and `refusal`: `not-registered` for a name no
+    program registered, `module-reserved` for a module's name (`send_as` sends under
+    those), `credential` when the token can't be read (`moxi comms send-only renew
+    NAME`, from this environment); it raises only for arguments `send` would refuse."""
+    return _send_only("send_under", None, name, to, text, expires=expires,
+                      interrupt=interrupt, timeout_s=timeout_s)
+
+
+def _send_only(verb: str, module, name, to, text, *, expires, interrupt: bool,
+               timeout_s: float) -> SendResult:
+    """`send_as` (with `module`) and `send_under` (without): one send under a send-only
+    name, with no reply."""
     if expires is not None:
         _sending.expiry_seconds(expires)          # a bad duration raises ValueError
     names = to.split(",") if isinstance(to, str) else [str(t) for t in to]
     tags = [t.strip() for t in names if t.strip()]
     if not tags:
-        raise ValueError("send_as needs `to` to name at least one recipient")
+        raise ValueError(f"{verb} needs `to` to name at least one recipient")
     args = SimpleNamespace(text=str(text), posture=_machine_line.POSTURE_NONE, cap=None,
                            no_cap=False, audience=None, new=False, held=False,
                            standing=False, new_name=False, interrupt=bool(interrupt),
                            expires=expires, check=False, reply_to=None, message_id=None)
     ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
     try:
-        return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+        return _sending.run_reserved(ctx, args, module=module, name=str(name), tags=tags)
     finally:
         ctx.close()
 
@@ -304,16 +333,18 @@ class Agent:
 
 @dataclass(frozen=True)
 class Standing:
-    """A standing identity: a directory row (`kind` `agent`), or a reserved name (`kind`
+    """A standing identity: a directory row (`kind` `agent`), or a send-only name (`kind`
     `send-only`: active, or kept from an older comms). `module` names the module the name
     is reserved for, or declared by when it is in conflict; None for a name no module
-    owns."""
+    owns. `holder` says who holds a send-only name: `module`, `program` (a name a program
+    registered, with no module), or None (one an older comms kept)."""
 
     qualified: str
     name: str
     scope: str
     kind: str
     module: str | None = None
+    holder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -382,7 +413,7 @@ def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
                   for b in answer.get("bindings") or ())
     standing = tuple(Standing(qualified=s["qualified"], name=s.get("name"),
                               scope=s.get("scope"), kind=s.get("kind"),
-                              module=s.get("module"))
+                              module=s.get("module"), holder=s.get("holder"))
                      for s in answer.get("standing") or ())
     waiting = tuple(Waiting(qualified=q, count=w.get("count"), oldest=w.get("oldest"))
                     for q, w in (answer.get("waiting") or {}).items())
@@ -394,16 +425,17 @@ SEND_ONLY = _reserved_mod.SEND_ONLY
 
 
 def _reserved_rows(conn) -> dict:
-    """qualified -> (the module each reserved name is reserved for, or None when no
-    module owns it; its state), for every row not freed."""
-    return {row["name"]: (row["module"], row["state"]) for row in conn.execute(
-        "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
+    """qualified -> (the module each send-only name is reserved for, or None when no
+    module owns it; its state; its holder), for every row not freed."""
+    return {row["name"]: (row["module"], row["state"], row["holder"])
+            for row in conn.execute("SELECT name, module, state, holder FROM reserved "
+                                    "WHERE freed_at IS NULL")}
 
 
-def _reserved(qualified: str) -> tuple[bool, str | None]:
-    """Whether `qualified` is a reserved name (a `reserved` row not freed: active, in
-    conflict or unowned, each of which the daemon's bind refuses), and its module. A
-    store that can't be read holds none."""
+def _reserved(qualified: str) -> tuple[bool, str | None, str | None]:
+    """Whether `qualified` is a send-only name (a `reserved` row not freed: active, in
+    conflict or unowned, each of which the daemon's bind refuses), its module, and its
+    holder. A store that can't be read holds none."""
     import sqlite3
 
     from ..store.open import Unmoved
@@ -411,14 +443,15 @@ def _reserved(qualified: str) -> tuple[bool, str | None]:
     try:
         conn = _directory.connect(_paths.comms_db(), read_only=True)
     except (sqlite3.Error, Unmoved, OSError):
-        return False, None
+        return False, None, None
     try:
         rows = _reserved_rows(conn)
     except sqlite3.Error:
-        return False, None
+        return False, None, None
     finally:
         conn.close()
-    return (qualified in rows), rows.get(qualified, (None,))[0]
+    module, _state, holder = rows.get(qualified, (None, None, None))
+    return (qualified in rows), module, holder
 
 
 def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
@@ -452,8 +485,8 @@ class RosterRow:
     """One address on the roster: a name a live session holds (`live`), or a standing
     name nobody holds now.
 
-    `kind` and `module` are the name's standing row's (`agent`, or `send-only` with the
-    module it is reserved for), None with no standing row. `tier`, `adapter` and
+    `kind`, `module` and `holder` are the name's standing row's (`agent`, or `send-only`
+    with the module it is reserved for and who holds it), None with no standing row. `tier`, `adapter` and
     `directors` are the binding's, so a standing row has none. `session_id`, `bound_at`
     (the daemon's clock, epoch seconds), `awaiting` (whom that session waits on) and
     `cache` (a `CacheFact`) are a live row's, empty when the daemon couldn't say. `cache`
@@ -473,6 +506,7 @@ class RosterRow:
     bound_at: float | None = None
     awaiting: tuple = ()
     cache: CacheFact | None = None
+    holder: str | None = None
 
 
 def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
@@ -507,11 +541,13 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
             kind=kept.kind if kept else None,
             module=getattr(kept, "module", None) if kept else None,
             tier=agent.tier, adapter=agent.adapter, directors=tuple(agent.directors),
-            session_id=session_id, bound_at=bound_at, awaiting=awaiting, cache=cache))
+            session_id=session_id, bound_at=bound_at, awaiting=awaiting, cache=cache,
+            holder=getattr(kept, "holder", None) if kept else None))
     for row in standing.values():
         rows.append(RosterRow(
             qualified=row.qualified, name=row.name, scope=row.scope, live=False,
-            kind=row.kind, module=getattr(row, "module", None), tier=None, adapter=None))
+            kind=row.kind, module=getattr(row, "module", None), tier=None, adapter=None,
+            holder=getattr(row, "holder", None)))
     rows = tuple(sorted(rows, key=lambda r: (not r.live, r.qualified)))
     return (rows, got) if with_roster else rows
 
@@ -575,15 +611,16 @@ class IdentityState:
 
     `state` is one of `IDENTITY_STATES`: `free`; `held` by a live binding (`holder`, a
     `Holder`); `standing` (a standing identity's directory row, not bound now);
-    `reserved` for a module (`module`, None for a name no module owns); `retired`; or
-    `offline`, when the daemon can't be asked (`reason` says why). Branch on `state`,
-    never on text."""
+    `reserved` as a send-only name (`module`, None for a name no module owns, and
+    `registered` True for a name a program registered); `retired`; or `offline`, when
+    the daemon can't be asked (`reason` says why). Branch on `state`, never on text."""
 
     qualified: str
     state: str
     holder: Holder | None = None
     module: str | None = None
     reason: str | None = None
+    registered: bool = False
 
 
 def identity_state(name: str, scope: str | None = None, *,
@@ -614,9 +651,10 @@ def identity_state(name: str, scope: str | None = None, *,
         return IdentityState(qualified, "offline", reason=str(exc))
     finally:
         client.close()
-    reserved, module = _reserved(qualified)
+    reserved, module, holder = _reserved(qualified)
     if reserved:
-        return IdentityState(qualified, "reserved", module=module)
+        return IdentityState(qualified, "reserved", module=module,
+                             registered=holder == _reserved_mod.PROGRAM_HOLDER)
     if answer.get("standing_row"):
         return IdentityState(qualified, "standing")
     return IdentityState(qualified, "free")
@@ -652,7 +690,7 @@ def daemon_socket() -> Path:
 
 
 __all__ = [
-    "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
+    "INTERFACE", "send", "send_as", "send_under", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "HEADLESS", "parse_exit", "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",

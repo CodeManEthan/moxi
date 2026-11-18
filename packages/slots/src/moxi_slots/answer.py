@@ -32,6 +32,9 @@ its own channel.
    (`ended`, else `not-ended`); one whose `then` is `gone` needs the screen to leave
    within 5 s with the pane still live (`gone`, else `mismatch`).
 
+A screen declared `answerable` False (the first-run theme picker and welcome screen, the
+Claude-in-Chrome dialog) is refused with a `UsageError` before anything is read or sent.
+
 `wait_s` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
 its own bound. One call presses Enter at most once, and every key follows a read taken
 after the screen appeared. With `wait_s=0` on a screen that takes Enter alone (the exit
@@ -318,7 +321,8 @@ def _screens(screens) -> tuple[Screen, ...]:
     if isinstance(screens, (str, bytes)) or not isinstance(screens, Sequence) \
             or not screens or not all(isinstance(s, Screen) for s in screens):
         raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_DIR, "
-                         "CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG)")
+                         "CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING, CLAUDE_EXIT_DIALOG, "
+                         "CLAUDE_THEME_PICKER, CLAUDE_WELCOME, CLAUDE_CHROME_DIALOG)")
     return tuple(screens)
 
 
@@ -360,7 +364,10 @@ def answer_screen(slot: int | str, screen: Screen, wait_s: float = 5) -> Answer:
     on the pane."""
     if not isinstance(screen, Screen):
         raise UsageError("screen is one Screen (CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, "
-                         "CLAUDE_EXIT_DIALOG)")
+                         "CLAUDE_BYPASS_WARNING, CLAUDE_EXIT_DIALOG)")
+    if not screen.answerable:
+        raise UsageError(f"the {screen.name} screen is read, never answered: a person "
+                         "answers it")
     if isinstance(wait_s, bool) or not isinstance(wait_s, (int, float)) or wait_s < 0:
         raise UsageError(f"wait_s is a number of seconds, not {wait_s!r}")
     number, pane_id = _run_pane(slot)
