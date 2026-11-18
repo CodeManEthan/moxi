@@ -13,7 +13,7 @@ worker count or base stops it there, before any step runs. Then, in order:
    flag cited by a comment exists or has a live `.refs-allow` entry; public config keys,
    flags, parameters and CLI verbs keep their unit and switch-word rules; code uses the
    house words and naming forms; every exception mark names its rule and reason.
-   Then the renames step (`moxi_dev.rename`, about 2 minutes on this repository): the
+   Then the renames step (`moxi_dev.rename`, about 45 s on this repository): the
    tree is settled under its rename table, `packages/moxi-dev/renames.tsv`, read in this
    process as `moxi-dev rename --dry-run` reads it, with no `--main`, since the check
    reads the tree it is given. Any row still to apply, any leftover and any row the

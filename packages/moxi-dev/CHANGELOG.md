@@ -29,7 +29,7 @@
   not settled under `renames.tsv` (a row still to apply, a leftover or a row the script
   refuses), read in its own process with no `--main`, and prints the first of them with
   their state. The summary line says `renames pass`, `fail`, or `none` for a tree with no
-  table. `--only renames` runs it alone. It costs about 50 s on this repository.
+  table. `--only renames` runs it alone. It costs about 45 s on this repository.
 - `moxi-dev check` runs no `timed` test, in any form: the serial pass after the parallel
   one is gone, and the summary line says `timed held <n>` (or `timed none`) for the
   tests the suites held back. A `--finding` whose tests are all timed no longer fails

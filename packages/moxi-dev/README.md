@@ -4,7 +4,7 @@ The contributor tools for the Moxi repository. It is a development package: the
 repository's `uv sync` installs it, and no Moxi module depends on it at run time.
 
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
-  tag, comment-reference, naming and Ruff checks, the renames step (about 50 s here; see
+  tag, comment-reference, naming and Ruff checks, the renames step (about 45 s here; see
   below), the release step (see below), the contract's import rules (import-linter and
   deptry) and the tests of the packages the change reaches. A test in the `slow`,
   `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
@@ -85,8 +85,8 @@ The renames step reads the tree as `moxi-dev rename --dry-run` reads it, in the 
 own process and with no `--main`: the check reads the tree it is given, and comparing
 with main is for a branch taking main in. It fails on any row still to apply, any
 leftover and any row the script refuses, and prints the first ten with their state;
-`moxi-dev rename --dry-run` lists every one. It costs about 50 s on this repository's
-table of about 15,800 rows, and reads the whole tree whatever the change picks. A tree
+`moxi-dev rename --dry-run` lists every one. It costs about 45 s on this repository's
+table of about 16,400 rows, and reads the whole tree whatever the change picks. A tree
 with no `packages/moxi-dev/renames.tsv` counts as `none`.
 
 Run one step without the lock, release, package, lint or test steps with
