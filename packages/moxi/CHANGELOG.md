@@ -2,6 +2,12 @@
 
 ## 0.1.11 (unreleased)
 
+- On Windows `moxi doctor --costs` shows a module's daemons' open handles in a row of its
+  own, `cost handles`, as `N open handles`, and never compares them with the module's
+  `fds` budget, a POSIX fd limit: a handle count also holds events, threads and registry
+  keys, so the doctor no longer warns `232 open files, over its budget 64` with nothing
+  wrong. A Windows `Measure` has `handles` and `fds` None; elsewhere `handles` is None
+  and `fds` and its warning are unchanged.
 - On Windows, removing a unit (`moxi uninstall`, or a unit a module no longer declares)
   ends its task and waits, up to 5 s, until the task no longer reads `Running` before it
   deletes it, so the uninstall's package step no longer meets the daemon still holding

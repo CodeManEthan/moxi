@@ -1378,6 +1378,75 @@ def test_costs_rows_against_budgets_and_the_samples_kept(d, monkeypatch):
     assert not any(name.startswith("cost") for _, name in d.rows("demo"))
 
 
+
+class _FakeProcess:
+    """A psutil process as `process_measure` reads it, with one child: each has 50 open
+    fds, or 116 open handles where psutil counts handles."""
+
+    def __init__(self, pid):
+        self.pid = pid
+
+    def children(self, *, recursive):
+        return [_FakeProcess(self.pid + 1)] if self.pid == 50 else []
+
+    def create_time(self):
+        return 1000.0
+
+    def oneshot(self):
+        import contextlib
+
+        return contextlib.nullcontext()
+
+    def cpu_times(self):
+        return types.SimpleNamespace(user=1.0, system=0.5)
+
+    def memory_info(self):
+        return types.SimpleNamespace(rss=1024)
+
+    def memory_full_info(self):
+        return types.SimpleNamespace(swap=0)
+
+    def num_fds(self):
+        return 50
+
+    def num_handles(self):
+        return 116
+
+
+@pytest.mark.parametrize(("windows", "fds", "handles"), [(True, None, 232), (False, 100, None)])
+def test_a_windows_measure_has_handles_and_no_fds(monkeypatch, windows, fds, handles):
+    import psutil
+
+    monkeypatch.setattr(psutil, "Process", _FakeProcess)
+    monkeypatch.setattr(_run, "_WINDOWS", windows)
+    got = _run.process_measure(50)
+    assert (got.fds, got.handles) == (fds, handles)
+    assert (got.cpu, got.memory, got.started) == (3.0, 2048, 1000.0)
+
+
+def _costs_with(d, monkeypatch, got):
+    d.installed(DAEMONS=DAEMON, BUDGETS="{'fds': 64}")
+    monkeypatch.setattr(_run, "floor_ms", lambda: 12.5)
+    monkeypatch.setattr(_run, "measure", lambda state: got)
+    return d.rows("demo", costs=True)
+
+
+def test_open_handles_far_over_the_fds_budget_read_as_handles_and_never_warn(d, monkeypatch):
+    got = _costs_with(d, monkeypatch, _run.Measure(1.0, 1024, None, time.time() - 3600,
+                                                   handles=232))
+    handles = got[("demo", "cost handles")]
+    assert (handles.state, handles.detail) == ("ok", "232 open handles")
+    assert ("demo", "cost fds") not in got
+    assert not any("fds" in row.detail for row in got.values())
+
+
+def test_open_fds_over_the_fds_budget_still_warn(d, monkeypatch):
+    got = _costs_with(d, monkeypatch, _run.Measure(1.0, 1024, 232, time.time() - 3600))
+    fds = got[("demo", "cost fds")]
+    assert (fds.state, fds.detail) == ("warn", "232 open files, over its budget 64")
+    assert ("demo", "cost handles") not in got
+
+
 def test_floor_ms_is_measured_once(monkeypatch):
     monkeypatch.setattr(_run, "_floor", [])
     calls = []
