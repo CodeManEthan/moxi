@@ -143,8 +143,10 @@ export function recordWhat(record: RecordRow, repo: Pick<RepoRow, "specs">, name
     return `${record.piece === null ? "a piece" : names.get(record.piece) ?? pieceName(record.piece)} broke`;
   }
   if (record.kind === "push") return `the push to ${spec?.remote ?? "its remote"} failed`;
+  // A stale index lock's record is the open one even under a refusal, as in its item.
+  if (spec?.index_stale) return "the auto-commit failed";
   if (spec?.refused_since != null) return "the auto-commit was refused";
-  if (spec?.error_since != null || spec?.index_stale) return "the auto-commit failed";
+  if (spec?.error_since != null) return "the auto-commit failed";
   return "the auto-commit said something";
 }
 

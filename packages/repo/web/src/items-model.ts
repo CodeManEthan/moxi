@@ -160,11 +160,24 @@ function lastCommit(ctx: Context, spec: SpecRow): string[] {
   return spec.last_commit_time === null ? [] : [`last commit ${at(ctx, spec.last_commit_time)}`];
 }
 
-/** The spec's one item from its commit record's states, or null when none holds. */
+/** The spec's one item from its commit record's states, or null when none holds. A stale
+ * index lock comes first: its record is then the open commit record, and no pass can
+ * commit or clear a refusal or failure while git's index stays locked, so the held item
+ * carries the refusal or failure as a dim fact. A failed spec whose record is closed takes
+ * the spec's own `Run` command as its fix. */
 function specItem(ctx: Context, spec: SpecRow): Item | null {
   const label = `Auto-commit ${spec.name}`;
   const commit = (): RecordRow | null => merge(ctx, openRecord(ctx, "commit", (r) => r.spec === spec.name));
   const first = (record: RecordRow | null): string[] => (record === null ? [] : [firstLine(record.text)]);
+  if (spec.index_stale) {
+    const record = commit();
+    const also = spec.refused_since !== null ? [`refused since ${at(ctx, spec.refused_since)}`]
+      : spec.error_since !== null ? [`failed since ${at(ctx, spec.error_since)}`] : [];
+    return item(ctx, "need", "held", `${label} is held up by git's index lock`, {
+      dim: [...first(record), ctx.name, ...also], fix: recordFix(record?.fix ?? null), time: spec.index_busy_since,
+      since: spec.index_busy_since !== null, record, spec,
+    });
+  }
   if (spec.refused_since !== null) {
     const record = commit();
     const passes = spec.refused_passes === null ? [] : [`refused ${counted(spec.refused_passes, "pass", "passes")}`];
@@ -177,14 +190,8 @@ function specItem(ctx: Context, spec: SpecRow): Item | null {
     const record = commit();
     return item(ctx, "need", "failed", `${label} failed`, {
       dim: [...first(record), ctx.name, ...lastCommit(ctx, spec)],
-      fix: recordFix(record?.fix ?? null), time: spec.error_since, since: true, record, spec,
-    });
-  }
-  if (spec.index_stale) {
-    const record = commit();
-    return item(ctx, "need", "held", `${label} is held up by git's index lock`, {
-      dim: [...first(record), ctx.name], fix: recordFix(record?.fix ?? null), time: spec.index_busy_since,
-      since: spec.index_busy_since !== null, record, spec,
+      fix: record === null ? fixOf(spec.run.command, { label: spec.run.label }) : recordFix(record.fix),
+      time: spec.error_since, since: true, record, spec,
     });
   }
   return null;

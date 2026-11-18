@@ -55,6 +55,9 @@ test("Today: today's open records only, newest first, each in words with its fir
   assert.deepEqual(todayLines(r, null, UTC), []);
   const failed = repo({ specs: [spec({ error_since: T("10:00") })], records: [record({ kind: "commit", spec: "notes/snapshot" })] });
   assert.equal(todayLines(failed, TODAY, UTC)[0].what, "the auto-commit failed");
+  const held = repo({ specs: [spec({ refused_since: T("10:00"), index_stale: true })],
+                      records: [record({ kind: "commit", spec: "notes/snapshot" })] });
+  assert.equal(todayLines(held, TODAY, UTC)[0].what, "the auto-commit failed");
   const said = repo({ specs: [spec()], records: [record({ kind: "commit", spec: "notes/snapshot" })] });
   assert.equal(todayLines(said, TODAY, UTC)[0].what, "the auto-commit said something");
 });

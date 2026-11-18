@@ -153,8 +153,12 @@ test("a failed spec stays failed after a throttled pass, with the record's fix",
     dim: ["error: git commit failed", "n", "last commit 18:30"],
     fix: { label: null, text: "look at the log", copy: null, refresh: false }, time: "since 17:00",
   });
-  // With no record, no fix.
-  assert.equal(one(repo({ project: "n", specs: [failed] })).fix, null);
+  // With its record closed, the spec's own facts, and its Run command as the fix.
+  const closed = one(repo({ project: "n", specs: [failed] }));
+  assert.deepEqual(words(closed), {
+    weight: "need", title: "Auto-commit notes/snapshot failed", dim: ["n", "last commit 18:30"],
+    fix: { label: "Run", text: "moxi repo run", copy: "moxi repo run", refresh: false }, time: "since 17:00",
+  });
 });
 
 test("a stale index lock is a need from the record", () => {
@@ -171,10 +175,37 @@ test("a stale index lock is a need from the record", () => {
   assert.deepEqual(repoItems(repo({ specs: [spec({ status: "index-busy", index_busy_since: T("12:00") })] }), opts), []);
 });
 
-test("refused wins over failed, and failed over a stale index", () => {
-  const both = spec({ refused_since: T("18:45"), error_since: T("17:00"), index_stale: true });
-  assert.equal(one(repo({ specs: [both] })).source, "refused");
-  assert.equal(one(repo({ specs: [{ ...both, refused_since: null }] })).source, "failed");
+const LOCK = { ...COMMIT, text: "repo: notes/snapshot: git's index lock /r/.git/index.lock has been held\n  more",
+               fix: "if no git is running in /r, remove /r/.git/index.lock" };
+
+test("a stale index lock under a refused spec comes first, with the lock's words and fix and the refusal", () => {
+  const refused = spec({ refused_since: T("18:45"), refused_passes: 2, index_busy_since: T("19:00"), index_stale: true });
+  const item = one(repo({ project: "n", specs: [refused], records: [LOCK] }));
+  assert.deepEqual(words(item), {
+    weight: "need", title: "Auto-commit notes/snapshot is held up by git's index lock",
+    dim: ["repo: notes/snapshot: git's index lock /r/.git/index.lock has been held", "n", "refused since 18:45"],
+    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: null, refresh: false },
+    time: "since 19:00",
+  });
+  assert.equal(item.record, LOCK);
+});
+
+test("a stale index lock under a failed spec comes first, with the lock's words and fix and the failure", () => {
+  const failed = spec({ error_since: T("17:00"), error_passes: 3, index_busy_since: T("19:00"), index_stale: true });
+  const item = one(repo({ project: "n", specs: [failed], records: [LOCK] }));
+  assert.deepEqual(words(item), {
+    weight: "need", title: "Auto-commit notes/snapshot is held up by git's index lock",
+    dim: ["repo: notes/snapshot: git's index lock /r/.git/index.lock has been held", "n", "failed since 17:00"],
+    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: null, refresh: false },
+    time: "since 19:00",
+  });
+});
+
+test("a stale index wins over refused, and refused over failed", () => {
+  const all = spec({ refused_since: T("18:45"), error_since: T("17:00"), index_stale: true });
+  assert.equal(one(repo({ specs: [all] })).source, "held");
+  assert.equal(one(repo({ specs: [{ ...all, index_stale: false }] })).source, "refused");
+  assert.equal(one(repo({ specs: [{ ...all, index_stale: false, refused_since: null }] })).source, "failed");
 });
 
 test("a commit record from a pass that committed, with hook lines, is a warning in its own words", () => {
