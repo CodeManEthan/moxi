@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The Claude runner now takes a session as headless only when Claude Code's own
+  `session.start` says nobody is at the prompt (`isInteractive` false). It used to read
+  the session's surfaces in whichever start hook ran first, and Claude Code usually runs
+  SessionStart first, before the terminal is bound in a new config folder. Such an
+  interactive session ran with no endpoint, no ready, no guards and no permission ask
+  step, and turns could not find it. SessionStart now waits up to 1 s for the decision,
+  except under a print or SDK start (`CLAUDE_CODE_ENTRYPOINT` starting with `sdk-`); when
+  it doesn't get it, `session.start` makes the ready ask itself before the first prompt,
+  and that ready's context is dropped. The runner plugin is version 0.2.1, so `moxi
+  install turns` updates an install at user scope.
 - Every setting carries page fields, which `moxi config turns show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, the
   unit of each wait and of the start-context limit, six settings shown first under
@@ -10,10 +20,10 @@
   guard off and on removing a guard from `guards.run`. The schema now lists the guards
   first and the start list before the session commands; no key changed. turns needs
   moxi 0.1.9 or later.
-- The Claude runner plugin is version 0.2.0, for the leg it speaks now. Claude Code runs
-  a user-scope plugin from a cache kept per version, so `moxi install turns` now updates
-  a plugin installed at another version than the one it ships (`claude plugin update`)
-  instead of skipping it. Before, an earlier install kept running the old runner, which
+- The Claude runner plugin took a new version, 0.2.0, for the leg it speaks now. Claude
+  Code runs a user-scope plugin from a cache kept per version, so `moxi install turns` now
+  updates a plugin installed at another version than the one it ships (`claude plugin
+  update`) instead of skipping it. Before, an earlier install kept running the old runner, which
   the endpoint refuses, so every session it loaded in ran without turns. `moxi doctor
   turns` has a new row, `claude installed runner`, that reads the leg of the runner
   Claude Code runs at user scope and fails when it is not the endpoint's.
