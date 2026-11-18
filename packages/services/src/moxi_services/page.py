@@ -11,8 +11,12 @@
                         unknown for a job this server holds no record of
     GET  /api/events    the stream; its one topic, `rows`, is what `/api/rows` answers
     POST /api/start     `moxi services start ID`, a daemon; confirmed (202)
-    POST /api/stop      `moxi services stop ID`; confirmed (202)
-    POST /api/restart   `moxi services restart ID`, a daemon; confirmed (202)
+    GET  /api/ends      what a stop or restart of slots' server would end now: the
+                        sessions, open slots and jobs in its slots
+    POST /api/stop      `moxi services stop ID`; confirmed (202); slots' server's only
+                        when `ends` covers what runs in its slots
+    POST /api/restart   `moxi services restart ID`, a daemon; confirmed (202); slots'
+                        server's as stop
     POST /api/run       a timer's run now (`start`), or with `restart` its run ended and
                         run once; confirmed (202)
     POST /api/enable    `moxi services enable ID`; confirmed (202)
@@ -27,9 +31,10 @@ server gives no first byte inside 30 seconds. So every act's handler checks the 
 the row, records a job as `running`, hands the act to services' one job thread and
 answers 202 with `/api/status?job=<id>` at once (`moxi_services.pagehandlers`).
 
-**The phone reaches the reads, the stream, the status route and the six confirmed acts on
-a row that exists** (start, stop, restart, run, enable and disable), and never add, remove
-or the project list: from the phone a service is acted on, never added, edited or
+**The phone reaches the reads, the stream, the status route, the read of what a stop of
+slots' server ends, and the six confirmed acts on a row that exists** (start, stop,
+restart, run, enable and disable), and never add, remove, the unit read or the project
+list: from the phone a service is acted on, never added, edited or
 removed, since a command sent from there would run on the desktop at every login and the
 phone could not add back what it removed. The gateway acts on these only while the shell
 mounts its acts; elsewhere the phone's sheet points to the desk.
@@ -46,7 +51,8 @@ loopback stops it when it has been idle. Only that server and loopback's export 
 import this module, each in a process of its own: nothing in services' announcement, CLI,
 doctor or projects link does. services' distribution doesn't require ui, which comes with
 the `ui` extra, so this module reaches loopback, ui's page-server base, only through
-`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails.
+`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails. slots, which
+says what its server's stop ends, is read the same way, and only for that.
 """
 
 from __future__ import annotations
@@ -239,6 +245,21 @@ TODAY = lb.Out("table", nullable=True, items={
 ONE = {"row": ROW, "runs": lb.Out("list", items=RUN), "log": _MAYBE_SAYS,
        "unit": _MAYBE, "units": lb.Out("list", items=_TEXT), "today": TODAY}
 
+#: One session a stop of slots' server ends: its slot's number and the label slots gives
+#: its launch while the run pane is there.
+SESSION = lb.Out("table", items={"slot": lb.Out("int"), "label": _MAYBE_SAYS})
+
+#: What a stop or restart of slots' server would end now: the sessions in its slots,
+#: how many other slots are open, and how many jobs run. `read` is False, with `why`,
+#: when slots couldn't be read; the counts are then 0.
+ENDS = {
+    "read": _FLAG,
+    "why": _MAYBE_SAYS,
+    "sessions": lb.Out("list", items=SESSION),
+    "open": lb.Out("int"),
+    "jobs": lb.Out("int"),
+}
+
 #: What the supervisor says of a unit not yet adopted. `found` is False for a missing
 #: unit and null when the supervisor did not answer or was not read; `kind` the kind it
 #: was read as; `asks_kind` True where the supervisor can't tell a unit's kind, so the
@@ -279,8 +300,14 @@ _ID = lb.Field("string", max=NAME_MAX)
 _MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)
 _MAYBE_BOOL = lb.Field("bool", required=False)
 
+#: The largest `ends` a request takes.
+ENDS_MAX = 9999
+
 #: An act on one row: its id, `<module>/<name>` or a user row's bare name.
 ROW_BODY = {"id": _ID}
+#: A stop or restart. `ends` is what the warning on slots' server showed in use (0 when
+#: it said the slots couldn't be read); absent for a plain press.
+STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}
 #: A timer's run now; with `restart` a run in progress is ended first.
 RUN_BODY = {"id": _ID, "restart": _MAYBE_BOOL}
 #: An add. `command` is the command line of a written row, split as this system's shell
@@ -337,6 +364,8 @@ PAGE = lb.Page(
                  query={"ref": _ID, "kind": lb.Field("enum", values=KINDS,
                                                      required=False)},
                  returns=UNIT),
+        lb.Route("/api/ends", "read", _target("ends"), query={"id": _ID}, returns=ENDS,
+                 gateway=True),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route(STATUS_ROUTE, "read", _target("status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS,
@@ -344,8 +373,8 @@ PAGE = lb.Page(
         lb.Route("/api/events", "read", _target("events"), stream=True,
                  topics={TOPIC: lb.Out("table", items=ROWS)}, gateway=True),
         _confirmed("/api/start", "start", ROW_BODY, gateway=True),
-        _confirmed("/api/stop", "stop", ROW_BODY, gateway=True),
-        _confirmed("/api/restart", "restart", ROW_BODY, gateway=True),
+        _confirmed("/api/stop", "stop", STOP_BODY, gateway=True),
+        _confirmed("/api/restart", "restart", STOP_BODY, gateway=True),
         _confirmed("/api/run", "run", RUN_BODY, gateway=True),
         _confirmed("/api/enable", "enable", ROW_BODY, gateway=True),
         _confirmed("/api/disable", "disable", ROW_BODY, gateway=True),
@@ -354,6 +383,7 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "KINDS", "LAST_RUN", "ONE", "PAGE",
-           "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS", "ROW_BODY", "RUN", "RUN_BODY",
-           "STATUS", "STATUS_ROUTE", "STREAK", "TIMING", "TODAY", "TOPIC", "UNIT", "VERDICT"]
+__all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "ENDS", "ENDS_MAX", "KINDS",
+           "LAST_RUN", "ONE", "PAGE", "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS",
+           "ROW_BODY", "RUN", "RUN_BODY", "SESSION", "STATUS", "STATUS_ROUTE",
+           "STOP_BODY", "STREAK", "TIMING", "TODAY", "TOPIC", "UNIT", "VERDICT"]

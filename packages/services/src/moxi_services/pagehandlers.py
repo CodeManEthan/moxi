@@ -29,6 +29,12 @@ status route gives its state, lines and fix.
   exists (an unknown id is a 422 with the fix), a timer's start and restart go through
   `/api/run` and a daemon's never do (422), and an add's fields are in shape. Everything
   else is the act's own refusal, in the job's record.
+- A stop or restart of slots' server (`slots/server`, by id: no other module declares
+  what its daemon's stop ends) is guarded: before the 202 the handler reads through
+  slots' API what the stop would end, and goes ahead only when nothing is in use, or
+  when the request's `ends`, the count the person was shown, covers what is in use now
+  (or the read did not answer and the person confirmed that). Else it is a 422,
+  `SLOTS_IN_USE`. `/api/ends` answers the same read for the page's warning.
 - `add` is a plain act: no key, so its handler mints the job id. A repeated add POST is a
   second job, which the thread refuses as the name being taken. A command's first word
   must be a full path, since this server's PATH is the service manager's, not the user's
@@ -131,6 +137,13 @@ STORE_TOO_NEW = ("services' store was written by a newer moxi-services; fix: upg
 #: The one row whose stop and restart end what runs in the slots: slots' server, by its
 #: id. No other module declares what its daemon's stop ends.
 SLOTS_SERVER = "slots/server"
+#: What a Stop or Restart of slots' server is told when more runs in its slots than the
+#: person was shown.
+SLOTS_IN_USE = "Something is running in its slots now."
+#: What `/api/ends` is told of any row but slots' server.
+ENDS_SLOTS_ONLY = "only slots' server ends what runs in the slots"
+#: What an act is told when its `ends` is below 0.
+ENDS_NEGATIVE = "ends is how many the person was shown in use: 0 or more"
 
 log = logging.getLogger("moxi.services.page")
 
@@ -204,6 +217,11 @@ def _timing(row) -> dict[str, Any] | None:
     return {"every": row.every, "at": _list(row.at), "days": _list(row.days)}
 
 
+def ends_slots(row) -> bool:
+    """True for slots' server, whose stop and restart end what runs in the slots."""
+    return isinstance(row, ModuleRow) and row.id == SLOTS_SERVER and row.kind == "daemon"
+
+
 def with_settings(found: list) -> frozenset[str]:
     """The modules among `found`'s module rows that have settings, so a row's
     `Settings` link leads somewhere. A module whose schema can't be read has none."""
@@ -250,7 +268,7 @@ def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
                                                      "at": checked_at},
         "streak": streak,
         "timing": _timing(row),
-        "ends_slots": row.id == SLOTS_SERVER and row.kind == "daemon" and user is None,
+        "ends_slots": ends_slots(row),
         "has_settings": user is None and row.module in settings,
         "argv": _list(user.argv) if user else None,
         "cwd": user.cwd if user else None,
@@ -465,6 +483,86 @@ def unit(call: Any) -> dict[str, Any]:
 _KIND_WORDS = {"daemon": "service", "timer": "timer"}
 
 
+# -- what a stop of slots' server ends -------------------------------------------------
+
+def _unread(why: str) -> dict[str, Any]:
+    return {"read": False, "why": why, "sessions": [], "open": 0, "jobs": 0}
+
+
+def _count_ends(api: Any) -> dict[str, Any]:
+    listing = api.list_slots()
+    if not listing.ok:
+        return _unread(f"slots couldn't be read: {listing.why}")
+    try:
+        running = sum(1 for found in api.jobs() if found.running)
+    except Exception as exc:  # noqa: BLE001 - an unread count is said, never raised
+        return _unread(f"slots' jobs couldn't be read ({type(exc).__name__})")
+    sessions, open_slots = [], 0
+    for found in (*listing.slots, *listing.unregistered):
+        if found.state == "missing":
+            continue
+        if found.state == "occupied":
+            sessions.append({"slot": found.number, "label": found.label or None})
+        elif not found.idle:
+            open_slots += 1
+    return {"read": True, "why": None, "sessions": sessions, "open": open_slots,
+            "jobs": running}
+
+
+def read_ends() -> dict[str, Any]:
+    """What a stop of slots' server would end now, from slots' own API, counted as slots'
+    uninstall check counts it: each occupied slot a session, with its number and label;
+    each other slot not missing and not idle an open slot; each running job. `read` is
+    False, with `why`, when slots' API does not load, its listing could not be read, its
+    jobs could not be read, or it did not answer within `STATUS_SECONDS`."""
+    found = modules.load("slots", interface=1)
+    if not found.ok:
+        return _unread(f"slots' API couldn't be loaded: {found.reason}")
+    try:
+        done, value = verdict.within(lambda: _count_ends(found.api), STATUS_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - an unread count is said, never raised
+        _log_once(exc, "reading slots' listing failed")
+        return _unread(f"slots couldn't be read ({type(exc).__name__})")
+    if not done:
+        return _unread(f"slots did not answer within {STATUS_SECONDS:g} s")
+    return value
+
+
+def in_use(read: Mapping[str, Any]) -> int:
+    """How many things `read_ends` found in use: sessions, open slots and jobs."""
+    return len(read["sessions"]) + read["open"] + read["jobs"]
+
+
+def guard_slots(found, ends: int | None) -> None:
+    """Refuse a stop or restart of slots' server unless what it ends now is no more than
+    the person was shown. `ends` is the count the warning showed, 0 when it said the
+    slots couldn't be read, None for a plain press. It goes ahead when the read finds
+    nothing in use, or when `ends` is given and the read did not answer or finds at most
+    `ends`. Any other row passes."""
+    if not ends_slots(found):
+        return
+    if ends is not None and ends < 0:
+        raise lb.Refused(ENDS_NEGATIVE)
+    now = read_ends()
+    if now["read"] and in_use(now) == 0:
+        return
+    if ends is not None and (not now["read"] or in_use(now) <= ends):
+        return
+    raise lb.Refused(SLOTS_IN_USE)
+
+
+def ends(call: Any) -> dict[str, Any]:
+    """`GET /api/ends?id=ID`: what a stop or restart of slots' server would end now (see
+    `read_ends`); 422 for any other row."""
+    try:
+        found = acts.resolve(call.query["id"])
+    except ServicesError as exc:
+        raise _answer(exc) from None
+    if not ends_slots(found):
+        raise lb.Refused(ENDS_SLOTS_ONLY)
+    return read_ends()
+
+
 def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: every project by key, for the add form's picker; `reason`
     says why there is none (projects not installed, busy or unreadable)."""
@@ -509,9 +607,10 @@ def _canonical(ident: str) -> str:
 
 
 def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
-               is_timer: bool | None = None) -> Any:
+               is_timer: bool | None = None, is_guarded: bool = False) -> Any:
     """A confirmed act on one row, queued: `is_timer` True for an act only a timer takes,
-    False for one a timer takes through `/api/run`, None for either."""
+    False for one a timer takes through `/api/run`, None for either. With `is_guarded`,
+    a stop or restart of slots' server goes only as `guard_slots` lets it."""
     job, ident = call.key, call.body["id"]
     held = JOBS.get(job)
     if held is not None:
@@ -526,6 +625,8 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
         raise lb.Refused(TIMER_RUNS)
     if is_timer is True and found.kind != "timer":
         raise lb.Refused(DAEMON_STARTS)
+    if is_guarded:
+        guard_slots(found, call.body.get("ends"))
     record, _ = JOBS.submit(job, act, found.id, lambda: run(found.id))
     if record.act != act or record.id != found.id:
         raise lb.Refused(KEY_REUSED)
@@ -538,13 +639,16 @@ def start(call: Any) -> Any:
 
 
 def stop(call: Any) -> Any:
-    """`POST /api/stop`, confirmed: `moxi services stop ID`, a daemon or a timer's run."""
-    return _confirmed(call, "stop", lambda i: acts.stop(i, by=BY))
+    """`POST /api/stop`, confirmed: `moxi services stop ID`, a daemon or a timer's run;
+    slots' server's under the guard, with `ends`."""
+    return _confirmed(call, "stop", lambda i: acts.stop(i, by=BY), is_guarded=True)
 
 
 def restart(call: Any) -> Any:
-    """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon."""
-    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False)
+    """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon; slots'
+    server's under the guard, with `ends`."""
+    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False,
+                      is_guarded=True)
 
 
 def run(call: Any) -> Any:
@@ -709,9 +813,10 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["BY", "DAEMON_STARTS", "HEALTH_PERIOD", "JOBS", "KEY_REUSED", "PERIOD",
-           "REPUBLISH_S", "RUNS_SHOWN", "SLOTS_SERVER", "STREAK_LINES",
-           "TODAY_LINES", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "count_streak", "disable", "enable",
-           "events", "every_row", "gather", "listing", "not_a_full_path", "projects",
-           "remove", "restart", "row", "row_value", "run", "start", "status", "stop",
-           "count_today", "unit", "with_settings"]
+__all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_SLOTS_ONLY", "HEALTH_PERIOD",
+           "JOBS", "KEY_REUSED", "PERIOD", "REPUBLISH_S", "RUNS_SHOWN", "SLOTS_IN_USE",
+           "SLOTS_SERVER", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS", "TODAY_LINES",
+           "UNKNOWN", "add", "count_streak", "count_today", "disable", "enable", "ends",
+           "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
+           "listing", "not_a_full_path", "projects", "read_ends", "remove", "restart",
+           "row", "row_value", "run", "start", "status", "stop", "unit", "with_settings"]

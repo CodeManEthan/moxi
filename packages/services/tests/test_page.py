@@ -338,8 +338,9 @@ def test_no_refusal_the_gateway_can_reach_names_the_store_or_the_home(store_path
         if 400 <= status < 500:
             text = json.dumps(body)
             assert not any(s in text for s in hidden), (path, text)
-    row_routes = [r.path for r in reached if r.path == "/api/row" or r.confirmed]
-    assert len(row_routes) == 7, row_routes
+    row_routes = [r.path for r in reached
+                  if r.path in ("/api/row", "/api/ends") or r.confirmed]
+    assert len(row_routes) == 8, row_routes
     for path in row_routes:
         assert answers[path] == (422, {"refused": says}), (path, answers[path])
     if spoil is not None:

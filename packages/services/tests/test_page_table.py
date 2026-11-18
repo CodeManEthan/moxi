@@ -17,11 +17,13 @@ from page_kit import LB
 
 # -- the table ------------------------------------------------------------------------------
 
-READS = {"/api/rows", "/api/row", "/api/unit", "/api/projects", page.STATUS_ROUTE, "/api/events"}
+READS = {"/api/rows", "/api/row", "/api/unit", "/api/ends", "/api/projects",
+         page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
              "/api/disable", "/api/remove"}
-#: The routes the phone reaches: the reads but the project list and the unit read, the
-#: stream, the status route and every confirmed act on a row but remove.
+#: The routes the phone reaches: the reads but the project list and the unit read (so
+#: the read of what a stop of slots' server ends), the stream, the status route and every
+#: confirmed act on a row but remove.
 GATEWAY = (READS - {"/api/projects", "/api/unit"}) | (CONFIRMED - {"/api/remove"})
 
 
@@ -117,6 +119,7 @@ def test_commands_are_redact_a_working_dir_path_and_every_sentence_redact():
     redact |= {"/api/rows detail", "/api/rows problems[].reason",
                "/api/events rows.detail", "/api/events rows.problems[].reason",
                "/api/row log", "/api/unit refused", "/api/projects reason",
+               "/api/ends why", "/api/ends sessions[].label",
                "/api/status lines[]", "/api/status fix"}
     path = {f"{where} {row}.cwd"
             for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),
@@ -144,7 +147,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     from moxi_services import module
 
     assert module.PAGE == "moxi_services.page:PAGE"
-    assert "ui" in module.OPTIONAL
+    assert sorted(module.OPTIONAL) == ["projects", "slots", "ui"]
     assert not hasattr(module, "BUDGETS")
     probe = ("import sys, moxi_services.module, moxi_services.cli, moxi_services.doctor, "
              "moxi_services.projects_link\n"

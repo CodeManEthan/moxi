@@ -1361,6 +1361,9 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1378,10 +1381,11 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["projects", "ui"]
+provides-extras = ["projects", "slots", "ui"]
 
 [package.metadata.requires-dev]
 dev = [

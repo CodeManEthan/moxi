@@ -142,6 +142,13 @@ project lists every service filed under it in a `Services` row, first while one 
   enable and disable, and remove for a row you added. Each opens the shell's confirm
   sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent
   session says on its sheet that it spends usage.
+- **Stopping slots' server.** With `moxi-slots` installed (the `slots` extra), stopping
+  or restarting slots' server ends every session, open slot and job in its slots. Before
+  either, the page server reads through slots' API what is in use there. With nothing in
+  use the act goes ahead; with something in use, the act goes ahead only when you were
+  shown at least that much, and is refused otherwise. The row is known by its id,
+  `slots/server`: no other module says what stopping its daemon ends, so no other row is
+  guarded this way.
 - **One at a time.** The page server runs its acts one at a time, each as a job, and
   answers at once with the job's status. The page follows that status until the job ends,
   shows what the command printed, and keeps every act's control off while one runs. If
@@ -185,7 +192,7 @@ moxi install services
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
 second adds services beside it and offers its optional extras: `projects` (project keys
-on rows) and `ui` (the page). The repository's README, at
+on rows), `slots` (what stopping slots' server ends) and `ui` (the page). The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 
@@ -193,7 +200,8 @@ lists the other modules.
 
 `moxi`, Moxi's core, and `psutil`, which reads a running daemon's uptime, memory and
 CPU time, and when the machine booted. The `projects` extra (`moxi-projects`) files rows
-under projects, and the `ui` extra (`moxi-ui`, the browser UI shell) adds the page.
+under projects, the `slots` extra (`moxi-slots`) says what stopping slots' server ends,
+and the `ui` extra (`moxi-ui`, the browser UI shell) adds the page.
 
 ## License
 
