@@ -531,8 +531,8 @@ class CiChecked:
 def _push(found: _Look, *, again: str) -> str | None:
     """Push the tip to the remote the setting names: where it names a `ref`, forced to
     the branch name the template gives the build's branch, and that name is returned;
-    else as a plain push to the build's own branch name, and None is returned. The push
-    runs through the repo's hooks. Raises `Refused` with git's message, and the hooks',
+    else as a plain push to the build's own branch name, and None is returned. The name
+    `full_ref` gives is never pushed here. The push runs through the repo's hooks. Raises `Refused` with git's message, and the hooks',
     when the push is refused."""
     from . import ci
 

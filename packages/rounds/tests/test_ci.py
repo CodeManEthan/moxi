@@ -245,6 +245,67 @@ def test_a_ref_of_a_prefix_then_the_branch_is_taken(ref):
     assert ci.ref_for(ref, "a/b") == ref.replace("{branch}", "a/b")
 
 
+FULL_BESIDE = 'local = "none", remote = "origin", ref = "ci/{{branch}}", full_ref = "{}"'
+
+
+@pytest.mark.parametrize("full_ref", [
+    "{branch}", "ci-full{branch}", "ci-full/{branch}/x", "ci-full/{tip}/{branch}",
+    "refs/heads/ci-full/{branch}", "ci full/{branch}", ".ci-full/{branch}", "ci-full/"])
+def test_the_config_check_refuses_a_full_ref_that_is_not_a_prefix_then_the_branch(full_ref):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            + FULL_BESIDE.format(full_ref) + " }\n")
+
+    assert caught.value.key == "projects.proj-a.ci.full_ref"
+    assert 'full_ref = "ci-full/{branch}"' in caught.value.fix
+
+
+@pytest.mark.parametrize("full_ref", ["ci/{branch}", "ci/full/{branch}", "ci/ci-full/{branch}"])
+def test_the_config_check_refuses_a_full_ref_whose_prefix_and_ref_s_start_alike(full_ref):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            + FULL_BESIDE.format(full_ref) + " }\n")
+
+    assert caught.value.key == "projects.proj-a.ci.full_ref"
+    assert "one starts with the other" in caught.value.problem
+
+
+def test_the_config_check_refuses_a_ref_that_starts_with_full_ref_s_prefix():
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            'local = "none", remote = "origin", ref = "ci/full/{branch}", '
+                            'full_ref = "ci/{branch}" }\n')
+
+    assert caught.value.key == "projects.proj-a.ci.full_ref"
+    assert "one starts with the other" in caught.value.problem
+
+
+def test_the_config_check_refuses_a_full_ref_with_no_ref():
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            'local = "none", remote = "origin", '
+                            'full_ref = "ci-full/{branch}" }\n')
+
+    assert caught.value.key == "projects.proj-a.ci.full_ref"
+    assert caught.value.problem == "is set with no ref beside it"
+
+
+@pytest.mark.parametrize("full_ref", ["ci-full/{branch}", "full/{branch}", "cix/{branch}"])
+def test_a_full_ref_beside_a_ref_of_another_prefix_is_taken(full_ref):
+    settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                        + FULL_BESIDE.format(full_ref) + " }\n")
+
+
+def test_the_setting_gives_both_templates_ref_s_first(write_config):
+    write_config(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                 + FULL_BESIDE.format("ci-full/{branch}") + " }\n")
+
+    found = ci.declared(settings.load(), "proj-a")
+
+    assert (found.ref, found.full_ref) == ("ci/{branch}", "ci-full/{branch}")
+    assert found.templates == ("ci/{branch}", "ci-full/{branch}")
+
+
 def test_a_setting_that_reads_named_jobs_and_pushes_to_a_ci_ref_is_taken():
     settings.check_text(
         f'[projects.proj-a]\n{CHECK}ci = {{ remote = "origin", ref = "ci/{{branch}}", '
@@ -317,7 +378,7 @@ def setup(repo, stub, write_config, tmp_path, capsys):
 
     def configure(local: str = "print('local ran')", *, remote: str | None = None,
                   workflows=(FLOW,), status=None, ref: str | None = None,
-                  extra: str = ""):
+                  full_ref: str | None = None, extra: str = ""):
         full = shlex.join([PY, "-c", "print('full ran')"])
         if local == ci.NONE:
             local_toml = '"none"'
@@ -335,6 +396,8 @@ def setup(repo, stub, write_config, tmp_path, capsys):
             table += f", remote = {json.dumps(remote)}"
         if ref is not None:
             table += f", ref = {json.dumps(ref)}"
+        if full_ref is not None:
+            table += f", full_ref = {json.dumps(full_ref)}"
         write_config(f"[projects.proj-a]\ncheck = {{ command = {json.dumps(full)} }}\n"
                      f"{extra}ci = {{ {table} }}\n")
         if done:
@@ -616,6 +679,25 @@ def test_with_a_ref_the_tip_is_forced_to_ci_s_own_branch_and_recorded(
     assert checking.check(ROUND, "B1", by="coder").ref == "ci/work"
     assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
     assert f"{tree.rev()} {tree.rev()} refs/heads/ci/work" in (tmp_path / "hook-read").read_text()
+
+
+def test_the_check_never_pushes_the_name_full_ref_gives(setup, stub, repo, tmp_path,
+                                                        capsys):
+    bare = bare_remote(repo, tmp_path,
+                       f"#!/bin/sh\ncat >> {tmp_path / 'hook-read'}\n")
+    path, tree, _made = setup(remote="origin", ref="ci/{branch}",
+                              full_ref="ci-full/{branch}")
+    green_at(stub, tree.rev())
+
+    assert main(["check", ROUND, "B1"]) == 0
+
+    assert "pushed: origin ci/work, forced" in capsys.readouterr().out
+    pushed = repo.git("--git-dir", str(bare), "for-each-ref", "--format=%(refname)")
+    assert pushed.split() == ["refs/heads/ci/work"]
+    assert "ci-full" not in (tmp_path / "hook-read").read_text()
+    [local] = events(path, "check.ran")
+    [read] = events(path, ci.READ)
+    assert local["pushed"] == read["pushed"] == {"remote": "origin", "ref": "ci/work"}
 
 
 def test_without_a_ref_the_push_goes_to_the_branch_name_and_records_no_ref(
