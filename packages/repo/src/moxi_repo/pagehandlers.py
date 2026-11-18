@@ -23,6 +23,9 @@ each repo's rules also fail alone: the pieces as empty lists, the project repos 
 empty `unindexed` with only the indexed repos, the rules as null, each failure that isn't
 repo's own logged once.
 
+`within` reads the folder a copy of Moxi keeps the page's plans and acts to, from
+`MOXI_ANCHOR_HOME`.
+
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
 
@@ -30,8 +33,10 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import threading
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from . import api, committer, projects
@@ -224,6 +229,22 @@ def gather() -> dict[str, Any]:
     return {**value, "state": "up", "detail": None, "repos": repos}
 
 
+def within(env: Mapping[str, str] | None = None) -> str | None:
+    """The folder the page's plans and acts keep to, from `env` (None: this process's
+    environment): when it sets `MOXI_ANCHOR_HOME` (a copy of Moxi, as the core's
+    `anchor_set` reads it), that folder's real path, or the value as it is when it isn't a
+    full path, so every plan and act refuses; else None, which keeps to nothing."""
+    from moxi import paths, terminal
+
+    source = os.environ if env is None else env
+    if not terminal.anchor_set(source):
+        return None
+    value = next((v for k, v in source.items()
+                  if v and (k == paths.ANCHOR_HOME_ENV or (
+                      os.name == "nt" and k.upper() == paths.ANCHOR_HOME_ENV))), "")
+    return os.path.realpath(value) if os.path.isabs(value) else value
+
+
 def repos(call: Any) -> dict[str, Any]:
     """`GET /api/repos`: every indexed repo now, with the server's `now` and `today`. A
     failure is a 200 with `state` `error`, never a 500."""
@@ -231,4 +252,4 @@ def repos(call: Any) -> dict[str, Any]:
     return {"now": time.time(), **value}
 
 
-__all__ = ["gather", "repos"]
+__all__ = ["gather", "repos", "within"]

@@ -91,7 +91,7 @@ class Changed(Failure):
 #: Every `Failure.reason` a verb gives, each named for what it refused.
 REFUSAL_CODES = ("not-absolute", "not-a-repo", "unknown-piece", "declaration-refused",
                  "seed-refused", "git-too-old", "shim-place", "not-registered",
-                 "index-unreadable", "config-unreadable", "busy")
+                 "index-unreadable", "config-unreadable", "outside-copy", "busy")
 
 
 class Problem(str):
@@ -393,11 +393,36 @@ def indexed_repos(index: dict | None = None) -> list[tuple[str, dict, Repo | Non
 
 # -- helpers ------------------------------------------------------------------------------
 
-def _resolve(path: str | os.PathLike) -> Repo:
+def _resolve(path: str | os.PathLike, within: str | None = None) -> Repo:
     try:
-        return gitconf.resolve(path)
+        repo = gitconf.resolve(path)
     except gitconf.NotARepo as exc:
         raise Usage(f"no git work tree at {exc}", reason="not-a-repo") from None
+    _check_within(repo, within)
+    return repo
+
+
+def _real(path: str | os.PathLike) -> Path:
+    return Path(os.path.normcase(os.path.realpath(path)))
+
+
+def _check_within(repo: Repo, within: str | None) -> None:
+    """Refuse (`outside-copy`) a repo whose main work tree, common git dir or hooks dir
+    is not inside the folder `within`, each by its real path and whole path parts; a
+    `within` that isn't absolute places no folder, so it refuses every repo. None checks
+    nothing."""
+    if within is None:
+        return
+    lead = f"This page runs in a copy of Moxi whose home is {within}. It changes no repo"
+    if not os.path.isabs(within):
+        raise Refused(f"{lead}, since that is not a full path.", reason="outside-copy")
+    home = _real(within)
+    for what, place in (("", repo.root), ("the git folder of ", repo.common_dir),
+                        ("the hooks folder of ", repo.hooks_dir)):
+        if not _real(place).is_relative_to(home):
+            named = f"{repo.root}" if not what else f"{what}{repo.root}, {place},"
+            raise Refused(f"{lead} outside that folder, and {named} is outside it.",
+                          reason="outside-copy")
 
 
 #: Lock file path -> the lock this process's threads queue on before they take that file's
@@ -518,7 +543,7 @@ def _ids(given: tuple, piece: str | None = None) -> list[str]:
 
 def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         mode: str | None = None, sets: list[str] | tuple = (),
-        expect: str | None = None) -> Report:
+        expect: str | None = None, within: str | None = None) -> Report:
     """Register pieces in the repo at `path`; with none, index the repo and write nothing
     else. Each piece id is its own argument, or they come as a list. `mode` pins the mode
     (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces.
@@ -526,14 +551,16 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
     It writes what `plan_add` plans, made under the repo's lock. `expect` is the digest of
     a plan read before (`plan_add`'s): when there is then nothing left to write it writes
     nothing and the report is `already`; when the plan differs it writes nothing and
-    raises `Changed`. A `Failure` raised after its first write is `partial`."""
+    raises `Changed`. A `Failure` raised after its first write is `partial`. `within` is
+    the folder of a copy of Moxi: a repo not inside it is refused (`outside-copy`) before
+    anything is read under the lock or written."""
     piece_ids = tuple(_ids(piece_ids))
     if mode is not None and mode not in gitconf.MODE_SETS:
         raise Usage(f"--mode {mode}: it is one of {', '.join(gitconf.MODE_SETS)}")
     if sets and not piece_ids:
         raise Usage("--set sets a setting of a piece named in the same call; name the piece")
     version = _version()
-    repo = _resolve(path)
+    repo = _resolve(path, within)
     good, bad = _declared(piece_ids)
     plan = _plan_add(repo, _state(repo), piece_ids, mode, sets, version, good, bad)
     if plan.in_repo:
@@ -547,8 +574,8 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
     return report
 
 
-def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ...] = ()
-             ) -> dict:
+def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ...] = (),
+             *, within: str | None = None) -> dict:
     """What `add(path, piece_ids)` would write, read without writing anything or taking a
     lock: `{root, name, is_repo, git_version, mode, indexed, pieces, mode_change,
     own_hooks, in_progress, writes, refusal, digest}`.
@@ -563,21 +590,22 @@ def plan_add(path: str | os.PathLike, piece_ids: str | list[str] | tuple[str, ..
     (`from` its root there before, when it moved). A value drawn at random as it is written
     (commit-proof's salt) is shown as None. `digest` is the SHA-256 of `{act, root,
     writes}`. `refusal` is `{code, text}` when `add` would refuse, with no `writes` and no
-    `digest`. `path` must be absolute (after `~`)."""
+    `digest`. `path` must be absolute (after `~`). `within` refuses a repo outside it, as
+    `add` does."""
 
     def make(repo: Repo, version) -> _Plan:
         ids = tuple(_ids((piece_ids,)))
         good, bad = _declared(ids)
         return _plan_add(repo, _state(repo), ids, None, (), version, good, bad)
 
-    return _planned(path, make, floor=True)
+    return _planned(path, make, floor=True, within=within)
 
 
 def _planned(path: str | os.PathLike, make: Callable[[Repo, tuple | None], _Plan], *,
-             floor: bool) -> dict:
+             floor: bool, within: str | None) -> dict:
     """A plan of the repo at the absolute `path`, made by `make(repo, git version)`, as
     `plan_add` returns it; a refusal is the plan's `refusal`. `floor` refuses a git older
-    than repo supports."""
+    than repo supports, and `within` a repo outside that folder."""
     where = Path(os.path.expanduser(os.fspath(path)))
     view = _plan_view(None, where)
     version = _version(need=False)
@@ -589,6 +617,7 @@ def _planned(path: str | os.PathLike, make: Callable[[Repo, tuple | None], _Plan
             _floor(version)
         repo = _resolve(where)
         view.update(root=str(repo.root), name=repo.root.name, is_repo=True)
+        _check_within(repo, within)
         plan = make(repo, version)
     except Failure as exc:
         view["refusal"] = {"code": exc.reason, "text": exc.text}
@@ -895,10 +924,11 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
         report.lines.append(f"dropped {path} from the index; {why}")
 
 
-def enable(path: str | os.PathLike, piece_id: str, *, expect: str | None = None) -> Report:
+def enable(path: str | os.PathLike, piece_id: str, *, expect: str | None = None,
+           within: str | None = None) -> Report:
     """Turn a registered piece on in the repo at `path`. It writes what `plan_enable`
-    plans, made under the repo's lock; `expect` is as `add` takes it."""
-    repo = _resolve(path)
+    plans, made under the repo's lock; `expect` and `within` are as `add` takes them."""
+    repo = _resolve(path, within)
     with _hooks_lock(repo):
         report = _write(_plan_enable(repo, _state(repo), piece_id, None), expect)
     if not report.already:
@@ -907,11 +937,13 @@ def enable(path: str | os.PathLike, piece_id: str, *, expect: str | None = None)
     return report
 
 
-def plan_enable(path: str | os.PathLike, piece_id: str) -> dict:
+def plan_enable(path: str | os.PathLike, piece_id: str, *, within: str | None = None
+                ) -> dict:
     """What `enable(path, piece_id)` would write, read as `plan_add` reads it, and in its
     shape. A piece not registered there is the refusal `not-registered`."""
     return _planned(path, lambda repo, version: _plan_enable(repo, _state(repo), piece_id,
-                                                              version), floor=False)
+                                                              version),
+                    floor=False, within=within)
 
 
 def _plan_enable(repo: Repo, state: State, piece_id: str, version) -> _Plan:
@@ -951,19 +983,23 @@ def disable(path: str | os.PathLike, piece_id: str) -> Report:
     return report
 
 
-def refresh(path: str | os.PathLike | None = None, *, expect: str | None = None) -> Report:
+def refresh(path: str | os.PathLike | None = None, *, expect: str | None = None,
+            within: str | None = None) -> Report:
     """Re-read declarations, git's version and the interpreter, and rewrite every entry,
     shim and launcher of one repo or every indexed repo by the rewrite rule; then sweep.
 
     In each repo it writes what `plan_refresh` plans, made under that repo's lock.
     `expect`, as `add` takes it, needs `path`; with it, a git failure raises (`partial`
-    once something was written) where without it the failure is a problem of the report."""
+    once something was written) where without it the failure is a problem of the report.
+    `within`, as `add` takes it, needs `path` too."""
     if expect is not None and path is None:
         raise Usage("a plan's digest is of one repo; name its path")
+    if within is not None and path is None:
+        raise Usage("a copy's folder is checked against one repo; name its path")
     version = _version()
     report = Report()
     if path is not None:
-        repos = [_resolve(path)]
+        repos = [_resolve(path, within)]
     else:
         repos = []
         for key, entry, repo, why in indexed_repos():
@@ -993,7 +1029,7 @@ def refresh(path: str | os.PathLike | None = None, *, expect: str | None = None)
     return report
 
 
-def plan_refresh(path: str | os.PathLike) -> dict:
+def plan_refresh(path: str | os.PathLike, *, within: str | None = None) -> dict:
     """What `refresh(path)` would write, read as `plan_add` reads it, and in its shape;
     `pieces` names each piece it registers (its `everywhere` key on) or whose declared
     keys it puts back."""
@@ -1002,7 +1038,7 @@ def plan_refresh(path: str | os.PathLike) -> dict:
         good, bad = pieces.declared()
         return _plan_refresh(repo, _state(repo), good, bad, default_mode(), version, [])
 
-    return _planned(path, make, floor=True)
+    return _planned(path, make, floor=True, within=within)
 
 
 def _plan_refresh(repo: Repo, state: State, good: dict, bad: dict, default: str, version,
