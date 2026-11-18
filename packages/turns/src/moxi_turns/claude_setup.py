@@ -46,6 +46,11 @@ each time, so two setups at once don't fail each other.
 
 `TEARDOWN` removes the marketplace from Claude Code when it was added from the placed
 folder, then removes turns' placements.
+
+`reach()` says, from the doctor's own readings and without writing anything, whether a
+Claude Code session started by hand runs with turns on this machine: `start`, `setup`
+(`moxi install turns` would fix it), `absent` (no `claude` and nothing placed), or None
+when it can't tell or the install would not fix it.
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -78,6 +84,8 @@ ENDPOINT_SCRIPT = "moxi-turns-endpoint"
 PASSED_VERSIONS = ("2.1.296",)
 #: The bound on each `claude` command SETUP and the rows run.
 CLAUDE_TIMEOUT_S = 60.0
+#: The bound on `reach()`'s one `claude` command.
+REACH_TIMEOUT_S = 10.0
 #: The placed copy's folder name under turns' data dir, and its placement's name.
 PLACED_NAME = "claude"
 #: What Claude Code lays beside a plugin it loads from a folder, relative to the plugin.
@@ -552,8 +560,106 @@ def _user_scope_entry() -> dict | None:
         listed = _json_list(claude, "list")
     except (SetupError, OSError, subprocess.TimeoutExpired):
         return None
+    return _runner_entry(listed)
+
+
+def _runner_entry(listed: list) -> dict:
+    """The runner's user-scope entry in a `claude plugin list --json`, or {}."""
     return next((p for p in listed if isinstance(p, dict) and p.get("scope") == "user"
                  and p.get("id") == f"{RUNNER}@{MARKETPLACE}"), {})
+
+
+# -- the reach -------------------------------------------------------------------------
+
+
+def reach(timeout_s: float = REACH_TIMEOUT_S) -> str | None:
+    """Whether a Claude Code session started by hand runs with turns here, from the
+    doctor's own readings. Takes no lock and writes nothing; its one `claude` command is
+    bounded by `timeout_s`.
+
+    - `start`: `claude` is on PATH, the runner is installed at user scope and not
+      disabled, and the placed `endpoint.json` names the endpoint command the config and
+      this environment give now.
+    - `setup`: `claude` is on PATH, there is an endpoint command, and `moxi install
+      turns` would fix what is not so: the runner is not at user scope, or
+      `endpoint.json` is missing or names a command that is not an executable file.
+    - `absent`: `claude` is not on PATH and nothing is placed, so SETUP skipped its
+      Claude step.
+    - None: it can't be told, or the install would not fix it: `claude` not on PATH with
+      a copy placed, the plugin list not answering within the bound, no endpoint command,
+      the runner listed with `enabled` false (SETUP leaves that as it is), or
+      `endpoint.json` naming another executable command, which may be the one another
+      environment gives.
+    """
+    claude = _claude()
+    if claude is None:
+        try:
+            state = placed_copy()[0]
+        except Exception as exc:  # noqa: BLE001 - a copy that can't be read can't tell
+            log.info("the placed copy could not be read: %s", exc)
+            return None
+        return "absent" if state == "none" else None
+    try:
+        want = str(endpoint_command())
+    except SetupError:
+        return None
+    listed = _bounded_plugin_list(claude, timeout_s)
+    if listed is None:
+        return None
+    entry = _runner_entry(listed)
+    if entry.get("enabled") is False:
+        return None
+    named = (read_endpoint_file() or {}).get("command")
+    if named == want:
+        return "start" if entry else "setup"
+    if isinstance(named, str) and _is_executable(named):
+        return None
+    return "setup"
+
+
+def _is_executable(path: str) -> bool:
+    return os.path.isabs(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _bounded_plugin_list(claude: str, timeout_s: float) -> list | None:
+    """`claude plugin list --json`'s list, or None when it failed, printed no list or did
+    not finish within `timeout_s`.
+
+    The command runs in a process group of its own, and the whole group is killed at the
+    bound, so a child of `claude` that holds its output open can't keep the read past it.
+    Where the platform has no POSIX process groups the command is not run, and the reach
+    reads None."""
+    if not hasattr(os, "killpg"):
+        return None
+    try:
+        proc = subprocess.Popen([claude, "plugin", "list", "--json"], text=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        log.info("`claude plugin list --json` could not start: %s", exc)
+        return None
+    try:
+        out, _ = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        if proc.stdout is not None:
+            proc.stdout.close()
+        log.info("`claude plugin list --json` did not finish within %g s", timeout_s)
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    return data if isinstance(data, list) else None
 
 
 def _user_scope_runner() -> bool | None:
@@ -637,4 +743,4 @@ __all__ = ["MARKETPLACE", "RUNNER", "GATE", "ENDPOINT_FILE", "ENDPOINT_SCRIPT",
            "volatile_paths", "endpoint_command", "write_endpoint_file",
            "read_endpoint_file", "placed_copy", "launch_root", "place_copy",
            "claude_plugin_dirs", "launch_endpoint", "ENDPOINT_ENV",
-           "install_plugins", "setup", "teardown", "rows"]
+           "install_plugins", "setup", "teardown", "rows", "reach", "REACH_TIMEOUT_S"]

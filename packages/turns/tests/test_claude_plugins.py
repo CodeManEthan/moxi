@@ -21,6 +21,13 @@ PLUGINS = ("moxi-turns", "moxi-turns-gate")
 needs_claude = pytest.mark.skipif(shutil.which("claude") is None, reason="Claude Code is not on PATH")
 
 
+@pytest.fixture(autouse=True)
+def stub_claude():
+    """These tests run Claude Code's own plugin checks on the package's folders, so they
+    keep the `claude` PATH finds in place of conftest's stand-in. Each runs in the fence's
+    tmp home."""
+
+
 def test_the_local_marketplace_lists_both_plugins_by_relative_path():
     doc = json.loads((CLAUDE_DIR / ".claude-plugin" / "marketplace.json").read_text())
     assert doc["name"] == "moxi-turns"

@@ -7,15 +7,23 @@ import type { ApiResult } from "/m/ui/client.js";
 /** The last `session.ready` an endpoint raised. */
 export interface Ready {
   source: string | null;
+  /** The session id the ready was raised for. */
+  session_id: string | null;
   at: number | null;
 }
 
 /** One session's facts, as its last read gave them. */
 export interface Facts {
+  /** The session id the reading was taken under. */
+  session_id: string | null;
   turn_number: number;
   turn_open: boolean;
+  /** When the open turn started, epoch seconds; null when no turn is open and while an
+   * open turn waits for its tie. */
+  turn_started_at: number | null;
   /** Busy subagents; null when they could not be listed. */
   agents: number | null;
+  /** On a session with `has_box`: a draft, or a box that could not be read. */
   draft: boolean;
   /** The reading is not one moment: the turn ledger moved while it was read. */
   stale: boolean;
@@ -54,7 +62,28 @@ export interface Session {
   trouble: string | null;
   facts: Facts | null;
   agents: Agents | null;
+  /** What could not be watched or read, as one sentence; null when every read answered. */
   read_error: string | null;
+  /** When the page server's watch saw the turn end, sent only while the latest facts show
+   * no turn open at that turn; else null. */
+  ended_at: number | null;
+  /** Whether turns reads this harness's prompt box, so `facts.draft` can be true. */
+  has_box: boolean;
+  /** When a run of unread readings began: a facts or agents read failed, or the facts
+   * reading has `agents` null. The watch alone being down doesn't count. */
+  unread_since: number | null;
+}
+
+/** Whether Claude Code sessions started by hand run with turns: `start` (they do), `setup`
+ * (`moxi install turns` would make it so), `absent` (Claude Code was not found when turns
+ * was installed), or null when that can't be told. */
+export type ClaudeReach = "start" | "setup" | "absent" | null;
+
+/** What this machine can show: how Claude Code sessions reach turns, and whether
+ * launched Codex sessions can run under turns' host. */
+export interface Reach {
+  claude: ClaudeReach;
+  codex: boolean;
 }
 
 /** The value of `/api/sessions` (without `now`) and of the topic `sessions`. */
@@ -63,6 +92,10 @@ export interface SessionList {
   listed: boolean;
   /** Null unless the page server's last scan failed; then one sentence. */
   detail: string | null;
+  /** The page server's home folder, for writing a folder in `~` form; null when not sent. */
+  home: string | null;
+  /** Null until the page server's first reach read has answered. */
+  reach: Reach | null;
   sessions: Session[];
 }
 
@@ -78,16 +111,29 @@ export interface Failure {
 export const RETRIES = 3;
 export const RETRY_MS = 1000;
 
+const CLAUDE_REACH = new Set(["start", "setup", "absent"]);
+
+/** The list's `reach`, or null when it is not one. A `claude` word the page doesn't know
+ * reads as null: it can't be told. */
+export function parseReach(data: unknown): Reach | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { claude, codex } = data as Record<string, unknown>;
+  if (typeof codex !== "boolean") return null;
+  return { claude: typeof claude === "string" && CLAUDE_REACH.has(claude) ? claude as ClaudeReach : null,
+           codex };
+}
+
 /** The route's or the topic's value, or null when it isn't one. A row with no text `key`
  * is dropped, since it can't be told apart from the others. */
 export function parseList(data: unknown): SessionList | null {
   if (typeof data !== "object" || data === null) return null;
-  const { listed, detail, sessions } = data as Record<string, unknown>;
+  const { listed, detail, home, reach, sessions } = data as Record<string, unknown>;
   if (typeof listed !== "boolean" || !Array.isArray(sessions)) return null;
   if (detail !== null && detail !== undefined && typeof detail !== "string") return null;
   const rows = sessions.filter((row): row is Session =>
     typeof row === "object" && row !== null && typeof (row as Session).key === "string");
-  return { listed, detail: detail ?? null, sessions: rows };
+  return { listed, detail: detail ?? null, home: typeof home === "string" && home !== "" ? home : null,
+           reach: parseReach(reach), sessions: rows };
 }
 
 /** The line a failure shows. */
@@ -124,6 +170,9 @@ export class Feed<V> {
   loading = true;
   /** The server's clock minus this browser's, in seconds; null before the first read. */
   offset: number | null = null;
+  /** When the value was last read, on the server's clock: the route's `now`, or the
+   * server's time when a topic event came. Null before the first read. */
+  readAt: number | null = null;
 
   #read: () => Promise<ApiResult>;
   #parse: (data: unknown) => V | null;
@@ -182,6 +231,7 @@ export class Feed<V> {
       return;
     }
     this.value = value;
+    this.readAt = this.now();
     this.#onChange();
   }
 
@@ -201,6 +251,7 @@ export class Feed<V> {
     if (value !== null && typeof now === "number" && Number.isFinite(now)) {
       this.value = value;
       this.offset = now - at;
+      this.readAt = now;
       this.failure = null;
       this.gone = false;
     } else if (answer.status === 404) {

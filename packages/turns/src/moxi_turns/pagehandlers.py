@@ -1,10 +1,10 @@
 """The handlers of turns' page, and the feed that carries the live list to its stream.
 
 One `pagereader.Reader` per page server keeps the list. It starts on the page's first read
-or subscribe and runs until the page server stops: its scans and watches are not a request,
-a stream or a busy hold, so they never delay loopback's idle exit, and that exit is what
-stops them when no one has looked for the page's idle time. At process exit every watch is
-closed.
+or subscribe and runs until the page server stops: its scans, watches and timed reads are
+not a request, a stream or a busy hold, so they never delay loopback's idle exit, and that
+exit is what stops them when no one has looked for the page's idle time. At process exit
+every watch is closed.
 
 - `GET /api/sessions` waits, on its worker thread, at most `FIRST_S` seconds for the
   reader's first scan and the first read of each session it found, then answers the list

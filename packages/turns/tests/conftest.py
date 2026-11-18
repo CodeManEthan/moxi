@@ -1,14 +1,20 @@
 """Shared fixtures: a short runtime root (AF_UNIX paths stop at 108 bytes), a config home
-a test can write to, and an endpoint driven by the fake harness.
+a test can write to, an endpoint driven by the fake harness, and a stand-in `claude`.
 
 Every test runs inside the kit's fence (the package's root `conftest.py`), which empties
-the environment (`MOXI_TURNS_COMMANDS` and the rest) and points every home into tmp."""
+the environment (`MOXI_TURNS_COMMANDS` and the rest) and points every home into tmp. On top
+of it, every test finds the stand-in `claude` first on PATH and turns' data and config
+homes in its own tmp, so a test that reads Claude Code's state through turns' code (the
+page server's reach among them) reaches only the stand-in and finds no placed copy but one
+the test made."""
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 
@@ -42,6 +48,41 @@ def state_home(monkeypatch, tmp_path_factory):
     root = tmp_path_factory.mktemp("state")
     monkeypatch.setenv("MOXI_TURNS_STATE_HOME", str(root))
     return root
+
+
+#: The stand-in `claude`: it logs each call's arguments and answers the calls turns makes
+#: from files in `$FAKE_CLAUDE_DIR`.
+FAKE_CLAUDE = """#!/bin/sh
+echo "$*" >> "$FAKE_CLAUDE_DIR/log"
+case "$*" in
+  "--version") echo "$FAKE_CLAUDE_VERSION (Claude Code)" ;;
+  "plugin marketplace list --json") cat "$FAKE_CLAUDE_DIR/markets.json" ;;
+  "plugin list --json") cat "$FAKE_CLAUDE_DIR/plugins.json" ;;
+esac
+exit 0
+"""
+
+
+@pytest.fixture(autouse=True)
+def stub_claude(monkeypatch, tmp_path_factory):
+    """The stand-in `claude` first on PATH, its files and log in the test's own folder,
+    and turns' data and config homes in tmp. Returns the folder of its files."""
+    root = tmp_path_factory.mktemp("claude-stub")
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    exe.write_text(FAKE_CLAUDE)
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    state = root / "state"
+    state.mkdir()
+    (state / "markets.json").write_text("[]")
+    (state / "plugins.json").write_text("[]")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CLAUDE_DIR", str(state))
+    monkeypatch.setenv("FAKE_CLAUDE_VERSION", "2.1.296")
+    monkeypatch.setenv("MOXI_TURNS_DATA_HOME", str(root / "data"))
+    monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(root / "config"))
+    return state
 
 
 @pytest.fixture
