@@ -1,5 +1,10 @@
 """The push piece, against real repos and a bare remote: the word, each rule for a ref,
-what is new to the remote and how it is judged, and the log."""
+what is new to the remote and how it is judged, and the log.
+
+`main` moves only to a commit whose check passed on a standing branch, so each test here
+runs with the check named at the repo's first commit, GitHub faked on a loopback port
+with every commit green on `ci/main`, and `standing-branch=ci/*` set wherever the push
+piece is registered; `test_standing.py` tests that rule itself."""
 
 from __future__ import annotations
 
@@ -7,13 +12,33 @@ import json
 import shutil
 import subprocess
 
+import conftest
 import pytest
-from conftest import commit, fingerprint, git, public_repo, token, write_config
+from conftest import CHECK_TOML, commit, fingerprint, git, token, write, write_config
 
 PIECE = "publishing/push"
 POINTER = "0123abcd9" + "@" + "2026-01-02"
 #: A ruling-shaped tag, joined at run time so no file spells one whole.
 TAG = "[" + "Q7" + "]"
+
+
+@pytest.fixture(autouse=True)
+def main_passes(repo, served):
+    """The check `main` waits for, named in a commit before `remote` pushes `main`, and
+    green at every commit on `ci/main`."""
+    write(repo, "pyproject.toml", CHECK_TOML)
+    git(repo, "add", "pyproject.toml")
+    git(repo, "commit", "-q", "-m", "Name the check")
+    git(repo, "config", "moxi-publishing.github", "operator/proj-a")
+    served.everywhere = "ci/main"
+    return served
+
+
+def public_repo(repo, *pieces, sets=()):
+    """conftest's, with `standing-branch=ci/*` added for the push piece."""
+    if PIECE in pieces and not any(s.startswith("standing-branch=") for s in sets):
+        sets = (*sets, "standing-branch=ci/*")
+    return conftest.public_repo(repo, *pieces, sets=sets)
 
 
 @pytest.fixture

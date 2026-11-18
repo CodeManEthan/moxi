@@ -37,6 +37,7 @@ the repo for them.
 | push | `protected` | any number | Branches beside `main` a push may never delete. |
 | push | `word-required` | one | `true`: a push needs `MOXI_PUBLISHING_PUSH_WORD`. |
 | push | `free-ref` | any number | Ref patterns outside branches and release tags a push may create, move or delete. |
+| push | `standing-branch` | any number | Patterns such as `ci/*` naming [standing branches](#standing-branches): pushed at a local branch's tip, with no word to the publishing remote. |
 
 Where `enable` first registers a piece, the piece's settings start from publishing's
 config: `defaults.drop_trailers` (`Claude-Session` and `Commit-Check`), `defaults.main`
@@ -58,6 +59,12 @@ moxi publishing enable ~/src/app --set pass-trailer=Commit-Check
 `free-ref` takes full ref names in which `*`, `?` and `[...]` are wildcards, such as
 `refs/notes/*` or `refs/tags/docs/*`. `enable` refuses a pattern that could match a branch
 (`refs/heads/...`) or a release tag (`<package>-v<version>`).
+
+`standing-branch` takes a fixed prefix of one or more path parts, each ending in `/`, then
+`*`: `ci/*`, `ci-full/*`. `enable` refuses one that is anything else, or that matches
+`main` or a `protected` branch, and writes nothing; it judges the three keys as they will
+stand after the call, so `--set main=...` that a pattern already there would match is
+refused too.
 
 ## The message piece
 
@@ -157,9 +164,77 @@ writes a release tag's message from the CHANGELOG itself.
 
 With `word-required` set to `true`, a push needs `MOXI_PUBLISHING_PUSH_WORD`, matching
 `push.word_pattern` in full: where the push was approved. It is a record, not a proof; any
-process can set it. A push that passes is logged first, one JSON line in the module's
-state directory, `pushes.jsonl` (time, repo, remote, URL, word, refs, commits); a log that
-can't be written refuses the push.
+process can set it. A blank one counts as none. The one push that needs no word is a push
+of standing branches only, to the publishing remote ([Standing
+branches](#standing-branches)). A push that passes is logged first, one JSON line in the
+module's state directory, `pushes.jsonl` (time, repo, remote, URL, word, refs, commits);
+`word` is null when none was given, and each ref of a standing branch names the pattern
+that allowed it (`standing`). A log that can't be written refuses the push.
+
+### Standing branches
+
+A branch under a `standing-branch` pattern, such as `ci/x` under `ci/*`, is a standing
+branch: one CI runs on, which a tool pushes and removes as it goes. It keeps its own rules:
+
+| what is pushed | allowed when |
+|---|---|
+| a standing branch created, moved or forced | its new value is a commit (not a tag object) and the tip of the local branch named by the rest of its name: `ci/x` only at the tip of local `x` |
+| a standing branch deleted | always, whatever its tip, with no merge check and no fetch first |
+
+What it sends is judged as any push's, with no setting that narrows it; a forced one sends
+what the remote's tracking refs and its old tip lack. A tag under the prefix (`refs/tags/ci/x`)
+is no standing branch.
+
+Where `word-required` is `true`, a push whose every ref is a standing branch needs no word
+when it goes to the publishing remote: the URL git hands the hook reduces to the
+OWNER/REPO in `moxi-publishing.github`. Only the whole URL in one of the three forms git
+sends to GitHub reduces:
+
+- `git@github.com:OWNER/REPO`
+- `ssh://git@github.com[:PORT]/OWNER/REPO`
+- `https://github.com/OWNER/REPO`, or `https://USER@github.com/OWNER/REPO` where USER is
+  one or more ASCII letters, digits, `.`, `_` and `-`
+
+each with one `.git` stripped (`R.git.git` reduces to `R.git`), OWNER being letters, digits
+and `-`, and REPO letters, digits, `.`, `_` and `-`. Anything else reduces to nothing and
+asks for the word: `http://`, a trailing `/` or newline, `ssh://git@github.com:OWNER/REPO`,
+another host, host letters in another case, an https USER holding any other byte (git sends
+`https://evil.example#@github.com/O/R` to evil.example), and `git@github.com/OWNER/REPO`,
+which has no colon and so is a local directory to git. A push that carries any other ref
+needs the word as before, and its standing branches are judged by the rules above. A word
+given on a standing push is judged as on any push: a malformed one refuses it, and a valid
+one is logged.
+
+While `standing-branch` holds a bad pattern (one written into git config by hand, say),
+the piece refuses every push, naming it and the `enable` command that fixes it; a hand
+edit can't open `main` or a protected branch.
+
+Another pre-push guard that reads this setting must apply the same rules and the same URL
+reduction (`moxi_publishing.push.github_repo`), or the two disagree on a push. What the
+rules can't stop: a push that skips the hooks (`--no-verify`, plumbing, the GitHub API), and any
+commit made public by first making it a local branch's tip.
+
+### A push of main
+
+A push that creates or moves `main` to commit C passes only when GitHub has, at C, a run
+of the workflow the root `pyproject.toml` names as `check-workflow` (read at C) from a push
+to a standing branch, in which the `check-job` job (read at C) concluded `success`:
+
+```sh
+git push origin +main:refs/heads/ci/main   # CI runs there; wait for check-job to pass
+git push origin main                       # then main may move to that commit
+```
+
+GitHub is read as the tag gate reads it (`gh auth token`, only api.github.com, each read
+bounded at ten seconds). A job counts by its name, or its name followed by ` (` for a
+matrix leg. The jobs read are those of the run's latest attempt, which is what GitHub's
+list of a run's jobs gives by default: a job that failed and passed on a re-run counts as
+passed, and one that passed and then failed on a re-run counts as failed. A read that
+fails, a missing `check-workflow` or `check-job` at C, `moxi-publishing.github` unset, or
+no `standing-branch` pattern refuses, naming which. When `main` moved on since the run,
+push the new tip to the standing branch again and wait, or move `main` to the commit that
+passed (`git push origin C:refs/heads/main`). The rule adds to the word and to
+fast-forward only; a push of any other branch or tag reads no CI here.
 
 ## Scanning a whole tree
 
@@ -363,9 +438,11 @@ and prints the check as left.
 
 Once `moxi-main` requires `check-job`, GitHub moves `main` only to a commit that check
 has already passed on: a direct push of `main` passes only when the same commit has a
-successful run of `check-job` from another ref, any branch. So each push of `main` goes:
+successful run of `check-job` from another ref, any branch. The push piece asks the same
+before the push goes, from a standing branch only ([A push of main](#a-push-of-main)). So
+each push of `main` goes:
 
-1. push the exact commit `main` will point at to another branch (after a merge, the
+1. push the exact commit `main` will point at to a standing branch (after a merge, the
    merge commit itself, not the tip of the branch merged);
 2. wait for that branch's `check-job` run to go green;
 3. push `main`. A push of `main` before that run has passed is refused, and nothing is
@@ -417,6 +494,16 @@ GitHub runs on every push, is missing (a missing `release.yml` only means the re
 doesn't release); and when a workflow file `workflows write` writes is there but differs
 from the template; and, once, when secrets' private names list is empty and when the
 push log can't be written.
+
+For a repo whose push piece sets `standing-branch`, it fails a bad pattern (the piece then
+refuses every push) and an unset `moxi-publishing.github` (no push then goes with no word),
+each with the `enable` command that fixes it. It warns when no push URL of the remote
+`origin` reduces to `moxi-publishing.github` by the rule in [Standing
+branches](#standing-branches), naming each URL: standing pushes there will ask for the
+word. The URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where
+set, else `url`, after `insteadOf` and `pushInsteadOf` rewriting, as git hands them to the
+hook. A repo with no `origin` warns the same way. Otherwise the repo's `ok` row names the
+patterns.
 
 ## Provenance rules
 

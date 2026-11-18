@@ -150,6 +150,12 @@ def remote(repo, tmp_path) -> Path:
 
 # -- releases: a workspace, and GitHub and the package index faked -------------------------
 
+#: The root `pyproject.toml` of a repo that names only the check `main` waits for.
+CHECK_TOML = """[tool.moxi-publishing]
+check-workflow = "ci.yml"
+check-job = "linux"
+"""
+
 ROOT_TOML = """[tool.uv.workspace]
 members = ["packages/a", "packages/a-extra"]
 
@@ -185,6 +191,8 @@ class Fake:
         self.index: dict[str, dict[str, list[dict]]] = {}  # dist: {version: [file]}
         self.tags: list[str] = []
         self.broken: set[str] = set()                      # path prefixes answering 500
+        # A branch whose run, `linux` green, every commit with no run of its own has.
+        self.everywhere: str | None = None
         self.asked: list[str] = []
         self.queries: list[str] = []                       # each URL's query string
 
@@ -205,6 +213,12 @@ class Fake:
             run = {"event": event, "branch": branch, "jobs": []}
             runs.append(run)
         run["jobs"].append((job, conclusion))
+
+    def runs_at(self, commit: str) -> list[dict]:
+        if commit in self.runs or self.everywhere is None:
+            return self.runs.get(commit, [])
+        return [{"event": "push", "branch": self.everywhere,
+                 "jobs": [("linux", "success")]}]
 
     def answer(self, url: str) -> tuple[int, object]:
         from urllib.parse import parse_qs, urlsplit
@@ -232,11 +246,11 @@ class Fake:
             sha = query.get("head_sha", [""])[0]
             runs = [{"id": f"{sha}-{n}", "head_sha": sha, "event": run["event"],
                      "head_branch": run["branch"]}
-                    for n, run in enumerate(self.runs.get(sha, []))]
+                    for n, run in enumerate(self.runs_at(sha))]
             return 200, {"workflow_runs": runs}
         if rest[:2] == ["actions", "runs"]:
             sha, _, n = rest[2].rpartition("-")
-            runs = self.runs.get(sha, [])
+            runs = self.runs_at(sha)
             jobs = runs[int(n)]["jobs"] if n.isdigit() and int(n) < len(runs) else []
             return 200, {"jobs": [{"name": name, "conclusion": c} for name, c in jobs]}
         if rest[:3] == ["git", "matching-refs", "tags"]:

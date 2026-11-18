@@ -28,7 +28,8 @@ from moxi import exit as codes
 
 _SETS_HELP = (
     "set a piece's setting in this repo: drop-trailer and pass-trailer (the message "
-    "piece), main, protected, word-required and free-ref (the push piece). Every --set for "
+    "piece), main, protected, word-required, free-ref and standing-branch (the push "
+    "piece). Every --set for "
     "one key together give that key's whole list, replacing its seed or what the repo "
     "had; KEY= alone removes the key; keys you don't name are kept. A key on pass-trailer "
     "is never dropped, even when drop-trailer holds it too.")

@@ -52,3 +52,12 @@ The first version.
 - Every setting carries page fields, which `moxi config publishing show --json` prints
   and the settings page draws: a plain label, a line, and on `provenance.rules` a
   can-hurt mark on taking a rule away. publishing needs moxi 0.1.9 or later.
+- The push piece's `standing-branch` setting (`ci/*`, say): a standing branch goes out
+  only at the tip of the local branch its name names, may be forced, and is deleted
+  whatever its tip; a push of only standing branches to the URL that reduces to
+  `moxi-publishing.github` needs no word, while a malformed word still refuses it; the
+  log names each ref's pattern; a bad pattern refuses every push, and `enable` refuses
+  one. `moxi doctor publishing` fails a bad pattern or an unset GitHub repo beside one,
+  and warns when no push URL of `origin` reduces to the GitHub repo.
+- A push of `main` passes only when GitHub has, at its new tip, a run of `check-workflow`
+  from a push to a standing branch whose `check-job` passed in the run's latest attempt.
