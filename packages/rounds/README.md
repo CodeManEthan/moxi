@@ -879,7 +879,8 @@ every workflow reads green there, the workflows and jobs named are the ones the 
 names now, and the local run passed at the tip with the command it declares now. The
 full check, run with `check --full`, meets the step whatever CI reads. A `ci` in a
 project with no `check` is refused, and so is a `ref` that is not one prefix then
-`{branch}`. `defaults.ratify` (and a project's `ratify`) picks what a round's ratification view puts to the operator. It also takes
+`{branch}`. `defaults.ratify` (and a project's `ratify`) picks what a round's
+ratification view puts to the operator. It also takes
 `defaults.check_on` (`merged`: a build's tip must hold the target to finish; `tip`:
 only where CI alone met the check), `defaults.slice_minutes` (45: over it, `fold` and
 `commission` warn of a slice and `mark --brief` refuses its brief),
