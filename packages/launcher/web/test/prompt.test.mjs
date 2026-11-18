@@ -6,7 +6,7 @@ import {
   briefFileOf, buttonWords, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
-  placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
+  placeTime, projectKeys, samePick, SCRATCH_PICK, takesScratch, tilde, typedFolder, valueOf, whereFace, withProjects,
 } from "../src/prompt-model.ts";
 
 const place = (project_key, cwd, at = "2026-11-10T18:45:00Z") => ({ project_key, cwd, at });
@@ -66,12 +66,20 @@ test("a place with a project is picked as the project with projects and as its f
   assert.deepEqual(pickOf(place(null, "/srv/x"), true), { kind: "folder", path: "/srv/x" });
 });
 
-test("a pick sets its own place row and empties the other", () => {
-  assert.deepEqual(pickValues({ kind: "project", key: "proj-a" }), { project: "proj-a", cwd: null });
-  assert.deepEqual(pickValues({ kind: "folder", path: "~/notes" }), { project: null, cwd: "~/notes" });
-  assert.deepEqual(pickValues({ kind: "choose" }), { project: null, cwd: null });
+test("a pick sets its own place row and empties the others", () => {
+  assert.deepEqual(pickValues({ kind: "project", key: "proj-a" }), { project: "proj-a", cwd: null, scratch: "false" });
+  assert.deepEqual(pickValues({ kind: "folder", path: "~/notes" }), { project: null, cwd: "~/notes", scratch: "false" });
+  assert.deepEqual(pickValues(SCRATCH_PICK), { project: null, cwd: null, scratch: "true" });
+  assert.deepEqual(pickValues({ kind: "choose" }), { project: null, cwd: null, scratch: "false" });
   assert.equal(placed({ kind: "choose" }), false);
   assert.equal(placed({ kind: "folder", path: HOME }), true);
+  assert.equal(placed(SCRATCH_PICK), true);
+});
+
+test("the line's menu offers Scratch only where the form has the row", () => {
+  assert.equal(takesScratch([field("scratch", { type: "bool" })]), true);
+  assert.equal(takesScratch([field("cwd", { type: "path" })]), false);
+  assert.equal(takesScratch([field("scratch", { type: "bool", needs_absent: true })]), false);
 });
 
 test("the first open is the one project, a choice among several, else the home folder", () => {
@@ -193,6 +201,7 @@ test("the line reads Project with a key and Folder with a path", () => {
                    { word: "Folder", dim: "~/code/", name: "proj-a" });
   assert.deepEqual(whereFace({ kind: "folder", path: "~" }, ALICE), { word: "Folder", dim: "", name: "~" });
   assert.deepEqual(whereFace({ kind: "choose" }, ALICE), { word: "Project", dim: "", name: "choose" });
+  assert.deepEqual(whereFace(SCRATCH_PICK, ALICE), { word: "Scratch", dim: "", name: "a throwaway folder" });
 });
 
 test("two picks are the same place by key, or by folder however home is written", () => {
@@ -200,6 +209,8 @@ test("two picks are the same place by key, or by folder however home is written"
   assert.equal(samePick({ kind: "project", key: "proj-a" }, { kind: "project", key: "proj-a" }, ALICE), true);
   assert.equal(samePick({ kind: "project", key: "notes" }, { kind: "folder", path: "notes" }, ALICE), false);
   assert.equal(samePick({ kind: "choose" }, { kind: "choose" }, ALICE), false);
+  assert.equal(samePick(SCRATCH_PICK, { kind: "scratch" }, ALICE), true);
+  assert.equal(samePick(SCRATCH_PICK, { kind: "folder", path: "scratch" }, ALICE), false);
 });
 
 test("a place's time is the time of day today and the day before that", () => {
@@ -229,7 +240,7 @@ test("without projects every place is its folder and a pick of it sets the folde
   assert.deepEqual(rows.map((row) => [row.dim, row.name, row.current]),
                    [["~/code/proj-a/", "web", false], ["~/", "notes", true], ["/srv/", "proj-b", false]]);
   assert.ok(rows.every((row) => row.pick.kind === "folder"));
-  assert.deepEqual(pickValues(rows[0].pick), { project: null, cwd: "/home/alice/code/proj-a/web" });
+  assert.deepEqual(pickValues(rows[0].pick), { project: null, cwd: "/home/alice/code/proj-a/web", scratch: "false" });
 });
 
 test("two places drawn the same are one row, the newer", () => {
@@ -458,6 +469,34 @@ test("a target or slot the form is filled with never places the launch", () => {
   assert.equal("slot" in sent.values, false);
   assert.equal(sent.leave_out.includes("slot"), true);
   assert.equal(launchRequest(FORM_FIELDS, null, SET, { target: "headless" }).values.target, "headless");
+});
+
+test("the request names the one place the line picks, and a switch between them never sends two", () => {
+  const fields = [...FORM_FIELDS, field("scratch", { type: "bool", default: "false", value: "false" })];
+  const places = (body) => ["cwd", "project", "scratch"].filter((name) => name in body.values);
+  const sent = (pick) => launchRequest(fields, null, { brief: "go", ...pickValues(pick) }, SLOT_2);
+  const folder = sent({ kind: "folder", path: "~/code" });
+  assert.deepEqual(places(folder), ["cwd"]);
+  assert.equal(folder.values.cwd, "~/code");
+  assert.deepEqual(folder.leave_out.filter((name) => name !== "slot").sort(), ["instructions", "model", "project", "scratch"]);
+  const project = sent({ kind: "project", key: "proj-a" });
+  assert.deepEqual(places(project), ["project"]);
+  assert.equal(project.values.project, "proj-a");
+  const scratch = sent(SCRATCH_PICK);
+  assert.deepEqual(places(scratch), ["scratch"]);
+  assert.equal(scratch.values.scratch, "true");
+  assert.equal(scratch.leave_out.includes("cwd") && scratch.leave_out.includes("project"), true);
+  // A form filled with a scratch folder, by a preset or the user's defaults, still sends the
+  // line's one place: a folder or a project picked turns Scratch off.
+  const filled = fields.map((item) => item.name === "scratch" ? { ...item, value: "true" } : item);
+  for (const pick of [{ kind: "folder", path: "~/code" }, { kind: "project", key: "proj-a" }]) {
+    const body = launchRequest(filled, null, { brief: "go", ...pickValues(pick) }, SLOT_2);
+    assert.equal(places(body).length, 1, JSON.stringify(body));
+    assert.equal(body.leave_out.includes("scratch"), true);
+  }
+  // Without the row nothing of it is sent.
+  const bare = launchRequest(FORM_FIELDS, null, { brief: "go", ...pickValues({ kind: "folder", path: "~/code" }) }, SLOT_2);
+  assert.equal("scratch" in bare.values || bare.leave_out.includes("scratch"), false);
 });
 
 test("an install with no slot row sends no slot either way", () => {

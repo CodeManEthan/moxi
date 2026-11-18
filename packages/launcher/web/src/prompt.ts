@@ -5,12 +5,15 @@
 // Home places it in its spot and expects no report from it: a main piece is shown as it
 // is. The caret is in the box as soon as the piece is drawn.
 //
-// The line above the box reads `Project <key>` or `Folder <path>`. When the piece connects
-// it reads `/api/places` and works out once whether projects is there (the page server
-// takes a project, and the shell lists projects' picker); the line opens on the newest
-// place, or, on a Home that never launched, on the one project, on `Project choose` with
-// several, else on the home folder. Its menu takes a typed folder path, lists the places
-// (read again each time it opens) and, with projects, places projects' picker under them.
+// The line above the box reads `Project <key>`, `Folder <path>` or `Scratch a throwaway
+// folder`. When the piece connects it reads `/api/places` and works out once whether
+// projects is there (the page server takes a project, and the shell lists projects'
+// picker); the line opens on the newest place, or, on a Home that never launched, on the
+// one project, on `Project choose` with several, else on the home folder. Its menu takes a
+// typed folder path, lists the places (read again each time it opens), offers `Scratch`
+// where the form has the row, and, with projects, places projects' picker under them. A
+// launch names the one place the line names: Scratch sends `scratch` and neither a folder
+// nor a project, and a folder or a project sends `scratch` off.
 //
 // The chip reads `/api/catalog` and `/api/form`: its face is the harness, the model and
 // the effort the form is filled with, until one is set in its menu. A read of either that
@@ -109,7 +112,8 @@
 // a session of the line's place that he made and can resume now; its dim line says whether
 // it resumes in a slot or copies the resume command. A click resumes it at once through
 // `/api/resume`, with the lines under the box a launch has, in a resume's words; the box
-// keeps its text.
+// keeps its text. With Scratch on the line the entry is drawn dim, not clickable, and says
+// there is none to continue.
 //
 // Every menu opens inside the page: after a render while one is open, and on a resize, the
 // piece measures it, and shifts it left by what it passes 16 px from the page's right edge,
@@ -148,11 +152,12 @@ import {
   afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
-  placeTime, resumeSent, runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  placeTime, resumeSent, runOf, SCRATCH, SCRATCH_PICK, SCRATCH_SAYS, SLOTS_UNREAD, STARTING, stopped, takesScratch,
+  TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import {
-  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, lastSession, PLUS_LABEL, resumeBody,
-  SESSIONS_READ, takesBriefFile,
+  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, lastSession, NONE_TO_CONTINUE,
+  noneToContinue, PLUS_LABEL, resumeBody, SESSIONS_READ, takesBriefFile,
 } from "./plus-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 import {
@@ -204,7 +209,7 @@ const STYLES = css`
           outline: 0; background: none; color: var(--moxi-text); font: inherit; }
   .find::placeholder { color: var(--moxi-text-dim); opacity: 1; }
   .hint { margin: 0; padding: 7px 14px 0; color: var(--moxi-text-dim); }
-  .places { display: grid; margin-top: 6px; }
+  .places, .others { display: grid; margin-top: 6px; }
   .row { display: grid; grid-template-columns: 20px 1fr auto; align-items: baseline; width: 100%; padding: 7px 14px;
          border: 0; background: none; color: var(--moxi-text); font: inherit; text-align: left; }
   .row:hover { background: var(--moxi-bg-hover); }
@@ -283,6 +288,8 @@ const STYLES = css`
   .menu.plusm { top: calc(100% + 6px); width: 320px; padding: 6px 0 4px; }
   .plusm .row { grid-template-columns: 20px 1fr; padding: 7px 14px; }
   .plusm .row .d { display: block; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .plusm .row.none { color: var(--moxi-text-dim); cursor: default; }
+  .plusm .row.none:hover { background: none; }
   .plusm .find { margin-top: 4px; border-top: 1px solid var(--moxi-border); border-bottom: 0; }
   textarea:disabled { color: var(--moxi-text-dim); cursor: default; }
   .changed .file { min-width: 0; overflow-wrap: anywhere; font-family: var(--moxi-font-mono); font-size: 13px; }
@@ -1133,6 +1140,7 @@ export class LauncherPrompt extends LitElement {
       ${this.typed === "" ? nothing
         : html`<p class="hint" role="status">Give an absolute path, or one starting with ~</p>`}
       <div class="places">${rows.map((row) => this.#placeRow(row))}</div>
+      ${takesScratch(this.fields) ? html`<div class="others">${this.#scratchRow(pick.kind === "scratch")}</div>` : nothing}
       ${this.#withProjects ? html`<p class="all">All projects</p>${this.#picker}` : nothing}
     </div>`;
   }
@@ -1141,6 +1149,13 @@ export class LauncherPrompt extends LitElement {
     return html`<button type="button" class="row" data-current=${row.current ? "true" : "false"}
       @click=${() => this.#choose(row.pick)}><span aria-hidden="true">${row.current ? "✓" : ""}</span><span
       class="name">${this.#folder(row.dim, row.name)}</span><span class="t">${row.time}</span></button>`;
+  }
+
+  /** The menu's `Scratch` row: a throwaway folder as the launch's one place. */
+  #scratchRow(current: boolean) {
+    return html`<button type="button" class="row" data-place="scratch" data-current=${current ? "true" : "false"}
+      @click=${() => this.#choose(SCRATCH_PICK)}><span aria-hidden="true">${current ? "✓" : ""}</span><span
+      class="name">${SCRATCH}</span><span class="t">${SCRATCH_SAYS}</span></button>`;
   }
 
   #chip() {
@@ -1212,7 +1227,9 @@ export class LauncherPrompt extends LitElement {
         data-current=${this.briefFile === "" ? "false" : "true"} @click=${this.#openFileField}><span
         aria-hidden="true">${this.briefFile === "" ? "" : "✓"}</span><span class="name">${BRIEF_FROM_FILE}</span></button>`
         : nothing}
-      ${last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
+      ${noneToContinue(this.pick) ? html`<div class="row none" data-plus="continue" aria-disabled="true"><span
+        aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span class="d">${NONE_TO_CONTINUE}</span></span></div>`
+        : last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
         @click=${() => void this.#continue(last)}><span aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span
         class="d">${continueWords(last)}</span></span></button>`}
       ${this.fileField ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}

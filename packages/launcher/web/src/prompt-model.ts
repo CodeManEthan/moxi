@@ -2,8 +2,8 @@
 // tests can drive it. prompt.ts draws it.
 //
 // The piece is a launch form with a few rows drawn: the box is the row `brief`, the line
-// above it is the place (`project` or `cwd`), and the chip is `harness`, `model` and
-// `effort`. Every other row keeps the value `/api/form` gives it.
+// above it is the place (`project`, `cwd` or `scratch`), and the chip is `harness`, `model`
+// and `effort`. Every other row keeps the value `/api/form` gives it.
 //
 // Whether projects is there is one value, `withProjects`, worked out once when the piece
 // opens. Every project thing hangs on it: the line's face, how a place is drawn and what
@@ -79,12 +79,20 @@ export function projectKeys(data: unknown): string[] | null {
 
 // --- the pick ------------------------------------------------------------------------------
 
-/** Where the launch starts: a project by its key, a folder by its path, or `choose` while
- * there are several projects and none is picked yet. */
+/** Where the launch starts: a project by its key, a folder by its path, a scratch folder
+ * the launcher makes, or `choose` while there are several projects and none is picked yet. */
 export type Pick =
   | { kind: "project"; key: string }
   | { kind: "folder"; path: string }
+  | { kind: "scratch" }
   | { kind: "choose" };
+
+/** The pick of a scratch folder: a throwaway folder the launcher makes for the session. */
+export const SCRATCH_PICK: Pick = { kind: "scratch" };
+
+/** The word for a scratch pick, and what it is, as the line and its menu say them. */
+export const SCRATCH = "Scratch";
+export const SCRATCH_SAYS = "a throwaway folder";
 
 /** The home folder, as a launch takes it. */
 export const HOME = "~";
@@ -143,9 +151,16 @@ export function placed(pick: Pick): boolean {
   return pick.kind !== "choose";
 }
 
-/** The place rows a pick sets: the one it names, with the other emptied. */
+/** The place rows a pick sets: the one it names, with the others emptied, so a launch
+ * never names two places. */
 export function pickValues(pick: Pick): Record<string, FormValue> {
-  return { project: pick.kind === "project" ? pick.key : null, cwd: pick.kind === "folder" ? pick.path : null };
+  return { project: pick.kind === "project" ? pick.key : null, cwd: pick.kind === "folder" ? pick.path : null,
+           scratch: pick.kind === "scratch" ? "true" : "false" };
+}
+
+/** Whether the harness's form has the row `scratch`, so the line's menu offers Scratch. */
+export function takesScratch(fields: readonly FieldDescriptor[]): boolean {
+  return fields.some((field) => field.name === "scratch" && field.needs_absent !== true);
 }
 
 // --- folders -------------------------------------------------------------------------------
@@ -213,18 +228,19 @@ export function typedFolder(said: string): string | null {
 
 /** The line above the box: the word, then the dim part and the name of what is picked. */
 export interface WhereFace extends FolderFace {
-  word: "Project" | "Folder";
+  word: "Project" | "Folder" | typeof SCRATCH;
 }
 
 export function whereFace(pick: Pick, home: string): WhereFace {
   if (pick.kind === "project") return { word: "Project", dim: "", name: pick.key };
   if (pick.kind === "choose") return { word: "Project", dim: "", name: "choose" };
+  if (pick.kind === "scratch") return { word: SCRATCH, dim: "", name: SCRATCH_SAYS };
   return { word: "Folder", ...folderFace(pick.path, home) };
 }
 
 function pickKey(pick: Pick, home: string): string {
   return pick.kind === "project" ? `project ${pick.key}`
-    : pick.kind === "folder" ? `folder ${tilde(pick.path, home)}` : "";
+    : pick.kind === "folder" ? `folder ${tilde(pick.path, home)}` : pick.kind === "scratch" ? "scratch" : "";
 }
 
 /** Whether two picks name the same place. */

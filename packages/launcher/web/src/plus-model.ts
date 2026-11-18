@@ -6,7 +6,9 @@
 // `Continue the last session` resumes the newest past session of the place the line above
 // the box names, made by the user the page server launches as; it is read from
 // `/api/sessions` each time the menu opens, never when the piece loads. A click on it is
-// `POST /api/resume` with that session and nothing else: the box keeps its text.
+// `POST /api/resume` with that session and nothing else: the box keeps its text. A scratch
+// folder has no past sessions: with Scratch on the line the entry says there is none to
+// continue, and no other place's session is offered.
 //
 // Every string here goes into the page as text.
 
@@ -22,6 +24,8 @@ export const BRIEF_FILE_FIELD = "Path to a file holding the brief";
 export const CONTINUE_LAST = "Continue the last session";
 export const RESUMES_IN_SLOT = "resumes in a slot";
 export const COPIES_RESUME = "copies the resume command";
+/** The entry's dim line while the line names a scratch folder. */
+export const NONE_TO_CONTINUE = "none to continue in a throwaway folder";
 /** The word that takes the brief file off, on the line under the box. */
 export const CLEAR_FILE = "Clear";
 
@@ -34,7 +38,8 @@ export function takesBriefFile(fields: readonly FieldDescriptor[]): boolean {
 }
 
 /** Whether a past session is of the place `pick` names: by its project for a project, by
- * its folder, however the home folder is written, for a folder. */
+ * its folder, however the home folder is written, for a folder. None is of a scratch
+ * folder. */
 export function ofPlace(past: Past, pick: Pick, home: string): boolean {
   if (pick.kind === "project") return (past.project_key ?? null) === pick.key;
   if (pick.kind === "folder") return typeof past.cwd === "string" && tilde(past.cwd, home) === tilde(pick.path, home);
@@ -52,6 +57,11 @@ export function lastSession(pasts: readonly Past[], pick: Pick | null, actor: st
   if (pick === null || actor === "") return null;
   return pasts.find((past) => past.resumable && typeof past.session_id === "string" && past.session_id !== ""
     && past.actor === actor && ofPlace(past, pick, home)) ?? null;
+}
+
+/** Whether the entry says there is no session to continue: the line names a scratch folder. */
+export function noneToContinue(pick: Pick | null): boolean {
+  return pick !== null && pick.kind === "scratch";
 }
 
 /** The entry's dim line: what a click does with the session. */

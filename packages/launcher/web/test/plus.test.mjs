@@ -3,8 +3,8 @@ import test from "node:test";
 
 import { parsePasts } from "../src/panel.ts";
 import {
-  CONTINUE_LAST, continueWords, COPIES_RESUME, lastSession, ofPlace, RESUMES_IN_SLOT, resumeBody, SESSIONS_READ,
-  takesBriefFile,
+  CONTINUE_LAST, continueWords, COPIES_RESUME, lastSession, NONE_TO_CONTINUE, noneToContinue, ofPlace, RESUMES_IN_SLOT,
+  resumeBody, SESSIONS_READ, takesBriefFile,
 } from "../src/plus-model.ts";
 
 const HOME = "/home/alice";
@@ -56,6 +56,16 @@ test("a folder on the line takes a session by its folder, however the home folde
   assert.equal(ofPlace(there, PROJECT, HOME), false);
   assert.equal(ofPlace(inProject, { kind: "choose" }, HOME), false);
   assert.equal(lastSession([there], null, "operator", HOME), null);
+});
+
+test("with Scratch on the line no session of another place is offered, and the entry says there is none", () => {
+  const scratch = { kind: "scratch" };
+  const sessions = [past(), past({ project_key: null, cwd: "/home/alice/notes" }), past({ project_key: null, cwd: "/tmp/x" })];
+  assert.equal(sessions.some((one) => ofPlace(one, scratch, HOME)), false);
+  assert.equal(lastSession(sessions, scratch, "operator", HOME), null);
+  assert.equal(noneToContinue(scratch), true);
+  assert.equal(NONE_TO_CONTINUE, "none to continue in a throwaway folder");
+  for (const pick of [PROJECT, FOLDER, { kind: "choose" }, null]) assert.equal(noneToContinue(pick), false);
 });
 
 test("a session with no id to resume is not offered", () => {
