@@ -95,7 +95,7 @@ test("a piece's record not merged is its own need", () => {
                          at: AT("16:40") });
   assert.deepEqual(words(one(repo({ project: "a", records: [broke] }))), {
     weight: "need", title: "a: secret-gate broke", dim: ["secret-gate crashed"],
-    fix: { label: null, text: "run it again", copy: "run it again", refresh: false }, time: "16:40",
+    fix: { label: null, text: "run it again", copy: null, refresh: false }, time: "16:40",
   });
 });
 
@@ -106,6 +106,22 @@ test("a broken piece's Copy takes the command that runs; the alternative stays s
   assert.equal(item.fix.copy, "moxi repo git-hooks disable /r lint/lint");
   assert.equal(runnable("moxi repo git-hooks remove /r"), "moxi repo git-hooks remove /r");
   assert.equal(runnable("run (or: this) and that"), "run (or: this) and that");
+});
+
+test("a record's fix that is a sentence around a command copies the command alone; one with none has no Copy", () => {
+  const failed = spec({ error_since: T("17:00") });
+  const fix = "the spec's next pass that commits cleanly clears this; to forget the spec: "
+    + "moxi repo specs remove /r notes/snapshot";
+  const item = one(repo({ project: "n", specs: [failed], records: [{ ...COMMIT, fix }] }));
+  assert.equal(item.fix.text, fix);
+  assert.equal(item.fix.copy, "moxi repo specs remove /r notes/snapshot");
+  // The same sentence on an open commit record of no spec's state.
+  const loose = one(repo({ project: "n", records: [{ ...COMMIT, fix }] }));
+  assert.equal(loose.fix.copy, "moxi repo specs remove /r notes/snapshot");
+  assert.equal(runnable("if no git is running in /r, remove /r/.git/index.lock", { prose: true }), null);
+  assert.equal(runnable("moxi repo commit /r", { prose: true }), "moxi repo commit /r");
+  // A problem's fix or a chain line is a command as it stands.
+  assert.equal(runnable("sh .git/moxi-repo/launcher pre-commit"), "sh .git/moxi-repo/launcher pre-commit");
 });
 
 const COMMIT = record({ kind: "commit", piece: null, spec: "notes/snapshot",
@@ -135,7 +151,7 @@ test("a failed spec stays failed after a throttled pass, with the record's fix",
   assert.deepEqual(words(one(repo({ project: "n", specs: [failed], records: [rec] }))), {
     weight: "need", title: "Auto-commit notes/snapshot failed",
     dim: ["error: git commit failed", "n", "last commit 18:30"],
-    fix: { label: null, text: "look at the log", copy: "look at the log", refresh: false }, time: "since 17:00",
+    fix: { label: null, text: "look at the log", copy: null, refresh: false }, time: "since 17:00",
   });
   // With no record, no fix.
   assert.equal(one(repo({ project: "n", specs: [failed] })).fix, null);
@@ -148,7 +164,7 @@ test("a stale index lock is a need from the record", () => {
   assert.deepEqual(words(one(repo({ project: "n", specs: [held], records: [rec] }))), {
     weight: "need", title: "Auto-commit notes/snapshot is held up by git's index lock",
     dim: ["repo: notes/snapshot: git's index lock /r/.git/index.lock has been held", "n"],
-    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: "if no git is running in /r, remove /r/.git/index.lock", refresh: false },
+    fix: { label: null, text: "if no git is running in /r, remove /r/.git/index.lock", copy: null, refresh: false },
     time: "since 12:00",
   });
   // An index-busy run that isn't stale yet is no item.
@@ -166,7 +182,7 @@ test("a commit record from a pass that committed, with hook lines, is a warning 
                  fix: "see the paths left out", at: AT("19:00") };
   assert.deepEqual(words(one(repo({ project: "n", specs: [spec()], records: [said] }))), {
     weight: "warn", title: "committed abc1234 (3 paths); 1 left out", dim: ["n"],
-    fix: { label: null, text: "see the paths left out", copy: "see the paths left out", refresh: false }, time: "19:00",
+    fix: { label: null, text: "see the paths left out", copy: null, refresh: false }, time: "19:00",
   });
 });
 

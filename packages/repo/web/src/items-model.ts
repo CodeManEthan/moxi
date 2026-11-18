@@ -29,7 +29,7 @@ export interface Fix {
   /** The command or line shown, or the sentence; null for none. */
   text: string | null;
   /** What its `Copy` puts on the clipboard: the command that runs as it stands, without an
-   * `(or: ...)` alternative the text adds; null for no `Copy`. */
+   * `(or: ...)` alternative or a sentence around it; null for no `Copy`. */
   copy: string | null;
   /** The item offers the Refresh act. */
   refresh: boolean;
@@ -58,17 +58,26 @@ export interface Item {
   spec: SpecRow | null;
 }
 
-function fixOf(text: string | null, { label = null, refresh = false }: { label?: string | null; refresh?: boolean } = {}
-): Fix | null {
+function fixOf(text: string | null, { label = null, refresh = false, prose = false }:
+  { label?: string | null; refresh?: boolean; prose?: boolean } = {}): Fix | null {
   if (text === null && !refresh) return null;
-  return { label, text, copy: text === null ? null : runnable(text), refresh };
+  return { label, text, copy: text === null ? null : runnable(text, { prose }), refresh };
 }
 
-/** A fix's command as it runs: the text before an `(or: ...)` alternative at its end. */
-export function runnable(text: string): string {
+/** A fix's command as it runs: the text before an `(or: ...)` alternative at its end, and
+ * of a sentence around a command (`...; to forget the spec: moxi repo specs remove ...`),
+ * the command after its colon. A record's fix (`prose`) may be a sentence with no command
+ * in it; then there is nothing to run and none comes back. */
+export function runnable(text: string, { prose = false }: { prose?: boolean } = {}): string | null {
   const at = text.lastIndexOf(" (or: ");
-  return at > 0 && text.endsWith(")") ? text.slice(0, at) : text;
+  const cut = at > 0 && text.endsWith(")") ? text.slice(0, at) : text;
+  const inner = cut.lastIndexOf(": moxi ");
+  if (inner >= 0) return cut.slice(inner + 2);
+  return prose && !cut.startsWith("moxi ") ? null : cut;
 }
+
+/** A record's fix: a command to copy, or a sentence. */
+const recordFix = (text: string | null): Fix | null => fixOf(text, { prose: true });
 
 function sentence(text: string): Fix {
   return { label: null, text, copy: null, refresh: false };
@@ -168,13 +177,13 @@ function specItem(ctx: Context, spec: SpecRow): Item | null {
     const record = commit();
     return item(ctx, "need", "failed", `${label} failed`, {
       dim: [...first(record), ctx.name, ...lastCommit(ctx, spec)],
-      fix: fixOf(record?.fix ?? null), time: spec.error_since, since: true, record, spec,
+      fix: recordFix(record?.fix ?? null), time: spec.error_since, since: true, record, spec,
     });
   }
   if (spec.index_stale) {
     const record = commit();
     return item(ctx, "need", "held", `${label} is held up by git's index lock`, {
-      dim: [...first(record), ctx.name], fix: fixOf(record?.fix ?? null), time: spec.index_busy_since,
+      dim: [...first(record), ctx.name], fix: recordFix(record?.fix ?? null), time: spec.index_busy_since,
       since: spec.index_busy_since !== null, record, spec,
     });
   }
@@ -183,7 +192,7 @@ function specItem(ctx: Context, spec: SpecRow): Item | null {
 
 function commitItem(ctx: Context, record: RecordRow, spec: SpecRow | null): Item {
   return item(ctx, "warn", "commit", firstLine(record.text), {
-    dim: [ctx.name], fix: fixOf(record.fix), time: recordSeconds(record.at), record, spec,
+    dim: [ctx.name], fix: recordFix(record.fix), time: recordSeconds(record.at), record, spec,
   });
 }
 
@@ -205,7 +214,7 @@ function pushItems(ctx: Context, spec: SpecRow): Item[] {
 function pieceItem(ctx: Context, record: RecordRow): Item {
   const piece = record.piece === null ? "a piece" : pieceName(record.piece);
   return item(ctx, "need", "piece", `${ctx.name}: ${piece} broke`, {
-    dim: [firstLine(record.text)], fix: fixOf(record.fix), time: recordSeconds(record.at), record,
+    dim: [firstLine(record.text)], fix: recordFix(record.fix), time: recordSeconds(record.at), record,
   });
 }
 
