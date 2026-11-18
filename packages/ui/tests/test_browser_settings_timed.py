@@ -63,7 +63,7 @@ def test_on_the_full_install_the_shown_module_draws_within_2_s_and_every_section
     ui_page.goto("/m/ui/settings", wait_until="commit")
     marks = ui_page.wait_for_function(MARKS, arg="moxi", polling="raf", timeout=WAIT_MS).json_value()
     drawn_s, read_s = marks["drawn"] / 1000, marks["read"] / 1000
-    load = ", ".join(f"{one:.1f}" for one in os.getloadavg())
+    load = ", ".join(f"{one:.1f}" for one in os.getloadavg()) if hasattr(os, "getloadavg") else "unknown"
     print(f"\nSettings on the full install ({len(marks['listed'])} modules listed): the core drawn at "
           f"{drawn_s * 1000:.0f} ms, every section read at {read_s * 1000:.0f} ms (load {load})")
     timed_reading(*max((drawn_s, DRAWN_S), (read_s, READ_S), key=lambda pair: pair[0] / pair[1]), "s")

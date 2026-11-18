@@ -39,7 +39,7 @@ def test_browser_tests_and_asyncio_run_share_one_pytest_run(tmp_path, ui_browser
     # The last test uses no browser, so the browser closes in a teardown that runs with
     # Playwright's loop hidden. The child finds the browsers this run uses: under the
     # fence its home is a temporary one.
-    browsers = Path(ui_browser.browser_type.executable_path).parents[2]
+    browsers = _browsers_dir(ui_browser.browser_type.executable_path)
     (tmp_path / "test_mixed.py").write_text(textwrap.dedent("""
         import asyncio
 
