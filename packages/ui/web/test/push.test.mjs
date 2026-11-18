@@ -179,6 +179,20 @@ test("a tab that leaves takes its topics with it; no topics, no stream", () => {
   assert.equal(t.live().length, 0);
 });
 
+test("a leader whose page leaves closes its stream and opens none until it is back", () => {
+  const t = setup();
+  t.leader.setTab("a", ["fixture.one"], true);
+  t.clock.advance(REOPEN_MS);
+  t.leader.setTab("a", ["fixture.one", "fixture.two"], true);
+  // The page leaves while a reopen is due: the open stream closes and none opens.
+  t.leader.leave();
+  assert.equal(t.live().length, 0);
+  t.clock.advance(60_000);
+  assert.equal(t.streams.length, 1);
+  t.leader.back();
+  assert.deepEqual(t.live().map((s) => s.topics), [["fixture.one", "fixture.two"]]);
+});
+
 test("events from a closed stream are dropped", () => {
   const t = setup();
   t.leader.setTab("a", ["fixture.one"], true);

@@ -27,6 +27,13 @@ def _streams(shell) -> int:
     return data["shell"]["streams"]
 
 
+def _seen(shell, pages) -> str:
+    """The shell's stream count and each tab's visibility, for a failed wait to name."""
+    tabs = ", ".join(f"tab {n} {page.evaluate('document.visibilityState')}"
+                     for n, page in enumerate(pages, 1))
+    return f"{_streams(shell)} streams at the shell; {tabs}"
+
+
 def _count(shell) -> int:
     status, data = shell.session().get("/m/fixture/api/summary")
     assert status == 200
@@ -154,28 +161,35 @@ def test_the_stream_closes_after_10_s_with_no_visible_tab_and_reopens_when_one_i
     context.clock.install()
     first = ui_shell.sign_in(context.new_page())
     second = context.new_page()
+    pages = (first, second)
     n = _count(ui_shell)
-    for page in (first, second):
+    for page in pages:
         page.goto("/m/fixture/")
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n}")
-    wait_for(lambda: _streams(ui_shell) == 1, 5, what="one push stream at the shell")
+
+    def seen() -> str:
+        return _seen(ui_shell, pages)
+
+    wait_for(lambda: _streams(ui_shell) == 1, 5,
+             what=lambda: f"one push stream at the shell: {seen()}")
     _hide(second)
     context.clock.fast_forward(11_000)
-    assert _streams(ui_shell) == 1, "the stream closed while one tab was still shown"
+    assert _streams(ui_shell) == 1, f"the stream closed while one tab was still shown: {seen()}"
     _hide(first)
     context.clock.fast_forward(9_000)
-    assert _streams(ui_shell) == 1, "the stream closed before 10 s"
+    assert _streams(ui_shell) == 1, f"the stream closed before 10 s: {seen()}"
 
     def closed() -> bool:
         context.clock.fast_forward(500)
         return _streams(ui_shell) == 0
 
-    wait_for(closed, 5, interval=0.1, what="the stream to close with no tab shown")
+    wait_for(closed, 5, interval=0.1,
+             what=lambda: f"the stream to close with no tab shown: {seen()}")
     # Acts while no stream is open; showing a tab reopens it with the current value.
     ui_shell.session().post("/m/fixture/api/add", {"by": 5})
     _hide(second, hidden=False)
-    wait_for(lambda: _streams(ui_shell) == 1, 5, what="the stream to reopen")
-    for page in (first, second):
+    wait_for(lambda: _streams(ui_shell) == 1, 5, what=lambda: f"the stream to reopen: {seen()}")
+    for page in pages:
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 5}")
 
 

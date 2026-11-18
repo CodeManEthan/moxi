@@ -5,8 +5,9 @@
 // whether it is visible on the BroadcastChannel `moxi-ui-push`. The leader asks for the
 // union, reopens the stream 50 ms after the union last changed, and passes each event to
 // every tab. It closes the stream after 10 s with no visible tab and opens it again when
-// one is shown. When the leader tab closes, the lock goes to another tab, which asks every
-// tab for its topics and opens the stream. Every topic carries state (its first event is
+// one is shown, and closes it when its page is hidden for good or kept in the back-forward
+// cache. When the leader tab closes, the lock goes to another tab, which asks every tab for
+// its topics and opens the stream. Every topic carries state (its first event is
 // its current value, each later one replaces it), so a reopen or a new leader loses
 // nothing.
 
@@ -108,6 +109,7 @@ export class Leader {
   private refused: string | null = null;
   private failures = 0;
   private out = false;
+  private away = false;
   private stopped = false;
 
   private hooks: LeaderHooks;
@@ -154,6 +156,20 @@ export class Leader {
     this.refused = null;
     this.failures = 0;
     this.clear("retryTimer");
+    this.reconcile();
+  }
+
+  /** The page is going away, or into the back-forward cache: close the stream now and
+   * open none until `back()`. Firefox can keep a stream open past its page's end when the
+   * page opened it after its own navigation began, so the leader closes it itself. */
+  leave(): void {
+    this.away = true;
+    this.reconcile();
+  }
+
+  /** The page is shown again from the back-forward cache. */
+  back(): void {
+    this.away = false;
     this.reconcile();
   }
 
@@ -209,7 +225,8 @@ export class Leader {
 
   private reconcile(): void {
     const key = this.key();
-    const want = !this.stopped && !this.out && !this.dormant && key !== "" && key !== this.refused;
+    const want = !this.stopped && !this.out && !this.away && !this.dormant && key !== ""
+      && key !== this.refused;
     if (this.stream !== null && (!want || this.stream.key !== key)) this.closeStream();
     if (!want || this.stream !== null || this.retryTimer !== null) return;
     const topics = new Set(key.split(","));
@@ -478,13 +495,17 @@ export class TabPush {
     }
     document.addEventListener("visibilitychange", () => this.announce());
     // A page that leaves says so, so the leader drops its topics at once; one kept in the
-    // back-forward cache says so again when it is shown. A leader's stream and lock end
+    // back-forward cache says so again when it is shown. A leader closes its stream as its
+    // page leaves and opens it again if the page is shown from the cache; its lock ends
     // with its page.
     addEventListener("pagehide", () => {
       if (this.leader === null) this.post({ t: "bye", tab: this.id });
+      else this.leader.leave();
     });
     addEventListener("pageshow", (event) => {
-      if (event.persisted) this.announce();
+      if (!event.persisted) return;
+      this.leader?.back();
+      this.announce();
     });
     const locks = navigator.locks;
     if (locks === undefined || this.channel === null) {
