@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import CHECKS_MODE_BITS
 from moxi_comms import cli, paths, provision, store, tokens
 from moxi_comms.local_record import LocalRecord, META_OPERATOR_TOKEN_HASH, token_hash
 from moxi_comms.store import upgrade_0_2
@@ -152,7 +153,9 @@ def test_the_operator_token_and_provisioning_carry_over(soon, checkout):
     record = LocalRecord()
     try:
         token = paths.tokens_dir() / "operator"
-        assert stat.S_IMODE(token.stat().st_mode) == tokens.FILE_MODE, "left as 0.2 left it"
+        if CHECKS_MODE_BITS:
+            assert stat.S_IMODE(token.stat().st_mode) == tokens.FILE_MODE, (
+                "left as 0.2 left it")
         held = token.read_text().split('"')[3]
         assert record.meta_get(META_OPERATOR_TOKEN_HASH) == token_hash(held)
         before = rows("SELECT * FROM identities ORDER BY name")

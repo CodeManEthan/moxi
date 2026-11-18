@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from conftest import CHECKS_MODE_BITS
 from moxi_comms import directory
 from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import comms_db
@@ -19,7 +20,8 @@ def table_names(conn) -> set[str]:
 def test_schema_and_file_posture():
     gw = MockRecord()
     provision(gw, comms_db(), standing=[("planner", "proj-a")])
-    assert oct(os.stat(comms_db()).st_mode & 0o777) == "0o600"
+    if CHECKS_MODE_BITS:
+        assert oct(os.stat(comms_db()).st_mode & 0o777) == "0o600"
     conn = directory.connect(comms_db())
     try:
         tables = table_names(conn)

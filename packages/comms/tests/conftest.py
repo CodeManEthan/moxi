@@ -88,6 +88,11 @@ POSIX_MODES = pytest.mark.skipif(
     reason="file mode bits mean nothing on Windows, where the token store's rule is the "
            "user's profile, which has tests of its own")
 
+#: Whether a test checks a file's POSIX mode bits. On Windows they mean nothing (`os.chmod`
+#: sets only the read-only flag), so a test that also checks other things skips only its
+#: mode-bit assertion there and runs the rest.
+CHECKS_MODE_BITS = sys.platform != "win32"
+
 
 @pytest.fixture
 def profile(fence) -> Path:
