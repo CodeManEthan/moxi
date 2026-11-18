@@ -1351,7 +1351,9 @@ def test_the_process_read_counts_a_real_child():
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         got = _run.process_measure(child.pid)
-        assert got.memory > 0 and got.fds >= 0 and got.cpu >= 0
+        opened = got.handles if _run._WINDOWS else got.fds
+        assert got.memory > 0 and opened >= 0 and got.cpu >= 0
+        assert (got.fds is None, got.handles is None) == (_run._WINDOWS, not _run._WINDOWS)
         assert got.started == pytest.approx(time.time(), abs=60)
     finally:
         child.kill()
