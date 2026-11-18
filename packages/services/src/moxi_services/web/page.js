@@ -88,14 +88,14 @@ var se=globalThis,ie=se.ShadowRoot&&(se.ShadyCSS===void 0||se.ShadyCSS.nativeSha
   .det button.act.d { color: var(--moxi-text-dim); }
   .det button.act:hover:not(:disabled) { background: none; text-decoration: underline; }
   .det .foot .note { flex: 1 1 14em; text-align: right; font-size: 13px; }
-  .det button.act.w, moxi-ui-row > button.do.act.w { color: var(--moxi-warn); }
+  .det button.act.w, moxi-ui-row > button.do.act.w { color: var(--moxi-danger); }
   /* An act's confirm, in place under the foot. */
   .det .cf { margin: 10px 0 2px 84px; padding-top: 10px; border-top: 1px solid var(--moxi-border); }
   .det .cf .q { margin: 0; padding-bottom: 4px; font-weight: 600; }
-  .det .cf.w .q { color: var(--moxi-warn); }
+  .det .cf.w .q { color: var(--moxi-danger); }
   .det .cf .btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 0 2px; }
   .det .cf button.btn { padding: 5px 13px; background: none; }
-  .det .cf button.btn.wn { color: var(--moxi-warn); border-color: var(--moxi-warn); }
+  .det .cf button.btn.wn { color: var(--moxi-danger); border-color: var(--moxi-danger); }
   .det .cf button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); }
   .det .cf button.btn:hover:not(:disabled), .det .cf button.lnk:hover:not(:disabled) { background: none; }
   .det .links { display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 6px 0 0 84px; font-size: 13px; }

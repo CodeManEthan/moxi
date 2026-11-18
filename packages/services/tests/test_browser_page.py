@@ -924,6 +924,13 @@ def test_the_slots_servers_restart_with_nothing_in_use_goes_plain(seeded, units_
     expect(panel.locator("button[data-warn]")).to_have_count(0)
 
 
+def drawn_in(page, token: str) -> str:
+    """The colour a text in `token` renders as on `page`, in the theme it shows."""
+    return page.evaluate("""t => { const s = document.createElement("span");
+        s.style.color = `var(${t})`; document.body.append(s);
+        const c = getComputedStyle(s).color; s.remove(); return c; }""", token)
+
+
 def test_the_slots_servers_stop_with_sessions_asks_in_the_warning_colour(seeded, units_base, ui_shell, ui_page):
     slots_said(units_base, slots=(*THREE, {"number": 2, "state": "free", "idle": False}),
                jobs=({"name": "nightly", "running": True},))
@@ -946,12 +953,12 @@ def test_the_slots_servers_stop_with_sessions_asks_in_the_warning_colour(seeded,
     # The warning colour is on its two acts only, and on the confirm's question.
     warned = panel.locator('button[data-warn="true"]')
     expect(warned).to_have_text(["Restart", "Stop"])
-    warn = ui_page.evaluate("getComputedStyle(document.body).getPropertyValue('--moxi-warn')")
-    assert warn.strip(), warn
+    danger, text = drawn_in(ui_page, "--moxi-danger"), drawn_in(ui_page, "--moxi-text")
+    assert danger != text, (danger, text)
     colours = [el.evaluate("e => getComputedStyle(e).color") for el in
                (warned.first, warned.last, asked.locator('[data-line="ask"]'), go)]
-    # The default theme's warning colour is its text colour, so only their sameness shows.
-    assert len(set(colours)) == 1, colours
+    assert colours == [danger] * 4, (colours, danger)
+    assert go.evaluate("e => getComputedStyle(e).borderTopColor") == danger
     expect(part.locator('[data-part="foot"] button.w')).to_have_text(["Restart", "Stop"])
     asked.get_by_role("button", name="Keep it running", exact=True).click()
     expect(asked).to_have_count(0)
