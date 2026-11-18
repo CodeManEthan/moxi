@@ -175,8 +175,8 @@ runtime directory every 2 s and holds one watch per session; turns adds no daemo
   `No session is running.` and the reach line; with Claude Code missing and no launcher,
   `No session can show here yet.` An address that names no listed session opens the list
   with `That session isn't running now.` While a session's watch is down but its reads
-  answer, its row keeps its group and a dim line under the reach line says `Showing what
-  Moxi read up to 30 s ago`: the page server reads every session again within 30 s.
+  answer, its row keeps its group and says `read every 30 s` on a dim line of its own:
+  the page server reads every session again within 30 s.
 - **Reading.** The list follows the shell's push channel as sessions start, turn and end,
   is read again when the tab is shown, and is redrawn once a minute for its day words.
   A Claude Code run with no window (headless) spawns no endpoint and is not listed.

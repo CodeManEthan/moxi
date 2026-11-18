@@ -216,7 +216,7 @@ def test_the_first_time_without_claude_code_says_none_can_show_and_how_to_fix_it
     assert page.evaluate("() => navigator.clipboard.readText()") == "moxi install turns"
 
 
-def test_while_a_sessions_watch_alone_is_down_a_dim_line_says_what_shows_may_be_old(
+def test_while_a_sessions_watch_alone_is_down_its_row_keeps_its_group_and_says_so(
         panel, make_endpoint, ui_contexts, monkeypatch):
     from moxi import ipc
     from moxi_turns.endpoint import Endpoint
@@ -229,8 +229,13 @@ def test_while_a_sessions_watch_alone_is_down_a_dim_line_says_what_shows_may_be_
     ep, _ = make_endpoint(harness("/srv/work/unwatched"), session_id=SID)
     panel.listed({key_of(ep)})
     _, root = open_panel(panel, ui_contexts)
-    expect(row(root, key_of(ep))).to_have_attribute("name", started("unwatched"))
-    expect(root.locator('[data-line="note"]')).to_have_text(["Showing what Moxi read up to 30 s ago"])
+    unwatched = group(root, "idle").locator(f'moxi-ui-row[data-key="{key_of(ep)}"]')
+    expect(unwatched).to_have_attribute("name", started("unwatched"))
+    expect(unwatched).to_have_attribute("note", "read every 30 s")
+    expect(unwatched).not_to_have_attribute("lead", re.compile("."))
+    expect(group(root, "problem")).to_have_count(0)
+    # No line for the whole panel.
+    expect(root.locator('[data-line="note"]')).to_have_count(0)
 
 
 # --- markup as text --------------------------------------------------------------------------

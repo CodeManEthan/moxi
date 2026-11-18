@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   ABSENT, addressRoute, frameOf, INSTALL_COMMAND, NO_SESSION, NONE_CAN_SHOW, NOT_RUNNING, parseAddress,
-  reachLine, READ_ON_TIMER, READING, readingLine, ROUTE_FAILED, SCAN_FAILED,
+  reachLine, READING, readingLine, ROUTE_FAILED, SCAN_FAILED,
 } from "../src/frame-model.ts";
 
 const UTC = {
@@ -157,12 +157,11 @@ test("the address opens a drawn row, and an unknown one adds its line", () => {
   assert.deepEqual([waiting.open, waiting.notes], [null, []]);
 });
 
-test("a watch that is down while the reads answer shows as a quiet dim line, not a problem", () => {
+test("a watch that is down while the reads answer keeps the session in its group, with no panel line", () => {
   const late = session({ read_error: "Moxi can't watch it, so what shows is read every 30 s and may be up to 30 s old" });
   const frame = frameOf(data({}, { sessions: [late] }), NOWHERE, false, TODAY, UTC);
   assert.deepEqual(frame.groups.map((g) => g.group), ["idle"]);
-  assert.deepEqual(frame.notes, [READ_ON_TIMER]);
-  assert.deepEqual(frameOf(data(), NOWHERE, false, TODAY, UTC).notes, []);
+  assert.deepEqual(frame.notes, []);
 });
 
 test("the loading state shows nothing for 400 ms, then Reading…; no other state shows it", () => {

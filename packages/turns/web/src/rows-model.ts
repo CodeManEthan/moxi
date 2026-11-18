@@ -82,6 +82,10 @@ export function isWatchAlone(session: Session): boolean {
   return session.read_error !== null && session.unread_since === null;
 }
 
+/** A row's dim line while only its watch is down: what shows comes from the page server's
+ * timer, which reads every session again within 30 s. */
+export const READ_ON_TIMER = "read every 30 s";
+
 /** Whether the session waits for its first read: nothing read, nothing failed but maybe
  * the watch. It is not drawn, since any group would state a state not read. */
 export function isWaiting(session: Session): boolean {
@@ -292,7 +296,8 @@ export interface Launch {
  * The row's lines. A problem row: line two is the first problem's lead (heavy) and its
  * reason in the text colour; line three is a second problem's lead and reason, then the
  * news. Another row: line two leads with the first news phrase, its description as the
- * rest, the other phrases as the tail; a row with no news is one line.
+ * rest, the other phrases as the tail; a row with no news is one line. While only the
+ * session's watch is down, line three ends with `read every 30 s`.
  */
 export function rowLines(session: Session, group: Group, today: string, launch: Launch | null = null,
                          clock: Clock = LOCAL): RowLines {
@@ -303,12 +308,14 @@ export function rowLines(session: Session, group: Group, today: string, launch: 
     lead: null, leadHeavy: false, rest: null, restStrong: false, tail: null, note: null,
   };
   const news = newsOf(session);
+  const timer = isWatchAlone(session) ? [READ_ON_TIMER] : [];
   if (group === "problem") {
     const [first, ...others] = problemsOf(session);
     if (first !== undefined) {
       Object.assign(lines, { lead: first.lead, leadHeavy: true, rest: first.reason, restStrong: true });
     }
-    const note = [...others.map((problem) => `${problem.lead} · ${problem.reason}`), ...news.map(newsText)];
+    const note = [...others.map((problem) => `${problem.lead} · ${problem.reason}`), ...news.map(newsText),
+                  ...timer];
     lines.note = note.length > 0 ? note.join(" · ") : null;
     return lines;
   }
@@ -318,5 +325,6 @@ export function rowLines(session: Session, group: Group, today: string, launch: 
     lines.rest = first.description;
     lines.tail = others.length > 0 ? others.map(newsText).join(" · ") : null;
   }
+  lines.note = timer[0] ?? null;
   return lines;
 }

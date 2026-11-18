@@ -5,7 +5,7 @@
 
 import type { Failure, Reach, Session, SessionList } from "./feed.ts";
 import type { GroupView } from "./rows-model.ts";
-import { groupsOf, isWaiting, isWatchAlone, LOCAL, timeWord } from "./rows-model.ts";
+import { groupsOf, isWaiting, LOCAL, timeWord } from "./rows-model.ts";
 import type { Clock } from "./rows-model.ts";
 
 // --- addresses ------------------------------------------------------------------------------
@@ -156,9 +156,6 @@ export const NONE_CAN_SHOW = "No session can show here yet.";
 export const ROUTE_FAILED = "Moxi can't read the live sessions";
 export const SCAN_FAILED = "Moxi couldn't look for sessions";
 export const NOT_RUNNING = "That session isn't running now.";
-/** While a drawn session's watch is down and its reads answer: what shows comes from the
- * page server's timer, which reads every session again within 30 s. */
-export const READ_ON_TIMER = "Showing what Moxi read up to 30 s ago";
 
 /** What a failed route's answer says. */
 export function failureWords(failure: Failure): string {
@@ -180,7 +177,6 @@ export function frameOf(data: FeedState, address: Address, launcher: boolean, to
     key !== null && sessions.some((session) => session.key === key);
   const notes = (): string[] => {
     const lines: string[] = [];
-    if (drawn.some(isWatchAlone)) lines.push(READ_ON_TIMER);
     if (address.unknown || (address.key !== null && !listedKey(address.key))) lines.push(NOT_RUNNING);
     return lines;
   };

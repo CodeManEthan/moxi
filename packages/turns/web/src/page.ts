@@ -10,8 +10,7 @@
 //   rows read stay, dim, with no acts, and none opens.
 // - The empty state's line, with the reach line under it.
 // - The foot: the reach line and `Settings › turns` at its right, then a dim line for each
-//   of its notes (the reads shown come from the timer; an address whose session isn't
-//   running).
+//   of its notes (an address whose session isn't running).
 //
 // It places what `frame-model.ts` and `rows-model.ts` return and decides nothing about
 // what is shown; every word comes from there and goes into the page as text. One row is

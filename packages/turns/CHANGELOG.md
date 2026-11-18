@@ -9,8 +9,9 @@
   `session/<key>`, with `Now`, `Agents`, `Prompt box`, `Session`, `Details` and `Copy id`.
   A reach line at the foot says which sessions show here and which don't, with `Copy` on
   `moxi install turns` where it applies, and `Settings › turns` beside it. The page says
-  when a read failed, a scan failed, no session runs or an address names none, and a dim
-  `Showing what Moxi read up to 30 s ago` while a session's watch is down. The page
+  when a read failed, a scan failed, no session runs or an address names none; a row
+  whose session's watch is down while its reads answer keeps its group and says
+  `read every 30 s` on a dim line of its own. The page
   server sends each session's turn start time, session id, whether it has a prompt box,
   when it ended its last turn, since when it can't be read, and the `reach`; it reads
   every session again within 30 s, and reads `reach` on a thread of its own.

@@ -3,8 +3,8 @@ import test from "node:test";
 
 import {
   dayTime, dayWord, factOf, folderName, groupOf, groupsOf, harnessName, isBusy, isWaiting,
-  isWatchAlone, LIST_NOT_WHOLE, MAY_HOLD_DRAFT, newsOf, ordered, problemsOf, rowLines, sinceOf,
-  timeWord, TROUBLE_LEAD, UNREAD_LEAD,
+  isWatchAlone, LIST_NOT_WHOLE, MAY_HOLD_DRAFT, newsOf, ordered, problemsOf, READ_ON_TIMER, rowLines,
+  sinceOf, timeWord, TROUBLE_LEAD, UNREAD_LEAD,
 } from "../src/rows-model.ts";
 
 const UTC = {
@@ -246,6 +246,25 @@ test("line two on another row: the first phrase leads, its description is the re
   assert.equal(lines.note, null);
   const quiet = rowLines(session(), "idle", TODAY, null, UTC);
   assert.deepEqual([quiet.lead, quiet.rest, quiet.tail, quiet.note], [null, null, null, null]);
+});
+
+test("a row whose watch alone is down keeps its lines and says on line three it is read every 30 s", () => {
+  const late = { read_error: "Moxi can't watch it, so what shows is read every 30 s and may be up to 30 s old" };
+  assert.equal(READ_ON_TIMER, "read every 30 s");
+  const idle = rowLines(session(late), "idle", TODAY, null, UTC);
+  assert.deepEqual([idle.lead, idle.tail, idle.note], [null, null, "read every 30 s"]);
+  const busy = session({ ...late, facts: facts({ turn_open: true, turn_started_at: at("18:52") }),
+                         agents: { entries: [agent({ description: "Check the plan" })], complete: true } });
+  assert.equal(groupOf(busy), "working");
+  const working = rowLines(busy, "working", TODAY, null, UTC);
+  assert.deepEqual([working.fact, working.lead, working.rest, working.note],
+                   ["since 18:52", "1 subagent busy", "Check the plan", "read every 30 s"]);
+  // On a problem row it comes after the problems and the news.
+  const trouble = rowLines(session({ ...late, trouble: "t" }), "problem", TODAY, null, UTC);
+  assert.equal(trouble.note, "read every 30 s");
+  // A watch down with a read: a problem, and no timer line.
+  const both = session({ read_error: "Moxi can't watch it or read its turn, and tries again", unread_since: at("19:09") });
+  assert.equal(rowLines(both, "problem", TODAY, null, UTC).note, null);
 });
 
 test("a launch's name and where take the folder's place", () => {
