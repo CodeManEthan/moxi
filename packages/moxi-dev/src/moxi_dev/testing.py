@@ -118,7 +118,10 @@ its tier. On a loaded machine such a test measures the machine, so `moxi-dev che
 runs no timed test: it holds every one back, and `moxi-dev timed` runs them on their
 own. A test whose bound only tells a
 deadline or timeout that fired from one that never did (a 0.3 s timeout that must return
-in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
+in under 0.9 s) splits in two. The land-check test carries no `timed`, keeps every
+behaviour assertion, and holds five times the bound with no factor, so a guard that never
+fired fails it and load alone doesn't. Its twin, named `<test>_in_time`, carries `timed`
+and holds the bound times `timed_slack()`. A plain `pytest`, with neither of the values below, runs a
 timed test where it falls, like any other.
 
 `MOXI_TEST_TIMED_SLACK=<factor>`, read once from the environment pytest starts with, is
