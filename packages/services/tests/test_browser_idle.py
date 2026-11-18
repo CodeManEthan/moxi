@@ -55,7 +55,7 @@ def test_the_server_exits_when_idle_with_its_poller_running_and_forgets_its_jobs
     page = ui_contexts(shell).pages[0]
     page.goto("/m/services/")
     panel = page.locator("#moxi-panel > moxi-services-page")
-    item = panel.locator('li.row[data-id="services/web"]')
+    item = panel.locator('.item[data-id="services/web"]')
     expect(item).to_have_attribute("data-verdict", "ok")
     # The page follows the topic: its stream started the poller.
     with page.expect_response(lambda r: "/m/services/api/status?job=" in r.url

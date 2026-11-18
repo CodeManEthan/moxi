@@ -217,9 +217,9 @@ def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui
 
     # Today's acts stay on each row until the page's own acts replace them.
     agent = row(panel, "services/agent-run")
-    expect(agent.locator('button[slot="acts"]')).to_have_text(
+    expect(agent.locator('[data-part="acts"] button')).to_have_text(
         ["Run now", "Run again", "Stop run", "Enable", "Disable", "Remove…"])
-    expect(row(panel, "services/web").locator('button[slot="acts"]')).to_have_text(
+    expect(row(panel, "services/web").locator('[data-part="acts"] button')).to_have_text(
         ["Start", "Stop", "Restart", "Enable", "Disable", "Remove…"])
 
 

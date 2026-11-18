@@ -28,11 +28,13 @@ var q=globalThis,Y=q.ShadowRoot&&(q.ShadyCSS===void 0||q.ShadyCSS.nativeShadow)&
   .grp .gk { color: var(--moxi-text-dim); padding-top: 7px; overflow-wrap: anywhere; }
   .grp .gk small { display: block; font-size: 13px; line-height: 18px; margin-top: 3px; }
   .grp .gl { grid-column: 2; min-width: 0; }
-  .grp .gk button, .item moxi-ui-row > button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
-                                                 text-align: left; cursor: pointer; }
+  .grp .gk button, .item .acts button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
+                                        text-align: left; cursor: pointer; }
   .grp .gk small button { color: var(--moxi-text); }
-  .grp .gk button:hover:not(:disabled), .item moxi-ui-row > button:hover:not(:disabled) { background: none; }
-  .item moxi-ui-row > button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .grp .gk button:hover:not(:disabled), .item .acts button:hover:not(:disabled) { background: none; }
+  .item .acts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: -4px 0 7px; }
+  .item .acts:empty { display: none; }
+  .item .acts button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
   .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
   .one { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; padding: 7px 0;
          flex-wrap: wrap; }
@@ -89,11 +91,11 @@ var q=globalThis,Y=q.ShadowRoot&&(q.ShadyCSS===void 0||q.ShadyCSS.nativeShadow)&
       <moxi-ui-row name=${n.name} where=${n.where??h} fact=${o?h:n.fact}
         ?fact-heavy=${n.weight==="heavy"} lead=${n.line??h}>
         ${o?p`<span slot="acts-one" class="fact" data-line="fact">${n.fact}</span>`:h}
-        ${Ct(s,this.#c).map(l=>p`
-          <button type="button" slot="acts" class="do" data-action=${l.name} ?disabled=${i}
-            aria-label=${`${l.label.replace(/…$/,"")} ${s.name}`}
-            @click=${()=>{this.#$(s,l)}}>${l.label}</button>`)}
       </moxi-ui-row>
+      <div class="acts" data-part="acts">${Ct(s,this.#c).map(l=>p`
+        <button type="button" class="do" data-action=${l.name} ?disabled=${i}
+          aria-label=${`${l.label.replace(/…$/,"")} ${s.name}`}
+          @click=${()=>{this.#$(s,l)}}>${l.label}</button>`)}</div>
       ${r!==null?this.#h(r):h}
     </div>`}#v(){let n=this.renderRoot.querySelector('section[data-part="add"] input[name="name"]');n?.scrollIntoView({block:"nearest"}),n?.focus()}#w(){let n=this.#a,s=this.#d,i=this.#e?.where===H?this.#e.said:null,r=this.#n?.value??null,o=r?.reason??(this.#n?.failure?`they can't be listed: ${this.#n.failure.why}`:null),l=n.source==="command",a=n.kind==="timer";return p`<section data-part="add">
       <h2>Add</h2>

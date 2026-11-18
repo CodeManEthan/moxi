@@ -77,11 +77,13 @@ const STYLES = css`
   .grp .gk { color: var(--moxi-text-dim); padding-top: 7px; overflow-wrap: anywhere; }
   .grp .gk small { display: block; font-size: 13px; line-height: 18px; margin-top: 3px; }
   .grp .gl { grid-column: 2; min-width: 0; }
-  .grp .gk button, .item moxi-ui-row > button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
-                                                 text-align: left; cursor: pointer; }
+  .grp .gk button, .item .acts button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
+                                        text-align: left; cursor: pointer; }
   .grp .gk small button { color: var(--moxi-text); }
-  .grp .gk button:hover:not(:disabled), .item moxi-ui-row > button:hover:not(:disabled) { background: none; }
-  .item moxi-ui-row > button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .grp .gk button:hover:not(:disabled), .item .acts button:hover:not(:disabled) { background: none; }
+  .item .acts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: -4px 0 7px; }
+  .item .acts:empty { display: none; }
+  .item .acts button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
   .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
   .one { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; padding: 7px 0;
          flex-wrap: wrap; }
@@ -332,7 +334,7 @@ export class ServicesPage extends LitElement {
   }
 
   /** One row: line one's name, dim words and fact; a risen row's sentence on line two; the
-   * row's acts at line two's right; what its last act came to under it. A fact in the text
+   * row's acts under it, wrapping on a narrow screen; what its last act came to. A fact in the text
    * colour is drawn by the page at line one's right, since the row draws its own fact
    * either dim or heavy. */
   #row(item: RowView) {
@@ -345,11 +347,11 @@ export class ServicesPage extends LitElement {
       <moxi-ui-row name=${item.name} where=${item.where ?? nothing} fact=${own ? nothing : item.fact}
         ?fact-heavy=${item.weight === "heavy"} lead=${item.line ?? nothing}>
         ${own ? html`<span slot="acts-one" class="fact" data-line="fact">${item.fact}</span>` : nothing}
-        ${shownActs(row, this.#phone).map((act) => html`
-          <button type="button" slot="acts" class="do" data-action=${act.name} ?disabled=${busy}
-            aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
-            @click=${() => void this.#act(row, act)}>${act.label}</button>`)}
       </moxi-ui-row>
+      <div class="acts" data-part="acts">${shownActs(row, this.#phone).map((act) => html`
+        <button type="button" class="do" data-action=${act.name} ?disabled=${busy}
+          aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
+          @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
       ${told !== null ? this.#saidPart(told) : nothing}
     </div>`;
   }
