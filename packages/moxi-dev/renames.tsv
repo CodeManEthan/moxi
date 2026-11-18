@@ -11562,6 +11562,10 @@ services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "re
 services	packages/services/src/moxi_services/page.py	_MAYBE_WORDS = lb.Out("list", items=_TEXT, nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	TIMING = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	STREAK = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	#: `wraps` True for a systemd timer, which adopting wraps behind a switch; `refused` why	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	"refused": _MAYBE_SAYS,	keep	refused	refused
+services	packages/services/src/moxi_services/page.py	required=False)},	keep	required=	required=
+services	packages/services/src/moxi_services/page.py	TODAY = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -11578,6 +11582,11 @@ services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threa
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": check_health}, daemon=True,	use	kwargs={"health": check_health}	kwargs={"check_health": check_health}
 services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, kwargs={"health": health}, daemon=True,	use	kwargs={"health": health}	kwargs={"check_health": check_health}
 services	packages/services/src/moxi_services/pagehandlers.py	out = set()	keep	set	set
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = f"{ref} is a {_KIND_WORDS[kind]}, not a {_KIND_WORDS[asked]}"	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer.update(enabled=st.enabled, active=st.state == "active",	keep	enabled=	enabled=
+services	packages/services/src/moxi_services/pagehandlers.py	and a `kind` that disagrees is refused. A refusal is in `refused`, never a 422."""	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	"refused": None}	keep	refused	refused
+services	packages/services/src/moxi_services/pagehandlers.py	answer["refused"] = _text(exc)	keep	refused	refused
 services	packages/services/src/moxi_services/rows.py	"created", "changed", "changed_by")	keep	changed	changed
 services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	`launches_session` are bools; `stopped`, `created` and `changed` are UTC times	keep	changed	changed
@@ -11693,6 +11702,12 @@ services	packages/services/tests/test_page.py	release.set()	keep	set	set
 services	packages/services/tests/test_page.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 services	packages/services/tests/test_page.py	assert not any(r["has_settings"] for r in by_id().values())	keep	any	any
+services	packages/services/tests/test_page.py	"active": True, "wraps": True, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	"active": False, "wraps": False, "refused": None}	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["active"], found["refused"]) == (	keep	refused	refused
+services	packages/services/tests/test_page.py	assert says in found["refused"] and found["found"] is None	keep	refused	refused
+services	packages/services/tests/test_page.py	assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]	keep	refused	refused
+services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)	keep	refused	refused
 services	packages/services/tests/test_page_feed.py	"""A gather in place of the page's: each call recorded with its `health`, blocking	use	health	check_health
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"

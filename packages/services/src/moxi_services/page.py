@@ -2,7 +2,10 @@
 
     GET  /api/rows      every row, each with its verdict, its state and the last health
                         result, and the modules whose run-time declarations failed
-    GET  /api/row       one row, by `id`, with a timer's newest runs and the log hint
+    GET  /api/row       one row, by `id`, with a timer's newest runs and today's count,
+                        the units the supervisor knows it by, and the log hint
+    GET  /api/unit      what the supervisor says of a unit not yet adopted, by `ref`
+                        and the `kind` it is read as; desk only
     GET  /api/projects  every project, by key, for the add form's picker
     GET  /api/status    what the act `job` came to: running, done, failed, refused, or
                         unknown for a job this server holds no record of
@@ -219,9 +222,38 @@ RUN = lb.Out("table", items={
     "seconds": lb.Out("float", nullable=True),
 })
 
-#: One row with what only its own read gives: a timer's newest runs, oldest first, and
-#: the hint for reading its output (a `journalctl` command or a log file).
-ONE = {"row": ROW, "runs": lb.Out("list", items=RUN), "log": _MAYBE_SAYS}
+#: A timer's runs on the page server's local day, of the newest 500 run lines read:
+#: how many, how many failed, and `more` when all 500 are today's, so there may be more.
+TODAY = lb.Out("table", nullable=True, items={
+    "runs": lb.Out("int"),
+    "failed": lb.Out("int"),
+    "more": _FLAG,
+})
+
+#: One row with what only its own read gives: a timer's newest runs, oldest first, the
+#: hint for reading its output (a `journalctl` command or a log file), `unit` the one
+#: unit that runs it (a daemon's service, a timer's own unit, an adopted row's unit;
+#: null with no supervisor), `units` every id the supervisor knows it by, and `today`,
+#: a timer's runs today (null for a daemon and for a timer whose runs no run line
+#: records).
+ONE = {"row": ROW, "runs": lb.Out("list", items=RUN), "log": _MAYBE_SAYS,
+       "unit": _MAYBE, "units": lb.Out("list", items=_TEXT), "today": TODAY}
+
+#: What the supervisor says of a unit not yet adopted. `found` is False for a missing
+#: unit and null when the supervisor did not answer or was not read; `kind` the kind it
+#: was read as; `asks_kind` True where the supervisor can't tell a unit's kind, so the
+#: person says; `enabled` and `active` as the supervisor gives them, null when unread;
+#: `wraps` True for a systemd timer, which adopting wraps behind a switch; `refused` why
+#: it can't be adopted, or null.
+UNIT = {
+    "found": _MAYBE_FLAG,
+    "kind": _MAYBE,
+    "asks_kind": _FLAG,
+    "enabled": _MAYBE_FLAG,
+    "active": _MAYBE_FLAG,
+    "wraps": _FLAG,
+    "refused": _MAYBE_SAYS,
+}
 
 #: A project for the add form's picker. `reason` says why there is no list: projects not
 #: installed, busy or unreadable.
@@ -301,6 +333,10 @@ PAGE = lb.Page(
         lb.Route("/api/rows", "read", _target("listing"), returns=ROWS, gateway=True),
         lb.Route("/api/row", "read", _target("row"), query={"id": _ID}, returns=ONE,
                  gateway=True),
+        lb.Route("/api/unit", "read", _target("unit"),
+                 query={"ref": _ID, "kind": lb.Field("enum", values=KINDS,
+                                                     required=False)},
+                 returns=UNIT),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route(STATUS_ROUTE, "read", _target("status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS,
@@ -320,4 +356,4 @@ PAGE = lb.Page(
 
 __all__ = ["ADD_BODY", "BUDGET", "CHECKED", "DAYS", "KINDS", "LAST_RUN", "ONE", "PAGE",
            "PROBLEM", "PROJECT", "PROJECTS", "ROW", "ROWS", "ROW_BODY", "RUN", "RUN_BODY",
-           "STATUS", "STATUS_ROUTE", "STREAK", "TIMING", "TOPIC", "VERDICT"]
+           "STATUS", "STATUS_ROUTE", "STREAK", "TIMING", "TODAY", "TOPIC", "UNIT", "VERDICT"]

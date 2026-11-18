@@ -213,6 +213,11 @@ def boot_time() -> float | None:
     return _booted[0]
 
 
+def utc_seconds(utc: str) -> float | None:
+    """Seconds since the epoch of a UTC time written `YYYY-MM-DDTHH:MM:SSZ`, or None."""
+    return _seconds(utc)
+
+
 def _seconds(utc: str) -> float | None:
     try:
         return float(calendar.timegm(time.strptime(utc, "%Y-%m-%dT%H:%M:%SZ")))
@@ -557,4 +562,4 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
 
 
 __all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run", "run_of",
-           "boot_time", "stop_recorded", "judge", "flags", "healths", "within", "views"]
+           "boot_time", "utc_seconds", "stop_recorded", "judge", "flags", "healths", "within", "views"]

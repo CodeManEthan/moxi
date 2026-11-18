@@ -804,3 +804,156 @@ def test_rows_carry_when_the_supervisor_was_read():
     before = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     at = read("/api/rows")["at"]
     assert before <= at <= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# --- one row's units and today's runs ----------------------------------------------------
+
+def test_a_socketless_systemd_daemons_unit_is_its_service():
+    a_daemon()
+    found = read("/api/row", "id=web")
+    assert found["unit"] == "moxi-services-web.service"
+    assert found["units"] == ["moxi-services-web.socket", "moxi-services-web.service"]
+    assert found["today"] is None
+
+
+def test_a_socket_daemons_unit_is_its_service_and_every_socket_is_listed(site, fake):
+    site.module("slots", SLOTS)
+    fake.sockets[("slots", "server")] = 1
+    found = read("/api/row", "id=slots/server")
+    assert found["unit"] == "moxi-slots-server.service"
+    assert found["units"] == ["moxi-slots-server.socket", "moxi-slots-server-1.socket",
+                              "moxi-slots-server.service"]
+
+
+def test_a_timers_unit_is_its_timer():
+    a_timer()
+    found = read("/api/row", "id=nightly")
+    assert found["unit"] == "moxi-services-nightly.timer"
+    assert found["units"] == ["moxi-services-nightly.timer", "moxi-services-nightly.service"]
+
+
+def test_an_adopted_rows_unit_is_its_own(fake):
+    from fake_units import Unit
+
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
+    assert acts.add_adopted("backup", "backup.service", enable=True).ok
+    found = read("/api/row", "id=backup")
+    assert (found["unit"], found["units"]) == ("backup.service", ["backup.service"])
+
+
+@pytest.mark.parametrize(("supervisor", "unit"), [
+    ("launchd", "moxi.services.web"), ("schtasks", "\\Moxi\\services\\web"),
+    (None, None)])
+def test_a_rows_unit_elsewhere_is_its_one_id(fake, supervisor, unit):
+    a_daemon()
+    fake.supervisor = supervisor
+    found = read("/api/row", "id=web")
+    assert found["unit"] == unit and found["units"] == ([unit] if unit else [])
+
+
+def now_line(code: int = 0) -> dict:
+    return {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "result": "ran",
+            "exit": code, "seconds": 1.0}
+
+
+OLD_LINE = {"at": "2020-01-01T12:00:00Z", "result": "ran", "exit": 0, "seconds": 1.0}
+
+
+def test_today_counts_a_timers_runs_on_this_machines_day_from_one_read(fake):
+    a_timer()
+    fake.written["nightly"].runs = [OLD_LINE, now_line(0), now_line(1), now_line(0)]
+    found = read("/api/row", "id=nightly")
+    assert found["today"] == {"runs": 3, "failed": 1, "more": False}
+    assert len(found["runs"]) == 4
+    reads = [c for c in fake.calls if c[0] == "last_runs"]
+    assert reads == [("last_runs", "services", "nightly", pagehandlers.TODAY_LINES)]
+
+
+def test_today_with_every_line_read_today_says_there_may_be_more(fake):
+    a_timer()
+    fake.written["nightly"].runs = [OLD_LINE] + [now_line()] * 600
+    found = read("/api/row", "id=nightly")
+    assert found["today"] == {"runs": 500, "failed": 0, "more": True}
+    assert len(found["runs"]) == pagehandlers.RUNS_SHOWN == 5
+
+
+def test_today_is_null_for_a_timer_whose_runs_no_run_line_records():
+    from services_kit import add, adopted
+
+    # An adopted timer off Linux: its runs are the supervisor's, recorded in no run line.
+    add(**adopted("backup", platform="darwin" if sys.platform != "darwin" else "win32"))
+    assert read("/api/row", "id=backup")["today"] is None
+
+
+# --- a unit not yet adopted --------------------------------------------------------------
+
+def unit_read(query: str) -> dict:
+    return read("/api/unit", query)
+
+
+def test_unit_reads_a_found_timer_which_adopting_wraps(fake):
+    from fake_units import Unit
+
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
+    assert unit_read("ref=backup.timer") == {
+        "found": True, "kind": "timer", "asks_kind": False, "enabled": True,
+        "active": True, "wraps": True, "refused": None}
+
+
+def test_unit_reads_a_found_service(fake):
+    from fake_units import Unit
+
+    fake.foreign["web.service"] = Unit("daemon", enabled=False, active=False)
+    assert unit_read("ref=web.service") == {
+        "found": True, "kind": "daemon", "asks_kind": False, "enabled": False,
+        "active": False, "wraps": False, "refused": None}
+
+
+def test_unit_says_a_missing_unit_is_not_found():
+    found = unit_read("ref=gone.service")
+    assert (found["found"], found["enabled"], found["active"], found["refused"]) == (
+        False, None, None, None)
+
+
+@pytest.mark.parametrize(("query", "says"), [
+    ("ref=moxi-notes-sync.service", "moxi's own unit namespace"),
+    ("ref=backup.socket", "is not a .service or a .timer"),
+    ("ref=backup.timer&kind=daemon", "backup.timer is a timer, not a service"),
+    ("ref=web.service&kind=timer", "web.service is a service, not a timer"),
+])
+def test_unit_refuses_what_adopting_refuses(fake, query, says):
+    found = unit_read(query)
+    assert says in found["refused"] and found["found"] is None
+    assert [c for c in fake.calls if c[0] == "status"] == []
+
+
+@pytest.mark.parametrize("supervisor", ["launchd", "schtasks"])
+def test_unit_asks_the_kind_where_the_supervisor_cannot_tell(fake, supervisor):
+    from fake_units import Unit
+
+    fake.supervisor = supervisor
+    fake.foreign["backup"] = Unit("timer", enabled=True)
+    found = unit_read("ref=backup")
+    assert (found["kind"], found["asks_kind"], found["wraps"]) == ("daemon", True, False)
+    found = unit_read("ref=backup&kind=timer")
+    assert (found["found"], found["kind"], found["asks_kind"]) == (True, "timer", True)
+    assert ("status", ("timer",)) not in fake.kinds
+    assert ("status", {"backup": "timer"}) in fake.kinds
+
+
+def test_unit_with_no_supervisor_is_refused(fake):
+    fake.supervisor = None
+    assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]
+
+
+def test_unit_that_the_supervisor_does_not_answer_is_not_said_found(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "STATUS_SECONDS", 0.05)
+    monkeypatch.setattr(pagehandlers.state, "read_foreign",
+                        lambda ref, kind: time.sleep(1))
+    found = unit_read("ref=backup.timer")
+    assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)
+
+
+def test_unit_is_the_desks_alone():
+    route = next(r for r in page.PAGE.routes if r.path == "/api/unit")
+    assert route.gateway is False and route.kind == "read"

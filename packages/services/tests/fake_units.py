@@ -81,11 +81,32 @@ class FakeUnits:
     locked: list = field(default_factory=list)
     #: the `kinds` each status read and act was given, by call, in order: (call, kinds).
     kinds: list = field(default_factory=list)
+    #: on systemd, the further socket units a daemon has, by (module, name): a count.
+    sockets: dict = field(default_factory=dict)
 
     # -- the calls services makes ------------------------------------------------------
 
     def backend(self):
         return self.supervisor
+
+    def ids(self, module, name, kind="daemon"):
+        """As the core names a unit here: on systemd a daemon's first socket unit
+        (whether or not it has one), each further socket, then its service; a timer's
+        timer then its service; a launchd label; a Task Scheduler path."""
+        if kind not in ("daemon", "timer"):
+            raise ValueError(f"kind is {kind!r}, not daemon or timer")
+        stem = f"moxi-{module}-{name}"
+        if self.supervisor == "systemd":
+            if kind == "timer":
+                return (f"{stem}.timer", f"{stem}.service")
+            more = self.sockets.get((module, name), 0)
+            return (f"{stem}.socket", *(f"{stem}-{k}.socket" for k in range(1, more + 1)),
+                    f"{stem}.service")
+        if self.supervisor == "launchd":
+            return (f"moxi.{module}.{name}",)
+        if self.supervisor == "schtasks":
+            return (f"\\Moxi\\{module}\\{name}",)
+        return ()
 
     def plan(self, module, *, only=None):
         self.calls.append(("plan", module, tuple(only or ())))

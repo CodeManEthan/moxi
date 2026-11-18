@@ -9,7 +9,9 @@
   server, `has_settings` on a module row whose module has settings, the last run's
   `exit` code, when its health check ran (`checked.at`) and a failing timer's
   `streak`; the list gains `at`, when the supervisor was read, and the stream sends it
-  again at least once a minute. A module row in `moxi
+  again at least once a minute. One row's read gains the unit that runs it, every id
+  the supervisor knows it by, and a timer's runs today; a new desk read says what the
+  supervisor knows of a unit not yet adopted. A module row in `moxi
   services show --json` gains a timer's `every`, `at` and `days`.
 - With the `ui` extra, a `project-facts` component reports each project's failed and
   warned services to the Projects page, and the opened project's `Services` row.

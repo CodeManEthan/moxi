@@ -17,7 +17,7 @@ from page_kit import LB
 
 # -- the table ------------------------------------------------------------------------------
 
-READS = {"/api/rows", "/api/row", "/api/projects", page.STATUS_ROUTE, "/api/events"}
+READS = {"/api/rows", "/api/row", "/api/unit", "/api/projects", page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
              "/api/disable", "/api/remove"}
 #: The routes the phone reaches: the reads but the project list, the stream, the status
@@ -47,7 +47,7 @@ def test_the_page_declares_its_reads_its_confirmed_acts_and_add():
 def test_the_gateway_reaches_the_reads_the_stream_the_status_and_six_acts():
     found = routes()
     assert {p for p, r in found.items() if r["gateway"]} == GATEWAY
-    for path in ("/api/add", "/api/remove", "/api/projects"):
+    for path in ("/api/add", "/api/remove", "/api/projects", "/api/unit"):
         assert found[path]["gateway"] is False, path
 
 
@@ -102,6 +102,7 @@ def test_every_string_leaf_is_plain_only_for_a_name_an_id_a_time_or_a_word():
               "/api/events rows.state", "/api/events rows.at",
               "/api/events rows.problems[].module",
               "/api/row runs[].at", "/api/row runs[].result",
+              "/api/row unit", "/api/row units[]", "/api/unit kind",
               "/api/projects projects[].key",
               "/api/status job", "/api/status act", "/api/status id", "/api/status state"}
     found = every_leaf()
@@ -115,7 +116,7 @@ def test_commands_are_redact_a_working_dir_path_and_every_sentence_redact():
               for leaf in ROW_REDACT}
     redact |= {"/api/rows detail", "/api/rows problems[].reason",
                "/api/events rows.detail", "/api/events rows.problems[].reason",
-               "/api/row log", "/api/projects reason",
+               "/api/row log", "/api/unit refused", "/api/projects reason",
                "/api/status lines[]", "/api/status fix"}
     path = {f"{where} {row}.cwd"
             for where, row in (("/api/rows", "rows[]"), ("/api/events", "rows.rows[]"),

@@ -107,6 +107,10 @@ HEALTH_AT_ONCE = 8
 REPUBLISH_S = 60.0
 #: The most run lines a failing timer's streak counts back through.
 STREAK_LINES = 50
+#: The most run lines one row's read takes for its count of today's runs.
+TODAY_LINES = 500
+#: The newest runs one row's read shows.
+RUNS_SHOWN = 5
 #: Seconds a page read, or the poller, waits for the supervisor.
 STATUS_SECONDS = 10.0
 #: Who a change from the page is recorded as made by.
@@ -391,22 +395,74 @@ def listing(call: Any) -> dict[str, Any]:
     return gather()
 
 
+def _local_day(utc: Any) -> tuple[int, int, int] | None:
+    seconds = verdict.utc_seconds(utc) if isinstance(utc, str) else None
+    return None if seconds is None else time.localtime(seconds)[:3]
+
+
+def count_today(lines: list[dict], *, limit: int = TODAY_LINES) -> dict[str, Any]:
+    """`lines`' runs on this machine's local day, of the newest `limit` read: how many,
+    how many failed, and `more` when every line read is today's, so there may be more."""
+    today = time.localtime()[:3]
+    ran = [line for line in lines if _local_day(line.get("at")) == today]
+    return {"runs": len(ran), "failed": sum(verdict.run_of(line).failed for line in ran),
+            "more": len(lines) >= limit and len(ran) == len(lines)}
+
+
 def row(call: Any) -> dict[str, Any]:
-    """`GET /api/row?id=ID`: one row, with a timer's newest runs and its log hint; 422
-    for an id that names no row."""
+    """`GET /api/row?id=ID`: one row, with a timer's newest runs, the count of its runs
+    today, the units the supervisor knows it by and its log hint; 422 for an id that
+    names no row."""
     try:
         found = acts.resolve(call.query["id"])
         view = verdict.views([found], status_seconds=STATUS_SECONDS,
                              known_health=_known_health())[0]
-        runs = state.last_runs(found, 5) if found.kind == "timer" else []
+        lines = state.last_runs(found, TODAY_LINES) if found.kind == "timer" else []
+        ids = list(state.unit_ids(found))
     except ServicesError as exc:
         raise _answer(exc) from None
+    runs = lines[-RUNS_SHOWN:]
     return {"row": row_value(view, settings=with_settings([found]),
                              checked_at=_checked_at(view),
                              streak=_streaks_of([view], is_every_row=False)[found.id]),
             "runs": [{"at": r.get("at"), "result": r.get("result"), "exit": r.get("exit"),
                       "seconds": r.get("seconds")} for r in runs],
-            "log": None if view.st is None else view.st.log}
+            "log": None if view.st is None else view.st.log,
+            "unit": state.unit_of(found),
+            "units": ids,
+            "today": count_today(lines) if state.keeps_runs(found) else None}
+
+
+def unit(call: Any) -> dict[str, Any]:
+    """`GET /api/unit?ref=REF&kind=KIND`: what the supervisor says of a unit not yet
+    adopted, for the adopt panel. `kind` is the person's choice where the supervisor
+    can't tell a unit's kind (launchd, Task Scheduler); on systemd the suffix decides
+    and a `kind` that disagrees is refused. A refusal is in `refused`, never a 422."""
+    ref, asked = call.query["ref"], call.query.get("kind")
+    backend = state.units.backend()
+    answer: dict[str, Any] = {"found": None, "kind": asked, "asks_kind": False,
+                              "enabled": None, "active": None, "wraps": False,
+                              "refused": None}
+    try:
+        kind = rows.check_ref(ref, backend, is_timer=asked == "timer")
+    except ServicesError as exc:
+        answer["refused"] = _text(exc)
+        return answer
+    answer.update(kind=kind, asks_kind=backend != "systemd")
+    if asked is not None and kind != asked:
+        answer["refused"] = f"{ref} is a {_KIND_WORDS[kind]}, not a {_KIND_WORDS[asked]}"
+        return answer
+    done, st = verdict.within(lambda: state.read_foreign(ref, kind), STATUS_SECONDS)
+    if not done or st is None or st.state in ("unknown", "nobackend"):
+        return answer
+    answer["found"] = st.state != "missing"
+    if answer["found"]:
+        answer.update(enabled=st.enabled, active=st.state == "active",
+                      wraps=backend == "systemd" and kind == "timer")
+    return answer
+
+
+_KIND_WORDS = {"daemon": "service", "timer": "timer"}
 
 
 def projects(call: Any) -> dict[str, Any]:
@@ -654,7 +710,8 @@ def _feed() -> _Feed:
 
 
 __all__ = ["BY", "DAEMON_STARTS", "HEALTH_PERIOD", "JOBS", "KEY_REUSED", "PERIOD",
-           "REPUBLISH_S", "SLOTS_SERVER", "STREAK_LINES", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "count_streak", "disable", "enable",
+           "REPUBLISH_S", "RUNS_SHOWN", "SLOTS_SERVER", "STREAK_LINES",
+           "TODAY_LINES", "STATUS_SECONDS", "TIMER_RUNS", "UNKNOWN", "add", "count_streak", "disable", "enable",
            "events", "every_row", "gather", "listing", "not_a_full_path", "projects",
            "remove", "restart", "row", "row_value", "run", "start", "status", "stop",
-           "with_settings"]
+           "count_today", "unit", "with_settings"]
