@@ -424,39 +424,6 @@ def open_home(page: Any) -> Any:
     return piece
 
 
-# The page's copies, kept where a test can read them back: Firefox grants no
-# `clipboard-read`, so off Chromium each document wraps `navigator.clipboard.writeText` to
-# keep the last text in `window.__copied`, then calls the real one. Guarded, so a second
-# run in the same document wraps nothing.
-_KEEP_COPIED = """(() => {
-  const clipboard = navigator.clipboard;
-  if (!clipboard || clipboard.__keepsCopied) return;
-  const write = clipboard.writeText.bind(clipboard);
-  clipboard.writeText = (text) => { window.__copied = text; return write(text); };
-  clipboard.__keepsCopied = true;
-})()"""
-
-
-def ready_copying(context: Any) -> None:
-    """Ready `context` for a test that reads back what its page copies: on Chromium,
-    grant `clipboard-read` and `clipboard-write`; on other engines, keep each copy in
-    every document the context opens from now on and in each page already open."""
-    if context.browser.browser_type.name == "chromium":
-        context.grant_permissions(["clipboard-read", "clipboard-write"])
-        return
-    context.add_init_script(_KEEP_COPIED)
-    for page in context.pages:
-        page.evaluate(_KEEP_COPIED)
-
-
-def copied(page: Any) -> str | None:
-    """The text `page` last copied, in a context `ready_copying` readied: the clipboard's
-    on Chromium, the document's kept copy elsewhere."""
-    if page.context.browser.browser_type.name == "chromium":
-        return page.evaluate("navigator.clipboard.readText()")
-    return page.evaluate("window.__copied ?? null")
-
-
 # --- Home's Sessions row ------------------------------------------------------------------
 
 

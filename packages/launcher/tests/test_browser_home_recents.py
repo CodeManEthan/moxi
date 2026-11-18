@@ -24,6 +24,8 @@ from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
@@ -253,7 +255,7 @@ def test_the_changed_line_sits_above_the_recents(page):
 
 
 def test_where_the_default_is_the_terminal_a_click_copies_the_recents_command(context, fake, shell):
-    kit.ready_copying(context)
+    _copying.ready_copying(context)
     page = context.pages[0]
     fake.script(supported={"ok": False, "why": "tmux is not on PATH"})
     piece = kit.open_home(page)
@@ -266,7 +268,7 @@ def test_where_the_default_is_the_terminal_a_click_copies_the_recents_command(co
     body = run_again(page, piece)
     assert body["values"]["target"] == "terminal" and "slot" in body["leave_out"], body
     expect(piece.locator('.said [data-line="copied"]')).to_have_text(COPIED)
-    command = kit.copied(page)
+    command = _copying.copied(page)
     assert command.startswith("moxi launcher run ") and brief in command, command
     assert len(fake.starts()) == before
 

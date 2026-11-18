@@ -25,6 +25,8 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets, store
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="the fake harness is a script run by its #! line")]
@@ -593,7 +595,7 @@ def test_a_launch_followed_to_the_end_of_its_watch_says_it_stopped_watching(fake
 # --- the terminal ---------------------------------------------------------------------------
 
 def test_your_terminal_copies_the_command_and_starts_nothing(fake, ui_context, ui_shell):
-    kit.ready_copying(ui_context)
+    _copying.ready_copying(ui_context)
     page = ui_context.pages[0]
     piece = kit.open_home(page)
     box = piece.locator("textarea")
@@ -607,7 +609,7 @@ def test_your_terminal_copies_the_command_and_starts_nothing(fake, ui_context, u
     expect(box).to_have_value(BRIEF)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Copy command")
-    command = kit.copied(page)
+    command = _copying.copied(page)
     assert command.startswith("moxi launcher run ") and BRIEF in command, command
     # The page ran nothing: no start, and no row until the user runs the command.
     assert (len(fake.starts()), _count(ui_shell)) == (before, rows)

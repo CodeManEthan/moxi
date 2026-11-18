@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- On a wide page a Settings row's control stays on its label's first line in any sans
+  face: the label and key take the width left beside the control and wrap there, the key
+  on a line of its own when it doesn't fit. A row laid out for Adwaita Sans's widths no
+  longer drops its control under the label in a wider face such as DejaVu Sans. At a
+  phone's width a control still drops under a label too long to share its line.
+- The test kit reads back what a page copied in any engine: `moxi_ui.testing.browser`'s
+  `ready_copying(context)` readies a browser context and `copied(page)` returns the text.
+  On Chromium it grants `clipboard-read` and `clipboard-write` and reads the clipboard.
+  Firefox refuses a `clipboard-read` grant and WebKit a `clipboard-write` one, so there it
+  returns the text the page last passed to `navigator.clipboard.writeText`.
 - A check's name reaches the phone with each path that starts a word, or follows `:` or
   `=`, with `/` or `~` cut to its last folder name. The gateway sends a kept row's `name`
   (`/m/ui/api/checks` and the topic `ui.checks`) that way, so Home's Health row on the
