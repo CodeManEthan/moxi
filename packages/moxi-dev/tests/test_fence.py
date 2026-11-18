@@ -163,7 +163,7 @@ def test_a_fenced_test_sees_the_real_supervisor_opt_in_as_pytest_started(
     pytester.makepyfile(test_probe=SUPERVISOR_PROBE)
     result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-s")
     result.assert_outcomes(passed=1)
-    assert f"opt-in: {value!r}" in result.outlines
+    result.stdout.fnmatch_lines([f"*opt-in: {value!r}"])
 
 
 def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
