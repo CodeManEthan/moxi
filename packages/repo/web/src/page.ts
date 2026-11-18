@@ -33,16 +33,18 @@ import { css, html, LitElement, noChange, nothing } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api } from "/m/ui/client.js";
+import { api, navigate } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
-import type { RecordRow, Repos } from "./feed.ts";
+import type { Command, RecordRow, Repos } from "./feed.ts";
 import {
   NOTHING_OPEN, noSuchRepo, pageState, parseRoute, pathToWrite, READING_AFTER_MS, REFRESH_MS, rowAddress, rowNamed,
 } from "./frame-model.ts";
 import type { Address, PageState } from "./frame-model.ts";
 import { foldedLine, itemsOf, timeWords, verdict } from "./items-model.ts";
 import type { Item, Verdict } from "./items-model.ts";
+import { openedView, turnOffView } from "./opened-model.ts";
+import type { AutoView, EventView, OpenedView, PieceLine, RulesView, TodayLine } from "./opened-model.ts";
 import { piecesView } from "./pieces-model.ts";
 import type { PiecesView } from "./pieces-model.ts";
 import { reposView } from "./rows-model.ts";
@@ -61,6 +63,15 @@ const SHOW = "Show";
 const HIDE = "Hide";
 const COPY = "Copy";
 const COPIED = "Copied";
+const TURN_OFF = "Turn off";
+const OR_REMOVE = "Or remove";
+const SETTINGS = "Settings";
+const TODAY = "Today";
+const AUTO_COMMIT = "Auto-commit";
+const RULES = "Rules";
+const GIT = "Git";
+const COMMANDS = "Commands";
+const SETTINGS_LINK = "Settings › repo";
 /** How long a `Copy` reads `Copied`, in milliseconds. */
 const COPIED_MS = 1500;
 
@@ -136,12 +147,35 @@ const STYLES = css`
          color: var(--moxi-text-dim); }
   .one button { flex: none; color: var(--moxi-text-dim); }
 
+  /* The opened repo: one labelled row each, the label dim at the left, an act at the
+     right; a line's first phrase in the text's colour and the rest dim. */
+  .det { min-width: 0; margin: 9px 0 3px; padding-top: 8px; border-top: 1px solid var(--moxi-border);
+         font-size: 13px; line-height: 18px; cursor: auto; }
+  .det .r { display: grid; grid-template-columns: 118px minmax(0, 1fr); padding: 3px 0; align-items: baseline; }
+  .det .r > .k { color: var(--moxi-text-dim); }
+  .det .r > .f { min-width: 0; }
+  .det .line + .line, .det .f > .sub + .line { margin-top: 3px; }
+  .det .sub { display: block; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .det .tm { display: inline-block; min-width: 46px; font-variant-numeric: tabular-nums; }
+  .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 118px; }
+  .det .foot button { color: var(--moxi-text-dim); }
+  .det .foot button.on { color: var(--moxi-text); }
+  .det .cmds { padding: 6px 0 0 118px; }
+  .det .cmds .cmd + .cmd { margin-top: 4px; }
+  /* Turn off: the one block in the warning colour, its Copy buttons too. */
+  .off { margin: 6px 0 4px; padding: 8px 0 8px 12px; border-left: 2px solid var(--moxi-warn); color: var(--moxi-warn); }
+  .off p + p, .off .cmd { margin-top: 4px; }
+  .off .q { font-weight: 600; font-size: 14px; line-height: 20px; }
+  .off code { color: var(--moxi-warn); }
+  .off .act { color: var(--moxi-warn); }
   .pc { padding-top: 10px; }
   .pc .d.git { margin-left: 6px; }
   .said { padding-top: 10px; color: var(--moxi-text-dim); }
 
   @media (max-width: 720px) {
     :host { padding-top: 10px; }
+    .det .r { grid-template-columns: minmax(0, 1fr); }
+    .det .foot, .det .cmds { padding-left: 0; }
     .grp { display: block; padding: 8px 0 10px; }
     .grp.rows { padding: 4px 0 6px; }
     /* The label above its lines, its act beside it at the right. */
@@ -187,6 +221,14 @@ export class RepoPage extends LitElement {
   #foldShown = false;
   /** The items whose record's whole text is shown, by item key. */
   #recordsShown = new Set<string>();
+  /** The pieces whose settings are shown, by `<root>\n<id>`. */
+  #settingsShown = new Set<string>();
+  /** The opened repo's `Rules` lines are shown. */
+  #rulesShown = false;
+  /** The opened repo's `Commands` are shown. */
+  #commandsShown = false;
+  /** The piece whose `Turn off` block is open, as `<root>\n<id>`. */
+  #turnOff: string | null = null;
   /** An address that named no repo: the dim line at the foot. */
   #unknown: string | null = null;
   /** The opened row takes the view once drawn. */
@@ -307,6 +349,9 @@ export class RepoPage extends LitElement {
   /** Nothing is open. */
   #close(): void {
     this.#open = null;
+    this.#rulesShown = false;
+    this.#commandsShown = false;
+    this.#turnOff = null;
     this.#openAdd = false;
     this.#adding = false;
     this.#piecesShown = false;
@@ -439,13 +484,13 @@ export class RepoPage extends LitElement {
   #repos(drawn: Drawn, acts: boolean) {
     const view = drawn.repos;
     return html`<section class="grp rows" data-group="repos"><div class="gk">${REPOS}</div><div class="gl">
-      ${repeat(view.rows, (row) => row.key, (row) => this.#row(row, acts))}
+      ${repeat(view.rows, (row) => row.key, (row) => this.#row(row, drawn, acts))}
       ${view.noHooks !== null ? html`<div class="one" data-line="no-hooks"><span>${view.noHooks.text}</span></div>`
         : nothing}
     </div></section>`;
   }
 
-  #row(row: RowView, acts: boolean) {
+  #row(row: RowView, drawn: Drawn, acts: boolean) {
     const open = acts && this.#open === row.key;
     const values = {
       name: row.name, where: row.where === "" ? null : row.where, fact: row.fact, "fact-heavy": flag(row.factHeavy),
@@ -456,8 +501,133 @@ export class RepoPage extends LitElement {
       ${acts && row.open ? html`<button type="button" slot="acts-one" class="do" data-action="open"
         aria-expanded=${open ? "true" : "false"} @click=${() => this.#toggle(row)}>${open ? CLOSE : OPEN}</button>`
         : nothing}
-      ${open ? html`<div data-part="opened"></div>` : nothing}
+      ${open && row.repo !== null ? this.#opened(row, drawn) : nothing}
     </moxi-ui-row>`;
+  }
+
+  // -- the opened repo ---------------------------------------------------------------------
+
+  #opened(row: RowView, drawn: Drawn) {
+    const repo = row.repo;
+    if (repo === null) return nothing;
+    const value = drawn.value;
+    const view = openedView(repo, row.items, value.offered, { home: value.home, today: value.today });
+    return html`<div class="det" data-part="opened">
+      ${view.events.map((one) => this.#event(row, one, drawn))}
+      ${view.today.length > 0 ? html`<div class="r" data-part="today"><span class="k">${TODAY}</span><div class="f">
+        ${view.today.map((line) => this.#todayLine(row, line))}</div></div>` : nothing}
+      ${view.autos.length > 0 ? html`<div class="r" data-part="auto-commit"><span class="k">${AUTO_COMMIT}</span>
+        <div class="f">${view.autos.map((auto) => this.#auto(row, auto))}</div></div>` : nothing}
+      ${view.rules !== null ? this.#rules(view.rules) : nothing}
+      <div class="r" data-part="git"><span class="k">${GIT}</span><div class="f"><span data-line="git">${view.git}</span>
+        ${view.moved !== null ? html`<span class="sub" data-line="moved">${view.moved}</span>` : nothing}</div></div>
+      ${this.#foot(row, view)}
+    </div>`;
+  }
+
+  #event(row: RowView, one: EventView, drawn: Drawn) {
+    return html`<div class="r" data-event=${one.event}><span class="k">${one.label}</span><div class="f">
+      ${one.pieces.map((line) => this.#pieceLine(row, line, drawn))}
+      ${one.chain !== null ? html`<span class="sub" data-line="chain">${one.chain}</span>` : nothing}
+      ${one.own !== null ? html`<span class="sub" data-line="own">${one.own}</span>` : nothing}
+    </div></div>`;
+  }
+
+  #pieceLine(row: RowView, line: PieceLine, drawn: Drawn) {
+    const key = `${row.key}\n${line.piece.id}`;
+    const [head, ...rest] = line.text.split(" · ");
+    const settingsShown = this.#settingsShown.has(key);
+    const offOpen = this.#turnOff === key;
+    return html`<div data-piece=${line.piece.id}>
+      <div class="line"><span><span data-line="piece">${head}</span>${rest.length > 0
+        ? html`<span class="d"> · ${rest.join(" · ")}</span>` : nothing}</span>${line.act === "turn-off"
+        ? html`<button type="button" class="act ${offOpen ? "on" : ""}" data-action="turn-off"
+          aria-expanded=${offOpen ? "true" : "false"} @click=${() => this.#toggleTurnOff(key)}>${TURN_OFF}</button>`
+        : nothing}</div>
+      ${line.settings.length > 0 && line.tucked ? html`<div class="line"><span class="d">${SETTINGS}</span><button
+        type="button" class="act" data-action="show-settings" aria-expanded=${settingsShown ? "true" : "false"}
+        @click=${() => this.#toggleIn(this.#settingsShown, key)}>${settingsShown ? HIDE : SHOW}</button></div>` : nothing}
+      ${line.settings.length > 0 && (!line.tucked || settingsShown)
+        ? line.settings.map((setting) => html`<span class="sub" data-line="setting">${setting}</span>`) : nothing}
+      ${offOpen ? this.#turnOffBlock(row, line, drawn) : nothing}
+    </div>`;
+  }
+
+  #turnOffBlock(row: RowView, line: PieceLine, drawn: Drawn) {
+    if (row.repo === null) return nothing;
+    const view = turnOffView(line, row.repo, drawn.value.offered, drawn.value.home);
+    const key = `${row.key}\n${line.piece.id}`;
+    return html`<div class="off" data-part="turn-off">
+      <p class="q">${view.title}</p>
+      ${view.stops !== null ? html`<p>${view.stops}</p>` : nothing}
+      <p>${view.stays}</p>
+      ${this.#command(TURN_OFF, view.toggle, `off:${key}`)}
+      ${this.#command(OR_REMOVE, view.remove, `remove:${key}`)}
+      <p data-line="note">${view.note}</p>
+    </div>`;
+  }
+
+  /** A command with its label and `Copy`. */
+  #command(label: string, command: Command, what: string) {
+    return html`<div class="cmd" data-line="command"><span><span class="lbl">${label}</span> <code>${command.command}</code></span>${
+      this.#copyButton(what, command.command)}</div>`;
+  }
+
+  #todayLine(row: RowView, line: TodayLine) {
+    const key = `today:${row.key}\n${line.record.kind}\n${line.record.at}\n${line.record.piece ?? line.record.spec}`;
+    const shown = this.#recordsShown.has(key);
+    return html`<div data-line="today"><div class="line"><span><span class="tm d">${line.time}</span>${line.what}</span>
+        <button type="button" class="act" data-action="show-record" aria-expanded=${shown ? "true" : "false"}
+          @click=${() => this.#toggleRecord(key)}>${shown ? HIDE : SHOW}</button></div>
+      <span class="sub"><span class="tm"></span>${line.first}</span>
+      ${shown ? recordText(line.record) : nothing}</div>`;
+  }
+
+  #auto(row: RowView, auto: AutoView) {
+    const key = `${row.key}\n${auto.spec.name}`;
+    return html`<div data-spec=${auto.spec.name}>
+      <div class="line"><span><span>${auto.spec.name}</span>${auto.state !== null
+        ? html`<span class="d" data-line="state"> ${auto.state}</span>` : nothing}</span></div>
+      ${auto.lines.map((line) => html`<span class="sub" data-line="auto">${line}</span>`)}
+      ${this.#command(auto.run.label, auto.run, `run:${key}`)}
+      ${this.#command(auto.forget.label, auto.forget, `forget:${key}`)}
+    </div>`;
+  }
+
+  #rules(rules: RulesView) {
+    const shown = this.#rulesShown;
+    return html`<div class="r" data-part="rules"><span class="k">${RULES}</span><div class="f">
+      <div class="line"><span data-line="rules">${rules.head}</span>${rules.lines.length > 0 ? html`<button type="button"
+        class="act" data-action="show-rules" aria-expanded=${shown ? "true" : "false"}
+        @click=${() => { this.#rulesShown = !shown; this.requestUpdate(); }}>${shown ? HIDE : SHOW}</button>` : nothing}</div>
+      ${shown && rules.lines.length > 0 ? html`<pre data-line="rules-text">${rules.lines.join("\n")}</pre>
+        ${rules.after.map((line) => html`<span class="sub">${line}</span>`)}` : nothing}
+    </div></div>`;
+  }
+
+  #foot(row: RowView, view: OpenedView) {
+    const shown = this.#commandsShown;
+    return html`<div class="foot" data-part="foot">
+        ${view.project !== null ? html`<button type="button" data-action="project"
+          @click=${() => navigate("projects", `open/${encodeURIComponent(view.project ?? "")}`)}>Project ${view.project}</button>`
+          : nothing}
+        <button type="button" data-action="settings" @click=${() => navigate("ui", "settings/repo")}>${SETTINGS_LINK}</button>
+        <button type="button" data-action="show-commands" aria-expanded=${shown ? "true" : "false"}
+          @click=${() => { this.#commandsShown = !shown; this.requestUpdate(); }}>${COMMANDS} · ${shown ? HIDE : SHOW}</button>
+      </div>
+      ${shown ? html`<div class="cmds" data-part="commands">${view.commands.map((command) =>
+        this.#command(command.label, command, `command:${row.key}\n${command.label}`))}</div>` : nothing}`;
+  }
+
+  #toggleTurnOff(key: string): void {
+    this.#turnOff = this.#turnOff === key ? null : key;
+    this.requestUpdate();
+  }
+
+  #toggleIn(set: Set<string>, key: string): void {
+    if (set.has(key)) set.delete(key);
+    else set.add(key);
+    this.requestUpdate();
   }
 
   // -- Pieces ------------------------------------------------------------------------------
