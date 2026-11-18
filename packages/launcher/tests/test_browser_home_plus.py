@@ -3,8 +3,9 @@ server. `Continue the last session` offers only a session the shell's own user m
 place the line names, and resumes it in a slot with the lines under the box while the box
 keeps its text; a brief from a file turns the box off and launches with that file as the
 first turn; a handoff from a file, or one a preset names, is on its line under the box,
-goes in the launch beside the box's text, and `Clear` takes it out until a preset is picked
-again, when that preset's handoff is back on the line and in the launch.
+goes in the launch beside the box's text, and `Clear` takes it out of the next launch or
+copied command only: after that, or once a preset is picked, the preset's handoff is back
+on the line and in the launch.
 
 The shell runs the fake slots in slots' place and fake `claude` and `codex` first on its
 `PATH`, so no launch or resume starts a real session.
@@ -23,11 +24,14 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="the fake harness is a script run by its #! line")]
 
 PREVIEW = "/m/launcher/api/preview"
+COPIED = "Copied. Paste it in your terminal."
 SESSIONS = "/m/launcher/api/sessions?limit=20"
 RESUME = "/m/launcher/api/resume"
 
@@ -313,5 +317,62 @@ def test_a_clear_covers_one_launch_and_the_next_launch_or_preset_shows_and_sends
         assert (body["seat"], body["values"]["handoff"]) == ("alpha", str(mine)), body
         assert row.handoff_path == str(mine), row
         expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
+    finally:
+        file.unlink()
+
+
+def copy_command(page, piece, brief: str) -> tuple[dict, str]:
+    """Presses `Copy command` with `brief` in the box; returns the request it sent and the
+    command it copied."""
+    piece.locator(".go:not([disabled])").wait_for()
+    piece.locator("textarea").fill(brief)
+    with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    expect(piece.locator('.said [data-line="copied"]')).to_have_text(COPIED)
+    return json.loads(sent.value.post_data), _copying.copied(page)
+
+
+def test_a_clear_covers_one_copied_command_and_the_next_shows_and_sends_its_handoff(
+        context, shell, work_dir):
+    _copying.ready_copying(context)
+    page = context.pages[0]
+    alpha, mine = (work_dir / f"{name}-handoff.md" for name in ("alpha", "mine"))
+    for path in (alpha, mine):
+        path.write_text(f"{path.name}\n", encoding="utf-8")
+    file = presets.path(env=shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[seat.alpha]\nharness = "claude"\nhandoff = "{alpha}"\n')
+    try:
+        piece = kit.open_home(page)
+        line = piece.locator("[data-handoff]")
+        pick_seat(piece, "alpha")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
+        piece.locator(".more").click()
+        piece.locator('[data-menu="run"] button[data-run="Your terminal"]').click()
+        expect(piece.locator(".go")).to_have_text("Copy command")
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        # Cleared, then copied: that command leaves the preset's handoff out.
+        body, command = copy_command(page, piece, "first")
+        assert body["values"]["target"] == "terminal", body
+        assert "handoff" not in body["values"] and "handoff" in body["leave_out"], body
+        assert "--seat alpha" in command and "--leave-out handoff" in command, command
+        # The copied command was the launch the Clear was made for: alpha's handoff shows
+        # again and the next command sends it.
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/alpha-handoff.md")
+        body, command = copy_command(page, piece, "second")
+        assert (body["seat"], body["values"]["handoff"]) == ("alpha", str(alpha)), body
+        assert "handoff" not in body["leave_out"], body
+        assert "--seat alpha" in command and "--leave-out handoff" not in command, command
+        # One set through the + stays after a copied command, as a brief file does.
+        menu = plus_menu(page, piece)
+        entry(menu, "Handoff from a file").click()
+        field = menu.get_by_role("textbox", name="Path to a handoff file")
+        field.fill(str(mine))
+        field.press("Enter")
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/mine-handoff.md")
+        body, command = copy_command(page, piece, "third")
+        assert body["values"]["handoff"] == str(mine) and str(mine) in command, (body, command)
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/mine-handoff.md")
     finally:
         file.unlink()

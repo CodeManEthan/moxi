@@ -468,15 +468,16 @@ filled from the preset and `[defaults]` as the page's form is. The first turn is
 Home shows: the text in the box, and a handoff on its line under the box. A brief your
 `[defaults]` or the preset set does not go with a launch from the box; a handoff they
 name shows on that line, with `Clear`, and goes with the launch unless you clear it. A
-`Clear` covers the next launch only: once it starts, or you pick a preset, the handoff
-shows again and goes. A handoff from the `+` stays when you pick a preset and goes after
-the launch that sent it, as a brief file does. An empty box with no handoff starts
-a session with no first turn. The `+` beside the chip takes a brief from a file instead,
-which turns the box off while it is set, takes a handoff from a file, and offers to
-continue your last session in the place on the line; with `Scratch` on the line there is
-none to continue. A slot or headless launch is previewed and handed to a detached job as
-on the page, and a line under the box says where it started, or why it failed or was
-refused. A terminal launch is not run: its command is copied for you to paste.
+`Clear` covers the next launch only: once it starts or its command is copied, or you pick
+a preset, the handoff shows again and goes. A handoff from the `+` stays when you pick a
+preset or copy a command, and goes after the launch that sent it, as a brief file does.
+An empty box with no handoff starts a session with no first turn. The `+` beside the chip
+takes a brief from a file instead, which turns the box off while it is set, takes a
+handoff from a file, and offers to continue your last session in the place on the line;
+with `Scratch` on the line there is none to continue. A slot or headless launch is
+previewed and handed to a detached job as on the page, and a line under the box says
+where it started, or why it failed or was refused. A terminal launch is not run: its
+command is copied for you to paste.
 
 `Options` beside the chip opens a panel with the form's other rows, in groups, with a
 find field. Each row you change there is named on a `Changed` line under the box, with

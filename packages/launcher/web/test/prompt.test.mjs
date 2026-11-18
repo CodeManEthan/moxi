@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  briefFileOf, buttonWords, handoffAtLaunch, handoffAtPreset, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  briefFileOf, buttonWords, handoffAtCopy, handoffAtLaunch, handoffAtPreset, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, SCRATCH_PICK, takesScratch, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -644,6 +644,23 @@ test("a Clear covers the one launch it was made for; after it, or a preset chang
   assert.equal(handoffAtLaunch("/srv/other.md", "/srv/mine.md"), "/srv/other.md");
   assert.equal(handoffAtLaunch(null, null), null);
   assert.equal(handoffAtPreset(null), null);
+});
+
+test("a command copied with a Clear lets go of it, so the next shows and sends the form's handoff; a + one stays", () => {
+  const alpha = [...FORM_FIELDS, field("handoff", { type: "path", value: "/home/alice/handoffs/alpha.md" })];
+  const setOf = (held) => (held === null ? SET : { ...SET, handoff: held });
+  // Cleared for the command copied: let go, so alpha's handoff shows and goes with the next.
+  const held = handoffAtCopy("", "");
+  assert.equal(held, null);
+  assert.equal(handoffOf(alpha, setOf(held)), "/home/alice/handoffs/alpha.md");
+  assert.equal(launchRequest(alpha, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/alpha.md");
+  // A Clear made after the press covers the next command, not the one copied.
+  assert.equal(handoffAtCopy("", null), "");
+  assert.equal(handoffAtCopy("", "/srv/mine.md"), "");
+  // One set through the + stays after a copy, as a brief file does, and so does a fill.
+  assert.equal(handoffAtCopy("/srv/mine.md", "/srv/mine.md"), "/srv/mine.md");
+  assert.equal(handoffAtCopy("/srv/other.md", ""), "/srv/other.md");
+  assert.equal(handoffAtCopy(null, null), null);
 });
 
 test("a handoff alone, with an empty box and no brief file, is the launch's first turn", () => {

@@ -584,6 +584,16 @@ export function handoffAtLaunch(handoff: string | null, sent: string | null): st
   return sent !== null && handoff === sent ? null : handoff;
 }
 
+/**
+ * The handoff the piece holds once a launch went out as a copied command, given the one it
+ * held at the press (`sent`): a Clear ("") made for that launch is let go, as after a launch
+ * that started, so the form's own shows again and goes with the next launch. One set through
+ * the `+` stays, as a brief file and the box's text do after a copy.
+ */
+export function handoffAtCopy(handoff: string | null, sent: string | null): string | null {
+  return sent === "" && handoff === "" ? null : handoff;
+}
+
 /** The built-in tools the Options panel draws a line for, in its order. No route lists a
  * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
 export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
