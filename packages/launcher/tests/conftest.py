@@ -13,7 +13,8 @@ from moxi import config
 from moxi_launcher import names, settings, startup
 
 #: Why a test marked `slot_target` is skipped on native Windows.
-SLOT_TARGET_SKIP = "the slot target needs slots, which runs on Linux and WSL2, not native Windows"
+SLOT_TARGET_SKIP = ("the slot target needs slots, which runs on Linux, macOS and WSL2, "
+                    "not native Windows")
 
 
 def pytest_configure(config):
