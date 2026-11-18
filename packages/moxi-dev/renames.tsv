@@ -13347,6 +13347,8 @@ turns	packages/turns/src/moxi_turns/claude_setup.py	data = json.dumps({"command"
 turns	packages/turns/src/moxi_turns/claude_setup.py	if not any(p.path == key and p.state == "ok" for p in done):	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_setup.py	install_plugins	name	folder	marketplace_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	installed = set() if moved else {	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_setup.py	out, _ = proc.communicate(timeout=timeout_s)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/claude_setup.py	proc.wait(timeout=1.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/claude_setup.py	return any(isinstance(p, dict) and p.get("scope") == "user"	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_setup.py	rows	name	folder	plugin_root_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	write_endpoint_file	name	out	fh
@@ -13687,11 +13689,11 @@ turns	packages/turns/src/moxi_turns/page.py	"pid": lb.Out("int", nullable=True),
 turns	packages/turns/src/moxi_turns/page.py	"sessions": lb.Out("list", items=SESSION),	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	"stale": _FLAG,	keep	stale	stale
 turns	packages/turns/src/moxi_turns/page.py	"trouble": lb.Out("string", mark="redact", nullable=True),	keep	nullable=	nullable=
-turns	packages/turns/src/moxi_turns/page.py	#: finished; `detail` is null unless the last scan failed; `sessions` is newest first.	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	AGENTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	FACTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	GET /api/events     the stream; its one topic, `sessions`, is the same list without	keep	sessions	sessions
-turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "at": _MAYBE_WHEN})	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	REACH = lb.Out("table", nullable=True, items={"claude": _MAYBE, "codex": _FLAG})	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "session_id": _MAYBE,	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	TOPIC = "sessions"	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
@@ -13705,7 +13707,6 @@ turns	packages/turns/src/moxi_turns/pagehandlers.py	__all__ = ["FIRST_S", "event
 turns	packages/turns/src/moxi_turns/pagehandlers.py	await self.snapshot.changed()	use	changed	on_changed
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.kick.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.loop.call_soon_threadsafe(self.kick.set)	keep	set	set
-turns	packages/turns/src/moxi_turns/pagereader.py	"""The list now: `listed`, `detail` and `sessions`, newest first."""	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	"stale": _need(facts.stale, _flag, "facts.stale"),	keep	stale	stale
 turns	packages/turns/src/moxi_turns/pagereader.py	# A session `sessions()` found knows its capabilities from its probe's hello; reading	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	- one scanner thread calls `sessions()` every `RESCAN_S` seconds, since no central registry	keep	sessions	sessions
@@ -13722,9 +13723,9 @@ turns	packages/turns/src/moxi_turns/pagereader.py	held = list(self._held.values(
 turns	packages/turns/src/moxi_turns/pagereader.py	held = self._held.get(key)	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	held = self._held[key] = _Held(self, key, session)	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	held, self._held = list(self._held.values()), {}	keep	_held	_held
+turns	packages/turns/src/moxi_turns/pagereader.py	if facts.stale is not True:	keep	stale	stale
 turns	packages/turns/src/moxi_turns/pagereader.py	if self._held.get(held.key) is not held:	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	if self._started:	keep	_started	_started
-turns	packages/turns/src/moxi_turns/pagereader.py	return {"listed": listed, "detail": detail, "sessions": rows}	keep	sessions	sessions
 turns	packages/turns/src/moxi_turns/pagereader.py	rows = [one.row() for one in self._held.values()]	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	self._dropped = {k: t for k, t in self._dropped.items() if t > now}	keep	_dropped	_dropped
 turns	packages/turns/src/moxi_turns/pagereader.py	self._dropped: dict[str, float] = {}	keep	_dropped	_dropped
@@ -13741,6 +13742,7 @@ turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._failed(self, "wat
 turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._failed(self, name, exc)	use	_failed	_on_failed
 turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._gone(self, gone)	use	gone	said=gone
 turns	packages/turns/src/moxi_turns/pagereader.py	self.stopped.set()	keep	set	set
+turns	packages/turns/src/moxi_turns/pagereader.py	while the ledger moved (`stale`) is read again at once, up to `STALE_REREADS` times;	keep	stale	stale
 turns	packages/turns/src/moxi_turns/procs.py	seen: set[int] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/protocol.py	"""Ask the version 1 endpoint in `directory` for its hello, with version 1's own line	keep	directory	directory
 turns	packages/turns/src/moxi_turns/protocol.py	"""The `hello.json` in `directory` as a dict, or None when it is missing or does not	keep	directory	directory
@@ -13900,8 +13902,9 @@ turns	packages/turns/tests/test_bound_grant.py	ep, fake = make_endpoint(session_
 turns	packages/turns/tests/test_bound_grant.py	held.set()	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	release.set()	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	return turns.launch_additions(harness, cwd="/work", env={"HOME": "/home/someone"}, **kw)	keep	HOME	HOME
-turns	packages/turns/tests/test_browser_page.py	assert any(SESSIONS in url for url in check.requests), check.requests	keep	any	any
+turns	packages/turns/tests/test_browser_page.py	assert any("/m/turns/api/sessions" in url for url in check.requests), check.requests	keep	any	any
 turns	packages/turns/tests/test_browser_page.py	expect(found).to_have_count(1, timeout=APPEAR_MS)	keep	timeout	timeout
+turns	packages/turns/tests/test_browser_page.py	expect(reach).to_have_text(START_SMALL, timeout=20_000)	keep	timeout	timeout
 turns	packages/turns/tests/test_browser_page.py	expect(rows(panel)).to_have_count(2, timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_browser_page.py	expect(state).to_have_attribute("data-state", "empty", timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	"environ"})	keep	environ	environ
@@ -14271,18 +14274,20 @@ turns	packages/turns/tests/test_opencode_host.py	until(lambda: seen.extend(_drai
 turns	packages/turns/tests/test_opencode_host.py	while not isinstance(events.get(timeout=5), TurnEnded):	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	world.fake.compacted(h.session_id)	keep	compacted	compacted
 turns	packages/turns/tests/test_opencode_host.py	world.fake.sessions.clear()	keep	sessions	sessions
-turns	packages/turns/tests/test_page.py	"listed": True, "detail": None, "sessions": []}	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	"""A session stand-in whose facts readings are stale for the first `stale` reads."""	keep	stale	stale
 turns	packages/turns/tests/test_page.py	"turn": None, "agents": 0, "draft": False, "at": time.time(), "stale": False,	keep	stale	stale
+turns	packages/turns/tests/test_page.py	"turn_started_at", "agents", "draft", "stale",	keep	stale	stale
+turns	packages/turns/tests/test_page.py	@pytest.mark.parametrize(("stale", "calls", "kept_stale"), [	keep	stale	stale
 turns	packages/turns/tests/test_page.py	[row] = data["sessions"]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert data["listed"] is True and data["sessions"] == []	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	assert facts.stale is kept_stale	keep	stale	stale
 turns	packages/turns/tests/test_page.py	assert facts["agents"] == 1 and facts["draft"] is False and facts["stale"] is False	keep	stale	stale
-turns	packages/turns/tests/test_page.py	assert list(page.FACTS.items) == ["turn_number", "turn_open", "agents", "draft", "stale",	keep	stale	stale
 turns	packages/turns/tests/test_page.py	assert list(routes["/api/events"]["topics"]) == ["sessions"]	keep	sessions	sessions
-turns	packages/turns/tests/test_page.py	assert list(routes["/api/sessions"]["returns"]) == ["now", "listed", "detail", "sessions"]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert name == "sessions"	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert name == "sessions" and keys(data) == [a.dir.name]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert not set(page.SESSION.items) & {"address", "dir", "nonce", "endpoint_pid", "earlier"}	keep	set	set
 turns	packages/turns/tests/test_page.py	assert out["refused"].startswith("turns' page needs the ui module")	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert pagehandlers._reader_now._held[key].ended is not None	keep	_held	_held
 turns	packages/turns/tests/test_page.py	assert pagereader.read_error(set()) is None	keep	set	set
 turns	packages/turns/tests/test_page.py	assert reader.value()["sessions"] == []	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	assert routes["/api/events"]["topics"]["sessions"]["items"] == {	keep	sessions	sessions
@@ -14292,10 +14297,17 @@ turns	packages/turns/tests/test_page.py	assert set(module.OPTIONAL) == {"codex",
 turns	packages/turns/tests/test_page.py	assert {"deliver", "agents", "steer"} <= set(row["capabilities"])	keep	set	set
 turns	packages/turns/tests/test_page.py	await stream.until(lambda d: len(d["sessions"]) == 2, 5)	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	by `sessions()` through a `hello.json` of its own. `answers[method]` is called with the	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	ep.turn_started("t-held", None, held=True)	keep	held=	held=
 turns	packages/turns/tests/test_page.py	failing.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	held = pagehandlers._reader_now._held[key]	keep	_held	_held
+turns	packages/turns/tests/test_page.py	held.dirty.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	if check(data):	keep	ok	ok
 turns	packages/turns/tests/test_page.py	inner = lb.app(page.PAGE, module="turns", server_id=SERVER_ID, strict=True)	keep	strict	strict
 turns	packages/turns/tests/test_page.py	monkeypatch.setattr(client, "sessions", broken)	keep	sessions	sessions
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held[key].dirty.set()	keep	_held	_held
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held[key].dirty.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	reach.go.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	return SimpleNamespace(stale=self.calls <= self.stale, n=self.calls)	keep	stale	stale
 turns	packages/turns/tests/test_page.py	return [row["key"] for row in data["sessions"]]	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	return next((row for row in data["sessions"] if row["key"] == key), None)	keep	sessions	sessions
 turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
@@ -14303,6 +14315,9 @@ turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=Tr
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	super().set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dirty.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.go.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.stale = stale	keep	stale	stale
+turns	packages/turns/tests/test_page.py	until(lambda: any(r and r["claude"] == "start" for r in notified))	keep	any	any
 turns	packages/turns/tests/test_settings.py	assert cli.main(["config", "turns", "show", "--json"]) == 0	keep	show	show
 turns	packages/turns/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
 turns	packages/turns/tests/test_settings.py	assert not any(hurt["stays"] for hurt in hurts.values())	keep	any	any
@@ -16582,3 +16597,10 @@ rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
+turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
+turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_browser_states.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	first.listed(set(), reach="absent")	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	panel.listed(set())	keep	set	set
+turns	packages/turns/tests/test_browser_states.py	texts = set()	keep	set	set
