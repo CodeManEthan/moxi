@@ -402,7 +402,10 @@ The steps the workflow runs:
   resolves, or only at `--resolution`, and reports a sibling the resolver had to raise
   above its floor, with what raised it. An extra left out is reported, not failed; a required sibling with no
   published version it admits refuses, naming it. Before any test runs, the run fails if
-  the package imports from anywhere but the venv's site-packages.
+  the package imports from anywhere but the venv's site-packages. The suite runs with
+  `MOXI_TEST_TIMED=hold`, over any value the job had, so its timed tests are held as the
+  land check (`moxi-dev check`) holds them and run only in `moxi-dev timed`; a timing
+  bound never runs on the release's runner.
 
 ## GitHub's side
 
