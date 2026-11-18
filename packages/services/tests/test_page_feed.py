@@ -101,12 +101,12 @@ def test_the_first_event_is_every_row_and_a_change_comes_at_the_next_tick(monkey
             name, data = await stream.next(5)
             assert stream.status == 200 and name == "rows"
             assert data["state"] == "up"
-            assert [(r["id"], r["state"]) for r in data["rows"]] == [("services/web",
-                                                                      "active")]
+            assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
+                == [("services/web", "active", None)]
             await asyncio.to_thread(acts.stop, "web")
             _, data = await stream.next(5)
-            assert [(r["id"], r["state"]) for r in data["rows"]] == [("services/web",
-                                                                      "inactive")]
+            assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
+                == [("services/web", "inactive", "stopped")]
         finally:
             await stream.close()
 

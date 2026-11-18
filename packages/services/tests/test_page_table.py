@@ -86,7 +86,7 @@ def every_leaf() -> dict[str, str | None]:
 #: Within one row: the string leaves that are a name, an id, a time or a word of a fixed
 #: set, and so carry no mark.
 ROW_PLAIN = {"id", "module", "name", "form", "kind", "project", "switch", "verdict.state",
-             "state", "since", "last_run.at", "checked.state", "unit", "schedule",
+             "verdict.cause", "state", "since", "last_run.at", "checked.state", "unit", "schedule",
              "stopped", "platform"}
 ROW_REDACT = {"doc", "verdict.reason", "verdict.fix", "detail", "last_run.text",
               "checked.line", "argv[]", "health[]"}
@@ -152,16 +152,18 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert done.stdout.strip() == "[]"
 
 
-def test_the_components_are_the_page_and_the_home_summary_block():
+def test_the_components_are_the_page_the_home_summary_block_and_the_project_facts():
     from moxi_services import module
 
-    assert set(module.COMPONENTS) == {"page", "summary"}
+    assert set(module.COMPONENTS) == {"page", "summary", "project-facts"}
     for name, decl in module.COMPONENTS.items():
         assert decl["script"] == f"{name}.js"
         assert decl["contract"] == 1
     assert module.COMPONENTS["page"]["place"] == "page"
     summary = module.COMPONENTS["summary"]
     assert summary["place"] == "block" and summary["home"] is True
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}
 
 
 def test_the_page_states_its_group_and_order_among_the_pages():
