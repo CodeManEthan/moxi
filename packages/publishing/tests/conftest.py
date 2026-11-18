@@ -234,10 +234,11 @@ class Fake:
             return 200, {"default_branch": self.default_branch}
         if rest[:2] == ["actions", "workflows"]:
             # Every run at the commit, whatever event or branch the query names, so the
-            # gate's own reading of each run is what a test holds.
+            # gate's own reading of each run is what a test holds. A run may give another
+            # commit as its own, as a wrong answer would.
             sha = query.get("head_sha", [""])[0]
-            runs = [{"id": f"{sha}-{n}", "head_sha": sha, "event": run["event"],
-                     "head_branch": run["branch"]}
+            runs = [{"id": f"{sha}-{n}", "head_sha": run.get("head_sha", sha),
+                     "event": run["event"], "head_branch": run["branch"]}
                     for n, run in enumerate(self.runs.get(sha, []))]
             return 200, {"workflow_runs": runs}
         if rest[:2] == ["actions", "runs"]:

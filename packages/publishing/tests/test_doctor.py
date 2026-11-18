@@ -311,6 +311,14 @@ def test_the_push_url_is_read_as_git_pushes_to_it(repo, names):
         states(repo)[0][1]
 
 
+def test_one_reducing_push_url_of_several_is_enough(repo, names):
+    standing(repo)
+    git(repo, "config", "--add", "remote.origin.pushurl", "git@example.test:mirror.git")
+    git(repo, "config", "--add", "remote.origin.pushurl", "git@github.com:operator/proj-a")
+    assert states(repo) == [("ok", "marked public; the three pieces are enabled; standing "
+                                   "branches: ci/* ci-full/*")]
+
+
 def test_no_origin_warns(repo, names):
     standing(repo, None)
     assert states(repo)[0] == (

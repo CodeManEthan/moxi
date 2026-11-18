@@ -395,6 +395,35 @@ def test_a_standing_push_to_a_local_remote_asks_for_the_word(worded):
     refused(done, "this repo wants the word", "goes to ")
 
 
+def test_a_push_with_no_ref_line_needs_the_word(worded, monkeypatch):
+    outcome = hook(worded, URL, monkeypatch=monkeypatch)
+    assert outcome.kind == "refuse"
+    assert "this repo wants the word" in said(outcome)
+    assert "this push carries no ref line" in said(outcome)
+
+
+def test_a_standing_push_with_no_word_still_goes_out_only_at_the_tip(worded, monkeypatch):
+    base = head(worded)
+    git(worded, "switch", "-q", "topic")
+    commit(worded, "Ahead")
+    line = f"refs/heads/topic {base} refs/heads/ci/topic {ZERO}"
+    outcome = hook(worded, URL, line, monkeypatch=monkeypatch)
+    assert outcome.kind == "refuse"
+    assert "goes out only at the tip of refs/heads/topic" in said(outcome)
+    assert "wants the word" not in said(outcome)
+
+
+def test_a_standing_push_with_no_word_is_still_scanned(worded, monkeypatch):
+    git(worded, "switch", "-q", "topic")
+    commit(worded, "A name", text="bobsecret\n")
+    named = head(worded)
+    outcome = hook(worded, URL, ci_line(worded), monkeypatch=monkeypatch)
+    assert outcome.kind == "refuse"
+    assert f"{named[:12]} note.md:1: private-names/private-name" in said(outcome)
+    assert "wants the word" not in said(outcome)
+    assert log_lines() == []
+
+
 # -- main moves only to a commit whose check passed on a standing branch -------------------
 
 SSH = """#!/bin/sh
@@ -479,6 +508,21 @@ def test_main_may_move_to_an_earlier_commit_that_passed(mainline, served):
     commit(mainline, "Later")
     refused(run(mainline, "push", "-q", "origin", "main"), "no ci.yml run")
     passed(run(mainline, "push", "-q", "origin", f"{passed_at}:refs/heads/main"))
+
+
+def test_main_moved_from_any_local_ref_waits_for_the_check(mainline, served):
+    tip = head(mainline)
+    git(mainline, "branch", "topic")
+    for source in (tip, "topic"):
+        refused(run(mainline, "push", "-q", "origin", f"{source}:refs/heads/main"),
+                f"no ci.yml run from a push to ci/* at {tip[:12]}")
+
+
+def test_a_run_that_gives_another_commit_does_not_count(mainline, served):
+    tip = head(mainline)
+    served.runs[tip] = [{"event": "push", "branch": "ci/main", "head_sha": "f" * 40,
+                         "jobs": [("linux", "success")]}]
+    refused(run(mainline, "push", "-q", "origin", "main"), "no ci.yml run")
 
 
 def test_main_without_its_settings_is_refused(mainline, served):
