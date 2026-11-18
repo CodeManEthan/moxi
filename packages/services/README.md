@@ -112,10 +112,11 @@ project lists every service filed under it in a `Services` row, first while one 
 - **The list.** Every row, grouped by project, with its verdict and reason, its health
   check's last result, its switch or on/off, and since when it runs or how its last run
   went. Open a row to see its command, unit, directory, schedule and the supervisor's own
-  words. The page and the home's block follow the rows as they change: while either is
-  open, services' page server reads the supervisor every 5 seconds and runs the health
-  checks every 30, at most eight at a time, and it keeps doing so for a while after the
-  last one closes, until the server stops when idle.
+  words. The page, the home's block and the Projects page's project facts follow the
+  rows as they change: while any of them is open, services' page server reads the
+  supervisor every 5 seconds and runs the health checks every 30, at most eight at a
+  time, and it keeps doing so for a while after the last one closes, until the server
+  stops when idle.
 - **Acts.** Start, stop and restart for a daemon, run now and run again for a timer,
   enable and disable, and remove for a row you added. Each opens the shell's confirm
   sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent
