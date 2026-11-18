@@ -350,7 +350,7 @@ def put(path, data):
     path.write_text(json.dumps(data) if not isinstance(data, str) else data)
 
 
-def tick_file(machine="mini-1", **kw):
+def tick_file(machine="host-b", **kw):
     return {"format": 1, "machine": machine, "started": "2026-11-18T14:00:00Z",
             "tick_version": 1, "commit": None, "steps": {}, "failure": None,
             "not_settled": None, "summary": None, "exit": 0, "invocation": None, **kw}
@@ -358,7 +358,7 @@ def tick_file(machine="mini-1", **kw):
 
 @pytest.fixture
 def host(tmp_path):
-    return tmp_path / "moxi-timed-mini-1" / "mini-1"
+    return tmp_path / "moxi-timed-host-b" / "host-b"
 
 
 @pytest.fixture
@@ -371,38 +371,38 @@ def run(started):
 
 
 def test_take_adds_merges_and_keeps(host, rec):
-    put(host / f"{SHA1}.json", commit_file("mini-1", SHA1, [run("a")],
+    put(host / f"{SHA1}.json", commit_file("host-b", SHA1, [run("a")],
                                            {"t": {"3.1": {"outcome": "passed", "run": "a"}}},
                                            ["t"], "a"))
-    put(host / f"{SHA2}.json", commit_file("mini-1", SHA2, [run("a"), run("b")],
+    put(host / f"{SHA2}.json", commit_file("host-b", SHA2, [run("a"), run("b")],
                                            {"t": {"3.1": {"outcome": "failed", "run": "b"}}},
                                            ["t"], "b"))
-    put(rec / "mini-1" / f"{SHA2}.json", commit_file(
-        "mini-1", SHA2, [run("a")], {"t": {"3.1": {"outcome": "passed", "run": "a"}}},
+    put(rec / "host-b" / f"{SHA2}.json", commit_file(
+        "host-b", SHA2, [run("a")], {"t": {"3.1": {"outcome": "passed", "run": "a"}}},
         ["t"], "a"))
-    put(rec / "mini-1" / f"{SHA3}.json", commit_file("mini-1", SHA3, [run("z")], {}))
+    put(rec / "host-b" / f"{SHA3}.json", commit_file("host-b", SHA3, [run("z")], {}))
     put(host / f"{SHA1}.json.part", "half")
     put(host / f".syncthing.{SHA1}.json.tmp", "half")
-    code, _ = timed_record.take(host, rec, "mini-1", own="alpha")
+    code, _ = timed_record.take(host, rec, "host-b", own="alpha")
     assert code == 0
-    assert json.loads((rec / "mini-1" / f"{SHA1}.json").read_text())["runs"] == [run("a")]
-    two = json.loads((rec / "mini-1" / f"{SHA2}.json").read_text())
+    assert json.loads((rec / "host-b" / f"{SHA1}.json").read_text())["runs"] == [run("a")]
+    two = json.loads((rec / "host-b" / f"{SHA2}.json").read_text())
     assert [one["started"] for one in two["runs"]] == ["a", "b"]
     assert two["tests"]["t"]["3.1"]["outcome"] == "failed"
-    assert (rec / "mini-1" / f"{SHA3}.json").is_file()
-    assert not list((rec / "mini-1").glob("*.part")) and \
-        not list((rec / "mini-1").glob(".syncthing*"))
+    assert (rec / "host-b" / f"{SHA3}.json").is_file()
+    assert not list((rec / "host-b").glob("*.part")) and \
+        not list((rec / "host-b").glob(".syncthing*"))
 
 
 def test_an_older_host_file_with_fewer_runs_loses_none_of_the_record(host, rec):
-    put(rec / "mini-1" / f"{SHA1}.json", commit_file(
-        "mini-1", SHA1, [run("a"), run("b")],
+    put(rec / "host-b" / f"{SHA1}.json", commit_file(
+        "host-b", SHA1, [run("a"), run("b")],
         {"t": {"3.1": {"outcome": "failed", "run": "b"}}}, ["t", "u"], "b"))
     put(host / f"{SHA1}.json", commit_file(
-        "mini-1", SHA1, [run("a")], {"t": {"3.1": {"outcome": "passed", "run": "a"}}},
+        "host-b", SHA1, [run("a")], {"t": {"3.1": {"outcome": "passed", "run": "a"}}},
         ["t"], "a"))
-    assert timed_record.take(host, rec, "mini-1", own="alpha")[0] == 0
-    data = json.loads((rec / "mini-1" / f"{SHA1}.json").read_text())
+    assert timed_record.take(host, rec, "host-b", own="alpha")[0] == 0
+    data = json.loads((rec / "host-b" / f"{SHA1}.json").read_text())
     assert [one["started"] for one in data["runs"]] == ["a", "b"]
     assert data["tests"]["t"]["3.1"]["outcome"] == "failed"
     assert data["collected"] == ["t", "u"]
@@ -411,34 +411,34 @@ def test_an_older_host_file_with_fewer_runs_loses_none_of_the_record(host, rec):
 def test_take_adds_a_tick_file_once_and_reads_only_the_name_form(host, rec):
     put(host / "ticks" / "20261118T140000Z.json", tick_file(exit=2))
     put(host / "ticks" / "2026-11-18T14:00:00Z.json", tick_file())
-    put(rec / "mini-1" / "ticks" / "20261118T150000Z.json", tick_file(exit=0))
+    put(rec / "host-b" / "ticks" / "20261118T150000Z.json", tick_file(exit=0))
     put(host / "ticks" / "20261118T150000Z.json", tick_file(exit=1))
-    assert timed_record.take(host, rec, "mini-1", own="alpha")[0] == 0
-    ticks = sorted(path.name for path in (rec / "mini-1" / "ticks").iterdir())
+    assert timed_record.take(host, rec, "host-b", own="alpha")[0] == 0
+    ticks = sorted(path.name for path in (rec / "host-b" / "ticks").iterdir())
     assert ticks == ["20261118T140000Z.json", "20261118T150000Z.json"]
-    assert json.loads((rec / "mini-1/ticks/20261118T150000Z.json").read_text())["exit"] == 0
+    assert json.loads((rec / "host-b/ticks/20261118T150000Z.json").read_text())["exit"] == 0
 
 
 def test_take_refuses_another_machine_an_unknown_format_and_its_own_name(host, rec):
-    put(host / f"{SHA1}.json", commit_file("mini-2", SHA1, [], {}))
-    put(host / f"{SHA2}.json", {**commit_file("mini-1", SHA2, [], {}), "format": 9})
-    put(host / f"{SHA3}.json", commit_file("mini-1", SHA3, [run("a")], {}))
+    put(host / f"{SHA1}.json", commit_file("host-c", SHA1, [], {}))
+    put(host / f"{SHA2}.json", {**commit_file("host-b", SHA2, [], {}), "format": 9})
+    put(host / f"{SHA3}.json", commit_file("host-b", SHA3, [run("a")], {}))
     put(host / "ticks" / "20261118T140000Z.json", tick_file(format=9))
-    code, said = timed_record.take(host, rec, "mini-1", own="alpha")
+    code, said = timed_record.take(host, rec, "host-b", own="alpha")
     assert code == 2
     assert sum("not taken" in line for line in said) == 3
-    assert (rec / "mini-1" / f"{SHA3}.json").is_file()
+    assert (rec / "host-b" / f"{SHA3}.json").is_file()
     assert timed_record.take(host, rec, "alpha", own="alpha")[0] == 2
 
 
 def test_take_with_nothing_to_take_exits_0_and_with_its_results_dir_gone_exits_2(host, rec):
-    assert timed_record.take(host, rec, "mini-1", own="alpha") == (2, [
+    assert timed_record.take(host, rec, "host-b", own="alpha") == (2, [
         f"the results folder {host.parent} is gone"])
     host.parent.mkdir()
-    code, said = timed_record.take(host, rec, "mini-1", own="alpha")
+    code, said = timed_record.take(host, rec, "host-b", own="alpha")
     assert code == 0 and said[0].startswith("nothing to take")
     host.mkdir()
-    assert timed_record.take(host, rec, "mini-1", own="alpha")[0] == 0
+    assert timed_record.take(host, rec, "host-b", own="alpha")[0] == 0
 
 
 def test_collected_comes_from_the_file_whose_complete_run_is_later():
@@ -449,16 +449,16 @@ def test_collected_comes_from_the_file_whose_complete_run_is_later():
 
 
 def test_take_merges_while_its_parent_holds_the_run_lock(repo, host):
-    put(host / f"{SHA1}.json", commit_file("mini-1", SHA1, [run("a")], {}))
+    put(host / f"{SHA1}.json", commit_file("host-b", SHA1, [run("a")], {}))
     lock = record_dir(repo) / ".run-lock"
     lock.parent.mkdir(parents=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
-        code, _ = timed_record.take(host, record_dir(repo), "mini-1", own="alpha")
+        code, _ = timed_record.take(host, record_dir(repo), "host-b", own="alpha")
     finally:
         os.close(fd)
-    assert code == 0 and (record_dir(repo) / "mini-1" / f"{SHA1}.json").is_file()
+    assert code == 0 and (record_dir(repo) / "host-b" / f"{SHA1}.json").is_file()
 
 
 def test_the_record_and_the_tick_agree_on_the_tick_files_format():
@@ -499,19 +499,19 @@ def shown(repo, rec, **kw):
 def test_each_machine_on_its_own_its_own_first_and_machine_picks_one(repo, rec):
     tip = commits(repo, 1)[0]
     machine_file(rec, "alpha", tip, {"t": {"1": result("passed")}}, collected=["t"])
-    machine_file(rec, "mini-1", tip, {"t": {"1": result("failed")}}, collected=["t"])
+    machine_file(rec, "host-b", tip, {"t": {"1": result("failed")}}, collected=["t"])
     code, by, reports = shown(repo, rec)
-    assert [report["machine"] for report in reports] == ["alpha", "mini-1"]
-    assert by["alpha"]["verdict"] == 0 and by["mini-1"]["verdict"] == 1 and code == 1
+    assert [report["machine"] for report in reports] == ["alpha", "host-b"]
+    assert by["alpha"]["verdict"] == 0 and by["host-b"]["verdict"] == 1 and code == 1
     assert shown(repo, rec, machine="alpha")[0] == 0
 
 
 def test_no_complete_run_stays_out_of_the_exit_unless_a_counted_failure(repo, rec):
     tip = commits(repo, 1)[0]
     machine_file(rec, "alpha", tip, {"t": {"1": result("passed")}}, collected=["t"])
-    machine_file(rec, "mini-1", tip, {"t": {"1": result("not measured")}})
+    machine_file(rec, "host-b", tip, {"t": {"1": result("not measured")}})
     code, by, _ = shown(repo, rec)
-    assert by["mini-1"]["verdict"] is None and code == 0
+    assert by["host-b"]["verdict"] is None and code == 0
     lines = timed_show.render(list(by.values()), "main", tip, 7, "alpha")
     assert any("no complete run" in line for line in lines)
     machine_file(rec, "alpha", tip, {"t": {"1": result("failed")}})
@@ -528,11 +528,11 @@ SCHED = [{"started": "r0", "slack": 3.1, "kind": "scheduled"}]
     ("3.1", "failed", 1), ("4", "failed", 1), ("1", "failed", 3)])
 def test_a_result_counts_against_the_machines_set_factor(repo, rec, factor, outcome, code):
     tip = commits(repo, 1)[0]
-    machine_file(rec, "mini-1", tip, {"t": {factor: result(outcome)}},
+    machine_file(rec, "host-b", tip, {"t": {factor: result(outcome)}},
                  runs=[*SCHED, {"started": "r1", "slack": float(factor), "kind": "hand"}],
                  collected=["t"])
     got, by, _ = shown(repo, rec)
-    assert by["mini-1"]["set_factor"] == 3.1
+    assert by["host-b"]["set_factor"] == 3.1
     assert got == code
 
 
@@ -574,22 +574,22 @@ def test_the_walk_its_window_the_test_set_and_the_failure_range(repo, rec):
 
 def test_each_machines_newest_tick_and_an_older_tick_version(repo, rec, monkeypatch):
     tip = commits(repo, 1)[0]
-    machine_file(rec, "mini-1", tip, {"t": {"1": result("passed")}}, collected=["t"])
-    put(rec / "mini-1" / "ticks" / "20261118T140000Z.json",
-        tick_file(exit=2, failure="moxi-dev timed tick: mini-1: lock failed: held"))
-    put(rec / "mini-1" / "ticks" / "20261118T150000Z.json",
+    machine_file(rec, "host-b", tip, {"t": {"1": result("passed")}}, collected=["t"])
+    put(rec / "host-b" / "ticks" / "20261118T140000Z.json",
+        tick_file(exit=2, failure="moxi-dev timed tick: host-b: lock failed: held"))
+    put(rec / "host-b" / "ticks" / "20261118T150000Z.json",
         tick_file(exit=3, not_settled="differs README.md"))
     monkeypatch.setattr(tick, "TICK_VERSION", 2)
     _, by, _ = shown(repo, rec)
     lines = timed_show.render(list(by.values()), "main", tip, 7, "alpha")
     text = "\n".join(lines)
     assert "exit 3; not measured: tree not settled: differs README.md" in text
-    assert "tick 1, this moxi-dev's 2; run schedule again on mini-1" in text
+    assert "tick 1, this moxi-dev's 2; run schedule again on host-b" in text
 
 
 def test_the_strict_line_states_coverage(repo, rec):
     tip = commits(repo, 1)[0]
-    machine_file(rec, "mini-1", tip, {name: {"3.1": result("passed")} for name in "abc"},
+    machine_file(rec, "host-b", tip, {name: {"3.1": result("passed")} for name in "abc"},
                  runs=SCHED, collected=["a", "b", "c"])
     _, _, reports = shown(repo, rec)
     assert timed_show.strict_line("alpha", reports, tip).startswith(
