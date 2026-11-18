@@ -705,6 +705,31 @@ def test_a_package_with_no_collected_test_has_nothing_to_read(repo, rec):
     assert timed_show.strict_line("alpha", reports, tip, "turns") == nothing
 
 
+def test_a_machine_s_newest_measured_commit_is_its_package_s_newest(repo, rec):
+    old, tip = commits(repo, 2)[::-1]
+    machine_file(rec, "alpha", old, {"c1": {"1": result("passed", package="comms")},
+                                      "s1": {"1": result("passed", package="sessions")}},
+                 collected=["c1", "s1"])
+    # A hand run of another package alone at the tip.
+    machine_file(rec, "alpha", tip, {"s1": {"1": result("passed", package="sessions")}})
+    machine_file(rec, "host-b", tip, {"s2": {"1": result("passed", package="sessions")}},
+                 collected=["s2"])
+    _, by, _ = shown(repo, rec)
+    assert (by["alpha"]["newest_commit"], by["alpha"]["behind"]) == (tip, 0)
+    _, by, reports = shown(repo, rec, package="comms")
+    assert (by["alpha"]["newest_commit"], by["alpha"]["behind"]) == (old, 1)
+    assert (by["host-b"]["newest_commit"], by["host-b"]["behind"]) == (None, None)
+    lines = timed_show.render(reports, "main", tip, 7, "alpha", package="comms")
+    assert (f"alpha: set factor 1 | newest measured commit {old[:12]}, 1 commits behind"
+            in lines)
+    assert "host-b: set factor 1 | no result of comms on the walk" in lines
+    # A package no machine has a result of, read from a machine with no record: the strict
+    # line still picks a set among machines with no newest commit.
+    _, _, reports = shown(repo, rec, package="turns")
+    assert all(report["newest_commit"] is None for report in reports)
+    assert timed_show.strict_line("gamma", reports, tip, "turns").startswith(
+        "turns has no timed test collected by a complete run")
+
 def test_json_carries_the_package(repo, rec, monkeypatch, capsys):
     tip = commits(repo, 1)[0]
     two_packages(rec, tip)

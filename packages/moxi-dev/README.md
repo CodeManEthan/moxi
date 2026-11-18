@@ -300,12 +300,14 @@ package's directory under `packages/` or its distribution name, as `moxi-dev tim
 no package there exits 2. Results are picked by the package each was filed under at its
 run, so after a package is renamed or moved its old name is unknown and its new name has
 nothing to read until a complete run at the new path. Every part of the reading counts
-that package's tests alone: each machine's set, its outcomes, the failures that make the
-exit 1 and the strict line. When the set the strict line reads holds none of the
-package's tests, the line in its place is `<name> has no timed test collected by a
-complete run on the walk to <commit>; nothing to read`, and the exit is 0, or 3 when no
-machine has a complete run. A test that landed after the newest complete run isn't in
-its set yet, so a release reads that line beside the package's own `timed` marks.
+that package's tests alone: each machine's set, its outcomes, its newest measured commit
+(its newest record holding one of the package's results, or `no result of <name> on the
+walk`), the failures that make the exit 1 and the strict line. When the set the strict
+line reads holds none of the package's tests, the line in its place is `<name> has no
+timed test collected by a complete run on the walk to <commit>; nothing to read`, and the
+exit is 0, or 3 when no machine has a complete run. A test that landed after the newest
+complete run isn't in its set yet, so a release reads that line beside the package's own
+`timed` marks.
 `--json` carries `package`, the name given or null.
 
 `moxi-dev timed take DIR --machine NAME` merges another machine's record, `DIR` being that

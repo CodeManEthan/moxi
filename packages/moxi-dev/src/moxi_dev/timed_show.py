@@ -37,8 +37,10 @@ the directory name at the run, never by the node id, so no name reads results fi
 under a directory that tree no longer has. Every part of the reading counts that
 package's tests and no other's: each machine's set is its `collected` list cut to the
 ids whose results name the package, a machine with no complete run lists only that
-package's outcomes, a failure lifts the exit only when it is that package's, and the
-strict line counts that package's tests alone. When the set the strict line reads holds
+package's outcomes, a failure lifts the exit only when it is that package's, a
+machine's newest measured commit is its newest record on the walk holding one of that
+package's results (`no result of <name> on the walk` with none), and the strict line
+counts that package's tests alone. When the set the strict line reads holds
 none of the package's tests, the line in its place is `<name> has no timed test
 collected by a complete run on the walk to <commit>; nothing to read`. A machine whose
 cut set is empty has nothing unsettled and reads 0; with no complete run on any machine
@@ -181,9 +183,13 @@ def machine_report(name: str, machine_dir: Path, walk_shas: Sequence[str],
             tick = timed_record.read_tick(ticks[-1])
         except timed_record.RecordError as exc:
             unreadable.append(str(exc))
-    newest_sha = records[0][0]
+    if package is None:
+        newest_sha: str | None = records[0][0]
+    else:
+        newest_sha = next((sha for sha, data in records if data["tests"]), None)
+    behind = None if newest_sha is None else list(walk_shas).index(newest_sha)
     return {"machine": name, "set_factor": set_factor, "complete": complete,
-            "newest_commit": newest_sha, "behind": list(walk_shas).index(newest_sha),
+            "newest_commit": newest_sha, "behind": behind,
             "tests": reported, "tick": tick, "verdict": verdict,
             "unreadable": unreadable}
 
@@ -197,7 +203,8 @@ def strict_line(own: str, reports: Sequence[dict[str, Any]], tip: str,
     if mine is not None and mine["complete"]:
         base = mine
     else:
-        base = min(sets, key=lambda report: report["behind"], default=mine)
+        base = min(sets, key=lambda report: (report["behind"] is None,
+                                             report["behind"] or 0), default=mine)
     total = len(base["tests"]) if base else 0
     if package is not None and not total:
         return (f"{package} has no timed test collected by a complete run on the walk to "
@@ -265,8 +272,13 @@ def render(reports: Sequence[dict[str, Any]], rev: str, tip: str, days: float,
         lines.append(strict)
     for report in reports:
         name, set_factor = report["machine"], report["set_factor"]
-        lines.append(f"{name}: set factor {set_factor:g} | newest measured commit "
-                     f"{report['newest_commit'][:12]}, {report['behind']} commits behind")
+        if report["newest_commit"] is None:
+            lines.append(f"{name}: set factor {set_factor:g} | no result of {package} on "
+                         f"the walk")
+        else:
+            lines.append(f"{name}: set factor {set_factor:g} | newest measured commit "
+                         f"{report['newest_commit'][:12]}, {report['behind']} commits "
+                         f"behind")
         lines += _tick_lines(name, report["tick"])
         if not report["complete"]:
             lines.append("  no complete run in the window; outcomes found:")
