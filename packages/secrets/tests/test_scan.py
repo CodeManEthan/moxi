@@ -379,6 +379,11 @@ IMPORT_LOADS = frozenset({
     "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",
     "re._casefix", "re._compiler", "re._constants", "re._parser", "_sre", "struct",
     "_struct",
+    # What those modules import in turn. A Linux venv's startup (its `site`) has loaded
+    # these already, so the import adds none of them there; under `python -S` none are
+    # loaded, and on Windows the import loads them itself.
+    "operator", "_operator", "collections", "_collections", "functools", "_functools",
+    "itertools", "keyword", "types", "reprlib",
     # On Windows `platform` loads `_wmi`, and `fnmatch` loads `posixpath`, which is not
     # `os.path` there.
     *(("_wmi", "posixpath") if sys.platform == "win32" else ()),
