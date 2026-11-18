@@ -880,6 +880,9 @@ def test_a_changed_reach_is_published_once_and_an_unchanged_one_not():
     reach = Reaches("setup")
     notified = []
     one = pagereader.Reader(rescan_s=0.1, reach=reach, reach_soon_s=0.1)
+    # The scan publishes too (its first listing, and whatever it finds), and its value
+    # carries the reach read so far. With no scan, every publish here is the reach's own.
+    one._scan = lambda: None
     one.listen(lambda: notified.append(one.value()["reach"]))
     try:
         one.start()
