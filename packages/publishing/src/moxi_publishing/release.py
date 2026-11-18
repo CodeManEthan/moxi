@@ -357,6 +357,12 @@ FENCE = "moxi-dev"
 #: The test tools the fence runs beside, installed at uv.lock's versions with it, since
 #: `--no-deps` leaves out the ones its own requirements would bring.
 FENCE_TOOLS = ("pytest", "pytest-xdist", "pytest-timeout")
+#: The fence's variable for timed tests. The suite runs with it at `hold`, as `moxi-dev
+#: check` runs its suites: every `timed` test is deselected after the package's own `-m`
+#: and `-k`, so a timing bound never runs on a release runner, and timed tests run only in
+#: `moxi-dev timed`.
+TIMED_ENV = "MOXI_TEST_TIMED"  # noqa: MX2 -- the fence is a dev tool publishing never imports
+TIMED_HOLD = "hold"
 
 _INSTALLED = ("import json, importlib.metadata as m\n"
               "print(json.dumps({d.metadata['Name']: [d.version, d.requires or []]\n"
@@ -659,7 +665,7 @@ def _run_once(plan: ReleaseTest, resolution: str, *, uv: str, run, web) -> tuple
         shutil.copyfile(site_check.__file__, os.path.join(plugin, SITE_CHECK + ".py"))
         env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "VIRTUAL_ENV")}
         env.update({site_check.NAMES_ENV: ",".join(plan.imports), "PYTHONPATH": plugin,
-                    "PYTHONSAFEPATH": "1"})
+                    "PYTHONSAFEPATH": "1", TIMED_ENV: TIMED_HOLD})
         try:
             done = run([python, "-m", "pytest", "-p", SITE_CHECK, "-p", "no:cacheprovider"],
                        cwd=os.path.join(plan.root, plan.member_path), env=env,
@@ -690,7 +696,9 @@ def ci_siblings(path: str, name: str, *, artifact: str, resolution: str | None =
     published siblings and its test tools at uv.lock's versions, and the test fence from
     the checkout without its requirements when its dev group names it; once at the
     newest published siblings it admits and once at the lowest set that resolves, or only
-    at `resolution`. Raises `Failure`."""
+    at `resolution`. The suite runs with `MOXI_TEST_TIMED=hold`, over any value the job
+    had, so its timed tests are held as the land check holds them and run only in
+    `moxi-dev timed`. Raises `Failure`."""
     import shutil
 
     from moxi_publishing import tags
