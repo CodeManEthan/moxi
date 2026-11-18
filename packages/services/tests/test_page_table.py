@@ -20,9 +20,9 @@ from page_kit import LB
 READS = {"/api/rows", "/api/row", "/api/unit", "/api/projects", page.STATUS_ROUTE, "/api/events"}
 CONFIRMED = {"/api/start", "/api/stop", "/api/restart", "/api/run", "/api/enable",
              "/api/disable", "/api/remove"}
-#: The routes the phone reaches: the reads but the project list, the stream, the status
-#: route and every confirmed act on a row but remove.
-GATEWAY = (READS - {"/api/projects"}) | (CONFIRMED - {"/api/remove"})
+#: The routes the phone reaches: the reads but the project list and the unit read, the
+#: stream, the status route and every confirmed act on a row but remove.
+GATEWAY = (READS - {"/api/projects", "/api/unit"}) | (CONFIRMED - {"/api/remove"})
 
 
 def routes() -> dict[str, dict]:
