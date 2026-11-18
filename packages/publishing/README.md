@@ -114,10 +114,25 @@ Nothing leaves a public repo unless every ref the push moves follows these rules
 | a tag shaped like a release tag (`<package>-v<version>`) | never moved or deleted; created only when it is a release tag of a member at its commit and passes the tag gate ([Releases](#releases)), read against the tracking ref of `main` |
 | any other tag or ref | a `free-ref` pattern names it; then it is created, moved or deleted freely |
 
-Every ref pushed points at a commit or a tag of one, a push creates at most three tags
-(GitHub starts nothing for a push that creates more), and each ref name goes through
+Every ref pushed points at a commit or a tag of one, and each ref name goes through
 secrets' sets. A `free-ref` pattern never applies to a branch or a release tag, even one
 written into git config by hand. GitHub's rulesets still hold on the server.
+
+### Pushing tags
+
+A push creates at most one tag, of any kind: a release tag, or a tag a `free-ref`
+pattern names. A push that creates two or more is refused whole, naming the count, so
+push them one at a time:
+
+```sh
+git push origin proj-a-v0.1.0
+git push origin proj-b-v0.3.1
+```
+
+Each tag then gets its own push event and its own release run, and no release waits on
+another tag of the same push. (GitHub starts nothing at all for the tags of a push that
+creates more than three.) Moving or deleting a `free-ref` tag, or pushing a branch beside
+the one tag, is not counted.
 
 Everything the push makes public for the first time is judged as a commit would have
 been. Already public means reachable from the remote's tracking refs or a ref's remote
@@ -245,8 +260,14 @@ requirement on it admits. Its catalogue marks `unreleased = true` on each module
 released version, which check 7 then passes; until a later core release drops those
 marks, `moxi install <module>` from that core wants `--from`. The other packages follow in
 dependency order, each after every member it requires (here `moxi-secrets` and
-`moxi-repo` before `moxi-publishing`, and `moxi-publishing` before `moxi-dev`), at most
-three tags per push. A core release after a module's first release drops its mark.
+`moxi-repo` before `moxi-publishing`, and `moxi-publishing` before `moxi-dev`), one tag
+per push. Each release goes through the gate and the `pypi` environment's approval before
+the next tag is pushed, since check 5 of the next one reads what the index holds. A core
+release after a module's first release drops its mark.
+
+Before that first tag, `main` itself goes public on a commit `check-job` has already
+passed on another branch ([Moving main](#moving-main)), and the gate's check 3 waits for
+the run of `check-job` that the push of `main` starts.
 
 ### The workflow files
 
@@ -307,13 +328,21 @@ checks too. `moxi publishing github show [PATH]` reads, with [gh](https://cli.gi
 the GitHub repo `moxi-publishing.github` names and prints each field unlike what a
 public repo expects; `moxi publishing github apply [PATH]` writes those that differ.
 
-- Ruleset `moxi-main` on the push piece's `main` branch: no deletion and no force push.
+- Ruleset `moxi-main` on the push piece's `main` branch: no deletion, no force push, and
+  the check the root `pyproject.toml` names as `check-job` required, from the GitHub
+  Actions app only (so a commit status another token posts under that name doesn't
+  count), not strict (the commit need not be up to date with `main`).
 - No other branch ruleset: other branches are created, updated and deleted freely; the
   push piece keeps a branch from being deleted before it is merged.
 - Ruleset `moxi-tags` on every tag: no update, deletion or force push.
-- Ruleset `tags-create` on every tag but release tags (`*-v*`): no creation.
-- Each ruleset active, with no bypass actors.
-- Secret scanning with push protection, which needs admin access to read.
+- Ruleset `moxi-tags-create` on every tag but release tags (`*-v*`): no creation.
+- Each ruleset active, with no bypass actors, and each rule compared with its
+  parameters (the required check's name, its app, strictness), not by type alone. A
+  parameter publishing doesn't set (`do_not_enforce_on_create`, say) is GitHub's: a
+  rewrite keeps it as GitHub holds it.
+- Secret scanning with push protection, which needs admin access to read. With push
+  protection on, GitHub refuses a push it finds a secret in, a push of `main` included,
+  and links a way past it.
 - Environment `pypi`, deployable from release tags only, whose required reviewer is the
   account `gh` is signed in as, allowed to approve its own runs since that account
   pushes the tags.
@@ -324,6 +353,53 @@ GitHub; `show` says what each needs (this repository, `release.yml`, environment
 `pypi`), to set on pypi.org. `apply` deletes no ruleset and changes no branch: an
 unexpected branch or tag ruleset and a `main` unlike the default branch are printed
 for you, with the command that would remove the ruleset.
+
+`check-job` is read from the root `pyproject.toml` in the work tree, as the tag gate
+reads it. Without one there is no check to require: `show` names the missing key, and
+`apply` writes `moxi-main`'s other rules, keeps a required check GitHub already holds,
+and prints the check as left.
+
+### Moving main
+
+Once `moxi-main` requires `check-job`, GitHub moves `main` only to a commit that check
+has already passed on: a direct push of `main` passes only when the same commit has a
+successful run of `check-job` from another ref, any branch. So each push of `main` goes:
+
+1. push the exact commit `main` will point at to another branch (after a merge, the
+   merge commit itself, not the tip of the branch merged);
+2. wait for that branch's `check-job` run to go green;
+3. push `main`. A push of `main` before that run has passed is refused, and nothing is
+   lost: push again once it has.
+
+**Your CI must run `check-job` on pushes to branches other than `main`.** A workflow
+that runs it only on `main` can never pass first anywhere else, and after `apply` no
+commit could ever reach `main`. `show` and `apply` print a note saying so whenever
+`main` would require after `apply` a check it doesn't require today, a `moxi-main` that
+lists the check but isn't in force on `main` included; read your workflow's `on: push`
+trigger before you run `apply`. The note errs toward being printed: another ruleset
+counts as requiring a check on `main` today only when it is active, has no bypass actors,
+names `main` without a pattern, and has no exclusion that might leave `main` out.
+
+### Testing the required check once
+
+How GitHub judges a direct push against a required check is worth seeing once before a
+repo relies on it. In a throwaway public repo under your account:
+
+1. Give it a `.github/workflows/ci.yml` with one job, `linux`, that runs on pushes to
+   every branch, and `check-job = "linux"` (with `check-workflow = "ci.yml"`) in its root
+   `pyproject.toml`'s `[tool.moxi-publishing]`.
+2. Clone it, `moxi publishing enable` the clone with `--github OWNER/REPO`, then run
+   `moxi publishing github apply` on it.
+3. One commit: push `main` to a commit no run has seen; it must be refused. Push the same
+   commit to `ci/probe`, wait for `linux` to go green there, then push `main`; it must
+   pass.
+4. Two new commits where only the tip is green: push the tip to a branch, wait for green,
+   then push `main` to the tip; it must pass.
+5. Two new commits where only the earlier one is green: push the earlier commit to a
+   branch, wait for green, then push `main` to the later one; it must be refused.
+
+Delete the repo after. If any step goes the other way, don't rely on the required check
+until you know why.
 
 ## Doctor
 

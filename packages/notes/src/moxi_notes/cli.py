@@ -10,6 +10,7 @@
     moxi notes inbox rename SLUG NEW
     moxi notes validate [--json] [--unfiled] [--limit N]
     moxi notes backfill [--apply] [--json] [--limit N]
+    moxi notes home-paths [--apply] [--json] [--limit N]
 
 `dir` prints the notes directory for PATH (default: the working directory) and exits 1
 when there is none; a warning goes to stderr. `snapshot` runs one pass of notes'
@@ -18,7 +19,10 @@ now and changes nothing; it exits 1 when that is any file, and its `--json` shap
 `moxi_notes.scan.JSON_SHAPE`, which its help prints. `validate` walks the notes and reports each
 note's frontmatter against the types file; it writes nothing, exits 0 whatever it finds,
 and 1 when the types file can't be used. `backfill` proposes the required keys a filed
-note lacks and can be inferred, and writes them only with `--apply`. `setup` asks setup's questions
+note lacks and can be inferred, and writes them only with `--apply`. `home-paths` writes
+each path under the home folder as `~` and each session path as its session id, only with
+`--apply`, and commits nothing; its `--json` shape is `moxi_notes.home_paths.JSON_SHAPE`.
+`setup` asks setup's questions
 again and writes what they change, as `moxi install notes` does. `MOXI_NOTES_DIR` in this
 command's own environment is passed as the override, as the launcher sets it for a launch. A refusal
 prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
@@ -116,6 +120,24 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print JSON, every file included")
     p.add_argument("--limit", type=_limit, default=80, metavar="N",
                    help="print at most N files (default 80)")
+
+    from .home_paths import JSON_SHAPE as HOME_PATHS_SHAPE
+
+    p = verbs.add_parser(
+        "home-paths", help="write home paths as ~ and session paths as ids",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Across the notes root's files, write each path under your home\n"
+                    "folder as ~ and each Claude Code session path as its session id, and\n"
+                    "make links into the root relative. A dry run: it writes only with\n"
+                    "--apply, which changes only committed files and refuses the whole run\n"
+                    "while one it would change is untracked or modified. It commits\n"
+                    "nothing; its last line prints the commit to make. Exits 0 when done,\n"
+                    "1 when it can't run or a file was left alone, 3 when --apply refuses.",
+        epilog=HOME_PATHS_SHAPE)
+    p.add_argument("--apply", action="store_true", help="write the changes")
+    p.add_argument("--json", action="store_true", help="print JSON (shape below)")
+    p.add_argument("--limit", type=_limit, default=80, metavar="N",
+                   help="print the changes of at most N files (default 80)")
 
     inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",
                              description="Inbox one-offs: folders of notes for work that "
@@ -262,8 +284,29 @@ def _backfill(args, out) -> int:
     return codes.ERROR if found.counts()["errors"] else codes.OK
 
 
+def _home_paths(args, out) -> int:
+    from . import home_paths
+
+    found = home_paths.plan()
+    if not found.error and args.apply:
+        found = home_paths.apply(found)
+    if args.json:
+        print(json.dumps(found.as_dict()), file=out)
+    else:
+        print(home_paths.render(found, limit=args.limit), end="", file=out)
+    if found.refused:
+        print(f"notes: refused: {found.error}", file=sys.stderr)
+        return codes.REFUSED
+    if found.error:
+        print(f"notes: can't rewrite home paths: {found.error}", file=sys.stderr)
+        return codes.ERROR
+    left_alone = any(reason in ("changed", "read-only") for _, reason in found.left)
+    return codes.ERROR if left_alone else codes.OK
+
+
 _VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "scan": _scan,
-          "setup": _setup, "inbox": _inbox, "validate": _validate, "backfill": _backfill}
+          "setup": _setup, "inbox": _inbox, "validate": _validate, "backfill": _backfill,
+          "home-paths": _home_paths}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:
