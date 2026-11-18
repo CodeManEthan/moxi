@@ -1,11 +1,11 @@
 """turns' panel in a browser, through a real shell that starts turns' real page server, on
 the full install and on the small one: the contract check, the 360 px width check, and
-the panel's questions: which sessions are running, by folder and start time (TU1); which
-is idle and which working, each since when (TU2); the planner's busy subagent on its row,
-with both its agents in the opened row (TU3); a session in trouble and one whose live part
-did not read, both problems that keep their state (TU4); and the reach line, which asks for
-the install and then, in the same page, says the sessions show (TU5). Then a launch from
-launcher naming its row and where it runs.
+the panel's questions: which sessions are running, by folder and start time; which is
+idle and which working, each since when; the planner's busy subagent on its row, with both
+its agents in the opened row; a session in trouble and one whose live part did not read,
+both problems that keep their state, with the groups in their order; and the reach line,
+which asks for the install and then, in the same page, says the sessions show. Then a
+launch from launcher naming its row and where it runs.
 
 The shells, the stand-in `claude` and the helpers are `panel_kit`'s.
 """
@@ -75,7 +75,7 @@ def test_the_page_fits_a_phone(full_panel, make_endpoint, ui_contexts, ui_width_
     ui_width_check(page)
 
 
-# --- TU1: which sessions are running, by folder and start time ---------------------------------
+# --- which sessions are running, by folder and start time -------------------------------------
 
 def test_which_sessions_are_running_named_by_cwd_and_start_time(panel, make_endpoint, ui_contexts):
     older, _ = make_endpoint(harness("/srv/work/parser"), session_id=SID)
@@ -106,7 +106,7 @@ def test_which_sessions_are_running_named_by_cwd_and_start_time(panel, make_endp
     expect(reach.locator("button")).to_have_count(0)
 
 
-# --- TU2: which is idle and since when, which is working and since when ------------------------
+# --- which is idle and since when, which is working and since when ----------------------------
 
 def test_which_is_idle_and_which_working_each_since_when(panel, make_endpoint, ui_contexts):
     found, _ = make_endpoint(harness("/srv/work/found-idle"), session_id=SID)
@@ -138,7 +138,7 @@ def test_which_is_idle_and_which_working_each_since_when(panel, make_endpoint, u
         re.compile(rf"^idle since {T} · turn 1$"))
 
 
-# --- TU3: the planner's busy subagent, and both its agents opened ------------------------------
+# --- the planner's busy subagent, and both its agents opened ----------------------------------
 
 def test_the_planners_busy_subagent_is_on_line_two_and_both_agents_in_the_opened_row(
         panel, make_endpoint, ui_contexts):
@@ -180,7 +180,7 @@ def test_the_planners_busy_subagent_is_on_line_two_and_both_agents_in_the_opened
     expect(row(root, key_of(quiet)).locator('[data-line="agents"]')).to_have_count(0)
 
 
-# --- TU4: what is wrong, and what it still holds -----------------------------------------------
+# --- what is wrong, and what it still holds ---------------------------------------------------
 
 #: A time of day with its seconds, as `can't read since` gives it.
 TS = r"\d{1,2}:\d\d:\d\d(?: [AP]M)?"
@@ -229,7 +229,7 @@ def test_a_trouble_row_and_an_unread_one_are_problems_that_keep_their_state(
     expect(line(opened, "details")).to_have_text(re.compile(rf" · can't read since {TS}$"))
 
 
-# --- TU5: the reach line, before and after an install ------------------------------------------
+# --- the reach line, before and after an install ----------------------------------------------
 
 def test_the_reach_line_asks_for_the_install_then_reads_start_with_no_reload(
         own_panel, make_endpoint, ui_contexts):
