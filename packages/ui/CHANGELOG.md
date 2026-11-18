@@ -184,6 +184,11 @@
   does not scroll the page. A click that ends a selection of text does not toggle, so a
   name can be copied. When line one is too narrow the where and the name are cut before
   the fact. `docs/row.md` has the list. `client.d.ts` gains `RowElement`.
+- `<moxi-ui-row>` gains the slot `acts-one`, at line one's right end after the fact, so a
+  row with nothing on line two stays one line with its act beside it. The slot sits
+  beside line one's button, not inside it, and is never cut; a click or key in it sends
+  no `moxi-row-toggle`, as for `acts`. A page that leaves it empty draws as before. A page
+  that fills it needs a ui with this slot.
 
 ## 0.2.3 (2026-11-08)
 
