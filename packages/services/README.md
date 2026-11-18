@@ -148,7 +148,9 @@ project lists every service filed under it in a `Services` row, first while one 
   or restarting slots' server ends every session, open slot and job in its slots. Before
   either, the page server reads through slots' API what is in use there. With nothing in
   use the act goes ahead; with something in use, the act goes ahead only when you were
-  shown at least that much, and is refused otherwise. The row is known by its id,
+  shown at least that much, and is refused otherwise. When the slots can't be read, no
+  count is given: the act may end sessions in them, so it goes ahead only after you
+  confirm that. The row is known by its id,
   `slots/server`: no other module says what stopping its daemon ends, so no other row is
   guarded this way.
 - **One at a time.** The page server runs its acts one at a time, each as a job, and

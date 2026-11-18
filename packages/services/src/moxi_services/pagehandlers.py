@@ -39,7 +39,9 @@ status route gives its state, lines and fix.
   slots' API what the stop would end, and goes ahead only when nothing is in use, or
   when the request's `ends`, the count the person was shown, covers what is in use now
   (or the read did not answer and the person confirmed that). Else it is a 422,
-  `SLOTS_IN_USE`. `/api/ends` answers the same read for the page's warning.
+  `SLOTS_IN_USE`, or `SLOTS_UNREAD` for a plain press the read couldn't answer: a count
+  Moxi couldn't read means the stop may end sessions, never that nothing is in use.
+  `/api/ends` answers the same read for the page's warning, its counts null when unread.
 - `add` is a plain act: no key, so its handler mints the job id. A repeated add POST is a
   second job, which the thread refuses as the name being taken. A command's first word
   must be a full path, since this server's PATH is the service manager's, not the user's
@@ -145,6 +147,8 @@ SLOTS_SERVER = "slots/server"
 #: What a Stop or Restart of slots' server is told when more runs in its slots than the
 #: person was shown.
 SLOTS_IN_USE = "Something is running in its slots now."
+#: What a plain stop or restart of slots' server is told when its slots couldn't be read.
+SLOTS_UNREAD = "Moxi can't read the slots, so stopping it may end sessions in them."
 #: What `/api/ends` is told of any row but slots' server.
 ENDS_SLOTS_ONLY = "only slots' server ends what runs in the slots"
 #: What an act is told when its `ends` is below 0.
@@ -498,7 +502,9 @@ _KIND_WORDS = {"daemon": "service", "timer": "timer"}
 # -- what a stop of slots' server ends -------------------------------------------------
 
 def _unread(why: str) -> dict[str, Any]:
-    return {"read": False, "why": why, "sessions": [], "open": 0, "jobs": 0}
+    """A read that didn't answer: its counts are null, never 0, since what is in use is
+    not known."""
+    return {"read": False, "why": why, "sessions": None, "open": None, "jobs": None}
 
 
 def _count_ends(api: Any) -> dict[str, Any]:
@@ -525,8 +531,9 @@ def read_ends() -> dict[str, Any]:
     """What a stop of slots' server would end now, from slots' own API, counted as slots'
     uninstall check counts it: each occupied slot a session, with its number and label;
     each other slot not missing and not idle an open slot; each running job. `read` is
-    False, with `why`, when slots' API does not load, its listing could not be read, its
-    jobs could not be read, or it did not answer within `STATUS_SECONDS`."""
+    False, with `why` and null counts, when slots' API does not load, its listing could
+    not be read, its jobs could not be read, or it did not answer within
+    `STATUS_SECONDS`."""
     found = modules.load("slots", interface=1)
     if not found.ok:
         return _unread(f"slots' API couldn't be loaded: {found.reason}")
@@ -540,25 +547,32 @@ def read_ends() -> dict[str, Any]:
     return value
 
 
-def in_use(read: Mapping[str, Any]) -> int:
-    """How many things `read_ends` found in use: sessions, open slots and jobs."""
+def in_use(read: Mapping[str, Any]) -> int | None:
+    """How many things `read_ends` found in use: sessions, open slots and jobs; None when
+    it couldn't read them, which may be any number."""
+    if not read["read"]:
+        return None
     return len(read["sessions"]) + read["open"] + read["jobs"]
 
 
 def guard_slots(found, ends: int | None) -> None:
     """Refuse a stop or restart of slots' server unless what it ends now is no more than
     the person was shown. `ends` is the count the warning showed, 0 when it said the
-    slots couldn't be read, None for a plain press. It goes ahead when the read finds
-    nothing in use, or when `ends` is given and the read did not answer or finds at most
-    `ends`. Any other row passes."""
+    slots couldn't be read, None for a plain press. A read that didn't answer counts as
+    "may end sessions", never as nothing in use: only a confirmed press (`ends` given)
+    goes past it, and a plain one is told the slots couldn't be read. It goes ahead when
+    the read finds nothing in use, or when `ends` is given and the read did not answer
+    or finds at most `ends`. Any other row passes."""
     if not ends_slots(found):
         return
     if ends is not None and ends < 0:
         raise lb.Refused(ENDS_NEGATIVE)
-    now = read_ends()
-    if now["read"] and in_use(now) == 0:
+    count = in_use(read_ends())
+    if count is None:
+        if ends is None:
+            raise lb.Refused(SLOTS_UNREAD)
         return
-    if ends is not None and (not now["read"] or in_use(now) <= ends):
+    if count == 0 or (ends is not None and count <= ends):
         return
     raise lb.Refused(SLOTS_IN_USE)
 
@@ -878,8 +892,8 @@ def _feed() -> _Feed:
 __all__ = ["BY", "DAEMON_STARTS", "ENDS_NEGATIVE", "ENDS_SLOTS_ONLY", "ENDS_STOP_ONLY",
            "HEALTH_PERIOD", "JOBS", "JOB_SHAPE", "KEY_REUSED", "ON_OFF_IN_SETTINGS",
            "PERIOD", "REPUBLISH_S", "RESTART_RUN_ONLY", "RUNS_SHOWN", "SLOTS_IN_USE",
-           "SLOTS_SERVER", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS", "TODAY_LINES",
-           "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
+           "SLOTS_SERVER", "SLOTS_UNREAD", "STATUS_SECONDS", "STREAK_LINES", "TIMER_RUNS",
+           "TODAY_LINES", "UNKNOWN", "act", "add", "count_streak", "count_today", "disable", "enable",
            "ends", "ends_slots", "events", "every_row", "gather", "guard_slots", "in_use",
            "listing", "not_a_full_path", "projects", "read_ends", "remove", "restart",
            "row", "row_value", "run", "start", "status", "stop", "unit", "with_settings"]

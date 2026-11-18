@@ -11568,6 +11568,7 @@ services	packages/services/src/moxi_services/page.py	required=False)},	keep	requ
 services	packages/services/src/moxi_services/page.py	TODAY = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	STOP_BODY = {"id": _ID, "ends": lb.Field("int", required=False, max=ENDS_MAX)}	keep	required	required
 services	packages/services/src/moxi_services/page.py	"ends": lb.Field("int", required=False, max=ENDS_MAX),	keep	required	required
+services	packages/services/src/moxi_services/page.py	"sessions": lb.Out("list", items=SESSION, nullable=True),	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	health	check_health
@@ -11744,6 +11745,7 @@ services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandler
 services	packages/services/tests/test_page_slots.py	assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
 services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_IN_USE})	keep	refused	refused
 services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.ENDS_NEGATIVE})	keep	refused	refused
+services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandlers.SLOTS_UNREAD})	keep	refused	refused
 services	packages/services/tests/test_page_act.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 services	packages/services/tests/test_page_act.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page_act.py	assert (found["state"], found["code"]) == ("refused", 3)	keep	refused	refused

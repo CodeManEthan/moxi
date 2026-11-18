@@ -254,13 +254,14 @@ SESSION = lb.Out("table", items={"slot": lb.Out("int"), "label": _MAYBE_SAYS})
 
 #: What a stop or restart of slots' server would end now: the sessions in its slots,
 #: how many other slots are open, and how many jobs run. `read` is False, with `why`,
-#: when slots couldn't be read; the counts are then 0.
+#: when slots couldn't be read; the counts are then null, never 0: a count Moxi couldn't
+#: read is not a number, and the stop may end sessions in them.
 ENDS = {
     "read": _FLAG,
     "why": _MAYBE_SAYS,
-    "sessions": lb.Out("list", items=SESSION),
-    "open": lb.Out("int"),
-    "jobs": lb.Out("int"),
+    "sessions": lb.Out("list", items=SESSION, nullable=True),
+    "open": _MAYBE_INT,
+    "jobs": _MAYBE_INT,
 }
 
 #: What the supervisor says of a unit not yet adopted. `found` is False for a missing

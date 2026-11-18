@@ -108,7 +108,7 @@ def test_ends_counts_sessions_open_slots_and_jobs_as_slots_counts_them(slots):
 def test_ends_says_why_when_the_listing_could_not_be_read(slots):
     slots.ok, slots.why = False, "tmux did not answer"
     assert ends() == {"read": False, "why": "slots couldn't be read: tmux did not answer",
-                      "sessions": [], "open": 0, "jobs": 0}
+                      "sessions": None, "open": None, "jobs": None}
     assert slots.calls == ["list_slots"]
 
 
@@ -121,7 +121,7 @@ def test_ends_says_why_when_the_jobs_could_not_be_read(slots):
     slots.jobs_raise = TmuxError("no server")
     found = ends()
     assert found == {"read": False, "why": "slots' jobs couldn't be read (TmuxError)",
-                     "sessions": [], "open": 0, "jobs": 0}
+                     "sessions": None, "open": None, "jobs": None}
 
 
 def test_ends_says_so_when_slots_does_not_answer_in_time(slots, monkeypatch):
@@ -134,7 +134,7 @@ def test_ends_says_so_when_slots_does_not_answer_in_time(slots, monkeypatch):
     finally:
         slots.hold.set()
     assert found == {"read": False, "why": "slots did not answer within 0.2 s",
-                     "sessions": [], "open": 0, "jobs": 0}
+                     "sessions": None, "open": None, "jobs": None}
 
 
 def test_ends_says_why_when_slots_api_does_not_load(site, fake):
@@ -146,7 +146,15 @@ def test_ends_says_why_when_slots_api_does_not_load(site, fake):
     found = ends()
     assert found["read"] is False and found["why"].startswith(
         "slots' API couldn't be loaded: ")
-    assert (found["sessions"], found["open"], found["jobs"]) == ([], 0, 0)
+    assert (found["sessions"], found["open"], found["jobs"]) == (None, None, None)
+
+
+def test_an_unread_count_is_not_a_number():
+    # A read that didn't answer is never nothing in use: its count is not known.
+    unread = pagehandlers._unread("slots couldn't be read: x")
+    assert pagehandlers.in_use(unread) is None
+    assert pagehandlers.in_use(
+        {"read": True, "sessions": [], "open": 0, "jobs": 0}) == 0
 
 
 def test_ends_without_slots_installed_names_no_row(monkeypatch):
@@ -235,10 +243,32 @@ def test_a_stop_goes_unread_when_the_unread_warning_was_confirmed(slots, fake, r
     assert ended(job_of(route))["state"] == "done"
 
 
-def test_a_plain_stop_is_refused_when_the_slots_could_not_be_read(slots, fake, route):
-    slots.ok = False
-    assert post(route, {"id": SERVER}) == (422, {"refused": pagehandlers.SLOTS_IN_USE})
+@pytest.mark.parametrize("unread", ["listing", "jobs", "slow"])
+def test_a_plain_stop_is_refused_when_the_slots_could_not_be_read(
+        slots, fake, route, unread, monkeypatch):
+    # An unread count may be any number: a plain press is told so, never let through as
+    # though nothing were in use.
+    if unread == "listing":
+        slots.ok = False
+    elif unread == "jobs":
+        slots.jobs_raise = RuntimeError("no server")
+    else:
+        monkeypatch.setattr(pagehandlers, "STATUS_SECONDS", 0.2)
+        slots.hold = threading.Event()
+    try:
+        assert post(route, {"id": SERVER}) == (
+            422, {"refused": pagehandlers.SLOTS_UNREAD})
+    finally:
+        if slots.hold is not None:
+            slots.hold.set()
     assert not acted(fake, _act(route))
+
+
+def test_a_stop_shown_a_count_goes_when_the_slots_can_no_longer_be_read(slots, fake, route):
+    slots.ok = False
+    status, body = post(route, {"id": SERVER, "ends": 2})
+    assert status == 202, body
+    assert ended(job_of(route))["state"] == "done"
 
 
 def test_a_stop_is_refused_when_its_ends_is_below_zero(slots, fake, route):
