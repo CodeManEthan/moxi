@@ -64,7 +64,8 @@ def test_a_new_piece_in_shim_mode_names_every_key_shim_and_moved_hook(demo):
     assert plan["mode_change"] is None and plan["in_progress"] is None
     keys = [i["key"] for i in plan["writes"] if i["place"] == "config"]
     assert keys == [f"moxi-repo.piece.demo/gate.{var}"
-                    for var in ("event", "target", "fail", "order", "enabled")]
+                    for var in ("event", "target", "fail", "order", "enabled")
+                    ] + ["moxi-repo.moved"]
     hooks = repo / ".git" / "hooks"
     assert [(i["key"], i["from"], i["to"]) for i in plan["writes"] if i["place"] == "hooks"
             ] == [("hook", str(hooks / "pre-commit"), str(hooks / "pre-commit.local")),

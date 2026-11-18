@@ -72,8 +72,9 @@ def synced(where: gitconf.Repo, state: gitconf.State) -> tuple[list[dict], gitco
     before = snapshot(where)
     done = gitconf.sync(where, state, plan)
     assert changed(before, snapshot(where)) == touched(plan.writes)
-    # Nothing is left to write after it.
-    assert gitconf.plan_sync(where, gitconf.read(where)).writes == []
+    # Nothing is left to write after it but the chain lines the user adds.
+    assert [i for i in gitconf.plan_sync(where, gitconf.read(where)).writes
+            if i["place"] != "chain"] == []
     return plan.writes, done
 
 
