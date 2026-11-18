@@ -111,6 +111,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import durations, lint, naming, refs, release, rename, ruff_check, stamp, tags
+from .scope import WORKERS_ENV
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -118,7 +119,6 @@ PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
-WORKERS_ENV = "MOXI_TEST_WORKERS"
 #: How many of the renames step's unsettled rows and leftovers a failure prints.
 RENAMES_SHOWN = 10
 
