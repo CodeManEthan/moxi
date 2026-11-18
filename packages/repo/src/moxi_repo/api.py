@@ -66,13 +66,26 @@ class Busy(Failure):
 class Problem(str):
     """One problem a listing names, as the text it prints, carrying the parts the doctor's
     row takes: `detail`, `fix` (the command, or None) and `state` (`fail`, `warn` or `ok`:
-    `ok` for something worth saying that needs no action)."""
+    `ok` for something worth saying that needs no action).
+
+    It also carries what kind of problem it is, for a reader that words it itself: `code`
+    (one of `PROBLEM_CODES`), its subject, `piece` and `event` (each None when it has
+    none), and `refresh`, true when its fix is `git-hooks refresh` of this repo."""
 
     def __new__(cls, detail: str, fix: str | None = None, *, state: str = "fail",
-                how: str = "run"):
+                how: str = "run", code: str | None = None, piece: str | None = None,
+                event: str | None = None, refresh: bool = False):
         self = super().__new__(cls, detail if fix is None else f"{detail}; {how}: {fix}")
         self.detail, self.fix, self.state = detail, fix, state
+        self.code, self.piece, self.event, self.refresh = code, piece, event, refresh
         return self
+
+
+#: Every `Problem.code` a listing gives, each named for what is wrong.
+PROBLEM_CODES = ("gone", "unreadable", "no-module", "not-an-event", "git-too-old", "no-entry",
+                 "interpreter-missing", "runner-missing", "other-environment", "shim-moved",
+                 "shim-missing", "launcher-missing", "left-shim", "left-hook",
+                 "left-hook-taken")
 
 
 class Report:
@@ -1023,10 +1036,13 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
     enabled, fail policy, order, settings and whether a doctor record of it is open; its
-    `events` how git reaches each event's pieces (`via`), the existing git hook, and
-    `command`, the text git runs for it as repo wrote it (the config entry's command, the
-    shim, or the launcher; None when it can't be read or nothing of repo's runs); and its
-    `records` each doctor record repo has open for it (`_records.open_of`)."""
+    `events` how git reaches each event's pieces (`via`), the existing git hook
+    (`existing`, a sentence; `existing_hook`, the path of the user's own git hook that runs
+    after the pieces, or alone while each of them is disabled, None in launcher mode and
+    when there is none), and `command`, the text git runs for it as repo wrote it (the
+    config entry's command, the shim, or the launcher; None when it can't be read or
+    nothing of repo's runs); and its `records` each doctor record repo has open for it
+    (`_records.open_of`). Each of its `problems` is a `Problem`."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -1037,13 +1053,21 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
     out = []
     for key, repo, why in targets:
         if repo is None:
-            root = index[key].get("root") or key
-            out.append({"root": root, "common_dir": index[key].get("common_dir"),
+            entry = index[key]
+            root = entry.get("root") or key
+            common = entry.get("common_dir") or key
+            # Gone when its folder or its git dir no longer exists; else git can't read
+            # what is there now.
+            if not os.path.isdir(root) or not os.path.isdir(common):
+                code, detail = "gone", why
+            else:
+                code, detail = "unreadable", _unreadable_repo(key, entry) or why
+            out.append({"root": root, "common_dir": entry.get("common_dir"),
                         "indexed": True, "pieces": [], "events": {},
-                        "records": _records.open_of(index[key].get("common_dir") or key),
-                        "problems": [Problem(why,
+                        "records": _records.open_of(common),
+                        "problems": [Problem(detail,
                                              f"moxi repo git-hooks remove {_arg(root)}",
-                                             state="warn")]})
+                                             state="warn", code=code)]})
             continue
         out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good))
     return out
@@ -1065,10 +1089,12 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                                     "declares it",
                                     f"moxi repo git-hooks remove {_arg(repo.root)} {pid}",
                                     state="fail" if closing else "warn",
-                                    how="remove it with"))
+                                    how="remove it with", code="no-module", piece=pid,
+                                    event=last(section, "event")))
         if last(section, "event") not in EVENTS:
             problems.append(Problem(f"{pid} names {last(section, 'event')!r}, not a git "
-                                    "event", state="warn"))
+                                    "event", state="warn", code="not-an-event", piece=pid,
+                                    event=last(section, "event")))
     listed.sort(key=lambda p: (p["event"] or "", p["order"], p["id"]))
     mode = state.mode
     if mode == "config" and version is not None and version < gitconf.CONFIG_FROM:
@@ -1078,34 +1104,41 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             default = default_mode()
         except Failure:
             default = "auto"  # refresh itself then names the config that can't be read
-        if gitconf.pick_mode(state.mode_set, default, version) == "config":
+        pinned = gitconf.pick_mode(state.mode_set, default, version) == "config"
+        if pinned:
             fix = f"moxi repo git-hooks add {_arg(repo.root)} --mode shim"
         else:
             fix = f"moxi repo git-hooks refresh {_arg(repo.root)}"
         problems.append(Problem(f"git {gitconf.version_text(version)} runs no config "
-                                "entries, so no piece runs here", fix))
+                                "entries, so no piece runs here", fix, code="git-too-old",
+                                refresh=not pinned))
     events = {}
     ours = shim.our_shims(repo.hooks_dir)
     python, runner = gitconf.interpreter(), gitconf.runner_file()
     running = state.events()
     for event in sorted({p["event"] for p in listed if p["event"] in EVENTS}):
         info: dict = {"pieces": [p["id"] for p in listed if p["event"] == event],
-                      "via": None, "existing": None, "chain_line": None, "command": None}
+                      "via": None, "existing": None, "existing_hook": None,
+                      "chain_line": None, "command": None}
         hook = repo.hooks_dir / event
         if event not in running:
             # Every piece of it is disabled, so nothing of repo's is there to check.
             info["existing"] = str(hook) if _runnable(hook) else None
+            if _runnable(hook) and shim.shim_event(hook) is None:
+                info["existing_hook"] = str(hook)
         elif mode == "config":
             info["via"] = "config entry"
             command = state.entries.get(event)
             if command is None:
                 problems.append(Problem(f"{event} has pieces but no config entry",
-                                        f"moxi repo git-hooks refresh {_arg(repo.root)}"))
+                                        f"moxi repo git-hooks refresh {_arg(repo.root)}",
+                                        code="no-entry", event=event, refresh=True))
             else:
                 info["command"] = command
                 problems += _guard_problems(event, command, python, runner, repo.root)
             if _runnable(hook) and shim.shim_event(hook) is None:
                 info["existing"] = f"{hook}, run by git after the pieces"
+                info["existing_hook"] = str(hook)
         elif repo.hooks_inside:
             info["via"] = "shim"
             mine = ours.get(event, [])
@@ -1121,7 +1154,7 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(
                     f"{event}: another tool's git hook took {hook}, and moved repo's shim "
                     f"to {mine[0].name}; the pieces run only if that tool runs it",
-                    state="ok" if runs else "fail"))
+                    state="ok" if runs else "fail", code="shim-moved", event=event))
                 if runs:
                     # It still runs, so its guard's two paths matter as the shim's do.
                     info["command"] = mine[0].read_text(encoding="utf-8", errors="replace")
@@ -1130,9 +1163,11 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             else:
                 problems.append(Problem(f"{event}: repo's shim is missing or another tool "
                                         "replaced it",
-                                        f"moxi repo git-hooks refresh {_arg(repo.root)}"))
+                                        f"moxi repo git-hooks refresh {_arg(repo.root)}",
+                                        code="shim-missing", event=event, refresh=True))
             if _runnable(local):
                 info["existing"] = f"{local}, run by the shim after the pieces"
+                info["existing_hook"] = str(local)
         else:
             info["via"] = "launcher"
             chain_hook, line, present = gitconf.chain_state(repo, event)
@@ -1146,7 +1181,8 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(f"{event}: the launcher {repo.launcher} is missing, "
                                         "so the chain line skips quietly",
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                        state="fail" if present else "warn"))
+                                        state="fail" if present else "warn",
+                                        code="launcher-missing", event=event, refresh=True))
             else:
                 info["command"] = repo.launcher.read_text(encoding="utf-8",
                                                           errors="replace")
@@ -1158,17 +1194,19 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             problems.append(Problem(f"{event}: repo's shim {path} is left in {path.parent}, "
                                     "which git no longer reads as the hooks dir",
                                     f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                    state="warn"))
+                                    state="warn", code="left-shim", event=event,
+                                    refresh=True))
         elif fixable:
             problems.append(Problem(f"{event}: the git hook repo moved aside is still "
                                     f"{path}, which nothing runs",
                                     f"moxi repo git-hooks refresh {_arg(repo.root)}",
-                                    state="warn"))
+                                    state="warn", code="left-hook", event=event,
+                                    refresh=True))
         else:
             problems.append(Problem(f"{event}: the git hook repo moved aside is still "
                                     f"{path}, which nothing runs, and another git hook took "
                                     f"{path.with_name(event)}; merge them or remove one",
-                                    state="warn"))
+                                    state="warn", code="left-hook-taken", event=event))
     return {"root": str(repo.root), "common_dir": str(repo.common_dir),
             "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
             "git_version": gitconf.version_text(version), "mode": mode,
@@ -1192,13 +1230,16 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     written_run = (run.group(1) or run.group(2)).replace("'\\''", "'") if run else None
     fix = f"moxi repo git-hooks refresh {_arg(root)}"
     if written_py and not Path(written_py).exists():
-        out.append(Problem(f"{event}: the interpreter {written_py} is missing", fix))
+        out.append(Problem(f"{event}: the interpreter {written_py} is missing", fix,
+                           code="interpreter-missing", event=event, refresh=True))
     elif written_run and not Path(written_run).exists():
-        out.append(Problem(f"{event}: the runner {written_run} is missing", fix))
+        out.append(Problem(f"{event}: the runner {written_run} is missing", fix,
+                           code="runner-missing", event=event, refresh=True))
     elif written_py != python or written_run != runner:
         # Both still exist, so the pieces run, from another environment.
         out.append(Problem(f"{event}: written for another interpreter or runner", fix,
-                           state="warn"))
+                           state="warn", code="other-environment", event=event,
+                           refresh=True))
     return out
 
 
@@ -1231,7 +1272,7 @@ def __dir__():
     return sorted({*globals(), *REEXPORTS})
 
 
-__all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
+__all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "PROBLEM_CODES", "SEEDS", "SETTING_CHECKS",
            "RULE_LINES", "EVERYWHERE", "available", "add", "remove", "enable", "disable",
            "refresh", "rules", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
