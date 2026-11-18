@@ -442,7 +442,7 @@ def _ask(question: str) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
-__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "FIRST_RUN_HINT", "GO_ON", "HINTS", "INTERVAL_S", "Listed",
-           "MIN_ANSWER_S", "MISMATCH", "NOT_ANSWERED", "NOT_SETTLED", "PANE_ENDED",
+__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "FIRST_RUN_HINT", "GO_ON", "HINTS", "INTERVAL_S",
+           "Listed", "MIN_ANSWER_S", "MISMATCH", "NOT_ANSWERED", "NOT_SETTLED", "PANE_ENDED",
            "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "SCREEN_NOT_ANSWERED", "Watched",
            "held_words", "listed", "setup", "watch"]

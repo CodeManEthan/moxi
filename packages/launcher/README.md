@@ -97,8 +97,9 @@ turn owed or not. With nothing that can say so (no turns), it ends `started` wit
 reason `ready-unknown`: attach to the slot to see it. A launch of a new session (a fresh
 launch or a resume) that finds a screen it won't answer, or no ready in time (`no-ready`),
 ends `failed`, exit 1, naming the slot. The `no-ready` line names both causes a launch
-can't tell apart: a screen the launcher doesn't know, and a session turns isn't running in. The session is never stopped: it stays in its slot
-for you to attach to. A relaunch has already exited the session it replaces, so the same
+can't tell apart: a screen the launcher doesn't know, and a session turns isn't running
+in. The session is never stopped: it stays in its slot for you to attach to. A relaunch
+has already exited the session it replaces, so the same
 findings only flag it: its row stays `started` with a `flagged` event, a self relaunch's
 run ends `first-turn-not-sent` (its handoff is not sent), a director's ends `relaunched`
 with the finding as its word, and either tells the directors. A relaunch fails only when

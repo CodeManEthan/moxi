@@ -321,7 +321,8 @@ def _screens(screens) -> tuple[Screen, ...]:
     if isinstance(screens, (str, bytes)) or not isinstance(screens, Sequence) \
             or not screens or not all(isinstance(s, Screen) for s in screens):
         raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_DIR, "
-                         "CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING, CLAUDE_EXIT_DIALOG)")
+                         "CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING, CLAUDE_EXIT_DIALOG, "
+                         "CLAUDE_THEME_PICKER, CLAUDE_WELCOME, CLAUDE_CHROME_DIALOG)")
     return tuple(screens)
 
 
