@@ -5,7 +5,7 @@ export function row(fields = {}) {
   return {
     id: "services/web", module: "services", name: "web", form: "written", kind: "daemon",
     doc: "serves the docs", project: null, launches_session: false, flag: true, switch: null,
-    has_switch: true, verdict: { state: "ok", reason: "running", fix: null, unknown: false },
+    has_switch: true, verdict: { state: "ok", reason: "running", fix: null, unknown: false, cause: null },
     state: "active", enabled: true, pid: 4242, since: "2026-11-03T09:15:00Z", detail: null,
     last_run: null, checked: null, argv: ["/usr/bin/python3", "-m", "http.server"], cwd: null,
     unit: null, schedule: null, health: null, stopped: null, removing: false, platform: "linux",

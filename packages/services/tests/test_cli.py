@@ -21,7 +21,7 @@ PY = sys.executable
 
 ROW_KEYS = {"id", "module", "name", "form", "kind", "project", "launches_session", "flag",
             "switch", "verdict", "state", "enabled", "pid", "since", "last_run", "health"}
-VERDICT_KEYS = {"state", "reason", "fix", "unknown"}
+VERDICT_KEYS = {"state", "reason", "fix", "unknown", "cause"}
 
 
 @pytest.fixture
@@ -99,6 +99,7 @@ def test_list_shows_module_rows(fake, site, capsys):
     found = {r["id"]: r for r in json.loads(out)}
     assert found["jotter/sync"]["verdict"]["reason"] == "not running"
     assert found["jotter/sync"]["verdict"]["fix"] == "moxi services start jotter/sync"
+    assert found["jotter/sync"]["verdict"]["cause"] == "not-running"
 
 
 def test_a_busy_store_exits_75(fake, no_modules, capsys, monkeypatch):
@@ -199,6 +200,7 @@ def test_show_json_has_the_row_and_its_runs(fake, no_modules, capsys, monkeypatc
     found = json.loads(out)
     assert code == 0
     assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}
+    assert set(found["verdict"]) == VERDICT_KEYS and found["verdict"]["cause"] is None
     assert found["row"]["every"] == "5m" and found["runs"][0]["result"] == "ran"
     assert found["process"] is None
 

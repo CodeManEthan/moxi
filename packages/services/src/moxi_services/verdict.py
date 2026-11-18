@@ -67,20 +67,30 @@ AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add 
             "without --timer")
 
 
+#: The words a verdict's `cause` may hold, so a reader tells a verdict's case without
+#: reading its reason: `not-running`, a daemon that is on and not running (`fail`);
+#: `stopped`, a daemon's stop by hand that still holds (`warn`); `last-run`, a timer whose
+#: last run failed (`warn`). Every other verdict's cause is None. The set may grow; a
+#: reader treats a word it does not know as it treats None.
+CAUSES = ("not-running", "stopped", "last-run")
+
+
 @dataclass(frozen=True)
 class Verdict:
     """A row's verdict. `state` is `ok`, `warn`, `fail` or `off`; `unknown` is True when
     the verdict is `warn` because a value could not be read; `reason` says why in a few
-    words; `fix` is one command, or where the log is, or None."""
+    words; `fix` is one command, or where the log is, or None; `cause` one of `CAUSES`,
+    or None."""
 
     state: str
     reason: str
     fix: str | None = None
     unknown: bool = False
+    cause: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {"state": self.state, "reason": self.reason, "fix": self.fix,
-                "unknown": self.unknown}
+                "unknown": self.unknown, "cause": self.cause}
 
 
 @dataclass(frozen=True)
@@ -296,10 +306,12 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         if not running:
             stopped = stop_recorded(row, booted)
             if stopped is not None:
-                return Verdict("warn", f"stopped by hand at {stopped}", _cmd("start", row))
+                return Verdict("warn", f"stopped by hand at {stopped}", _cmd("start", row),
+                               cause="stopped")
             why = f" (failed: {st.detail})" if st.state == "failed" and st.detail else (
                 " (failed)" if st.state == "failed" else "")
-            return Verdict("fail", f"not running{why}", _cmd("start", row))
+            return Verdict("fail", f"not running{why}", _cmd("start", row),
+                           cause="not-running")
         if enabled is None:
             return _unknown("whether it starts at login can't be read"
                             + (f" ({st.detail})" if st.detail else ""))
@@ -343,7 +355,8 @@ def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
     if last is not None and last.failed:
         at = f" at {last.at}" if last.at else ""
         hint = f"; {AS_TIMER}" if _adopted_task(row, st) else ""
-        return Verdict("warn", f"last run failed ({last.text}{at}){hint}", st.log)
+        return Verdict("warn", f"last run failed ({last.text}{at}){hint}", st.log,
+                       cause="last-run")
     if last is None:
         return Verdict("ok", "armed, no run yet")
     return Verdict("ok", "armed")
@@ -515,5 +528,5 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
     return out
 
 
-__all__ = ["STATES", "Verdict", "LastRun", "View", "worst", "last_run", "boot_time",
-           "stop_recorded", "judge", "flags", "healths", "within", "views"]
+__all__ = ["STATES", "CAUSES", "Verdict", "LastRun", "View", "worst", "last_run",
+           "boot_time", "stop_recorded", "judge", "flags", "healths", "within", "views"]
