@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   ABSENT, addressRoute, frameOf, INSTALL_COMMAND, NO_SESSION, NONE_CAN_SHOW, NOT_RUNNING, parseAddress,
-  reachLine, READ_ON_TIMER, ROUTE_FAILED, SCAN_FAILED,
+  reachLine, READ_ON_TIMER, READING, readingLine, ROUTE_FAILED, SCAN_FAILED,
 } from "../src/frame-model.ts";
 
 const UTC = {
@@ -163,4 +163,12 @@ test("a watch that is down while the reads answer shows as a quiet dim line, not
   assert.deepEqual(frame.groups.map((g) => g.group), ["idle"]);
   assert.deepEqual(frame.notes, [READ_ON_TIMER]);
   assert.deepEqual(frameOf(data(), NOWHERE, false, TODAY, UTC).notes, []);
+});
+
+test("the loading state shows nothing for 400 ms, then Reading…; no other state shows it", () => {
+  const loading = frameOf(data({ loading: true, value: null }), NOWHERE, false, TODAY, UTC);
+  assert.equal(readingLine(loading, 0), null);
+  assert.equal(readingLine(loading, 399), null);
+  assert.equal(readingLine(loading, 400), READING);
+  assert.equal(readingLine(frameOf(data(), NOWHERE, false, TODAY, UTC), 5000), null);
 });

@@ -138,6 +138,19 @@ export interface Frame {
 }
 
 export const READING = "Reading…";
+/** How long the loading state shows nothing before `Reading…`. */
+export const READING_AFTER_MS = 400;
+/** How often the panel redraws while open: its times are clock times, so only the day
+ * words move, across midnight. */
+export const REDRAW_MS = 60_000;
+export const OPEN = "Open";
+export const CLOSE = "Close";
+export const COPY = "Copy";
+export const COPIED = "Copied";
+/** How long a copy act reads `Copied`. */
+export const COPIED_MS = 1500;
+export const SETTINGS_LINK = "Settings › turns";
+export const SETTINGS_ROUTE = "settings/turns";
 export const NO_SESSION = "No session is running.";
 export const NONE_CAN_SHOW = "No session can show here yet.";
 export const ROUTE_FAILED = "Moxi can't read the live sessions";
@@ -190,4 +203,10 @@ export function frameOf(data: FeedState, address: Address, launcher: boolean, to
   }
   if (drawn.length === 0) return { ...frame, alert };
   return { ...frame, state: "up", alert, groups, reach: reachLine(value.reach, launcher), notes: notes(), open };
+}
+
+/** The loading state's line: nothing for the first 400 ms the page waits, then `Reading…`;
+ * null in every other state. */
+export function readingLine(frame: Frame, waitedMs: number): string | null {
+  return frame.state === "loading" && waitedMs >= READING_AFTER_MS ? READING : null;
 }
