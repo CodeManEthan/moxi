@@ -11602,6 +11602,7 @@ services	packages/services/src/moxi_services/verdict.py	on/off and its health in
 services	packages/services/src/moxi_services/verdict.py	over.set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	started: set[str] = set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	views	name	health	check_health
+services	packages/services/src/moxi_services/verdict.py	if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)	keep	any	any
 services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 services	packages/services/tests/browser_kit.py	platform=sys.platform, enabled=True)	keep	enabled	enabled
 services	packages/services/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -11713,6 +11714,7 @@ services	packages/services/tests/test_verdict.py	rest = {"services/svc0", "servi
 services	packages/services/tests/test_verdict.py	assert given == set(verdict.CAUSES)	keep	set	set
 services	packages/services/tests/test_verdict.py	assert len(verdict.CAUSES) == len(set(verdict.CAUSES))	keep	set	set
 services	packages/services/tests/test_verdict.py	assert {"not-running", "stopped", "last-run"} <= set(verdict.CAUSES)	keep	set	set
+services	packages/services/tests/test_verdict.py	assert set(found) == {"services/web", "notes/sync", "notes/other"}	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

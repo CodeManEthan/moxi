@@ -102,6 +102,20 @@ def a_timer(name: str = "nightly", **extra) -> None:
     assert out.ok, out
 
 
+def test_a_moxi_daemon_stopped_by_hand_reads_stopped_and_counts_as_a_warning(site, fake):
+    from fake_units import Unit
+
+    site.module("notes", 'SUMMARY = "notes"\nDAEMONS = {"sync": {"command": "moxi-notes-sync"}}\n')
+    fake.modules[("notes", "sync")] = Unit("daemon", enabled=True, active=True)
+    assert acts.stop("notes/sync").code == 0
+    listed = read("/api/rows")["rows"]
+    sync = {r["id"]: r for r in listed}["notes/sync"]
+    assert (sync["verdict"]["state"], sync["verdict"]["cause"]) == ("warn", "stopped")
+    assert sync["stopped"] == store.read_module_stops()["notes/sync"]
+    # The summary block counts the rows by verdict state: a warning, not a failure.
+    assert [r["verdict"]["state"] for r in listed] == ["warn"]
+
+
 def busy_now() -> list[str]:
     status, health = get("/api/health")
     assert status == 200, health

@@ -211,7 +211,7 @@ def row_value(view: verdict.View) -> dict[str, Any]:
         "unit": user.unit if user else None,
         "schedule": _schedule(user) if user else None,
         "health": _list(user.health) if user else None,
-        "stopped": user.stopped if user else None,
+        "stopped": view.stopped,
         "removing": bool(user and user.removing),
         "platform": user.platform if user else None,
     }

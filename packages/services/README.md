@@ -56,7 +56,9 @@ with the worst.
 Every row reads `ok`, `warn`, `fail` or `off`, with a reason and the command that fixes
 it, the same in `list`, `show`, `watch` and `moxi doctor`. A timer is judged by whether
 its schedule is armed and how its last run went, never by whether a process is running.
-A daemon that is on and not running is `fail`, unless you stopped it by hand (`warn`). A
+A daemon that is on and not running is `fail`, unless you stopped it by hand (`warn`):
+services records each stop it makes, of your daemons and of Moxi's own, until the daemon is
+started, restarted or turned on again, or the machine boots. A
 value the supervisor can't give is `warn`, "unknown", with the reason. A health check you
 give with `--health` runs when asked (`show`, `watch`, `list --health`, the doctor),
 only for a running daemon, for five seconds at most: exit 0 is healthy.

@@ -178,11 +178,24 @@ def test_a_stop_from_before_the_last_boot_is_ignored():
     assert (found.state, found.reason) == ("fail", "not running")
 
 
-def test_a_module_daemon_stopped_by_hand_fails_with_start_as_the_fix():
-    # A module daemon's stop is not stored, so nothing tells it from a crash.
+def test_a_module_daemon_down_with_no_stop_recorded_fails_with_start_as_the_fix():
     found = judge(module_row(), st(state="inactive", module="notes", name="sync"), is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "fail", "not running", "moxi services start notes/sync")
+
+
+def test_a_module_daemon_stopped_by_hand_warns_as_a_user_daemon_does():
+    found = judge(module_row(), st(state="inactive", module="notes", name="sync"),
+                  is_enabled=True, booted=BOOTED, module_stop="2030-01-01T00:00:00Z")
+    assert (found.state, found.reason, found.fix, found.cause) == (
+        "warn", "stopped by hand at 2030-01-01T00:00:00Z", "moxi services start notes/sync",
+        "stopped")
+
+
+def test_a_module_daemons_stop_from_before_the_last_boot_is_ignored():
+    found = judge(module_row(), st(state="inactive", module="notes", name="sync"),
+                  is_enabled=True, booted=BOOTED, module_stop="2020-01-01T00:00:00Z")
+    assert (found.state, found.cause) == ("fail", "not-running")
 
 
 def test_a_module_daemon_idle_under_its_socket_is_ok():
@@ -475,6 +488,21 @@ def test_views_judge_every_row_from_one_read(fake):
     assert {v.row.id: v.verdict.state for v in found} == {
         "services/job": "warn", "services/web": "ok"}
     assert [c[0] for c in fake.calls].count("status") == 1
+
+
+def test_views_read_module_stops_from_the_store_by_row_id(fake):
+    store.write(lambda c: (
+        store.set_module_stop(c, "notes/sync", "2030-01-01T00:00:00Z", by="test"),
+        store.set_module_stop(c, "gone/daemon", "2030-01-01T00:00:00Z", by="test")))
+    user(enabled=True, stopped="2030-01-01T00:00:00Z")
+    rows = [*store.read_rows(), module_row(), module_row(name="other")]
+    found = {v.row.id: v for v in verdict.views(rows)}
+    assert set(found) == {"services/web", "notes/sync", "notes/other"}
+    assert (found["notes/sync"].verdict.cause, found["notes/sync"].stopped) == (
+        "stopped", "2030-01-01T00:00:00Z")
+    assert (found["notes/other"].verdict.cause, found["notes/other"].stopped) == (
+        "not-running", None)
+    assert found["services/web"].stopped == "2030-01-01T00:00:00Z"
 
 
 def test_views_past_the_status_limit_are_unknown_and_run_no_health(fake, monkeypatch):

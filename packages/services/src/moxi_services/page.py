@@ -124,9 +124,9 @@ CHECKED = lb.Out("table", nullable=True, items={
 #:   gives them, null when it was not read.
 #: - `last_run` a timer's last run, `checked` a running daemon's last health result.
 #: - A user row's `argv` (written), `cwd`, `unit` (adopted), `schedule` (`every 5m`, `at
-#:   09:00 on mon,fri`), `health` (its health command), `project`, `stopped` (a daemon
-#:   stopped by hand, UTC), `removing` and `platform` (the system it was added on); null
-#:   or False for a module row.
+#:   09:00 on mon,fri`), `health` (its health command), `project`, `removing` and
+#:   `platform` (the system it was added on); null or False for a module row.
+#: - `stopped`: a daemon's recorded stop by hand, UTC, a user's or a module's; else null.
 #: - `launches_session` True for a row whose runs launch an agent session, so its runs
 #:   spend usage.
 ROW = lb.Out("table", items={

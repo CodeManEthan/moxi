@@ -34,9 +34,10 @@ The first case that matches gives the verdict:
                                                     (its gate holds the runs); else armed:
                                                     warn, not armed: off
 
-A user daemon's stop by hand is recorded; one older than the machine's last boot is
-ignored, since the daemon started again at login after it. A module daemon's stop is not
-recorded, so a module daemon that is on and not running is `fail`, "not running".
+A daemon's stop by hand is recorded, a user daemon's on its row and a module daemon's
+in the store's `module_stops`; one older than the machine's last boot is ignored, since
+the daemon started again at login after it. So a daemon that is on and not running is
+`fail`, "not running", only when no stop by hand holds.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from dataclasses import dataclass
 
 from moxi import units
 
-from . import state
+from . import state, store
 from .rows import ModuleRow, UserRow
 
 Row = UserRow | ModuleRow
@@ -209,15 +210,18 @@ def _seconds(utc: str) -> float | None:
         return None
 
 
-def stop_recorded(row: Row, booted: float | None) -> str | None:
-    """The time of a user daemon's stop by hand that still holds, or None. A stop from
-    before the last boot no longer holds: the daemon started again at login since."""
-    if not isinstance(row, UserRow) or row.stopped is None:
+def stop_recorded(row: Row, booted: float | None,
+                  module_stop: str | None = None) -> str | None:
+    """The time of a daemon's stop by hand that still holds, or None: a user daemon's
+    from its row, a module daemon's from `module_stop`, its record in the store. A stop
+    from before the last boot no longer holds: the daemon started again at login since."""
+    recorded = row.stopped if isinstance(row, UserRow) else module_stop
+    if recorded is None:
         return None
-    when = _seconds(row.stopped)
+    when = _seconds(recorded)
     if booted is not None and when is not None and when < booted:
         return None
-    return row.stopped
+    return recorded
 
 
 # --- the verdict ------------------------------------------------------------------------
@@ -233,16 +237,17 @@ def _unknown(reason: str) -> Verdict:
 
 def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
           supervisor: bool = True, booted: float | None = None,
-          unread: str | None = None) -> Verdict:
+          unread: str | None = None, module_stop: str | None = None) -> Verdict:
     """The verdict of one row.
 
     `st` is what the supervisor said of it (None when the read did not cover it, and
     then `unread` says why), `is_enabled` its on/off (`state.flag`; None when unreadable),
     `health` its health check's `(verdict, line)` when one ran, `socket` a module
-    daemon's listening-socket state, `supervisor` False when this system has none, and
-    `booted` the last boot time, before which a recorded stop no longer holds."""
+    daemon's listening-socket state, `supervisor` False when this system has none,
+    `booted` the last boot time, before which a recorded stop no longer holds, and
+    `module_stop` a module daemon's recorded stop by hand."""
     found = _state_verdict(row, st, is_enabled, socket=socket, supervisor=supervisor,
-                           booted=booted, unread=unread)
+                           booted=booted, unread=unread, module_stop=module_stop)
     if health is None or found.state not in ("ok", "warn") or found.unknown:
         return found
     said, line = health
@@ -254,7 +259,8 @@ def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, heal
     return found
 
 
-def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread) -> Verdict:
+def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread,
+                   module_stop) -> Verdict:
     user = isinstance(row, UserRow)
     if user and not row.here:
         return Verdict("off", f"added on {row.platform}", cause="elsewhere")
@@ -280,7 +286,8 @@ def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unre
         return Verdict("warn", "not wrapped: runs are neither gated nor recorded",
                        _cmd("enable" if is_enabled else "disable", row), cause="not-wrapped")
     if row.kind == "daemon":
-        return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted)
+        return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted,
+                       module_stop=module_stop)
     return _timer(row, st, is_enabled=is_enabled)
 
 
@@ -295,7 +302,7 @@ def _missing(row: Row, *, is_enabled: bool) -> Verdict:
     return Verdict("fail" if is_enabled else "warn", what, fix, cause="missing")
 
 
-def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
+def _daemon(row: Row, st, *, is_enabled: bool, socket, booted, module_stop) -> Verdict:
     running = st.state == "active"
     listening = (socket is not None and socket.state == "active" and not running
                  and st.state == "inactive")
@@ -306,7 +313,7 @@ def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
         if listening:
             return Verdict("ok", "idle, socket listening", cause="listening")
         if not running:
-            stopped = stop_recorded(row, booted)
+            stopped = stop_recorded(row, booted, module_stop)
             if stopped is not None:
                 return Verdict("warn", f"stopped by hand at {stopped}", _cmd("start", row),
                                cause="stopped")
@@ -381,13 +388,14 @@ def _adopted_task(row: Row, st) -> bool:
 class View:
     """One row as the reads show it: the row, what the supervisor said (`st`, None when
     not read), its on/off (`is_enabled`), its health check's `(verdict, line)` when one ran,
-    and its verdict."""
+    its verdict, and its recorded stop by hand (`stopped`, UTC, or None)."""
 
     row: Row
     st: units.UnitState | None
     flag: bool | None
     health: tuple[str, str] | None
     verdict: Verdict
+    stopped: str | None = None
 
 
 def flags(rows: Sequence[Row]) -> dict[str, bool | None]:
@@ -524,13 +532,17 @@ def views(rows: Sequence[Row], *, check_health: bool = False,
     else:
         checked = {}
     booted = boot_time()
+    module_stops = (store.read_module_stops()
+                    if any(isinstance(r, ModuleRow) and r.kind == "daemon" for r in rows)
+                    else {})
     out = []
     for row in rows:
         st = states.get(row.id)
+        stopped = row.stopped if isinstance(row, UserRow) else module_stops.get(row.id)
         verdict = judge(row, st, is_enabled=on[row.id], health=checked.get(row.id),
                         socket=sockets.get(row.id), supervisor=supervisor, booted=booted,
-                        unread=unread)
-        out.append(View(row, st, on[row.id], checked.get(row.id), verdict))
+                        unread=unread, module_stop=module_stops.get(row.id))
+        out.append(View(row, st, on[row.id], checked.get(row.id), verdict, stopped))
     return out
 
 
