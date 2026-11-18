@@ -145,7 +145,7 @@ def test_every_path_in_a_plan_or_an_answer_carries_a_mark():
     from tests.test_page import _marks
 
     routes = {r["path"]: r for r in loopback().export(page.PAGE)["routes"]}
-    plan = {"plan.root": "path", "plan.writes[].from": "redact",
+    plan = {"plan.root": "path", "plan.name": "path", "plan.writes[].from": "redact",
             "plan.writes[].to": "redact", "plan.refusal.text": "redact"}
     assert {k: v for key, shape in routes["/api/plan"]["returns"].items()
             for k, v in _marks(shape, key).items()} == {"detail": "redact", **plan}

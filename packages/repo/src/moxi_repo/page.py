@@ -221,7 +221,7 @@ WRITE = lb.Out("table", items={
 #: when it would be refused, with no `writes` and no `digest`.
 PLAN = lb.Out("table", items={
     "root": _PATH,
-    "name": _TEXT,
+    "name": _PATH,
     "is_repo": _FLAG,
     "git_version": _MAYBE,
     "mode": _MAYBE,
