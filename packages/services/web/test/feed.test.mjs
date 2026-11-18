@@ -17,24 +17,30 @@ function feedOf(answers, parse = parseRows) {
 }
 
 test("every row form and kind parses, and the value is a copy", () => {
-  const data = rows([row(), timer(), moduleRow()]);
+  const failing = timer({ id: "services/report", name: "report",
+                          streak: { count: 3, since: "2026-11-03T08:00:00Z", same_exit: true },
+                          timing: { every: null, at: ["09:00"], days: ["mon", "fri"] } });
+  const data = rows([row(), timer(), failing, moduleRow({ ends_slots: true, has_settings: true })]);
   const value = parseRows(data);
   assert.deepEqual(value, data);
   value.rows[0].argv.push("x");
+  value.rows[2].timing.days.push("sun");
   assert.equal(data.rows[0].argv.length, 3);
+  assert.deepEqual(data.rows[2].timing.days, ["mon", "fri"]);
 });
 
 test("on the phone every redacted text is null, and the rows still parse", () => {
   const phone = row({
     doc: null, detail: null, argv: null, health: null, cwd: "@h/0123456789ab/docs",
     verdict: { state: "fail", reason: null, fix: null, unknown: false, cause: "not-running" },
-    checked: { state: "fail", line: null },
+    checked: { state: "fail", line: null, at: "2026-11-03T10:04:30Z" },
   });
-  const value = parseRows(rows([phone, timer({ last_run: { failed: true, text: null, at: null } })],
+  const value = parseRows(rows([phone, timer({ last_run: { failed: true, text: null, at: null, exit: null } })],
                               { problems: [{ module: "notes", reason: null }] }));
   assert.equal(value.rows[0].verdict.reason, null);
   assert.equal(value.rows[0].verdict.cause, "not-running");
   assert.equal(value.rows[1].last_run.text, null);
+  assert.equal(value.rows[0].checked.at, "2026-11-03T10:04:30Z");
   assert.deepEqual(value.problems, [{ module: "notes", reason: null }]);
 });
 
@@ -49,16 +55,26 @@ test("a row that isn't one makes the whole list unreadable", () => {
     { ...row(), argv: "/bin/true" },
     { ...row(), last_run: { failed: "no", text: "ok", at: null } },
     { ...row(), launches_session: null },
+    { ...row(), last_run: { failed: true, text: "exit 1", at: null } },
+    { ...row(), last_run: { failed: true, text: "exit 1", at: null, exit: "1" } },
+    { ...row(), checked: { state: "ok", line: "ok" } },
+    { ...row(), streak: { count: 2, since: null } },
+    { ...row(), streak: { count: 1.5, since: null, same_exit: true } },
+    { ...row(), timing: { every: 5, at: null, days: null } },
+    { ...row(), timing: { every: null, at: ["09:00", null], days: null } },
+    { ...row(), ends_slots: null },
+    { ...row(), has_settings: undefined },
   ]) {
     assert.equal(parseRow(bad), null, JSON.stringify(bad));
     assert.equal(parseRows(rows([row(), bad])), null);
   }
-  assert.equal(parseRows({ state: "maybe", detail: null, rows: [], problems: [] }), null);
+  assert.equal(parseRows({ state: "maybe", detail: null, at: null, rows: [], problems: [] }), null);
+  assert.equal(parseRows({ state: "up", detail: null, at: 5, rows: [], problems: [] }), null);
   assert.equal(parseRows(null), null);
 });
 
 test("a store that can't be read is the error state with its detail", () => {
-  const value = parseRows({ state: "error", detail: "services' store is too new", rows: [], problems: [] });
+  const value = parseRows({ state: "error", detail: "services' store is too new", at: null, rows: [], problems: [] });
   assert.equal(value.state, "error");
   assert.equal(value.detail, "services' store is too new");
 });
