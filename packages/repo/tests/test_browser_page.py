@@ -94,7 +94,7 @@ def test_a_repo_is_a_row_named_in_the_home_form(notes_repo, ui_page):
     expect(row).to_have_attribute("where", re.compile("commit-rules"))
     row.locator("button[data-action=open]").click()
     expect(row).to_have_attribute("open", "")
-    ui_page.wait_for_url("**/m/repo/repo/~%2Falpha-notes")
+    ui_page.wait_for_url("**/m/repo/repo/~!2Falpha-notes")
 
 
 @pytest.mark.parametrize("status", [500, 401])

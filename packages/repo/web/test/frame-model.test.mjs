@@ -7,22 +7,25 @@ import {
 import { repoRow } from "../src/rows-model.ts";
 import { HOME, repo, value } from "./fixtures.mjs";
 
-test("addresses: each one read and written, a ~ name encoded", () => {
+test("addresses: each one read and written, a ~ name encoded with no %", () => {
   const cases = [
     ["", { piece: "list" }], ["add", { piece: "add" }], ["pieces", { piece: "pieces" }],
     ["repo/atlas-api", { piece: "repo", name: "atlas-api" }],
-    ["repo/~%2Fcode%2Ffinch", { piece: "repo", name: "~/code/finch" }],
-    ["repo/~%2Fnotes/add", { piece: "repo-add", name: "~/notes" }],
+    ["repo/~!2Fcode!2Ffinch", { piece: "repo", name: "~/code/finch" }],
+    ["repo/~!2Fnotes/add", { piece: "repo-add", name: "~/notes" }],
+    ["repo/~!2Fcode!2Fr!C3!A9sum!C3!A9!20x", { piece: "repo", name: "~/code/résumé x" }],
     ["project/orbit-cli", { piece: "project", key: "orbit-cli" }],
   ];
   for (const [route, address] of cases) {
     assert.deepEqual(parseRoute(route), address, route);
     assert.equal(routeOf(address), route);
   }
-  for (const odd of ["repo", "repo/", "repo/%E0", "repo/a/b", "elsewhere/x", "project/a/add"]) {
+  for (const odd of ["repo", "repo/", "repo/%E0", "repo/!E0", "repo/a!2", "repo/a/b", "elsewhere/x", "project/a/add"]) {
     assert.deepEqual(parseRoute(odd), { piece: "list" }, odd);
   }
-  assert.equal(pathToWrite({ piece: "repo", name: "~/notes" }, "/m/repo/"), "/m/repo/repo/~%2Fnotes");
+  // A name written with `%` escapes, as a link from elsewhere may, is read the same.
+  assert.deepEqual(parseRoute("repo/~%2Fcode%2Ffinch"), { piece: "repo", name: "~/code/finch" });
+  assert.equal(pathToWrite({ piece: "repo", name: "~/notes" }, "/m/repo/"), "/m/repo/repo/~!2Fnotes");
   assert.equal(pathToWrite({ piece: "list" }, "/m/repo/"), null);
   assert.equal(pathToWrite({ piece: "add" }, "/m/ui/"), null);
 });
@@ -30,8 +33,8 @@ test("addresses: each one read and written, a ~ name encoded", () => {
 test("an address names a row by name, ~ folder or project; none gives the foot line", () => {
   const rows = [repo({ project: "atlas-api" }), repo({ root: `${HOME}/notes` })].map((r) => repoRow(r, { home: HOME }));
   assert.equal(rowNamed(parseRoute("repo/atlas-api"), rows, HOME), rows[0]);
-  assert.equal(rowNamed(parseRoute("repo/~%2Fnotes"), rows, HOME), rows[1]);
-  assert.equal(rowNamed(parseRoute("repo/~%2Fcode%2Fatlas-api"), rows, HOME), rows[0]);
+  assert.equal(rowNamed(parseRoute("repo/~!2Fnotes"), rows, HOME), rows[1]);
+  assert.equal(rowNamed(parseRoute("repo/~!2Fcode!2Fatlas-api"), rows, HOME), rows[0]);
   assert.equal(rowNamed(parseRoute("project/atlas-api"), rows, HOME), rows[0]);
   assert.equal(rowNamed(parseRoute("repo/kestrel"), rows, HOME), null);
   assert.equal(noSuchRepo(parseRoute("repo/kestrel")), "No repo is named kestrel.");

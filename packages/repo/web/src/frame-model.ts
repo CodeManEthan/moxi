@@ -4,8 +4,10 @@
 // `repo/<name>` a repo opened (`name` its project's key or its `~` folder),
 // `repo/<name>/add` its `Add a piece` list, `project/<key>` the first repo of that project
 // opened, `add` the `Add a repo` panel, and `pieces` with `Pieces` shown. A name is one
-// path segment, encoded, and decoded once when read. One thing is open at a time; the
-// page writes the address with `history.replaceState` whenever what is open changes.
+// path segment, encoded, and decoded once when read. The shell loads no address holding
+// `%`, so a byte outside `KEPT` is written `!` and two hex digits (`~/code` is
+// `~!2Fcode`), as loadout's page writes its paths. One thing is open at a time; the page
+// writes the address with `history.replaceState` whenever what is open changes.
 
 import type { Failure, Repos } from "./feed.ts";
 import type { RowView } from "./rows-model.ts";
@@ -22,10 +24,38 @@ export type Address =
 /** The page, nothing open. */
 export const NOTHING_OPEN: Address = { piece: "list" };
 
+/** The characters a name keeps as they are in an address. */
+const KEPT = /^[A-Za-z0-9._~:@-]$/;
+const UTF8 = new TextEncoder();
+
+/** `name` as one segment of an address the shell loads. */
+export function encodeName(name: string): string {
+  let out = "";
+  for (const ch of name) {
+    if (KEPT.test(ch)) out += ch;
+    else for (const byte of UTF8.encode(ch)) out += `!${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return out;
+}
+
+/** The name a segment writes, or null for none. A `%` escape is read too. */
 function decoded(segment: string): string | null {
   if (segment === "") return null;
+  let plain: string;
   try {
-    return decodeURIComponent(segment);
+    plain = decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+  if (!/^(?:[^!]|![0-9A-Fa-f]{2})*$/.test(plain)) return null;
+  const bytes: number[] = [];
+  for (const piece of plain.split(/(![0-9A-Fa-f]{2})/)) {
+    if (piece.startsWith("!")) bytes.push(parseInt(piece.slice(1), 16));
+    else bytes.push(...UTF8.encode(piece));
+  }
+  try {
+    const name = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+    return name === "" ? null : name;
   } catch {
     return null;
   }
@@ -49,9 +79,9 @@ export function routeOf(address: Address): string {
     case "list": return "";
     case "add": return "add";
     case "pieces": return "pieces";
-    case "repo": return `repo/${encodeURIComponent(address.name)}`;
-    case "repo-add": return `repo/${encodeURIComponent(address.name)}/add`;
-    case "project": return `project/${encodeURIComponent(address.key)}`;
+    case "repo": return `repo/${encodeName(address.name)}`;
+    case "repo-add": return `repo/${encodeName(address.name)}/add`;
+    case "project": return `project/${encodeName(address.key)}`;
   }
 }
 
