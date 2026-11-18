@@ -24,7 +24,7 @@ import pytest
 from conftest import wait_until
 
 from moxi import modules
-from moxi_comms import api, page, pagehandlers
+from moxi_comms import api, kinds, page, pagehandlers
 
 from test_reply_enforcement import PLANNER, REVIEWER, P, R
 
@@ -51,9 +51,16 @@ def fresh_handlers(monkeypatch):
     monkeypatch.setattr(pagehandlers, "_current", None)
 
 
+#: The harness each of comms' own adapter kinds is a session of.
+HARNESS_OF = {"claude-shim": "claude", "codex": "codex", "opencode": "opencode"}
+
+
 def row(r: api.RosterRow) -> dict:
-    return json.loads(json.dumps({key: value for key, value in dataclasses.asdict(r).items()
-                                  if key in pagehandlers.KEYS}))
+    """`r` as the page sends it: its declared keys, with the harness of a live row's kind."""
+    out = {key: value for key, value in dataclasses.asdict(r).items()
+           if key in pagehandlers.KEYS}
+    out["harness"] = HARNESS_OF.get(r.adapter) if r.live else None
+    return json.loads(json.dumps(out))
 
 
 def up(rows, waiting=()) -> dict:
@@ -212,7 +219,10 @@ def test_no_route_but_the_mail_is_the_gateways():
 
 
 def test_a_row_is_the_reads_fields_and_no_shape_carries_a_path_or_a_token():
-    assert list(page.ROW.items) == list(api.RosterRow.__dataclass_fields__)
+    # Every field of `api.RosterRow`, and `harness`, which the page server adds.
+    assert "harness" not in api.RosterRow.__dataclass_fields__
+    assert [key for key in page.ROW.items if key != "harness"] == list(
+        api.RosterRow.__dataclass_fields__)
     keys = set(page.ROW.items) | set(page.ROSTER)
     assert not keys & {"cache_source", "cache_kind", "path", "socket", "token", "pid"}
 
@@ -413,6 +423,40 @@ def test_mail_waiting_adds_no_row_to_the_roster(rig):
     assert "curator@proj-a" not in {r["qualified"] for r in body["rows"]}
     assert body["rows"] == up(api.roster_rows())["rows"]
     assert [w["qualified"] for w in body["waiting"]] == ["curator@proj-a"]
+
+
+class _Declared:
+    """An entry point of the kinds group, declaring `table` as `name`."""
+
+    def __init__(self, name, table):
+        self.name, self._table = name, table
+
+    def load(self):
+        return self._table
+
+
+def test_a_live_rows_harness_is_its_kinds(monkeypatch):
+    """`harness` is the harness comms' kinds give a live row's adapter kind, comms' own or
+    one a module declares; null for a person kind, a kind comms doesn't accept and a
+    standing row."""
+    declared = kinds.load([_Declared("my-codex", {"cache": "harness", "harness": "codex",
+                                                  "evidence": "some_package.kinds:read"})])
+    monkeypatch.setattr(pagehandlers, "_kinds", lambda: declared)
+
+    def live(name, adapter):
+        return api.RosterRow(qualified=name, name=name, scope="global", live=True, kind=None,
+                             module=None, tier="chosen", adapter=adapter)
+
+    standing = api.RosterRow(qualified="idle", name="idle", scope="global", live=False,
+                             kind="agent", module=None, tier=None, adapter=None)
+    stub_rows(monkeypatch, (live("shim", "claude-shim"), live("cx", "codex"),
+                            live("oc", "opencode"), live("mine", "my-codex"),
+                            live("app", "connector"), live("odd", "nobody-knows"), standing))
+    status, body = run(get(served(), "/api/roster"))
+    assert (status, body["state"]) == (200, "up")
+    assert {r["qualified"]: r["harness"] for r in body["rows"]} == {
+        "shim": "claude", "cx": "codex", "oc": "opencode", "mine": "codex", "app": None,
+        "odd": None, "idle": None}
 
 
 LEAD_ROW = api.RosterRow(qualified="lead", name="lead", scope="global", live=True,

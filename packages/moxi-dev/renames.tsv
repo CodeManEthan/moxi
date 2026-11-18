@@ -1251,6 +1251,7 @@ comms	packages/comms/src/moxi_comms/page.py	"delivered": lb.Out("list", items=lb
 comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"earlier": lb.Out("table", nullable=True, items={	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"expired": lb.Out("list", items=lb.Out("string")),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	"harness": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=100)},	keep	required	required
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=500)},	keep	required	required
