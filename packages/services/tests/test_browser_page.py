@@ -8,8 +8,8 @@ list's states, the opened row's lines, the acts on the closed row and in the foo
 presses followed to their end (done, did not hold, refused, a lost answer), a Moxi
 daemon's stop by hand, the in-place confirms (a run that spends usage, Remove, slots'
 server's Stop and Restart over a fake slots API, the guard's refusal asked anew, ui's
-shell), the add form's 202 and the status it reads until the job ends, and the 360 px
-width check.
+shell), and the 360 px width check. The panel that adds a service is
+`test_browser_add.py`'s.
 """
 
 from __future__ import annotations
@@ -458,12 +458,15 @@ def test_each_address_opens_what_it_names(seeded, ui_page, route, opened, path):
         expect(item).to_be_in_viewport()
     expect_path(ui_page, path)
     expect(list_part(panel).locator('[data-line="unknown"]')).to_have_count(0)
-    form = panel.locator('section[data-part="add"] form')
+    aside = panel.locator('moxi-services-panel [data-part="panel"]')
     if route == "add":
-        expect(form.get_by_label("Name", exact=True)).to_be_focused()
+        expect(aside.get_by_role("radio", name="A command to run")).to_be_checked()
+        expect(aside.get_by_label("Command", exact=True)).to_be_focused()
     elif route == "adopt":
-        expect(form.get_by_label("a unit already here")).to_be_checked()
-        expect(form.get_by_role("textbox", name="Unit")).to_be_focused()
+        expect(aside.get_by_role("radio", name="A unit already on this computer")).to_be_checked()
+        expect(aside.get_by_label("Unit", exact=True)).to_be_focused()
+    else:
+        expect(aside).to_have_count(0)
 
 
 def test_a_moxi_rows_address_is_its_module_and_name(seeded, ui_shell, ui_page):
@@ -539,11 +542,15 @@ def test_open_close_and_add_rewrite_the_address_and_back_leaves_the_page(seeded,
     panel.get_by_role("button", name="Add a service", exact=True).click()
     expect(panel.locator("moxi-ui-row[open]")).to_have_count(0)
     expect_path(ui_page, "/m/services/add")
-    form = panel.locator('section[data-part="add"] form')
-    expect(form.get_by_label("Name", exact=True)).to_be_focused()
-    form.get_by_label("a unit already here").check()
+    aside = panel.locator('moxi-services-panel [data-part="panel"]')
+    expect(aside.get_by_label("Command", exact=True)).to_be_focused()
+    aside.get_by_role("radio", name="A unit already on this computer").click()
     expect_path(ui_page, "/m/services/adopt")
-    form.get_by_label("a command line").check()
+    aside.get_by_role("radio", name="A command to run").click()
+    expect_path(ui_page, "/m/services/add")
+    aside.get_by_role("button", name="Close", exact=True).click()
+    expect(aside).to_have_count(0)
+    expect_path(ui_page, "/m/services/")
 
     # No entry was added, so Back leaves the page.
     assert ui_page.evaluate("() => history.length") == entries
@@ -1050,78 +1057,6 @@ def test_ui_shells_stop_is_a_command_and_its_restart_reloads_the_page(seeded, ui
     assert ui_page.evaluate("window.beforeTheRestart") is None
     expect(ui_page.locator('#moxi-panel > moxi-services-page section[data-part="list"]')).to_have_attribute(
         "data-state", "up")
-
-
-# --- add ------------------------------------------------------------------------------------
-
-@pytest.mark.parametrize(("name", "port", "tick", "verdict"), [
-    ("notebook", 8123, False, "off"),
-    ("jupyter", 8124, True, "ok"),
-], ids=["left-off", "turned-on"])
-def test_the_add_form_takes_a_202_and_reads_the_status_until_the_job_ends(seeded, ui_shell, ui_page,
-                                                                          name, port, tick, verdict):
-    """A written row starts off, as the command line leaves it; ticking "Turn it on now"
-    starts it."""
-    panel = panel_of(ui_page)
-    form = panel.locator('section[data-part="add"] form')
-    expect(form.get_by_label("Project")).to_contain_text("alpha")
-    form.get_by_label("Name", exact=True).fill(name)
-    form.get_by_role("textbox", name="Command line").fill(f"/usr/bin/python3 -m http.server {port}")
-    form.get_by_label("Project").select_option("alpha")
-    form.get_by_label("Doc").fill("a notebook server")
-    turn_on = form.get_by_label("Turn it on now")
-    expect(turn_on).not_to_be_checked()
-    if tick:
-        turn_on.check()
-    statuses: list[str] = []
-    ui_page.on("request", lambda r: statuses.append(r.url) if "/m/services/api/status?job=" in r.url else None)
-    with ui_page.expect_response("**/m/services/api/add") as added:
-        form.get_by_role("button", name="Add", exact=True).click()
-    assert added.value.status == 202, added.value.text()
-    assert added.value.request.post_data_json["enable"] is tick
-    link = added.value.json()["status"]
-    assert link.startswith("/api/status?job="), link
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "ok")
-    expect(said).to_contain_text(f"Add {name}: Done.")
-    assert any(url.endswith(link) for url in statuses), statuses
-    assert name in stored(ui_shell)
-    item = row(panel, f"services/{name}")
-    expect(item).to_have_count(1)
-    expect(item).to_have_attribute("data-verdict", verdict)
-    expect(panel.locator(f'section[data-project="alpha"] .item[data-id="services/{name}"]')).to_have_count(1)
-    # The form starts again once the add is done, the box off again.
-    expect(form.get_by_label("Name", exact=True)).to_have_value("")
-    expect(turn_on).not_to_be_checked()
-
-
-def test_an_add_whose_command_is_not_a_full_path_is_refused_before_any_job(seeded, ui_shell, ui_page):
-    panel = panel_of(ui_page)
-    form = panel.locator('section[data-part="add"] form')
-    form.get_by_label("Name", exact=True).fill("bare")
-    form.get_by_role("textbox", name="Command line").fill("python3 -m http.server")
-    with ui_page.expect_response("**/m/services/api/add") as added:
-        form.get_by_role("button", name="Add", exact=True).click()
-    assert added.value.status == 422
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
-    expect(said).to_contain_text("python3 is not a full path")
-    expect(said).to_contain_text("command -v python3")
-    assert "bare" not in stored(ui_shell)
-
-
-def test_an_add_of_a_taken_name_ends_refused(seeded, ui_page):
-    panel = panel_of(ui_page)
-    form = panel.locator('section[data-part="add"] form')
-    form.get_by_label("Name", exact=True).fill("web")
-    form.get_by_role("textbox", name="Command line").fill("/usr/bin/true")
-    with ui_page.expect_response("**/m/services/api/add") as added:
-        form.get_by_role("button", name="Add", exact=True).click()
-    assert added.value.status == 202
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
-    expect(said).to_contain_text("Add web: Refused; nothing changed.")
-    expect(said).to_contain_text("web is taken")
 
 
 # --- width ----------------------------------------------------------------------------------

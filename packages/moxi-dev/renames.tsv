@@ -11760,6 +11760,12 @@ services	packages/services/tests/test_page_slots.py	422, {"refused": pagehandler
 services	packages/services/tests/test_page_act.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 services	packages/services/tests/test_page_act.py	return body["refused"]	keep	refused	refused
 services	packages/services/tests/test_page_act.py	assert (found["state"], found["code"]) == ("refused", 3)	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
+services	packages/services/tests/test_browser_add.py	assert box is not None and round(box["x"] + box["width"]) == WIDE["width"], box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert round(box["width"]) == PANEL_PX, box	keep	round	round
+services	packages/services/tests/test_browser_add.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
+services	packages/services/tests/test_browser_add.py	"wraps": False, "refused": None})	keep	refused	refused
+services	packages/services/tests/test_browser_add.py	status=422, json={"refused": "the stand-in takes no add"}))	keep	refused	refused
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

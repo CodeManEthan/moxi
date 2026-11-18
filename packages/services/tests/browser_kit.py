@@ -51,6 +51,8 @@ SITECUSTOMIZE = textwrap.dedent('''\
             _fake.written[_name] = Unit(**_unit)
         for _key, _unit in _spec.get("modules", {{}}).items():
             _fake.modules[tuple(_key.split("/", 1))] = Unit(**_unit)
+        for _ref, _unit in _spec.get("foreign", {{}}).items():
+            _fake.foreign[_ref] = Unit(**_unit)
         _fake.fail = {{tuple(_pair) for _pair in _spec.get("fail", [])}}
         for _module in (acts, lifecycle, state, verdict):
             _module.units = _fake
@@ -91,8 +93,9 @@ SITECUSTOMIZE = textwrap.dedent('''\
 
 def fake_site(base: Path, spec: dict[str, Any]) -> Path:
     """A site directory for the shell's `PYTHONPATH` whose `sitecustomize` gives services'
-    page server a fake supervisor holding `spec`'s units: `written` by row name and
-    `modules` by `<module>/<name>`, each a `fake_units.Unit`'s fields, and `fail`, the
+    page server a fake supervisor holding `spec`'s units: `written` by row name,
+    `modules` by `<module>/<name>` and `foreign` (units not yet adopted) by the
+    supervisor's own name, each a `fake_units.Unit`'s fields, and `fail`, the
     `[act, name]` pairs whose act fails. `health` gives a running module daemon's check
     by its id, `[verdict, line]`, in place of the module's own. With `slots` true, slots'
     API answers from `<base>/slots.json`, which `slots_said` writes."""

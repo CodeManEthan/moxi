@@ -160,15 +160,20 @@ first while one fails, and its `Services` link opens this page filtered to the p
   the answer is lost, the page says the act may have been done and reads the rows again.
   The server keeps its jobs only while it runs: after it restarts, a status it holds no
   record of says so, and the row's state shows the outcome.
-- **Add.** The form `moxi services add` takes: a command line to run, or a unit already on
-  the system to adopt, with its schedule, directory, health command, project and doc. A
-  command line's first word must be a full path (`/usr/bin/python3`, not `python3`), and
+- **Add.** `Add a service` opens a panel at the window's right edge with the two ways
+  `moxi services add` takes: a command to run, or a unit already on this computer to
+  adopt, with its schedule, folder, health check, project and description. Once you type
+  a unit, the panel reads what your system says of it: found, and whether it is a timer or
+  a service and on or off, or missing, or why it can't be adopted. Where your system
+  can't tell a unit's kind (launchd, Task Scheduler), the panel asks whether it keeps
+  running or runs on a schedule, and reads it again as that. A command line's first word must be a full path (`/usr/bin/python3`, not `python3`), and
   the page refuses one that isn't. The page server runs under your service manager,
   whose `PATH` isn't your shell's, so it doesn't search one; `command -v python3` in your
   shell prints the full path. Give a health command's first word in full too, since the
-  checks run with that same `PATH`. As in a terminal, a command you add starts off: tick "Turn
-  it on now" to start it now and at every login. Adopting a unit asks you to say whether
-  it is on or off.
+  checks run with that same `PATH`. As in a terminal, a command you add starts off: turn
+  on "Turn it on now" to start it now and at every login. Adopting a unit asks you to say
+  whether it is on or off. A done add leaves the panel open and empty, and the row in the
+  list. The addresses `add` and `adopt` open the panel on that way.
 - **On the phone.** Through the shell's gateway the phone shows the list and the home's
   block, and can start, stop, restart, run, enable and disable a row, each confirmed on
   the phone. It can't add or remove a row, and doesn't see the projects list: those stay

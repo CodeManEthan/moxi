@@ -1,6 +1,6 @@
 // What services' page and summary block show, as plain data: each row's lines, the acts
 // it offers with the confirm sheet of each, what an
-// act came to, the add form's body, and the count by verdict. No DOM and no Lit here, so
+// act came to, and the count by verdict. No DOM and no Lit here, so
 // the Node tests check it directly.
 
 import type { ConfirmOutcome } from "/m/ui/client.js";
@@ -218,92 +218,6 @@ export function statusSaid(label: string, status: Status): Said {
 /** What a status read that failed says: the act was taken, so it may still run. */
 export function statusLost(label: string, failure: Failure | null): Said {
   return { tone: "warn", lines: [`${label}: taken, but what it came to can't be read (${failureLine(failure)}).`, MAY_HAVE_ACTED] };
-}
-
-// -- the add form -------------------------------------------------------------------------
-
-export const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-
-/** What the add form holds, as typed. */
-export interface AddForm {
-  name: string;
-  kind: "daemon" | "timer";
-  /** `command` writes a unit from a command line; `unit` adopts one already there. */
-  source: "command" | "unit";
-  command: string;
-  unit: string;
-  /** A written row: start it now. An adopted row: on or off now (`""` until chosen). */
-  enable: boolean;
-  adoptOn: "" | "on" | "off";
-  /** A written timer's schedule: `every` (`5m`, `2h`) or `at` (`09:00, 17:30`). */
-  schedule: "every" | "at";
-  every: string;
-  at: string;
-  days: string[];
-  cwd: string;
-  health: string;
-  project: string;
-  launchesSession: boolean;
-  doc: string;
-}
-
-/** A new form. A written row starts off, as `moxi services add` leaves it without
- * `--enable`: the user ticks "Turn it on now" to start it now and at every login. */
-export function emptyForm(): AddForm {
-  return { name: "", kind: "daemon", source: "command", command: "", unit: "", enable: false, adoptOn: "",
-           schedule: "every", every: "", at: "", days: [], cwd: "", health: "", project: "",
-           launchesSession: false, doc: "" };
-}
-
-/** `/api/add`'s body from the form, or the one line that says what the form still
- * needs. The server checks it again and has the last word. */
-export function addBody(form: AddForm): { body: Record<string, unknown> } | { missing: string } {
-  const name = form.name.trim();
-  if (name === "") return { missing: "Give the row a name." };
-  const body: Record<string, unknown> = { name, kind: form.kind };
-  if (form.source === "command") {
-    const command = form.command.trim();
-    if (command === "") return { missing: "Give the command line to run, its first word a full path." };
-    body.command = command;
-    body.enable = form.enable;
-    if (form.kind === "timer") {
-      if (form.schedule === "every") {
-        const every = form.every.trim();
-        if (every === "") return { missing: "Give how often the timer runs, such as 5m or 2h." };
-        body.every = every;
-      } else {
-        const at = form.at.split(/[\s,]+/).filter(Boolean);
-        if (at.length === 0) return { missing: "Give the times the timer runs at, such as 09:00, 17:30." };
-        body.at = at;
-        if (form.days.length) body.days = DAYS.filter((day) => form.days.includes(day));
-      }
-    }
-    const cwd = form.cwd.trim();
-    if (cwd !== "") body.cwd = cwd;
-  } else {
-    const unit = form.unit.trim();
-    if (unit === "") return { missing: "Give the unit to adopt, as the supervisor names it." };
-    if (form.adoptOn === "") return { missing: "Say whether the adopted row is on or off now." };
-    body.unit = unit;
-    body.enable = form.adoptOn === "on";
-  }
-  const health = form.health.trim();
-  if (health !== "") body.health = health;
-  const project = form.project.trim();
-  if (project !== "") body.project = project;
-  if (form.launchesSession) body.launches_session = true;
-  const doc = form.doc.trim();
-  if (doc !== "") body.doc = doc;
-  return { body };
-}
-
-/** What an add POST's answer says when it isn't a 202: its refusal, or why there was
- * none. */
-export function addRefused(status: number, said: string | null): Said {
-  if (status === 0) return { tone: "warn", lines: ["No answer from the shell; the add may have been taken. The list shows what stands now."] };
-  if (status === 409) return { tone: "error", lines: [said ?? "services is busy; try again."] };
-  if (status >= 500) return { tone: "warn", lines: [`services' page server answered ${status}; the add may have been taken. The list shows what stands now.`] };
-  return { tone: "error", lines: [said ?? `services' page server answered ${status}`] };
 }
 
 // -- the summary block ----------------------------------------------------------------------

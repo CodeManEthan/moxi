@@ -1,7 +1,7 @@
 // <moxi-services-page route="...">: services' panel.
 //
 // - The address (`address.ts`): the route opens the page (`""`), a row (`row/<id>`), the
-//   add form on one of its two ways (`add`, `adopt`), the filter to one project's rows
+//   panel on one of its two ways (`add`, `adopt`), the filter to one project's rows
 //   (`project/<key>`, with projects installed), or both (`project/<key>/row/<id>`). One
 //   thing is open at a time, and the page rewrites the browser's address with
 //   `history.replaceState` whenever what is open changes, so Back leaves the page. A route
@@ -38,9 +38,11 @@
 //   slots again and asks anew. ui's shell offers no Stop (its opened row gives the
 //   command), and after its Restart the page reloads once the shell answers again. The
 //   phone keeps its row's acts under the row, each through the sheet.
-// - The add form: a command line to run, or a unit already on the system to adopt, with
-//   its schedule, directory, health command, project and doc. It is one plain request,
-//   no sheet, and the server checks it again.
+// - The panel (`panel.ts`), from `Add a service` or the `add` and `adopt` addresses, at the
+//   window's right edge: a command to run, or a unit already on this computer to adopt,
+//   with the kind asked where the system can't tell it. Its button is one plain
+//   `/api/add`, no sheet, followed to its end like an act; the server checks it again. A
+//   done add leaves the panel open, its form empty, saying so.
 //
 // Each act runs as a job on services' page server: the page reads the job's status link
 // once a second until it ends, shows its lines under the row, and keeps every act's
@@ -48,12 +50,12 @@
 // job ends the page reads the rows again. Otherwise it reads `/api/rows` when it opens and
 // when its tab is shown again, and follows the topic `rows`.
 //
-// On the phone the add form, the projects list and remove are left out: from the phone a
+// On the phone the panel, the projects list and remove are left out: from the phone a
 // service is acted on, never added or removed. Where the phone runs no acts here, each
 // sheet says to do the act at the desk.
 
-import { css, html, LitElement, nothing } from "lit";
-import { live } from "lit/directives/live.js";
+import { css, html, LitElement, nothing, unsafeCSS } from "lit";
+import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, components, confirm, gateway, gatewayActs, installed, navigate, subscribe } from "/m/ui/client.js";
 
@@ -75,9 +77,15 @@ import type { ListShape, PageState, RowView } from "./list-model.ts";
 import { footLinks, openedLines } from "./opened-model.ts";
 import type { Line, One, Opened } from "./opened-model.ts";
 import {
-  actsOf as sheetActs, addBody, addRefused, DAYS, emptyForm, outcomeSaid, statusLost, statusSaid,
+  actsOf as sheetActs, outcomeSaid, statusLost, statusSaid,
 } from "./views.ts";
-import type { Act, AddForm, Said } from "./views.ts";
+import type { Act, Said } from "./views.ts";
+import { PANEL_WIDTH_PX } from "./panel.ts";
+import { addRefused } from "./panel-model.ts";
+import type { addBody, Way } from "./panel-model.ts";
+
+/** What the panel sends: `/api/add`'s body, or the line saying what it still needs. */
+type Built = ReturnType<typeof addBody>;
 
 const TAG = "moxi-services-page";
 
@@ -87,6 +95,12 @@ const JOB_POLL_MS = 1000;
 const JOB_TRIES = 5;
 /** Where the page's line about the add form goes. */
 const ADD = "add";
+
+/** The window's width from which the panel moves the column; under it the panel lies over
+ * the page. */
+const SIDE_FROM_PX = 1100;
+/** Half of the column's width. */
+const HALF_COLUMN_PX = 340;
 
 const STYLES = css`
   :host { display: block; min-width: 0; color: var(--moxi-text); font-family: var(--moxi-font-sans); }
@@ -101,11 +115,12 @@ const STYLES = css`
   .muted { color: var(--moxi-text-dim); }
   .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
   .note { padding-left: 8px; border-left: 3px solid var(--moxi-warn); font-size: var(--moxi-font-size-sm); }
-  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
   :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
-  section[data-part="add"] { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: 24px; padding: 12px;
-                             border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius-lg);
-                             background: var(--moxi-bg-raised); }
+  /* Beside the panel, where the window has the room, the column stands at the centre of
+     what the panel leaves; under that width the panel lies over the page. */
+  @media (min-width: ${unsafeCSS(SIDE_FROM_PX)}px) {
+    :host([data-side]) { margin-left: calc(50% - ${unsafeCSS(HALF_COLUMN_PX + PANEL_WIDTH_PX / 2)}px); }
+  }
   p.state, p.foot { margin: 16px 0 0; padding: 0 2px; }
   p.foot { color: var(--moxi-text-dim); }
   /* The list is the Projects page's: a dim label at the left of each group, its rows at
@@ -203,22 +218,11 @@ const STYLES = css`
   .said.error { border-left-color: var(--moxi-error); }
   .said.warn { border-left-color: var(--moxi-warn); color: var(--moxi-text); }
   .said.muted { color: var(--moxi-text-dim); }
-  button, select, input { font: inherit; color: var(--moxi-text); max-width: 100%; }
+  button { font: inherit; color: var(--moxi-text); max-width: 100%; }
   button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
            background: var(--moxi-bg-raised); cursor: pointer; }
-  button.go { background: var(--moxi-accent); border-color: var(--moxi-accent); color: var(--moxi-bg); }
   button:hover:not(:disabled) { background: var(--moxi-bg-hover); }
-  button.go:hover:not(:disabled) { background: var(--moxi-accent); }
-  button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity: 0.6; }
-  select, input[type=text] { min-width: 0; padding: 2px 6px; border: 1px solid var(--moxi-border-strong);
-                             border-radius: var(--moxi-radius); background: var(--moxi-bg); }
-  form { display: grid; gap: 8px; min-width: 0; }
-  form label { display: grid; gap: 2px; min-width: 0; }
-  form label > span, legend { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  form input[type=text], form select { width: 100%; }
-  fieldset { display: flex; flex-wrap: wrap; gap: 4px var(--moxi-gap); min-width: 0; margin: 0; padding: 4px 8px;
-             border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius); }
-  fieldset label, label.check { display: flex; align-items: center; gap: 4px; }
+  button:disabled { cursor: not-allowed; opacity: 0.6; }
   :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
 `;
 
@@ -303,7 +307,8 @@ export class ServicesPage extends LitElement {
    * Restart are in the warning colour while it found something in use or couldn't read. */
   #ends: { id: string; ends: Ends } | null = null;
   #reloadTimer: ReturnType<typeof setTimeout> | undefined;
-  #form: AddForm = emptyForm();
+  /** The panel's key: a new one places a fresh panel, its form empty. */
+  #panelKey = 0;
   /** Whether the page came through the gateway, on the phone. */
   #phone = false;
 
@@ -319,7 +324,7 @@ export class ServicesPage extends LitElement {
   /** The filter's menu of projects is open. */
   #menu = false;
   /** What was opened by its address takes the view once drawn. */
-  #scrollTo: "row" | "add" | null = null;
+  #scrollTo: "row" | null = null;
   /** When the page was connected, for the first read's `Reading…`. */
   #since = Date.now();
   #readingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -435,12 +440,12 @@ export class ServicesPage extends LitElement {
   }
 
   protected updated(): void {
+    const panel = this.renderRoot.querySelector<HTMLElement>("moxi-services-panel");
+    this.toggleAttribute("data-side", panel !== null && !panel.hidden);
     const to = this.#scrollTo;
     if (to === null) return;
     this.#scrollTo = null;
-    if (to === "add") {
-      this.#focusAdd();
-    } else if (this.#open !== null) {
+    if (this.#open !== null) {
       this.renderRoot.querySelector(`.item[data-id="${CSS.escape(this.#open)}"]`)?.scrollIntoView({ block: "nearest" });
     }
   }
@@ -485,10 +490,7 @@ export class ServicesPage extends LitElement {
     this.#open = found.address.row;
     this.#panel = found.address.panel;
     this.#menu = false;
-    if (this.#panel !== null) {
-      this.#form = { ...this.#form, source: this.#panel === "adopt" ? "unit" : "command" };
-      this.#scrollTo = "add";
-    } else if (this.#open !== null) {
+    if (this.#panel === null && this.#open !== null) {
       this.#scrollTo = "row";
     }
     this.#write();
@@ -659,9 +661,10 @@ export class ServicesPage extends LitElement {
     }
   }
 
-  async #add(): Promise<void> {
+  /** The panel's `Add service` or `Adopt unit`: posts its body to `/api/add` and follows
+   * the job, or says what the form still needs. */
+  async #add(built: Built): Promise<void> {
     if (this.#busy) return;
-    const built = addBody(this.#form);
     if ("missing" in built) {
       this.#told = { where: ADD, said: { tone: "error", lines: [built.missing] } };
       this.requestUpdate();
@@ -670,7 +673,7 @@ export class ServicesPage extends LitElement {
     this.#sending = true;
     this.#told = null;
     this.requestUpdate();
-    const label = `Add ${String(built.body.name)}`;
+    const label = `${built.body.unit !== undefined ? "Adopt" : "Add"} ${String(built.body.name)}`;
     try {
       const answer = await api("services", "api/add", built.body);
       const status = answer.status === 202 ? (answer.data as { status?: unknown } | null)?.status : undefined;
@@ -761,13 +764,8 @@ export class ServicesPage extends LitElement {
       job.ended = true;
       this.#told = { where: job.where, said: statusSaid(job.label, value) };
       this.#readAgain(job.where);
-      if (value.state === "done" && job.where === ADD) {
-        this.#form = emptyForm();
-        if (this.#panel !== null) {
-          this.#panel = null;
-          this.#write();
-        }
-      }
+      // A done add leaves the panel open with what it came to, its form empty again.
+      if (value.state === "done" && job.where === ADD) this.#panelKey += 1;
       void this.#rows?.refresh();
     } else if (feed.gone || job.fails >= JOB_TRIES) {
       job.ended = true;
@@ -813,7 +811,7 @@ export class ServicesPage extends LitElement {
         ${value !== null && state.rows ? problemLines(value).map((line) => html`<p class="foot" data-line="module-problem">${line}</p>`)
           : nothing}
       </section>
-      ${this.#phone ? nothing : this.#addPart()}`;
+      ${this.#panelPart(state.acts)}`;
   }
 
   /** `Project <key> ▾`, its menu of the projects his rows name, `<n> of <m> services` and
@@ -1015,121 +1013,48 @@ export class ServicesPage extends LitElement {
       }}>${link.text}</a>`;
   }
 
-  /** `Add a service`: the add form, on its way for a command, and the address says so. */
+  /** `Add a service`: the panel opens on its way for a command, and the address says so. */
   #toAdd(): void {
     this.#panel = "add";
     this.#open = null;
     this.#unknown = null;
     this.#menu = false;
-    this.#form = { ...this.#form, source: "command" };
-    this.#scrollTo = "add";
+    if (this.#told?.where === ADD) this.#told = null;
     this.#write();
     this.requestUpdate();
   }
 
-  /** The add form takes the view, its first field focused. */
-  #focusAdd(): void {
-    const field = this.#form.source === "unit" ? "unit" : "name";
-    const input = this.renderRoot.querySelector<HTMLInputElement>(`section[data-part="add"] input[name="${field}"]`);
-    input?.scrollIntoView({ block: "nearest" });
-    input?.focus();
-  }
-
-  #addPart() {
-    const form = this.#form;
-    const busy = this.#busy;
+  /** The panel, while the address says `add` or `adopt`; it lies hidden while the page
+   * offers no acts. A fresh one, its form empty, once an add is done. */
+  #panelPart(acts: boolean) {
+    const way = this.#panel;
+    if (way === null || this.#phone) return nothing;
     const told = this.#told?.where === ADD ? this.#told.said : null;
-    const projects = this.#projects?.value ?? null;
-    const reason = projects?.reason ?? (this.#projects?.failure ? `they can't be listed: ${this.#projects.failure.why}` : null);
-    const command = form.source === "command";
-    const timer = form.kind === "timer";
-    return html`<section data-part="add">
-      <h2>Add</h2>
-      <p class="dim">A command to run as a daemon or on a schedule, written as a unit, or a unit already on this system to adopt.</p>
-      <form @submit=${(event: Event) => { event.preventDefault(); void this.#add(); }}>
-        <label><span>Name</span>
-          <input type="text" name="name" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(form.name)} @input=${this.#text("name")}></label>
-        <fieldset><legend>Kind</legend>
-          ${(["daemon", "timer"] as const).map((kind) => html`<label><input type="radio" name="kind" value=${kind}
-            ?disabled=${busy} .checked=${live(form.kind === kind)} @change=${() => this.#set({ kind })}>${kind}</label>`)}
-        </fieldset>
-        <fieldset><legend>Runs</legend>
-          <label><input type="radio" name="source" value="command" ?disabled=${busy} .checked=${live(command)}
-            @change=${() => this.#set({ source: "command" })}>a command line</label>
-          <label><input type="radio" name="source" value="unit" ?disabled=${busy} .checked=${live(!command)}
-            @change=${() => this.#set({ source: "unit" })}>a unit already here</label>
-        </fieldset>
-        ${command ? html`
-          <label><span>Command line, its first word a full path (<code>command -v NAME</code> in your shell prints it)</span>
-            <input type="text" name="command" autocomplete="off" spellcheck="false" ?disabled=${busy}
-              .value=${live(form.command)} @input=${this.#text("command")}></label>
-          <label class="check"><input type="checkbox" name="enable" ?disabled=${busy} .checked=${live(form.enable)}
-            @change=${(event: Event) => this.#set({ enable: (event.target as HTMLInputElement).checked })}>Turn it on now</label>
-          ${timer ? html`<fieldset><legend>Schedule</legend>
-            <label><input type="radio" name="schedule" value="every" ?disabled=${busy} .checked=${live(form.schedule === "every")}
-              @change=${() => this.#set({ schedule: "every" })}>every</label>
-            <label><input type="radio" name="schedule" value="at" ?disabled=${busy} .checked=${live(form.schedule === "at")}
-              @change=${() => this.#set({ schedule: "at" })}>at times</label>
-          </fieldset>
-          ${form.schedule === "every" ? html`<label><span>Every, such as 5m or 2h</span>
-            <input type="text" name="every" autocomplete="off" ?disabled=${busy} .value=${live(form.every)} @input=${this.#text("every")}></label>`
-          : html`<label><span>At, 24-hour times such as 09:00, 17:30</span>
-            <input type="text" name="at" autocomplete="off" ?disabled=${busy} .value=${live(form.at)} @input=${this.#text("at")}></label>
-            <fieldset><legend>Days (none for every day)</legend>${DAYS.map((day) => html`<label><input type="checkbox" name="days" value=${day}
-              ?disabled=${busy} .checked=${live(form.days.includes(day))} @change=${(event: Event) => this.#day(day, (event.target as HTMLInputElement).checked)}>${day}</label>`)}
-            </fieldset>`}` : nothing}
-          <label><span>Working directory, a full path (optional)</span>
-            <input type="text" name="cwd" autocomplete="off" spellcheck="false" ?disabled=${busy}
-              .value=${live(form.cwd)} @input=${this.#text("cwd")}></label>`
-        : html`
-          <label><span>Unit, as the supervisor names it</span>
-            <input type="text" name="unit" autocomplete="off" spellcheck="false" ?disabled=${busy}
-              .value=${live(form.unit)} @input=${this.#text("unit")}></label>
-          <fieldset><legend>Now</legend>
-            <label><input type="radio" name="adopt" value="on" ?disabled=${busy} .checked=${live(form.adoptOn === "on")}
-              @change=${() => this.#set({ adoptOn: "on" })}>on</label>
-            <label><input type="radio" name="adopt" value="off" ?disabled=${busy} .checked=${live(form.adoptOn === "off")}
-              @change=${() => this.#set({ adoptOn: "off" })}>off</label>
-          </fieldset>`}
-        <label><span>Health command (optional; exit 0 is healthy)</span>
-          <input type="text" name="health" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(form.health)} @input=${this.#text("health")}></label>
-        <label><span>Project</span>
-          <select name="project" ?disabled=${busy} .value=${live(form.project)}
-            @change=${(event: Event) => this.#set({ project: (event.target as HTMLSelectElement).value })}>
-            <option value="" ?selected=${form.project === ""}>none</option>
-            ${(projects?.projects ?? []).map((project) => html`<option value=${project.key}
-              ?selected=${project.key === form.project}>${project.key}</option>`)}
-          </select></label>
-        ${reason ? html`<p class="dim" data-line="projects">Projects: ${reason}</p>` : nothing}
-        <label class="check"><input type="checkbox" name="launches_session" ?disabled=${busy} .checked=${live(form.launchesSession)}
-          @change=${(event: Event) => this.#set({ launchesSession: (event.target as HTMLInputElement).checked })}>Its runs launch an agent session (they spend usage)</label>
-        <label><span>Doc, one line (optional)</span>
-          <input type="text" name="doc" autocomplete="off" ?disabled=${busy} .value=${live(form.doc)} @input=${this.#text("doc")}></label>
-        <div class="bar"><button type="submit" class="go" data-action="add" ?disabled=${busy}>Add</button></div>
-        ${told !== null ? this.#saidPart(told) : nothing}
-      </form>
-    </section>`;
+    const projects = this.#projects;
+    return keyed(this.#panelKey, html`<moxi-services-panel way=${way} ?busy=${this.#busy} .said=${told}
+      .projects=${projects === null ? null : { value: projects.value, failure: projects.failure?.why ?? null }}
+      .withProjects=${installed("projects")} ?hidden=${!acts}
+      @moxi-services-panel-close=${() => this.#closePanel()}
+      @moxi-services-panel-way=${(event: CustomEvent<Way>) => this.#pickWay(event.detail)}
+      @moxi-services-panel-send=${(event: CustomEvent<Built>) => void this.#add(event.detail)}></moxi-services-panel>`);
   }
 
-  #set(change: Partial<AddForm>): void {
-    this.#form = { ...this.#form, ...change };
-    // The form's way is the address's, while the address names the form.
-    if (change.source !== undefined && this.#panel !== null) {
-      this.#panel = change.source === "unit" ? "adopt" : "add";
-      this.#write();
-    }
+  /** The panel's other way: the address says it. */
+  #pickWay(way: Way): void {
+    this.#panel = way;
+    if (this.#told?.where === ADD) this.#told = null;
+    this.#write();
     this.requestUpdate();
   }
 
-  #text(name: "name" | "command" | "unit" | "every" | "at" | "cwd" | "health" | "doc") {
-    return (event: Event): void => this.#set({ [name]: (event.target as HTMLInputElement).value });
-  }
-
-  #day(day: string, on: boolean): void {
-    const days = this.#form.days.filter((d) => d !== day);
-    this.#set({ days: on ? [...days, day] : days });
+  /** The panel's `Close`, `Cancel` or Escape: nothing is open, the focus back on `Add a
+   * service`. */
+  #closePanel(): void {
+    this.#panel = null;
+    if (this.#told?.where === ADD) this.#told = null;
+    this.#write();
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[data-action="add"]')?.focus());
   }
 }
 

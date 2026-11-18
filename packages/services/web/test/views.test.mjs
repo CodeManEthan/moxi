@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actsOf, addBody, addRefused, commandLine, counts, emptyForm, flagLine, healthLine, HIDDEN,
+  actsOf, commandLine, counts, flagLine, healthLine, HIDDEN,
   MAY_HAVE_ACTED, outcomeSaid, rowFacts, SPENDS, statusLost, statusSaid, summaryView,
   timeLine, verdictLine, when,
 } from "../src/views.ts";
@@ -86,46 +86,6 @@ test("a job's status: running, then its end with its lines and fix", () => {
   assert.equal(statusSaid("x", { ...base, state: "failed", code: 1 }).tone, "error");
   assert.equal(statusSaid("x", { ...base, state: "unknown", lines: ["no record of this act"] }).tone, "warn");
   assert.equal(statusLost("Stop web", null).tone, "warn");
-});
-
-test("a written row starts off unless the user turns it on", () => {
-  assert.equal(emptyForm().enable, false);
-  const form = { ...emptyForm(), name: "web", command: "/usr/bin/python3 -m http.server" };
-  assert.equal(addBody(form).body.enable, false);
-  assert.equal(addBody({ ...form, enable: true }).body.enable, true);
-});
-
-test("the add body: a written daemon, a timer every or at, an adopted unit", () => {
-  const form = { ...emptyForm(), name: " web ", command: "/usr/bin/python3 -m http.server", cwd: "/srv", enable: true,
-                 health: "/usr/bin/curl -f http://localhost:8000", project: "alpha", doc: "docs" };
-  assert.deepEqual(addBody(form), { body: { name: "web", kind: "daemon", command: "/usr/bin/python3 -m http.server",
-    enable: true, cwd: "/srv", health: "/usr/bin/curl -f http://localhost:8000", project: "alpha", doc: "docs" } });
-  const every = { ...emptyForm(), name: "backup", kind: "timer", command: "/usr/bin/true", every: "5m", enable: false,
-                  launchesSession: true };
-  assert.deepEqual(addBody(every).body, { name: "backup", kind: "timer", command: "/usr/bin/true", enable: false,
-                                          every: "5m", launches_session: true });
-  const at = { ...every, schedule: "at", at: "17:30, 09:00", days: ["fri", "mon"], launchesSession: false };
-  assert.deepEqual(addBody(at).body, { name: "backup", kind: "timer", command: "/usr/bin/true", enable: false,
-                                       at: ["17:30", "09:00"], days: ["mon", "fri"] });
-  const adopt = { ...emptyForm(), name: "syncthing", source: "unit", unit: "syncthing.service", adoptOn: "off",
-                  cwd: "/ignored", every: "5m" };
-  assert.deepEqual(addBody(adopt).body, { name: "syncthing", kind: "daemon", unit: "syncthing.service", enable: false });
-});
-
-test("the add form says what it still needs", () => {
-  assert.match(addBody(emptyForm()).missing, /name/);
-  assert.match(addBody({ ...emptyForm(), name: "x" }).missing, /command line/);
-  assert.match(addBody({ ...emptyForm(), name: "x", kind: "timer", command: "/bin/true" }).missing, /how often/);
-  assert.match(addBody({ ...emptyForm(), name: "x", kind: "timer", command: "/bin/true", schedule: "at" }).missing, /times/);
-  assert.match(addBody({ ...emptyForm(), name: "x", source: "unit" }).missing, /unit/);
-  assert.match(addBody({ ...emptyForm(), name: "x", source: "unit", unit: "a.service" }).missing, /on or off/);
-});
-
-test("an add that wasn't taken says why, and a lost answer may have been taken", () => {
-  assert.deepEqual(addRefused(422, "x is not a full path"), { tone: "error", lines: ["x is not a full path"] });
-  assert.equal(addRefused(409, null).lines[0], "services is busy; try again.");
-  assert.equal(addRefused(0, null).tone, "warn");
-  assert.match(addRefused(504, null).lines[0], /may have been taken/);
 });
 
 test("the summary counts rows by verdict, and its tone is the worst", () => {
