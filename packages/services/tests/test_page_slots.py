@@ -264,11 +264,25 @@ def test_a_plain_stop_is_refused_when_the_slots_could_not_be_read(
     assert not acted(fake, _act(route))
 
 
-def test_a_stop_shown_a_count_goes_when_the_slots_can_no_longer_be_read(slots, fake, route):
+@pytest.mark.parametrize("shown", [1, 2])
+def test_a_stop_shown_a_count_is_refused_when_the_slots_can_no_longer_be_read(
+        slots, fake, route, shown):
+    # The count he confirmed is no longer the one in use: an unread count equals none,
+    # so he is asked again with the unread warning.
     slots.ok = False
-    status, body = post(route, {"id": SERVER, "ends": 2})
+    assert post(route, {"id": SERVER, "ends": shown}) == (
+        422, {"refused": pagehandlers.SLOTS_UNREAD})
+    assert not acted(fake, _act(route))
+    assert get(page.STATUS_ROUTE, f"job={job_of(route)}")[1]["state"] == "unknown"
+
+
+def test_a_stop_refused_unread_goes_once_the_unread_warning_is_confirmed(slots, fake, route):
+    slots.ok = False
+    assert post(route, {"id": SERVER, "ends": 2})[0] == 422
+    status, body = post(route, {"id": SERVER, "ends": 0})
     assert status == 202, body
     assert ended(job_of(route))["state"] == "done"
+    assert len(acted(fake, _act(route))) == 1
 
 
 def test_a_stop_is_refused_when_its_ends_is_below_zero(slots, fake, route):

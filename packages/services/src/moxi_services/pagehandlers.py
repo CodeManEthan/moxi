@@ -38,9 +38,10 @@ status route gives its state, lines and fix.
   what its daemon's stop ends) is guarded: before the 202 the handler reads through
   slots' API what the stop would end, and goes ahead only when nothing is in use, or
   when the request's `ends`, the count the person was shown, covers what is in use now
-  (or the read did not answer and the person confirmed that). Else it is a 422,
-  `SLOTS_IN_USE`, or `SLOTS_UNREAD` for a plain press the read couldn't answer: a count
-  Moxi couldn't read means the stop may end sessions, never that nothing is in use.
+  (or the read did not answer and the person confirmed that warning). Else it is a 422,
+  `SLOTS_IN_USE`, or `SLOTS_UNREAD` for any other press the read couldn't answer: a
+  count Moxi couldn't read means the stop may end sessions, never that nothing is in
+  use, and a count confirmed before is no longer the one in use.
   `/api/ends` answers the same read for the page's warning, its counts null when unread.
 - `add` is a plain act: no key, so its handler mints the job id. A repeated add POST is a
   second job, which the thread refuses as the name being taken. A command's first word
@@ -559,17 +560,18 @@ def guard_slots(found, ends: int | None) -> None:
     """Refuse a stop or restart of slots' server unless what it ends now is no more than
     the person was shown. `ends` is the count the warning showed, 0 when it said the
     slots couldn't be read, None for a plain press. A read that didn't answer counts as
-    "may end sessions", never as nothing in use: only a confirmed press (`ends` given)
-    goes past it, and a plain one is told the slots couldn't be read. It goes ahead when
-    the read finds nothing in use, or when `ends` is given and the read did not answer
-    or finds at most `ends`. Any other row passes."""
+    "may end sessions", never as a number: only the unread warning's confirm (`ends` 0)
+    goes past it. A plain press, or one confirmed against a count, is told the slots
+    couldn't be read, so the page asks again with that warning. It goes ahead when the
+    read finds nothing in use, or finds at most `ends`, or did not answer and `ends` is
+    0. Any other row passes."""
     if not ends_slots(found):
         return
     if ends is not None and ends < 0:
         raise lb.Refused(ENDS_NEGATIVE)
     count = in_use(read_ends())
     if count is None:
-        if ends is None:
+        if ends != 0:
             raise lb.Refused(SLOTS_UNREAD)
         return
     if count == 0 or (ends is not None and count <= ends):
