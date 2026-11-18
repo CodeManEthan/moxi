@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Feed, parseList, RETRIES } from "../src/feed.ts";
+import { Feed, parseList, parseReach, RETRIES } from "../src/feed.ts";
 
 const settled = () => new Promise((done) => setImmediate(done));
 
 const SESSION = { key: "claude-n1", harness: "claude", pid: 10, session_id: "s1", cwd: "/w",
                   started: 100, capabilities: ["agents"], endpoint_version: "2.0",
                   mod_version: "0.2.0", trouble: null, facts: null, agents: null,
-                  read_error: null };
-const UP = { now: 1000, listed: true, detail: null, sessions: [SESSION] };
+                  read_error: null, ended_at: null, has_box: true, unread_since: null };
+const UP = { now: 1000, listed: true, detail: null, home: "/home/u", reach: null, sessions: [SESSION] };
 
 /** A feed over `answers`, read in order; the clock reads 400. */
 function feedOf(answers) {
@@ -23,10 +23,23 @@ function feedOf(answers) {
 }
 
 test("parseList takes the route's and the topic's value", () => {
-  assert.deepEqual(parseList({ listed: true, detail: null, sessions: [SESSION] }),
-                   { listed: true, detail: null, sessions: [SESSION] });
-  assert.deepEqual(parseList({ listed: false, sessions: [] }), { listed: false, detail: null, sessions: [] });
+  assert.deepEqual(parseList({ listed: true, detail: null, home: "/home/u",
+                               reach: { claude: "start", codex: true }, sessions: [SESSION] }),
+                   { listed: true, detail: null, home: "/home/u",
+                     reach: { claude: "start", codex: true }, sessions: [SESSION] });
+  assert.deepEqual(parseList({ listed: false, sessions: [] }),
+                   { listed: false, detail: null, home: null, reach: null, sessions: [] });
   assert.equal(parseList({ listed: true, detail: "d", sessions: [] }).detail, "d");
+});
+
+test("parseReach keeps the words it knows and reads any other as null", () => {
+  for (const word of ["start", "setup", "absent", null]) {
+    assert.deepEqual(parseReach({ claude: word, codex: false }), { claude: word, codex: false });
+  }
+  assert.deepEqual(parseReach({ claude: "later", codex: true }), { claude: null, codex: true });
+  for (const bad of [null, "start", { claude: "start" }, { claude: "start", codex: "yes" }]) {
+    assert.equal(parseReach(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("parseList refuses what isn't the shape, and drops rows with no key", () => {
@@ -43,7 +56,7 @@ test("a 200 gives the value and the server clock's offset", async () => {
   assert.equal(feed.loading, true);
   await feed.refresh();
   assert.equal(feed.loading, false);
-  assert.deepEqual(feed.value, { listed: true, detail: null, sessions: [SESSION] });
+  assert.deepEqual(feed.value, { listed: true, detail: null, home: "/home/u", reach: null, sessions: [SESSION] });
   assert.equal(feed.offset, 600);
   assert.equal(feed.now(), 1000);
   assert.equal(feed.failure, null);
