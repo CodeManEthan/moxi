@@ -379,6 +379,9 @@ IMPORT_LOADS = frozenset({
     "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",
     "re._casefix", "re._compiler", "re._constants", "re._parser", "_sre", "struct",
     "_struct",
+    # On Windows `platform` loads `_wmi`, and `fnmatch` loads `posixpath`, which is not
+    # `os.path` there.
+    *(("_wmi", "posixpath") if sys.platform == "win32" else ()),
 })
 
 
