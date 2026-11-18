@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  briefFileOf, buttonWords, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  briefFileOf, buttonWords, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, SCRATCH_PICK, takesScratch, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -531,19 +531,20 @@ test("a brief file the form is filled with is left out, with the box empty and w
   assert.equal(launchRequest(FORM_FIELDS, null, SET, SLOT_2).leave_out.includes("brief_file"), false);
 });
 
-test("no first-turn row reaches the request but the brief, as the box's text", () => {
-  // Each row filled by the form, each withheld by it, and all of them at once.
+test("no brief row reaches the request but the box's text", () => {
+  // Each row filled by the form, each withheld by it, and both at once.
+  const BRIEF_ROWS = FIRST_TURN.filter((name) => name !== "handoff");
   const filled = (name) => field(name, { type: name === "brief" ? "string" : "path", value: `/form/${name}.md` });
   const without = FORM_FIELDS.filter((item) => !FIRST_TURN.includes(item.name));
   const withheld = { state: "up", detail: null, harness: "claude", refused: null,
-                     rows: FIRST_TURN.map((name) => ({ name, value: null, items: null, source: "defaults", withheld: true })) };
-  const cases = [...FIRST_TURN.map((name) => [name]), [...FIRST_TURN]];
+                     rows: BRIEF_ROWS.map((name) => ({ name, value: null, items: null, source: "defaults", withheld: true })) };
+  const cases = [...BRIEF_ROWS.map((name) => [name]), [...BRIEF_ROWS]];
   for (const names of cases) {
     const fields = [...without, ...names.map(filled)];
     for (const form of [null, withheld]) {
       const empty = launchRequest(fields, form, { ...SET, brief: null }, SLOT_2);
       const typed = launchRequest(fields, form, SET, SLOT_2);
-      for (const name of FIRST_TURN) {
+      for (const name of BRIEF_ROWS) {
         assert.equal(name in empty.values, false, `${name} sent from an empty box`);
         assert.equal(empty.leave_out.includes(name), names.includes(name), `${name} left out of an empty box`);
         if (name === "brief") continue;
@@ -555,7 +556,7 @@ test("no first-turn row reaches the request but the brief, as the box's text", (
       assert.equal(typed.leave_out.includes("brief"), false);
       // A request built with no box text at all sends no brief the form is filled with.
       const unset = launchRequest(fields, form, { project: null, cwd: "~/code" }, SLOT_2);
-      assert.equal(FIRST_TURN.some((name) => name in unset.values), false);
+      assert.equal(BRIEF_ROWS.some((name) => name in unset.values), false);
     }
   }
 });
@@ -572,6 +573,52 @@ test("a brief file set through the + is the first turn: brief_file sent, no brie
   const empty = launchRequest(filled, null, { ...SET, brief: null, brief_file: "/srv/briefs/first.md" }, SLOT_2);
   assert.equal(empty.values.brief_file, "/srv/briefs/first.md");
   assert.equal("brief" in empty.values, false);
+});
+
+test("a handoff set through the + is sent beside the box's text or the brief file", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "" }), field("handoff", { type: "path", value: "" })];
+  const typed = launchRequest(fields, null, { ...SET, handoff: " ~/notes/handoff.md " }, SLOT_2);
+  assert.equal(typed.values.handoff, "~/notes/handoff.md");
+  assert.equal(typed.values.brief, "fix the build");
+  const filed = launchRequest(fields, null, { ...SET, brief_file: "/srv/b.md", handoff: "/srv/h.md" }, SLOT_2);
+  assert.deepEqual([filed.values.brief_file, filed.values.handoff], ["/srv/b.md", "/srv/h.md"]);
+  // None set and none filled: left out, as before.
+  const none = launchRequest(fields, null, SET, SLOT_2);
+  assert.equal("handoff" in none.values, false);
+  assert.equal(none.leave_out.includes("handoff"), true);
+  // A form with no handoff row sends nothing of it, set or not.
+  const bare = launchRequest(FORM_FIELDS, null, { ...SET, handoff: "/srv/h.md" }, SLOT_2);
+  assert.equal("handoff" in bare.values || bare.leave_out.includes("handoff"), false);
+  assert.equal(handoffOf(FORM_FIELDS, { handoff: "/srv/h.md" }), null);
+  assert.equal(handoffOf([field("handoff", { type: "path", value: "/srv/h.md", needs_absent: true })], {}), null);
+});
+
+test("a handoff the defaults or a preset fill is sent unless cleared, and a cleared one is left out", () => {
+  const fields = [...FORM_FIELDS, field("handoff", { type: "path", value: "/home/alice/handoffs/last.md" })];
+  // Filled: shown, and sent with nothing set over it.
+  assert.equal(handoffOf(fields, {}), "/home/alice/handoffs/last.md");
+  const sent = launchRequest(fields, null, SET, SLOT_2);
+  assert.equal(sent.values.handoff, "/home/alice/handoffs/last.md");
+  // Another set through the + stands over the fill.
+  assert.equal(launchRequest(fields, null, { ...SET, handoff: "/srv/mine.md" }, SLOT_2).values.handoff, "/srv/mine.md");
+  // Cleared, blank or empty: none shown, and the row left out so no layer gives it.
+  for (const handoff of ["", "  ", null]) {
+    assert.equal(handoffOf(fields, { handoff }), null);
+    const cleared = launchRequest(fields, null, { ...SET, handoff }, SLOT_2);
+    assert.equal("handoff" in cleared.values, false);
+    assert.equal(cleared.leave_out.includes("handoff"), true);
+  }
+});
+
+test("a handoff alone, with an empty box and no brief file, is the launch's first turn", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "" }), field("handoff", { type: "path", value: "" })];
+  for (const set of [{ cwd: "~/code", handoff: "/srv/h.md" }, { cwd: "~/code", brief: null }]) {
+    const body = launchRequest(fields.map((item) => item.name === "handoff" && !("handoff" in set)
+      ? { ...item, value: "/srv/h.md" } : item), null, set, { target: "headless" });
+    assert.equal(body.values.handoff, "/srv/h.md");
+    assert.equal(body.values.target, "headless");
+    assert.equal("brief" in body.values || "brief_file" in body.values, false);
+  }
 });
 
 test("with no brief file set the rule is the box's: an empty or blank file is none", () => {

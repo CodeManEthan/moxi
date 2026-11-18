@@ -405,21 +405,26 @@ The page has four parts.
 
 **The box on Home.** The shell's home opens on a box that starts a session without a
 visit to the page. Type what the agent should do and press the button. The line above
-the box says where the session starts, a project or a folder: it opens on the place you
-last launched in, and its menu takes a typed folder path, lists your recent places and,
-with projects installed, every project. With any preset set up, `Preset` on the same
-line applies a seat or a project preset; a project picked there, or the one Home opens
-on, applies that project's own preset. The chip in the box sets the harness, the model
+the box says where the session starts, a project, a folder or `Scratch`, a throwaway
+folder the launcher makes: it opens on the place you last launched in, and its menu
+takes a typed folder path, lists your recent places, offers `Scratch` and, with projects
+installed, every project. A launch names only the place the line shows. With any preset
+set up, `Preset` on the same line applies a seat or a project preset; a project picked
+there, or the one Home opens on, applies that project's own preset, and a preset that
+names a place, `Scratch` among them, moves the line there. The chip in the box sets the harness, the model
 and the effort. The button names where the launch runs, and its caret opens the choices:
 each slot with its state, your terminal, or headless. With slots it starts at the lowest
 free slot, without slots at your terminal, and the choice is not kept from one visit to
 the next. A launch from the box runs where its button says, whatever `[defaults]` or the
 preset sets for `target` and `slot`; every other row is filled from the preset and
-`[defaults]` as the page's form is. The text in the box is the whole first turn: nothing
-your `[defaults]` or the preset set to be sent as a first turn goes with a launch from
-the box, so an empty box starts a session with no first turn. The `+` beside the chip
-takes a brief from a file instead, which turns the box off while it is set, and offers to
-continue your last session in the place on the line. A slot or headless launch is
+`[defaults]` as the page's form is. The first turn is what Home shows: the text in the
+box, and a handoff on its line under the box. A brief your `[defaults]` or the preset set
+does not go with a launch from the box; a handoff they name shows on that line, with
+`Clear`, and goes with the launch unless you clear it. An empty box with no handoff
+starts a session with no first turn. The `+` beside the chip takes a brief from a file
+instead, which turns the box off while it is set, takes a handoff from a file, and offers
+to continue your last session in the place on the line; with `Scratch` on the line there
+is none to continue. A slot or headless launch is
 previewed and handed to a detached job as on the page, and a line under the box says
 where it started, or why it failed or was refused. A terminal launch is not run: its
 command is copied for you to paste.

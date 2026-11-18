@@ -107,7 +107,12 @@
 // A dim `+` at the left of the chip opens a menu drawn like the chip's. `Brief from a file`
 // opens a field for a path: while one is set the box is off, a dim line under the box names
 // the file with `Clear`, and the launch's first turn is that file, not the box's text. A
-// launch that starts with it lets go of it, as it empties the box. `Continue the last
+// launch that starts with it lets go of it, as it empties the box. `Handoff from a file`,
+// where the form has the row, opens a field for a handoff's path. The handoff the launch
+// sends, whether set there or filled by the user's defaults or the applied preset, is named
+// on a dim line under the box, home written `~`, with `Clear`, which sends none; the box
+// stays on, since a launch's first turn may hold a brief and a handoff. A launch that starts
+// with a handoff set there lets go of it, so the form's own shows again. `Continue the last
 // session` is offered when the menu's read of `/api/sessions`, made each time it opens, holds
 // a session of the line's place that he made and can resume now; its dim line says whether
 // it resumes in a slot or copies the resume command. A click resumes it at once through
@@ -149,15 +154,16 @@ import {
   afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
 import {
-  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
+  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, handoffOf,
+  hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
   placeTime, resumeSent, runOf, SCRATCH, SCRATCH_PICK, SCRATCH_SAYS, SLOTS_UNREAD, STARTING, stopped, takesScratch,
-  TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  TARGETS_FRESH_MS, tilde, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import {
-  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, lastSession, NONE_TO_CONTINUE,
-  noneToContinue, PLUS_LABEL, resumeBody, SESSIONS_READ, takesBriefFile,
+  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, HANDOFF_FILE_FIELD, HANDOFF_FROM_FILE,
+  lastSession, NONE_TO_CONTINUE, noneToContinue, PLUS_LABEL, resumeBody, SESSIONS_READ, takesBriefFile, takesHandoff,
 } from "./plus-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 import {
@@ -455,6 +461,7 @@ export class LauncherPrompt extends LitElement {
     nameSaid: { state: true },
     saving: { state: true },
     briefFile: { state: true },
+    handoff: { state: true },
     fileField: { state: true },
     pasts: { state: true },
   };
@@ -522,8 +529,11 @@ export class LauncherPrompt extends LitElement {
   saving = false;
   /** The brief file set through the `+`; "" for none, when the box's text is the first turn. */
   briefFile = "";
-  /** The `+` menu's field for a brief file's path is open. */
-  fileField = false;
+  /** The handoff set through the `+`: a path, "" for one cleared, null to send the one the
+   * form is filled with. */
+  handoff: string | null = null;
+  /** Which of the `+` menu's path fields is open: the brief file's, the handoff's, or none. */
+  fileField: "" | "brief" | "handoff" = "";
   /** The past sessions the `+` menu read when it opened; null until that read answers. */
   pasts: Past[] | null = null;
   #pastsAsked = 0;
@@ -531,6 +541,8 @@ export class LauncherPrompt extends LitElement {
   #actor = "";
   /** The brief file sent with the press; null when none was. */
   #sentFile: string | null = null;
+  /** The handoff set through the `+` that was sent with the press; null when none was. */
+  #sentHandoff: string | null = null;
   #nameAsked = 0;
   /** The query the latest read of the name was for; null to read it again at the next update. */
   #nameKey: string | null = null;
@@ -731,12 +743,13 @@ export class LauncherPrompt extends LitElement {
     return this.#form?.harness ?? "";
   }
 
-  /** The rows this piece sets, over what `/api/form` fills: the brief, a brief file, the place, the
+  /** The rows this piece sets, over what `/api/form` fills: the brief, a brief file, a handoff, the place, the
    * model and the effort once the chip's menu set them, each value set in the panel, and
    * under those the values filled from the last launch. */
   get set(): Record<string, FormValue> {
     return { ...this.#fill, ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
              ...(this.briefFile === "" ? {} : { brief_file: this.briefFile }),
+             ...(this.handoff === null ? {} : { handoff: this.handoff }),
              ...(this.pick === null ? {} : pickValues(this.pick)) };
   }
 
@@ -1058,6 +1071,7 @@ export class LauncherPrompt extends LitElement {
         <div class="boxrow"><div class="left">${this.#plus()}${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
       ${this.#fileLine()}
+      ${this.#handoffLine()}
       ${this.#changed()}
       ${this.#presetLine()}
       ${this.#said()}
@@ -1206,7 +1220,7 @@ export class LauncherPrompt extends LitElement {
   /** Opens or closes the `+` menu; each open reads the past sessions again. */
   #togglePlus(): void {
     this.menu = this.menu === "plus" ? "" : "plus";
-    this.fileField = false;
+    this.fileField = "";
     if (this.menu === "plus") void this.#readPasts();
   }
 
@@ -1222,24 +1236,31 @@ export class LauncherPrompt extends LitElement {
   #plusMenu() {
     const last = lastSession(this.pasts ?? [], this.pick, this.#actor, this.#home);
     const file = takesBriefFile(this.fields);
+    const handoff = takesHandoff(this.fields) ? handoffOf(this.fields, this.set) : undefined;
     return html`<div class="menu plusm" data-menu="plus">
       ${file ? html`<button type="button" class="row" data-plus="brief-file"
-        data-current=${this.briefFile === "" ? "false" : "true"} @click=${this.#openFileField}><span
+        data-current=${this.briefFile === "" ? "false" : "true"} @click=${() => this.#openFileField("brief")}><span
         aria-hidden="true">${this.briefFile === "" ? "" : "✓"}</span><span class="name">${BRIEF_FROM_FILE}</span></button>`
         : nothing}
+      ${handoff === undefined ? nothing : html`<button type="button" class="row" data-plus="handoff"
+        data-current=${handoff === null ? "false" : "true"} @click=${() => this.#openFileField("handoff")}><span
+        aria-hidden="true">${handoff === null ? "" : "✓"}</span><span class="name">${HANDOFF_FROM_FILE}</span></button>`}
       ${noneToContinue(this.pick) ? html`<div class="row none" data-plus="continue" aria-disabled="true"><span
         aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span class="d">${NONE_TO_CONTINUE}</span></span></div>`
         : last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
         @click=${() => void this.#continue(last)}><span aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span
         class="d">${continueWords(last)}</span></span></button>`}
-      ${this.fileField ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}
+      ${this.fileField === "brief" ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}
         placeholder=${BRIEF_FILE_FIELD} autocomplete="off" spellcheck="false" .value=${this.briefFile}
         @keydown=${this.#fileKey}>` : nothing}
+      ${this.fileField === "handoff" ? html`<input class="find" type="text" aria-label=${HANDOFF_FILE_FIELD}
+        placeholder=${HANDOFF_FILE_FIELD} autocomplete="off" spellcheck="false" .value=${handoff ?? ""}
+        @keydown=${this.#handoffKey}>` : nothing}
     </div>`;
   }
 
-  #openFileField(): void {
-    this.fileField = true;
+  #openFileField(which: "brief" | "handoff"): void {
+    this.fileField = which;
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLInputElement>(".plusm .find")?.focus());
   }
 
@@ -1249,9 +1270,46 @@ export class LauncherPrompt extends LitElement {
     event.preventDefault();
     this.#setFile((event.target as HTMLInputElement).value.trim());
     this.menu = "";
-    this.fileField = false;
+    this.fileField = "";
     void this.updateComplete.then(() => (this.renderRoot.querySelector<HTMLElement>(this.briefFile === "" ? "textarea" : ".go"))
       ?.focus());
+  }
+
+  /** Enter in the handoff's path field sets the handoff, or clears it when the field is
+   * empty. The box keeps its text and the caret goes back to it. */
+  #handoffKey(event: KeyboardEvent): void {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    this.#setHandoff((event.target as HTMLInputElement).value.trim());
+    this.menu = "";
+    this.fileField = "";
+    void this.updateComplete.then(() => (this.briefFile === "" ? this.#box() : this.renderRoot.querySelector<HTMLElement>(".go"))
+      ?.focus());
+  }
+
+  /** Sets the handoff, "" to clear it. The lines of a launch that has ended go, as at an edit
+   * of the box. */
+  #setHandoff(path: string): void {
+    this.handoff = path;
+    const next = edited(this.flight);
+    if (next !== this.flight) {
+      this.flight = next;
+      this.#stopFollow();
+      this.#pressed += 1;
+    }
+  }
+
+  /** The dim line under the box while a handoff is sent, whether set through the `+` or
+   * filled by the user's defaults or the preset: its path, home written `~`, and `Clear`. */
+  #handoffLine() {
+    const path = takesHandoff(this.fields) ? handoffOf(this.fields, this.set) : null;
+    if (path === null) return nothing;
+    return html`<div class="changed" data-handoff><span><span class="k">${HANDOFF_FROM_FILE}</span><b
+      class="file">${tilde(path, this.#home)}</b></span><button type="button" aria-label=${`${CLEAR_FILE} the handoff`}
+      @click=${() => {
+        this.#setHandoff("");
+        void this.updateComplete.then(() => this.#box()?.focus());
+      }}>${CLEAR_FILE}</button></div>`;
   }
 
   /** Sets the brief file, "" for none. The lines of a launch that has ended go, as at an edit
@@ -1286,6 +1344,7 @@ export class LauncherPrompt extends LitElement {
     this.#sent = null;
     this.#sentOn = {};
     this.#sentFile = null;
+    this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
     const sent = resumeSent(await api("launcher", "api/resume", resumeBody(past)));
@@ -1765,6 +1824,7 @@ export class LauncherPrompt extends LitElement {
     this.#sent = null;
     this.#sentOn = {};
     this.#sentFile = null;
+    this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
     await this.#send(mine, recentBody(card.answer.request), againRun(card.run));
@@ -1867,6 +1927,7 @@ export class LauncherPrompt extends LitElement {
     // A brief file is the first turn in place of the box's text, which then stays.
     this.#sentFile = this.briefFile === "" ? null : this.briefFile;
     this.#sent = this.#sentFile === null ? this.brief : null;
+    this.#sentHandoff = this.handoff === "" ? null : this.handoff;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
     this.flight = PRESSED;
@@ -1939,8 +2000,8 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, lets go of the brief file it was launched with,
-   * unless it was changed since, and lets go of each value that can do harm it was
+   * its text was changed since the press, lets go of the brief file and the handoff set
+   * through the `+` it was launched with, unless one was changed since, and lets go of each value that can do harm it was
    * launched with, unless its row was changed since the press. */
   #landed(next: Flight): void {
     if (next === this.flight) return;
@@ -1950,6 +2011,8 @@ export class LauncherPrompt extends LitElement {
     if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
     if (this.#sentFile !== null && this.briefFile === this.#sentFile) this.briefFile = "";
     this.#sentFile = null;
+    if (this.#sentHandoff !== null && this.handoff === this.#sentHandoff) this.handoff = null;
+    this.#sentHandoff = null;
     this.options = afterLaunch(this.options, this.#sentOn);
     this.#sentOn = {};
   }

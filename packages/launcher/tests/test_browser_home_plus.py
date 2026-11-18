@@ -2,7 +2,8 @@
 server. `Continue the last session` offers only a session the shell's own user made in the
 place the line names, and resumes it in a slot with the lines under the box while the box
 keeps its text; a brief from a file turns the box off and launches with that file as the
-first turn.
+first turn; a handoff from a file, or one a preset names, is on its line under the box,
+goes in the launch beside the box's text, and `Clear` takes it out.
 
 The shell runs the fake slots in slots' place and fake `claude` and `codex` first on its
 `PATH`, so no launch or resume starts a real session.
@@ -19,6 +20,7 @@ from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
+from moxi_launcher import presets
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -172,3 +174,67 @@ def test_clear_takes_the_brief_file_off_and_the_box_is_back(page, work_dir):
     expect(piece.locator("[data-brief-file]")).to_have_count(0)
     expect(piece.locator("textarea")).to_be_enabled()
     expect(piece.locator("textarea")).to_be_focused()
+
+
+def test_a_handoff_from_a_file_is_on_its_line_under_the_box_and_goes_in_the_launch(page, shell, work_dir):
+    handoff = work_dir / "handoff.md"
+    handoff.write_text("Where the last session stopped.\n", encoding="utf-8")
+    piece = kit.open_home(page)
+    piece.locator(".more").click()
+    piece.locator('[data-menu="run"] button[data-run="Headless"]').click()
+    piece.locator("textarea").fill("carry on from the handoff")
+    menu = plus_menu(page, piece)
+    found = entry(menu, "Handoff from a file")
+    expect(found).to_have_attribute("data-current", "false")
+    found.click()
+    field = menu.get_by_role("textbox", name="Path to a handoff file")
+    field.fill(str(handoff))
+    field.press("Enter")
+    expect(menu).to_have_count(0)
+    # The box stays on, and the line names the file with home written ~.
+    expect(piece.locator("textarea")).to_be_enabled()
+    line = piece.locator("[data-handoff]")
+    expect(line.locator(".k")).to_have_text("Handoff from a file")
+    expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/handoff.md")
+    expect(entry(plus_menu(page, piece), "Handoff from a file")).to_have_attribute("data-current", "true")
+    page.keyboard.press("Escape")
+    with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    body = json.loads(sent.value.post_data)
+    assert body["values"]["handoff"] == str(handoff), body
+    assert body["values"]["brief"] == "carry on from the handoff", body
+    expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started headless · "))
+    row = kit.newest_launch(shell)
+    assert (row.brief, row.handoff_path) == ("carry on from the handoff", str(handoff)), row
+    # The launch that started with it lets go of it.
+    expect(line).to_have_count(0)
+
+
+def test_a_presets_handoff_shows_as_its_line_and_clear_takes_it_out_of_the_launch(page, shell, work_dir):
+    handoff = work_dir / "seat-handoff.md"
+    handoff.write_text("The seat's own notes.\n", encoding="utf-8")
+    file = presets.path(env=shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[seat.relief]\nharness = "claude"\nhandoff = "{handoff}"\n')
+    try:
+        piece = kit.open_home(page)
+        line = piece.locator("[data-handoff]")
+        expect(line).to_have_count(0)
+        piece.locator('.where [data-item="preset"] > button').click()
+        piece.locator('[data-menu="preset"] button[data-preset="seat:relief"]').click()
+        expect(line.locator(".file")).to_have_text(f"~/work/{work_dir.name}/seat-handoff.md")
+        piece.locator(".go:not([disabled])").wait_for()
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        expect(piece.locator("textarea")).to_be_focused()
+        piece.locator("textarea").fill("start fresh")
+        with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+            piece.locator(".go").click()
+        body = json.loads(sent.value.post_data)
+        assert body["seat"] == "relief", body
+        assert "handoff" not in body["values"] and "handoff" in body["leave_out"], body
+        expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Started in slot 3 · "))
+        row = kit.newest_launch(shell)
+        assert row.handoff_path is None, row
+    finally:
+        file.unlink()

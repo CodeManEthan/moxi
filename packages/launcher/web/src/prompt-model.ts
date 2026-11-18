@@ -551,6 +551,19 @@ export function briefFileOf(set: Readonly<Record<string, FormValue>>): string | 
   return typeof file === "string" && file.trim() !== "" ? file.trim() : null;
 }
 
+/**
+ * The handoff the launch sends: the one set through the `+` (`set.handoff`; "" is one
+ * cleared there), else the one the form is filled with, from the user's defaults or the
+ * applied preset. Null for none, and where the form has no `handoff` row. The line under
+ * the box shows exactly this, so what is sent is what Home shows.
+ */
+export function handoffOf(fields: readonly FieldDescriptor[], set: Readonly<Record<string, FormValue>>): string | null {
+  const field = offered(fields, "handoff");
+  if (field === undefined) return null;
+  const value = Object.hasOwn(set, "handoff") ? set.handoff : shownValue(field);
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
 /** The built-in tools the Options panel draws a line for, in its order. No route lists a
  * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
 export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
@@ -560,11 +573,13 @@ export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", 
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
  * where the form has the row. The first turn is what the piece shows: a brief file set
- * through the `+` (`set.brief_file`), else the box's text. Of the rows in `FIRST_TURN` the
- * request holds `brief_file` alone while a file is set, else `brief` alone, with the box's
- * text, and only while the box has text. Every other such row the form has is left out,
- * whatever the form filled it with or withheld, so nothing the piece does not show is sent
- * as the first turn. Any other
+ * through the `+` (`set.brief_file`), else the box's text, and beside either the handoff
+ * the line under the box shows (`handoffOf`). Of the rows in `FIRST_TURN` the request holds
+ * `brief_file` alone while a file is set, else `brief` alone, with the box's text, and only
+ * while the box has text; and `handoff` while one is shown. Every other such row the form
+ * has is left out, whatever the form filled it with or withheld, so nothing the piece does
+ * not show is sent as the first turn; a handoff cleared is left out, so the user's defaults
+ * or the preset can't give it. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
  * The request names the one preset `choice` applies, whose values `fields` are filled
  * with. It says it starts off the user's usual permissions exactly when one of its
@@ -581,7 +596,7 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   for (const name of PLACED) delete values[name];
   const file = briefFileOf(set);
   const box = file === null && typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
-  const turn: Record<string, string | null> = { brief: box, brief_file: file };
+  const turn: Record<string, string | null> = { brief: box, brief_file: file, handoff: handoffOf(fields, set) };
   for (const name of FIRST_TURN) if (name in values) values[name] = turn[name] ?? null;
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
   const kept = new Set([...withheld].filter((name) => !(FIRST_TURN as readonly string[]).includes(name)));

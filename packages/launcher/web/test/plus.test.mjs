@@ -4,7 +4,7 @@ import test from "node:test";
 import { parsePasts } from "../src/panel.ts";
 import {
   CONTINUE_LAST, continueWords, COPIES_RESUME, lastSession, NONE_TO_CONTINUE, noneToContinue, ofPlace, RESUMES_IN_SLOT,
-  resumeBody, SESSIONS_READ, takesBriefFile,
+  HANDOFF_FILE_FIELD, HANDOFF_FROM_FILE, resumeBody, SESSIONS_READ, takesBriefFile, takesHandoff,
 } from "../src/plus-model.ts";
 
 const HOME = "/home/alice";
@@ -87,4 +87,12 @@ test("a brief file is offered only where the form has the row", () => {
   assert.equal(takesBriefFile([{ name: "brief_file", type: "path" }]), true);
   assert.equal(takesBriefFile([{ name: "brief", type: "string" }]), false);
   assert.equal(takesBriefFile([{ name: "brief_file", type: "path", needs_absent: true }]), false);
+});
+
+test("the handoff entry is offered only where the harness's form has the row handoff", () => {
+  assert.equal(HANDOFF_FROM_FILE, "Handoff from a file");
+  assert.equal(HANDOFF_FILE_FIELD, "Path to a handoff file");
+  assert.equal(takesHandoff([{ name: "handoff", type: "path" }]), true);
+  assert.equal(takesHandoff([{ name: "brief_file", type: "path" }]), false);
+  assert.equal(takesHandoff([{ name: "handoff", type: "path", needs_absent: true }]), false);
 });
