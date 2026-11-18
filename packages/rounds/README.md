@@ -886,10 +886,10 @@ Some refs no account names, and you remove them by hand (`git push <remote> --de
 refs/heads/<name>`) if you find them. The sweep lists only the prefixes `ref` and
 `full_ref` give now, and lists nothing for a project with no `ref`, so a push that went
 out unrecorded (the check stopped, its read failed, or it was a hand push) under a prefix
-neither gives any more is never listed and never removed. And the keep rule reads the builds of the project key itself, in the
-rounds folders it can find: an open build in a project whose rounds folder can't be
-worked out, or under another project key whose remote is the same repository, is not
-seen, so its ref is not kept for it.
+neither gives any more is never listed and never removed. And the keep rule reads the
+builds of the project key itself, in the rounds folders it can find: an open build in a
+project whose rounds folder can't be worked out, or under another project key whose
+remote is the same repository, is not seen, so its ref is not kept for it.
 
 CI is read with `status`, `ids` and `jobs`, commands printing JSON, by default `gh run
 list --commit {tip} --json ...`, `gh workflow list --all --json id,path` and `gh run

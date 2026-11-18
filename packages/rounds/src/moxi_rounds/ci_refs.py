@@ -14,9 +14,9 @@ A ref is kept when it is the branch name a template the setting names (`ref` or
 repo that has not ended, in any round of any project, or gives a target branch of the
 repo: the project's target (its `into`, else the branch checked out at its root, as a
 new build would take) and the target each such build recorded; and when a build that
-has not ended recorded pushing it. While any round's log, or the project's target, can't be read, every ref is kept,
-since an open build may be recorded there, or the ref may be the target's. The rule is
-read again just before each deletion.
+has not ended recorded pushing it. While any round's log, or the project's target, can't
+be read, every ref is kept, since an open build may be recorded there, or the ref may be
+the target's. The rule is read again just before each deletion.
 
 **Removal** (`remove`), run from the repo's root: `git ls-remote --heads` for each ref
 first, then `git push <remote> --delete refs/heads/<ref>` for each one there that the
@@ -112,10 +112,10 @@ def of_build(state: states.State, build: builds.Build, settings) -> list[tuple[s
 @dataclass(frozen=True)
 class Keep:
     """What the keep rule reads for one repo: the `templates` its setting names now,
-    `ref`'s and `full_ref`'s (none where it names no `ref`), the branches of its builds that have not ended (`branches`, each
-    with the round and stage), its `targets`, the refs those builds recorded pushing
-    (`pushed`), and why any log, or the project's target, can't be read
-    (`unreadable`, each a reason the rule keeps every ref)."""
+    `ref`'s and `full_ref`'s (none where it names no `ref`), the branches of its builds
+    that have not ended (`branches`, each with the round and stage), its `targets`, the
+    refs those builds recorded pushing (`pushed`), and why any log, or the project's
+    target, can't be read (`unreadable`, each a reason the rule keeps every ref)."""
 
     templates: tuple[str, ...]
     branches: Mapping[str, str]
