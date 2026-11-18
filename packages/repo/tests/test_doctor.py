@@ -305,6 +305,36 @@ def test_commits_not_pushed_are_a_warn_row_until_the_push(demo, clock):
                                  "failed: ")
 
 
+def test_the_doctors_push_rows_and_unpushed_name_the_same_branches(demo, clock):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo, push="origin"))
+
+    def both() -> tuple[list, list]:
+        [item] = committer.listing(repo)
+        gaps = committer.unpushed(repo, "origin", item["push"],
+                                  head=committer.head_branch(repo))
+        return gaps, [row.detail.split(";")[0] for row in problems(f"spec {repo} demo/snap push")]
+
+    assert committer.head_branch(repo) == "main"
+    bare = failed_push(demo, repo, clock)
+    assert both() == ([{"branch": "main", "ahead": None}],
+                      ["main has never been pushed to origin"])
+    deny(bare, enabled=False)
+    clock[0] += 400
+    assert moxi_repo.commit_saved(repo, "demo/snap").pushed == ("main",)
+    assert both() == ([], [])
+    clock[0] += 400
+    failed_push(demo, repo, clock)
+    clock[0] += 400
+    failed_push(demo, repo, clock)
+    assert both() == ([{"branch": "main", "ahead": 2}],
+                      ["2 commits on main not pushed to origin"])
+    git(repo, "checkout", "-q", "--detach")
+    assert committer.head_branch(repo) is None
+    assert both() == ([{"branch": "main", "ahead": 2}],
+                      ["2 commits on main not pushed to origin"])
+
+
 def test_an_unsaved_specs_push_record_names_its_unseen_ending(demo, clock):
     repo = demo.repo()
     failed_push(demo, repo, clock)

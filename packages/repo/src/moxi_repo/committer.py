@@ -1208,6 +1208,12 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
     elif conclusive:
         entry.pop("refused_since", None)
         entry.pop("refused_passes", None)
+    if status == "error":
+        entry.setdefault("error_since", now)
+        entry["error_passes"] = int(entry.get("error_passes") or 0) + 1
+    elif conclusive:
+        entry.pop("error_since", None)
+        entry.pop("error_passes", None)
     if status == "index-busy":
         entry.setdefault("index_busy_since", now)
         entry["index_busy_passes"] = int(entry.get("index_busy_passes") or 0) + 1
@@ -1364,7 +1370,15 @@ def _clear_gone(cgd: Path) -> list:
 def listing(root) -> list[dict]:
     """The repo's saved specs and the specs that ran without being saved, each with its
     last result, as `moxi repo specs --json` prints them. `push` holds each branch whose
-    last push failed, and `pushed` each branch's last pushed commit."""
+    last push failed, and `pushed` each branch's last pushed commit.
+
+    Three runs of passes outlast the passes after them that aren't conclusive, each as
+    when it began and how many passes it has lasted, both None when it isn't running:
+    refused passes (`refused_since`, `refused_passes`) and error passes (`error_since`,
+    `error_passes`), each ended by a conclusive pass of another status, and index-busy
+    passes (`index_busy_since`, `index_busy_passes`), ended by any conclusive pass.
+    `index_stale` is true once the index-busy run has lasted `STALE_INDEX_PASSES` passes,
+    when the commit record names git's held index lock."""
     where = _where(root)
     saved = _config_specs(where.cgd)
     state = read_state(where.cgd)["specs"]
@@ -1376,6 +1390,12 @@ def listing(root) -> list[dict]:
         item: dict = {"name": name, "saved": name in saved, "spec": None, "problem": None,
                       "last": entry.get("last"), "refused_since": entry.get("refused_since"),
                       "refused_passes": entry.get("refused_passes"),
+                      "error_since": entry.get("error_since"),
+                      "error_passes": entry.get("error_passes"),
+                      "index_busy_since": entry.get("index_busy_since"),
+                      "index_busy_passes": entry.get("index_busy_passes"),
+                      "index_stale": int(entry.get("index_busy_passes") or 0)
+                      >= STALE_INDEX_PASSES,
                       "push": entry.get("push") or {},
                       "pushed": entry.get("pushed_sha") or {}, "left": entry.get("left") or {},
                       "records": sorted(k for k, v in keys.items() if v.get("cgd") == want
@@ -1395,7 +1415,37 @@ def listing(root) -> list[dict]:
     return out
 
 
+def head_branch(top) -> str | None:
+    """The branch the work tree at `top` has checked out, or None when HEAD is detached
+    or can't be read."""
+    done = git(top, "symbolic-ref", "-q", "HEAD")
+    ref = done.stdout.strip()
+    return ref[len("refs/heads/"):] if done.returncode == 0 and ref.startswith(
+        "refs/heads/") else None
+
+
+def unpushed(top, remote: str, failed, *, head: str | None) -> list[dict]:
+    """The branches a spec that pushes to `remote` has commits on that `remote` lacks:
+    the branch `head` names, then each branch in `failed` (those whose last push failed)
+    A to Z. Each is `{"branch", "ahead"}`, `ahead` how many commits on it are not on the
+    remote's branch, or None when it was never pushed there. A branch that no longer
+    exists, or has nothing to push, is not listed."""
+    out = []
+    for branch in ([head] if head else []) + sorted(b for b in failed if b != head):
+        if git(top, "rev-parse", "-q", "--verify",
+               f"refs/heads/{branch}").returncode != 0:
+            continue
+        count = git(top, "rev-list", "--count",
+                    f"refs/remotes/{remote}/{branch}..refs/heads/{branch}")
+        if count.returncode != 0:
+            out.append({"branch": branch, "ahead": None})
+        elif int(count.stdout.strip() or 0):
+            out.append({"branch": branch, "ahead": int(count.stdout.strip())})
+    return out
+
+
 __all__ = ["Spec", "CommitResult", "PrepareContext", "Prepared", "SpecError", "commit",
            "commit_saved", "save_spec", "remove_spec", "saved_spec", "saved_names",
-           "spec_problem", "spec_gone", "clear_gone", "listing", "read_state", "STATUSES",
+           "spec_problem", "spec_gone", "clear_gone", "listing", "read_state", "head_branch",
+           "unpushed", "STATUSES",
            "CONCLUSIVE", "COMMITTER_ENV"]
