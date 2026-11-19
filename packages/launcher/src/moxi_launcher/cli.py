@@ -696,6 +696,11 @@ def _launch_flags(parser: argparse.ArgumentParser) -> None:
 LAUNCH_EPILOG = ("Any flag of the launcher's or the harness's catalog may follow; "
                  "moxi launcher catalog lists them. A flag the catalog does not know is "
                  "passed on to the harness, after one warning.")
+#: `run --help`'s own line: where a slot launch goes.
+RUN_EPILOG = (f"{LAUNCH_EPILOG} --target slot --slot N runs the session in slot N, making "
+              "its tmux session again when it is missing; a slot held by another holder, a "
+              "park's reservation among them, is refused. Without --slot it takes the "
+              "lowest slot with no session running and no hold, else a new one.")
 
 
 def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
@@ -711,7 +716,7 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
     # parsers abbreviate nothing: `--project` must stay the catalog's, never become
     # `--project-preset`.
     run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,
-                           epilog=LAUNCH_EPILOG,
+                           epilog=RUN_EPILOG,
                            description="Launch a session from at most one preset and the "
                                        "flags typed. Flags after -- go to the harness last.")
     _launch_flags(run)

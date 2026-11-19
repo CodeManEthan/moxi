@@ -189,6 +189,24 @@ def test_an_entry_names_its_launchs_project_and_actor(conn):
     assert (entries["r2"]["project_key"], entries["r2"]["actor"]) == ("proj-a", "alice")
 
 
+def test_a_session_with_an_open_park_entry_is_marked_parked_in_its_slot(conn):
+    launched(conn, request_id="r1", at="2026-10-30T10:00:00.000000+00:00")
+    launched(conn, request_id="r2", session_id=SID2, slot="4",
+             at="2026-10-31T10:00:00.000000+00:00")
+    entry = store.add_entry(conn, park_id="p1", kind="park", by="ann", slot=3,
+                            request_id="r1", session_id=SID, harness="claude",
+                            outcome="exited")
+    got = resume.sessions(conn=conn, turns=None)
+    by = {e["request_id"]: e for e in got.data["sessions"]}
+    assert (by["r1"]["parked"], by["r2"]["parked"]) == (3, None)
+    assert got.lines[1].endswith(f"session {SID}, ended, parked in slot 3: resumable")
+    assert "parked" not in got.lines[0]
+    # Once the entry is closed the mark goes.
+    store.close_entry(conn, entry.entry_id, "dropped")
+    assert [e["parked"] for e in resume.sessions(conn=conn, turns=None).data["sessions"]] == [
+        None, None]
+
+
 def test_an_empty_log_lists_no_sessions(conn):
     got = resume.sessions(conn=conn, turns=None)
     assert got.lines == ("no sessions",) and got.data == {"sessions": []}

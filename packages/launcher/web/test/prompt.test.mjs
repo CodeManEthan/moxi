@@ -330,17 +330,19 @@ test("the chip reads the values the form is filled with until one is set here", 
 
 // --- where it runs -------------------------------------------------------------------------
 
-const slot = (number, state, extra = {}) =>
-  ({ number, state, launchable: false, holder: null, until: null, taken_by: null, ...extra });
+const slot = (number, state, extra = {}) => ({
+  number, state, launchable: false, choosable: false, crashed: false, holder: null, until: null, taken_by: null,
+  parked: null, ...extra,
+});
 const TARGETS = {
   state: "up", detail: null, new_slot: true, default: { target: "slot", slot: 2 },
   slots: [
     slot(1, "occupied", { taken_by: { request_id: "r1", label: "planner" } }),
-    slot(2, "free", { launchable: true }),
+    slot(2, "free", { launchable: true, choosable: true }),
     slot(3, "free", { holder: "reviewer", until: 1900000000.5 }),
     slot(4, "missing"),
     slot(5, "occupied"),
-    slot(6, "ended", { launchable: true }),
+    slot(6, "ended", { launchable: true, choosable: true }),
   ],
 };
 const NONE_FREE = { ...TARGETS, default: { target: "slot", slot: null }, slots: [TARGETS.slots[0], TARGETS.slots[3]] };
@@ -413,6 +415,32 @@ test("the menu's rows say each slot's state, and only a free one can be picked",
     ["Headless", "no terminal, runs in the background", false],
   ]);
   assert.equal(slotWords({ ...parseTargets(TARGETS).slots[2], until: null }), "held for reviewer");
+});
+
+test("a missing slot can be picked and made again, a crashed or reserved one can't", () => {
+  const listing = {
+    ...TARGETS, default: { target: "slot", slot: 1 },
+    slots: [
+      slot(1, "missing", { choosable: true }),
+      slot(2, "missing", { crashed: true }),
+      slot(3, "missing", { holder: "park-p1", parked: { session_id: "s1", label: "planner" } }),
+      slot(4, "missing", { holder: "reviewer" }),
+      slot(5, "free", { launchable: true, crashed: true }),
+    ],
+  };
+  const targets = parseTargets(listing);
+  assert.deepEqual(targets.default, { target: "slot", slot: 1, named: false });
+  const menu = runMenu(targets, targets.default, clock);
+  assert.deepEqual(menu.slots.map((row) => [row.lead, row.words, row.run !== null]), [
+    ["Slot 1", "missing, made again at launch", true],
+    ["Slot 2", "crashed, reserved at the next launch", false],
+    ["Slot 3", "held for park-p1 · parked planner", false],
+    ["Slot 4", "held for reviewer", false],
+    ["Slot 5", "crashed, reserved at the next launch", false],
+  ]);
+  // A pick of a slot crash discovery would reserve falls back to the default.
+  assert.deepEqual(runOf(targets, { target: "slot", slot: 5, named: true }), targets.default);
+  assert.deepEqual(runOf(targets, { target: "slot", slot: 1, named: true }), { target: "slot", slot: 1, named: true });
 });
 
 test("a new slot is offered only while no slot is free, and is then the ticked default", () => {

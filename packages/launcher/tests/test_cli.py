@@ -152,6 +152,16 @@ def test_bad_arguments_exit_2(argv, capsys):
     assert raised.value.code == codes.USAGE
 
 
+def test_run_help_says_where_a_slot_launch_goes(capsys):
+    with pytest.raises(SystemExit) as done:
+        cli.main(["run", "--help"])
+    assert done.value.code == 0
+    said = " ".join(capsys.readouterr().out.split())
+    assert "--target slot --slot N runs the session in slot N" in said
+    assert "making its tmux session again when it is missing" in said
+    assert "park's reservation among them, is refused" in said
+
+
 def test_no_verb_says_it_is_not_built(capsys):
     """Every verb is wired: none prints the skeleton's placeholder any more."""
     source = Path(cli.__file__).read_text()

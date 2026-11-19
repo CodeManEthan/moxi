@@ -222,7 +222,8 @@ LAUNCHES = {**STANDING, "launches": Out("list", items=LAUNCH),
             "why": _text(nullable=True, mark="redact")}
 
 #: One entry of the past-sessions list. `live` is null when it could not be read;
-#: `project_key` is null for a launch in a folder alone.
+#: `project_key` is null for a launch in a folder alone; `parked` is the slot an open
+#: park entry keeps for the session, null when none does.
 PAST = _table(
     request_id=_text(), created_at=_text(), harness=_text(), target=_text(),
     slot=_text(nullable=True), cwd=_text(mark="path"), project_key=_text(nullable=True),
@@ -231,6 +232,7 @@ PAST = _table(
     resumable=Out("bool"), why=_text(nullable=True), hint=_text(nullable=True),
     unread=_text(nullable=True), held_by=_text(nullable=True),
     resume_of=_text(nullable=True), relaunch_of=_text(nullable=True),
+    parked=Out("int", nullable=True),
 )
 SESSIONS = {**STANDING, "sessions": Out("list", items=PAST)}
 
@@ -314,15 +316,21 @@ PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_tex
 PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(), "home": _text(mark="path"),
           "places": Out("list", items=PLACE)}
 
-#: One slot a launch may name. `holder` and `until` (seconds since the epoch) are a live
-#: hold's; `taken_by` is the launch that occupies the slot when the launch log knows it.
+#: One slot a launch may name. `choosable` is whether a launch may name it now (a missing
+#: one is made again at launch); `crashed` that the next launch's crash discovery reserves
+#: it. `holder` and `until` (seconds since the epoch, null for a hold kept until released)
+#: are a live hold's; `taken_by` is the launch that occupies the slot when the launch log
+#: knows it; `parked` the session a park reservation keeps the slot for.
 SLOT = _table(number=Out("int"), state=_text(), launchable=Out("bool"),
+              choosable=Out("bool"), crashed=Out("bool"),
               holder=_text(nullable=True), until=Out("float", nullable=True),
-              taken_by=_table(request_id=_text(), label=_text(), nullable=True))
+              taken_by=_table(request_id=_text(), label=_text(), nullable=True),
+              parked=_table(session_id=_text(), label=_text(), nullable=True))
 #: Where a launch may run. `slots` is empty and `new_slot` false where slots can't be
 #: used or read; `unread` is true only where slots is installed and can run and its
 #: slots could not be read. `default` is the choice a launch starts with: `target` is
-#: `slot` or `terminal`, and `slot` the lowest slot free now, or null to take a new one.
+#: `slot` or `terminal`, and `slot` the one a launch naming none takes now, or null to
+#: take a new one.
 TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool"),
            "unread": Out("bool"),
            "default": _table(target=_text(), slot=Out("int", nullable=True))}

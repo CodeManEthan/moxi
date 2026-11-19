@@ -3611,6 +3611,7 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	parked=Out("int", nullable=True),	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
@@ -3700,6 +3701,7 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/park.py	gets an entry. A `changed` refusal (the run ended and something else took the slot) is	keep	changed	changed
 launcher	packages/launcher/src/moxi_launcher/park.py	return set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/park.py	if exc.reason == "changed":	keep	changed	changed
@@ -4423,8 +4425,9 @@ launcher	packages/launcher/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp
 launcher	packages/launcher/tests/test_page.py	out.setdefault(key, set()).add(sub.mark)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),	keep	launchable=	launchable=
 launcher	packages/launcher/tests/test_page.py	slot(3, "free", launchable=False, holder="planner", until=1900000000.5),	keep	launchable=	launchable=
-launcher	packages/launcher/tests/test_page.py	slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]	keep	launchable=	launchable=
 launcher	packages/launcher/tests/test_page.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_page.py	slot(4, "missing", launchable=False, choosable=True),	keep	launchable	launchable
+launcher	packages/launcher/tests/test_page.py	slot(10, "free", launchable=True)]	keep	launchable	launchable
 launcher	packages/launcher/tests/test_page_joiner.py	"""A value with the fields of sessions' `Message` that the joiner reads; `injected`	keep	injected	injected
 launcher	packages/launcher/tests/test_page_joiner.py	"reasoning": False, "injected": "unknown", **more})	keep	injected	injected
 launcher	packages/launcher/tests/test_page_joiner.py	assert at < ended["at"] and set(facts) == {"quick"}	keep	set	set

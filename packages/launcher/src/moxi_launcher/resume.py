@@ -89,7 +89,8 @@ class Past:
     take it now, `why` the reason when it would not, and `hint` what to do instead.
     `held_by` names a later launch that holds the same session id (a resume of it), which
     is the one a resume of that id acts on. `project_key` is the project the launch ran
-    in, None for a launch in a folder alone, and `actor` who made it."""
+    in, None for a launch in a folder alone, and `actor` who made it. `parked` is the
+    slot an open park entry keeps for the session, None when none does."""
 
     request_id: str
     created_at: str
@@ -110,6 +111,7 @@ class Past:
     held_by: str | None = None
     resume_of: str | None = None
     relaunch_of: str | None = None
+    parked: int | None = None
 
     def as_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -151,6 +153,8 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
                           f"resume it as that launch's: moxi launcher resume {newest}")
     if refused is None:
         refused = live_refusal(row, newest, live=live, unread=unread)
+    parked = store.entries_of(conn, [row.request_id],
+                              [newest] if newest and not held_by else [])
     return Past(
         request_id=row.request_id, created_at=row.created_at, harness=row.harness,
         target=row.target, slot=row.slot, cwd=row.cwd, project_key=row.project_key,
@@ -158,7 +162,8 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
         live=live, resumable=refused is None,
         why=None if refused is None else refused.problem,
         hint=None if refused is None else refused.hint, unread=unread, held_by=held_by,
-        resume_of=row.resume_of, relaunch_of=row.relaunch_of)
+        resume_of=row.resume_of, relaunch_of=row.relaunch_of,
+        parked=parked[0].slot if parked else None)
 
 
 def session_line(past: Past) -> str:
@@ -167,6 +172,8 @@ def session_line(past: Past) -> str:
     said = (f"{past.created_at} {past.harness} in {where}, launch {past.request_id}, "
             f"session {past.session_id or '(none)'}")
     said += {True: ", live", False: ", ended", None: ", liveness unread"}[past.live]
+    if past.parked is not None:
+        said += f", parked in slot {past.parked}"
     said += ": resumable" if past.resumable else f": not resumable, {past.why}"
     return said
 

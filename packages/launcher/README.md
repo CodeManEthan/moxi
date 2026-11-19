@@ -67,7 +67,10 @@ detached, with the brief as its prompt, its output going to the launch's run log
 headless launch needs a brief. With a comms identity it runs comms' wrapper instead
 (below). `--target slot` starts the session in a tmux slot, and needs
 the slots module (Linux and WSL2; macOS untested). `--slot` names the slot; a launch with
-any other target that names one is refused, exit 2.
+any other target that names one is refused, exit 2. A named slot whose tmux session is
+gone (`missing`) is made again first; one held by another holder, a park's reservation
+among them, is refused `held`. A slot launch that names no slot takes the lowest slot
+with no session running and no hold, making a missing one again, else a new slot.
 
 **How a slot launch starts.** Claude Code can open on a screen of its own before the
 session runs: the folder-trust screen, the development-channels screen, and in
@@ -338,7 +341,8 @@ it is live and whether it can be resumed, and why not: it is live (attach to its
 instead), it ran headless, it never learned a session id (a Codex launch made without
 turns' host: use `codex resume`), it ran Codex under a comms name and the installed comms'
 Codex wrapper can't resume a thread (upgrade moxi-comms), its harness is no longer
-launched, or a later launch resumed it since. `moxi launcher resume SESSION_ID` launches
+launched, or a later launch resumed it since. A session a park entry keeps a slot for is
+marked `parked in slot N` (below). `moxi launcher resume SESSION_ID` launches
 it again from its launch's values, resumed, keeping its session id (a Codex launch under a
 comms name continues its thread through comms' wrapper; a relaunch or recycle starts a
 new one): in its own slot when that can take it, else
@@ -522,8 +526,12 @@ with projects installed, every project. With any preset set up, `Preset` on the 
 line applies a seat or a project preset; a project picked there, or the one Home opens
 on, applies that project's own preset. The chip in the box sets the harness, the model
 and the effort. The button names where the launch runs, and its caret opens the choices:
-each slot with its state, your terminal, or headless. With slots it starts at the lowest
-free slot, without slots at your terminal, and the choice is not kept from one visit to
+each slot with its state, your terminal, or headless. A missing slot reads `missing, made
+again at launch` and can be picked; a slot the next launch reserves for the session that
+was running in it when the machine went down reads `crashed, reserved at the next
+launch`; a reserved slot names its holder and, for a park's reservation, the parked
+session. With slots it starts at the slot a launch naming none would take (the lowest
+with no session running and no hold), without slots at your terminal, and the choice is not kept from one visit to
 the next. A launch from the box runs where its button says, whatever `[defaults]` or the
 preset sets for `target` and `slot`; every other row is filled from the preset and
 `[defaults]` as the page's form is. The text in the box is the whole first turn: nothing
