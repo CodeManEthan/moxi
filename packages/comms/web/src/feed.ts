@@ -17,6 +17,9 @@ export interface RosterRow {
   module: string | null;
   tier: string | null;
   adapter: string | null;
+  /** The harness a live row's adapter kind is a session of (`claude`, `codex`,
+   * `opencode`); null for any other row. */
+  harness: string | null;
   directors: string[];
   session_id: string | null;
   /** When the session took the name, on the server's clock, epoch seconds. */
