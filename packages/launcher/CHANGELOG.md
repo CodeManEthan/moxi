@@ -13,7 +13,38 @@
 - The launch log moves to schema version 3, adding `park_entries`: one row per session
   that belongs back in a slot, at most one open per slot. Open entries are never pruned;
   closed ones follow `records.keep_days`. A park lock (`park.lock` in the state
-  directory) names its holder's kind and pid. Needs moxi-slots 0.1.1 or later.
+  directory) names its holder's kind and pid. Needs moxi-slots 0.1.1 or later. An older
+  launcher refuses the log once it is at version 3, so restart the launcher's page and
+  every process that runs the launcher with the update.
+- `moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]` exits every launched
+  session in a slot and reserves its slot for it first (an open-ended `park-<id>` hold
+  and a park entry). Each exit waits for the session to be quiet, up to `--wait-s` or the
+  setting `park.wait_s` (300 s), counting neither the pane's nor a client's activity;
+  copy mode, an open turn, subagents and a draft still hold it. A Codex session is left
+  running and reserved, since Codex offers no exit, and so is the session park runs in.
+  Exits 75 while another park or restore runs.
+- `moxi launcher restore [SLOT ...] [--dry-run] [--json]` resumes each parked session
+  into its reserved slot, made again when it is missing, under the reservation. A slot
+  that can't take it sends the session to the lowest slot and releases the reservation;
+  a session still running, or one taken up by another launch, is said and left or
+  closed. A launch that fails keeps the entry and its reservation.
+- `moxi launcher unpark SLOT ... | --all [--json]` gives reserved slots up; their
+  sessions stay resumable with `moxi launcher resume`. A slot given up that reads
+  crashed is settled, so it is not reserved again.
+- A plain `moxi launcher resume` of a parked session goes back into its reserved slot as
+  restore does. A slot resume runs crash discovery first, and a recorded slot another
+  session's reservation holds sends the resume to the lowest slot, with a line saying
+  why.
+- `moxi launcher run --slot N`, the page's slot choice and a resume make a missing slot
+  again when no one else holds it; one held by another is refused `held by H`.
+  `moxi launcher run --help` has a line for `--slot`.
+- The page's targets list marks each slot `choosable`, `crashed` (crash discovery would
+  reserve it) and `parked` (the session a park reservation keeps it for), and its
+  default slot is the one a launch naming none would take. Home's run menu words them
+  `missing, made again at launch`, `crashed, reserved at the next launch` and `held for
+  park-<id> · parked <name>`.
+- `moxi launcher sessions` marks a session with an open park entry `parked in slot N`
+  (`parked` in `--json`).
 - Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
   project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
   folder or project picked again sends `scratch` off, so a launch from Home never names

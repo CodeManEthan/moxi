@@ -126,9 +126,12 @@ def resume_entry(conn: sqlite3.Connection, entry: store.ParkEntry, *,
     if not asked_other and api is not None:
         try:
             hold, why_not = _into_reserved(api, entry)
-        except (api.TryAgain, api.SlotsError) as exc:
+        except api.TryAgain as exc:
             return _restored(entry, "refused", f"slots could not answer about slot "
                                                f"{entry.slot}: {exc}", conn=conn)
+        except api.SlotsError as exc:
+            return _restored(entry, "refused", f"slots failed on slot {entry.slot}: {exc}",
+                             conn=conn)
         if hold is None:
             where = ""
     try:
@@ -178,7 +181,10 @@ def _into_reserved(api: Any, entry: store.ParkEntry) -> tuple[str | None, str]:
         held = f"held by {found.hold.holder}" if found.hold is not None else "not reserved"
         return None, f"slot {entry.slot} is {held}"
     if found.state == "missing":
-        api.create([found.number])
+        try:
+            api.create([found.number])
+        except api.Refused as exc:  # a session of its name with no registry row, say
+            return None, f"slot {entry.slot} could not be made again: {exc.words or exc}"
         return entry.holder, ""
     if found.state in ("free", "ended"):
         return entry.holder, ""

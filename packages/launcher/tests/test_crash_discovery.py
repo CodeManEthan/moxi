@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -17,7 +18,7 @@ import pytest
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, compose, first, parks, slots, store, targets
+from moxi_launcher import api, compose, first, parks, resume, slots, store, targets
 from moxi_launcher.api import LaunchRequest
 
 TESTS = Path(__file__).resolve().parent
@@ -61,9 +62,10 @@ def work(tmp_path) -> Path:
     return path
 
 
-def launch_row(conn, rid="r3", sid=SID, *, target="slot", harness="claude", **more):
+def launch_row(conn, rid="r3", sid=SID, *, target="slot", harness="claude", cwd="/tmp",
+               values=None, **more):
     store.insert(conn, request_id=rid, by="ann", harness=harness, target=target,
-                 cwd="/tmp", values={}, argv=[harness], env={}, posture="",
+                 cwd=cwd, values=values or {}, argv=[harness], env={}, posture="",
                  session_id=sid, slot="3" if target == "slot" else None, **more)
     store.set_state(conn, rid, "ready")
     return store.get(conn, rid)
@@ -268,6 +270,38 @@ def test_a_launch_naming_no_slot_reserves_crashed_slots_before_it_starts(conn, r
     assert store.open_entry(conn, 3) is not None
     names = [c["call"] for c in fake.calls(rig.dir)]
     assert names.index("hold") < names.index("start")
+
+
+@pytest.mark.parametrize(("harness_name", "trusted"), [("codex", False), ("claude", True)])
+def test_a_fresh_launch_tells_slots_whether_the_status_is_trusted(
+        conn, rig, work, harness, harness_name, trusted):
+    rig.plan(slots={"4": {"state": "free", "launchable": True}}, placed=4)
+    got = api.launch(request(work, harness=harness_name))
+    assert got.slot == "4"
+    [fresh] = rig.calls("start")
+    assert fresh["status_trusted"] is trusted
+
+
+def test_a_resume_goes_through_the_same_placement(conn, rig, work, harness):
+    launch_row(conn, "r5", cwd=str(work),
+               values={"harness": "claude", "cwd": str(work), "target": "slot", "slot": "3"})
+    rig.plan(slots={"3": {"state": "ended", "launchable": True}})
+    resume.resume(SID, conn=conn, turns=None)
+    [resumed] = rig.calls("start")
+    assert (str(resumed["slot"]), resumed["status_trusted"]) == ("3", True)
+    assert resumed["label"].startswith("launcher:")
+
+
+def test_the_launcher_places_into_slots_at_one_site_only():
+    # Every placement path goes through `targets.Slot.start`, where the trusted status is
+    # set; a second call of slots' start or respawn would need its own.
+    found = []
+    for path in sorted(Path(targets.__file__).parent.glob("*.py")):
+        for number, text in enumerate(path.read_text().splitlines(), 1):
+            if re.search(r"\.(start|respawn)\(named\b|api\.(start|respawn)\(", text):
+                found.append((path.name, text.strip().split("(")[0]))
+    assert found == [("targets.py", "placed = api.respawn"),
+                     ("targets.py", "placed = api.start")]
 
 
 def test_a_terminal_launch_runs_no_discovery(conn, rig, work, harness):

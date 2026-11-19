@@ -655,7 +655,7 @@ def _parked(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None
     """The session a park reservation keeps `slot` for: its open park entry's, when the
     slot's hold is that entry's."""
     holder = slot.hold.holder if slot.hold else None
-    if conn is None or holder is None or not holder.startswith("park-"):
+    if conn is None or holder is None or not holder.startswith(store.HOLDER_PREFIX):
         return None
     entry = store.open_entry(conn, slot.number)
     if entry is None or entry.holder != holder:

@@ -346,7 +346,8 @@ marked `parked in slot N` (below). `moxi launcher resume SESSION_ID` launches
 it again from its launch's values, resumed, keeping its session id (a Codex launch under a
 comms name continues its thread through comms' wrapper; a relaunch or recycle starts a
 new one): in its own slot when that can take it, else
-the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
+the lowest that can, with a line saying why its own could not (another session's park
+reservation, say); `--slot N` picks one. Or in this terminal for a terminal launch,
 where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 `TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
@@ -388,8 +389,8 @@ its reserved slot, making the slot's tmux session again first; `moxi launcher re
 a time, in slot order, each with one line:
 
 - `restored`: resumed into its slot under the reservation, which the start ends. When its
-  slot can't take it (something else runs there), it goes to the lowest slot that can,
-  and the reservation is released.
+  slot can't take it (something else runs there, or slots won't make it again), it goes
+  to the lowest slot that can, and the reservation is released.
 - `still running`: park left it `not-exited` and no reboot came; the entry stays.
 - `liveness unread`: whether it runs can't be read; the entry stays.
 - `refused`, with the reason: the resume was refused before anything started, such as
@@ -409,14 +410,17 @@ were running in slots: slots records how each run in a slot ended, and a run tha
 still going when its tmux server went down reads `crashed`. Before any launch into a slot,
 and at the start of park, restore and unpark, the launcher turns each crashed slot whose
 last launch was its own into a park entry with a reservation, so no fresh launch takes the
-slot and `restore` brings the session back. A launch that names such a slot is refused
+slot and `restore` brings the session back; a resume of the session, or a relaunch
+repair, runs this before it chooses a slot. A launch that names such a slot is refused
 `held by park-<id>`, with the hint to restore or unpark it. A Codex session quit by hand
 in the two minutes before an unplanned shutdown, and a run whose window was killed by
 hand, read crashed too; unpark them.
 
 **Unpark.** `moxi launcher unpark 3` gives up slot 3's reservation without restoring its
 session, and `moxi launcher unpark --all` every one. The session stays resumable with
-`moxi launcher resume`.
+`moxi launcher resume`. A slot given up, by unpark or by restore, that reads crashed (a
+session park left running that the reboot ended) is settled, so it is not reserved
+again.
 
 **Recycle.** Two launch options let a session be cleared or compacted on the launcher's
 own reads:

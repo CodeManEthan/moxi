@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -221,6 +222,49 @@ def test_a_launch_inside_a_whole_run_holder_runs_no_discovery_of_its_own():
     with parks.lock("restore"):
         with parks.discovery(wait_s=0) as run_it:
             assert run_it is False
+
+
+def test_the_holder_file_goes_when_the_lock_is_let_go():
+    with parks.lock("park") as path:
+        parks.mark_done(path)
+        assert (path.parent / parks.HOLDER_FILE).exists()
+    assert not (path.parent / parks.HOLDER_FILE).exists()
+
+
+def test_another_thread_of_the_holders_process_meets_the_lock_as_another_process():
+    taken, let_go, seen = threading.Event(), threading.Event(), {}
+
+    def restore_run():
+        with parks.lock("restore") as path:
+            seen["here"] = parks.held_here()
+            taken.set()
+            let_go.wait(10)
+            parks.mark_done(path)
+            taken.clear()
+            let_go.clear()
+            taken.set()
+            let_go.wait(10)
+
+    thread = threading.Thread(target=restore_run)
+    thread.start()
+    try:
+        assert taken.wait(10)
+        assert seen["here"] == "restore" and parks.held_here() is None
+        with pytest.raises(parks.ParkRunning) as caught:  # before the done mark
+            with parks.discovery(wait_s=0.3):
+                pass
+        assert caught.value.holder.kind == "restore"
+        with pytest.raises(parks.ParkRunning):
+            with parks.lock("park", wait_s=0.3):
+                pass
+        taken.clear()
+        let_go.set()
+        assert taken.wait(10)
+        with parks.discovery(wait_s=0.3) as run_it:  # done: the holder ran discovery
+            assert run_it is False
+    finally:
+        let_go.set()
+        thread.join(10)
 
 
 def test_only_a_whole_run_holder_marks_the_lock_done():

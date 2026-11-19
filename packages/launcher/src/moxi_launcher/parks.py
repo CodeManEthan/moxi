@@ -4,7 +4,8 @@
 `moxi.files.lock`, which writes the holder's pid there. Beside it, `park.holder` names
 the holder: its pid on the first line, its kind on the second, and `done` on a third once
 the holder's reconcile and crash discovery are done. It counts only while its pid is the
-lock file's. `park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold
+lock file's, and the holder removes it as it lets the lock go. The lock is held per
+thread: another thread of the holder's process waits for it as another process does. `park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold
 it for their whole run; a launch's own crash discovery (`discovery`) holds it only around
 discovery. A second whole-run holder waits `LOCK_WAIT_S`, then is refused `park or restore
 is running`. A launch that meets a whole-run holder whose `done` mark is written proceeds
@@ -69,11 +70,11 @@ POLL_S = 0.2
 #: The default `turns`: turns' API looked up when discovery runs.
 LOOK = object()
 
-# The kind this process holds the park lock as, or None. A launch inside a process that
-# holds it (restore's own resumes, a parked session's resume) runs no discovery of its
-# own: the holder ran it.
-_mine: str | None = None
-_mine_guard = threading.Lock()
+# The kind this thread holds the park lock as (`kind`), or none. A launch the holder
+# makes itself (restore's own resumes, a parked session's resume) runs no discovery of its
+# own: the holder ran it. Another thread of the same process meets the lock as another
+# process would.
+_here = threading.local()
 
 
 class ParkRunning(catalog.Refused):
@@ -141,40 +142,57 @@ def _write_holder(path: Path, kind: str, *, done: bool = False) -> None:
 
 
 def held_here() -> str | None:
-    """The kind this process holds the park lock as, or None."""
-    return _mine
+    """The kind this thread holds the park lock as, or None."""
+    return getattr(_here, "kind", None)
 
 
 @contextmanager
 def lock(kind: str, *, env: Mapping[str, str] | None = None,
          wait_s: float = LOCK_WAIT_S) -> Iterator[Path]:
     """Hold the park lock as `kind` for the block, its file naming the holder. Waits
-    `wait_s` for it, then raises `ParkRunning`. Yields the lock file's path, for
-    `mark_done`."""
-    global _mine
+    `wait_s` for it, then raises `ParkRunning`, whether another process or another thread
+    of this one holds it. Yields the lock file's path, for `mark_done`. The holder file is
+    removed as the lock is let go, so it never names a holder that is gone."""
     if kind not in LOCK_KINDS:
         raise ValueError(f"not a park lock holder: {kind!r}")
+    if held_here() is not None:
+        raise RuntimeError(f"this thread holds the park lock as {held_here()} already")
     path = lock_path(env)
+    deadline = time.monotonic() + wait_s
     with ExitStack() as stack:
-        try:
-            stack.enter_context(files.lock(path, timeout_s=wait_s))
-        except files.LockTimeout as exc:
-            raise ParkRunning(read_holder(path)) from exc
+        while True:
+            try:
+                left_s = max(0.0, deadline - time.monotonic())
+                stack.enter_context(files.lock(path, timeout_s=left_s))
+                break
+            except files.LockTimeout as exc:
+                raise ParkRunning(read_holder(path)) from exc
+            except RuntimeError:  # another thread of this process holds it
+                if time.monotonic() >= deadline:
+                    raise ParkRunning(read_holder(path)) from None
+                time.sleep(POLL_S)
         _write_holder(path, kind)
-        with _mine_guard:
-            _mine = kind
+        _here.kind = kind
         try:
             yield path
         finally:
-            with _mine_guard:
-                _mine = None
+            _here.kind = None
+            _clear_holder(path)
+
+
+def _clear_holder(path: Path) -> None:
+    try:
+        _holder_path(path).unlink(missing_ok=True)
+    except OSError as exc:  # a stale file counts only while its pid holds the lock
+        log.warning("the park lock's holder file was not removed: %s", exc)
 
 
 def mark_done(path: Path) -> None:
     """Write the mark that this whole-run holder's reconcile and discovery are done."""
-    if _mine not in WHOLE_KINDS:
+    kind = held_here()
+    if kind not in WHOLE_KINDS:
         raise RuntimeError("only a whole-run holder of the park lock marks it done")
-    _write_holder(path, _mine, done=True)
+    _write_holder(path, kind, done=True)
 
 
 @contextmanager
@@ -182,7 +200,8 @@ def discovery(*, env: Mapping[str, str] | None = None,
               wait_s: float = LOCK_WAIT_S) -> Iterator[bool]:
     """The park lock as a launch's crash discovery takes it. Yields True with the lock
     held, for the launch to run discovery; or False, holding nothing, when a whole-run
-    holder that has done its discovery holds it (in this process or another). Waits up
+    holder that has done its discovery holds it (this thread, another thread or another
+    process). Waits up
     to `wait_s` for either, then raises `ParkRunning`."""
     if held_here() in WHOLE_KINDS:
         yield False
@@ -198,8 +217,6 @@ def discovery(*, env: Mapping[str, str] | None = None,
                 break
             except ParkRunning as exc:
                 found = exc.holder or read_holder(path)
-            except RuntimeError:
-                found = None  # another thread of this process runs its discovery
             if found is not None and found.kind in WHOLE_KINDS and found.done:
                 break
             if time.monotonic() >= deadline:

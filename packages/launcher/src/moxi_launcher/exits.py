@@ -124,7 +124,7 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
         relaunch._no_open_run(conn, row, api)
         reading = quiet.read(found.session, slot=row.slot if in_slot else None,
                              slots_api=api if in_slot else None, person_s=person_s,
-                             activity=mode != "park")
+                             count_activity=mode != "park")
         if not reading.quiet:
             hold = reading.first
             return Result(codes.TEMPFAIL, (f"held: {hold}; nothing would be done now",),
@@ -163,7 +163,7 @@ class ExitRun(job.RelaunchJob):
         #: Park's exit waits for quiet until this time on `clock`; the verb's reads once.
         self.parking = run.mode == "park"
         self.deadline = deadline
-        self.activity = not self.parking
+        self.count_activity = not self.parking
         # The exit starts at once: there is no wait for a stop to end.
         self.acting = True
         self.verdict = "not-exited"
@@ -228,7 +228,7 @@ class ExitRun(job.RelaunchJob):
             reading = quiet.read(session, slot=row.slot if self.in_slot else None,
                                  slots_api=self.slots_api if self.in_slot else None,
                                  person_s=float(self.setting("relaunch.person_s")),
-                                 activity=self.activity)
+                                 count_activity=self.count_activity)
             hold = reading.first
             if hold is None:
                 return reading.turn_number

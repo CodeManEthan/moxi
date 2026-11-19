@@ -185,6 +185,19 @@ def test_an_occupied_reserved_slot_falls_back_to_the_lowest_and_releases_it(conn
     assert rig.slot(3)["hold"] is None and result.exit_code == 0
 
 
+def test_a_reserved_slot_slots_wont_make_again_falls_back_to_the_lowest(conn, rig):
+    entry = parked(conn, "r3", SID3, 3)
+    rig.plan(slots={"3": reserved("missing", "r3")}, placed=7, create="refused",
+             refused={"reason": "name-taken", "words": "a session named 3 runs"})
+    result = go(conn, launch=Launch())
+    [start] = rig.calls("start")
+    assert (start["slot"], start["hold"], start["create"]) == (None, None, True)
+    now = store.get_entry(conn, entry.entry_id)
+    assert now.state == "restored" and "resumed in slot 7" in now.detail
+    assert "slot 3 could not be made again: a session named 3 runs" in now.detail
+    assert rig.slot(3)["hold"] is None and result.exit_code == 0
+
+
 def test_an_entry_whose_slot_another_holder_took_is_dropped_by_reconcile(conn, rig):
     entry = parked(conn, "r3", SID3, 3)
     rig.plan(slots={"3": reserved("ended", "r3", holder="someone")}, placed=7)

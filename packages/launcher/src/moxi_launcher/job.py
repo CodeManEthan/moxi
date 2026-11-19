@@ -306,7 +306,7 @@ class RelaunchJob:
     kind = "relaunch"
     #: Whether the pane's and a client's activity hold at the exit dialog (copy mode
     #: always does).
-    activity = True
+    count_activity = True
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
                  slots_api: Any = LOOK, comms: Any = LOOK,
@@ -679,7 +679,7 @@ class RelaunchJob:
         own = math.floor(self.exit_sent_at) if self.exit_sent_at is not None else None
         person = quiet.judge(None, None, pane, now=self.wall(),
                              person_s=float(self.setting("relaunch.person_s")),
-                             own_output_from=own, activity=self.activity).hold("person")
+                             own_output_from=own, count_activity=self.count_activity).hold("person")
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")

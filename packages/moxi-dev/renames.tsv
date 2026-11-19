@@ -3783,6 +3783,7 @@ launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(entry.s
 launcher	packages/launcher/src/moxi_launcher/restore.py	if any(COMMS_OFFLINE in s.why for s in said):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(slot)	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/restore.py	line: set[str] = set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", f"slots failed on slot {entry.slot}: {exc}",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/resume.py	"""Whether `row`'s session is live, and, when that can't be read, why: turns' `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/resume.py	"sessions", "static_refusal"]	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	can't. Live is read from turns first (`find` by that id), then from the launch's own	keep	find	find
@@ -4633,6 +4634,8 @@ launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
 launcher	packages/launcher/tests/test_park.py	raise fake.Refused("changed", f"slot {slot}'s last launch is r9, not {expect}")	keep	changed	changed
 launcher	packages/launcher/tests/test_parks.py	assert [(n.what, n.slot) for n in notes] == [("released", 2)]	keep	released	released
+launcher	packages/launcher/tests/test_parks.py	taken.set()	keep	set	set
+launcher	packages/launcher/tests/test_parks.py	let_go.set()	keep	set	set
 launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
 launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir
 launcher	packages/launcher/tests/test_presets.py	-	name	test_the_callers_directory_gets_its_project_key	test_the_callers_dir_gets_its_project_key
@@ -4775,6 +4778,7 @@ launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, 
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
 launcher	packages/launcher/tests/test_restore.py	for entry, request in zip((three, five), launch.requests, strict=True):	keep	strict	strict
+launcher	packages/launcher/tests/test_restore.py	rig.plan(slots={"3": reserved("missing", "r3")}, placed=7, create="refused",	keep	refused	refused
 launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `show` and `create`, from a table of slots by number."""	keep	show	show
 launcher	packages/launcher/tests/test_resume.py	"""turns' `find`: live for the ids in `live`, raising for the ids in `failing`."""	keep	find	find
 launcher	packages/launcher/tests/test_resume.py	[past] = resume.sessions(conn=conn, turns=None).data["sessions"]	keep	sessions	sessions
