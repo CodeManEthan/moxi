@@ -1718,6 +1718,7 @@ comms	packages/comms/tests/test_books.py	test_delete_racing_open_digest_ends_wit
 comms	packages/comms/tests/test_books.py	test_the_books_serve_many_threads_on_one_connection.work	name	e	exc
 comms	packages/comms/tests/test_books.py	{"id": "102", "reason": "expired"}]	keep	expired	expired
 comms	packages/comms/tests/test_browser_page.py	"folder": project},	keep	folder	folder
+comms	packages/comms/tests/test_browser_page.py	"stale": False, "ready": None, "at": time.time()},	keep	stale	stale
 comms	packages/comms/tests/test_browser_page.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
 comms	packages/comms/tests/test_browser_page.py	return rig.record.post_as_identity(by, rig.names_channel,	keep	record	record
 comms	packages/comms/tests/test_browser_page.py	self.answer: dict = {"refused": None}	keep	refused	refused

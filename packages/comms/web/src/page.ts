@@ -45,6 +45,12 @@
 // press posts to launcher's `/api/keep-warm` and disables the button until the answer and
 // the next value of `running` have come, or for 20 s; a refusal's note leads line three
 // until the next value.
+//
+// With turns installed, while a send box is open, it reads turns' `/api/sessions` with each
+// check the box runs, when the roster changes, when its tab is shown again and every 30 s
+// while the tab is visible, and joins each session whose turn is open to its bound address
+// by session id (`turns-model.ts`): a message the dry-run line delivers live to it says the
+// recipient is working and reads it when its turn ends. A read that fails leaves no join.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -82,6 +88,7 @@ import {
 } from "./today-model.ts";
 import type { Messages, ReadDay } from "./today-model.ts";
 import { ALL_MAIL_WITH, between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
+import { openTurns, TURNS_PATH, workingIn } from "./turns-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -276,6 +283,11 @@ export class CommsPage extends LitElement {
   #runningLine: string | null = null;
   #runningOut = false;
   #runningAgain = false;
+  /** The session ids whose turn turns' last read found open, with turns installed and a
+   * box open; whether a read of them is out, and whether another is wanted after it. */
+  #openTurns: ReadonlySet<string> | null = null;
+  #turnsOut = false;
+  #turnsAgain = false;
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -292,6 +304,7 @@ export class CommsPage extends LitElement {
     void this.#feed?.refresh();
     this.#readMail();
     void this.#readRunning();
+    void this.#readTurns();
   };
 
   /** Reads the mail state again, with today's messages, the days before today the page
@@ -327,6 +340,29 @@ export class CommsPage extends LitElement {
       } while (this.#runningAgain);
     } finally {
       this.#runningOut = false;
+    }
+  }
+
+  /** Reads which sessions have a turn open, with turns installed and a send box open; one
+   * read at a time, and one more after it when asked meanwhile. A read that fails leaves no
+   * session working. */
+  async #readTurns(): Promise<void> {
+    if (!installed("turns") || this.#box === null) return;
+    if (this.#turnsOut) {
+      this.#turnsAgain = true;
+      return;
+    }
+    this.#turnsOut = true;
+    try {
+      do {
+        this.#turnsAgain = false;
+        const result = await api("turns", TURNS_PATH);
+        if (!this.isConnected) return;
+        this.#openTurns = result.status === 200 ? openTurns(result.data) : null;
+        this.requestUpdate();
+      } while (this.#turnsAgain);
+    } finally {
+      this.#turnsOut = false;
     }
   }
 
@@ -413,6 +449,7 @@ export class CommsPage extends LitElement {
       if (document.visibilityState !== "visible") return;
       this.#readMail();
       void this.#readRunning();
+      void this.#readTurns();
     }, MAIL_EVERY_MS);
   }
 
@@ -465,6 +502,7 @@ export class CommsPage extends LitElement {
       this.#taken = value;
       this.#today = newestDay(this.#today, value.today);
       void this.#readRunning();
+      void this.#readTurns();
       if (value.state === "up" && now !== null) {
         this.#kept = { value, at: now };
         const key = mailKey(value);
@@ -870,7 +908,8 @@ export class CommsPage extends LitElement {
     const box = this.#box;
     if (box === null || box.to !== to) return nothing;
     const queue = this.#queueFor === to ? this.#queue?.value ?? null : null;
-    const view = box.view({ when: this.#when, queue });
+    const view = box.view({ when: this.#when, queue,
+                            working: workingIn(this.#kept?.value.rows ?? [], this.#openTurns) });
     const quote = view.quote;
     const quoteId = `quote:${box.reply?.message_id ?? ""}`;
     const deliver = view.deliver;
@@ -984,7 +1023,12 @@ export class CommsPage extends LitElement {
       if (to === null) this.#box = null;
       else {
         const box: SendBox = new SendBox(to, reply, {
-          post: (path, body) => api("comms", path, body), onChange: () => this.requestUpdate(),
+          post: (path, body) => {
+            // Each check reads turns again, so the line says whether the recipient is working now.
+            if (path === "api/check") void this.#readTurns();
+            return api("comms", path, body);
+          },
+          onChange: () => this.requestUpdate(),
           onActed: () => this.#acted(box), now: () => this.#feed?.now() ?? Date.now() / 1000, hasCache: installed("cache"),
         });
         this.#box = box;

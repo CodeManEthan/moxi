@@ -369,7 +369,9 @@ message would go when it opens and when you change `Reply wanted` or `Deliver`, 
 so on one line, `If sent now` and then the words: `Delivered. planner reads it at its
 next turn boundary.`, `Held until planner's next turn. Its cache went cold at 18:35, …`,
 `planner isn't running. It waits until a session takes the name.`, or why it would be
-refused, with `Check again`. Send stays an outline until there is text and the last check
+refused, with `Check again`. With turns installed, a delivered line names a recipient whose
+turn is open, `Delivered. planner is working; it reads this when its turn ends.`, read from
+turns at each check. Send stays an outline until there is text and the last check
 said it would go; then it is the one control on the page in the accent colour. It is
 pressed once, and its answer is final: `Sent <time>`, how it was delivered, how many
 messages now wait, and that you can take it back until it has been read; a refusal keeps
