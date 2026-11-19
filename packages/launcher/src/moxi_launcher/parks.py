@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from moxi import exit as codes
 from moxi import files
 from moxi.paths import Layout
 
@@ -78,6 +79,7 @@ class ParkRunning(catalog.Refused):
     """The park lock stayed held past the wait."""
 
     code = "park-running"
+    exit_code = codes.TEMPFAIL
 
     def __init__(self, holder: LockHolder | None):
         who = holder.words() if holder is not None else "another process"

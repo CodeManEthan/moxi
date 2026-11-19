@@ -28,6 +28,14 @@ The steps, in this process (no job: the exit is over before the verb returns):
 found (unclaimed, changed, not live, no exit offered, another run open), which has no run.
 A session no launch holds is refused `not-launched` and logged nowhere. Exit codes: 0
 exited; 1 at-dialog, not-exited, or a fault; 3 refused; 75 held.
+
+**Park's exit** (`park_exit`) is the same run with mode `park` and two differences. It
+waits for quiet, reading it every `PARK_POLL_S` until a deadline, instead of taking one
+read; a refusal of turns' that clears by itself sends it back to that wait, and a
+`run-open` refusal (another act on the launch) is tried again within the same wait, each
+try logged. And neither the pane's activity nor a client's holds it, at the quiet read or
+at the exit dialog: copy mode still does, as do a turn, subagents, a draft and a read
+that failed.
 """
 
 from __future__ import annotations
@@ -53,6 +61,10 @@ OUTCOMES = {"exit-pending": "at-dialog", "relaunch-failed": "not-exited"}
 #: The verdict an exit's run outcome is logged as; a fault is `not-exited`.
 VERDICT_OF = {"error": "not-exited"}
 
+#: How often park's exit reads quiet again, and tries again a launch another run holds,
+#: in seconds.
+PARK_POLL_S = 3.0
+
 LOOK = relaunch.LOOK
 Refused = relaunch.Refused
 Result = relaunch.Result
@@ -64,10 +76,12 @@ def exit_session(session_id: str, *, dry_run: bool = False,
                  conn: sqlite3.Connection | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep) -> Result:
+                 sleep: Callable[[float], None] = time.sleep, mode: str = "verb",
+                 deadline: float | None = None) -> Result:
     """Exit the launched session `session_id`. Raises a refusal (logged as `exc` once
     the launch is found); returns the verdict otherwise. A dry run takes the checks and
-    the quiet read and writes nothing."""
+    the quiet read and writes nothing. `mode` is the run's (`verb`, or `park` for park's
+    exit, which waits for quiet until `deadline` on `clock`)."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else relaunch._settings()
     with relaunch._store(conn) as c:
@@ -81,7 +95,8 @@ def exit_session(session_id: str, *, dry_run: bool = False,
             _on_refused(c, row, exc, dry_run=dry_run)
             raise
         try:
-            return _exit(c, found, api, env, current, dry_run=dry_run, clock=clock, wall=wall, sleep=sleep)
+            return _exit(c, found, api, env, current, dry_run=dry_run, clock=clock,
+                         wall=wall, sleep=sleep, mode=mode, deadline=deadline)
         except (catalog.Refused, store.RunOpen) as exc:
             _on_refused(c, found.row, exc, dry_run=dry_run)
             raise
@@ -90,7 +105,8 @@ def exit_session(session_id: str, *, dry_run: bool = False,
 
 
 def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping[str, str],
-          current: Mapping[str, Any], *, dry_run: bool, clock, wall, sleep) -> Result:
+          current: Mapping[str, Any], *, dry_run: bool, clock, wall, sleep,
+          mode: str = "verb", deadline: float | None = None) -> Result:
     row, sid = found.row, found.session_id
     if not found.live or found.session is None:
         raise Refused("not-live", f"session {sid} is not live", "nothing to exit")
@@ -107,7 +123,8 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
     if dry_run:
         relaunch._no_open_run(conn, row, api)
         reading = quiet.read(found.session, slot=row.slot if in_slot else None,
-                             slots_api=api if in_slot else None, person_s=person_s)
+                             slots_api=api if in_slot else None, person_s=person_s,
+                             activity=mode != "park")
         if not reading.quiet:
             hold = reading.first
             return Result(codes.TEMPFAIL, (f"held: {hold}; nothing would be done now",),
@@ -118,11 +135,11 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
         return Result(codes.OK, (f"would exit session {sid} {how}",),
                       data={**data, "outcome": "dry-run"})
     run = store.insert_run(
-        conn, kind="exit", mode="verb", request_id=row.request_id, session_id=sid,
+        conn, kind="exit", mode=mode, request_id=row.request_id, session_id=sid,
         by=first.actor(env), state="acting", slot=row.slot, pane_id=row.pane_id,
         job=own_job(), gone=lambda j: job.gone(j, slots_api=api))
     ran = ExitRun(conn, run, found, in_slot=in_slot, slots_api=api, settings=current,
-                  clock=clock, wall=wall, sleep=sleep)
+                  clock=clock, wall=wall, sleep=sleep, deadline=deadline)
     ran.act()
     ended = store.get_run(conn, run.run_id)
     verdict = ran.verdict
@@ -139,10 +156,14 @@ class ExitRun(job.RelaunchJob):
     kind = "exit"
 
     def __init__(self, conn: sqlite3.Connection, run: store.Run, found: target.Target, *,
-                 in_slot: bool, **seams: Any):
+                 in_slot: bool, deadline: float | None = None, **seams: Any):
         super().__init__(conn, run.run_id, **seams)
         self.run, self.target, self.row = run, found, found.row
         self.in_slot = in_slot
+        #: Park's exit waits for quiet until this time on `clock`; the verb's reads once.
+        self.parking = run.mode == "park"
+        self.deadline = deadline
+        self.activity = not self.parking
         # The exit starts at once: there is no wait for a stop to end.
         self.acting = True
         self.verdict = "not-exited"
@@ -176,19 +197,18 @@ class ExitRun(job.RelaunchJob):
         return self.verdict
 
     def steps(self) -> None:
-        session, row = self.target.session, self.row
-        reading = quiet.read(session, slot=row.slot if self.in_slot else None,
-                             slots_api=self.slots_api if self.in_slot else None,
-                             person_s=float(self.setting("relaunch.person_s")))
-        if not reading.quiet:
-            hold = reading.first
-            self.end("held", hold.word, hold.detail)
-        number = reading.turn_number
-        if not store.advance_run(self.conn, self.run_id, "acting", leaving=("acting",),
-                                 turn_number=number):
-            self._ended_under()
-        self.guard()
-        kind, reason = self.exit(number)
+        while True:
+            number = self._quiet()
+            if not store.advance_run(self.conn, self.run_id, "acting", leaving=("acting",),
+                                     turn_number=number):
+                self._ended_under()
+            self.guard()
+            try:
+                kind, reason = self.exit(number)
+                break
+            except job.Again as exc:  # park's exit: back to the wait
+                self.event("again", {"word": exc.word, "detail": exc.detail})
+                self.sleep(PARK_POLL_S)
         if self.in_slot:
             self.dialog(number)
             self.end("exited", None, f"session {self.run.session_id} exited")
@@ -199,6 +219,35 @@ class ExitRun(job.RelaunchJob):
                  f"turns asked the session to exit and said {said}; the launch is not in "
                  "a slot, so if Claude's exit dialog is up, a person answers it")
 
+    def _quiet(self) -> int | None:
+        """The quiet read, once for the verb; for park, again every `PARK_POLL_S` until
+        nothing holds or the deadline. Ends the run `held` with what still holds."""
+        session, row = self.target.session, self.row
+        said: str | None = None
+        while True:
+            reading = quiet.read(session, slot=row.slot if self.in_slot else None,
+                                 slots_api=self.slots_api if self.in_slot else None,
+                                 person_s=float(self.setting("relaunch.person_s")),
+                                 activity=self.activity)
+            hold = reading.first
+            if hold is None:
+                return reading.turn_number
+            if not self._time_left():
+                self.end("held", hold.word, hold.detail)
+            if hold.word != said:
+                said = hold.word
+                self.event("wait", {"word": hold.word, "detail": hold.detail})
+            self.sleep(PARK_POLL_S)
+
+    def _time_left(self) -> bool:
+        return (self.parking and self.deadline is not None
+                and self.clock() + PARK_POLL_S < self.deadline)
+
+    def _transient(self, word: str, detail: str) -> None:
+        if self._time_left():
+            raise job.Again(word, detail)
+        self.end("held", word, detail)
+
     def _log(self) -> None:
         ended = store.get_run(self.conn, self.run_id)
         if ended is None or ended.open:
@@ -208,6 +257,22 @@ class ExitRun(job.RelaunchJob):
         store.add_exit(self.conn, run_id=self.run_id, request_id=ended.request_id,
                        session_id=ended.session_id, verdict=self.verdict, word=ended.word,
                        detail=ended.detail, slot=ended.slot, pane_id=ended.pane_id)
+
+
+def park_exit(session_id: str, *, deadline: float,
+              clock: Callable[[], float] = time.monotonic,
+              sleep: Callable[[float], None] = time.sleep, **given: Any) -> Result:
+    """Exit `session_id` for park: `exit_session` with mode `park`, which waits for quiet
+    until `deadline` on `clock`. A `run-open` refusal is tried again every `PARK_POLL_S`
+    within the same wait, then raised. `given` is `exit_session`'s other keywords."""
+    while True:
+        try:
+            return exit_session(session_id, mode="park", deadline=deadline, clock=clock,
+                                sleep=sleep, **given)
+        except store.RunOpen:
+            if clock() + PARK_POLL_S >= deadline:
+                raise
+            sleep(PARK_POLL_S)
 
 
 def own_job() -> str:
@@ -284,5 +349,5 @@ def exit_line(row: store.ExitRow) -> str:
     return said
 
 
-__all__ = ["EXIT_CODES", "OUTCOMES", "VERDICT_OF", "ExitRun", "Refused", "Result",
-           "exit_line", "exit_session", "exits", "own_job"]
+__all__ = ["EXIT_CODES", "OUTCOMES", "PARK_POLL_S", "VERDICT_OF", "ExitRun", "Refused",
+           "Result", "exit_line", "exit_session", "exits", "own_job", "park_exit"]

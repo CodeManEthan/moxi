@@ -81,6 +81,15 @@ label = "A launch from the page may take"
 group = "Waits"
 unit = "seconds"
 
+[park.wait_s]
+type = "int"
+default = 300
+doc = "How long park waits for each session to be quiet before it leaves it running, in seconds."
+read = "use"
+label = "Park waits for each session to be quiet"
+group = "Waits"
+unit = "seconds"
+
 [runs.keep_days]
 type = "int"
 default = 30

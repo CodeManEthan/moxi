@@ -34,6 +34,7 @@ DEFAULTS = {
     "name.template": "<project>-<model>-<date:mmm-dd hh:mm>",
     "name.templates": {},
     "page.launch_wait_s": 600,
+    "park.wait_s": 300,
     "records.keep_days": 90,
 }
 #: The list settings whose defaults are texts: checked for their count only.
@@ -82,7 +83,7 @@ COMMON = ["startup.trust_dialog", "startup.dev_channels_dialog", "startup.bypass
 #: The sub-heads behind More, in the order they first appear, and the keys under each.
 GROUPS = {
     "Waits": ["ready.wait_s", "first.wait_s", "startup.wait_s", "recycle.limit_wait_s",
-              "page.launch_wait_s"],
+              "page.launch_wait_s", "park.wait_s"],
     "Relaunch": ["relaunch.wait_s", "relaunch.person_s", "relaunch.dialog_s",
                  "relaunch.name_wait_s", "relaunch.follow_s", "relaunch.director_pass_env",
                  "relaunch.notice_retry_s"],

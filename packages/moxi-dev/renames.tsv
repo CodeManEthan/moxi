@@ -3345,6 +3345,13 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	session, so that `restore` brings them back after a reboot. `keep-warm` opens, releases and lists this session's named holds. `show` shows	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	"park", help="exit the sessions in slots and reserve their slots",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--wait-s", type=float, metavar="SECONDS",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="how long to wait for each session to be quiet (park.wait_s, "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="say what park would do; write nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3681,6 +3688,10 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/park.py	gets an entry. A `changed` refusal (the run ended and something else took the slot) is	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/park.py	return set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/park.py	if exc.reason == "changed":	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/park.py	result = call(one.session_id, deadline=deadline, conn=conn, turns=turns,	keep	deadline	deadline
 launcher	packages/launcher/src/moxi_launcher/parks.py	back), `released` (a park hold with no entry) or `unread` (slots could not say)."""	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/parks.py	notes.append(Note("released", slot.number,	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
@@ -4168,6 +4179,10 @@ launcher	packages/launcher/tests/test_exits.py	test_an_exits_run_makes_every_oth
 launcher	packages/launcher/tests/test_exits.py	test_an_unclaimed_launch_is_refused_and_logged_without_a_run	name	connection	conn
 launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_did_not_see_through_is_at_the_dialog	name	connection	conn
 launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_saw_through_is_exited	name	connection	conn
+launcher	packages/launcher/tests/test_exits.py	session = FakeSession(exits=(Result("refused", "busy-turn"), Result("ran")))	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	store.end_run(conn, other.run_id, "expired")	keep	expired	expired
+launcher	packages/launcher/tests/test_exits.py	assert [r.verdict for r in reversed(logged(conn))] == ["refused", "exited"]	keep	refused	refused
+launcher	packages/launcher/tests/test_exits.py	assert {r.verdict for r in logged(conn)} == {"refused"}	keep	refused	refused
 launcher	packages/launcher/tests/test_first.py	"closed-reconnect": {"deliver": "unanswered", "connection": "closed"},	keep	closed	closed
 launcher	packages/launcher/tests/test_first.py	"closed-refused": {"deliver": "unanswered", "connection": "closed",	keep	closed	closed
 launcher	packages/launcher/tests/test_first.py	"delivered": {},	keep	delivered	delivered
@@ -4584,6 +4599,7 @@ launcher	packages/launcher/tests/test_page_waits.py	assert {c["session_id"] for 
 launcher	packages/launcher/tests/test_page_waits.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
+launcher	packages/launcher/tests/test_park.py	raise fake.Refused("changed", f"slot {slot}'s last launch is r9, not {expect}")	keep	changed	changed
 launcher	packages/launcher/tests/test_parks.py	assert [(n.what, n.slot) for n in notes] == [("released", 2)]	keep	released	released
 launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
 launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir

@@ -349,6 +349,35 @@ another launch of the session is still starting or running, the resume is refuse
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the
 launch is under way, the resume is refused `run-open` (exit 3), naming the run.
 
+**Park.** `moxi launcher park` gets the slots ready for a reboot. It exits every session
+the launcher launched into a slot, records which session was in which slot (a park
+entry), and reserves each of those slots with a slots hold `park-<id>` that lasts until
+it is released, so no other launch takes the slot. It holds the slot before it exits the
+session, so the slot is never free between the two. Each exit is exit-session's, with two
+differences: it waits for the session to be quiet, up to `park.wait_s` (300 s, or
+`--wait-s`), and it does not count the pane's or a client's activity as a person, at the
+quiet read or at the exit dialog, since the person parking is the one at the panes. Copy
+mode in the pane still holds, as do an open turn, subagents, a draft and a read that
+failed. Each slot gets one line:
+
+- `exited`: the session ended.
+- `not-exited`, with the reason: the wait ran out or the exit failed. The session still
+  runs; its entry and reservation stay, so a reboot ends it and running park again tries
+  its exit again.
+- `left-running`: a Codex session, which offers no exit. It is recorded and reserved, and
+  the reboot ends it.
+- The session park itself runs in is recorded `not-exited: the session running park` and
+  left for you to exit.
+- A live run the launcher did not launch is `left alone`; a session launched into a
+  terminal is listed `not in a slot; left running`; a slot taken by something else since
+  park found it is `changed; left alone`; a slot another holder holds is `held by H; left
+  running`.
+
+Park exits 0 when every session it found got an entry, and 1 when a slot could not be
+reserved or an entry could not be written. `--dry-run` says what park would do and
+writes nothing. Park removes no slot. Only one park runs at a time: a second waits 10 s
+for the first, then is refused `park or restore is running` (exit 75).
+
 **Recycle.** Two launch options let a session be cleared or compacted on the launcher's
 own reads:
 
@@ -569,6 +598,7 @@ nothing has used it for a while.
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
+| `moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]` | exit the sessions in slots and reserve their slots |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
 | `moxi launcher show [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
 
@@ -682,6 +712,7 @@ Set with `moxi config set launcher <key> <value>`:
   a Claude slot launch takes this long before it returns.
 - `runs.keep_days` (30): how long run logs, prompt files and settings run files are kept.
 - `relaunch.wait_s` (900): how long a self relaunch waits for its session to be quiet.
+- `park.wait_s` (300): how long park waits for each session to be quiet.
 - `relaunch.person_s` (120): how recently a person's use of the pane, or a turn no
   delivery opened, holds an act.
 - `relaunch.dialog_s` (60): how long a relaunch or an exit waits at the exit dialog.

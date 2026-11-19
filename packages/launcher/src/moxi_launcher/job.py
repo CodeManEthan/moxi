@@ -179,6 +179,11 @@ class _Again(Exception):
         self.word, self.detail = word, detail
 
 
+#: Raised to send a run back to its wait; a run that takes the steps in its own order
+#: catches it.
+Again = _Again
+
+
 # -- what other parts share -------------------------------------------------------------
 
 
@@ -299,6 +304,9 @@ class RelaunchJob:
 
     #: The run's kind of job, for its name.
     kind = "relaunch"
+    #: Whether the pane's and a client's activity hold at the exit dialog (copy mode
+    #: always does).
+    activity = True
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
                  slots_api: Any = LOOK, comms: Any = LOOK,
@@ -671,7 +679,7 @@ class RelaunchJob:
         own = math.floor(self.exit_sent_at) if self.exit_sent_at is not None else None
         person = quiet.judge(None, None, pane, now=self.wall(),
                              person_s=float(self.setting("relaunch.person_s")),
-                             own_output_from=own).hold("person")
+                             own_output_from=own, activity=self.activity).hold("person")
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")

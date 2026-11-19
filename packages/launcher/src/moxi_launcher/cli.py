@@ -19,6 +19,7 @@ launched.
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
+    moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
     moxi launcher show [SESSION_ID] [--json]
 
@@ -36,7 +37,8 @@ relaunches another as one of its directors, shows a run (`--status`), or launche
 the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `keep-warm` opens, releases and lists this session's named holds. `show` shows
+resumed. `park` exits every launched session in a slot and reserves each slot for its
+session, so that `restore` brings them back after a reboot. `keep-warm` opens, releases and lists this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -609,6 +611,15 @@ def _resume(args: argparse.Namespace, prog: str) -> int:
     return _said(resume.resume(args.session_id, slot=args.slot, warn=_warn), args)
 
 
+def _park(args: argparse.Namespace, prog: str) -> int:
+    from . import park
+
+    if args.wait_s is not None and args.wait_s < 0:
+        print(f"{prog} park: --wait-s takes seconds, 0 or more", file=sys.stderr)
+        return codes.USAGE
+    return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)
+
+
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
@@ -639,6 +650,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "exits": _exits,
     "sessions": _sessions,
     "resume": _resume,
+    "park": _park,
     "keep-warm": _keep_warm,
     "show": _state,
 }
@@ -790,6 +802,20 @@ def _act_parsers(verbs) -> None:
                     "that can take it, else the lowest that can, or this terminal.")
     resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")
     resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")
+
+    park = verbs.add_parser(
+        "park", help="exit the sessions in slots and reserve their slots",
+        allow_abbrev=False,
+        description="Exit every launched session in a slot once it is quiet, record which "
+                    "session was in which slot, and reserve those slots for moxi launcher "
+                    "restore. A Codex session, and the session park runs in, are reserved "
+                    "and left running.")
+    park.add_argument("--wait-s", type=float, metavar="SECONDS",
+                      help="how long to wait for each session to be quiet (park.wait_s, "
+                           "300 by default)")
+    park.add_argument("--dry-run", action="store_true",
+                      help="say what park would do; write nothing")
+    park.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
         "keep-warm", help="open, release or list this session's holds", allow_abbrev=False,
