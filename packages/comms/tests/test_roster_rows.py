@@ -20,7 +20,8 @@ import pytest
 from conftest import cache_absent, wait_until
 
 from moxi import exit as moxi_exit
-from moxi_comms import api, cache, cli
+from moxi import modules
+from moxi_comms import api, cache, cli, kinds
 from moxi_comms.client import VersionMismatch
 
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
@@ -162,6 +163,56 @@ def test_a_name_with_no_session_id_asks_no_owner(monkeypatch):
 def test_no_names_is_no_rows(monkeypatch):
     Daemon().install(monkeypatch)
     assert api.roster_rows() == ()
+
+
+# --------------------------------------------------------------------------- the connector's words
+
+APP = "claude-app"
+
+
+def connector_installed(monkeypatch, *, installed: bool) -> list:
+    """`moxi.modules.available` answering `installed` for the connector, as the real one
+    for every other module; the names it was asked, in order."""
+    real, asked = modules.available, []
+
+    def available(name):
+        asked.append(name)
+        return installed if name == "connector" else real(name)
+
+    monkeypatch.setattr(modules, "available", available)
+    return asked
+
+
+def test_the_connectors_binding_carries_comms_words_for_it(monkeypatch):
+    connector_installed(monkeypatch, installed=True)
+    Daemon(bound=[agent(APP, adapter=kinds.CONNECTOR_KIND), agent(LEAD)],
+           standing=[standing(APP)],
+           sessions={APP: {"bound": True, "session_id": None, "bound_at": 9.0},
+                     LEAD: held(SID_LEAD)}).install(monkeypatch)
+    app, lead = api.roster_rows()
+    assert (app.qualified, app.adapter, app.via) == (
+        APP, "connector", "Claude's apps, through the connector")
+    assert (lead.adapter, lead.via) == ("claude-shim", None)
+
+
+def test_without_the_connector_module_its_kind_carries_no_words(monkeypatch):
+    asked = connector_installed(monkeypatch, installed=False)
+    Daemon(bound=[agent(APP, adapter=kinds.CONNECTOR_KIND)],
+           sessions={APP: {"bound": True, "session_id": None, "bound_at": 9.0}}
+           ).install(monkeypatch)
+    (app,) = api.roster_rows()
+    assert (app.live, app.adapter, app.via) == (True, "connector", None)
+    assert asked == ["connector"]
+
+
+def test_an_unbound_connector_name_and_every_other_kind_ask_nothing_and_carry_no_words(
+        monkeypatch):
+    asked = connector_installed(monkeypatch, installed=True)
+    Daemon(bound=[agent(LEAD), agent(PLAN, adapter="codex")], standing=[standing(APP)],
+           sessions={LEAD: held(SID_LEAD), PLAN: held(SID_PLAN)}).install(monkeypatch)
+    rows = api.roster_rows()
+    assert [(r.qualified, r.via) for r in rows] == [(LEAD, None), (PLAN, None), (APP, None)]
+    assert asked == []
 
 
 # --------------------------------------------------------------------------- the roster
@@ -356,23 +407,25 @@ def test_agents_json_prints_the_reads_rows(rig):
 
 def test_agents_json_prints_exactly_what_roster_rows_returns(monkeypatch):
     rows = (api.RosterRow(qualified=LEAD, name="lead", scope="proj-a", live=True,
-                          kind=None, module=None, tier="chosen", adapter="codex",
+                          kind=None, module=None, tier="chosen", adapter="connector",
                           directors=("boss",), session_id=SID_LEAD, bound_at=12.5,
                           awaiting=(PLAN,),
-                          cache=api.CacheFact(kind="warm", until=1300.0)),
+                          cache=api.CacheFact(kind="warm", until=1300.0),
+                          via="Claude's apps, through the connector"),
             api.RosterRow(qualified="herald", name="herald", scope="global", live=False,
                           kind="agent", module=None, tier=None, adapter=None))
     asked = []
     monkeypatch.setattr(api, "roster_rows", lambda **kw: asked.append(kw) or rows)
     assert agents_json() == (moxi_exit.OK, {"ok": True, "rows": [{
         "qualified": LEAD, "name": "lead", "scope": "proj-a", "live": True, "kind": None,
-        "module": None, "tier": "chosen", "adapter": "codex", "directors": ["boss"],
+        "module": None, "tier": "chosen", "adapter": "connector", "directors": ["boss"],
         "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN],
-        "cache": {"kind": "warm", "until": 1300.0}, "holder": None}, {
+        "cache": {"kind": "warm", "until": 1300.0}, "holder": None,
+        "via": "Claude's apps, through the connector"}, {
         "qualified": "herald", "name": "herald", "scope": "global", "live": False,
         "kind": "agent", "module": None, "tier": None, "adapter": None, "directors": [],
         "session_id": None, "bound_at": None, "awaiting": [], "cache": None,
-        "holder": None}]})
+        "holder": None, "via": None}]})
     assert asked == [{"timeout_s": api.READ_DEADLINE}]
     agents_json(deadline=3)
     assert asked[-1] == {"timeout_s": 3}
