@@ -3855,6 +3855,7 @@ launcher	packages/launcher/tests/launcher_fake_slots.py	make_slot	kwonly	launcha
 launcher	packages/launcher/tests/launcher_fake_slots.py	name="CLAUDE_TRUST_FOLDER",	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/launcher_fake_slots.py	record	name	out	fh
 launcher	packages/launcher/tests/launcher_fake_slots.py	record("show", slot=slot)	keep	show	show
+launcher	packages/launcher/tests/launcher_fake_slots.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_turns.py	#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module	use	moxi_launcher.first.TURNS_SEAM	moxi_launcher.first.TURNS_ENV
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `reconnect`: `ok`, or `refused` (nothing serves any more: `Lost("unanswered")`).	keep	refused	refused
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `sessions`: the live sessions `find` finds, by session id, each `{harness, endpoint_pid,	keep	find	find
@@ -12851,6 +12852,11 @@ slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="stor
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--name", help="name the one slot made")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("name", nargs="?", metavar="NAME")	keep	NAME	NAME
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("numbers", metavar="N", nargs="*", type=int)	keep	type	type
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while or until "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	how_long = p.add_mutually_exclusive_group(required=True)	keep	required	required
+slots	packages/slots/src/moxi_slots/cli.py	how_long.add_argument("--for", dest="seconds", type=float, metavar="S",	keep	type	type
+slots	packages/slots/src/moxi_slots/cli.py	help="seconds, at most a day")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	help="hold until `moxi slots release` ends it")	keep	help	help
 slots	packages/slots/src/moxi_slots/doctor.py	launch_files_row	name	directory	launch_dir
 slots	packages/slots/src/moxi_slots/doctor.py	mismatches_row	name	directory	mismatches_dir
 slots	packages/slots/src/moxi_slots/health.py	__all__ = ["NAME", "expected_pid", "check"]	keep	NAME	NAME
@@ -12892,6 +12898,9 @@ slots	packages/slots/src/moxi_slots/slots.py	home = os.environ.get("HOME") or os
 slots	packages/slots/src/moxi_slots/slots.py	inside_this_server	name	environ	env
 slots	packages/slots/src/moxi_slots/slots.py	return panes.listing(reg).find(number)	keep	find	find
 slots	packages/slots/src/moxi_slots/slots.py	used = set(reg.rows) | {s.number for s in listing.unregistered} | set(taken)	keep	set	set
+slots	packages/slots/src/moxi_slots/slots.py	`expect`, a request id, makes the hold conditional: it is refused `changed` unless the	keep	changed	changed
+slots	packages/slots/src/moxi_slots/slots.py	raise Refused("changed", f"slot {number}'s last launch is "	keep	changed	changed
+slots	packages/slots/src/moxi_slots/slots.py	"""The last launch's label and meta from a registry row, for a `changed` refusal."""	keep	changed	changed
 slots	packages/slots/src/moxi_slots/tmux.py	client_env	name	environ	env
 slots	packages/slots/src/moxi_slots/tmux.py	return any(marker in low for marker in _NO_SERVER)	keep	any	any
 slots	packages/slots/tests/screen_program.py	ap.add_argument("--choices", default="")	keep	default	default
@@ -12933,12 +12942,14 @@ slots	packages/slots/tests/test_live_slots.py	assert env == {"HOME": "/h"}	keep	
 slots	packages/slots/tests/test_live_slots.py	assert pane_field(target, "pane_current_path") == os.environ["HOME"]	keep	HOME	HOME
 slots	packages/slots/tests/test_live_slots.py	env = slots.attach_env(argv, {"TMUX": "/x,1,0", "TMUX_PANE": "%1", "HOME": "/h"})	keep	HOME	HOME
 slots	packages/slots/tests/test_live_slots.py	outs = [p.communicate(timeout=30) for p in procs]	keep	timeout	timeout
+slots	packages/slots/tests/test_live_slots.py	assert caught.value.reason == "changed"	keep	changed	changed
 slots	packages/slots/tests/test_panes.py	assert panes.join(reg, [home()]).find(1).hold.holder == "h"	keep	find	find
 slots	packages/slots/tests/test_panes.py	found = panes.join(reg, [home(), run(dead=True, status=3)], NOW).find(1)	keep	find	find
 slots	packages/slots/tests/test_registry.py	assert data["version"] == 1 and set(data["slots"]) == {"3", "12"}	keep	set	set
 slots	packages/slots/tests/test_registry.py	holder.wait(timeout=5)	keep	timeout	timeout
 slots	packages/slots/tests/test_registry.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_registry.py	places.registry().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/tests/test_registry.py	assert data["version"] == 2 and set(data["slots"]) == {"3", "12"}	keep	set	set
 slots	packages/slots/tests/test_server.py	-	name	test_the_server_environment_keeps_only_the_named_variables	test_the_server_env_keeps_only_the_named_variables
 slots	packages/slots/tests/test_server.py	assert env == {"HOME": "/h", "USER": "u", "LOGNAME": "u", "SHELL": "/bin/sh",	keep	HOME	HOME
 slots	packages/slots/tests/test_server.py	env = server.clean_env({"HOME": "/h", "USER": "u", "LOGNAME": "u", "SHELL": "/bin/sh",	keep	HOME	HOME
@@ -16597,6 +16608,7 @@ rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/src/moxi_slots/errors.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

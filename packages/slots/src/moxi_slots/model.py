@@ -14,8 +14,9 @@ States:
 
 A slot is launchable when it is `free` or `ended` and unheld, or held by the caller. A
 live `slot-<n>` session with no registry row is never launchable: `start` refuses it. A
-hold is a reservation by a `holder` word until `until` (epoch seconds); past `until` it
-reads as absent.
+hold is a reservation by a `holder` word until `until` (epoch seconds), past which it reads
+as absent, or, with `until` None, until its holder releases it. A hold may sit on a
+missing slot: it reserves the registered number, whether its session exists or not.
 
 A slot is idle when no client is attached, it has no window but the home window and a
 dead run window, and the home pane runs the shell it started with (or has died).
@@ -127,13 +128,14 @@ def check_meta(meta: object) -> dict | None:
 
 @dataclass(frozen=True)
 class Hold:
-    """A reservation: `holder` has the slot until `until` (epoch seconds)."""
+    """A reservation: `holder` has the slot until `until` (epoch seconds), or, with
+    `until` None, until the holder releases it."""
 
     holder: str
-    until: float
+    until: float | None
 
     def live(self, now: float) -> bool:
-        return self.until > now
+        return self.until is None or self.until > now
 
 
 @dataclass(frozen=True)

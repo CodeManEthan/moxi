@@ -66,8 +66,10 @@ is yours, and slots ignores it. A slot is `free` (no run window), `occupied` (th
 pane is live), `ended` (the run pane is dead and its last screen stays), or `missing`
 (registered, but the session is gone, as after a reboot).
 
-A **hold** reserves a slot for a holder, a word you choose, for up to a day. A held slot
-takes a launch only from its holder, and a start by the holder ends the hold.
+A **hold** reserves a slot for a holder, a word you choose, for up to a day or until the
+holder releases it. A held slot takes a launch only from its holder, and a start by the
+holder ends the hold. A missing slot can be held too: the hold reserves the number, and
+stays when the slot is made again.
 
 A **job** is a command that outlives its caller. It runs in its own window of session
 `moxi-jobs`, and the window goes when the job ends.
@@ -84,6 +86,7 @@ A **job** is a command that outlives its caller. It runs in its own window of se
 | `moxi slots rename N\|NAME NAME`, `... --clear` | names a slot, or clears its name |
 | `moxi slots attach N\|NAME [--print]` | attaches this terminal, making the slot when it has no session. `--print` prints the tmux command instead |
 | `moxi slots hold N\|NAME --holder H --for S` | holds a slot for S seconds, at most a day |
+| `moxi slots hold N\|NAME --holder H --until-released` | holds a slot until `moxi slots release` ends the hold |
 | `moxi slots release N\|NAME --holder H` | ends your hold |
 | `moxi slots jobs [--json]` | the detached jobs |
 | `moxi slots screen N\|NAME [--json]` | which known screen the slot's run pane shows, and why. It sends nothing |

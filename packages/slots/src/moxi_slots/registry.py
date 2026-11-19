@@ -3,17 +3,22 @@
 The registry holds, per slot, only what tmux can't know: `created`, `name`, `hold` and
 `last` (`at`, `label`, `meta`). Everything else is read from tmux.
 
-    {"version": 1,
+    {"version": 2,
      "slots": {"3": {"created": 1793392266.1, "name": "review",
                      "hold": {"holder": "run-7", "until": 1793395866.0},
                      "last": {"at": 1793392300.5, "label": "agent", "meta": {...}}}}}
+
+A hold whose `until` is null lasts until its holder releases it. Version 2 is the first
+that may hold one, so a slots that reads only version 1 refuses the file by its version
+rather than misreading it; this code reads version 1 files as well and writes version 2.
 
 Every change (create, remove, rename, hold, release, a launch) runs under the one module
 lock, `locked()`: read the registry, read tmux, act, write with `write()`, which replaces
 the file in one step. The lock is held for the critical section only, never across a
 wait. Reads take no lock: the atomic replace always hands them a whole file.
 
-A write drops holds that have run out, which read as absent anyway.
+A write drops holds that have run out, which read as absent anyway, and keeps every hold
+with a null `until`.
 """
 
 from __future__ import annotations
@@ -29,7 +34,9 @@ from . import places
 from .errors import RegistryError, TryAgain
 from .model import HIGHEST, LOWEST, Hold, Last
 
-VERSION = 1
+VERSION = 2
+#: The versions `parse` reads.
+READS = (1, 2)
 #: Seconds a change waits for the module lock before `TryAgain`.
 LOCK_WAIT = 10.0
 
@@ -94,8 +101,9 @@ def parse(data: object) -> Registry:
     if not isinstance(data, dict):
         raise ValueError("not a JSON object")
     version = data.get("version")
-    if version != VERSION:
-        raise ValueError(f"version {version!r}, and this code reads version {VERSION}")
+    if isinstance(version, bool) or version not in READS:
+        raise ValueError(f"version {version!r}, and this code reads versions "
+                         f"{', '.join(map(str, READS))}")
     slots = data.get("slots")
     if not isinstance(slots, dict):
         raise ValueError("no slots object")
@@ -120,10 +128,12 @@ def _row(key: str, value: object) -> Row:
         raise ValueError(f"slot {key}'s name is not a string")
     hold = value.get("hold")
     if hold is not None:
+        until = hold.get("until", False) if isinstance(hold, dict) else False
         if not (isinstance(hold, dict) and isinstance(hold.get("holder"), str)
-                and isinstance(hold.get("until"), (int, float))):
+                and (until is None or (isinstance(until, (int, float))
+                                       and not isinstance(until, bool)))):
             raise ValueError(f"slot {key}'s hold has no holder or until")
-        hold = Hold(hold["holder"], float(hold["until"]))
+        hold = Hold(hold["holder"], None if until is None else float(until))
     last = value.get("last")
     if last is not None:
         if not (isinstance(last, dict) and isinstance(last.get("at"), (int, float))
@@ -172,5 +182,5 @@ def expired_holds(registry: Registry, now: float | None = None) -> list[tuple[in
             if row.hold is not None and not row.hold.live(now)]
 
 
-__all__ = ["VERSION", "LOCK_WAIT", "Row", "Registry", "locked", "read", "parse", "dump",
+__all__ = ["VERSION", "READS", "LOCK_WAIT", "Row", "Registry", "locked", "read", "parse", "dump",
            "write", "expired_holds"]

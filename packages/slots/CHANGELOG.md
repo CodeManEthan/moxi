@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- A hold can last until its holder releases it: `hold(slot, holder)` with no `seconds`,
+  or `moxi slots hold N --holder H --until-released`. Its `Hold.until` is None, and
+  `list` and `show` print it as `until released by hand`. A missing slot can now be held
+  (the `missing` refusal is gone), and the hold stays when the slot is made again.
+  `hold(..., expect=REQUEST_ID)` holds only while the slot's last launch carries that
+  `request_id` in its meta, else it is refused with the new reason `changed`. The
+  registry file moves to version 2, which an older slots refuses by its version; this
+  one reads version 1 files.
+
 - Three screens slots reads and never answers, from Claude Code 2.1.326:
   `CLAUDE_THEME_PICKER` and `CLAUDE_WELCOME`, the first-run theme picker and welcome
   screen, and `CLAUDE_CHROME_DIALOG`, the "Claude in Chrome extension detected" dialog.

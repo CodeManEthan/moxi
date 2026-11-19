@@ -82,10 +82,16 @@ def _when(epoch: float | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
 
 
+def _until_text(hold) -> str:
+    if hold.until is None:
+        return "until released by hand"
+    return f"until {_when(hold.until)}"
+
+
 def _hold_text(slot) -> str:
     if slot.hold is None:
         return "-"
-    return f"{slot.hold.holder} until {_when(slot.hold.until)}"
+    return f"{slot.hold.holder} {_until_text(slot.hold)}"
 
 
 def _row_text(slot) -> list[str]:
@@ -272,18 +278,23 @@ def _run_attach(args) -> int:
 
 
 def _add_hold(verbs) -> None:
-    p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while")
+    p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while or until "
+                                      "released")
     p.add_argument("slot", metavar="N|NAME")
     p.add_argument("--holder", required=True, metavar="H")
-    p.add_argument("--for", dest="seconds", required=True, type=float, metavar="S",
-                   help="seconds, at most a day")
+    how_long = p.add_mutually_exclusive_group(required=True)
+    how_long.add_argument("--for", dest="seconds", type=float, metavar="S",
+                          help="seconds, at most a day")
+    how_long.add_argument("--until-released", action="store_true",
+                          help="hold until `moxi slots release` ends it")
 
 
 def _run_hold(args) -> int:
     from .slots import hold
 
-    found = hold(_number(args.slot), args.holder, args.seconds)
-    print(f"slot {args.slot} held by {found.holder} until {_when(found.until)}")
+    found = hold(_number(args.slot), args.holder,
+                 None if args.until_released else args.seconds)
+    print(f"slot {args.slot} held by {found.holder} {_until_text(found)}")
     return codes.OK
 
 

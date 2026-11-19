@@ -68,7 +68,7 @@ from pathlib import Path
 DIR = "LAUNCHER_FAKE_SLOTS"
 
 REASONS = ("occupied", "held", "missing", "in-use", "no-slot", "no-free-slot", "live-pane",
-           "name-taken", "job-running", "unsupported")
+           "name-taken", "job-running", "unsupported", "changed")
 
 
 class SlotsError(Exception):
@@ -108,7 +108,7 @@ class Support:
 @dataclass(frozen=True)
 class Hold:
     holder: str
-    until: float
+    until: float | None
 
 
 @dataclass(frozen=True)

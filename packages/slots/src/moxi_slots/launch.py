@@ -30,7 +30,7 @@ from .errors import Refused, SlotsError, TmuxError, TryAgain, UsageError
 from .model import (ENDED, FREE, MISSING, OCCUPIED, RUN_MARK, Ended, Last, Placed, Slot,
                     check_holder, check_label, check_meta, launchable, session_name)
 from .registry import Row
-from .slots import _holder_of, _lowest_free, _when, make_session, resolve
+from .slots import _holder_of, _lowest_free, make_session, resolve, until_words
 
 #: The `pane-died` hook's index on a run window; the hook signals `wait_ended`.
 HOOK = "pane-died[64]"
@@ -63,8 +63,8 @@ def _taken(found: Slot, number: int, hold: str | None, *, occupied: str) -> None
         raise Refused(occupied, f"slot {number} runs a launch{label}; it ends through its "
                                 "own session", holder=_holder_of(found, "occupied"))
     if found.hold is not None and found.hold.holder != hold:
-        raise Refused("held", f"slot {number} is held by {found.hold.holder} until "
-                              f"{_when(found.hold.until)}",
+        raise Refused("held", f"slot {number} is held by {found.hold.holder} "
+                              f"{until_words(found.hold)}",
                       holder=_holder_of(found, "held"))
 
 
