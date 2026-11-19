@@ -4823,6 +4823,7 @@ launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused=
 launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_slot.py	assert len(off) == 6 and not any(e.answer for e in off)	keep	any	any
 launcher	packages/launcher/tests/test_slot.py	assert set(startup.HINTS) == set(names)	keep	set	set
+launcher	packages/launcher/tests/test_slot.py	for name in ("supported", "list_slots", "show", "create", "start", "respawn",	keep	show	show
 launcher	packages/launcher/tests/test_state.py	"exited", "held", "expired", "not-held", "stopped",	keep	expired	expired
 launcher	packages/launcher/tests/test_state.py	@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "nudged",	keep	compacted	compacted
 launcher	packages/launcher/tests/test_state.py	assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"	keep	stale	stale
@@ -12857,6 +12858,7 @@ slots	packages/slots/src/moxi_slots/cli.py	how_long = p.add_mutually_exclusive_g
 slots	packages/slots/src/moxi_slots/cli.py	how_long.add_argument("--for", dest="seconds", type=float, metavar="S",	keep	type	type
 slots	packages/slots/src/moxi_slots/cli.py	help="seconds, at most a day")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	help="hold until `moxi slots release` ends it")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	"""How the last run ended, for `show`: its status or signal, or why it was settled,	keep	show	show
 slots	packages/slots/src/moxi_slots/doctor.py	launch_files_row	name	directory	launch_dir
 slots	packages/slots/src/moxi_slots/doctor.py	mismatches_row	name	directory	mismatches_dir
 slots	packages/slots/src/moxi_slots/health.py	__all__ = ["NAME", "expected_pid", "check"]	keep	NAME	NAME
@@ -16609,6 +16611,11 @@ rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/src/moxi_slots/errors.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
+slots	packages/slots/tests/test_live_runs.py	places.module_lock().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=5)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1"]) == 0	keep	show	show
+slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1", "--json"]) == 0	keep	show	show
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

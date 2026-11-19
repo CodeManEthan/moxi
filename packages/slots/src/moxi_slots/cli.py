@@ -94,6 +94,18 @@ def _hold_text(slot) -> str:
     return f"{slot.hold.holder} {_until_text(slot.hold)}"
 
 
+def _ended_text(ended) -> str:
+    """How the last run ended, for `show`: its status or signal, or why it was settled,
+    and when; `-` while no end is recorded."""
+    if ended is None:
+        return "-"
+    if ended.settled is not None:
+        return f"settled ({ended.settled}) at {_when(ended.at)}"
+    how = f"signal {ended.signal}" if ended.signal is not None else (
+        f"status {ended.status}" if ended.status is not None else "no status")
+    return f"{how} at {_when(ended.at)}"
+
+
 def _row_text(slot) -> list[str]:
     last = "-" if slot.last is None else f"{slot.last.label} at {_when(slot.last.at)}"
     return [str(slot.number), slot.name or "-", slot.state,
@@ -178,6 +190,8 @@ def _run_show(args) -> int:
         pairs.append(("last launch", f"{found.last.label} at {_when(found.last.at)}"))
         if found.last.meta:
             pairs.append(("last meta", json.dumps(found.last.meta, sort_keys=True)))
+        if found.last.run is not None:
+            pairs.append(("ended", _ended_text(found.last.ended)))
     pairs.append(("created", _when(found.created) if found.created else "(no row)"))
     pairs += [("drift", d.words) for d in listing.drift if d.number == number]
     width = max(len(k) for k, _ in pairs)

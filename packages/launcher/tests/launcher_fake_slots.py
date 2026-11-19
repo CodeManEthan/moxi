@@ -12,7 +12,9 @@ The script's keys, each with its default:
 
 - `supported`: `{"ok": true, "why": ""}`.
 - `slots`: what `show` reads, by slot (`{"3": {"state": "occupied", "launchable": false,
-  "hold": null, "label": ..., "last": {"at": ..., "label": ..., "meta": {...}}}}`), any
+  "hold": null, "label": ..., "last": {"at": ..., "label": ..., "meta": {...}, "run": ...,
+  "server": ..., "status_trusted": true, "ended": {"at": ..., "status": ..., "signal": ...}
+  or null}}}`), any
   other `Slot` field given by name. A listed slot has a registry row (`created` is a time)
   unless it gives `"created": null`, a session of a slot's name with no row, which slots
   reads not launchable. A slot not listed reads None. A `start` or a `respawn` writes
@@ -112,10 +114,29 @@ class Hold:
 
 
 @dataclass(frozen=True)
+class RunEnd:
+    at: float
+    status: int | None
+    signal: int | None
+    settled: str | None = None
+
+
+@dataclass(frozen=True)
 class Last:
     at: float
     label: str
     meta: dict | None = None
+    run: str | None = None
+    server: str | None = None
+    status_trusted: bool = True
+    ended: RunEnd | None = None
+
+
+def _last(entry: dict) -> Last:
+    fields = dict(entry)
+    if fields.get("ended"):
+        fields["ended"] = RunEnd(**fields["ended"])
+    return Last(**fields)
 
 
 @dataclass(frozen=True)
@@ -303,7 +324,7 @@ def _listed(key, entry: dict, plan: dict) -> Slot:
     its `last`, and, in the process that placed it, the pane it was given."""
     fields = dict(entry)
     fields["hold"] = Hold(**entry["hold"]) if entry.get("hold") else None
-    fields["last"] = Last(**entry["last"]) if entry.get("last") else None
+    fields["last"] = _last(entry["last"]) if entry.get("last") else None
     number = int(key) if str(key).isdigit() else fields.pop("number", 1)
     if "meta" in fields:
         fields["last"] = Last(1.0, fields.get("label"), fields.pop("meta"))
@@ -382,9 +403,10 @@ def create(numbers=None, *, count=1, name=None) -> list[int]:
     return made
 
 
-def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) -> Placed:
+def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False,
+          status_trusted=True) -> Placed:
     record("start", slot=slot, argv=list(argv), env=dict(env), cwd=cwd, label=label,
-           meta=meta, hold=hold, create=create)
+           meta=meta, hold=hold, create=create, status_trusted=status_trusted)
     if slot is not None and create:
         raise UsageError("create=True makes a slot only for a start that names none")
     if not os.path.isabs(os.fspath(cwd)):
@@ -413,9 +435,10 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
                   plan.get("dead_status"))
 
 
-def respawn(slot, argv, *, env, cwd, label, meta=None, hold=None) -> Placed:
+def respawn(slot, argv, *, env, cwd, label, meta=None, hold=None,
+            status_trusted=True) -> Placed:
     record("respawn", slot=slot, argv=list(argv), env=dict(env), cwd=cwd, label=label,
-           meta=meta, hold=hold)
+           meta=meta, hold=hold, status_trusted=status_trusted)
     if slot is None:
         raise UsageError("respawn names the slot whose run pane it reuses")
     if not os.path.isabs(os.fspath(cwd)):

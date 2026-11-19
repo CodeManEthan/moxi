@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Each run records how it ended. Every `start` and `respawn` writes a fresh run token
+  (`Last.run`) and the tmux server's id (`Last.server`, `<boot id>:<tmux pid>`) into the
+  slot's last launch, and sets a `pane-died` hook on the run window that writes
+  `Last.ended` (a `RunEnd`: the pane's death time, its exit status, the signal that
+  ended it) for that token only, so a late hook of an earlier run writes nothing. The
+  hook waits up to 60 s for the module lock. `start` and `respawn` take
+  `status_trusted` (default True), kept as `Last.status_trusted`, for a command whose
+  exit status doesn't tell a clean end from a kill. `moxi slots show` prints `ended`.
+
 - `start(None, ..., create=True)` takes the lowest registered slot with no session
   running that it may use, a missing one included when it has no hold but the caller's,
   and makes that slot's session again with a new run window. Its name, hold and last

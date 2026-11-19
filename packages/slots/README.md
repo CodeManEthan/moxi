@@ -118,7 +118,11 @@ isn't answering yet.
 - `start(slot, argv, env=, cwd=, label=, ...)` and `respawn` place a launch in a slot,
   and `run_job(name, argv, env=, cwd=)` runs a detached one. The environment goes through
   a private file the pane's first command reads, never through tmux. Each returns once the
-  command has started or hasn't. `wait_ended` waits for a run pane to end.
+  command has started or hasn't. `wait_ended` waits for a run pane to end. The slot's
+  `last` records each run's token, the tmux server it was placed under and, once its
+  pane dies, how it ended (`ended`: when, and its exit status or signal), which `moxi
+  slots show` prints. `status_trusted=False` records that a command's exit status
+  doesn't tell a clean end from a kill.
 - `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
   `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`, `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME`
   and `CLAUDE_CHROME_DIALOG` the run pane shows. `answer_screen(slot, screen, wait_s)`

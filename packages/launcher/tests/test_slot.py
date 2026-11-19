@@ -1309,7 +1309,8 @@ USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "an
         "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
         "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG")
 #: The shapes the launcher reads, as the fake gives them.
-SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
+SHAPES = ("Support", "Hold", "RunEnd", "Last", "Slot", "Listing", "Placed", "Screen", "Seen",
+          "Answer")
 
 
 @pytest.fixture
@@ -1370,8 +1371,8 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "list_slots", "show", "create", "start", "read_screen",
-                 "answer_screen"):
+    for name in ("supported", "list_slots", "show", "create", "start", "respawn",
+                 "read_screen", "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [

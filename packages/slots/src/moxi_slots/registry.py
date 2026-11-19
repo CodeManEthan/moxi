@@ -6,7 +6,14 @@ The registry holds, per slot, only what tmux can't know: `created`, `name`, `hol
     {"version": 2,
      "slots": {"3": {"created": 1793392266.1, "name": "review",
                      "hold": {"holder": "run-7", "until": 1793395866.0},
-                     "last": {"at": 1793392300.5, "label": "agent", "meta": {...}}}}}
+                     "last": {"at": 1793392300.5, "label": "agent", "meta": {...},
+                              "run": "9f2c...", "server": "<boot id>:<tmux pid>",
+                              "status_trusted": true,
+                              "ended": {"at": 1793399000.0, "status": 0,
+                                        "signal": null}}}}}
+
+A `last` written by an older slots has no `run`, `server`, `status_trusted` or `ended`;
+it reads with None, None, true and None.
 
 A hold whose `until` is null lasts until its holder releases it. Version 2 is the first
 that may hold one, so a slots that reads only version 1 refuses the file by its version
@@ -32,7 +39,7 @@ from pathlib import Path
 
 from . import places
 from .errors import RegistryError, TryAgain
-from .model import HIGHEST, LOWEST, Hold, Last
+from .model import HIGHEST, LOWEST, Hold, Last, RunEnd
 
 VERSION = 2
 #: The versions `parse` reads.
@@ -66,12 +73,14 @@ class Registry:
 
 
 @contextmanager
-def locked(timeout: float = LOCK_WAIT) -> Iterator[None]:
-    """Hold the module lock; `TryAgain` when it is not had in `timeout` seconds."""
+def locked(timeout: float = LOCK_WAIT, path: Path | None = None) -> Iterator[None]:
+    """Hold the module lock (or the lock file at `path`); `TryAgain` when it is not had in
+    `timeout` seconds."""
     from moxi import files
 
     try:
-        with files.lock(places.module_lock(), timeout_s=timeout):
+        with files.lock(places.module_lock() if path is None else path,
+                        timeout_s=timeout):
             yield
     except files.LockTimeout as exc:
         raise TryAgain(f"the slots lock was not had in {timeout:g} s ({exc}); try "
@@ -142,8 +151,48 @@ def _row(key: str, value: object) -> Row:
         meta = last.get("meta")
         if meta is not None and not isinstance(meta, dict):
             raise ValueError(f"slot {key}'s last meta is not an object")
-        last = Last(float(last["at"]), last["label"], meta)
+        run, server = last.get("run"), last.get("server")
+        trusted = last.get("status_trusted", True)
+        if not all(v is None or isinstance(v, str) for v in (run, server)) \
+                or not isinstance(trusted, bool):
+            raise ValueError(f"slot {key}'s last run, server or status_trusted is not one "
+                             "slots wrote")
+        last = Last(float(last["at"]), last["label"], meta, run, server, trusted,
+                    _ended(key, last.get("ended")))
     return Row(float(created), name, hold, last)
+
+
+def _int_or_none(value: object) -> bool:
+    return value is None or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _ended(key: str, value: object) -> RunEnd | None:
+    if value is None:
+        return None
+    if not (isinstance(value, dict) and isinstance(value.get("at"), (int, float))
+            and not isinstance(value.get("at"), bool)
+            and _int_or_none(value.get("status")) and _int_or_none(value.get("signal"))
+            and (value.get("settled") is None or isinstance(value.get("settled"), str))):
+        raise ValueError(f"slot {key}'s last run's end is not one slots wrote")
+    return RunEnd(float(value["at"]), value.get("status"), value.get("signal"),
+                  value.get("settled"))
+
+
+def _ended_json(ended: RunEnd | None) -> dict | None:
+    if ended is None:
+        return None
+    out = {"at": ended.at, "status": ended.status, "signal": ended.signal}
+    if ended.settled is not None:
+        out["settled"] = ended.settled
+    return out
+
+
+def _last_json(last: Last | None) -> dict | None:
+    if last is None:
+        return None
+    return {"at": last.at, "label": last.label, "meta": last.meta, "run": last.run,
+            "server": last.server, "status_trusted": last.status_trusted,
+            "ended": _ended_json(last.ended)}
 
 
 def dump(registry: Registry, now: float | None = None) -> dict:
@@ -157,9 +206,7 @@ def dump(registry: Registry, now: float | None = None) -> dict:
             "created": row.created,
             "name": row.name,
             "hold": None if hold is None else {"holder": hold.holder, "until": hold.until},
-            "last": None if row.last is None else {"at": row.last.at,
-                                                   "label": row.last.label,
-                                                   "meta": row.last.meta}}
+            "last": _last_json(row.last)}
     return {"version": VERSION, "slots": slots}
 
 
