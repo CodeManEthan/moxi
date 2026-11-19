@@ -15,9 +15,10 @@
 // the button disabled, for the route's answer and the next value of `running` after it,
 // or for `PRESS_WAIT_MS`. A refusal's words are the row's note until the next value.
 //
-// A session's transcript asks launcher once whether a launch holds the session
-// (`statePath`). Only launcher's refusal `not-launched` says it was started by hand; any
-// other answer, a failed read too, says nothing.
+// A Claude Code session's transcript asks launcher once whether a launch holds the session
+// (`statePath`). Launcher's refusal `not-launched` is half of what says it was started by
+// hand (the other half is the head's `by_program` false); any other answer, a failed read
+// too, says nothing.
 //
 // Every string here goes into the page as text.
 

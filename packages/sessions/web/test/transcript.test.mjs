@@ -181,17 +181,42 @@ test("launcher is asked once for the session, and only its not-launched refusal 
 });
 
 test("a session started by hand says when and where at its start, and nothing else does", () => {
-  const value = answer(row());
+  const value = answer(row({ by_program: false }));
   assert.equal(startedLine(TARGET, value, true, UTC), "Started today 07:40 in proj-a, by hand");
-  assert.equal(startedLine(TARGET, answer(row({ started: at("2026-11-07 23:10") })), true, UTC),
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: at("2026-11-07 23:10") })), true, UTC),
                "Started yesterday 23:10 in proj-a, by hand");
-  assert.equal(startedLine(TARGET, answer(row({ folder: null })), true, UTC), "Started today 07:40, by hand");
-  assert.equal(startedLine(TARGET, answer(row({ started: null })), true, UTC), "Started in proj-a, by hand");
-  assert.equal(startedLine(TARGET, answer(row({ started: null, folder: "" })), true, UTC), "Started by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, folder: null })), true, UTC), "Started today 07:40, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: null })), true, UTC), "Started in proj-a, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: null, folder: "" })), true, UTC), "Started by hand");
   // Launched, not read, a program's, another session's, a subagent: no line.
   assert.equal(startedLine(TARGET, value, false, UTC), null);
   assert.equal(startedLine(TARGET, null, true, UTC), null);
   assert.equal(startedLine(TARGET, answer(row({ by_program: true })), true, UTC), null);
-  assert.equal(startedLine(TARGET, answer(row({ session: `${ID}-fork` })), true, UTC), null);
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, session: `${ID}-fork` })), true, UTC), null);
   assert.equal(startedLine({ ...TARGET, agent: "a1" }, value, true, UTC), null);
+});
+
+test("a Claude Code session whose head says a person started it gets the by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false })), true, UTC), "Started today 07:40 in proj-a, by hand");
+});
+
+test("a Claude Code session a program started gets no by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: true })), true, UTC), null);
+});
+
+test("a Claude Code session whose head was not read gets no by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: null })), true, UTC), null);
+});
+
+test("a Codex session launcher refuses gets no by-hand line", () => {
+  const target = { harness: "codex", session: ID, agent: null };
+  assert.equal(startedLine(target, answer(row({ harness: "codex", by_program: null })), true, UTC), null);
+  // Not even if an answer said false: Codex's record says nothing of who started it.
+  assert.equal(startedLine(target, answer(row({ harness: "codex", by_program: false })), true, UTC), null);
+});
+
+test("an OpenCode session launcher refuses gets no by-hand line", () => {
+  const target = { harness: "opencode", session: "ses_1", agent: null };
+  assert.equal(startedLine(target, answer(row({ harness: "opencode", session: "ses_1", by_program: null })), true, UTC),
+               null);
 });

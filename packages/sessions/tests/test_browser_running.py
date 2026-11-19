@@ -4,8 +4,8 @@ Home words them, the session it holds drawn nowhere else, a row opened in place;
 when nothing runs, and a failed read's line; a filter keeping the launches its list holds,
 and no group under the find field; `Keep warm` in the text colour, its press posting the
 launch's request id, disabled until the next value, and a refusal's note; the line at a
-transcript's start that says a session was started by hand, from launcher's one answer;
-and a small install, with ui and sessions only, which draws none of it and leaves no gap.
+transcript's start that says a Claude Code session was started by hand, from its head and
+launcher's one answer, and a Codex session's plain start line; and a small install, with ui and sessions only, which draws none of it and leaves no gap.
 
 Launcher's `running` and `keep-warm` routes are answered in the browser (`LauncherStub`),
 so each test sets the launches it needs, and the shell's push stream is kept from bringing
@@ -250,6 +250,17 @@ def test_a_session_a_launch_holds_keeps_the_plain_start_line(full_shell, ui_cont
     page.unroute("**/m/launcher/api/state?*")
     page.route("**/m/launcher/api/state?*", lambda route: route.fulfill(status=502, body="down"))
     expect(start_line(page, f"claude/{sid(2)}")).to_have_text(START_LINE)
+
+
+def test_a_codex_session_launcher_refuses_keeps_the_plain_start_line(full_shell, ui_contexts):
+    page = ui_contexts(full_shell).pages[0]
+    reads = state_reads(page)
+    # The real launcher, whose log holds no launch, refuses every id as not launched; a
+    # Codex record says nothing of who started it, so the page doesn't ask.
+    page.goto(f"/m/sessions/codex/{tid(1)}")
+    line = page.locator(PANEL).locator('[data-line="start"]')
+    expect(line).to_have_text(START_LINE)
+    assert reads == [], reads
 
 
 @pytest.fixture(scope="module")

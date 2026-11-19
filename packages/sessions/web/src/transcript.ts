@@ -15,9 +15,11 @@
 // viewer's own heading and shows the header's facts in the open, as the window block does.
 // A session that is not there is refused the same way, and its turns say why.
 //
-// Where the turns reach the session's start, a session launcher refuses as never launched
-// (`notLaunched`) that no program started says when, where and that it was started by
-// hand: `Started today 07:40 in harbor-infra, by hand`.
+// Where the turns reach the session's start, a Claude Code session whose head says a
+// person started it (`by_program` false) and that launcher refuses as never launched
+// (`notLaunched`) says when, where and that it was started by hand: `Started today 07:40
+// in harbor-infra, by hand`. Codex and OpenCode records say no such thing, so their
+// sessions keep the view's plain start line, as does one whose head was not read.
 //
 // Every string here goes into the page as text.
 
@@ -114,14 +116,15 @@ export const BY_HAND = "by hand";
 
 /**
  * `Started today 07:40 in harbor-infra, by hand`, for the session `target` names: drawn
- * only when launcher refused it as never launched (`byHand`) and the session's answer is
- * that session's and does not say a program started it. A part that was not read is left
- * out: `Started in harbor-infra, by hand`, `Started by hand`. Null otherwise.
+ * only for a Claude Code session that launcher refused as never launched (`byHand`) and
+ * whose answer is that session's and says a person started it (`by_program` false, read
+ * from its head). A part that was not read is left out: `Started in harbor-infra, by
+ * hand`, `Started by hand`. Null otherwise.
  */
 export function startedLine(target: Target, answer: SessionAnswer | null, byHand: boolean,
                             zone: Zone = LOCAL): string | null {
-  if (!byHand || answer === null || target.agent !== null) return null;
-  if (answer.harness !== target.harness || answer.session !== target.session || answer.by_program === true) return null;
+  if (!byHand || answer === null || target.agent !== null || target.harness !== "claude") return null;
+  if (answer.harness !== target.harness || answer.session !== target.session || answer.by_program !== false) return null;
   const when = typeof answer.started === "number"
     ? ` ${dayWords(zone.day(answer.started), answer.today)} ${zone.clock(answer.started)}` : "";
   const where = typeof answer.folder === "string" && answer.folder !== "" ? ` in ${lastSegment(answer.folder)}` : "";

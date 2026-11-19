@@ -22,9 +22,10 @@
 // opened row of the list reads (`/api/session`), asked for the route's one session when it
 // opens, when its tab is shown again and on `Refresh`, beside the turns.
 //
-// With launcher installed, opening a session's transcript asks launcher once whether a
-// launch holds it (`/api/state`); where launcher refuses it as never launched, the line at
-// the session's start says it was started by hand (`startedLine`).
+// With launcher installed, opening a Claude Code session's transcript asks launcher once
+// whether a launch holds it (`/api/state`); where launcher refuses it as never launched
+// and its head says a person started it, the line at the session's start says it was
+// started by hand (`startedLine`). A Codex or OpenCode session is not asked about.
 //
 // While the turns are on their way the page says so; a session that is not there and a
 // read that fails each show the page server's reason, and only that.
@@ -104,7 +105,9 @@ export class SessionsPage extends SessionView {
     const path = target !== null ? headPath(target) : null;
     if (path !== null) this.#head = new Feed<SessionAnswer>(() => api("sessions", path), parseSession, () => this.requestUpdate());
     this.#byHand = null;
-    if (path !== null && target !== null && installed("launcher")) void this.#readLaunched(this.route, target.session);
+    if (path !== null && target !== null && target.harness === "claude" && installed("launcher")) {
+      void this.#readLaunched(this.route, target.session);
+    }
     if (target !== null) this.setAttribute("data-view", "session");
     else this.removeAttribute("data-view");
     this.openSession(target);
