@@ -476,12 +476,26 @@ def test_a_send_only_rows_holder_reaches_the_page(monkeypatch):
                                                                    "lead": None}
 
 
+def test_comms_words_for_the_connectors_binding_reach_the_page(monkeypatch):
+    """`via` is the row's, as `roster_rows` gave it: the connector's words on its
+    binding, null on every other row."""
+    app = api.RosterRow(qualified="claude-app", name="claude-app", scope="global",
+                        live=True, kind="agent", module=None, tier="chosen",
+                        adapter="connector", via="Claude's apps, through the connector")
+    stub_rows(monkeypatch, (app, LEAD_ROW))
+    status, body = run(get(served(), "/api/roster"))
+    assert (status, body["state"]) == (200, "up")
+    assert {r["qualified"]: r["via"] for r in body["rows"]} == {
+        "claude-app": "Claude's apps, through the connector", "lead": None}
+
+
 @pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},
                                  {"awaiting": (7,)}, {"tier": 3},
                                  {"bound_at": float("inf")}, {"bound_at": 10 ** 400},
-                                 {"live": "yes"}, {"name": None}],
+                                 {"live": "yes"}, {"name": None}, {"via": 4}],
                          ids=["int-director", "object-director", "int-awaiting", "int-tier",
-                              "infinite", "overflowing", "string-live", "no-name"])
+                              "infinite", "overflowing", "string-live", "no-name",
+                              "int-via"])
 def test_a_value_its_declared_type_cannot_carry_is_state_error(monkeypatch, bad):
     """A row built from a hand-edited claim file, with one value of the wrong type, ends
     the read in `state` `error`, never a 500."""
