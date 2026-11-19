@@ -328,10 +328,11 @@ bottom:
   doesn't have.
 
 **An agent row.** Line one is the name, where it works, and at the right the row's fact.
-Where it works is launcher's where for a session launcher runs (`slot 3 · atlas-api`);
-else, with sessions, the session's folder, when it started and its harness as sessions
-has them (`atlas-api · started today 12:45 · claude`); else nothing. Line two says what
-kind of waiting it is:
+Where it works is, in this order: comms' words for the connector's binding, with the
+connector module installed (`Claude's apps, through the connector`); launcher's where
+for a session launcher runs (`slot 3 · atlas-api`); with sessions, the session's folder,
+when it started and its harness as sessions has them (`atlas-api · started today 12:45 ·
+claude`); else nothing. Line two says what kind of waiting it is:
 
 | case | fact | line two | acts |
 |---|---|---|---|
@@ -442,6 +443,8 @@ reads adds to it when installed:
   answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
   kept warm: <why>` until then. Without launcher: none of these, the cache fact from comms
   alone, and the empty state gives the command instead of `Launch one from Home`.
+- **connector**: the words `Claude's apps, through the connector` as the where of the
+  name the connector's binding holds. Without it, that row has no where.
 - **cache**: the cache fact, `Deliver`, the `held until its next turn` words and the
   `Cache` link. Without it, unread mail reads `not read yet`.
 - **sessions**: where a session works and its `Session` line when launcher gives none (on
