@@ -12299,6 +12299,7 @@ sessions	packages/sessions/tests/test_api.py	assert {"retention", "Retention"} <
 sessions	packages/sessions/tests/test_api.py	before = {"find", "sources", "subagents", "window", "retention", "Retention"}	keep	find	find
 sessions	packages/sessions/tests/test_api.py	found = modules.load("sessions", interface=2)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_api.py	test_the_list_answers_through_the_api_over_the_roots_the_process_names	name	folders	session_dirs
+sessions	packages/sessions/tests/test_api.py	assert set(module.OPTIONAL) == {"ui", "secrets", "turns", "projects"}	keep	set	set
 sessions	packages/sessions/tests/test_archives.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO, "--harness", "codex")	keep	find	find
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO)	keep	find	find
