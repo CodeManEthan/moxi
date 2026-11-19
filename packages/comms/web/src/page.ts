@@ -59,6 +59,12 @@
 // while the tab is visible, and joins each session whose turn is open to its bound address
 // by session id (`turns-model.ts`): a message the dry-run line delivers live to it says the
 // recipient is working and reads it when its turn ends. A read that fails leaves no join.
+//
+// With projects installed, while `Other names` holds an idle name, it reads projects'
+// `/api/projects` when one first shows there, when its tab is shown again and every 30 s
+// while the tab is visible, and matches each idle name to the projects it leads
+// (`leads-model.ts`): its shown row says `leads <key>` on line two. A read that fails, or a
+// name that leads nothing, says nothing.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -101,6 +107,7 @@ import {
 import type { Messages, ReadDay } from "./today-model.ts";
 import { ALL_MAIL_WITH, between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
 import { openTurns, TURNS_PATH, workingIn } from "./turns-model.ts";
+import { leadsOf, leadsWords, PROJECTS_PATH, wantsLeads } from "./leads-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -309,6 +316,14 @@ export class CommsPage extends LitElement {
   #openTurns: ReadonlySet<string> | null = null;
   #turnsOut = false;
   #turnsAgain = false;
+  /** The keys of the projects each name leads, from projects' last read, with projects
+   * installed; whether the last drawing held an idle name in `Other names`, whether it was
+   * read for since, whether a read is out, and whether another is wanted after it. */
+  #leads: ReadonlyMap<string, readonly string[]> | null = null;
+  #leadsWanted = false;
+  #leadsAsked = false;
+  #leadsOut = false;
+  #leadsAgain = false;
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -327,6 +342,7 @@ export class CommsPage extends LitElement {
     void this.#readRunning();
     this.#readSessions();
     void this.#readTurns();
+    void this.#readLeads();
   };
 
   /** Reads the mail state again, with today's messages, the days before today the page
@@ -429,6 +445,29 @@ export class CommsPage extends LitElement {
     }
   }
 
+  /** Reads which projects each name leads, with projects installed and an idle name in
+   * `Other names`; one read at a time, and one more after it when asked meanwhile. A read
+   * that fails leaves no name leading anything. */
+  async #readLeads(): Promise<void> {
+    if (!installed("projects") || !this.#leadsWanted) return;
+    if (this.#leadsOut) {
+      this.#leadsAgain = true;
+      return;
+    }
+    this.#leadsOut = true;
+    try {
+      do {
+        this.#leadsAgain = false;
+        const result = await api("projects", PROJECTS_PATH);
+        if (!this.isConnected) return;
+        this.#leads = result.status === 200 ? leadsOf(result.data) : null;
+        this.requestUpdate();
+      } while (this.#leadsAgain);
+    } finally {
+      this.#leadsOut = false;
+    }
+  }
+
   /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
    * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`;
    * a press that went reads that value at once. */
@@ -514,6 +553,7 @@ export class CommsPage extends LitElement {
       void this.#readRunning();
       this.#readSessions();
       void this.#readTurns();
+      void this.#readLeads();
     }, MAIL_EVERY_MS);
   }
 
@@ -665,6 +705,7 @@ export class CommsPage extends LitElement {
       : opened?.kind === "other" ? opened.qualified : null;
     this.#drawnReply = opened?.kind === "agent" ? opened.reply : null;
     this.#drawnSession = null;
+    this.#leadsWanted = frame !== null && wantsLeads(frame.others);
     this.#drawnThread = opened?.kind === "thread" ? { a: opened.a, b: opened.b }
       : opened?.kind === "mail" ? { a: opened.qualified, b: null } : null;
     if (frame === null || frame.state === "gone") return nothing;
@@ -872,7 +913,8 @@ export class CommsPage extends LitElement {
     const row = (other: OtherName) => {
       const open = other.qualified === at;
       return html`<moxi-ui-row data-name=${other.qualified} name=${other.qualified}
-          where=${ifDefined(otherWhere(other) ?? undefined)} ?open=${open}>${open
+          where=${ifDefined(otherWhere(other) ?? undefined)}
+          lead=${ifDefined(installed("projects") ? leadsWords(other, this.#leads) ?? undefined : undefined)} ?open=${open}>${open
         ? html`<button type="button" slot="acts" class="do" data-action="close" aria-expanded="true"
           @click=${() => this.open({ piece: "others" })}>${CLOSE}</button><div class="det" data-part="opened"
           data-to=${other.qualified}>${this.box(null, other.qualified)}</div>`
@@ -1061,11 +1103,16 @@ export class CommsPage extends LitElement {
       line.tail !== null ? html` <span class="d">· ${line.tail}</span>` : nothing}</span>${end}</div>`;
   }
 
-  /** Follows the opened row's address with a read of its queue, asks sessions again for its
-   * session once each time a row is opened, and marks the messages a four-line cut hides
-   * part of. */
+  /** Reads projects once an idle name first shows in `Other names`, follows the opened row's
+   * address with a read of its queue, asks sessions again for its session once each time a
+   * row is opened, and marks the messages a four-line cut hides part of. */
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
+    if (!this.#leadsWanted) this.#leadsAsked = false;
+    else if (!this.#leadsAsked) {
+      this.#leadsAsked = true;
+      void this.#readLeads();
+    }
     const session = this.#drawnSession;
     if ((session === null ? null : keyOf(session)) !== this.#sessionFor) {
       this.#sessionFor = session === null ? null : keyOf(session);
