@@ -9,7 +9,9 @@ launcher's one answer, and a Codex session's plain start line; and a small insta
 
 Launcher's `running` and `keep-warm` routes are answered in the browser (`LauncherStub`),
 so each test sets the launches it needs, and the shell's push stream is kept from bringing
-the real launcher's topic `running`; every other route is the page servers' own. The
+the real launcher's topic `running`; one test instead puts a launch in each of the topic's
+events and leaves the route unanswered, so the group comes from the topic alone. Every
+other route is the page servers' own. The
 sessions are written with `moxi_sessions.testing` and timed from the moment the test runs.
 """
 
@@ -67,10 +69,13 @@ def launch(request_id: str, session_id: str | None, name: str, *, harness: str =
     }
 
 
-#: Drops from the shell's push stream each event of launcher's topic `running`, whose value
-#: is the real launcher's: the page then knows only what the stubbed route answers.
-_NO_RUNNING_TOPIC = r"""(() => {
+#: Rewrites each event of launcher's topic `running` in the shell's push stream, whose value
+#: is the real launcher's: called with null it drops the event, so the page knows only what
+#: the stubbed route answers; called with a value it puts that value in the event's place.
+#: `window.runningEvents` counts the events it met.
+_RUNNING_TOPIC = r"""(value) => {
   const fetched = window.fetch.bind(window);
+  window.runningEvents = 0;
   window.fetch = async (input, init) => {
     const answer = await fetched(input, init);
     const url = typeof input === "string" ? input : input.url;
@@ -84,13 +89,24 @@ _NO_RUNNING_TOPIC = r"""(() => {
         const blocks = held.split("\n\n");
         held = blocks.pop();
         for (const block of blocks) {
-          if (!/^event: ?launcher\.running\s*$/m.test(block)) out.enqueue(encoder.encode(`${block}\n\n`));
+          if (!/^event: ?launcher\.running\s*$/m.test(block)) {
+            out.enqueue(encoder.encode(`${block}\n\n`));
+            continue;
+          }
+          window.runningEvents += 1;
+          if (value !== null) out.enqueue(encoder.encode(`event: launcher.running\ndata: ${JSON.stringify(value)}\n\n`));
         }
       },
     }));
     return new Response(body, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
   };
-})()"""
+}"""
+
+
+def running_topic(value: dict | None) -> str:
+    """The init script that puts `value` in place of each event of the topic `running`,
+    or drops each one when `value` is None."""
+    return f"({_RUNNING_TOPIC})({json.dumps(value)})"
 
 
 class LauncherStub:
@@ -107,7 +123,7 @@ class LauncherStub:
         self.pressed: list[dict] | None = None
         self.status: int | None = None
         self.held: list[Any] | None = None
-        page.add_init_script(_NO_RUNNING_TOPIC)
+        page.add_init_script(running_topic(None))
         page.route("**/m/launcher/api/running", self._running)
         page.route("**/m/launcher/api/keep-warm", self._keep_warm)
 
@@ -304,6 +320,23 @@ def test_the_running_group_comes_first_and_holds_its_sessions_alone(full_shell, 
     first.get_by_role("button", name="Open").click()
     expect(first).to_have_attribute("open", "")
     expect(first.get_by_role("button", name="Close")).to_be_visible()
+
+
+def test_a_value_of_launchers_topic_alone_draws_the_group_with_keep_warm(full_shell, ui_contexts):
+    page = ui_contexts(full_shell).pages[0]
+    value = {"state": "up", "detail": None, "count": 1,
+             "sessions": [launch("r-t", sid(1), "from-topic", waits=2, coverable=True)]}
+    page.add_init_script(running_topic(value))
+    # The route is never answered, so only the topic can bring the launch.
+    held: list[Any] = []
+    page.route("**/m/launcher/api/running", lambda route: held.append(route))
+    view = open_list(page)
+    row = launched_row(view, "r-t")
+    expect(row).to_have_attribute("name", "from-topic", timeout=30_000)
+    expect(labels(view).first).to_have_text("1 running")
+    expect(row.get_by_role("button", name="Keep warm")).to_be_enabled()
+    assert page.evaluate("() => window.runningEvents") >= 1
+    assert len(held) >= 1
 
 
 def test_nothing_running_draws_no_group_and_a_failed_read_says_why(full_shell, ui_contexts):
