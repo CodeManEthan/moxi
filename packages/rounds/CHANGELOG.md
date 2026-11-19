@@ -10,6 +10,14 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- A round's log writes a path under the home folder as `~/<rest>`, and the home folder
+  itself as `~`: a build's worktree and scratch folder, a check run's argv words and
+  output file, the argvs of a read of CI, and a report or brief kept outside the round's
+  folder. A path read from the log is expanded before it is used, so a log whose paths
+  were written with `~` is checked, finished and swept, and an older log that holds the
+  whole paths reads as before. A check run recorded with `~` counts against the command
+  that names the whole path, and the other way round. A `~`-led word of a command
+  step's argv in the round's flow runs as the path under the home folder.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,

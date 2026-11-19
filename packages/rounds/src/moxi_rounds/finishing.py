@@ -382,9 +382,9 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
     the finish."""
     commissioned = checking.commission_of(state, build)
     merged = any(one.kind == own.MERGE and one.state in (OK, FOUND) for one in done)
-    there = {kind: Path(str(commissioned[kind]))
-             for kind in (removal.WORKTREE, removal.SCRATCH)
-             if commissioned.get(kind) and Path(str(commissioned[kind])).is_dir()}
+    recorded = {kind: Path(places.expand_home(commissioned[kind]))
+                for kind in (removal.WORKTREE, removal.SCRATCH) if commissioned.get(kind)}
+    there = {kind: place for kind, place in recorded.items() if place.is_dir()}
     if not merged:
         cleaned = removal.removes(name, commissioned, (removal.SCRATCH,),
                                   settings=settings, env=env,
@@ -582,7 +582,8 @@ def _remote_holds(root: Path, remote: str, target: str, landing: str) -> str | N
 def _command(state: states.State, name: str, build: builds.Build, root: Path, tip: str,
              action: Mapping) -> Action:
     """Run a command action in the build's worktree, its output the caller's own."""
-    worktree = Path(str(checking.commission_of(state, build).get("worktree")))
+    commissioned = checking.commission_of(state, build)
+    worktree = Path(places.expand_home(commissioned.get("worktree")))
     argv = checking.fill(action["argv"], checking.values(name, build, root=root, tip=tip))
     timeout_s = action.get("timeout_s")
     try:
