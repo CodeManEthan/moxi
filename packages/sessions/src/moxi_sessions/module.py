@@ -9,7 +9,8 @@ with the `ui` extra, a page in the browser UI shell that lists the sessions and 
 session's last turns, and a block other pages may place for that view. With the
 `secrets` extra, `moxi sessions read` redacts what it prints. With the `turns` extra, turns
 enforces sessions' transcript-read guard, off until the install's question or its switch
-turns it on.
+turns it on. With the `projects` extra and the `ui` one, the page server folds the
+sessions into projects for the Projects page.
 """
 
 INTERFACES = frozenset({2, 3, 4, 5, 6})
@@ -27,6 +28,9 @@ OPTIONAL = {
     "turns": "The transcript-read guard: turns refuses an agent's Read, Grep, Glob or shell "
              "read of a harness transcript and points it to `moxi sessions read`, once "
              "guard.transcript_read is on.",
+    "projects": "Sessions by project on the Projects page: each project's sessions active "
+                "recently and this week, its last activity, and the folders worked in "
+                "this week that are no project. Needs projects' read API at interface 2.",
 }
 GATED = {}
 INTERNAL_ENV = {}

@@ -184,10 +184,10 @@ def test_the_gate_matrix_passes():
     assert LB.gate_matrix(ROUTES)
 
 
-def test_the_page_declares_six_reads_and_nothing_the_gateways():
+def test_the_page_declares_seven_reads_and_nothing_the_gateways():
     routes = {r["path"]: r for r in LB.export(ROUTES)["routes"]}
     assert set(routes) == {"/api/window", "/api/subagents", "/api/list", "/api/more",
-                           "/api/session", "/api/folders"}
+                           "/api/session", "/api/folders", "/api/projects"}
     assert all(r["kind"] == "read" for r in routes.values())
     assert not any(r["gateway"] or r["stream"] or r["confirmed"] for r in routes.values())
     assert set(routes["/api/window"]["query"]) == {"harness", "session", "agent", "turns",
@@ -283,7 +283,7 @@ def test_each_component_is_a_built_asset_of_the_page():
         assert decl["script"] in exported["assets"]
     assert {r["path"] for r in exported["routes"]} == {
         "/api/window", "/api/subagents", "/api/list", "/api/more", "/api/session",
-        "/api/folders"}
+        "/api/folders", "/api/projects"}
     assert LB.gate_matrix(page.PAGE)
 
 

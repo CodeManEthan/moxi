@@ -5,13 +5,19 @@ so every file and database read here runs off the loop. All are reads: they call
 `find`, `window`, `subagents` and the list's functions (`moxi_sessions.lists`) and write
 nothing.
 
-**The list.** `listing`, `more`, `session` and `folders` read through the process's one
-catalog (`moxi_sessions.catalog.shared()`), which keeps what it read for the server's
-life and lets several threads ask at once. Each reads the setting `list.recent_s` when it
-is called, so a change shows in the next answer. A reply is cut here, at
-`TEXT_MAX` bytes with `truncated` set, and a subagent's last message at 300 bytes. The
-newest thing said on a row and the prompt come cut from the catalog, which keeps no more
-of either than is sent.
+**The list.** `listing`, `more`, `session`, `work_dirs` and `projects` read through the
+process's one catalog (`moxi_sessions.catalog.shared()`), which keeps what it read for
+the server's life and lets several threads ask at once. Each but `work_dirs` reads the
+setting `list.recent_s` when it is called, so a change shows in the next answer. A reply
+is cut here, at `TEXT_MAX` bytes with `truncated` set, and a subagent's last message at
+300 bytes. The newest thing said on a row and the prompt come cut from the catalog, which
+keeps no more of either than is sent.
+
+**Projects.** `projects` loads projects' read API through the core's loader at
+interface 2, whose `for_paths` says which project holds each folder; this module never
+imports projects. Without it the answer's `state` is `off`; when projects raises (its
+store can't be read, is busy or too new), `error`, with a fixed sentence that names no
+file, the error logged once per kind. Either way the lists are empty.
 
 **The home folder.** The list's answer and an opened session's carry `home`, the home
 folder of the account this server runs as (`Path.home()`), so the page can word a folder
@@ -45,11 +51,14 @@ answer fails its declared shape on what a harness wrote.
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from moxi import modules
 from moxi.config import ConfigError
 
 from . import find as finding, lists, settings
@@ -62,6 +71,18 @@ from .shape import CLAUDE, OPENCODE, SHAPE
 from .source import Source
 from .view import (INT as _INT, STRING as _STRING, cut_message, header_row,
                    put as _put, view_row)
+
+#: The interface of projects' read API the fold into projects needs: `for_paths`.
+PROJECTS_INTERFACE = 2
+#: The route's `state` and its `detail` when projects can't answer. Neither names a file.
+UP, OFF, ERROR = "up", "off", "error"
+PROJECTS_OFF = "projects is not installed, or is too old to fold folders into projects"
+PROJECTS_UNREADABLE = ("projects' store can't be read; `moxi projects list` on this "
+                       "machine says why")
+
+log = logging.getLogger("moxi.sessions.page")
+_logged: set[type] = set()
+_logged_lock = threading.Lock()
 
 #: A byte offset, as a file's `before` is written.
 _OFFSET = re.compile(r"\A[0-9]{1,18}\Z")
@@ -308,4 +329,34 @@ def work_dirs(call: Any) -> dict[str, Any]:
     return {"shape": SHAPE, **answer}
 
 
-__all__ = ["work_dirs", "listing", "more", "session", "subagents", "view_row", "window"]
+def projects(call: Any) -> dict[str, Any]:
+    """`GET /api/projects`: the sessions folded into projects by the folder each ran in,
+    and this week's folders no project holds (`lists.fold_projects`), with `state`:
+    `up`; `off` when projects is not installed or offers no interface 2; `error` when
+    projects' store can't be read, its reason logged once rather than sent."""
+    recent_s, now = _recent_s(), time.time()
+    out: dict[str, Any] = {"shape": SHAPE, "now": now, "today": lists.local_day(now),
+                           "home": _home(), "recently_s": recent_s, "state": UP,
+                           "detail": None, "projects": [], "folders": [], "more": 0}
+    found = modules.load("projects", interface=PROJECTS_INTERFACE)
+    if not found.ok:
+        return {**out, "state": OFF, "detail": PROJECTS_OFF}
+    try:
+        folded = lists.fold_projects(for_paths=found.api.for_paths, recent_s=recent_s,
+                                     now=now)
+    except Exception as exc:  # noqa: BLE001 - an optional module's failure is a state
+        _log_once(exc, "sessions' page couldn't fold the sessions into projects")
+        return {**out, "state": ERROR, "detail": PROJECTS_UNREADABLE}
+    return {**out, **folded}
+
+
+def _log_once(exc: BaseException, what: str) -> None:
+    with _logged_lock:
+        first = type(exc) not in _logged
+        _logged.add(type(exc))
+    if first:
+        log.error("%s (%s)", what, type(exc).__name__, exc_info=exc)
+
+
+__all__ = ["PROJECTS_INTERFACE", "PROJECTS_OFF", "PROJECTS_UNREADABLE", "work_dirs",
+           "listing", "more", "projects", "session", "subagents", "view_row", "window"]
