@@ -260,7 +260,7 @@ export interface OtherName {
    * first of the entries of a name none of whose addresses has a session, mail or an
    * `owed` message (its bare address when that is one); null on its other entries, on a
    * scoped address whose name has a row, and on a send-only name. */
-  name: string | null;
+  speaksFor: string | null;
 }
 
 /** The agents part of the page: `N agents` is `rows.length`. */
@@ -633,7 +633,7 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
     const row = address.row as RosterRow;
     const sendOnly = row.kind === "send-only";
     others.push({ qualified: address.qualified, sentBy: sendOnly ? sentBy(row) : null, writable: !sendOnly,
-                  name: sendOnly ? null : idle });
+                  speaksFor: sendOnly ? null : idle });
   };
   for (const [name, all] of names) {
     const sendOnly = all.filter((address) => address.row?.kind === "send-only" && !address.bound
@@ -660,9 +660,9 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
   // scoped ones.
   const spoken = new Set<string>();
   for (const entry of others) {
-    if (entry.name === null) continue;
-    if (spoken.has(entry.name)) entry.name = null;
-    else spoken.add(entry.name);
+    if (entry.speaksFor === null) continue;
+    if (spoken.has(entry.speaksFor)) entry.speaksFor = null;
+    else spoken.add(entry.speaksFor);
   }
   return { rows: order(rows), others };
 }

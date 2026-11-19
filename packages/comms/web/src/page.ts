@@ -107,7 +107,7 @@ import {
 import type { Messages, ReadDay } from "./today-model.ts";
 import { ALL_MAIL_WITH, between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
 import { openTurns, TURNS_PATH, workingIn } from "./turns-model.ts";
-import { leadsOf, leadsWords, PROJECTS_PATH, wantsLeads } from "./leads-model.ts";
+import { projectsLedBy, leadsWords, PROJECTS_PATH, wantsLeads } from "./leads-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -460,7 +460,7 @@ export class CommsPage extends LitElement {
         this.#leadsAgain = false;
         const result = await api("projects", PROJECTS_PATH);
         if (!this.isConnected) return;
-        this.#leads = result.status === 200 ? leadsOf(result.data) : null;
+        this.#leads = result.status === 200 ? projectsLedBy(result.data) : null;
         this.requestUpdate();
       } while (this.#leadsAgain);
     } finally {

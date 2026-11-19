@@ -1,7 +1,7 @@
 // Which projects an idle name leads, from projects, worked out with no DOM so the Node tests
 // can drive it. With projects installed the page reads projects' `/api/projects` while
 // `Other names` holds an idle name. Each project names its lead, or none; an entry of
-// `Other names` that speaks for an idle name (`OtherName.name`) is matched to the projects
+// `Other names` that speaks for an idle name (`OtherName.speaksFor`) is matched to the projects
 // whose lead is that name, and its shown row says `leads <key>` on line two. A name that
 // leads nothing, a read that failed or isn't back, or projects not installed: the row says
 // nothing of it.
@@ -15,7 +15,7 @@ export const PROJECTS_PATH = "api/projects";
 /** The keys of the projects each name leads, in the list's order (by key), or null when
  * the value isn't projects' list. A project with no lead, or an entry that isn't a
  * project, leads nothing. */
-export function leadsOf(data: unknown): ReadonlyMap<string, readonly string[]> | null {
+export function projectsLedBy(data: unknown): ReadonlyMap<string, readonly string[]> | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
   const { projects } = data as Record<string, unknown>;
   if (!Array.isArray(projects)) return null;
@@ -36,12 +36,12 @@ export function leadsOf(data: unknown): ReadonlyMap<string, readonly string[]> |
  * harbor-infra`); null for an entry that speaks for no idle name, a name that leads
  * nothing, and no read. */
 export function leadsWords(other: OtherName, leads: ReadonlyMap<string, readonly string[]> | null): string | null {
-  if (leads === null || other.name === null) return null;
-  const keys = leads.get(other.name);
+  if (leads === null || other.speaksFor === null) return null;
+  const keys = leads.get(other.speaksFor);
   return keys === undefined || keys.length === 0 ? null : `leads ${namesWords([...keys])}`;
 }
 
 /** Whether `others` holds an entry that speaks for an idle name, so the page reads projects. */
 export function wantsLeads(others: readonly OtherName[]): boolean {
-  return others.some((other) => other.name !== null);
+  return others.some((other) => other.speaksFor !== null);
 }
