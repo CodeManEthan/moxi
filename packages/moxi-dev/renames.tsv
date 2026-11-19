@@ -16610,3 +16610,9 @@ turns	packages/turns/tests/test_browser_states.py	assert {"text", "text-dim"} <=
 turns	packages/turns/tests/test_browser_states.py	first.listed(set(), reach="absent")	keep	set	set
 turns	packages/turns/tests/test_browser_states.py	panel.listed(set())	keep	set	set
 turns	packages/turns/tests/test_browser_states.py	texts = set()	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	pick(view, "folder", "atlas")	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_text(re.compile("^atlas"))	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	assert set(page.evaluate("window.writtenAddresses")) <= {"/m/sessions/?more=recent:3"}	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	assert set(after) == {"/m/sessions/?harness=claude"}, written	keep	set	set
