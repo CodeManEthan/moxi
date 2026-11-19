@@ -16616,6 +16616,9 @@ slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=10)	keep	timeou
 slots	packages/slots/tests/test_live_runs.py	holder.wait(timeout=5)	keep	timeout	timeout
 slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1"]) == 0	keep	show	show
 slots	packages/slots/tests/test_live_runs.py	assert cli.main(["show", "1", "--json"]) == 0	keep	show	show
+slots	packages/slots/tests/test_live_runs.py	old.wait(timeout=10)	keep	timeout	timeout
+slots	packages/slots/tests/test_live_runs.py	assert not any(s.crashed for s in slots.list_slots().slots)	keep	any	any
+slots	packages/slots/tests/test_live_runs.py	assert listing.ok and not any(s.crashed for s in listing.slots)	keep	any	any
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

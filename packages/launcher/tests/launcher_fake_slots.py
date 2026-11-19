@@ -156,6 +156,7 @@ class Slot:
     dead_status: int | None
     last: Last | None
     created: float | None
+    crashed: bool = False
 
 
 #: When a fake slot's registry row was made.

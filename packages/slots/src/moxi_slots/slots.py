@@ -15,6 +15,7 @@ import os
 import shlex
 import time
 from collections.abc import Iterable
+from dataclasses import replace
 
 from . import panes, places, registry, server, tmux
 from .errors import Refused, UsageError
@@ -331,6 +332,38 @@ def release(slot: int | str, holder: str) -> bool:
         return live
 
 
+#: The longest reason `settle` takes.
+SETTLED_MAX = 200
+
+
+def settle(slot: int | str, why: str) -> bool:
+    """End a slot's crashed reading without a run: record `why` as its last run's end
+    (`last.ended` with `settled`, no status and no signal). True when written; False
+    when the slot has no last launch to settle. Refuses `no-slot` for a number with no
+    registry row and `occupied` for a slot whose run pane is live. A new placement
+    replaces `last`, and so ends a settled record too."""
+    from .model import RunEnd
+
+    if not isinstance(why, str) or not why or len(why) > SETTLED_MAX \
+            or not why.isprintable():
+        raise UsageError(f"why is 1-{SETTLED_MAX} printable characters, not {why!r}")
+    with registry.locked():
+        reg, listing = _snapshot()
+        number = resolve(slot, reg)
+        row = reg.rows.get(number)
+        found = listing.find(number)
+        if row is None or found is None:
+            raise Refused("no-slot", f"there is no slot {number}")
+        if found.state == OCCUPIED:
+            raise Refused("occupied", f"slot {number} runs a launch; a live run is not "
+                                      "settled", holder=_holder_of(found, "occupied"))
+        if row.last is None:
+            return False
+        row.last = replace(row.last, ended=RunEnd(time.time(), None, None, settled=why))
+        registry.write(reg)
+        return True
+
+
 def inside_this_server(env=None) -> bool:
     """Whether this process runs in a pane of this module's server (its `TMUX` names
     the same socket)."""
@@ -401,5 +434,6 @@ def quoted(argv: list[str]) -> str:
 
 
 __all__ = ["resolve", "list_slots", "show", "make_session", "create", "remove", "rename",
-           "hold", "release", "until_words", "inside_this_server", "attach_argv",
+           "hold", "release", "until_words", "SETTLED_MAX", "settle", "inside_this_server",
+           "attach_argv",
            "attach_env", "busy", "quoted"]

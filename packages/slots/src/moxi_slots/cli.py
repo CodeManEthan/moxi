@@ -108,7 +108,8 @@ def _ended_text(ended) -> str:
 
 def _row_text(slot) -> list[str]:
     last = "-" if slot.last is None else f"{slot.last.label} at {_when(slot.last.at)}"
-    return [str(slot.number), slot.name or "-", slot.state,
+    state = f"{slot.state}, crashed" if slot.crashed else slot.state
+    return [str(slot.number), slot.name or "-", state,
             str(slot.attached), _hold_text(slot), slot.label or "-", last]
 
 
@@ -177,7 +178,8 @@ def _run_show(args) -> int:
                "drift": [d.words for d in listing.drift if d.number == number]})
         return codes.OK
     pairs = [("slot", str(found.number)), ("name", found.name or "-"),
-             ("state", found.state), ("launchable", "yes" if found.launchable else "no"),
+             ("state", f"{found.state}, crashed" if found.crashed else found.state),
+             ("launchable", "yes" if found.launchable else "no"),
              ("idle", "yes" if found.idle else "no"), ("attached", str(found.attached)),
              ("hold", _hold_text(found)), ("label", found.label or "-")]
     if found.pane_id:

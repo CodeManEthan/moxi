@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (unreleased)
+
+- Each slot reads `crashed` (`Slot.crashed`): its last run was going when its tmux
+  server went down. It is not occupied, its last run was placed under another server
+  than the one answering now, it did not end by itself (status 0, no signal, a trusted
+  status), it was not settled, and either no end was recorded or it ended within 120 s
+  before its server's end. A server's end is the next server's start within one boot,
+  or the boot's last journal entry for an earlier boot (`journalctl --list-boots`);
+  where that can't be read only a run with no end recorded is crashed, and with no
+  server answering nothing is. `moxi slots list` and `show` print it in the state, as
+  `missing, crashed`. slots itself never acts on it. `settle(slot, why)` ends a slot's
+  crashed reading by recording why in place of an end, and refuses an occupied slot.
 
 - Each run records how it ended. Every `start` and `respawn` writes a fresh run token
   (`Last.run`) and the tmux server's id (`Last.server`, `<boot id>:<tmux pid>`) into the

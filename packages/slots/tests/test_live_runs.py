@@ -15,17 +15,19 @@ import time
 import pytest
 
 from moxi_slots import cli, launch, places, registry, runs, slots, tmux
-from moxi_slots.errors import TryAgain, UsageError
+from moxi_slots.errors import Refused, TryAgain, UsageError
 from moxi_slots.model import Last, RunEnd
 from moxi_slots.registry import Registry, Row
 
-from slots_kit import pane_field, wait_for
+from slots_kit import pane_field, start_server, wait_answer, wait_for
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/runs.py",
                                  "packages/slots/src/moxi_slots/launch.py",
                                  "packages/slots/src/moxi_slots/registry.py",
                                  "packages/slots/src/moxi_slots/model.py",
-                                 "packages/slots/src/moxi_slots/cli.py")
+                                 "packages/slots/src/moxi_slots/cli.py",
+                                 "packages/slots/src/moxi_slots/panes.py",
+                                 "packages/slots/src/moxi_slots/slots.py")
 
 
 @pytest.fixture
@@ -171,3 +173,73 @@ def test_show_prints_how_the_last_run_ended(server, base, tmp_path, capsys):
     assert "status 4 at" in capsys.readouterr().out
     assert cli.main(["show", "1", "--json"]) == 0
     assert '"status": 4' in capsys.readouterr().out
+
+
+def restart(old: subprocess.Popen | None = None) -> subprocess.Popen:
+    """Kill the server answering on the test's socket and start another."""
+    tmux.attempt("kill-server")
+    if old is not None:
+        old.wait(timeout=10)
+    wait_for(lambda: tmux.ping(timeout=0.5) is None, what="the server to go")
+    proc = start_server()
+    wait_answer()
+    return proc
+
+
+def test_a_run_under_a_server_that_went_down_reads_crashed(tmux_path, stop_after, base,
+                                                          tmp_path, capsys):
+    first = start_server()
+    wait_answer()
+    slots.create(count=3)
+    go(1, "sleep", "60", env=base, cwd=tmp_path)
+    go(2, "sh", "-c", "exit 0", env=base, cwd=tmp_path)
+    go(3, "sh", "-c", "exit 0", env=base, cwd=tmp_path, status_trusted=False)
+    ended_of(2)
+    ended_of(3)
+    assert not any(s.crashed for s in slots.list_slots().slots)
+    restart(first)
+    one, two, three = slots.list_slots().slots
+    assert (one.state, one.crashed) == ("missing", True)
+    assert (two.crashed, three.crashed) == (False, True)
+    assert cli.main(["list"]) == 0
+    assert "missing, crashed" in capsys.readouterr().out
+    assert slots.settle(1, "nothing to restore") is True
+    found = slots.show(1)
+    assert not found.crashed and found.last.ended.settled == "nothing to restore"
+    assert found.last.ended.status is None and found.last.ended.signal is None
+    placed = go(None, "sleep", "60", env=base, cwd=tmp_path, create=True)
+    assert placed.slot == 1 and not slots.show(1).crashed
+    with pytest.raises(Refused) as caught:
+        slots.settle(1, "x")
+    assert caught.value.reason == "occupied"
+    with pytest.raises(UsageError):
+        slots.settle(3, "")
+    tmux.attempt("kill-server")
+    wait_for(lambda: tmux.ping(timeout=0.5) is None, what="the server to go")
+    listing = slots.list_slots()
+    assert listing.ok and not any(s.crashed for s in listing.slots)
+
+
+def test_a_slot_with_no_last_launch_settles_nothing(server):
+    slots.create()
+    assert slots.settle(1, "nothing") is False
+    with pytest.raises(Refused) as caught:
+        slots.settle(4, "nothing")
+    assert caught.value.reason == "no-slot"
+
+
+def test_a_run_of_an_earlier_boot_reads_crashed_by_its_journal_end(server, monkeypatch):
+    slots.create(count=3)
+    monkeypatch.setattr(runs, "_journal_ends", {})
+    monkeypatch.setattr(runs, "_journal_boots", lambda: {"0ldb00t": 5000.0})
+    reg = registry.read()
+    reg.rows[1].last = Last(1.0, "a", run="t1", server="0ldb00t:42")
+    reg.rows[2].last = Last(1.0, "b", run="t2", server="0ldb00t:42",
+                            ended=RunEnd(4950.0, None, 1))
+    reg.rows[3].last = Last(1.0, "c", run="t3", server="0ldb00t:42",
+                            ended=RunEnd(4000.0, None, 1))
+    with registry.locked():
+        registry.write(reg)
+    for number in (1, 2, 3):
+        tmux.call("kill-session", "-t", f"=slot-{number}")
+    assert [s.crashed for s in slots.list_slots().slots] == [True, True, False]

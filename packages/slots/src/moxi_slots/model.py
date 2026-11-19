@@ -177,7 +177,9 @@ class Slot:
     `hold` is a live hold or None. The run pane's facts (`pane_id`, `window_id`,
     `pane_pid`, `current_command`, `dead_status`) are None when there is no run
     window. `label` is the last launch's label while its run pane is there. `created`
-    is None, and `launchable` False, for a session with no registry row.
+    is None, and `launchable` False, for a session with no registry row. `crashed` is
+    whether the last run was going when its tmux server went down (see `runs.crashed`);
+    it is read, never acted on, by slots.
     """
 
     number: int
@@ -195,6 +197,7 @@ class Slot:
     dead_status: int | None
     last: Last | None
     created: float | None
+    crashed: bool = False
 
     def to_json(self) -> dict:
         return asdict(self)

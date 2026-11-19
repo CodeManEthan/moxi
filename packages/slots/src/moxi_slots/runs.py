@@ -16,6 +16,18 @@ before finds a different token and writes nothing.
 
 The hook prints nothing and always exits 0: tmux shows a `run-shell` command's output, or
 its failing status, over the pane.
+
+A run ended by itself when its `ended` record has status 0 and no signal and the caller
+placed it with `status_trusted`. A slot is crashed (`crashed`) when it is not occupied,
+its last run was placed under a server (`last.server`) that is not the one answering now,
+that run did not end by itself, the slot was not settled, and either no end was ever
+recorded (the server went down with the run) or the run ended within `WINDOW_S` seconds
+before its server's end (a shutdown that signalled the session just before the server
+went). A server's end is, for a server of an earlier boot, that boot's last journal
+entry (`journalctl --list-boots`), and for one of this boot, the current server's start
+time. Where a server's end can't be read, only a run with no end recorded reads crashed.
+Every time compared is from one boot's clock. With no server answering, nothing reads
+crashed.
 """
 
 from __future__ import annotations
@@ -28,7 +40,8 @@ from pathlib import Path
 
 from . import registry, tmux
 from .errors import TmuxError
-from .model import Last, RunEnd
+from .model import OCCUPIED, Last, RunEnd
+from .panes import ServerNow
 
 #: The run window's `pane-died` hook that records how the run ended.
 HOOK = "pane-died[65]"
@@ -36,6 +49,14 @@ HOOK = "pane-died[65]"
 LOCK_WAIT_S = 60.0
 #: Where Linux keeps this boot's id.
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+#: Seconds before its server's end within which a run's death counts as the shutdown's.
+WINDOW_S = 120.0
+#: Seconds `journalctl --list-boots` gets.
+JOURNAL_TIMEOUT_S = 10.0
+
+#: The last journal entry of each earlier boot read in this process, by boot id; a past
+#: boot's last entry never changes.
+_journal_ends: dict[str, float | None] = {}
 
 
 def new_token() -> str:
@@ -92,6 +113,80 @@ def set_hook_args(window: str, number: int, token: str) -> list[str]:
     return ["set-hook", "-w", "-t", window, HOOK, hook_command(number, token)]
 
 
+def _boot_key(boot: str) -> str:
+    return boot.replace("-", "").lower()
+
+
+def journal_end(boot: str) -> float | None:
+    """When boot `boot`'s journal ends (its last entry, epoch seconds), or None when the
+    journal can't be read or doesn't list that boot."""
+    key = _boot_key(boot)
+    if key not in _journal_ends:
+        _journal_ends.update(_journal_boots())
+        _journal_ends.setdefault(key, None)
+    return _journal_ends[key]
+
+
+def _journal_boots() -> dict[str, float]:
+    import json
+    import shutil
+    import subprocess
+
+    from moxi import proc
+
+    found = shutil.which("journalctl")
+    if found is None:
+        return {}
+    try:
+        done = proc.run([found, "--list-boots", "--output=json", "--no-pager"],
+                        timeout_s=JOURNAL_TIMEOUT_S)
+        out = done.stdout.decode("utf-8", "replace") if isinstance(done.stdout, bytes) \
+            else (done.stdout or "")
+        boots = json.loads(out) if done.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+    ends = {}
+    for boot in boots if isinstance(boots, list) else []:
+        if isinstance(boot, dict) and isinstance(boot.get("boot_id"), str) \
+                and isinstance(boot.get("last_entry"), int):
+            ends[_boot_key(boot["boot_id"])] = boot["last_entry"] / 1e6
+    return ends
+
+
+def server_end(server: str, current: ServerNow) -> float | None:
+    """When server `server` (`<boot id>:<pid>`) ended, by `current`'s reading of it:
+    this boot's current server start for a server of this boot, else that boot's last
+    journal entry; None when unknown."""
+    boot = server.rsplit(":", 1)[0]
+    if _boot_key(boot) == _boot_key(boot_id() or ""):
+        return None if current.start_time is None else float(current.start_time)
+    return journal_end(boot)
+
+
+def ended_by_itself(last: Last) -> bool:
+    """Whether `last`'s run ended by itself: status 0, no signal, a trusted status."""
+    ended = last.ended
+    return (ended is not None and ended.settled is None and ended.status == 0
+            and ended.signal is None and last.status_trusted)
+
+
+def crashed(state: str, last: Last | None, current: ServerNow | None) -> bool:
+    """Whether a slot in `state` with last launch `last` reads crashed against
+    `current`, the server answering now (None: none answers, and nothing is crashed)."""
+    if current is None or state == OCCUPIED or last is None or last.server is None:
+        return False
+    if last.server == server_id(current.pid):
+        return False
+    if ended_by_itself(last):
+        return False
+    if last.ended is None:
+        return True
+    if last.ended.settled is not None:
+        return False
+    end = server_end(last.server, current)
+    return end is not None and last.ended.at >= end - WINDOW_S
+
+
 def _number(text: str) -> int | None:
     text = text.strip()
     return int(text) if text.lstrip("-").isdigit() else None
@@ -137,8 +232,10 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["HOOK", "LOCK_WAIT_S", "BOOT_ID", "new_token", "boot_id", "server_id",
-           "server_pid", "hook_command", "set_hook_args", "write_ended", "main"]
+__all__ = ["HOOK", "LOCK_WAIT_S", "BOOT_ID", "WINDOW_S", "JOURNAL_TIMEOUT_S", "new_token",
+           "boot_id", "server_id", "server_pid", "hook_command", "set_hook_args",
+           "journal_end", "server_end", "ended_by_itself", "crashed",
+           "write_ended", "main"]
 
 
 if __name__ == "__main__":

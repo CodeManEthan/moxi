@@ -114,7 +114,7 @@ isn't answering yet.
   could read), `show`, `job`, `jobs`, and `supported()`, which says whether slots runs
   here.
 - Changes, each under the module lock: `create`, `remove`, `rename`, `hold`, `release`,
-  and `attach_argv` for the attach command.
+  `settle`, and `attach_argv` for the attach command.
 - `start(slot, argv, env=, cwd=, label=, ...)` and `respawn` place a launch in a slot,
   and `run_job(name, argv, env=, cwd=)` runs a detached one. The environment goes through
   a private file the pane's first command reads, never through tmux. Each returns once the
@@ -123,6 +123,11 @@ isn't answering yet.
   pane dies, how it ended (`ended`: when, and its exit status or signal), which `moxi
   slots show` prints. `status_trusted=False` records that a command's exit status
   doesn't tell a clean end from a kill.
+- Each slot reads `crashed` when its last run was going when its tmux server went down:
+  no end was seen, or the run ended within 120 s before the server did, and it didn't
+  end by itself with status 0 and a trusted status. `moxi slots list` shows it in the
+  state column, as `missing, crashed`. slots never acts on it; `settle(slot, why)` ends
+  the reading without a run.
 - `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
   `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`, `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME`
   and `CLAUDE_CHROME_DIALOG` the run pane shows. `answer_screen(slot, screen, wait_s)`
