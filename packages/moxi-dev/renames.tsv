@@ -12885,6 +12885,7 @@ slots	packages/slots/src/moxi_slots/answer.py	raise UsageError("screens is a Scr
 slots	packages/slots/src/moxi_slots/answer.py	save_mismatch	name	directory	mismatches_dir
 slots	packages/slots/src/moxi_slots/api.py	"Removed", "Placed", "Job", "Ended", "list_slots", "show", "create", "remove",	keep	show	show
 slots	packages/slots/src/moxi_slots/api.py	Reads (`list_slots`, `show`, `job`, `jobs`) take no lock and return typed results;	keep	show	show
+slots	packages/slots/src/moxi_slots/api.py	"Drift", "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create",	keep	show	show
 slots	packages/slots/src/moxi_slots/cli.py	HEADER = ["SLOT", "NAME", "STATE", "ATTACHED", "HOLD", "LABEL", "LAST LAUNCH"]	keep	NAME	NAME
 slots	packages/slots/src/moxi_slots/cli.py	VERBS.update({"list": (_add_list, _run_list), "show": (_add_show, _run_show),	keep	show	show
 slots	packages/slots/src/moxi_slots/cli.py	__all__ = ["VERBS", "parser", "refused", "main"]	keep	refused	refused
@@ -12986,6 +12987,7 @@ slots	packages/slots/tests/test_claude_live.py	replied = any(row.startswith("●
 slots	packages/slots/tests/test_doctor.py	-	name	test_the_socket_row_fails_on_an_open_runtime_directory	test_the_socket_row_fails_on_an_open_runtime_dir
 slots	packages/slots/tests/test_doctor.py	test_the_launch_files_row_removes_stale_ones	name	directory	launch_dir
 slots	packages/slots/tests/test_doctor.py	test_the_mismatches_row_counts	name	directory	mismatches_dir
+slots	packages/slots/tests/test_doctor.py	places.state_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 slots	packages/slots/tests/test_launchfile.py	launch_file	name	f	fh
 slots	packages/slots/tests/test_live_launch.py	-	name	test_no_environment_bleeds_into_a_launch	test_no_env_bleeds_into_a_launch
 slots	packages/slots/tests/test_live_launch.py	failed = jobs.run_job("bad", ["true"], env=base, cwd=str(tmp_path / "gone"))	keep	bad	bad

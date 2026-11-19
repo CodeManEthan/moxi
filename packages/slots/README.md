@@ -127,7 +127,10 @@ isn't answering yet.
   no end was seen, or the run ended within 120 s before the server did, and it didn't
   end by itself with status 0 and a trusted status. `moxi slots list` shows it in the
   state column, as `missing, crashed`. slots never acts on it; `settle(slot, why)` ends
-  the reading without a run.
+  the reading without a run. The reading needs Linux's boot id
+  (`/proc/sys/kernel/random/boot_id`), so on macOS no slot reads crashed. A run end the
+  `pane-died` hook fails to write is logged to `hooks.log` in the state directory, and
+  `moxi doctor` warns of it: that run reads crashed after the next server start.
 - `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
   `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`, `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME`
   and `CLAUDE_CHROME_DIALOG` the run pane shows. `answer_screen(slot, screen, wait_s)`

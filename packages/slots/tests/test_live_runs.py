@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+from moxi import files
 from moxi_slots import cli, launch, places, registry, runs, slots, tmux
 from moxi_slots.errors import Refused, TryAgain, UsageError
 from moxi_slots.model import Last, RunEnd
@@ -121,7 +122,7 @@ def test_the_hook_waits_for_the_lock(server, base, tmp_path):
     assert ended_of(1).signal == signal.SIGTERM
 
 
-def test_record_gives_up_after_its_wait_and_main_never_fails(tmux_path):
+def test_record_gives_up_after_its_wait_and_main_never_fails(tmux_path, tmp_path):
     reg = Registry({2: Row(1.0, last=Last(1.0, "agent", run="t-1"))})
     with registry.locked():
         registry.write(reg)
@@ -133,7 +134,9 @@ def test_record_gives_up_after_its_wait_and_main_never_fails(tmux_path):
         holder.kill()
         holder.wait(timeout=5)
     assert runs.LOCK_WAIT_S == 60.0
-    assert runs.main(["/nonexistent", "x", "t-1", "", "", ""]) == 0
+    gone = tmp_path / "gone"
+    assert runs.main([str(gone), "x", "t-1", "", "", ""]) == 0
+    assert "ValueError" in files.read_records(gone / places.HOOKS_LOG)[0]["error"]
     assert runs.main([]) == 0
     assert runs.write_ended(2, "t-1", 0, None, 5.0)
     assert registry.read().rows[2].last.ended == RunEnd(5.0, 0, None)

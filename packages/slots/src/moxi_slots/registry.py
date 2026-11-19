@@ -1,7 +1,9 @@
 """The registry, `slots.json` in the state directory, and the module lock.
 
 The registry holds, per slot, only what tmux can't know: `created`, `name`, `hold` and
-`last` (`at`, `label`, `meta`). Everything else is read from tmux.
+`last` (`at`, `label`, `meta`, the run's token `run`, the `server` it was placed under,
+`status_trusted`, and `ended`, how the run ended or why it was settled). Everything else
+is read from tmux.
 
     {"version": 2,
      "slots": {"3": {"created": 1793392266.1, "name": "review",
@@ -19,10 +21,10 @@ A hold whose `until` is null lasts until its holder releases it. Version 2 is th
 that may hold one, so a slots that reads only version 1 refuses the file by its version
 rather than misreading it; this code reads version 1 files as well and writes version 2.
 
-Every change (create, remove, rename, hold, release, a launch) runs under the one module
-lock, `locked()`: read the registry, read tmux, act, write with `write()`, which replaces
-the file in one step. The lock is held for the critical section only, never across a
-wait. Reads take no lock: the atomic replace always hands them a whole file.
+Every change (create, remove, rename, hold, release, settle, a launch, and the
+`pane-died` hook's write of a run's end) runs under the one module lock, `locked()`: read
+the registry, read tmux, act, write with `write()`, which replaces the file in one step.
+The lock is held for the critical section only, never across a wait. Reads take no lock: the atomic replace always hands them a whole file.
 
 A write drops holds that have run out, which read as absent anyway, and keeps every hold
 with a null `until`.

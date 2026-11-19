@@ -2,23 +2,31 @@
 
 ## 0.1.1 (unreleased)
 
+- The registry moves to version 2 at the first change this version makes (a hold, a
+  start, a create). An older slots refuses a version 2 registry, so restart every
+  process that uses slots (the launcher's page, its jobs) with the update.
+
 - Each slot reads `crashed` (`Slot.crashed`): its last run was going when its tmux
   server went down. It is not occupied, its last run was placed under another server
   than the one answering now, it did not end by itself (status 0, no signal, a trusted
   status), it was not settled, and either no end was recorded or it ended within 120 s
-  before its server's end. A server's end is the next server's start within one boot,
-  or the boot's last journal entry for an earlier boot (`journalctl --list-boots`);
-  where that can't be read only a run with no end recorded is crashed, and with no
-  server answering nothing is. `moxi slots list` and `show` print it in the state, as
-  `missing, crashed`. slots itself never acts on it. `settle(slot, why)` ends a slot's
-  crashed reading by recording why in place of an end, and refuses an occupied slot.
+  before its server's end. A server's end is, within one boot, the start of the server
+  answering now, or the boot's last journal entry for an earlier boot (`journalctl
+  --list-boots`); where that can't be read only a run with no end recorded is crashed,
+  and with no server answering nothing is. `moxi slots list` and `show` print it in the
+  state, as `missing, crashed`. slots itself never acts on it. `settle(slot, why)` ends
+  a slot's crashed reading by recording why in place of an end, and refuses an occupied
+  slot. The reading needs Linux's boot id (`/proc/sys/kernel/random/boot_id`): on macOS
+  no slot reads crashed.
 
 - Each run records how it ended. Every `start` and `respawn` writes a fresh run token
   (`Last.run`) and the tmux server's id (`Last.server`, `<boot id>:<tmux pid>`) into the
   slot's last launch, and sets a `pane-died` hook on the run window that writes
   `Last.ended` (a `RunEnd`: the pane's death time, its exit status, the signal that
   ended it) for that token only, so a late hook of an earlier run writes nothing. The
-  hook waits up to 60 s for the module lock. `start` and `respawn` take
+  hook waits up to 60 s for the module lock; a write it fails goes as a line to
+  `hooks.log` in the state directory, and `moxi doctor` warns of it, since the run it
+  missed reads crashed later. `start` and `respawn` take
   `status_trusted` (default True), kept as `Last.status_trusted`, for a command whose
   exit status doesn't tell a clean end from a kill. `moxi slots show` prints `ended`.
 

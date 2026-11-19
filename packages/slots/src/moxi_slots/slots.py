@@ -435,5 +435,4 @@ def quoted(argv: list[str]) -> str:
 
 __all__ = ["resolve", "list_slots", "show", "make_session", "create", "remove", "rename",
            "hold", "release", "until_words", "SETTLED_MAX", "settle", "inside_this_server",
-           "attach_argv",
-           "attach_env", "busy", "quoted"]
+           "attach_argv", "attach_env", "busy", "quoted"]

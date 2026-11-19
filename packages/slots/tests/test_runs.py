@@ -26,6 +26,7 @@ def boots(monkeypatch):
     """This boot is `BOOT`; the journal says the old boot's last entry was at 5000."""
     monkeypatch.setattr(runs, "boot_id", lambda: BOOT)
     monkeypatch.setattr(runs, "_journal_ends", {})
+    monkeypatch.setattr(runs, "_journal_misses", {})
     monkeypatch.setattr(runs, "_journal_boots",
                         lambda: {OLD_BOOT.replace("-", ""): 5000.0})
 
@@ -51,6 +52,9 @@ EARLIER = f"{OLD_BOOT}:600"
     (MISSING, last(EARLIER, died(4900, signal=1)), True),
     (MISSING, last(EARLIER, died(4880, signal=15)), True),
     (MISSING, last(EARLIER, died(4879, signal=15)), False),
+    # A death the journal's last entry came before (its last writes lost in a hard
+    # crash): still the shutdown's, since the window has no upper edge.
+    (MISSING, last(EARLIER, died(5100, signal=1)), True),
     (MISSING, last(THIS_OLD, died(9950, status=143)), True),
     (MISSING, last(THIS_OLD, died(9000, status=143)), False),
     # Ended by itself: status 0, no signal, trusted.
@@ -102,6 +106,18 @@ def test_the_journal_is_read_once_per_process(monkeypatch):
     assert runs.journal_end("not-a-boot") is None
     assert runs.journal_end("not-a-boot") is None
     assert len(seen) == 2
+
+
+def test_a_boot_the_journal_did_not_list_is_asked_about_again_later(monkeypatch):
+    listed, clock = {}, [1000.0]
+    monkeypatch.setattr(runs, "_journal_boots", lambda: dict(listed))
+    monkeypatch.setattr(runs.time, "monotonic", lambda: clock[0])
+    assert runs.journal_end(OLD_BOOT) is None
+    listed[OLD_BOOT.replace("-", "")] = 5000.0
+    clock[0] += runs.JOURNAL_RETRY_S - 1
+    assert runs.journal_end(OLD_BOOT) is None
+    clock[0] += 2
+    assert runs.journal_end(OLD_BOOT) == 5000.0
 
 
 def test_the_journal_read_takes_list_boots_json(monkeypatch, fence):

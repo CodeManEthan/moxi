@@ -59,9 +59,9 @@ from .support import Support, supported
 
 __all__ = ["REASONS", "Refused", "TmuxError", "TryAgain", "RegistryError", "SlotsError",
            "UsageError", "Support", "supported", "Slot", "Hold", "RunEnd", "Last", "Listing",
-           "Drift",
-           "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create", "remove",
-           "rename", "hold", "release", "settle", "attach_argv", "start", "respawn", "wait_ended",
+           "Drift", "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create",
+           "remove", "rename", "hold", "release", "settle", "attach_argv", "start",
+           "respawn", "wait_ended",
            "run_job", "job", "jobs", "Screen", "Seen", "Answer", "PaneUse",
            "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
            "CLAUDE_EXIT_DIALOG", "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME",
