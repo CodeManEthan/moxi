@@ -351,10 +351,12 @@ export interface Refreshed {
  * read from their start checks their first row. Rows opened in place stay open, and an
  * opened program line stays open.
  *
- * A list asked with another query keeps nothing but the opened rows' keys.
+ * A list asked with another query, or asked to `restart` (a query he changed, even back
+ * to the kept one's), keeps nothing but the opened rows' keys.
  */
-export function refresh(kept: ListState | null, answer: ListAnswer, query: Query): Refreshed {
-  const old = kept !== null && sameQuery(kept.query, query) ? kept : null;
+export function refresh(kept: ListState | null, answer: ListAnswer, query: Query,
+                        { restart = false }: { restart?: boolean } = {}): Refreshed {
+  const old = !restart && kept !== null && sameQuery(kept.query, query) ? kept : null;
   const now = answer.now;
   const reads: MoreRequest[] = [];
   const fresh = new Set<string>();
