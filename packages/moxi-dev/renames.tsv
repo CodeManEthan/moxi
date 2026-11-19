@@ -4368,6 +4368,7 @@ launcher	packages/launcher/tests/test_page.py	assert said["refused"]["code"] == 
 launcher	packages/launcher/tests/test_page.py	assert said["refused"]["code"] == "no-preset" and said["rows"] == []	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	assert set(first) == set(page.LAUNCH.items)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(form_modes(f"harness={harness}").values()) <= known	keep	set	set
+launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state",	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "prompt", "sessions", "state"}	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(page.VALUES) == set(settable)	keep	set	set
