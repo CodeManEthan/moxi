@@ -1251,6 +1251,7 @@ comms	packages/comms/src/moxi_comms/page.py	"delivered": lb.Out("list", items=lb
 comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"earlier": lb.Out("table", nullable=True, items={	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"expired": lb.Out("list", items=lb.Out("string")),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	"harness": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=100)},	keep	required	required
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=500)},	keep	required	required
@@ -1737,6 +1738,8 @@ comms	packages/comms/tests/test_browser_roster.py	expect(roster).to_have_attribu
 comms	packages/comms/tests/test_browser_roster.py	expect(rows(roster)).to_have_count(4, timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_browser_roster.py	shell	name	directory	clock_dir
+comms	packages/comms/tests/test_browser_session_where.py	assert not any(planner.session_id in url for url in asked), asked	keep	any	any
+comms	packages/comms/tests/test_browser_session_where.py	wait_for(lambda: any(SESSIONS_READ in url and session_id in url for url in asked), 10,	keep	any	any
 comms	packages/comms/tests/test_cache_clock.py	(tmp_path / "work").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_cache_clock.py	-	name	test_cache_source_is_the_sessions_directory_under_codex_home	test_cache_source_is_the_sessions_dir_under_codex_home
 comms	packages/comms/tests/test_cache_clock.py	@pytest.mark.parametrize("bad", ["above", "unparseable"])	keep	bad	bad
