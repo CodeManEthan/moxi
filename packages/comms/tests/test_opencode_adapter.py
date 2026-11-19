@@ -788,9 +788,13 @@ def test_a_window_new_is_followed_and_a_child_session_is_not(
     time.sleep(0.3)
     assert adapter.session_id == old
     created = fake.control("new-session", {})["session"]
-    assert wait_until(lambda: adapter.session_id == created, LIVE_S)
+    # The follow sets `session_id` first and sends the ready last, so the test waits on
+    # the ready.
+    assert wait_until(lambda: [f for f in frame_kinds(frames, "ready")
+                               if f.get("source") == "clear"], LIVE_S)
     clear = [f for f in frame_kinds(frames, "ready") if f.get("source") == "clear"]
     assert len(clear) == 1 and clear[0]["session_id"] == created
+    assert adapter.session_id == created
     record = oc.read_record(opencode_roster.session_path(IDENTITY))
     assert record["session_id"] == created
     assert adapter.generation.thread_id == created

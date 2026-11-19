@@ -15,7 +15,8 @@ page server reads the rig's record: a message the rig posted is on the page.
 
 Launcher's `/api/running` and `/api/keep-warm` are answered by a route stub in the browser
 (`LauncherStub`) in launcher's declared shape, its entries joined to the rig's session
-ids. The small install leaves out every module but the core, ui and comms, and comms'
+ids; so is turns' `/api/sessions` (`TurnsStub`), each session's facts read under a rig
+session id. The small install leaves out every module but the core, ui and comms, and comms'
 seam finds no cache.
 """
 
@@ -37,6 +38,7 @@ from playwright.sync_api import expect
 import roster_kit
 import shim_drive
 from conftest import cache_absent, write_transcript
+from moxi import modules
 from moxi import paths as moxi_paths
 from moxi.store import transaction
 from moxi_comms import machine_line, store
@@ -66,6 +68,13 @@ COLD_AGE_S = 2 * 3600
 PAGE = "/m/comms/"
 needs_launcher = pytest.mark.skipif(importlib.util.find_spec("moxi_launcher") is None,
                                     reason="the launcher module is not installed here")
+needs_turns = pytest.mark.skipif(importlib.util.find_spec("moxi_turns") is None,
+                                 reason="the turns module is not installed here")
+needs_connector = pytest.mark.skipif(not modules.load("connector", interface=1).ok,
+                                     reason="the connector module is not installed here")
+#: The name comms' tools in the Claude apps bind as, and comms' words for it.
+APP = "claude-app"
+CONNECTOR_WORDS = "Claude's apps, through the connector"
 
 
 def rig_env() -> dict[str, str]:
@@ -160,6 +169,38 @@ class LauncherStub:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(self.answer))
 
 
+def turns_session(session_id: str, *, turn_open: bool) -> dict:
+    """One session in turns' declared shape (`SESSION`), its facts read under `session_id`
+    with a turn open or not."""
+    return {
+        "key": f"claude-{session_id[:8]}", "harness": "claude", "pid": 4242, "session_id": session_id,
+        "cwd": None, "started": time.time() - 3600, "capabilities": ["agents"], "endpoint_version": "1",
+        "mod_version": "1", "trouble": None,
+        "facts": {"session_id": session_id, "turn_number": 3, "turn_open": turn_open,
+                  "turn_started_at": time.time() - 60 if turn_open else None, "agents": 0, "draft": False,
+                  "stale": False, "ready": None, "at": time.time()},
+        "agents": None, "read_error": None, "ended_at": None, "has_box": False, "unread_since": None,
+    }
+
+
+class TurnsStub:
+    """Turns' `sessions` route, answered in the browser once attached to a page: `open`
+    maps each listed session id to whether its turn is open, and `reads` counts the reads."""
+
+    def __init__(self, open_turns: dict[str, bool]) -> None:
+        self.open = open_turns
+        self.reads = 0
+
+    def attach(self, page: Any) -> None:
+        page.route("**/m/turns/api/sessions", self._sessions)
+
+    def _sessions(self, route: Any) -> None:
+        self.reads += 1
+        body = {"listed": True, "detail": None, "home": "/home/someone", "reach": None,
+                "sessions": [turns_session(sid, turn_open=is_open) for sid, is_open in self.open.items()]}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+
 #: Keeps in `window.pushed` the name of each event the shell's push stream brings.
 _PUSHED = """(() => {
   const pushed = window.pushed = [];
@@ -183,9 +224,11 @@ _PUSHED = """(() => {
 })()"""
 
 
-def open_page(shell, ui_contexts, launcher: list[dict] | None = None) -> tuple[Any, Any, Any]:
+def open_page(shell, ui_contexts, launcher: list[dict] | None = None,
+              turns: TurnsStub | None = None) -> tuple[Any, Any, Any]:
     """A signed-in page on the shell, once the shell's push stream has brought the modules;
-    with `launcher`, the stub serves those launches. The page, its root and the stub.
+    with `launcher`, the stub serves those launches, and with `turns` that stub serves
+    turns' sessions. The page, its root and the launcher's stub.
 
     The shell places the page again on a modules event when the address differs from the
     one it placed, and the page writes its address as things open; the stream's first
@@ -193,6 +236,8 @@ def open_page(shell, ui_contexts, launcher: list[dict] | None = None) -> tuple[A
     page = ui_contexts(shell).pages[0]
     page.add_init_script(_PUSHED)
     stub = LauncherStub(page, launcher) if launcher is not None else None
+    if turns is not None:
+        turns.attach(page)
     page.goto(PAGE)
     page.wait_for_function("() => window.pushed.includes('ui.modules')")
     return page, page.locator("#moxi-panel > moxi-comms-page"), stub
@@ -307,6 +352,45 @@ def test_on_the_small_install_every_message_is_read_live(page_shell, rig, ui_con
         "Delivered. planner reads it at its next turn boundary.")
     expect(root.locator('[data-part="box"] [data-action="deliver"]')).to_have_count(0)
     expect(root.locator('[data-part="box"] [data-line="deliver"]')).to_have_count(0)
+
+
+@needs_turns
+def test_the_dry_run_says_a_recipient_is_working_while_its_turn_is_open(page_shell, rig, ui_contexts):
+    planner = rig.shim(**PLANNER)
+    reviewer = rig.shim(**REVIEWER)
+    bound(rig, P, R)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P, R]))
+    turns = TurnsStub({planner.session_id: True, reviewer.session_id: False})
+    _, root, _ = open_page(shell, ui_contexts, turns=turns)
+    dry = root.locator('[data-line="dry"]')
+    agent(root, P).locator('[data-action="message"]').click()
+    expect(root.locator('[data-part="box"][data-to="planner"]')).to_have_count(1)
+    expect(dry).to_contain_text("Delivered. planner is working; it reads this when its turn ends.")
+    # Its turn ends: the next check reads turns again and the line says so.
+    turns.open[planner.session_id] = False
+    root.locator('[data-part="box"] [data-action="posture"]').click()
+    root.locator('[data-part="box"] [data-choice="once"]').click()
+    expect(dry).to_contain_text("Delivered. planner reads it at its next turn boundary.")
+    # A session whose turn is closed: nothing of it.
+    agent(root, R).locator('[data-action="message"]').click()
+    expect(root.locator('[data-part="box"][data-to="reviewer"]')).to_have_count(1)
+    expect(dry).to_contain_text("Delivered. reviewer reads it at its next turn boundary.")
+    expect(dry).not_to_contain_text("working")
+
+
+def test_without_turns_the_dry_run_says_nothing_of_a_turn(page_shell, rig, ui_contexts):
+    planner = rig.shim(**PLANNER)
+    bound(rig, P)
+    shell = page_shell(leave_out=["turns"])
+    roster_kit.current(shell, holding([P]))
+    turns = TurnsStub({planner.session_id: True})
+    _, root, _ = open_page(shell, ui_contexts, turns=turns)
+    agent(root, P).locator('[data-action="message"]').click()
+    dry = root.locator('[data-line="dry"]')
+    expect(dry).to_contain_text("Delivered. planner reads it at its next turn boundary.")
+    expect(dry).not_to_contain_text("working")
+    assert turns.reads == 0
 
 
 # --- M3: which names need launching -------------------------------------------------------------
@@ -449,6 +533,80 @@ def test_the_thread_between_planner_and_builder_1_opens_in_place(page_shell, rig
     thread.locator('[data-action="message-side"][data-address="builder-1"]').click()
     expect(root.locator('[data-part="box"][data-to="builder-1"] textarea')).to_be_focused()
     assert address(page) == "agent/builder-1"
+
+
+# --- Who is claude-app ----------------------------------------------------------------------------
+
+#: A `sitecustomize.py` that keeps the connector's package from being imported in every
+#: process started with its directory on the path, so the connector reads as not installed
+#: in the shell's page servers while this process still runs its binding.
+_NO_CONNECTOR = '''import sys
+
+
+class _LeftOut:
+    def find_spec(self, name, path=None, target=None):
+        if name.partition(".")[0] == "moxi_connector":
+            raise ModuleNotFoundError(f"{name} is left out", name=name)
+        return None
+
+
+sys.meta_path.insert(0, _LeftOut())
+'''
+
+
+@pytest.fixture
+def app_link(rig):
+    """comms' tools in the Claude apps bound as `claude-app` on the rig's daemon, as the
+    connector binds them."""
+    from moxi_comms.connector.link import Link
+
+    link = Link(APP, backoff=lambda: iter(lambda: 0.05, None), held_retry=0.2)
+    link.start()
+    wait_for(lambda: link.bound and APP in rig.daemon.bindings, 5, what=f"{APP} to bind")
+    yield link
+    link.stop()
+
+
+def app_bound(via: str | None):
+    """A `published` check: up, with `claude-app` and planner live and `claude-app`'s
+    `via` as given."""
+    def check(data: dict) -> bool:
+        rows = {row["qualified"]: row for row in data["rows"]} if data["state"] == "up" else {}
+        return (APP in rows and rows[APP]["live"] and rows[APP]["via"] == via
+                and P in rows and bool(rows[P]["session_id"]))
+    return check
+
+
+@needs_connector
+def test_who_is_claude_app_the_connectors_name_says_what_it_is(
+        page_shell, rig, ui_contexts, app_link):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    shell = page_shell()
+    roster_kit.current(shell, app_bound(CONNECTOR_WORDS))
+    _, root, _ = open_page(shell, ui_contexts)
+    expect(agent(root, APP)).to_have_attribute("where", CONNECTOR_WORDS)
+    expect(agent(root, APP)).to_contain_text(CONNECTOR_WORDS)
+    # Every other name keeps its own where: none here, without launcher's.
+    expect(agent(root, P)).to_have_attribute("name", P)
+    assert agent(root, P).get_attribute("where") is None
+
+
+@needs_connector
+def test_without_the_connector_its_name_shows_no_words_and_no_gap(
+        page_shell, rig, ui_contexts, app_link, tmp_path):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    site = tmp_path / "no-connector"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(_NO_CONNECTOR)
+    shell = page_shell(site=[str(site)], leave_out=["connector"])
+    roster_kit.current(shell, app_bound(None))
+    _, root, _ = open_page(shell, ui_contexts)
+    expect(agent(root, APP)).to_have_attribute("name", APP)
+    assert agent(root, APP).get_attribute("where") is None
+    expect(agent(root, APP)).not_to_contain_text("connector")
+    expect(agent(root, APP)).not_to_contain_text("Claude's apps")
 
 
 # --- M6: is comms working, with the daemon stopped mid-page ----------------------------------
@@ -882,6 +1040,11 @@ def test_the_page_fits_both_widths_in_both_themes_and_only_send_takes_the_accent
     shell = page_shell()
     roster_kit.current(shell, holding([P, R]))
     page, root, _ = open_page(shell, ui_contexts, [])
+    # With sessions installed it knows both sessions, so each row's where comes when its read
+    # answers, and the row draws its lines anew; the colours are read once both have come.
+    if importlib.util.find_spec("moxi_sessions") is not None:
+        for name in (P, R):
+            expect(agent(root, name)).to_have_attribute("where", re.compile(r" · claude$"))
     agent(root, R).locator('[data-action="message"]').click()
     box = root.locator('[data-part="box"][data-to="reviewer"]')
     box.locator("textarea").fill("Is the cursor fix safe to ship?")

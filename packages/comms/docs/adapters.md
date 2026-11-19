@@ -18,6 +18,10 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
 
+A live row of `api.roster_rows()` and `agents --json` bound as the `connector` kind
+carries `via`, `Claude's apps, through the connector`, while the connector module is
+installed; every other row's `via` is null. The Comms page shows it after the name.
+
 `moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
 of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`.
 The Claude wrapper also runs as `moxi comms claude`.
