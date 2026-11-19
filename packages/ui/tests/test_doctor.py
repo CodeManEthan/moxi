@@ -85,6 +85,30 @@ def test_the_rows_with_the_shell_up_come_from_its_servers_data():
     assert "1 streams" in by["page:fine"].detail
 
 
+def test_a_windows_sample_shows_open_handles_and_no_fds_warn():
+    handles = {"pid": 1, "rss": 30 * 1024**2, "cpu_s": 1.0, "handles": 232}
+    found = _running([_server("busy", sample={**handles, "pid": 100})])
+    found.servers["shell"]["sample"] = handles
+    shell = doctor.shell_rows(found)[0]
+    page = doctor.page_row(found.servers["servers"][0], now=NOW)
+    for row in (shell, page):
+        assert row.state == "ok" and "232 open handles" in row.detail, row.detail
+        assert "fds" not in row.detail
+    assert "RSS 30 MB, 232 open handles, CPU 1.0 s" in shell.detail
+
+
+def test_a_posix_sample_shows_fds_and_warns_over_the_budget():
+    found = _running([_server("busy", sample={"pid": 100, "rss": 40 * 1024**2,
+                                              "cpu_s": 0.2, "fds": 65})])
+    found.servers["shell"]["sample"]["fds"] = 232
+    shell = doctor.shell_rows(found)[0]
+    page = doctor.page_row(found.servers["servers"][0], now=NOW)
+    assert shell.state == "warn" and "RSS 30 MB, 232 fds, CPU 1.0 s" in shell.detail
+    assert "232 open fds over its 64" in shell.detail
+    assert page.state == "warn" and "RSS 40 MB, 65 fds, CPU 0.2 s" in page.detail
+    assert "65 open fds over its 64" in page.detail
+
+
 @pytest.mark.parametrize("in_row", [1, 2])
 def test_one_or_two_failed_starts_are_no_warn(in_row):
     idle = doctor.page_row(_server("flaky", state="idle", failed_in_row=in_row,
