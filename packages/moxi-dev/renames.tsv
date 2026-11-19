@@ -12338,6 +12338,10 @@ sessions	packages/sessions/tests/test_browser_page.py	expect(view).to_have_attri
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{LONG}")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{SESSION}")	keep	sessions	sessions
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folders	folders
+sessions	packages/sessions/tests/test_browser_project_facts.py	return Path(shell.env["HOME"])	keep	HOME	HOME
+sessions	packages/sessions/tests/test_browser_project_facts.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/tests/test_browser_questions.py	"""A Claude Code session in `folder` under the home folder, last changed at `at`:	use	`folder`	`work_dir`
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	use	input=	input_tokens=
@@ -12688,6 +12692,8 @@ sessions	packages/sessions/tests/test_page.py	package="moxi_sessions")	keep	pack
 sessions	packages/sessions/tests/test_page.py	return body["refused"]	keep	refused	refused
 sessions	packages/sessions/tests/test_page.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page.py	test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why	name	directory	subagents_dir
+sessions	packages/sessions/tests/test_page.py	assert not any(attr.get("required") for attr in facts["attributes"].values())	keep	any	any
+sessions	packages/sessions/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "window", "project-facts"}	keep	set	set
 sessions	packages/sessions/tests/test_page_list.py	"find"}	keep	find	find
 sessions	packages/sessions/tests/test_page_list.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	"harness", "since", "until", "folder",	keep	folder	folder
