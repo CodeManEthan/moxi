@@ -7,6 +7,11 @@
   address by session id. A message the dry run would deliver to that session now reads
   `Delivered. <name> is working; it reads this when its turn ends.` Without turns, or
   for a name whose turn isn't open, the line is as before.
+- The Comms page says what the connector's name is: the row of the name that comms' tools
+  in the Claude apps bind reads `Claude's apps, through the connector` after the name. Each live row of
+  `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
+  for a binding of the connector's kind while the connector module is installed, and null
+  for every other row.
 - Any program or service, not only a Moxi module, can hold a send-only name: `moxi comms
   send-only add NAME` registers it, `moxi comms send --as NAME` and
   `moxi_comms.api.send_under` send under it from outside every session, and `send-only

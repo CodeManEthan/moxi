@@ -76,10 +76,13 @@ OPENCODE = {"cache": CACHE_HARNESS, "harness": "opencode"}
 #: comms' tools in the Claude apps, through the connector: a person at the other end, who
 #: reads mail when a tool call asks for it, so it is never held for a cold cache.
 CONNECTOR = {"cache": CACHE_PERSON}
+#: The connector kind's name, and comms' words for what a binding of that kind is.
+CONNECTOR_KIND = "connector"
+CONNECTOR_VIA = "Claude's apps, through the connector"
 
 #: The built-in kinds, by name, in the order the daemon has always listed them.
 BUILT_IN = {"claude-shim": CLAUDE_SHIM, "codex": CODEX, "opencode": OPENCODE,
-            "connector": CONNECTOR}
+            CONNECTOR_KIND: CONNECTOR}
 
 #: What an evidence function answers when its record exists but cannot be read.
 UNREADABLE = "unreadable"

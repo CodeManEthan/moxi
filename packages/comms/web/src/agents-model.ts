@@ -530,6 +530,12 @@ function actsOf(kind: Case | null, addresses: readonly Address[], lead: Address)
   return [message];
 }
 
+/** Line one's dim words for the lead: comms' own words for its binding when its kind says what
+ * it is (the connector's), else where launcher says its launch runs; null with neither. */
+function whereOf(lead: Address): string | null {
+  return lead.row?.via ?? lead.launched?.where ?? null;
+}
+
 function rowOf(name: string, addresses: Address[], full: ReadonlySet<string>, asks: readonly Ask[], words: Words)
   : AgentRow {
   const lead = leadOf(addresses);
@@ -550,7 +556,7 @@ function rowOf(name: string, addresses: Address[], full: ReadonlySet<string>, as
   }
   return {
     name, lead: lead.qualified, addresses, case: first, second,
-    where: lead.launched?.where ?? null,
+    where: whereOf(lead),
     fact: top.fact, line: top.line,
     note: { second: note, lines },
     acts: actsOf(first, addresses, lead),

@@ -38,6 +38,7 @@ from playwright.sync_api import expect
 import roster_kit
 import shim_drive
 from conftest import cache_absent, write_transcript
+from moxi import modules
 from moxi import paths as moxi_paths
 from moxi.store import transaction
 from moxi_comms import machine_line, store
@@ -69,6 +70,11 @@ needs_launcher = pytest.mark.skipif(importlib.util.find_spec("moxi_launcher") is
                                     reason="the launcher module is not installed here")
 needs_turns = pytest.mark.skipif(importlib.util.find_spec("moxi_turns") is None,
                                  reason="the turns module is not installed here")
+needs_connector = pytest.mark.skipif(not modules.load("connector", interface=1).ok,
+                                     reason="the connector module is not installed here")
+#: The name comms' tools in the Claude apps bind as, and comms' words for it.
+APP = "claude-app"
+CONNECTOR_WORDS = "Claude's apps, through the connector"
 
 
 def rig_env() -> dict[str, str]:
@@ -527,6 +533,80 @@ def test_the_thread_between_planner_and_builder_1_opens_in_place(page_shell, rig
     thread.locator('[data-action="message-side"][data-address="builder-1"]').click()
     expect(root.locator('[data-part="box"][data-to="builder-1"] textarea')).to_be_focused()
     assert address(page) == "agent/builder-1"
+
+
+# --- Who is claude-app ----------------------------------------------------------------------------
+
+#: A `sitecustomize.py` that keeps the connector's package from being imported in every
+#: process started with its directory on the path, so the connector reads as not installed
+#: in the shell's page servers while this process still runs its binding.
+_NO_CONNECTOR = '''import sys
+
+
+class _LeftOut:
+    def find_spec(self, name, path=None, target=None):
+        if name.partition(".")[0] == "moxi_connector":
+            raise ModuleNotFoundError(f"{name} is left out", name=name)
+        return None
+
+
+sys.meta_path.insert(0, _LeftOut())
+'''
+
+
+@pytest.fixture
+def app_link(rig):
+    """comms' tools in the Claude apps bound as `claude-app` on the rig's daemon, as the
+    connector binds them."""
+    from moxi_comms.connector.link import Link
+
+    link = Link(APP, backoff=lambda: iter(lambda: 0.05, None), held_retry=0.2)
+    link.start()
+    wait_for(lambda: link.bound and APP in rig.daemon.bindings, 5, what=f"{APP} to bind")
+    yield link
+    link.stop()
+
+
+def app_bound(via: str | None):
+    """A `published` check: up, with `claude-app` and planner live and `claude-app`'s
+    `via` as given."""
+    def check(data: dict) -> bool:
+        rows = {row["qualified"]: row for row in data["rows"]} if data["state"] == "up" else {}
+        return (APP in rows and rows[APP]["live"] and rows[APP]["via"] == via
+                and P in rows and bool(rows[P]["session_id"]))
+    return check
+
+
+@needs_connector
+def test_who_is_claude_app_the_connectors_name_says_what_it_is(
+        page_shell, rig, ui_contexts, app_link):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    shell = page_shell()
+    roster_kit.current(shell, app_bound(CONNECTOR_WORDS))
+    _, root, _ = open_page(shell, ui_contexts)
+    expect(agent(root, APP)).to_have_attribute("where", CONNECTOR_WORDS)
+    expect(agent(root, APP)).to_contain_text(CONNECTOR_WORDS)
+    # Every other name keeps its own where: none here, without launcher's.
+    expect(agent(root, P)).to_have_attribute("name", P)
+    assert agent(root, P).get_attribute("where") is None
+
+
+@needs_connector
+def test_without_the_connector_its_name_shows_no_words_and_no_gap(
+        page_shell, rig, ui_contexts, app_link, tmp_path):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    site = tmp_path / "no-connector"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(_NO_CONNECTOR)
+    shell = page_shell(site=[str(site)], leave_out=["connector"])
+    roster_kit.current(shell, app_bound(None))
+    _, root, _ = open_page(shell, ui_contexts)
+    expect(agent(root, APP)).to_have_attribute("name", APP)
+    assert agent(root, APP).get_attribute("where") is None
+    expect(agent(root, APP)).not_to_contain_text("connector")
+    expect(agent(root, APP)).not_to_contain_text("Claude's apps")
 
 
 # --- M6: is comms working, with the daemon stopped mid-page ----------------------------------
