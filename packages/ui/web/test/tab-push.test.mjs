@@ -1,5 +1,6 @@
-// TabPush in one browser of fakes: a lock manager and a channel the tabs share, and each
-// tab's own page events and push streams. The timers are node:test's mock timers.
+// TabPush in one browser of fakes: a lock manager, a channel and a visibility the tabs
+// share, and each tab's own page events and push streams. The timers are node:test's mock
+// timers.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -40,20 +41,25 @@ class Locks {
   }
 }
 
-/** One browser: its locks, its channels, and the tabs opened in it. */
-function browser() {
+/** One browser: its locks, its channels, and the tabs opened in it. With `locks` false it
+ * has no Web Locks, and each tab leads a stream of its own. */
+function browser({ locks: hasLocks = true } = {}) {
   const locks = new Locks();
   const channels = new Set();
-  Object.defineProperty(globalThis, "navigator", { value: { locks }, configurable: true });
-  globalThis.document = { visibilityState: "visible", addEventListener() {} };
+  Object.defineProperty(globalThis, "navigator", {
+    value: hasLocks ? { locks } : {},
+    configurable: true,
+  });
 
   /** A tab: its TabPush, the streams it opened, and its page events to fire. */
   function tab() {
     const listeners = new Map();
     const streams = [];
-    globalThis.addEventListener = (type, fn) => {
+    const listen = (type, fn) => {
       listeners.set(type, [...(listeners.get(type) ?? []), fn]);
     };
+    globalThis.addEventListener = listen;
+    globalThis.document = { visibilityState: "visible", addEventListener: listen };
     globalThis.BroadcastChannel = class {
       constructor(name) {
         this.name = name;
@@ -93,17 +99,20 @@ async function settle() {
   for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-test("a leader's stream closes on pagehide and opens again when shown from the cache", async (t) => {
+test("a leader gives up its stream and lock on pagehide and leads again when shown from the cache", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
-  const { tab } = browser();
+  const { locks, tab } = browser();
   const a = tab();
   a.push.hub.add("fixture.one", () => {});
   await settle();
   t.mock.timers.tick(REOPEN_MS);
   assert.deepEqual(a.live(), [["fixture.one"]]);
+  assert.ok(locks.held.has(LOCK));
 
   a.fire("pagehide", { persisted: true });
   assert.deepEqual(a.live(), []);
+  await settle();
+  assert.ok(!locks.held.has(LOCK), "the leader lock is free for another tab");
   // A topic change while away opens nothing, however long the page stays away.
   a.push.hub.add("fixture.two", () => {});
   await settle();
@@ -120,7 +129,61 @@ test("a leader's stream closes on pagehide and opens again when shown from the c
   a.fire("pageshow", { persisted: true });
   await settle();
   t.mock.timers.tick(REOPEN_MS);
+  assert.ok(locks.held.has(LOCK));
   assert.deepEqual(a.live(), [["fixture.one", "fixture.two"]]);
+});
+
+test("when the leader's page leaves another tab leads, and the page rejoins when shown from the cache", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const { tab } = browser();
+  const a = tab();
+  a.push.hub.add("fixture.one", () => {});
+  await settle();
+  const b = tab();
+  b.push.hub.add("fixture.two", () => {});
+  await settle();
+  t.mock.timers.tick(REOPEN_MS);
+  assert.deepEqual(a.live(), [["fixture.one", "fixture.two"]]);
+
+  // a goes into the back-forward cache: b takes the lock and opens a stream for what the
+  // tabs still here ask for, and a, being away, does not answer b's ask.
+  a.fire("pagehide", { persisted: true });
+  assert.deepEqual(a.live(), []);
+  await settle();
+  t.mock.timers.tick(REOPEN_MS);
+  assert.deepEqual(b.live(), [["fixture.two"]]);
+  // A prune finds a's tab lock still held, and keeps a out of the union all the same.
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.deepEqual(b.live(), [["fixture.two"]]);
+
+  // a is shown again: it waits for the lock behind b, and b's stream takes its topics.
+  a.fire("pageshow", { persisted: true });
+  await settle();
+  t.mock.timers.tick(REOPEN_MS);
+  assert.deepEqual(b.live(), [["fixture.one", "fixture.two"]]);
+  assert.equal(a.streams.length, 1);
+
+  // b's page goes for good: a leads again.
+  b.fire("pagehide", { persisted: false });
+  assert.deepEqual(b.live(), []);
+  await settle();
+  t.mock.timers.tick(REOPEN_MS);
+  assert.deepEqual(a.live(), [["fixture.one"]]);
+});
+
+test("with no Web Locks, a tab closes its own stream on pagehide and opens it again when shown", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const { tab } = browser({ locks: false });
+  const a = tab();
+  a.push.hub.add("fixture.one", () => {});
+  t.mock.timers.tick(REOPEN_MS);
+  assert.deepEqual(a.live(), [["fixture.one"]]);
+  a.fire("pagehide", { persisted: true });
+  assert.deepEqual(a.live(), []);
+  t.mock.timers.tick(60_000);
+  a.fire("pageshow", { persisted: true });
+  assert.deepEqual(a.live(), [["fixture.one"]]);
 });
 
 test("a tab that is not the leader says bye on pagehide, and the leader drops its topics", async (t) => {
@@ -138,6 +201,8 @@ test("a tab that is not the leader says bye on pagehide, and the leader drops it
   assert.deepEqual(b.streams, []);
 
   b.fire("pagehide", { persisted: false });
+  // The page is hidden after pagehide; a page that has left says nothing more.
+  b.fire("visibilitychange");
   await settle();
   t.mock.timers.tick(REOPEN_MS);
   assert.deepEqual(a.live(), [["fixture.one"]]);

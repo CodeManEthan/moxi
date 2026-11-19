@@ -5,9 +5,10 @@
 // whether it is visible on the BroadcastChannel `moxi-ui-push`. The leader asks for the
 // union, reopens the stream 50 ms after the union last changed, and passes each event to
 // every tab. It closes the stream after 10 s with no visible tab and opens it again when
-// one is shown, and closes it when its page is hidden for good or kept in the back-forward
-// cache. When the leader tab closes, the lock goes to another tab, which asks every tab for
-// its topics and opens the stream. Every topic carries state (its first event is
+// one is shown. When the leader's page leaves, or goes into the back-forward cache, the
+// leader closes its stream and gives up the lock, which goes to another tab; that tab asks
+// every tab for its topics and opens the stream. A page shown again from the cache asks
+// for the lock again, as a new tab does. Every topic carries state (its first event is
 // its current value, each later one replaces it), so a reopen or a new leader loses
 // nothing.
 
@@ -159,9 +160,10 @@ export class Leader {
     this.reconcile();
   }
 
-  /** The page is going away, or into the back-forward cache: close the stream now and
-   * open none until `back()`. Firefox can keep a stream open past its page's end when the
-   * page opened it after its own navigation began, so the leader closes it itself. */
+  /** The page is going away, or into the back-forward cache, and this leader holds no
+   * lock to give up: close the stream now and open none until `back()`. Firefox can keep a
+   * stream open past its page's end when the page opened it after its own navigation
+   * began, so the leader closes it itself. */
   leave(): void {
     this.away = true;
     this.reconcile();
@@ -481,6 +483,13 @@ export class TabPush {
   private channel: BroadcastChannel | null = null;
   private opener: Opener;
   private onSignedOut: () => void;
+  /** Ends this tab's hold on the leader lock; null while it holds none. */
+  private release: (() => void) | null = null;
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  /** The page has left: it is gone, or kept in the back-forward cache. */
+  private away = false;
+  /** This tab gave up the leader lock as its page left. */
+  private resigned = false;
 
   constructor(opener: Opener, onSignedOut: () => void) {
     this.opener = opener;
@@ -494,17 +503,26 @@ export class TabPush {
       this.channel.onmessage = (event) => this.receive(event.data);
     }
     document.addEventListener("visibilitychange", () => this.announce());
-    // A page that leaves says so, so the leader drops its topics at once; one kept in the
-    // back-forward cache says so again when it is shown. A leader closes its stream as its
-    // page leaves and opens it again if the page is shown from the cache; its lock ends
-    // with its page.
+    // A page that leaves says so, so the leader drops its topics at once, and says nothing
+    // more while it is away. A leader closes its stream and gives up its lock, so another
+    // tab leads while this page is gone or kept in the back-forward cache; one that leads
+    // with no lock closes its stream. A page shown again from the cache asks for the lock
+    // again, or opens its stream again, and says its topics.
     addEventListener("pagehide", () => {
+      this.away = true;
       if (this.leader === null) this.post({ t: "bye", tab: this.id });
-      else this.leader.leave();
+      else if (this.release === null) this.leader.leave();
+      else this.resign();
     });
     addEventListener("pageshow", (event) => {
       if (!event.persisted) return;
-      this.leader?.back();
+      this.away = false;
+      if (this.resigned) {
+        this.resigned = false;
+        this.elect();
+      } else {
+        this.leader?.back();
+      }
       this.announce();
     });
     const locks = navigator.locks;
@@ -513,10 +531,7 @@ export class TabPush {
       this.lead();
     } else {
       void locks.request(`${TAB_LOCK}${this.id}`, () => new Promise(() => {}));
-      void locks.request(LOCK, () => {
-        this.lead();
-        return new Promise(() => {});
-      });
+      this.elect();
     }
     this.announce();
   }
@@ -524,6 +539,28 @@ export class TabPush {
   /** A new key was stored, by a sign-in in this browser: try again. */
   reset(): void {
     this.leader?.reset();
+  }
+
+  /** Ask for the leader lock, and lead once this tab holds it. */
+  private elect(): void {
+    void navigator.locks.request(LOCK, () => {
+      this.lead();
+      return new Promise<void>((resolve) => {
+        this.release = resolve;
+      });
+    });
+  }
+
+  /** Give up the leader lock: close the stream, stop every timer, and let another tab
+   * lead. */
+  private resign(): void {
+    this.leader?.stop();
+    this.leader = null;
+    if (this.pruneTimer !== null) clearInterval(this.pruneTimer);
+    this.pruneTimer = null;
+    this.release?.();
+    this.release = null;
+    this.resigned = true;
   }
 
   private lead(): void {
@@ -547,7 +584,7 @@ export class TabPush {
     });
     this.post({ t: "ask" });
     this.announce();
-    if (navigator.locks !== undefined) setInterval(() => void this.prune(), PRUNE_MS);
+    if (navigator.locks !== undefined) this.pruneTimer = setInterval(() => void this.prune(), PRUNE_MS);
   }
 
   private async prune(): Promise<void> {
@@ -561,6 +598,7 @@ export class TabPush {
   }
 
   private announce(): void {
+    if (this.away) return;
     const topics = this.hub.topics();
     const visible = document.visibilityState === "visible";
     if (this.leader !== null) this.leader.setTab(this.id, topics, visible);
