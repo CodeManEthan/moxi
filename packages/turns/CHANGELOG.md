@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Question mode counts a prompt sent from the Claude apps through Remote Control
+  (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
+  `["composer", "bridge"]`, so such a prompt that mentions a question lets
+  `AskUserQuestion` run and gets the question-mode reminder. A `plugin` prompt and one
+  with no origin are still refused. To count only prompts typed at the terminal again, set
+  `question_mode.origins = ["composer"]`.
 - The panel at `/m/turns/` is redrawn as groups of rows. Sessions fall under `problem`,
   `idle` and `working`, latest change first, each row with its name (a launched
   session's launch name with launcher installed, else its folder and start), how long it

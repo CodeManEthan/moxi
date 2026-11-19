@@ -281,6 +281,19 @@ def test_a_typed_prompt_mentioning_a_question_allows(turns_env, argv):
     assert argv.reads == [4242]
 
 
+def test_a_prompt_from_the_claude_apps_counts_as_typed_by_default(turns_env, argv):
+    assert qm.judge(ask(Prompt("bridge", "any questions?"))) is None
+    assert qm.judge(ask(Prompt("plugin", "any questions?"))) == \
+        Deny(qm.R_NOT_HERE.format(origin="plugin"))
+
+
+def test_a_config_of_composer_alone_refuses_a_prompt_from_the_claude_apps(turns_env, argv):
+    write_config(turns_env, '[question_mode]\norigins = ["composer"]\n')
+    assert qm.judge(ask(Prompt("bridge", "any questions?"))) == \
+        Deny(qm.R_NOT_HERE.format(origin="bridge"))
+    assert qm.judge(ask(Prompt("composer", "any questions?"))) is None
+
+
 @pytest.mark.parametrize("prompts,want", [
     ((), qm.R_NOT_ASKED),
     ((Prompt("composer", "carry on"),), qm.R_NOT_ASKED),
@@ -380,6 +393,7 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
     assert qm.on_prompt(prompt_event(text, "composer")) is None            # off
     write_config(turns_env, "[guards]\nquestion_mode = true\n")
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
+    assert qm.on_prompt(prompt_event(text, "bridge")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "plugin")) is None
     assert qm.on_prompt(prompt_event(text, None)) is None
     assert qm.on_prompt(prompt_event("go through the open questions in prose",
@@ -390,6 +404,10 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
                             '[question_mode]\norigins = ["plugin"]\n')
     assert qm.on_prompt(prompt_event(text, "plugin")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "composer")) is None
+    write_config(turns_env, '[guards]\nquestion_mode = true\n'
+                            '[question_mode]\norigins = ["composer"]\n')
+    assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
+    assert qm.on_prompt(prompt_event(text, "bridge")) is None
 
 
 def test_the_reminder_reads_the_prose_words_setting(turns_env):

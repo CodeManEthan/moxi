@@ -468,7 +468,7 @@ def test_turns_settings_declare_the_keys_with_their_defaults():
               "guards.question_mode": ("bool", False, "use"),
               "guards.max_wait_ms": ("int", 3000, "use"),
               "after_tool.wait_ms": ("int", 300, "use"),
-              "question_mode.origins": ("list", ["composer"], "use")}
+              "question_mode.origins": ("list", ["composer", "bridge"], "use")}
     for name, (kind, default, read) in expect.items():
         key = keys[name]
         assert (key.type, key.default, key.read, key.env) == (kind, default, read, None)
