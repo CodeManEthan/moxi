@@ -1402,7 +1402,7 @@ def test_the_form_in_submit_mode_takes_catalog_rows(ui_page, ui_width_check):
     expect(_field(form, "permission_mode")).to_contain_text("permission posture")
     ui_width_check(ui_page)
     form.get_by_role("button", name="Launch").click()
-    ui_page.wait_for_function("window.__submitted !== undefined")
+    ui_page.wait_for_function("() => window.__submitted !== undefined")
     assert ui_page.evaluate("window.__submitted") == {
         "model": "opus", "add_dir": ["/srv/b"], "remote_control": "here", "prompt_file": None,
         "permission_mode": "default"}
