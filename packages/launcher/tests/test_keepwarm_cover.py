@@ -132,7 +132,7 @@ def test_on_is_the_launch_value_or_cover(conn):
 
 
 def test_the_record_adds_no_store_step():
-    assert len(store.STEPS) == 2
+    assert len(store.STEPS) == 3
 
 
 # -- the ask's first read ------------------------------------------------------------------

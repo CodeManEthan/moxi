@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Crash discovery: before every slot launch, a slot slots reads crashed (its run was
+  going when its tmux server went down) whose last launch is a launcher slot launch with
+  a session no one has taken up since is reserved for that session (an open-ended hold
+  `park-<id>` and a `crash` park entry), and a crashed slot with nothing to restore is
+  settled. A launch naming a reserved slot is refused `held by park-<id>`, with the hint
+  `moxi launcher restore N` or `moxi launcher unpark N`. Every slot placement tells slots
+  whether the harness's exit status can be trusted: not for Codex, which ends with status
+  0 on SIGHUP and SIGTERM alike.
 - The launch log moves to schema version 3, adding `park_entries`: one row per session
   that belongs back in a slot, at most one open per slot. Open entries are never pruned;
   closed ones follow `records.keep_days`. A park lock (`park.lock` in the state

@@ -1,9 +1,10 @@
-"""Park entries kept true to slots: the park lock and reconcile.
+"""Park entries kept true to slots: the park lock, reconcile and crash discovery.
 
-**The park lock** is `park.lock` in the launcher's state directory. Its file names the
-holder: the pid on the first line (as `moxi.files.lock` writes it), the holder's kind on
-the second, and `done` on a third once the holder's reconcile and crash discovery are
-done. `park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold
+**The park lock** is `park.lock` in the launcher's state directory, taken with
+`moxi.files.lock`, which writes the holder's pid there. Beside it, `park.holder` names
+the holder: its pid on the first line, its kind on the second, and `done` on a third once
+the holder's reconcile and crash discovery are done. It counts only while its pid is the
+lock file's. `park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold
 it for their whole run; a launch's own crash discovery (`discovery`) holds it only around
 discovery. A second whole-run holder waits `LOCK_WAIT_S`, then is refused `park or restore
 is running`. A launch that meets a whole-run holder whose `done` mark is written proceeds
@@ -15,10 +16,22 @@ unchecked.
 An open entry whose slot does not carry its holder's hold takes it again, with `expect`
 set to the entry's launch; a refusal closes the entry `dropped` and names the session's
 `moxi launcher resume` command. A `park-*` hold with no open entry behind it is released.
+
+**Crash discovery** turns crashed slots (slots' `Slot.crashed`) into park entries before
+the launcher places a session in a slot, and at the start of each whole-run holder. A
+crashed slot with no open entry is a candidate when its last launch is a launcher slot
+launch, not failed, with a session id, whose session is not live and that no later launch
+holds (or whose liveness can't be read). A candidate is reserved (an open-ended hold
+`park-<id>`, `expect` set to its launch), given a `crash` entry, then settled, since the
+reservation now keeps it. A crashed slot with nothing to restore is settled with the
+reason; one another holder holds is left crashed, with no entry, for a later discovery.
+Discovery writes only entries, reservations and settles: it never starts a session.
+`discover(..., write=False)` is its read-only form, for dry runs and the page.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -32,10 +45,14 @@ from typing import Any
 from moxi import files
 from moxi.paths import Layout
 
-from . import catalog, store
+from . import catalog, first, slots, store
+
+log = logging.getLogger("moxi.launcher.parks")
 
 #: The park lock's file, in the launcher's state directory.
 LOCK_FILE = "park.lock"
+#: The file beside it that names the holder's kind and whether it is done.
+HOLDER_FILE = "park.holder"
 #: Who may hold the park lock: the verbs that hold it for their whole run, then a
 #: launch's crash discovery.
 LOCK_KINDS = ("park", "restore", "unpark", "resume", "discovery")
@@ -47,6 +64,8 @@ LOCK_WAIT_S = 10.0
 DONE = "done"
 #: How often a launch's discovery looks at the lock again while it waits, in seconds.
 POLL_S = 0.2
+#: The default `turns`: turns' API looked up when discovery runs.
+LOOK = object()
 
 # The kind this process holds the park lock as, or None. A launch inside a process that
 # holds it (restore's own resumes, a parked session's resume) runs no discovery of its
@@ -84,24 +103,38 @@ def lock_path(env: Mapping[str, str] | None = None) -> Path:
     return Layout("launcher").state_dir(env) / LOCK_FILE
 
 
-def read_holder(path: Path) -> LockHolder | None:
-    """The holder the lock file names, or None for an empty or unreadable file."""
+def _holder_path(path: Path) -> Path:
+    return path.with_name(HOLDER_FILE)
+
+
+def _lock_pid(path: Path) -> int | None:
     try:
-        lines = path.read_text(encoding="ascii", errors="replace").splitlines()
+        with open(path, "rb") as fh:
+            first_line = fh.readline(32).strip()
     except OSError:
         return None
-    if not lines or not lines[0].strip():
+    return int(first_line) if first_line.isdigit() else None
+
+
+def read_holder(path: Path) -> LockHolder | None:
+    """The holder of lock file `path`: its pid, and the kind and done mark its holder
+    file gives when that file names the same pid. None when the lock file names none."""
+    pid = _lock_pid(path)
+    if pid is None:
         return None
-    pid = int(lines[0]) if lines[0].strip().isdigit() else None
+    try:
+        lines = _holder_path(path).read_text(encoding="ascii", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    if not lines or lines[0].strip() != str(pid):
+        return LockHolder(pid, None, done=False)
     kind = lines[1].strip() if len(lines) > 1 and lines[1].strip() in LOCK_KINDS else None
-    return LockHolder(pid, kind, len(lines) > 2 and lines[2].strip() == DONE)
+    return LockHolder(pid, kind, done=len(lines) > 2 and lines[2].strip() == DONE)
 
 
 def _write_holder(path: Path, kind: str, *, done: bool = False) -> None:
     text = f"{os.getpid()}\n{kind}\n" + (f"{DONE}\n" if done else "")
-    with open(path, "r+", encoding="ascii") as fh:
-        fh.write(text)
-        fh.truncate()
+    files.atomic_write(_holder_path(path), text)
 
 
 def held_here() -> str | None:
@@ -248,6 +281,176 @@ def reconcile(conn: sqlite3.Connection, api: Any) -> list[Note]:
     return notes
 
 
-__all__ = ["DONE", "LOCK_FILE", "LOCK_KINDS", "LOCK_WAIT_S", "WHOLE_KINDS", "LockHolder",
+# -- crash discovery -----------------------------------------------------------------------
+
+#: What discovery does with a crashed slot: `reserve` it for its session, `settle` it
+#: (nothing to restore), or leave it (`held` by another holder; `failed` when slots
+#: refused or could not answer).
+ACTIONS = ("reserve", "settle", "held", "failed")
+
+
+@dataclass(frozen=True)
+class Found:
+    """One crashed slot discovery met, what it does (or, read-only, would do) with it, and
+    why. `entry` is the crash entry written for a reserved slot."""
+
+    slot: int
+    action: str
+    why: str
+    request_id: str | None = None
+    session_id: str | None = None
+    harness: str | None = None
+    unread: str | None = None
+    entry: store.ParkEntry | None = None
+
+    def line(self) -> str:
+        who = f"session {self.session_id}" if self.session_id else "no session"
+        return f"slot {self.slot}: crashed, {who}: {self.action}: {self.why}"
+
+
+def _session_of(conn: sqlite3.Connection, slot: Any,
+                turns: Any | None) -> tuple[str, str, Any, str | None, str | None]:
+    """What a crashed slot's last launch says: `(action, why, row, session id, unread)`,
+    the action `reserve` or `settle`."""
+    from . import resume
+
+    meta = slot.last.meta if slot.last is not None else None
+    rid = meta.get("request_id") if isinstance(meta, dict) else None
+    row = store.get(conn, rid) if isinstance(rid, str) and rid else None
+    if row is None:
+        return "settle", "its last launch is not the launcher's", None, None, None
+    if row.target != "slot":
+        return "settle", f"launch {row.request_id} was not a slot launch", row, None, None
+    if row.state == "failed":
+        return "settle", f"launch {row.request_id} failed", row, None, None
+    known = store.session_ids(conn, row.request_id)
+    newest = known[-1][0] if known else row.session_id
+    if not newest:
+        return "settle", f"launch {row.request_id} has no session id", row, None, None
+    holder = store.resolve(conn, newest)
+    if holder is not None and holder.request_id != row.request_id:
+        return ("settle", f"launch {holder.request_id} took up session {newest} since",
+                row, newest, None)
+    live, unread = resume.liveness(row, newest, turns)
+    if live:
+        return "settle", f"session {newest} is live", row, newest, None
+    if live is None:
+        return "reserve", f"session {newest}'s liveness can't be read", row, newest, unread
+    return "reserve", f"session {newest} was running when its server went down", row, \
+        newest, None
+
+
+def discover(conn: sqlite3.Connection, api: Any, *, by: str, write: bool = True,
+             turns: Any = LOOK, listing: Any = None) -> list[Found]:
+    """Crash discovery over every registered slot slots reads crashed. With
+    `write=False` it writes nothing and says what it would do. Without slots, or with no
+    tmux server answering (nothing reads crashed), it finds nothing."""
+    if api is None:
+        return []
+    listing = listing if listing is not None else api.list_slots()
+    if not listing.ok:
+        return []
+    park_id: str | None = None
+    found: list[Found] = []
+    for slot in listing.slots:
+        if not getattr(slot, "crashed", False) or store.open_entry(conn, slot.number):
+            continue
+        if turns is LOOK:
+            turns = first.turns_api(quiet=True)
+        action, why, row, session_id, unread = _session_of(conn, slot, turns)
+        held = slot.hold
+        if action == "reserve" and held is not None:
+            action, why = "held", f"held by {held.holder}; discovery tries again once it ends"
+        seen = Found(slot.number, action, why, row.request_id if row else None, session_id,
+                     row.harness if row else None, unread)
+        if write:
+            if park_id is None and action == "reserve":
+                park_id = store.new_park_id()
+            seen = _act(conn, api, seen, park_id, by)
+        found.append(seen)
+    return found
+
+
+def _act(conn: sqlite3.Connection, api: Any, seen: Found, park_id: str | None,
+         by: str) -> Found:
+    """Write what discovery found for one slot: the reservation, the entry and the settle
+    for `reserve`, the settle for `settle`."""
+    from dataclasses import replace
+
+    try:
+        if seen.action == "settle":
+            api.settle(slot=seen.slot, why=_settled_words(seen.why))
+            return seen
+        if seen.action != "reserve" or park_id is None:
+            return seen
+        holder = store.park_holder(park_id)
+        api.hold(seen.slot, holder, None, expect=seen.request_id)
+    except api.Refused as exc:
+        action = "held" if exc.reason == "held" else "failed"
+        return replace(seen, action=action, why=f"slots refused: {exc.words}")
+    except (api.TryAgain, api.TmuxError, api.RegistryError) as exc:
+        return replace(seen, action="failed", why=f"slots could not answer: {exc}")
+    made = store.add_entry(conn, park_id=park_id, kind="crash", by=by, slot=seen.slot,
+                           request_id=seen.request_id, session_id=seen.session_id,
+                           harness=seen.harness, outcome="crashed",
+                           detail=seen.unread or seen.why)
+    try:
+        api.settle(slot=seen.slot, why=f"reserved by {holder}")
+    except (api.Refused, api.TryAgain, api.TmuxError, api.RegistryError) as exc:
+        log.warning("slot %s was reserved but not settled: %s", seen.slot, exc)
+    return replace(seen, entry=made)
+
+
+def _settled_words(why: str) -> str:
+    text = "".join(ch if ch.isprintable() else " " for ch in why)
+    return text[:200] or "nothing to restore"
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """What a whole-run holder's reconcile and discovery did."""
+
+    notes: tuple[Note, ...]
+    found: tuple[Found, ...]
+
+    def lines(self) -> list[str]:
+        return [n.line() for n in self.notes] + [f.line() for f in self.found]
+
+
+@contextmanager
+def whole(kind: str, conn: sqlite3.Connection, api: Any, *, by: str,
+          env: Mapping[str, str] | None = None, turns: Any = LOOK,
+          wait_s: float = LOCK_WAIT_S) -> Iterator[Prepared]:
+    """Hold the park lock as whole-run holder `kind`, run reconcile and crash discovery,
+    mark the lock done, and hold it for the rest of the block."""
+    if kind not in WHOLE_KINDS:
+        raise ValueError(f"not a whole-run holder: {kind!r}")
+    with lock(kind, env=env, wait_s=wait_s) as path:
+        notes = reconcile(conn, api)
+        found = discover(conn, api, by=by, turns=turns)
+        mark_done(path)
+        yield Prepared(tuple(notes), tuple(found))
+
+
+def discover_before_launch(*, by: str, env: Mapping[str, str] | None = None,
+                           turns: Any = LOOK, wait_s: float = LOCK_WAIT_S) -> list[Found]:
+    """A slot launch's own crash discovery, under the park lock as `discovery`. Nothing
+    when a whole-run holder that has run discovery holds the lock; `ParkRunning` when it
+    stays held past the wait otherwise. Without slots it does nothing."""
+    api = slots.api()
+    if api is None:
+        return []
+    with discovery(env=env, wait_s=wait_s) as run_it:
+        if not run_it:
+            return []
+        conn = store.connect(env=env)
+        try:
+            return discover(conn, api, by=by, turns=turns)
+        finally:
+            conn.close()
+
+
+__all__ = ["ACTIONS", "DONE", "HOLDER_FILE", "LOOK", "Found", "Prepared", "discover", "discover_before_launch",
+           "whole", "LOCK_FILE", "LOCK_KINDS", "LOCK_WAIT_S", "WHOLE_KINDS", "LockHolder",
            "Note", "ParkRunning", "discovery", "held_here", "lock", "lock_path", "mark_done",
            "read_holder", "reconcile", "resume_command"]

@@ -429,6 +429,11 @@ class Headless(Target):
                             f"to {output}")
 
 
+#: The harnesses whose exit status in a slot says nothing of how they ended: slots is
+#: told so at every placement, and reads their runs by its 120 s window alone.
+UNTRUSTED_STATUS = ("codex",)
+
+
 class Slot(Target):
     """A tmux slot, through slots: the launch claims a slot and starts there, its startup
     screens are watched and those it is set to answer are answered, it waits for ready,
@@ -473,7 +478,7 @@ class Slot(Target):
                                 f"moxi slots create {found.number} makes it")]
         if found.launchable or _own_hold(found, getattr(resolved, "hold", None)):
             return []
-        if found.state == "missing":
+        if found.state == "missing" and found.hold is None:
             return [SlotMissing(named, f"slot {named} is missing: its tmux session is gone",
                                 f"recreate it with moxi slots create {named}")]
         # As slots' own refusal at start: an occupied slot names its last launch, even when
@@ -485,9 +490,12 @@ class Slot(Target):
         else:
             state, holder = found.state or "not launchable", None
         by = f" by {holder}" if holder else ""
-        return [SlotTaken(named, f"slot {named} is {state}{by}",
-                          "name another slot, or leave out the slot to take the lowest "
-                          "free one", holder)]
+        hint = "name another slot, or leave out the slot to take the lowest free one"
+        if state == "held" and found.hold.holder.startswith(store.HOLDER_PREFIX):
+            # A park reservation: the slot is kept for the session parked or crashed in it.
+            hint = (f"moxi launcher restore {named} brings its session back, or moxi "
+                    f"launcher unpark {named} gives the slot up")
+        return [SlotTaken(named, f"slot {named} is {state}{by}", hint, holder)]
 
     def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
         # slots' trampoline finds the command on the child's PATH; a harness that is not
@@ -507,8 +515,11 @@ class Slot(Target):
         notes = _seed(conn, rid, launch, current)
         meta = {"request_id": rid, "session_id": row.session_id if row else None,
                 "chain": launch.chain or rid}
+        # Codex ends with status 0 on SIGHUP and SIGTERM alike, so its exit status can't
+        # tell slots a clean end from a kill.
         place = dict(env=dict(launch.env), cwd=launch.cwd, label=f"launcher:{rid}",
-                     meta=meta, hold=launch.hold)
+                     meta=meta, hold=launch.hold,
+                     status_trusted=launch.composition.harness not in UNTRUSTED_STATUS)
         try:
             if launch.respawn:
                 if named is None:

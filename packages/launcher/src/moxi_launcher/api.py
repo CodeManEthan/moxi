@@ -12,14 +12,17 @@
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch or a resume, its values the stored row's).
 
-`launch` runs one launch in this order: resolve its values (`presets.resolve`), check the
+`launch` runs one launch in this order: resolve its values (`presets.resolve`), for a slot
+launch run crash discovery (`parks.discover_before_launch`, which may reserve crashed
+slots and settle others, or refuse `park or restore is running`), check the
 live state (`check`), compose it (`compose.build`, the call `preview` makes), find the
 command its target runs, write its row to the launch log (state `spawning`), then start it
 in its target (`targets`), which records the process and moves the row on. The session's
 readiness and its first turn come after, from the ready recorder and the first-turn
 sender.
 
-**A refusal before the row is written writes nothing**: `launch` raises it, a
+**A refusal before the row is written writes no row** (crash discovery's entries, holds
+and settles stand): `launch` raises it, a
 `catalog.Refused` (or one of the launch log's own, `store.TooLarge`, `store.SessionTaken`,
 `store.Busy`), each with the `exit_code` the command exits with (`exit_code` reads it).
 **After the row is written the row says what happened**: `launch` returns a
@@ -112,8 +115,8 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import (catalog, compose, first, handoffs, identity, live, names, presets, slots, store,
-               targets)
+from . import (catalog, compose, first, handoffs, identity, live, names, parks, presets, slots,
+               store, targets)
 from .compose import Composition, common
 from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
@@ -270,6 +273,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
     if known is not None:
         return _stored(known)
     resolved = _resolve(request, env)
+    if resolved.target == "slot":
+        # Crashed slots become park entries with reservations before any slot is chosen,
+        # so the target's check and slots' choice both see them held.
+        parks.discover_before_launch(by=_actor(request, caller), env=env)
     refusals = _check(resolved, caller)
     if refusals:
         raise refusals[0]

@@ -4141,6 +4141,7 @@ launcher	packages/launcher/tests/test_compose_env.py	-	name	test_the_scrub_leave
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.endswith("_") for name in found.session_env)	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",	keep	set	set
+launcher	packages/launcher/tests/test_crash_discovery.py	assert [n.what for n in prepared.notes] == ["released"]	keep	released	released
 launcher	packages/launcher/tests/test_doctor.py	-	name	test_a_system_that_cannot_read_an_environment_is_off	test_a_system_that_cannot_read_an_env_is_off
 launcher	packages/launcher/tests/test_doctor.py	assert set(rows) == {"catalog.claude", "catalog.codex"}	keep	set	set
 launcher	packages/launcher/tests/test_doctor.py	cache.ask	name	environ	env
