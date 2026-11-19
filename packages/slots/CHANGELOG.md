@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `start(None, ..., create=True)` takes the lowest registered slot with no session
+  running that it may use, a missing one included when it has no hold but the caller's,
+  and makes that slot's session again with a new run window. Its name, hold and last
+  launch stay. A new number is made only when no registered slot takes the launch, so
+  after a reboot launches no longer climb past the missing numbers. Without `create`,
+  `start(None)` still skips missing slots.
+
 - A hold can last until its holder releases it: `hold(slot, holder)` with no `seconds`,
   or `moxi slots hold N --holder H --until-released`. Its `Hold.until` is None, and
   `list` and `show` print it as `until released by hand`. A missing slot can now be held

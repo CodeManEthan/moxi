@@ -16,6 +16,12 @@ ended, and its id is kept.
 The rule: no slots call kills a live run pane. `respawn` refuses a live one
 (`live-pane`), and `respawn-pane` runs without `-k`: a session ends through its own exit.
 
+The rule for a start that names no slot and may create one: it takes the lowest
+registered slot with no session running that it may use (free or ended and launchable,
+or missing with no hold but the caller's), making a missing one's session again, and
+makes a new number only when no registered slot takes it. A remade slot gets a new run
+window, since its old pane went with its session.
+
 Neither call needs an attached terminal, so a timer can launch into a slot.
 """
 
@@ -66,6 +72,16 @@ def _taken(found: Slot, number: int, hold: str | None, *, occupied: str) -> None
         raise Refused("held", f"slot {number} is held by {found.hold.holder} "
                               f"{until_words(found.hold)}",
                       holder=_holder_of(found, "held"))
+
+
+def _takes(found: Slot, hold: str | None, *, create: bool) -> bool:
+    """Whether a start that names no slot may take registered slot `found`: one that is
+    launchable for `hold`, or, with `create`, a missing one whose hold is absent or
+    `hold`'s, which the start makes again."""
+    if launchable(found.state, found.hold, hold):
+        return True
+    return create and found.state == MISSING and (found.hold is None
+                                                   or found.hold.holder == hold)
 
 
 def _registered(found: Slot | None, number: int, reg) -> Slot:
@@ -158,8 +174,11 @@ def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str]
     """Run `argv` in a slot with exactly `env` (and the pane's terminal names) in `cwd`;
     return once it has started, or has not.
 
-    `slot=None, create=True`: the lowest launchable slot, or a new one when none is.
-    `slot=None` alone: the lowest launchable slot, else refused `no-free-slot`. A number
+    `slot=None, create=True`: the lowest registered slot that takes the launch, either
+    launchable or missing with no hold but the caller's (made again, keeping its name,
+    hold and last launch, with a new run window); a new number only when none does.
+    `slot=None` alone: the lowest launchable slot, else refused `no-free-slot`; it never
+    makes a session, so it skips missing slots. A number
     or name: that slot only, never created here; refused `no-slot`, `missing`,
     `occupied` (holder: the last launch's label and meta) or `held` (holder: the hold's
     holder and until). `create=True` with a named slot is a usage error: create it
@@ -180,9 +199,16 @@ def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str]
         listing = panes.join(reg, seen)
         made = False
         if slot is None:
-            found = next((s for s in listing.slots
-                          if launchable(s.state, s.hold, hold)), None)
-            if found is not None:
+            found = next((s for s in listing.slots if _takes(s, hold, create=create)),
+                         None)
+            if found is not None and found.state == MISSING:
+                number = found.number
+                make_session(number)
+                reg.rows[number].created = time.time()
+                made = True
+                found = None
+                seen = panes.read()
+            elif found is not None:
                 number = found.number
             elif create:
                 number = _lowest_free(reg, listing)
