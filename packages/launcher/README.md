@@ -707,8 +707,8 @@ Set with `moxi config set launcher <key> <value>`:
   directs.
 - `keep_warm.directing_texts`: the nudges for a covered director with no open hold, in
   order, the last repeating; the agents at work are named after each.
-- `records.keep_days` (90): how long ended runs, their events, exits and released holds
-  are kept.
+- `records.keep_days` (90): how long ended runs, their events, exits, released holds and
+  closed park entries are kept. Open park entries are never deleted by age.
 - `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
   the template a launch's session name is made from, and a project's own by project key
   (see "The session's name").

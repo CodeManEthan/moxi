@@ -245,7 +245,7 @@ elsewhere = "The session-name template is edited in Home's Options."
 [records.keep_days]
 type = "int"
 default = 90
-doc = "How many days ended runs, their events and exits, and released holds are kept."
+doc = "How many days ended runs, their events and exits, released holds and closed park entries are kept."
 read = "use"
 label = "Keep run records for"
 line = "Ended runs, their events and exits, and released holds."

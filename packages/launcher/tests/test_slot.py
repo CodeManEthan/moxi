@@ -1371,8 +1371,8 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "list_slots", "show", "create", "start", "respawn",
-                 "read_screen", "answer_screen"):
+    for name in ("supported", "list_slots", "show", "create", "start", "respawn", "hold",
+                 "release", "settle", "read_screen", "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [

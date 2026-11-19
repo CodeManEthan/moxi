@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The launch log moves to schema version 3, adding `park_entries`: one row per session
+  that belongs back in a slot, at most one open per slot. Open entries are never pruned;
+  closed ones follow `records.keep_days`. A park lock (`park.lock` in the state
+  directory) names its holder's kind and pid. Needs moxi-slots 0.1.1 or later.
 - Three more Claude Code screens are on the startup list with no setting, so a slot launch
   held on one fails at once, `screen-not-answered`, naming the screen: the first-run
   theme picker and welcome screen (the line says to run `claude` once in a terminal with

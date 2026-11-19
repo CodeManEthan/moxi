@@ -3681,6 +3681,8 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/parks.py	back), `released` (a park hold with no entry) or `unread` (slots could not say)."""	keep	released	released
+launcher	packages/launcher/src/moxi_launcher/parks.py	notes.append(Note("released", slot.number,	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	_agents_folder	_agents_dir
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	folder_place	dir_place
@@ -3856,6 +3858,8 @@ launcher	packages/launcher/tests/launcher_fake_slots.py	name="CLAUDE_TRUST_FOLDE
 launcher	packages/launcher/tests/launcher_fake_slots.py	record	name	out	fh
 launcher	packages/launcher/tests/launcher_fake_slots.py	record("show", slot=slot)	keep	show	show
 launcher	packages/launcher/tests/launcher_fake_slots.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	hold, `changed` when `expect` is not the slot's last launch's `request_id`; otherwise it	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	raise Refused("changed", f"slot {slot}'s last launch is "	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_turns.py	#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module	use	moxi_launcher.first.TURNS_SEAM	moxi_launcher.first.TURNS_ENV
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `reconnect`: `ok`, or `refused` (nothing serves any more: `Lost("unanswered")`).	keep	refused	refused
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `sessions`: the live sessions `find` finds, by session id, each `{harness, endpoint_pid,	keep	find	find
@@ -4579,6 +4583,7 @@ launcher	packages/launcher/tests/test_page_waits.py	assert {c["session_id"] for 
 launcher	packages/launcher/tests/test_page_waits.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
+launcher	packages/launcher/tests/test_parks.py	assert [(n.what, n.slot) for n in notes] == [("released", 2)]	keep	released	released
 launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
 launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir
 launcher	packages/launcher/tests/test_presets.py	-	name	test_the_callers_directory_gets_its_project_key	test_the_callers_dir_gets_its_project_key
@@ -4824,6 +4829,7 @@ launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_slot.py	assert len(off) == 6 and not any(e.answer for e in off)	keep	any	any
 launcher	packages/launcher/tests/test_slot.py	assert set(startup.HINTS) == set(names)	keep	set	set
 launcher	packages/launcher/tests/test_slot.py	for name in ("supported", "list_slots", "show", "create", "start", "respawn",	keep	show	show
+launcher	packages/launcher/tests/test_slot.py	for name in ("supported", "list_slots", "show", "create", "start", "respawn", "hold",	keep	show	show
 launcher	packages/launcher/tests/test_state.py	"exited", "held", "expired", "not-held", "stopped",	keep	expired	expired
 launcher	packages/launcher/tests/test_state.py	@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "nudged",	keep	compacted	compacted
 launcher	packages/launcher/tests/test_state.py	assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"	keep	stale	stale
@@ -4858,7 +4864,7 @@ launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env
 launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	conn	name	connection	conn
 launcher	packages/launcher/tests/test_store_v2.py	for order in set(itertools.permutations(writes)):	keep	set	set
-launcher	packages/launcher/tests/test_store_v2.py	test_a_newer_store_than_version_2_is_refused	name	raw	conn
+launcher	packages/launcher/tests/test_store_v2.py	test_a_newer_store_than_this_launchers_is_refused	name	raw	conn
 launcher	packages/launcher/tests/test_store_v2.py	test_a_step_that_fails_leaves_the_version_1_log_whole	name	raw	conn
 launcher	packages/launcher/tests/test_store_v2.py	test_a_version_1_log_is_carried_forward_with_no_row_lost	name	raw	raw_conn
 launcher	packages/launcher/tests/test_store_v2.py	version_1	name	raw	conn
