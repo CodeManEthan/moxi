@@ -327,8 +327,11 @@ bottom:
   dim line each while it holds: a read that failed and why, and an address the page
   doesn't have.
 
-**An agent row.** Line one is the name, where it runs (with launcher), and at the right
-the row's fact. Line two says what kind of waiting it is:
+**An agent row.** Line one is the name, where it works, and at the right the row's fact.
+Where it works is launcher's where for a session launcher runs (`slot 3 · atlas-api`);
+else, with sessions, the session's folder, when it started and its harness as sessions
+has them (`atlas-api · started today 12:45 · claude`); else nothing. Line two says what
+kind of waiting it is:
 
 | case | fact | line two | acts |
 |---|---|---|---|
@@ -351,15 +354,17 @@ narrow.
 **An agent opened** (pressing the row, `Message` or `Reply`) speaks for one address: the
 row's lead, or the address line you pressed. In order, each line only when its fact is
 there: `Address` (each of the name's addresses, to press); `Session`, launcher's name for
-the session and its harness, with `Sessions`; `Cache`, the cache fact in full, with
-`Cache`; the mail in the books for that address, `Held` (running) or `Waiting` (not
-running) and `Unread` (in its session but not yet read), each message with its time,
-author and text cut at four lines with `Show all`, and `Take back` on yours while the
-books can still take it back; `Waits on`, each name it waits on for one reply, with
-`Thread`; `Directs` and `Directed by`; the send box; `All mail with <name>`, every message
-by or to that address, which takes the place of the lines and the box; and `Details`,
-folded: the address in full, adapter, tier, when it was bound, the session id with `Copy
-id`, and `A name is held by one session at a time.`
+the session and its harness, or, where launcher gives none, the name typed for it in the
+harness (else its folder), when it started and its harness as sessions has them, with
+`Sessions` (sessions is asked again each time the row is opened, so a name typed since
+shows); `Cache`, the cache fact in full, with `Cache`; the mail in the books for that
+address, `Held` (running) or `Waiting` (not running) and `Unread` (in its session but not
+yet read), each message with its time, author and text cut at four lines with `Show all`,
+and `Take back` on yours while the books can still take it back; `Waits on`, each name it
+waits on for one reply, with `Thread`; `Directs` and `Directed by`; the send box; `All mail
+with <name>`, every message by or to that address, which takes the place of the lines and
+the box; and `Details`, folded: the address in full, adapter, tier, when it was bound, the
+session id with `Copy id`, and `A name is held by one session at a time.`
 
 **The send box** writes to one address as you. Its controls are on one line: `From
 operator`; `Reply wanted`, one of four (`no reply`, `only if it has something to add`,
@@ -431,15 +436,17 @@ reply.`
 **What each other module adds.** The page needs only comms and the shell; each module it
 reads adds to it when installed:
 
-- **launcher**: where each session runs, the `Session` line, launcher's cache words, the
-  row for a warm session waiting on other agents with nothing keeping it warm, and `Keep
-  warm` on it when launcher can keep it warm. A press is disabled until launcher answers and its next reading comes, or
-  for 20 s; a refusal leads line three with `Not kept warm: <why>` until then. Without
-  launcher: none of these, the cache fact from comms alone, and the empty state gives the
-  command instead of `Launch one from Home`.
+- **launcher**: where each session it runs works, its `Session` line, launcher's cache
+  words, the row for a warm session waiting on other agents with nothing keeping it warm,
+  and `Keep warm` on it when launcher can keep it warm. A press is disabled until launcher
+  answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
+  kept warm: <why>` until then. Without launcher: none of these, the cache fact from comms
+  alone, and the empty state gives the command instead of `Launch one from Home`.
 - **cache**: the cache fact, `Deliver`, the `held until its next turn` words and the
   `Cache` link. Without it, unread mail reads `not read yet`.
-- **sessions**: the `Sessions` link on the `Session` line.
+- **sessions**: where a session works and its `Session` line when launcher gives none (on
+  an install without launcher, every session), and the `Sessions` link on the `Session`
+  line. Without sessions, a row launcher doesn't run shows no where and no `Session` line.
 
 Not on the page yet: launching an agent from a name with mail (`Launch`), and whether a
 session's turn is open.
