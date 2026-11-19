@@ -7,7 +7,7 @@ import {
   panelFields, panelGroups, picksOnly, PLACE_ROWS, rowLabel, runsIn, shippedValue, summaryOf, valueNow, valueWords,
   withOption,
 } from "../src/options-model.ts";
-import { launchRequest } from "../src/prompt-model.ts";
+import { handoffOf, launchRequest } from "../src/prompt-model.ts";
 
 /** A catalog field as the page server sends one, shown and typed unless `extra` says not. */
 const field = (name, group, sub, extra = {}) => ({
@@ -316,11 +316,14 @@ test("a value set in the panel goes in the launch request with the rows the piec
   assert.deepEqual([body.values.brief, body.values.cwd, body.values.target], ["do it", "~", "headless"]);
 });
 
-test("nothing set in the panel makes a first-turn row part of the request", () => {
+test("nothing set in the panel changes the first turn: the handoff sent is the one shown", () => {
   const { form, fields } = filled(FIELDS, { handoff: "/srv/handoff.md" });
   const options = withOption({}, fields.find((item) => item.name === "native_name"), "helper");
   const body = launchRequest(fields, form, { ...options, cwd: "~" }, { target: "terminal" });
-  assert.ok(!("handoff" in body.values) && body.leave_out.includes("handoff"), body);
+  const plain = launchRequest(fields, form, { cwd: "~" }, { target: "terminal" });
+  assert.equal(handoffOf(fields, { ...options, cwd: "~" }), "/srv/handoff.md");
+  assert.equal(body.values.handoff, "/srv/handoff.md");
+  assert.equal(plain.values.handoff, body.values.handoff);
   assert.ok(!("brief" in body.values), body);
 });
 

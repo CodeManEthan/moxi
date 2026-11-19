@@ -171,3 +171,25 @@ test("without launcher: no Session line", () => {
   const r = roster([bound("planner")]);
   assert.deepEqual(opened(r, mail(), "planner", { hasSessions: true }).before, []);
 });
+
+test("without launcher, sessions' Session line: its words, linked to its transcript", () => {
+  const r = roster([bound("reviewer")]);
+  const session = { value: "reviewer · started today 15:50 · claude", route: "claude/s-reviewer" };
+  assert.deepEqual(opened(r, mail(), "reviewer", { hasSessions: true, session }).before, [
+    { key: "session", label: "Session", value: "reviewer · started today 15:50 · claude", tail: null,
+      link: { kind: "sessions", route: "claude/s-reviewer" } },
+  ]);
+  // Nothing from sessions: no line.
+  assert.deepEqual(opened(r, mail(), "reviewer", { hasSessions: true, session: null }).before, []);
+});
+
+test("launcher's Session line wins over sessions'; an unbound address takes neither", () => {
+  const r = roster([bound("planner")]);
+  const launched = join(r, [entry("planner")]);
+  const session = { value: "atlas-api · started today 12:45 · claude", route: "claude/s-planner" };
+  const got = opened(r, mail(), "planner", { hasSessions: true, session }, launched);
+  assert.deepEqual(got.before.filter((line) => line.key === "session").map((line) => line.value),
+                   ["planner's session · claude"]);
+  const idle = roster([row("docs-writer")], [{ qualified: "docs-writer", count: 1, since: at("17:40") }]);
+  assert.deepEqual(opened(idle, mail(), "docs-writer", { hasSessions: true, session }).before, []);
+});

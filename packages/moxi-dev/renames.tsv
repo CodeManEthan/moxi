@@ -1251,6 +1251,7 @@ comms	packages/comms/src/moxi_comms/page.py	"delivered": lb.Out("list", items=lb
 comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"earlier": lb.Out("table", nullable=True, items={	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"expired": lb.Out("list", items=lb.Out("string")),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	"harness": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=100)},	keep	required	required
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=500)},	keep	required	required
@@ -1265,6 +1266,7 @@ comms	packages/comms/src/moxi_comms/page.py	"reply_to": lb.Out("string", nullabl
 comms	packages/comms/src/moxi_comms/page.py	"scope": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"session_id": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"tier": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"via": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	#: What `/api/take-back` answers: the verb's `outcome` (`deleted`, `refused`, `offline`,	keep	refused	refused
 comms	packages/comms/src/moxi_comms/page.py	#: `expired` or `reserved`. `held` is the queue row's hold for the next turn; `takeable`	keep	expired	expired
 comms	packages/comms/src/moxi_comms/page.py	#: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted	keep	refused	refused
@@ -1717,6 +1719,7 @@ comms	packages/comms/tests/test_books.py	test_delete_racing_open_digest_ends_wit
 comms	packages/comms/tests/test_books.py	test_the_books_serve_many_threads_on_one_connection.work	name	e	exc
 comms	packages/comms/tests/test_books.py	{"id": "102", "reason": "expired"}]	keep	expired	expired
 comms	packages/comms/tests/test_browser_page.py	"folder": project},	keep	folder	folder
+comms	packages/comms/tests/test_browser_page.py	"stale": False, "ready": None, "at": time.time()},	keep	stale	stale
 comms	packages/comms/tests/test_browser_page.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
 comms	packages/comms/tests/test_browser_page.py	return rig.record.post_as_identity(by, rig.names_channel,	keep	record	record
 comms	packages/comms/tests/test_browser_page.py	self.answer: dict = {"refused": None}	keep	refused	refused
@@ -1735,6 +1738,8 @@ comms	packages/comms/tests/test_browser_roster.py	expect(roster).to_have_attribu
 comms	packages/comms/tests/test_browser_roster.py	expect(rows(roster)).to_have_count(4, timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_browser_roster.py	shell	name	directory	clock_dir
+comms	packages/comms/tests/test_browser_session_where.py	assert not any(planner.session_id in url for url in asked), asked	keep	any	any
+comms	packages/comms/tests/test_browser_session_where.py	wait_for(lambda: any(SESSIONS_READ in url and session_id in url for url in asked), 10,	keep	any	any
 comms	packages/comms/tests/test_cache_clock.py	(tmp_path / "work").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_cache_clock.py	-	name	test_cache_source_is_the_sessions_directory_under_codex_home	test_cache_source_is_the_sessions_dir_under_codex_home
 comms	packages/comms/tests/test_cache_clock.py	@pytest.mark.parametrize("bad", ["above", "unparseable"])	keep	bad	bad
@@ -3957,6 +3962,7 @@ launcher	packages/launcher/tests/test_browser_home_options.py	test_a_row_found_a
 launcher	packages/launcher/tests/test_browser_home_options.py	test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag_once	name	folder	project_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	-	name	folder	work_dir_fixture
 launcher	packages/launcher/tests/test_browser_home_plus.py	context	name	folder	work_dir
+launcher	packages/launcher/tests/test_browser_home_plus.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), actor="planner")	use	actor=	by=
 launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), actor=other)	use	actor=	by=
 launcher	packages/launcher/tests/test_browser_home_plus.py	sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), actor=kit.actor(shell))	use	actor=	by=

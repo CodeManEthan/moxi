@@ -87,6 +87,20 @@ test("a preset's place is a seat's home, else its project, else its folder", () 
   assert.equal(presetPlace(listed(["seat", "s", null, { home: "./here" }])[0], true), null);
 });
 
+test("a preset that sets scratch puts the line on Scratch, with projects or without", () => {
+  const [seat, project, off] = listed(["seat", "tryout", null, { scratch: "true", model: "haiku" }],
+                                      ["project", "sandbox", null, { scratch: "true" }],
+                                      ["seat", "kept", null, { scratch: "false", cwd: "/srv/work" }]);
+  assert.deepEqual(presetPlace(seat, true), { kind: "scratch" });
+  assert.deepEqual(presetPlace(seat, false), { kind: "scratch" });
+  assert.deepEqual(presetPlace(project, true), { kind: "scratch" });
+  assert.deepEqual(presetPlace(off, true), { kind: "folder", path: "/srv/work" });
+  assert.equal(placeWords(presetPlace(seat, true), PROJECT_A, ""), "in a throwaway folder");
+  // A picked scratch folder leaves the preset as it was, as a folder does.
+  assert.deepEqual(afterPick({ kind: "project", name: "proj-a" }, { kind: "scratch" }, PRESETS),
+                   { kind: "project", name: "proj-a" });
+});
+
 test("without projects no project preset names a place, and a seat's project key is none", () => {
   for (const name of ["proj-a", "folder"]) assert.equal(presetPlace(named("project", name), false), null, name);
   assert.equal(presetPlace(named("seat", "planner"), false), null);
@@ -192,5 +206,8 @@ test("the last launch is keyed by the seat applied, else the project on the line
   assert.equal(lastQuery(NO_PRESET, PROJECT_A), "project=proj-a");
   assert.equal(lastQuery({ kind: "project", name: "proj-a" }, FOLDER), "cwd=%2Fsrv%2Fother");
   assert.equal(lastQuery(NO_PRESET, { kind: "choose" }), null);
+  // A scratch folder has no last launch to fill from; a seat applied over it still has.
+  assert.equal(lastQuery(NO_PRESET, { kind: "scratch" }), null);
+  assert.equal(lastQuery(SEAT, { kind: "scratch" }), "seat=reviewer");
   assert.equal(lastQuery(NO_PRESET, null), null);
 });
