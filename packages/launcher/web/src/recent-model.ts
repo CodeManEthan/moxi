@@ -201,10 +201,11 @@ export function presetWords(request: RecentRequest): string {
 }
 
 /** Where the recent starts, when that is not the place the line above the box names: `in
- * <key>` for a project, else `in <folder>`; "" when it is the line's. */
+ * <key>` for a project, else `in <folder>`; "" when it is the line's. A recent is never in
+ * a scratch folder. */
 export function placeWords(shows: Shows, pick: Pick | null, home: string): string {
   const said = shows.project_key !== null ? `in ${shows.project_key}` : `in ${tilde(shows.cwd, home)}`;
-  if (pick === null || pick.kind === "choose") return said;
+  if (pick === null || pick.kind === "choose" || pick.kind === "scratch") return said;
   if (pick.kind === "project") return shows.project_key === pick.key ? "" : said;
   return shows.project_key === null && tilde(shows.cwd, home) === tilde(pick.path, home) ? "" : said;
 }
