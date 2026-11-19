@@ -32,7 +32,8 @@ The script's keys, each with its default:
   `label` and `meta` for `occupied`), `try-again`, `error` or `registry`. As slots does,
   `start` raises `UsageError` for a relative `cwd` and for `create=True` with a slot
   named.
-- `create`: `ok` (each number made: its slot reads `free` and launchable from then on),
+- `create`: `ok` (each number made: its slot reads `free` from then on, keeping its hold
+  and last launch, and launchable unless held),
   `refused` (raises `Refused` from `refused`: `in-use`, `name-taken`, `no-free-slot`),
   `try-again`, `error` or `registry`. It returns the numbers made.
 - `respawn`: as `start`, for `respawn`, which names its slot and reuses its run pane;
@@ -407,7 +408,9 @@ def create(numbers=None, *, count=1, name=None) -> list[int]:
     made = list(numbers) if numbers else [plan.get("placed", 1) + i for i in range(count)]
     listed = plan.setdefault("slots", {})
     for number in made:
-        listed[str(number)] = {"state": "free", "launchable": True}
+        # As slots' create: a missing slot made again keeps its row's hold and last.
+        kept = {k: v for k, v in listed.get(str(number), {}).items() if k in ("hold", "last")}
+        listed[str(number)] = {"state": "free", "launchable": not kept.get("hold"), **kept}
     _save(plan)
     return made
 

@@ -319,22 +319,26 @@ def test_a_launch_meeting_another_launchs_discovery_is_refused_not_unchecked(
 # -- whether slots may trust the exit status --------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["fresh", "resume", "relaunch", "repair"])
+@pytest.mark.parametrize("kind", ["fresh", "resume", "restore", "relaunch", "repair"])
 @pytest.mark.parametrize("harness_name, trusted", [("codex", False), ("claude", True)])
 def test_every_placement_tells_slots_whether_the_status_is_trusted(
         conn, rig, work, monkeypatch, kind, harness_name, trusted):
     launch_row(conn, "r1", harness=harness_name)
-    more = {"resume": {"resume_of": "r1"}, "relaunch": {"relaunch_of": "r1"},
-            "repair": {"relaunch_of": "r1"}}.get(kind, {})
+    more = {"resume": {"resume_of": "r1"}, "restore": {"resume_of": "r1"},
+            "relaunch": {"relaunch_of": "r1"}, "repair": {"relaunch_of": "r1"}}.get(kind, {})
     store.insert(conn, request_id="r2", by="ann", harness=harness_name, target="slot",
                  cwd=str(work), values={}, argv=[harness_name], env={}, posture="",
-                 session_id=SID if kind == "resume" else "8c3f6d4b-0c76-4fb1-8b3d-4a5e6f7a8b92",
-                 slot="3" if kind in ("relaunch", "repair") else None, **more)
+                 session_id=SID if kind in ("resume", "restore")
+                 else "8c3f6d4b-0c76-4fb1-8b3d-4a5e6f7a8b92",
+                 slot="3" if kind in ("relaunch", "repair", "restore") else None, **more)
     rig.plan(slots={"3": {"state": "ended", "launchable": True}})
+    if kind == "restore":  # its reserved slot, gone with the reboot, under its reservation
+        rig.plan(slots={"3": {"state": "missing", "launchable": False,
+                              "hold": {"holder": "park-p1", "until": None}}})
     monkeypatch.setattr(first, "send", lambda conn, rid, *, pid=None, turns=None:
                         first.Outcome(rid, "ready", "first-sent", None, "sent"))
     values = {"cwd": str(work)}
-    if kind in ("relaunch", "repair"):
+    if kind in ("relaunch", "repair", "restore"):
         values["slot"] = "3"
     composition = compose.Composition(
         harness=harness_name, mode="host" if harness_name == "codex" else "interactive",
@@ -342,7 +346,10 @@ def test_every_placement_tells_slots_whether_the_status_is_trusted(
     launch = targets.Launch(conn=conn, request_id="r2", composition=composition,
                             argv=composition.argv, command=harness_name, env={},
                             cwd=str(work), respawn=kind in ("relaunch", "repair"),
-                            hold="run-1" if kind == "repair" else None)
+                            hold={"repair": "run-1", "restore": "park-p1"}.get(kind))
     targets.Slot().start(launch)
     [call] = rig.calls("respawn" if kind in ("relaunch", "repair") else "start")
     assert call["status_trusted"] is trusted
+    if kind == "restore":
+        assert [c["numbers"] for c in rig.calls("create")] == [[3]]
+        assert (call["slot"], call["hold"]) == (3, "park-p1")

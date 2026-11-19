@@ -3352,6 +3352,18 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--wait-s"
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="how long to wait for each session to be quiet (park.wait_s, "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="say what park would do; write nothing")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	park.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	reservation up without bringing its session back. `keep-warm` opens, releases and lists this session's named holds. `show` shows	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(restore.restore(args.slots, dry_run=args.dry_run, warn=_warn), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	"restore", help="bring parked sessions back into their slots", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	restore.add_argument("slots", nargs="*", type=int, metavar="SLOT",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="restore only these slots")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="say what restore would do; write nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	restore.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"unpark", help="give up parked slots without restoring them", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	unpark.add_argument("slots", nargs="*", type=int, metavar="SLOT",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the slots to give up")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="give up every parked slot")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	unpark.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3755,6 +3767,13 @@ launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/restore.py	#: `liveness-unread`, `refused` and `kept` (the entry left open), `dropped` (closed with no	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	OUTCOMES = ("restored", "still-running", "liveness-unread", "refused", "kept", "dropped",	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	LEFT_OPEN = ("still-running", "liveness-unread", "refused", "kept", "failed")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", f"slots could not answer about slot "	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", why, conn=conn)	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(entry.slot)	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/restore.py	if any(COMMS_OFFLINE in s.why for s in said):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/resume.py	"""Whether `row`'s session is live, and, when that can't be read, why: turns' `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/resume.py	"sessions", "static_refusal"]	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	can't. Live is read from turns first (`find` by that id), then from the launch's own	keep	find	find
@@ -4095,6 +4114,7 @@ launcher	packages/launcher/tests/test_cli.py	handoff_files	name	folder	handoffs_
 launcher	packages/launcher/tests/test_cli.py	return lambda name: handoffs_dir(name, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
+launcher	packages/launcher/tests/test_cli.py	"keep-warm", "show"}	keep	show	show
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
@@ -4742,6 +4762,7 @@ launcher	packages/launcher/tests/test_replay.py	looks = (any(word in name for wo
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
+launcher	packages/launcher/tests/test_restore.py	for entry, request in zip((three, five), launch.requests, strict=True):	keep	strict	strict
 launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `show` and `create`, from a table of slots by number."""	keep	show	show
 launcher	packages/launcher/tests/test_resume.py	"""turns' `find`: live for the ids in `live`, raising for the ids in `failing`."""	keep	find	find
 launcher	packages/launcher/tests/test_resume.py	[past] = resume.sessions(conn=conn, turns=None).data["sessions"]	keep	sessions	sessions

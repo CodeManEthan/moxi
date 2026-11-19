@@ -380,9 +380,26 @@ def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
     assert type(listed) is targets.SlotTaken
 
 
+def test_a_named_missing_slot_with_no_hold_is_made_again_and_launched(work, harness, rig):
+    rig.plan(slots={"3": {"state": "missing", "launchable": False}})
+    assert api.check(request(work, slot="3")) == []
+    got = api.launch(request(work, slot="3"))
+    assert got.state != "failed"
+    assert [c["numbers"] for c in rig.calls("create")] == [[3]]
+    assert [c["slot"] for c in rig.calls("start")] == [3]
+
+
+def test_a_named_missing_slot_a_park_reserves_is_refused_held(work, harness, rig):
+    rig.plan(slots={"3": {"state": "missing", "launchable": False,
+                          "hold": {"holder": "park-p1", "until": None}}})
+    with pytest.raises(targets.SlotTaken) as raised:
+        api.launch(request(work, slot="3"))
+    assert raised.value.problem == "slot 3 is held by park-p1"
+    assert "moxi launcher restore 3" in raised.value.hint
+    assert rig.calls("create") == [] and rig.calls("start") == []
+
+
 @pytest.mark.parametrize("entry, words, hint", [
-    ({"state": "missing", "launchable": False}, "slot 3 is missing: its tmux session is gone",
-     "moxi slots create 3"),
     (None, "there is no slot 3", "moxi slots create"),
     # A live session named like the slot but with no registry row: slots reads it not
     # launchable, whatever its state, and its start refuses it no-slot. Not taken.

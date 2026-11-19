@@ -127,7 +127,8 @@ def test_each_verb_parses(argv, expected):
 def test_every_verb_has_a_handler():
     assert set(cli.VERBS) == {"run", "preview", "log", "presets", "catalog", "handoff",
                               "handoffs", "deliver", "relaunch", "exit-session", "exits",
-                              "sessions", "resume", "park", "keep-warm", "show"}
+                              "sessions", "resume", "park", "restore", "unpark",
+                              "keep-warm", "show"}
 
 
 REFUSED = [

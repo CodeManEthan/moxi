@@ -20,6 +20,8 @@ launched.
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
     moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]
+    moxi launcher restore [SLOT ...] [--dry-run] [--json]
+    moxi launcher unpark SLOT ... | --all [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
     moxi launcher show [SESSION_ID] [--json]
 
@@ -38,7 +40,8 @@ the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
 resumed. `park` exits every launched session in a slot and reserves each slot for its
-session, so that `restore` brings them back after a reboot. `keep-warm` opens, releases and lists this session's named holds. `show` shows
+session, so that `restore` brings them back after a reboot; `unpark` gives a slot's
+reservation up without bringing its session back. `keep-warm` opens, releases and lists this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -620,6 +623,21 @@ def _park(args: argparse.Namespace, prog: str) -> int:
     return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)
 
 
+def _restore(args: argparse.Namespace, prog: str) -> int:
+    from . import restore
+
+    return _said(restore.restore(args.slots, dry_run=args.dry_run, warn=_warn), args)
+
+
+def _unpark(args: argparse.Namespace, prog: str) -> int:
+    from . import restore
+
+    if bool(args.slots) == args.every:
+        print(f"{prog} unpark: give the slots to unpark, or --all", file=sys.stderr)
+        return codes.USAGE
+    return _said(restore.unpark(args.slots, every=args.every), args)
+
+
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
@@ -651,6 +669,8 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "sessions": _sessions,
     "resume": _resume,
     "park": _park,
+    "restore": _restore,
+    "unpark": _unpark,
     "keep-warm": _keep_warm,
     "show": _state,
 }
@@ -816,6 +836,27 @@ def _act_parsers(verbs) -> None:
     park.add_argument("--dry-run", action="store_true",
                       help="say what park would do; write nothing")
     park.add_argument("--json", action="store_true", help="print one JSON object")
+
+    restore = verbs.add_parser(
+        "restore", help="bring parked sessions back into their slots", allow_abbrev=False,
+        description="Resume each parked session in its reserved slot: every one, or those "
+                    "of the slots named. Crashed slots found since are reserved first.")
+    restore.add_argument("slots", nargs="*", type=int, metavar="SLOT",
+                         help="restore only these slots")
+    restore.add_argument("--dry-run", action="store_true",
+                         help="say what restore would do; write nothing")
+    restore.add_argument("--json", action="store_true", help="print one JSON object")
+
+    unpark = verbs.add_parser(
+        "unpark", help="give up parked slots without restoring them", allow_abbrev=False,
+        description="Release the reservation of each slot named, or of every parked slot "
+                    "with --all, and close its park entry. The session stays resumable by "
+                    "moxi launcher resume.")
+    unpark.add_argument("slots", nargs="*", type=int, metavar="SLOT",
+                        help="the slots to give up")
+    unpark.add_argument("--all", dest="every", action="store_true",
+                        help="give up every parked slot")
+    unpark.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
         "keep-warm", help="open, release or list this session's holds", allow_abbrev=False,

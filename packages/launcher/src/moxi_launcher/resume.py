@@ -47,6 +47,12 @@ lowest launchable one; a slot that went missing is made again first (`create`), 
 slot slots won't make again falls back to the lowest too. `slot` names the slot to use
 in place of the original's: a missing one is made first, and any other is passed as it
 is, so a slot that is taken is refused by the launch's own check.
+
+**A parked session** (one with an open park entry) is resumed as `restore` resumes it
+(`restore.resume_parked`): under the park lock, into its reserved slot with the
+reservation as the launch's own hold, or elsewhere with the reservation released and the
+entry closed. A resume made under the park lock already (restore's own) is not sent
+there again.
 """
 
 from __future__ import annotations
@@ -63,7 +69,7 @@ from typing import Any
 from moxi import exit as codes
 from moxi import proc
 
-from . import catalog, first, presets, relaunch, slots, store, target
+from . import catalog, first, parks, presets, relaunch, slots, store, target
 
 LOOK = relaunch.LOOK
 Refused = relaunch.Refused
@@ -241,20 +247,28 @@ def resume(session_id: str, *, slot: int | str | None = None,
            turns: Any = LOOK, slots_api: Any = LOOK,
            launch: Callable[..., Any] | None = None,
            warn: Callable[[str], None] | None = None,
-           conn: sqlite3.Connection | None = None) -> Result:
+           conn: sqlite3.Connection | None = None, hold: str | None = None) -> Result:
     """Launch the session `session_id` again, resumed. Raises a refusal with nothing
     written (`store.RunOpen` while a run on the launch is open and its job runs); returns the new launch's outcome. A launch in this terminal does not return
     on Linux and macOS.
 
     `slot` is the slot to use in place of the original's; `request_id` the new launch's
-    (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
-    for turns' and slots' APIs (None: not installed) and `api.launch`."""
+    (minted when None), its idempotency key. `hold` is the slot hold the resume has, which
+    lets it into the slot it holds and ends with the start. `turns`, `slots_api` and
+    `launch` stand in for turns' and slots' APIs (None: not installed) and `api.launch`."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         row = store.resolve(c, session_id)
         if row is None:
             raise target.NotLaunched()
         newest = row.newest_session_id or row.session_id
+        if hold is None and parks.held_here() is None and store.entries_of(
+                c, request_ids=[row.request_id], session_ids=[newest] if newest else []):
+            from . import restore
+
+            return restore.resume_parked(
+                session_id, slot=slot, request_id=request_id, caller_env=caller_env,
+                turns=turns, slots_api=slots_api, launch=launch, warn=warn, conn=conn)
         refused = static_refusal(row, newest)
         if refused is None:
             live, unread = liveness(row, newest, _turns(turns))
@@ -273,7 +287,8 @@ def resume(session_id: str, *, slot: int | str | None = None,
 
     request = api.ReplayRequest(row, resume_of=row.request_id,
                                 request_id=request_id or str(uuid.uuid4()),
-                                session_id=newest, actor=first.actor(env), slot=chosen)
+                                session_id=newest, actor=first.actor(env), slot=chosen,
+                                hold=hold)
     try:
         if launch is None:
             result = api.launch(request, env=caller_env, warn=warn)
