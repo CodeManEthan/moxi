@@ -11846,7 +11846,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	None if updated is None 
 sessions	packages/sessions/src/moxi_sessions/catalog.py	_activity	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	flight.done.set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	if _spoken(record) and record.role == "user" and record.injected is False:	keep	injected	injected
-sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in paths))	keep	any	any
+sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in why)}	keep	any	any
 sessions	packages/sessions/src/moxi_sessions/catalog.py	live: set[str] = set()           # the files whose heads a catalog keeps	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_head	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_prompt	name	handle	fh
@@ -12039,7 +12039,7 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it return
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
 sessions	packages/sessions/src/moxi_sessions/lists.py	`folders` is `{folder, at, week}` for each folder no project holds where a session	keep	folders	folders
-sessions	packages/sessions/src/moxi_sessions/lists.py	none of its sessions is in `projects` or `folders`, so their counts are short. A	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	sessions is in `projects` or `folders`; where `lost` names a folder or a file, the	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/lists.py	loose.append({"folder": where, "at": _newest_at(found), "week": week})	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	return {"projects": projects, "folders": loose[:limit],	keep	folders	folders

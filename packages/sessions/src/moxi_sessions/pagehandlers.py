@@ -79,8 +79,8 @@ UP, OFF, ERROR = "up", "off", "error"
 PROJECTS_OFF = "projects is not installed, or is too old to fold folders into projects"
 PROJECTS_UNREADABLE = ("projects' store can't be read; `moxi projects list` on this "
                        "machine says why")
-ROOT_UNREADABLE = ("a harness's sessions folder can't be read; `moxi sessions list` on "
-                   "this machine says why")
+SESSIONS_UNREADABLE = ("some sessions can't be read, so their projects' counts would be "
+                       "short; the page server's log on this machine says which")
 
 log = logging.getLogger("moxi.sessions.page")
 _logged: set[Any] = set()
@@ -335,10 +335,13 @@ def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: the sessions folded into projects by the folder each ran in,
     and this week's folders no project holds (`lists.fold_projects`), with `state`:
     `up`; `off` when projects is not installed or offers no interface 2; `error` when
-    projects' store can't be read, or a harness's root exists and can't be listed (its
-    sessions would be missing from every count, and a project that has some would read
-    as unused), the reason logged once rather than sent. A harness that is not on the
-    machine has no sessions, and the route answers `up` without it."""
+    projects' store can't be read, or a session can't be read: a harness's root exists
+    and can't be listed, a folder or a file under it that may hold a session can't be
+    listed, or a session's head can't be read (those sessions would be missing from the
+    counts, and a project that has some would read as unused). The reason is logged once
+    rather than sent. A session's subagents folder that can't be listed holds no session
+    and loses no count, so the route still answers `up`; so does a harness that is not
+    on the machine, which has no sessions."""
     recent_s, now = _recent_s(), time.time()
     out: dict[str, Any] = {"shape": SHAPE, "now": now, "today": lists.local_day(now),
                            "home": _home(), "recently_s": recent_s, "state": UP,
@@ -352,12 +355,13 @@ def projects(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - an optional module's failure is a state
         _log_once(exc, "sessions' page couldn't fold the sessions into projects")
         return {**out, "state": ERROR, "detail": PROJECTS_UNREADABLE}
-    roots = folded.pop("roots")
-    failed = [root for root in roots if root["reason"] is not None]
-    if failed:
+    roots, unread = folded.pop("roots"), folded.pop("unread")
+    failed = [root for root in roots if root["reason"] is not None or root["lost"]]
+    if failed or unread:
         for root in failed:
             _log_root_once(root)
-        return {**out, "state": ERROR, "detail": ROOT_UNREADABLE}
+        _log_unread_once(unread)
+        return {**out, "state": ERROR, "detail": SESSIONS_UNREADABLE}
     return {**out, **folded}
 
 
@@ -374,11 +378,29 @@ def _log_once(exc: BaseException, what: str) -> None:
 
 
 def _log_root_once(root: dict[str, Any]) -> None:
-    if _first((root["harness"], root["root"], root["reason"])):
-        log.error("sessions' page couldn't read %s's sessions at %s: %s", root["harness"],
-                  root["root"], root["reason"])
+    if root["reason"] is not None:
+        if _first((root["harness"], root["root"], root["reason"])):
+            log.error("sessions' page couldn't read %s's sessions at %s: %s",
+                      root["harness"], root["root"], root["reason"])
+        return
+    lost = root["lost"]
+    if _first((root["harness"], root["root"], tuple(tuple(p.values()) for p in lost))):
+        log.error("sessions' page couldn't list %d folder(s) or file(s) under %s's "
+                  "sessions at %s, the first %s: %s", len(lost), root["harness"],
+                  root["root"], lost[0]["path"], lost[0]["reason"])
 
 
-__all__ = ["PROJECTS_INTERFACE", "PROJECTS_OFF", "PROJECTS_UNREADABLE", "ROOT_UNREADABLE",
-           "work_dirs", "listing", "more", "projects", "session", "subagents", "view_row",
-           "window"]
+def _log_unread_once(unread: list[dict[str, Any]]) -> None:
+    by_harness: dict[str, list[dict[str, Any]]] = {}
+    for session in unread:
+        by_harness.setdefault(session["harness"], []).append(session)
+    for harness, sessions in by_harness.items():
+        first = sessions[0]
+        if _first((harness, first["path"], first["reason"])):
+            log.error("sessions' page couldn't read %d of %s's sessions, the first %s: %s",
+                      len(sessions), harness, first["path"], first["reason"])
+
+
+__all__ = ["PROJECTS_INTERFACE", "PROJECTS_OFF", "PROJECTS_UNREADABLE",
+           "SESSIONS_UNREADABLE", "work_dirs", "listing", "more", "projects", "session",
+           "subagents", "view_row", "window"]

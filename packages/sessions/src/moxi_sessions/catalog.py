@@ -31,7 +31,9 @@ loses its sessions, so the counts are no longer of every session. The gather say
 harness has an `Unread` with no reason and `parts`, how many such folders and files there
 were. For Codex a rollout whose head could not be opened is one of them: it is listed, but
 whether a thread spawned it is not known. A Claude Code session whose subagents folder
-could not be listed has `subagents` None, not 0.
+could not be listed has `subagents` None, not 0. Of the folders and files, `lost` names
+those that may hold a main session, with why each could not be listed: all but the ones
+under a Claude Code session's subagents folder, which holds no main session.
 
 **The details.** `Catalog.details(entry)` reads what a row shows of one session, a
 `Details`. A fact that was not read is None; nothing is filled in for it.
@@ -209,12 +211,17 @@ class Unread:
     * `reason`: why the root could not be listed; None when it was listed.
     * `parts`: how many folders and files under a listed root could not be listed, so the
       harness's counts leave their sessions out; None when the root was not listed.
+    * `lost`: `(path, reason)` under the root for each of those folders and files that
+      may hold a main session, so a main session may be in no entry: every one but those
+      under a Claude Code session's `subagents` folder. A Codex rollout whose head could
+      not be opened is not one: it is an entry.
     """
 
     harness: str
     root: str | None
     reason: str | None
     parts: int | None = None
+    lost: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -608,20 +615,37 @@ def _entry(listed: Listed, subagents: int | None, changed_ns: int | None = None
 def _unlisted(listing: Listing) -> int:
     """How many folders and files under a listed root could not be listed. One inside a
     folder that could not be listed itself is that folder's, and is not counted again."""
-    paths = {path for path, _ in listing.unreadable}
-    return sum(1 for path in paths
-               if not any(path.startswith(f"{other}/") for other in paths))
+    return len(_outermost(listing))
+
+
+def _outermost(listing: Listing) -> dict[str, str]:
+    """The folders and files under a listed root that could not be listed, by path, with
+    why; one inside another of them is left out."""
+    why = dict(listing.unreadable)
+    return {path: reason for path, reason in sorted(why.items())
+            if not any(path.startswith(f"{other}/") for other in why)}
+
+
+def _lost(listing: Listing) -> tuple[tuple[str, str], ...]:
+    """The folders and files under a listed root that could not be listed and may hold a
+    main session (`Unread.lost`)."""
+    return tuple((path, reason) for path, reason in _outermost(listing).items()
+                 if not (listing.harness == CLAUDE and _in_subagents(path)))
+
+
+def _in_subagents(path: str) -> bool:
+    """Whether a path under Claude Code's root is a session's subagents folder or in it:
+    `<project>/<session>/subagents/...`."""
+    parts = path.split("/")
+    return len(parts) >= 3 and parts[2] == "subagents"
 
 
 def _claude_entries(listing: Listing) -> list[Entry]:
     agents = Counter(e.source.session_id for e in listing if e.kind == "subagent")
     # A part under `<project>/<session>/subagents` that could not be listed leaves that
     # session's count unknown.
-    unknown = set()
-    for path, _ in listing.unreadable:
-        parts = path.split("/")
-        if len(parts) >= 3 and parts[2] == "subagents":
-            unknown.add(parts[1])
+    unknown = {path.split("/")[1] for path, _ in listing.unreadable
+               if _in_subagents(path)}
     return [_entry(e, None if e.source.session_id in unknown
                    else agents[e.source.session_id])
             for e in listing if e.kind == "main"]
@@ -777,7 +801,7 @@ class Catalog:
                 entries += found
                 parts += unopened
             if parts:
-                unread.append(Unread(harness, listing.root, None, parts))
+                unread.append(Unread(harness, listing.root, None, parts, _lost(listing)))
                 unsure.append(listing.root)
             if harness != OPENCODE:
                 live.update(e.source.path for e in listing

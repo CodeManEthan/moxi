@@ -15,12 +15,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from moxi_sessions import lists, pagehandlers
-from moxi_sessions.testing import CodexRollout, OpenCodeDb
+from moxi_sessions import catalog as catalog_module, lists, pagehandlers
+from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
 
 from conftest import write_config
 from test_page import LB, ROUTES, read, refused
-from test_page_list import DAY, HOUR, claude, fresh_catalog, roots, sid, tid  # noqa: F401
+from test_page_list import (DAY, HOUR, changed_at, claude, fresh_catalog,  # noqa: F401
+                            roots, sid, tid)
 
 ROUTE = "/api/projects"
 
@@ -271,7 +272,7 @@ def test_a_root_that_exists_and_cannot_be_read_is_an_error_with_a_fixed_sentence
     for answer in (first, second):
         # Its sessions would be missing from every count, so no count is sent.
         assert answer["state"] == "error"
-        assert answer["detail"] == pagehandlers.ROOT_UNREADABLE
+        assert answer["detail"] == pagehandlers.SESSIONS_UNREADABLE
         assert str(roots["opencode"]) not in str(answer)
         assert (answer["projects"], answer["folders"], answer["more"]) == ([], [], 0)
     logged = [r for r in caplog.records if r.name == "moxi.sessions.page"]
@@ -303,17 +304,137 @@ def test_a_harness_that_is_not_on_the_machine_has_no_sessions(roots, stand_in, t
     assert "roots" not in answer
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
-def test_a_root_listed_in_part_still_answers(roots, stand_in):
-    claude(roots, 1, time.time() - 60, cwd="/work/moxi")
-    unlisted = roots["claude"] / "-work-elsewhere"
-    unlisted.mkdir()
-    unlisted.chmod(0)
-    stand_in(Projects({"/work/moxi": "moxi"}))
-    try:
+not_root = pytest.mark.skipif(os.geteuid() == 0,
+                              reason="root reads a folder or file without permission")
+TWO = {"/work/moxi": "moxi", "/work/notes": "notes"}
+
+
+@pytest.fixture
+def locked():
+    """`locked(path)` takes every permission off a folder or file until the test ends."""
+    taken = []
+
+    def lock(path):
+        taken.append((path, path.stat().st_mode))
+        path.chmod(0)
+
+    yield lock
+    for path, mode in reversed(taken):
+        path.chmod(mode)
+
+
+def _short(answer, caplog, *words):
+    """The answer is the error with its fixed sentence and no count, and one line was
+    logged over the reads, naming each of `words`."""
+    assert answer["state"] == "error"
+    assert answer["detail"] == pagehandlers.SESSIONS_UNREADABLE
+    assert (answer["projects"], answer["folders"], answer["more"]) == ([], [], 0)
+    logged = [r.getMessage() for r in caplog.records if r.name == "moxi.sessions.page"]
+    assert len(logged) == 1
+    assert all(word in logged[0] for word in words), logged
+
+
+@not_root
+def test_a_claude_project_dir_that_cannot_be_listed_is_an_error(roots, stand_in,
+                                                                   locked, caplog):
+    now = time.time()
+    claude(roots, 1, now - 60, cwd="/work/moxi", project="-work-moxi")
+    claude(roots, 2, now - 120, cwd="/work/notes", project="-work-notes")
+    stand_in(Projects(TWO))
+    locked(roots["claude"] / "-work-notes")
+    pagehandlers._logged.clear()
+
+    with caplog.at_level(logging.ERROR, logger="moxi.sessions.page"):
+        first = read(ROUTE)
+        second = read(ROUTE)
+
+    # notes' session is in no count, so notes would read as not used yet.
+    for answer in (first, second):
+        _short(answer, caplog, "claude", "-work-notes", "Permission denied")
+        assert "-work-notes" not in str(answer)
+
+
+@not_root
+def test_a_claude_transcript_that_cannot_be_read_is_an_error(roots, stand_in, locked,
+                                                             caplog):
+    now = time.time()
+    claude(roots, 1, now - 60, cwd="/work/moxi", project="-work-moxi")
+    claude(roots, 2, now - 120, cwd="/work/notes", project="-work-notes")
+    stand_in(Projects(TWO))
+    locked(next(roots["claude"].glob(f"-work-notes/{sid(2)}.jsonl")))
+    pagehandlers._logged.clear()
+
+    with caplog.at_level(logging.ERROR, logger="moxi.sessions.page"):
+        first = read(ROUTE)
+        second = read(ROUTE)
+
+    for answer in (first, second):
+        _short(answer, caplog, "1 of claude's sessions", sid(2), "Permission denied")
+
+
+@not_root
+def test_a_codex_rollout_that_cannot_be_opened_is_an_error(roots, stand_in, locked,
+                                                           caplog):
+    claude(roots, 1, time.time() - 60, cwd="/work/moxi", project="-work-moxi")
+    rollout = CodexRollout(roots["codex"], thread_id=tid(1), cwd="/work/notes")
+    rollout.turn()
+    rollout.user("Do the thing.")
+    rollout.assistant("Done.")
+    stand_in(Projects(TWO))
+    locked(rollout.write())
+    pagehandlers._logged.clear()
+
+    with caplog.at_level(logging.ERROR, logger="moxi.sessions.page"):
+        first = read(ROUTE)
+        second = read(ROUTE)
+
+    for answer in (first, second):
+        _short(answer, caplog, "1 of codex's sessions", tid(1), "Permission denied")
+
+
+@not_root
+def test_a_subagents_dir_that_cannot_be_listed_still_answers_every_count(
+        roots, stand_in, locked, caplog):
+    now = time.time()
+    claude(roots, 1, now - 60, cwd="/work/moxi", project="-work-moxi")
+    t = ClaudeTranscript(roots["claude"], session_id=sid(2), cwd="/work/notes",
+                         project="-work-notes")
+    t.user("Do the thing.", origin="human")
+    t.subagent("a0190b0000000001").user("look")
+    path = t.write()
+    changed_at(path, now - 120)
+    stand_in(Projects(TWO))
+    locked(path.with_suffix("") / "subagents")
+    pagehandlers._logged.clear()
+
+    with caplog.at_level(logging.ERROR, logger="moxi.sessions.page"):
         answer = read(ROUTE)
-    finally:
-        unlisted.chmod(0o700)
+
+    # A subagents folder holds no session of its own: no count is short.
+    assert answer["state"] == "up" and answer["detail"] is None
+    assert [(p["key"], p["all"], p["week"], p["recent"]) for p in answer["projects"]] == [
+        ("moxi", 1, [f"claude/{sid(1)}"], [f"claude/{sid(1)}"]),
+        ("notes", 1, [f"claude/{sid(2)}"], [f"claude/{sid(2)}"])]
+    assert [r for r in caplog.records if r.name == "moxi.sessions.page"] == []
+
+
+def test_a_session_gone_since_its_root_was_listed_is_no_error(roots, stand_in):
+    now = time.time()
+    claude(roots, 1, now - 60, cwd="/work/moxi", project="-work-moxi")
+    claude(roots, 2, now - 120, cwd="/work/notes", project="-work-notes")
+    stand_in(Projects(TWO))
+    path = next(roots["claude"].glob(f"-work-notes/{sid(2)}.jsonl"))
+    real = catalog_module.Catalog.gather
+
+    def gather_then_remove(self):
+        gathered = real(self)
+        if path.exists():
+            path.unlink()
+        return gathered
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(catalog_module.Catalog, "gather", gather_then_remove)
+        answer = read(ROUTE)
 
     assert answer["state"] == "up"
     assert [p["key"] for p in answer["projects"]] == ["moxi"]

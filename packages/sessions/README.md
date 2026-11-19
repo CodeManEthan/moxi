@@ -515,17 +515,21 @@ subagent chosen in the block opens in the block, with Back to return.
 sessions places a `project-facts` component on the Projects page. A project's row gets
 when it was last active (the newest change of any of its sessions) and `N active
 recently`, its sessions that changed within `list.recent_s`. sessions reads every session,
-so a project with none reads `not used yet`. An opened project gets a `Sessions` row, `N
-sessions this week` with a link to this page, left out when none changed in the last 7
-days; and Remove lists `its N sessions and their transcripts` among what stays. Under the
-projects, `Not a project` lists up to 20 folders no project holds where a session changed
-in the last 7 days, each with `N sessions this week`, and says how many more there are. A
-session a program started counts toward a project's last activity and its Remove line,
-never toward `active recently` or the week. The component reads the page server when it is
-placed and every 60 seconds while the tab is visible. It reports nothing, so the page
-draws none of these facts, when projects is not installed or is too old, when projects'
-store can't be read, when a harness's sessions folder exists and can't be listed (its
-sessions would be missing from every count), and when the read fails.
+and draws none of these facts when one can't be read, so `not used yet` means the project
+has no session. An opened project gets a `Sessions` row, `N sessions this week` with a
+link to this page, left out when none changed in the last 7 days; and Remove lists `its N
+sessions and their transcripts` among what stays. Under the projects, `Not a project`
+lists up to 20 folders no project holds where a session changed in the last 7 days, each
+with `N sessions this week`, and says how many more there are. A session a program started
+counts toward a project's last activity and its Remove line, never toward `active
+recently` or the week. The component reads the page server when it is placed and every 60
+seconds while the tab is visible. It reports nothing, so the page draws none of these
+facts, when projects is not installed or is too old, when projects' store can't be read,
+when a session can't be read (a harness's sessions folder exists and can't be listed, a
+folder or a file under it that may hold a session can't be listed, or a session's first
+lines can't be read: it would be missing from the counts), and when the read fails. A
+session's subagents folder that can't be listed holds no session of its own, so it changes
+no count and the facts still show.
 
 Its read is `/api/projects`. It reads every session's first lines, once for as long as the
 page server runs, as `/api/folders` does, then asks projects' read API (`for_paths`) once

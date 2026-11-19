@@ -619,10 +619,17 @@ def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float
     left off. A session whose head names no folder is in neither. Reads every session's
     head not read yet.
 
-    `roots` is `{harness, root, reason, parts}` per harness whose root was not read
-    whole, as a list's `roots` says: where a root could not be listed (`reason` set),
-    none of its sessions is in `projects` or `folders`, so their counts are short. A
-    harness that is not on the machine is in no `roots`: it has no sessions.
+    `roots` is `{harness, root, reason, parts, lost}` per harness whose root was not read
+    whole, as a list's `roots` says, with `lost` the catalog's (`Unread.lost`) as
+    `{path, reason}`: where a root could not be listed (`reason` set), none of its
+    sessions is in `projects` or `folders`; where `lost` names a folder or a file, the
+    sessions in it are in neither. Either way some counts are short. A harness that is
+    not on the machine is in no `roots`: it has no sessions.
+
+    `unread` is `{harness, path, reason}` for each session whose head could not be read:
+    which folder it ran in is not known, so it is in neither and some count is short. A
+    session whose file is gone since its root was listed is not one: it has no session
+    left to count.
 
     Raises ValueError for a `recent_s` that is not a number, and whatever `for_paths`
     raises."""
@@ -632,9 +639,18 @@ def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float
     gathered = cat.gather()
     cat.read_heads()
     by_dir: dict[str, list[tuple[Entry, bool]]] = {}
+    unread: list[dict[str, Any]] = []
     for entry in gathered.entries:
         head = cat.kept_head(entry)
-        where = _work_dir(head.work_dir) if head is not None else None
+        if head is None:
+            head = cat.head(entry)       # kept for an older listing of the file: read now
+        if head is None:
+            reason = _unopened(entry.path)
+            if reason is not None:
+                unread.append({"harness": entry.harness, "path": entry.path,
+                               "reason": reason})
+            continue
+        where = _work_dir(head.work_dir)
         if where:
             by_dir.setdefault(where, []).append((entry, head.by_program is True))
     keys = for_paths(sorted(by_dir)) if by_dir else {}
@@ -661,7 +677,23 @@ def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float
     return {"projects": projects, "folders": loose[:limit],
             "more": max(0, len(loose) - limit),
             "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason,
-                       "parts": r.parts} for r in gathered.roots]}
+                       "parts": r.parts,
+                       "lost": [{"path": path, "reason": why} for path, why in r.lost]}
+                      for r in gathered.roots],
+            "unread": unread}
+
+
+def _unopened(path: str) -> str | None:
+    """Why a session's file whose head could not be read can't be opened; None when it
+    is gone."""
+    try:
+        with open(path, "rb"):
+            pass
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return "its first lines could not be read"
 
 
 def _since(entry: Entry, cut: int) -> bool:
