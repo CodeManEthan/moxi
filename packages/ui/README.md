@@ -288,6 +288,13 @@ components. The browser fixtures need the `testing` extra and a browser:
 `pip install 'moxi-ui[testing]'`, then `playwright install chromium`. The plugin's
 docstring lists every fixture.
 
+The shell's pages allow no eval, so a `page.wait_for_function` predicate is a function,
+`"() => window.done"`, never a bare expression, `"window.done"`. Playwright evaluates a
+function's text once, in a call the policy lets through, but a bare expression on every
+poll, and the policy refuses each poll after the first: the wait passes only when its
+condition already holds at the first poll. ui's tests refuse a bare predicate anywhere in
+this repository.
+
 A test of a module's phone face uses `moxi_ui.testing.phone`: `gateway_shell(home, site)`
 starts a shell in gateway mode with its tunnel address written, a `PhoneBridge` reaches its
 gateway at `https://gw.moxi.test/`, and `pair_page(context, shell)` pairs a browser context
