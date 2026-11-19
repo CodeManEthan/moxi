@@ -56,6 +56,11 @@ const STYLES = css`
          margin-bottom: calc(var(--moxi-gap) * 2); }
   .grid { display: grid; gap: calc(var(--moxi-gap) * 2); grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
           margin-bottom: calc(var(--moxi-gap) * 3); }
+  /* Each block's slot in the modules view's top grid is one height whatever the block draws,
+     and the block scrolls within it, so a block that fills late moves no other. */
+  #home { grid-auto-rows: 20rem; }
+  #home > .card { grid-template-rows: auto minmax(0, 1fr); }
+  #home > .card > div { min-height: 0; overflow: auto; }
   .list { display: grid; gap: var(--moxi-gap); margin-bottom: calc(var(--moxi-gap) * 3); }
   .card { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--moxi-border);
           border-radius: var(--moxi-radius-lg); background: var(--moxi-bg-raised); }
@@ -161,8 +166,7 @@ export class UiPage extends LitElement {
       ${gateway() ? nothing : html`<div class="bar">${this.#link("ui", "settings", "Settings")}</div>`}
       ${value?.error ? html`<p class="problem">${value.error}</p>` : nothing}
       <div class="grid" id="home"></div>
-      <h2>Installed</h2>
-      ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
+      ${value === null ? html`<p class="dim">Reading the modules…</p>` : html`<h2>Installed</h2>`}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
       <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
       <div class="grid" id="last"></div>`;
@@ -215,7 +219,8 @@ export class UiPage extends LitElement {
   }
 
   /** Places every block again when the set of them changes: each in the grid at the top,
-   * and `LAST_BLOCK` under the Installed list. */
+   * and `LAST_BLOCK` under the Installed list. Every block's card goes in at once, before
+   * any script loads, so a block placed late moves no other. */
   async #placeHome(): Promise<void> {
     const home = this.renderRoot.querySelector("#home");
     const last = this.renderRoot.querySelector("#last");
@@ -228,7 +233,7 @@ export class UiPage extends LitElement {
     const mine = (this.#placing += 1);
     home.replaceChildren();
     last.replaceChildren();
-    for (const block of blocks) {
+    const hosts = blocks.map((block) => {
       const card = document.createElement("section");
       card.className = "card";
       card.dataset.block = `${block.module}.${block.name}`;
@@ -237,6 +242,10 @@ export class UiPage extends LitElement {
       const host = document.createElement("div");
       card.append(title, host);
       (card.dataset.block === LAST_BLOCK ? last : home).append(card);
+      return host;
+    });
+    for (const [index, block] of blocks.entries()) {
+      const host = hosts[index];
       // A script that gave no element and answers fine gets one more try; one with no
       // script declared has nothing to fetch again.
       const url = components(block.module).find((comp) => comp.name === block.name)?.url;
