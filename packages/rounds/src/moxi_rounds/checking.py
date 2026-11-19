@@ -765,8 +765,8 @@ def _command(state: states.State, build: builds.Build, step: str | None, *, name
         return None, None, Unmet(
             f"the flow {state.flow} of {name} has no step {step} that runs a command (its "
             f"command steps: {listed})", f"moxi rounds show {name}")
-    # The step's words are read from the round's record, so a `~`-led one is a path
-    # under the home folder.
+    # The step's words are read from the round's record, so `~` and a `~/`-led one name
+    # the home folder and a path under it.
     return ([places.expand_home(word) for word in entry["argv"]], entry.get("timeout_s"),
             None)
 

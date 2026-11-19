@@ -11,9 +11,9 @@ that has ended. The caller ends the build; the folder and this machine's config 
 the rest, never the record alone, which only names a folder to look at:
 
 - A1. The record was made on this machine (`host`).
-- A2. The recorded path, a `~`-led one read as the path under the home folder
-  (`places.expand_home`), is, as text, the place rounds builds for that build from the
-  roots as config stands now (`places`): `<worktree_dir>/<repo>/<branch>` or
+- A2. The recorded path, `~` or a `~/`-led one read as the home folder or a path
+  under it (`places.expand_home`), is, as text, the place rounds builds for that build
+  from the roots as config stands now (`places`): `<worktree_dir>/<repo>/<branch>` or
   `<scratch root>/<repo>/<branch>/<build id>`. The repo is a projects key, the branch
   has no `..`, `.` or empty part, no `\\` and no `:`, and the build id is 16 hex digits.
   A path under a root the config moved from is outside the roots.

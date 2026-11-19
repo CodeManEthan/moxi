@@ -21,8 +21,9 @@ build, is never taken for a build's own.
 **A path in a record.** A path rounds writes into a round's records is written `~` when
 it is the home folder and `~/<rest>` when it is under it, the rest with the separators
 the path has (`contract_home`); any other path is written as it is. A path read from a
-record is expanded before rounds acts on it (`expand_home`): a `~`-led path names the
-home folder, and every other path, a relative one included, is read as it is written.
+record is expanded before rounds acts on it (`expand_home`): `~`, and a path that
+starts with `~` and a separator, name the home folder; every other path, a relative one
+and a `~user` one included, is read as it is written.
 A record that holds the whole path reads the same as one that holds the `~` form.
 """
 
@@ -88,8 +89,13 @@ def made_here(commissioned: Mapping, *, unrecorded_is_here: bool) -> bool:
 
 def expand_home(recorded: object) -> str:
     """The path `recorded`, as a round's record holds it, as it names a place on this
-    machine: a `~`-led path with the home folder in place of `~`, any other as written."""
-    return os.path.expanduser(str(recorded))
+    machine: `~` itself, or `~` followed by a separator and the rest, with the home folder
+    in place of `~`; any other path, `~user` and `~user/<rest>` among them, as written."""
+    text = str(recorded)
+    seps = os.sep + (os.altsep or "")
+    if text == "~" or (len(text) > 1 and text[0] == "~" and text[1] in seps):
+        return os.path.expanduser(text)
+    return text
 
 
 def contract_home(path: str | os.PathLike) -> str:

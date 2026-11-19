@@ -14,10 +14,11 @@ from pathlib import Path
 import pytest
 
 from moxi_rounds import (builds, checking, commissioning, dropping, log, opening, places,
-                         sweeping)
+                         stepping, sweeping)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
+from moxi_rounds.errors import Refused
 
 ROUND = "proj-a/a-round"
 PY = sys.executable
@@ -80,6 +81,15 @@ def test_a_whole_path_and_a_relative_path_read_as_they_are(home, tmp_path):
     assert places.expand_home("a/~/b") == "a/~/b"
 
 
+@pytest.mark.parametrize("recorded", ["~root/x", "~root", "x/~/y", "~~", "~x"])
+def test_a_tilde_not_followed_by_a_separator_reads_as_written(home, recorded):
+    assert places.expand_home(recorded) == recorded
+
+
+def test_a_tilde_followed_by_the_systems_separator_reads_under_home(home):
+    assert places.expand_home("~" + os.sep + "x") == str(home / "x")
+
+
 def test_what_is_written_reads_back_to_the_same_path(home, tmp_path):
     for path in (home, home / "a", home / "a" / "b c", tmp_path / "x"):
         assert Path(places.expand_home(places.contract_home(path))) == path
@@ -122,8 +132,13 @@ def script(rounds_home, write_config) -> Path:
 
 def commission(repo, tmp_path) -> tuple[Path, object]:
     """B1 on `work` commissioned in the `fix` flow with one commit of work."""
+    return commission_in(repo, tmp_path, "fix")
+
+
+def commission_in(repo, tmp_path, flow: str) -> tuple[Path, object]:
+    """B1 on `work` commissioned in the flow `flow` with one commit of work."""
     opening.open_round(ROUND, description="a placeholder round", by="planner",
-                       flow="fix")
+                       flow=flow)
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
@@ -338,6 +353,61 @@ def test_a_tilde_word_of_a_command_step_runs_as_the_path_under_home(
     assert done.output.read_text().strip() == "staged"
     run = checking.newest(folded(path), "B1", "staging")
     assert run["argv"] == [PY, "~" + os.sep + "staging.py"]
+
+
+def staged(write_config, script: Path) -> None:
+    """Write the flows `mine` and `later`, each with the command step `staging`, which
+    runs `script` named by its whole path, `later` after `mine` in the tiers."""
+    argv = json.dumps([PY, str(script)])
+    flow = textwrap.dedent(f"""
+        steps = [
+          {{ step = "build", by = "builder" }},
+          {{ step = "staging", does = "command", before = "finish", by = "builder", argv = {argv} }},
+          {{ step = "finish", by = "builder" }},
+        ]
+    """)
+    write_config('tiers = ["fix", "small", "mine", "later", "full"]\n'
+                 f"[flows.mine]{flow}[flows.later]{flow}")
+
+
+def staging_argv(event: dict) -> list[str]:
+    return next(one["argv"] for one in event["steps"] if one["step"] == "staging")
+
+
+def test_a_command_step_under_home_is_recorded_from_a_tilde_and_runs_whole(
+        repo, tmp_path, monkeypatch, write_config, rounds_home):
+    set_home(monkeypatch, rounds_home)
+    script = rounds_home / "staging.py"
+    script.write_text("print('staged')\n", encoding="utf-8")
+    staged(write_config, script)
+
+    path, _made = commission_in(repo, tmp_path, "mine")
+
+    opened = next(one for one in log.read_round(path) if one["type"] == log.OPENED)
+    assert staging_argv(opened) == [PY, "~" + os.sep + "staging.py"]
+    done = checking.check(ROUND, "B1", by="coder", step="staging")
+    assert done.passed and done.argv == (PY, str(script))
+    assert done.output.read_text().strip() == "staged"
+    # The round follows the steps the config has, read either way.
+    with pytest.raises(Refused, match="follows the flow mine already"):
+        stepping.step_up(ROUND, "mine", by="planner")
+
+
+def test_a_move_of_flow_records_a_command_step_under_home_from_a_tilde(
+        repo, tmp_path, monkeypatch, write_config, rounds_home):
+    set_home(monkeypatch, rounds_home)
+    script = rounds_home / "staging.py"
+    script.write_text("print('staged')\n", encoding="utf-8")
+    staged(write_config, script)
+    path, _made = commission_in(repo, tmp_path, "mine")
+
+    stepping.step_up(ROUND, "later", by="planner")
+
+    changed = log.read_round(path)[-1]
+    assert changed["type"] == "flow.changed"
+    assert staging_argv(changed) == [PY, "~" + os.sep + "staging.py"]
+    assert checking.check(ROUND, "B1", by="coder", step="staging").argv == (
+        PY, str(script))
 
 
 # -- a report's file -----------------------------------------------------------------------
