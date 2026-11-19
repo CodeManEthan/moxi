@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- With turns installed, comms' page reads turns' `/api/sessions` while a send box is
+  open, with each check and every 30 s, and joins each session whose turn is open to its
+  address by session id. A message the dry run would deliver to that session now reads
+  `Delivered. <name> is working; it reads this when its turn ends.` Without turns, or
+  for a name whose turn isn't open, the line is as before.
 - The Comms page says what the connector's name is: the row of the name that comms' tools
   in the Claude apps bind reads `Claude's apps, through the connector` after the name. Each live row of
   `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
