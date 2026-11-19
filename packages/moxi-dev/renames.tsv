@@ -1265,6 +1265,7 @@ comms	packages/comms/src/moxi_comms/page.py	"reply_to": lb.Out("string", nullabl
 comms	packages/comms/src/moxi_comms/page.py	"scope": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"session_id": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"tier": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"via": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	#: What `/api/take-back` answers: the verb's `outcome` (`deleted`, `refused`, `offline`,	keep	refused	refused
 comms	packages/comms/src/moxi_comms/page.py	#: `expired` or `reserved`. `held` is the queue row's hold for the next turn; `takeable`	keep	expired	expired
 comms	packages/comms/src/moxi_comms/page.py	#: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted	keep	refused	refused
