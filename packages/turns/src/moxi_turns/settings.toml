@@ -132,11 +132,11 @@ line = "The command the Claude plugin spawns. Empty, it is this environment's mo
 [question_mode.origins]
 type = "list"
 items = "str"
-default = ["composer"]
-doc = "The prompt origins question mode counts as the person's own (composer is a prompt typed at this terminal)."
+default = ["composer", "bridge"]
+doc = "The prompt origins question mode counts as the person's own (composer is a prompt typed at this terminal, bridge one sent from the Claude apps through Remote Control)."
 read = "use"
 label = "Prompts question mode counts as yours"
-line = "composer is a prompt typed at this terminal."
+line = "composer is a prompt typed at this terminal, bridge one sent from the Claude apps through Remote Control."
 
 [question_mode.prose_words]
 type = "list"
