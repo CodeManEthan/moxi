@@ -21,7 +21,8 @@ set to the entry's launch; a refusal closes the entry `dropped` and names the se
 the launcher places a session in a slot, and at the start of each whole-run holder. A
 crashed slot with no open entry is a candidate when its last launch is a launcher slot
 launch, not failed, with a session id, whose session is not live and that no later launch
-holds (or whose liveness can't be read). A candidate is reserved (an open-ended hold
+holds (or whose liveness can't be read), and that a relaunch repair running the discovery
+does not bring back itself. A candidate is reserved (an open-ended hold
 `park-<id>`, `expect` set to its launch), given a `crash` entry, then settled, since the
 reservation now keeps it. A crashed slot with nothing to restore is settled with the
 reason; one another holder holds is left crashed, with no entry, for a later discovery.
@@ -343,10 +344,13 @@ def _session_of(conn: sqlite3.Connection, slot: Any,
 
 
 def discover(conn: sqlite3.Connection, api: Any, *, by: str, write: bool = True,
-             turns: Any = LOOK, listing: Any = None) -> list[Found]:
+             turns: Any = LOOK, listing: Any = None,
+             chain: str | None = None) -> list[Found]:
     """Crash discovery over every registered slot slots reads crashed. With
     `write=False` it writes nothing and says what it would do. Without slots, or with no
-    tmux server answering (nothing reads crashed), it finds nothing."""
+    tmux server answering (nothing reads crashed), it finds nothing. `chain` is the launch
+    chain a relaunch repair brings back: a crashed slot whose last launch is of that chain
+    is settled, not reserved, since the repair itself brings its session back."""
     if api is None:
         return []
     listing = listing if listing is not None else api.list_slots()
@@ -360,6 +364,10 @@ def discover(conn: sqlite3.Connection, api: Any, *, by: str, write: bool = True,
         if turns is LOOK:
             turns = first.turns_api(quiet=True)
         action, why, row, session_id, unread = _session_of(conn, slot, turns)
+        meta = slot.last.meta if slot.last is not None else None
+        if (action == "reserve" and chain is not None and isinstance(meta, dict)
+                and meta.get("chain") == chain):
+            action, why = "settle", f"session {session_id} is brought back by its repair"
         held = slot.hold
         if action == "reserve" and held is not None:
             action, why = "held", f"held by {held.holder}; discovery tries again once it ends"
@@ -381,7 +389,7 @@ def _act(conn: sqlite3.Connection, api: Any, seen: Found, park_id: str | None,
 
     try:
         if seen.action == "settle":
-            api.settle(slot=seen.slot, why=_settled_words(seen.why))
+            api.settle(slot=seen.slot, why=settled_words(seen.why))
             return seen
         if seen.action != "reserve" or park_id is None:
             return seen
@@ -403,7 +411,8 @@ def _act(conn: sqlite3.Connection, api: Any, seen: Found, park_id: str | None,
     return replace(seen, entry=made)
 
 
-def _settled_words(why: str) -> str:
+def settled_words(why: str) -> str:
+    """`why` as slots' settle takes it: printable, at most 200 characters."""
     text = "".join(ch if ch.isprintable() else " " for ch in why)
     return text[:200] or "nothing to restore"
 
@@ -435,24 +444,30 @@ def whole(kind: str, conn: sqlite3.Connection, api: Any, *, by: str,
 
 
 def discover_before_launch(*, by: str, env: Mapping[str, str] | None = None,
-                           turns: Any = LOOK, wait_s: float = LOCK_WAIT_S) -> list[Found]:
+                           turns: Any = LOOK, wait_s: float = LOCK_WAIT_S,
+                           api: Any = LOOK, conn: sqlite3.Connection | None = None,
+                           chain: str | None = None) -> list[Found]:
     """A slot launch's own crash discovery, under the park lock as `discovery`. Nothing
     when a whole-run holder that has run discovery holds the lock; `ParkRunning` when it
-    stays held past the wait otherwise. Without slots it does nothing."""
-    api = slots.api()
+    stays held past the wait otherwise. Without slots it does nothing. `api` and `conn`
+    stand in for slots' API and the store (looked up, or opened and closed, when left
+    out); `chain` is as `discover`'s."""
+    api = slots.api() if api is LOOK else api
     if api is None:
         return []
     with discovery(env=env, wait_s=wait_s) as run_it:
         if not run_it:
             return []
-        conn = store.connect(env=env)
+        if conn is not None:
+            return discover(conn, api, by=by, turns=turns, chain=chain)
+        own_conn = store.connect(env=env)
         try:
-            return discover(conn, api, by=by, turns=turns)
+            return discover(own_conn, api, by=by, turns=turns, chain=chain)
         finally:
-            conn.close()
+            own_conn.close()
 
 
 __all__ = ["ACTIONS", "DONE", "HOLDER_FILE", "LOOK", "Found", "Prepared", "discover", "discover_before_launch",
            "whole", "LOCK_FILE", "LOCK_KINDS", "LOCK_WAIT_S", "WHOLE_KINDS", "LockHolder",
            "Note", "ParkRunning", "discovery", "held_here", "lock", "lock_path", "mark_done",
-           "read_holder", "reconcile", "resume_command"]
+           "read_holder", "reconcile", "resume_command", "settled_words"]

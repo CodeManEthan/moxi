@@ -121,6 +121,9 @@ class FakeSlots:
     def supported(self):
         return SimpleNamespace(ok=True, why="")
 
+    def list_slots(self):
+        return SimpleNamespace(ok=True, slots=(), unregistered=())
+
     def show(self, slot):
         return self.shown
 
@@ -682,6 +685,26 @@ def test_a_repair_respawns_the_recorded_slot_under_the_original_holder(conn):
     assert request.respawn and request.slot == "3" and request.hold == original.run_id
     assert request.handoff == original.handoff_path
     assert ("hold", "3", original.run_id) in slots_api.calls
+
+
+def test_a_repair_runs_crash_discovery_before_it_holds_the_recorded_slot(conn, monkeypatch):
+    original = failed_run(conn)
+    slots_api = FakeSlots(shown=shown("ended", chain="c-other"))
+    asked = []
+
+    def discover(**kw):
+        # Another session crashed in slot 3: discovery reserves the slot for it.
+        asked.append(kw)
+        slots_api.shown = shown("ended", holder="park-p1", chain="c-other")
+        return []
+
+    monkeypatch.setattr(job.parks, "discover_before_launch", discover)
+    got = go(conn, repair_run(conn, original), slots_api=slots_api, cls=job.RepairJob)
+    assert got.outcome == "relaunched"
+    [kw] = asked
+    assert kw["api"] is slots_api and kw["chain"] == job.chain_of(conn, original.request_id)
+    assert got.requests[0].slot == "" and got.requests[0].hold is None
+    assert "hold" not in slots_api.names()
 
 
 def test_a_repair_asks_again_when_slots_dont_answer_about_the_hold(conn):

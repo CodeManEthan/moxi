@@ -3781,6 +3781,8 @@ launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, 
 launcher	packages/launcher/src/moxi_launcher/restore.py	return _restored(entry, "refused", why, conn=conn)	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(entry.slot)	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/restore.py	if any(COMMS_OFFLINE in s.why for s in said):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/restore.py	found = api.show(slot)	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/restore.py	line: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/resume.py	"""Whether `row`'s session is live, and, when that can't be read, why: turns' `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/resume.py	"sessions", "static_refusal"]	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	can't. Live is read from turns first (`find` by that id), then from the launch's own	keep	find	find
@@ -3897,6 +3899,7 @@ launcher	packages/launcher/tests/launcher_fake_slots.py	record("show", slot=slot
 launcher	packages/launcher/tests/launcher_fake_slots.py	"name-taken", "job-running", "unsupported", "changed")	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_slots.py	hold, `changed` when `expect` is not the slot's last launch's `request_id`; otherwise it	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_slots.py	raise Refused("changed", f"slot {slot}'s last launch is "	keep	changed	changed
+launcher	packages/launcher/tests/launcher_fake_slots.py	live hold (open-ended, or `until` not passed), `changed` when `expect` is not the slot's	keep	changed	changed
 launcher	packages/launcher/tests/launcher_fake_turns.py	#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module	use	moxi_launcher.first.TURNS_SEAM	moxi_launcher.first.TURNS_ENV
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `reconnect`: `ok`, or `refused` (nothing serves any more: `Lost("unanswered")`).	keep	refused	refused
 launcher	packages/launcher/tests/launcher_fake_turns.py	- `sessions`: the live sessions `find` finds, by session id, each `{harness, endpoint_pid,	keep	find	find
@@ -4805,6 +4808,7 @@ launcher	packages/launcher/tests/test_resume.py	self.sessions.append(Session())	
 launcher	packages/launcher/tests/test_resume.py	store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",	use	actor=	by=
 launcher	packages/launcher/tests/test_resume.py	test_two_resumes_of_one_session_at_once_launch_it_once.one	name	error	exc
 launcher	packages/launcher/tests/test_resume.py	unread, fine = got.data["sessions"]	keep	sessions	sessions
+launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `list_slots`, `show` and `create`, from a table of slots by	keep	show	show
 launcher	packages/launcher/tests/test_resume_store.py	-	name	test_the_base_environment_is_recorded_and_holds_no_credential	test_the_base_env_is_recorded_and_holds_no_credential
 launcher	packages/launcher/tests/test_resume_store.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",	keep	HOME	HOME

@@ -1,8 +1,9 @@
 """A stand-in for slots' API, as the launcher calls it: `supported`, `list_slots`, `show`,
 `create` (which makes slots), `start` (which claims a slot and starts the command there),
 `respawn` (which starts it in the slot's ended run pane), `hold`, `release` and `settle`,
-and the screen calls `read_screen` and `answer_screen`, with slots' errors and result shapes, field for field (`test_slot` holds
-them against slots' own when slots is installed).
+and the screen calls `read_screen` and `answer_screen`, with slots' errors and result
+shapes, field for field (`test_slot` holds them against slots' own when slots is
+installed).
 
 The launcher reaches it through its test seam, `MOXI_LAUNCHER_SLOTS=launcher_fake_slots`.
 What it does is scripted by `script.json` in the directory `LAUNCHER_FAKE_SLOTS` names, read
@@ -32,17 +33,18 @@ The script's keys, each with its default:
   `label` and `meta` for `occupied`), `try-again`, `error` or `registry`. As slots does,
   `start` raises `UsageError` for a relative `cwd` and for `create=True` with a slot
   named.
-- `create`: `ok` (each number made: its slot reads `free` from then on, keeping its hold
-  and last launch, and launchable unless held),
+- `create`: `ok` (each number made: its slot reads `free` from then on, keeping its hold,
+  last launch and crashed reading, and launchable unless held),
   `refused` (raises `Refused` from `refused`: `in-use`, `name-taken`, `no-free-slot`),
   `try-again`, `error` or `registry`. It returns the numbers made.
 - `respawn`: as `start`, for `respawn`, which names its slot and reuses its run pane;
   `refused` raises `Refused` from `refused` (`live-pane`, `missing`, `held`).
 - `hold`: `ok`, `try-again`, `error` or `registry`. When `ok` it refuses as slots does,
   from the script's slots: `no-slot` for a slot not listed, `held` for another holder's
-  hold, `changed` when `expect` is not the slot's last launch's `request_id`; otherwise it
-  writes `{"holder": ..., "until": ...}` (`until` null for a hold with no `seconds`) on
-  the slot and saves the script. `release` ends the holder's hold the same way and says
+  live hold (open-ended, or `until` not passed), `changed` when `expect` is not the slot's
+  last launch's `request_id`; otherwise it writes `{"holder": ..., "until": ...}` (`until`
+  null for a hold with no `seconds`) on the slot and saves the script. `release` ends the
+  holder's live hold the same way, leaves a free or ended slot launchable again, and says
   whether it had one; `settle` refuses `no-slot` and `occupied`, and writes the slot's
   `last.ended` with `settled` and `crashed` false (`settle: "try-again"` raises
   `TryAgain`).
@@ -408,9 +410,12 @@ def create(numbers=None, *, count=1, name=None) -> list[int]:
     made = list(numbers) if numbers else [plan.get("placed", 1) + i for i in range(count)]
     listed = plan.setdefault("slots", {})
     for number in made:
-        # As slots' create: a missing slot made again keeps its row's hold and last.
-        kept = {k: v for k, v in listed.get(str(number), {}).items() if k in ("hold", "last")}
-        listed[str(number)] = {"state": "free", "launchable": not kept.get("hold"), **kept}
+        # As slots' create: a missing slot made again keeps its row's hold and last, so
+        # one that read crashed still does.
+        kept = {k: v for k, v in listed.get(str(number), {}).items()
+                if k in ("hold", "last", "crashed")}
+        listed[str(number)] = {"state": "free", "launchable": not _live(kept.get("hold")),
+                               **kept}
     _save(plan)
     return made
 
@@ -485,6 +490,12 @@ def _entry_meta(entry: dict) -> dict | None:
     return (entry.get("last") or {}).get("meta")
 
 
+def _live(hold: dict | None) -> bool:
+    """Whether a hold in the script is live, as slots reads one: an open-ended hold, or
+    one whose `until` has not passed."""
+    return bool(hold) and (hold.get("until") is None or hold["until"] > time.time())
+
+
 def hold(slot, holder, seconds=None, *, expect=None) -> Hold:
     record("hold", slot=slot, holder=holder, seconds=seconds, expect=expect)
     plan = script()
@@ -493,7 +504,7 @@ def hold(slot, holder, seconds=None, *, expect=None) -> Hold:
         raise TryAgain("the slots lock was not had in 10 s")
     _raise(how, "list-panes")
     entry = _slot_entry(plan, slot)
-    current = entry.get("hold")
+    current = entry.get("hold") if _live(entry.get("hold")) else None
     if current and current["holder"] != holder:
         raise Refused("held", f"slot {slot} is held by {current['holder']}",
                       {"holder": current["holder"], "until": current.get("until")})
@@ -515,9 +526,11 @@ def release(slot, holder) -> bool:
     record("release", slot=slot, holder=holder)
     plan = script()
     entry = plan.get("slots", {}).get(str(slot))
-    if not entry or not entry.get("hold") or entry["hold"]["holder"] != holder:
+    if not entry or not _live(entry.get("hold")) or entry["hold"]["holder"] != holder:
         return False
     entry["hold"] = None
+    # As slots reads it: a free or ended slot with no hold is launchable again.
+    entry["launchable"] = entry.get("state") in ("free", "ended")
     _save(plan)
     return True
 

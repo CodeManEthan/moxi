@@ -84,7 +84,8 @@ class Turns:
 
 
 class Slots:
-    """slots' `supported`, `show` and `create`, from a table of slots by number."""
+    """slots' `supported`, `list_slots`, `show` and `create`, from a table of slots by
+    number."""
 
     class SlotsError(Exception):
         pass
@@ -101,6 +102,12 @@ class Slots:
 
     def supported(self):
         return SimpleNamespace(ok=self.ok, why="")
+
+    def list_slots(self):
+        if self.how != "ok":  # as slots: a listing that can't be read says so, never raises
+            return SimpleNamespace(ok=False, why="tmux failed", slots=(), unregistered=())
+        found = (self.show(n) for n in sorted(self.table, key=int) if str(n).isdigit())
+        return SimpleNamespace(ok=True, slots=tuple(found), unregistered=())
 
     def show(self, slot):
         if self.how == "try-again":
@@ -534,6 +541,26 @@ def test_a_missing_recorded_slot_is_made_again_first(conn, entry):
     api_ = Slots({"3": entry} if entry is not None else {})
     assert resume.choose_slot(api_, row_in(conn), None) == "3"
     assert api_.created == [[3]]
+
+
+def test_a_missing_recorded_slot_another_holds_goes_to_the_lowest_and_says_why(conn):
+    reserved = {**MISSING, "hold": SimpleNamespace(holder="park-p1", until=None)}
+    api_, said = Slots({"3": reserved}), []
+    assert resume.choose_slot(api_, row_in(conn), None, say=said.append) == ""
+    assert api_.created == []
+    assert said == ["slot 3 is held by park-p1; resuming into the lowest slot that takes it"]
+    # Named, it is passed on for the launch's own check to refuse with slots' words.
+    assert resume.choose_slot(api_, store.get(conn, "r1"), 3) == 3
+    assert api_.created == []
+
+
+def test_a_recorded_slot_held_by_the_resumes_own_hold_takes_it(conn):
+    own = SimpleNamespace(holder="park-p1", until=None)
+    api_ = Slots({"3": {**MISSING, "hold": own}})
+    assert resume.choose_slot(api_, row_in(conn), None, hold="park-p1") == "3"
+    assert api_.created == [[3]]
+    ended = Slots({"3": {"state": "ended", "launchable": False, "hold": own}})
+    assert resume.choose_slot(ended, store.get(conn, "r1"), None, hold="park-p1") == "3"
 
 
 def test_a_slot_session_with_no_registry_row_is_made_again_first(conn):

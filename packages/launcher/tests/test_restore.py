@@ -79,14 +79,21 @@ class Launch:
     ends the hold it is given), then gives `state`; `refuse` raises instead; `then` runs
     after the placement."""
 
-    def __init__(self, state="ready", refuse=None, then=None):
-        self.state, self.refuse, self.then = state, refuse, then
+    def __init__(self, state="ready", refuse=None, then=None, conn=None):
+        self.state, self.refuse, self.then, self.conn = state, refuse, then, conn
         self.requests = []
 
     def __call__(self, request, *, env=None, warn=None):
         self.requests.append(request)
         if self.refuse is not None:
             raise self.refuse
+        if self.conn is not None:  # the launch's own row, as `api.launch` writes it
+            store.insert(self.conn, request_id=request.request_id, by="ann",
+                         harness="claude", target="slot", cwd="/tmp", values={},
+                         argv=["claude"], env={}, posture="", session_id=request.session_id,
+                         slot=str(request.slot or ""), resume_of=request.resume_of)
+            store.set_state(self.conn, request.request_id, self.state,
+                            reason="exec-failed" if self.state == "failed" else None)
         named = request.slot if request.slot not in (None, "") else None
         placed = fake.start(named, ["claude"], env={}, cwd="/tmp",
                             label=f"launcher:{request.request_id}",
@@ -212,6 +219,26 @@ def test_a_launch_failing_after_placement_takes_the_reservation_again(conn, rig)
     assert rig.slot(3)["hold"]["holder"] == HOLDER and result.exit_code == 1
 
 
+def test_a_restore_after_a_failed_launch_resumes_the_session_again(conn, rig):
+    entry = parked(conn, "r3", SID3, 3)
+    rig.plan(slots={"3": reserved("missing", "r3")})
+    first = go(conn, launch=Launch(state="failed", conn=conn))
+    assert first.exit_code == 1 and store.get_entry(conn, entry.entry_id).state == "open"
+    # The failed launch never claimed the session, so the session resolves to r3 again:
+    # that is not a launch that took it up since the park.
+    assert store.resolve(conn, SID3).request_id == "r3"
+    plan = fake.script()  # its pane died: the slot reads ended, still reserved
+    plan["slots"]["3"]["state"] = "ended"
+    fake._save(plan)
+    launch = Launch(conn=conn)
+    second = go(conn, launch=launch)
+    assert second.exit_code == 0, second.lines
+    [request] = launch.requests
+    assert (request.resume_of, request.slot, request.hold) == ("r3", 3, HOLDER)
+    now = store.get_entry(conn, entry.entry_id)
+    assert (now.state, now.restore_request_id) == ("restored", request.request_id)
+
+
 def test_a_launch_failing_after_the_slot_was_taken_closes_the_entry_dropped(conn, rig):
     entry = parked(conn, "r3", SID3, 3)
     rig.plan(slots={"3": reserved("ended", "r3")})
@@ -275,6 +302,46 @@ def test_a_plain_resume_refused_keeps_the_entry_and_raises(conn, rig):
     assert rig.slot(3)["hold"]["holder"] == HOLDER
 
 
+def crashed(rid, sid):
+    return {"state": "missing", "launchable": False, "hold": None, "crashed": True,
+            "last": {"at": 1.0, "label": f"launcher:{rid}",
+                     "meta": {"request_id": rid, "session_id": sid, "chain": rid}}}
+
+
+def launched(conn, rid, sid, slot):
+    store.insert(conn, request_id=rid, by="ann", harness="claude", target="slot",
+                 cwd="/tmp", values={}, argv=["claude"], env={}, posture="",
+                 session_id=sid, slot=str(slot))
+    store.set_state(conn, rid, "ready")
+
+
+def test_the_first_plain_resume_of_a_crashed_session_goes_back_into_its_slot(conn, rig):
+    launched(conn, "r3", SID3, 3)
+    rig.plan(slots={"3": crashed("r3", SID3)})
+    launch = Launch()
+    result = resume_it(conn, launch=launch)
+    assert result.exit_code == 0, result.lines
+    [entry] = store.entries_log(conn)
+    assert (entry.kind, entry.state) == ("crash", "restored")
+    assert [(c["slot"], c["hold"]) for c in rig.calls("start")] == [(3, entry.holder)]
+    assert store.open_entries(conn) == []
+
+
+def test_a_resume_whose_missing_slot_is_reserved_for_another_goes_to_the_lowest(conn, rig):
+    other = parked(conn, "r5", SID5, 3)
+    launched(conn, "r3", SID3, 3)
+    rig.plan(slots={"3": reserved("missing", "r5"), "1": {"state": "free",
+                                                         "launchable": True}}, placed=1)
+    result = resume_it(conn, launch=Launch())
+    assert result.exit_code == 0, result.lines
+    assert [(c["slot"], c["create"]) for c in rig.calls("start")] == [(None, True)]
+    assert rig.calls("create") == []
+    assert result.lines[0] == ("slot 3 is held by park-p1; resuming into the lowest slot "
+                               "that takes it")
+    assert store.get_entry(conn, other.entry_id).state == "open"
+    assert rig.slot(3)["hold"]["holder"] == HOLDER
+
+
 # -- unpark -----------------------------------------------------------------------------------
 
 
@@ -288,6 +355,30 @@ def test_unpark_releases_a_named_slot_and_closes_its_entry_dropped(conn, rig):
     assert rig.slot(3)["hold"] is None and rig.slot(5)["hold"]["holder"] == HOLDER
     assert result.lines[0] == (f"slot 3: {SID3}: dropped: resume it with moxi launcher "
                                f"resume {SID3}")
+
+
+def test_an_unparked_slot_that_reads_crashed_is_not_reserved_again(conn, rig):
+    # Park left the session running; the reboot ended it, so its slot reads crashed.
+    entry = parked(conn, "r3", SID3, 3)
+    rig.plan(slots={"3": {**reserved("missing", "r3"), "crashed": True}})
+    result = restore.unpark([3], conn=conn, turns=None)
+    assert result.exit_code == 0 and store.get_entry(conn, entry.entry_id).state == "dropped"
+    assert [c["slot"] for c in rig.calls("settle")] == [3]
+    assert rig.slot(3)["crashed"] is False
+    found = parks.discover(conn, slots.api(), by="ann", turns=None)
+    assert found == [] and store.open_entry(conn, 3) is None
+    assert rig.slot(3)["hold"] is None
+
+
+def test_a_restore_that_releases_a_crashed_slot_settles_it(conn, rig):
+    entry = parked(conn, "r3", SID3, 3)
+    store.insert(conn, request_id="r9", by="ann", harness="claude", target="slot",
+                 cwd="/tmp", values={}, argv=["claude"], env={}, posture="",
+                 session_id=SID3, slot="8", resume_of="r3")
+    rig.plan(slots={"3": {**reserved("missing", "r3"), "crashed": True}})
+    go(conn, launch=Launch())
+    assert store.get_entry(conn, entry.entry_id).state == "restored"
+    assert [c["slot"] for c in rig.calls("settle")] == [3]
 
 
 def test_unpark_all_gives_up_every_parked_slot(conn, rig):

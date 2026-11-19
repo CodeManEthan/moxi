@@ -117,7 +117,7 @@ from typing import Any
 
 from moxi import files
 
-from . import catalog, notices, quiet, slots, store, targets
+from . import catalog, notices, parks, quiet, slots, store, targets
 
 log = logging.getLogger("moxi.launcher.job")
 
@@ -845,6 +845,14 @@ class RepairJob(RelaunchJob):
         if api is None:
             self.end("relaunch-failed", "no-slots", "slots can't be loaded")
         chain = chain_of(self.conn, self.row.request_id)
+        # Crash discovery before the recorded slot is chosen and held: a crashed slot of
+        # another session is reserved for it, and so passed over; one of this chain's own
+        # is settled, since this repair brings its session back.
+        try:
+            parks.discover_before_launch(by=original.actor, api=api, conn=self.conn,
+                                         chain=chain)
+        except parks.ParkRunning as exc:
+            self.end("relaunch-failed", exc.code, f"{exc.problem}: {exc.hint}")
         try:
             choice = choose_slot(api, original.slot or self.row.slot, self.holder, chain)
         except Exception as exc:  # noqa: BLE001  (a slot that can't be read: nothing done)

@@ -36,11 +36,15 @@ entry is closed `dropped` and the session's `moxi launcher resume` command print
 open entry always has its reservation, or is closed.
 
 **Unpark** releases each named slot's reservation (every open entry's with `--all`) and
-closes its entry `dropped`; the session stays resumable by `moxi launcher resume`.
+closes its entry `dropped`; the session stays resumable by `moxi launcher resume`. A slot
+whose reservation is released, by unpark or by restore, is settled when it reads crashed
+(a session park left running that the reboot ended), so the next crash discovery does not
+reserve it again.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping
@@ -50,6 +54,8 @@ from typing import Any
 from moxi import exit as codes
 
 from . import catalog, first, identity, parks, relaunch, resume, slots, store, target
+
+log = logging.getLogger("moxi.launcher.restore")
 
 LOOK = relaunch.LOOK
 Refused = relaunch.Refused
@@ -209,13 +215,27 @@ def _rehold(conn: sqlite3.Connection, api: Any, entry: store.ParkEntry,
                                     "reserved again", failed, conn)
 
 
-def _release(api: Any, entry: store.ParkEntry) -> bool:
+def _release(api: Any, entry: store.ParkEntry, why: str = "its session was restored"
+             ) -> bool:
+    """Release the entry's reservation, and settle its slot when it reads crashed, so the
+    next crash discovery does not reserve the slot again for the session given up."""
     if api is None:
         return False
     try:
-        return bool(api.release(entry.slot, entry.holder))
+        released = bool(api.release(entry.slot, entry.holder))
     except Exception:  # noqa: BLE001  (reconcile releases a park hold left with no entry)
         return False
+    _settle_crashed(api, entry.slot, why)
+    return released
+
+
+def _settle_crashed(api: Any, slot: int, why: str) -> None:
+    try:
+        found = api.show(slot)
+        if found is not None and getattr(found, "crashed", False):
+            api.settle(slot=slot, why=parks.settled_words(why))
+    except Exception as exc:  # noqa: BLE001  (an unsettled slot is reserved again; said)
+        log.warning("slot %s was released but not settled: %s", slot, exc)
 
 
 def _name(conn: sqlite3.Connection, entry: store.ParkEntry) -> str | None:
@@ -313,7 +333,7 @@ def _before(conn: sqlite3.Connection, entry: store.ParkEntry,
     """What restore finds before it resumes an entry's session: `(outcome, why, later
     launch)`, or None to resume it."""
     holder = store.resolve(conn, entry.session_id)
-    if holder is not None and holder.request_id != entry.request_id:
+    if holder is not None and holder.request_id not in _entry_line(conn, entry):
         return "restored", f"launch {holder.request_id} took it up since", holder.request_id
     row = holder or store.get(conn, entry.request_id)
     if row is None:
@@ -324,6 +344,19 @@ def _before(conn: sqlite3.Connection, entry: store.ParkEntry,
     if live:
         return "still-running", f"it still runs in slot {entry.slot}", None
     return None
+
+
+def _entry_line(conn: sqlite3.Connection, entry: store.ParkEntry) -> set[str]:
+    """The entry's launch and the launches it resumes, back to the first. After a failed
+    restore the entry names the failed launch, and the session then resolves to the launch
+    that launch resumed: neither took the session up since the park."""
+    line: set[str] = set()
+    rid: str | None = entry.request_id
+    while rid and rid not in line:
+        line.add(rid)
+        row = store.get(conn, rid)
+        rid = row.resume_of if row is not None else None
+    return line
 
 
 def _summary(notes: list[str], said: list[Restored], *, dry_run: bool = False) -> Result:
@@ -414,6 +447,7 @@ def _unpark_one(conn: sqlite3.Connection, api: Any, entry: store.ParkEntry,
         except (api.TryAgain, api.SlotsError) as exc:
             return _restored(entry, "failed", f"its reservation could not be released: "
                                               f"{exc}", conn=conn)
+        _settle_crashed(api, entry.slot, f"unparked by {by}")
     store.close_entry(conn, entry.entry_id, "dropped", detail=f"unparked by {by}")
     return _restored(entry, "dropped", f"resume it with "
                                        f"{parks.resume_command(entry.session_id)}",

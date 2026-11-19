@@ -113,6 +113,16 @@ def test_a_crashed_slot_with_its_session_is_reserved_entered_and_settled(conn, r
     assert settle["why"] == f"reserved by {entry.holder}"
 
 
+def test_a_crashed_slot_of_the_chain_a_repair_brings_back_is_settled(conn, rig):
+    launch_row(conn)
+    rig.plan(slots={"3": crashed()})
+    [found] = parks.discover(conn, slots.api(), by="ann", turns=None, chain="r3")
+    assert (found.action, found.why) == ("settle", f"session {SID} is brought back by its "
+                                                   "repair")
+    assert store.open_entry(conn, 3) is None and rig.calls("hold") == []
+    assert [c["slot"] for c in rig.calls("settle")] == [3]
+
+
 def test_one_discovery_puts_every_slot_it_reserves_under_one_park_id(conn, rig):
     launch_row(conn, "r3")
     launch_row(conn, "r5", "6a1d4b2f-8a54-4d9f-8f1b-2e3c4d5e6f70")
