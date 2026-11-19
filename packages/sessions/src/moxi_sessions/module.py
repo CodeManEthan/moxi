@@ -10,7 +10,8 @@ session's last turns, and a block other pages may place for that view. With the
 `secrets` extra, `moxi sessions read` redacts what it prints. With the `turns` extra, turns
 enforces sessions' transcript-read guard, off until the install's question or its switch
 turns it on. With the `projects` extra and the `ui` one, the page server folds the
-sessions into projects for the Projects page.
+sessions into projects, and the `project-facts` component reports them on the Projects
+page.
 """
 
 INTERFACES = frozenset({2, 3, 4, 5, 6})
@@ -57,6 +58,8 @@ PAGE = "moxi_sessions.page:PAGE"
 #: The page, which lists the sessions at the empty route and shows one session at the
 #: route that names it (`<harness>/<session>`, or `claude/<session>/<agent>` for a Claude
 #: Code subagent), and the window block, that one session's view placed by attributes.
+#: `project-facts`, which draws nothing, reports each project's sessions to the Projects
+#: page; without projects its route answers `off` and it reports nothing.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Sessions", "contract": 1, "place": "page",
              "group": "daily", "order": 20,
@@ -72,4 +75,13 @@ COMPONENTS = {
                    "agent": {"type": "string",
                              "doc": "a Claude Code subagent's id, under its parent session"},
                }},
+    "project-facts": {"script": "project-facts.js", "title": "Sessions",
+                      "doc": "Each project's sessions active recently and this week, and "
+                             "the folders worked in this week that are no project, for the "
+                             "Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
