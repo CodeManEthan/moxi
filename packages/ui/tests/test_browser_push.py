@@ -207,7 +207,8 @@ def test_a_crash_shows_down_in_the_status_line_and_the_panel_comes_back(ui_shell
     }""")
     crashes = ui_shell.server("fixture")["crashes"]
     ui_shell.kill("fixture")
-    ui_page.wait_for_function("window.__statusSeen.some((t) => t.startsWith(\"fixture's page server is down\"))")
+    ui_page.wait_for_function(
+        "() => window.__statusSeen.some((t) => t.startsWith(\"fixture's page server is down\"))")
     expect(ui_page.locator("#moxi-status")).to_be_hidden()
     row = ui_shell.wait_server("fixture", lambda r: r["state"] == "running" and r["crashes"] > crashes)
     assert row["crashes"] == crashes + 1
