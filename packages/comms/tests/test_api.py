@@ -193,7 +193,7 @@ def test_the_reads_and_names_are_pinned():
                                                     "directors", "awaiting"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting", "cache", "holder"]
+        "directors", "session_id", "bound_at", "awaiting", "cache", "holder", "via"]
     assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
     params = inspect.signature(api.roster_rows).parameters
     assert params["timeout_s"].default == api.READ_DEADLINE

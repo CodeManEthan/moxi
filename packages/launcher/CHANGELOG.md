@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
+  project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
+  folder or project picked again sends `scratch` off, so a launch from Home never names
+  two places. A preset that sets `scratch` moves the line to `Scratch`, and `Continue the
+  last session` says there is none to continue there.
+- Home's `+` has `Handoff from a file`, where the harness's form has the `handoff` row.
+  The handoff a launch sends, set there or named by `[defaults]` or the applied preset,
+  shows on a line under the box with `Clear`; a cleared one is sent as left out, so no
+  layer gives it, for the next launch only: once that launch starts or its command is
+  copied, or a preset is picked or picked again, the preset's handoff, or the defaults',
+  shows and is sent again. One set through the `+` stays over a preset change and a copied
+  command and goes after the launch that sent it, as a brief file does. Home used to leave out every handoff. A handoff alone, with an empty
+  box, is a headless launch's first turn.
 - Three more Claude Code screens are on the startup list with no setting, so a slot launch
   held on one fails at once, `screen-not-answered`, naming the screen: the first-run
   theme picker and welcome screen (the line says to run `claude` once in a terminal with
@@ -51,7 +64,8 @@
 - README: a section "What the launcher changes on your machine".
 - A launch whose comms identity is a send-only name a program registered is refused as
   `identity <name> is a send-only name a program registered`, where it used to say the
-  name had no owner.
+  name had no owner. A launch whose wrapper ended, or ran out its bind wait, on such a
+  name says the same in its failure line.
 - A headless launch with a comms identity runs where comms' wrapper takes the headless
   flags: comms' API names those harnesses in `HEADLESS` (read by
   `presets.comms_headless`), today Codex, which then runs `moxi comms codex ...

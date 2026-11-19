@@ -1,10 +1,11 @@
-"""turns' question mode: `AskUserQuestion` runs only in a turn where the person at the
-keyboard typed something that mentions a question.
+"""turns' question mode: `AskUserQuestion` runs only in a turn where the person typed
+something that mentions a question, at this terminal or from the Claude apps.
 
 The judge reads the turn's prompts the runner hands it (the guard `wants` them), each with
 its origin as the harness stamped it. It allows the call when a prompt whose origin is in
-`question_mode.origins` (by default `composer`, the person's Enter at this terminal)
-contains "question", case-folded, anywhere, and that prompt is not the one the session was
+`question_mode.origins` (by default `composer`, the person's Enter at this terminal, and
+`bridge`, a prompt the person sent from the Claude apps through Remote Control) contains
+"question", case-folded, anywhere, and that prompt is not the one the session was
 launched with. A subagent's call is always refused: a subagent can't reach the person.
 Every other call is refused, naming why. A prompt the runner can't tie to the turn is not
 in the list, so a miss refuses (fails closed), and so does every break
@@ -53,7 +54,7 @@ R_NOT_ASKED = (
 )
 R_NOT_HERE = (
     "AskUserQuestion is refused: the prompt that mentions a question came in with origin "
-    "{origin}, which question mode doesn't count as typed by the person at this terminal. "
+    "{origin}, which question mode doesn't count as typed by the person. "
     "Put the questions in prose instead."
 )
 R_LAUNCH = (
