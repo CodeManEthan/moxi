@@ -3,8 +3,8 @@ import test from "node:test";
 
 import { joinRunning } from "../src/launched-model.ts";
 import {
-  AGAIN_MS, folderWord, headerOf, isDue, keyOf, parseSessionHeader, sessionLine, sessionOf, sessionPath, sessionWhere,
-  startedWords, wantedSessions,
+  AGAIN_MS, folderWord, headerOf, isDue, keyOf, parseSessionHeader, rereadable, rereadAnswered, sessionLine, sessionOf,
+  sessionPath, sessionWhere, startedWords, wantedSessions,
 } from "../src/session-model.ts";
 
 // A clock in UTC that writes the time as `HH:MM`, so the words are the same in any zone.
@@ -70,6 +70,23 @@ test("a read is due once, and again after a read that gave nothing", () => {
   assert.equal(isDue({ state: "read", header: header(), at: 0 }, 1e12), false);
   assert.equal(isDue({ state: "read", header: null, at: 1000 }, 1000 + AGAIN_MS - 1), false);
   assert.equal(isDue({ state: "read", header: null, at: 1000 }, 1000 + AGAIN_MS), true);
+});
+
+test("an opened row asks again once its session answered; never while out or unasked", () => {
+  assert.equal(rereadable(undefined), false);
+  assert.equal(rereadable({ state: "out" }), false);
+  assert.equal(rereadable({ state: "read", header: header(), at: 0 }), true);
+  assert.equal(rereadable({ state: "read", header: null, at: 0 }), true);
+});
+
+test("asked again: a new header replaces; nothing keeps the header held, else reads nothing", () => {
+  const held = { state: "read", header: header(), at: 1000 };
+  const named = header({ name: "parser fix" });
+  assert.deepEqual(rereadAnswered(held, named, 5000), { state: "read", header: named, at: 5000 });
+  assert.equal(rereadAnswered(held, null, 5000), held);
+  assert.deepEqual(rereadAnswered({ state: "read", header: null, at: 1000 }, null, 5000), { state: "read", header: null, at: 5000 });
+  assert.deepEqual(rereadAnswered({ state: "read", header: null, at: 1000 }, named, 5000), { state: "read", header: named, at: 5000 });
+  assert.deepEqual(rereadAnswered(undefined, null, 5000), { state: "read", header: null, at: 5000 });
 });
 
 test("the answer is read as sent; another session's, or a value that isn't one, is none", () => {

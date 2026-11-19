@@ -3,8 +3,10 @@
 // page reads sessions' `/api/session` once for each live row that has a session id and a
 // harness (the harness comms' kinds give its adapter kind) and that launcher gives no where:
 // with launcher installed, only once launcher's read has answered. A read that gives a header
-// is kept; one that gives nothing is asked again after `AGAIN_MS`. The session's header
-// then gives line one's dim where, `<folder> · started <time> · <harness>`, and the opened
+// is kept, and asked again once each time the row is opened (`rereadAnswered`), so a name
+// typed in the harness since reaches the `Session` line; what was held stays drawn meanwhile.
+// One that gives nothing is asked again after `AGAIN_MS`. The session's header then gives
+// line one's dim where, `<folder> · started <time> · <harness>`, and the opened
 // row's `Session` line, its name (else its folder) the same way, with `Sessions` linking to
 // its transcript. A read that fails, or a header that names neither a folder nor a start,
 // gives nothing: no gap, no word.
@@ -46,6 +48,22 @@ export const AGAIN_MS = 30_000;
 export function isDue(read: SessionRead | undefined, nowMs: number): boolean {
   if (read === undefined) return true;
   return read.state === "read" && read.header === null && nowMs - read.at >= AGAIN_MS;
+}
+
+/** Whether a session's read is asked again when its row is opened: it has answered. One
+ * still out, or never asked, is left to the first read. */
+export function rereadable(read: SessionRead | undefined): boolean {
+  return read?.state === "read";
+}
+
+/** What is held for a session once a read asked again on opening its row answered with
+ * `header` (null for nothing to show): the new header when it gave one; else what was held
+ * when that had one, since a read that failed takes nothing away; else nothing, answered at
+ * `nowMs`. */
+export function rereadAnswered(held: SessionRead | undefined, header: SessionHeader | null, nowMs: number): SessionRead {
+  if (header !== null) return { state: "read", header, at: nowMs };
+  if (held?.state === "read" && held.header !== null) return held;
+  return { state: "read", header: null, at: nowMs };
 }
 
 /** The key a session's read is held under. */

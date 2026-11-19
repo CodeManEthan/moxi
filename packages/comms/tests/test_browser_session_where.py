@@ -3,8 +3,9 @@ sessions' own page server reading the rig's Claude transcripts.
 
 With sessions installed and launcher not, a bound name's row says where its session works
 as sessions' header has it, `<folder> · started <time> · <harness>`, and its opened row's
-`Session` line names the session and links to its transcript. A session sessions can't
-read shows nothing. With launcher installed, launcher's where wins for a session it runs,
+`Session` line names the session and links to its transcript; a name typed in the harness
+after the page read the session comes when the row is opened again. A session sessions
+can't read shows nothing. With launcher installed, launcher's where wins for a session it runs,
 and sessions' fills in for one it doesn't. Without sessions nothing of it shows, and
 nothing asks sessions.
 
@@ -17,6 +18,7 @@ answered in the browser (`LauncherStub`), as on the rest of the page's tests.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
 import time
@@ -28,7 +30,7 @@ import pytest
 from playwright.sync_api import expect
 
 import roster_kit
-from conftest import assistant_line, cache_absent, write_transcript
+from conftest import assistant_line, cache_absent, projects_root, write_transcript
 from roster_kit import holding, wait_for
 from test_browser_page import (  # noqa: F401 -- `page_shell` is a fixture the tests take
     _PUSHED, PAGE, SMALL, T, LauncherStub, agent, bound, needs_launcher, page_shell, running_entry,
@@ -48,6 +50,11 @@ SMALL_WITH_SESSIONS = [module for module in SMALL if module != "sessions"]
 #: A session's where as sessions gives it, started a minute ago in a folder `atlas-api`.
 STARTED = rf"started (?:today|yesterday) {T}"
 SESSIONS_READ = "/m/sessions/api/session"
+#: The name sessions gives a session, read in the page as the page reads it, with the key
+#: the shell signed it in with.
+NAME_READ = """(url) => fetch(url, {headers: {"X-Moxi-Key": localStorage.getItem("moxi-ui-key"),
+                                          Accept: "application/json"}, cache: "no-store"})
+  .then((answer) => answer.json()).then((value) => value.name)"""
 
 
 def transcript(tmp_path: Path, work_dir_name: str) -> str:
@@ -115,6 +122,38 @@ def test_on_the_small_install_sessions_says_where_each_agent_works(
     opened = root.locator('[data-part="opened"][data-to="reviewer"]')
     expect(opened.locator('[data-part="box"]')).to_have_count(1)
     expect(opened.locator('[data-line="session"]')).to_have_count(0)
+
+
+@needs_sessions
+def test_a_name_typed_since_the_page_read_the_session_comes_when_its_row_is_opened(
+        page_shell, rig, ui_contexts, monkeypatch, tmp_path):
+    cache_absent(monkeypatch)
+    planner = rig.shim(**PLANNER, session_id=transcript(tmp_path, "atlas-api"))
+    rig.shim(**REVIEWER, session_id=transcript(tmp_path, "kestrel-web"))
+    bound(rig, P, R)
+    shell = page_shell(leave_out=SMALL_WITH_SESSIONS)
+    roster_kit.current(shell, holding([P, R]))
+    page, root, _ = open_page(shell, ui_contexts)
+
+    def session_line(to: str) -> Any:
+        return root.locator(f'[data-part="opened"][data-to="{to}"] [data-line="session"]')
+
+    agent(root, P).locator('[data-action="message"]').click()
+    expect(session_line("planner")).to_contain_text(re.compile(rf"atlas-api · {STARTED} · claude"))
+    # Planner's session is given a name in the harness after the page read it. Sessions
+    # reuses what it gathered for a moment; the row is opened again once it gives the name.
+    with (projects_root() / "rig" / f"{planner.session_id}.jsonl").open("a") as transcript_fh:
+        transcript_fh.write(json.dumps({"type": "custom-title", "customTitle": "parser fix",
+                                        "sessionId": planner.session_id}) + "\n")
+    named = f"{SESSIONS_READ}?harness=claude&session={planner.session_id}"
+    wait_for(lambda: page.evaluate(NAME_READ, named) == "parser fix", 10,
+             what="sessions to give planner's session its name")
+    agent(root, R).locator('[data-action="message"]').click()
+    expect(session_line("reviewer")).to_contain_text(re.compile(rf"kestrel-web · {STARTED} · claude"))
+
+    agent(root, P).locator('[data-action="message"]').click()
+    expect(session_line("planner")).to_contain_text(re.compile(rf"parser fix · {STARTED} · claude"))
+    expect(agent(root, P)).to_have_attribute("where", re.compile(rf"^atlas-api · {STARTED} · claude$"))
 
 
 @needs_sessions

@@ -50,7 +50,8 @@
 // session id and a harness that launcher gives no where (`session-model.ts`), once
 // launcher's read has answered when launcher is installed: on every roster value, after
 // each read of launcher's, and every 30 s while the tab is visible, asking each session
-// once (a read that gave nothing, again after 30 s). Its header gives the row's where when
+// once (a read that gave nothing, again after 30 s), and again each time its row is opened,
+// what it held staying drawn until the answer. Its header gives the row's where when
 // launcher gives none, and the opened row's `Session` line when launcher's join gives none.
 
 import { css, html, LitElement, nothing } from "lit";
@@ -80,9 +81,9 @@ import {
 } from "./launched-model.ts";
 import type { Presses, Running } from "./launched-model.ts";
 import { byHim, parseQueue } from "./messages-model.ts";
-import { headerOf, isDue, keyOf, parseSessionHeader, sessionLine, sessionPath, sessionWhere, wantedSessions,
-} from "./session-model.ts";
-import type { SessionRead } from "./session-model.ts";
+import { headerOf, isDue, keyOf, parseSessionHeader, rereadable, rereadAnswered, sessionLine, sessionOf, sessionPath,
+  sessionWhere, wantedSessions } from "./session-model.ts";
+import type { SessionKey, SessionRead } from "./session-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
 import type { Line } from "./opened-model.ts";
@@ -291,6 +292,11 @@ export class CommsPage extends LitElement {
   #runningAnswered = false;
   /** sessions' header of each session read, by `keyOf`, with sessions installed. */
   #sessionReads = new Map<string, SessionRead>();
+  /** The session of the row opened in the last drawing, the one last asked again for an
+   * opened row (by `keyOf`), and the reads asked again that are out. */
+  #drawnSession: SessionKey | null = null;
+  #sessionFor: string | null = null;
+  #sessionAgain = new Set<string>();
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -370,6 +376,21 @@ export class CommsPage extends LitElement {
         this.#sessionReads.set(held, { state: "read", header: null, at: Date.now() });
       });
     }
+  }
+
+  /** Asks sessions again for an opened row's session that has answered before, so a name
+   * typed in the harness since reaches its `Session` line; what was held stays drawn while
+   * it is out, and a read that fails takes nothing away (`rereadAnswered`). */
+  #rereadSession(key: SessionKey): void {
+    const held = keyOf(key);
+    if (!installed("sessions") || !rereadable(this.#sessionReads.get(held)) || this.#sessionAgain.has(held)) return;
+    this.#sessionAgain.add(held);
+    void api("sessions", sessionPath(key)).then((result) => {
+      if (!this.isConnected) return;
+      const header = result.status === 200 ? parseSessionHeader(result.data, key) : null;
+      this.#sessionReads.set(held, rereadAnswered(this.#sessionReads.get(held), header, Date.now()));
+      this.requestUpdate();
+    }, () => undefined).finally(() => this.#sessionAgain.delete(held));
   }
 
   /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
@@ -472,6 +493,7 @@ export class CommsPage extends LitElement {
     this.#box = null;
     this.#feed = this.#mail = this.#queue = null;
     this.#queueFor = null;
+    this.#sessionFor = null;
     this.#stop?.();
     this.#stop = null;
     document.removeEventListener("visibilitychange", this.#shown);
@@ -604,6 +626,7 @@ export class CommsPage extends LitElement {
     this.#drawnTo = opened?.kind === "agent" ? frame?.rows.find((item) => item.open)?.to ?? null
       : opened?.kind === "other" ? opened.qualified : null;
     this.#drawnReply = opened?.kind === "agent" ? opened.reply : null;
+    this.#drawnSession = null;
     this.#drawnThread = opened?.kind === "thread" ? { a: opened.a, b: opened.b }
       : opened?.kind === "mail" ? { a: opened.qualified, b: null } : null;
     if (frame === null || frame.state === "gone") return nothing;
@@ -862,13 +885,12 @@ export class CommsPage extends LitElement {
     const roster = this.#kept?.value.rows ?? [];
     const queue = this.#queueFor === to && this.#queue !== null ? this.#queue
       : { loading: true, gone: false, failure: null, value: null };
+    const live = item.row.addresses.find((one) => one.qualified === to)?.row ?? null;
+    this.#drawnSession = installed("sessions") && live !== null ? sessionOf(live) : null;
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
       when: (at) => whenWords(at, this.#today), hasCache: installed("cache"), hasSessions: installed("sessions"),
-      session: installed("sessions")
-        ? sessionLine(headerOf(this.#sessionReads, item.row.addresses.find((one) => one.qualified === to)?.row ?? null),
-                      this.#today)
-        : null,
+      session: installed("sessions") ? sessionLine(headerOf(this.#sessionReads, live), this.#today) : null,
       showsDetails: this.#details,
     });
     const sessionId = view.sessionId;
@@ -1000,10 +1022,16 @@ export class CommsPage extends LitElement {
       line.tail !== null ? html` <span class="d">· ${line.tail}</span>` : nothing}</span>${end}</div>`;
   }
 
-  /** Follows the opened row's address with a read of its queue, and marks the messages a
-   * four-line cut hides part of. */
+  /** Follows the opened row's address with a read of its queue, asks sessions again for its
+   * session once each time a row is opened, and marks the messages a four-line cut hides
+   * part of. */
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
+    const session = this.#drawnSession;
+    if ((session === null ? null : keyOf(session)) !== this.#sessionFor) {
+      this.#sessionFor = session === null ? null : keyOf(session);
+      if (session !== null) this.#rereadSession(session);
+    }
     const to = this.#drawnTo;
     if (to !== this.#queueFor) {
       this.#queue?.close();
