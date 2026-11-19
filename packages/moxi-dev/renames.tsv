@@ -3958,6 +3958,7 @@ launcher	packages/launcher/tests/test_browser_home_options.py	test_a_row_found_a
 launcher	packages/launcher/tests/test_browser_home_options.py	test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag_once	name	folder	project_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	-	name	folder	work_dir_fixture
 launcher	packages/launcher/tests/test_browser_home_plus.py	context	name	folder	work_dir
+launcher	packages/launcher/tests/test_browser_home_plus.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), actor="planner")	use	actor=	by=
 launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), actor=other)	use	actor=	by=
 launcher	packages/launcher/tests/test_browser_home_plus.py	sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), actor=kit.actor(shell))	use	actor=	by=

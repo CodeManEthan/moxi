@@ -230,8 +230,9 @@ def test_a_record_line_naming_a_programs_name_reaches_nobody_and_opens_no_ask(ri
     both = rig.record.post_as_identity("reviewer@proj-a", rig.names_channel,
                                        machine_line.compose([TICKER, PLANNER], "which?",
                                                             posture="once")).id
-    assert wait_until(lambda: any(p["message_id"] == plain for p in planner.queue)
-                      and both in rig.daemon.asks)
+    # The daemon opens the ask at its first recipient and adds each one as it routes it,
+    # before handing it over: planner holding `both` means planner's turn is done.
+    assert wait_until(lambda: {plain, both} <= {p["message_id"] for p in planner.queue})
     assert TICKER not in rig.daemon.queue
     assert rig.daemon.asks[both]["open"] == {PLANNER}
     assert not any(TICKER in a["open"] for a in rig.daemon.asks.values())

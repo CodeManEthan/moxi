@@ -19,7 +19,7 @@ import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (T, full, group, harness, key_of, keys, launch, line, on, open_panel, own_panel, row,
+from panel_kit import (T, copied, full, group, harness, key_of, keys, launch, line, on, open_panel, own_panel, row,
                        rows, small, started)
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
@@ -236,7 +236,7 @@ def test_the_reach_line_asks_for_the_install_then_reads_start_with_no_reload(
     panel = own_panel("setup", small=True)
     ep, _ = make_endpoint(harness(), session_id=SID)
     panel.listed({key_of(ep)}, reach="setup")
-    page, root = open_panel(panel, ui_contexts, permissions=["clipboard-read", "clipboard-write"])
+    page, root = open_panel(panel, ui_contexts, copying=True)
     reach = root.locator('[data-part="foot"] [data-line="reach"]')
     expect(reach).to_have_text(re.compile(
         r"^Interactive Claude Code sessions can't show here yet: run moxi install turns ?Copy\. "
@@ -245,7 +245,7 @@ def test_the_reach_line_asks_for_the_install_then_reads_start_with_no_reload(
     copy = reach.locator('[data-action="copy-command"]')
     copy.click()
     expect(copy).to_have_text("Copied")
-    assert page.evaluate("() => navigator.clipboard.readText()") == "moxi install turns"
+    assert copied(page) == "moxi install turns"
     page.evaluate("() => { window.sameDocument = true; }")
 
     # As an install does: the runner listed first, then `endpoint.json` written. The page

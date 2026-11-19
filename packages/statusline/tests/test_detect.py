@@ -348,19 +348,30 @@ def _clashing() -> list[str]:
             "ghijklzz", "wxyz", "wxyz", "wxyz", "wxyzwxyzwxyz"]
 
 
-def test_a_forced_collision_draws_again(tmp_path):
-    root = tmp_path / "rootwxyz"
+#: A throwaway folder's path with no digit in it, and a clock held still: the numbers a
+#: draw takes then depend on the scripted draws alone, never on a pytest temp folder's
+#: number or on the second the test runs.
+ROOT = "/t/rootwxyz"
+
+
+def _still() -> float:
+    return _held(2030, 3, 4, 9, 15, 0)
+
+
+def test_a_forced_collision_draws_again():
     draw = Scripted(letters=_clashing())
-    drawn = detect.plan(str(root), draw)
+    drawn = detect.plan(ROOT, draw, now=_still)
     assert drawn is not None
     assert draw.letter_calls == 20
     assert drawn.session[:6] != "ghijkl"
     assert drawn.clash() is None
 
 
-def test_a_collision_every_time_detects_nothing(line, throwaway):
+def test_a_collision_every_time_detects_nothing(line, throwaway, monkeypatch):
+    # Made from inside the throwaway folder, the root is `./rootwxyz`: no digit in it.
+    monkeypatch.chdir(throwaway)
     draw = Scripted(letters=["rootwxyz"] + _clashing() * (detect.REDRAWS + 1))
-    found = run(line(ALL), throwaway, draw=draw)
+    found = detect.detect(line(ALL), tmp=".", now=_still, draw=draw)
     assert found.pieces() == []
     assert found.problem.startswith("Moxi couldn't draw test input")
     assert not found.ran
@@ -375,8 +386,7 @@ def test_a_temp_path_holding_a_marker_number_draws_again(tmp_path):
 
 
 def test_every_marker_is_found_by_its_own_rule_only():
-    root = "/t/rootwxyz"
-    drawn = detect.plan(root, Scripted())
+    drawn = detect.plan(ROOT, Scripted())
     data = json.dumps(drawn.payload())
     for marker in drawn.markers:
         if marker.piece == "branch":
