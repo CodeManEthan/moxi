@@ -228,7 +228,9 @@ def parse_size(text: str) -> int:
 def over_budget(sample: Mapping[str, Any] | None, budget: Mapping[str, Any] | None) -> list[str]:
     """What of `sample` (`{"rss", "fds", ...}`) is over `budget` (`{"rss": <size>,
     "fds": <int>}`), one phrase each; empty when within it or when either is missing.
-    CPU is reported, never compared."""
+    CPU is reported, never compared. A Windows sample's `handles` is never compared
+    either: the budget's `fds` is a POSIX fd limit, and a handle count also holds events,
+    threads and registry keys."""
     if not sample or not budget:
         return []
     over = []
@@ -249,6 +251,18 @@ def _mb(size: int) -> str:
     return f"{size / 1024**2:.0f} MB"
 
 
+def _sample_text(sample: Mapping[str, Any]) -> str:
+    """`sample` for a person: its RSS, its open fds or, on Windows, its open handles, and
+    its CPU seconds."""
+    parts = [f"RSS {_mb(sample['rss'])}"]
+    if isinstance(sample.get("handles"), int):
+        parts.append(f"{sample['handles']} open handles")
+    elif isinstance(sample.get("fds"), int):
+        parts.append(f"{sample['fds']} fds")
+    parts.append(f"CPU {sample['cpu_s']:.1f} s")
+    return ", ".join(parts)
+
+
 def _uptime(seconds: float) -> str:
     seconds = int(seconds)
     if seconds < 120:
@@ -265,8 +279,7 @@ def _running_row(found: Probe) -> Row:
     if isinstance(own.get("uptime_s"), (int, float)):
         parts.append(f"up {_uptime(own['uptime_s'])}")
     if sample:
-        parts.append(f"RSS {_mb(sample['rss'])}, {sample['fds']} fds, "
-                     f"CPU {sample['cpu_s']:.1f} s")
+        parts.append(_sample_text(sample))
     detail = ", ".join(parts)
     warns = over_budget(sample, own.get("budget") or SHELL_BUDGET)
     if own.get("localhost") is False:
