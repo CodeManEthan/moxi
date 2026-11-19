@@ -141,4 +141,4 @@ server of its own by setting `MOXI_HOME`.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-slots-v0.1.0/packages/slots/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-slots-v0.1.1/packages/slots/LICENSE).
