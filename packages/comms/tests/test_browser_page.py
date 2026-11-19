@@ -882,6 +882,11 @@ def test_the_page_fits_both_widths_in_both_themes_and_only_send_takes_the_accent
     shell = page_shell()
     roster_kit.current(shell, holding([P, R]))
     page, root, _ = open_page(shell, ui_contexts, [])
+    # With sessions installed it knows both sessions, so each row's where comes when its read
+    # answers, and the row draws its lines anew; the colours are read once both have come.
+    if importlib.util.find_spec("moxi_sessions") is not None:
+        for name in (P, R):
+            expect(agent(root, name)).to_have_attribute("where", re.compile(r" · claude$"))
     agent(root, R).locator('[data-action="message"]').click()
     box = root.locator('[data-part="box"][data-to="reviewer"]')
     box.locator("textarea").fill("Is the cursor fix safe to ship?")
