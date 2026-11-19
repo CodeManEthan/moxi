@@ -7,18 +7,40 @@ import test from "node:test";
 
 import { LOCK, REOPEN_MS, TabPush } from "../src/push.ts";
 
-/** The Web Locks API, as much of it as TabPush uses: exclusive locks granted in order. */
+/** The Web Locks API, as much of it as TabPush uses: exclusive locks granted in order, and
+ * a waiting request withdrawn by its `signal`. With `signals` false it ignores the signal,
+ * as when the lock was already on its way to the tab when the signal fired. */
 class Locks {
   held = new Set();
   waiting = new Map();
 
-  request(name, callback) {
+  constructor({ signals = true } = {}) {
+    this.signals = signals;
+  }
+
+  request(name, options, callback) {
+    if (callback === undefined) [options, callback] = [{}, options];
+    const { signal } = options;
     return new Promise((resolve, reject) => {
       const queue = this.waiting.get(name) ?? [];
-      queue.push({ callback, resolve, reject });
+      const entry = { callback, resolve, reject };
+      if (this.signals && signal !== undefined) {
+        signal.addEventListener("abort", () => {
+          const at = queue.indexOf(entry);
+          if (at === -1) return;
+          queue.splice(at, 1);
+          reject(new DOMException("The request was aborted.", "AbortError"));
+        });
+      }
+      queue.push(entry);
       this.waiting.set(name, queue);
       this.grant(name);
     });
+  }
+
+  /** How many requests for `name` are waiting. */
+  pending(name) {
+    return (this.waiting.get(name) ?? []).length;
   }
 
   grant(name) {
@@ -42,9 +64,9 @@ class Locks {
 }
 
 /** One browser: its locks, its channels, and the tabs opened in it. With `locks` false it
- * has no Web Locks, and each tab leads a stream of its own. */
-function browser({ locks: hasLocks = true } = {}) {
-  const locks = new Locks();
+ * has no Web Locks, and each tab leads a stream of its own; `signals` goes to the locks. */
+function browser({ locks: hasLocks = true, signals = true } = {}) {
+  const locks = new Locks({ signals });
   const channels = new Set();
   Object.defineProperty(globalThis, "navigator", {
     value: hasLocks ? { locks } : {},
@@ -171,6 +193,65 @@ test("when the leader's page leaves another tab leads, and the page rejoins when
   t.mock.timers.tick(REOPEN_MS);
   assert.deepEqual(a.live(), [["fixture.one"]]);
 });
+
+for (const signals of [true, false]) {
+  const how = signals ? "withdraws its request" : "gives up a lock granted while it is away";
+  test(`a tab that leaves while it waits for the lock ${how}, and asks again when shown`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const { locks, tab } = browser({ signals });
+    const a = tab();
+    a.push.hub.add("fixture.a", () => {});
+    await settle();
+    const b = tab();
+    b.push.hub.add("fixture.b", () => {});
+    await settle();
+    const c = tab();
+    c.push.hub.add("fixture.c", () => {});
+    await settle();
+    t.mock.timers.tick(REOPEN_MS);
+    assert.deepEqual(a.live(), [["fixture.a", "fixture.b", "fixture.c"]]);
+    assert.equal(locks.pending(LOCK), 2);
+
+    // b goes into the back-forward cache while its request waits behind a.
+    b.fire("pagehide", { persisted: true });
+    await settle();
+    if (signals) assert.equal(locks.pending(LOCK), 1, "b's request is withdrawn");
+    t.mock.timers.tick(REOPEN_MS);
+    assert.deepEqual(a.live(), [["fixture.a", "fixture.c"]]);
+
+    // a's page goes for good: c, which is here, leads, never b.
+    a.fire("pagehide", { persisted: false });
+    await settle();
+    t.mock.timers.tick(REOPEN_MS);
+    await settle();
+    assert.deepEqual(b.streams, []);
+    assert.deepEqual(c.live(), [["fixture.c"]]);
+    assert.ok(locks.held.has(LOCK));
+
+    // b is shown again: it waits behind c, and c's stream takes its topics.
+    b.fire("pageshow", { persisted: true });
+    await settle();
+    t.mock.timers.tick(REOPEN_MS);
+    assert.deepEqual(c.live(), [["fixture.b", "fixture.c"]]);
+    assert.equal(locks.pending(LOCK), 1);
+
+    // b leaves again before its new request is granted, then c goes: nobody here leads,
+    // and b, being away, takes no lock.
+    b.fire("pagehide", { persisted: true });
+    c.fire("pagehide", { persisted: false });
+    await settle();
+    t.mock.timers.tick(60_000);
+    await settle();
+    assert.deepEqual(b.streams, []);
+    assert.ok(!locks.held.has(LOCK));
+
+    // b is shown again with no other tab: it leads.
+    b.fire("pageshow", { persisted: true });
+    await settle();
+    t.mock.timers.tick(REOPEN_MS);
+    assert.deepEqual(b.live(), [["fixture.b"]]);
+  });
+}
 
 test("with no Web Locks, a tab closes its own stream on pagehide and opens it again when shown", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });

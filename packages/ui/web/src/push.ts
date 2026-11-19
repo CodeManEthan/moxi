@@ -5,10 +5,11 @@
 // whether it is visible on the BroadcastChannel `moxi-ui-push`. The leader asks for the
 // union, reopens the stream 50 ms after the union last changed, and passes each event to
 // every tab. It closes the stream after 10 s with no visible tab and opens it again when
-// one is shown. When the leader's page leaves, or goes into the back-forward cache, the
-// leader closes its stream and gives up the lock, which goes to another tab; that tab asks
-// every tab for its topics and opens the stream. A page shown again from the cache asks
-// for the lock again, as a new tab does. Every topic carries state (its first event is
+// one is shown. A page that leaves, or goes into the back-forward cache, never leads while
+// it is away: a leader closes its stream and gives up the lock, which goes to another tab
+// that asks every tab for its topics and opens the stream, and a tab still waiting for the
+// lock withdraws its request. A page shown again from the cache asks for the lock again, as
+// a new tab does. Every topic carries state (its first event is
 // its current value, each later one replaces it), so a reopen or a new leader loses
 // nothing.
 
@@ -488,7 +489,10 @@ export class TabPush {
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The page has left: it is gone, or kept in the back-forward cache. */
   private away = false;
-  /** This tab gave up the leader lock as its page left. */
+  /** This tab's request for the leader lock, waiting or granted; aborting it withdraws a
+   * request still waiting. Null while it has none. */
+  private election: AbortController | null = null;
+  /** This tab withdrew from the election as its page left. */
   private resigned = false;
 
   constructor(opener: Opener, onSignedOut: () => void) {
@@ -504,15 +508,16 @@ export class TabPush {
     }
     document.addEventListener("visibilitychange", () => this.announce());
     // A page that leaves says so, so the leader drops its topics at once, and says nothing
-    // more while it is away. A leader closes its stream and gives up its lock, so another
-    // tab leads while this page is gone or kept in the back-forward cache; one that leads
-    // with no lock closes its stream. A page shown again from the cache asks for the lock
-    // again, or opens its stream again, and says its topics.
+    // more while it is away. It neither holds nor takes the leader lock while it is gone or
+    // kept in the back-forward cache: a leader closes its stream and gives up its lock, so
+    // another tab leads, and a tab waiting for the lock withdraws its request. One that
+    // leads with no lock closes its stream. A page shown again from the cache asks for the
+    // lock again, or opens its stream again, and says its topics.
     addEventListener("pagehide", () => {
       this.away = true;
       if (this.leader === null) this.post({ t: "bye", tab: this.id });
-      else if (this.release === null) this.leader.leave();
-      else this.resign();
+      if (this.election !== null) this.resign();
+      else this.leader?.leave();
     });
     addEventListener("pageshow", (event) => {
       if (!event.persisted) return;
@@ -541,26 +546,35 @@ export class TabPush {
     this.leader?.reset();
   }
 
-  /** Ask for the leader lock, and lead once this tab holds it. */
+  /** Ask for the leader lock, and lead once this tab holds it. A grant that comes while
+   * the page is away, or for a request withdrawn since, gives the lock up at once. */
   private elect(): void {
-    void navigator.locks.request(LOCK, () => {
+    const election = new AbortController();
+    this.election = election;
+    navigator.locks.request(LOCK, { signal: election.signal }, () => {
+      if (this.away || this.election !== election) return undefined;
       this.lead();
       return new Promise<void>((resolve) => {
         this.release = resolve;
       });
+    }).catch(() => {
+      // A withdrawn request ends with an AbortError; the tab asks again when it is back.
     });
   }
 
-  /** Give up the leader lock: close the stream, stop every timer, and let another tab
-   * lead. */
+  /** Leave the election: withdraw a request still waiting, or give up the lock held,
+   * closing the stream and stopping every timer, so another tab leads. */
   private resign(): void {
+    this.election?.abort();
+    this.election = null;
+    this.resigned = true;
+    if (this.release === null) return;
     this.leader?.stop();
     this.leader = null;
     if (this.pruneTimer !== null) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
-    this.release?.();
+    this.release();
     this.release = null;
-    this.resigned = true;
   }
 
   private lead(): void {
