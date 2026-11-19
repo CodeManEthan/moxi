@@ -544,10 +544,11 @@ which does not search every session's first lines as a `find` does. On a page se
 first open the name comes a fraction of a second after the turns, while the server lists
 the sessions it can show.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
-request. With launcher installed the page also reads three of launcher's: `/api/running`
-(the launches running now) with each read of the list, its push topic `running` at the
-desk, which brings each new value as launcher has it, `/api/keep-warm` on a `Keep warm`
-press, and `/api/state?session=<id>` once when a Claude Code session's transcript opens. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+request. With launcher installed the page also reads three of launcher's routes and its
+push topic: `/api/running` (the launches running now) with each read of the list; the topic
+`running` at the desk, which brings each new value as launcher has it; `/api/keep-warm` on a
+`Keep warm` press; and `/api/state?session=<id>` once when a Claude Code session's transcript
+opens. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
 the list read in memory for as long as it runs, and keeps no more of a message than it
 sends.
