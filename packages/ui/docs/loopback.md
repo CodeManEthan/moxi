@@ -138,7 +138,8 @@ PAGE = lb.Page(
   once for a burst of changes and publishes it only when it changed.
 - `idle_s` (default 300) is how long the server stays up with nothing open. `budget`
   (default `{"rss": "120M", "fds": 64}`) is carried in the export for whoever watches the
-  process.
+  process. On Windows the shell samples a page server's open handles, not its fds, and
+  never compares them with `fds`.
 
 ### Confirmed acts
 

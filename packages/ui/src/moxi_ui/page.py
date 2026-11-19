@@ -91,7 +91,8 @@ def serving(shell: Any, inner: Callable[..., Awaitable[None]]) -> Callable[..., 
 # --- the shapes -------------------------------------------------------------------------
 
 _SAMPLE = Out("table", nullable=True, items={
-    "pid": Out("int"), "rss": Out("int"), "cpu_s": Out("float"), "fds": Out("int")})
+    "pid": Out("int"), "rss": Out("int"), "cpu_s": Out("float"), "fds": Out("int"),
+    "handles": Out("int")})
 _BUDGET = Out("table", nullable=True, items={"rss": Out("string"), "fds": Out("int")})
 _STRING = Out("string", nullable=True)
 _INT = Out("int", nullable=True)
