@@ -474,9 +474,31 @@ run it in where the harness needs one, and `Copy`, which puts the command on the
 clipboard. A folder under your home folder is written with `~`, here and in the Folder
 menu; any other folder is written whole. A piece the record does not give is not drawn. Under them `Read the
 transcript` goes to the session's address and `Copy id` copies its id. An opened row is
-read again after a newer list only when that list shows the session changed. Leaving the
-list for a transcript and coming back gives the list from its top, with no filter set
-and no row open.
+read again after a newer list only when that list shows the session changed.
+
+**The list's address.** The list keeps its state in the query of its own address,
+`/m/sessions/`: `folder` (an absolute path), `harness`, `when` (`today`, `7d`, `30d`, or a
+range of days such as `2026-11-01..2026-11-05`, either end left open), `find` (the text as
+it was sent), `more` (how many times each group's `Show` read more, such as
+`recent:1,2026-11-09:2`) and `program` (each day whose program line is open, and how far it
+was paged). A key is written only when it differs from its default, so the plain list is
+`/m/sessions/` with no `?`. Each change rewrites the address in place and adds no history
+entry, so one Back leaves the list. Back from a transcript, a reload and a link opened
+elsewhere bring the list back with its filters, find and depth: the list reads each group
+again to the depth the address names, one read at a time and at most 40 reads, then writes
+the depth it reached. Back and a reload also bring back the rows that were open and the
+scroll, which the browser's history entry keeps; a link carries neither. A transcript
+opened from the list carries the list's query in its own address, on through its subagents
+and its parent, and its `Sessions` link goes back to the list with it.
+
+An address is a request. A value the list's own controls could have set is taken. Anything
+else (a harness the list does not know, a folder that is not absolute, a `when`, `more` or
+`program` value of another form, a count of 0, a group or a key given twice, a key the list
+does not use) is dropped before the list is read, and one dim line above the list names
+it: `This address held harness=foo, which the list does not take; the list is shown
+without it.` A value that matches nothing narrows the list to nothing, as the filter would.
+A depth the list cannot reach is read as far as the list goes. Once the list has read to
+the address's depth, the address is rewritten to say exactly what the list shows.
 
 Under the list a dim line names each harness whose sessions could not be read, with the
 reason, and says how many Codex sessions are left out because their files are compressed.
@@ -485,7 +507,8 @@ On a machine with no session the page says so in place of the list.
 **One session.** A session's address is `<harness>/<session id>`, or
 `claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
 a Codex subagent thread each open at their own id. Over the session, the first line has
-`Sessions`, which goes back to the list, the session's name as the list names it (a name
+`Sessions`, which goes back to the list (as it was left, when the session was opened from
+it), the session's name as the list names it (a name
 typed for it, else its folder and when it started) and `Refresh`. The second has the
 harness, the model and from when to when, and `Details`, which shows and hides the rest:
 the harness's name, the session's id, its title, directory, last activity, version,
@@ -539,9 +562,6 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - A second line on Codex rows: sessions would need to read the rollout's `user.text` item
   kind as the mark of a typed message (see "Listing sessions"). A second line on OpenCode
   rows: OpenCode's record has no such mark to read.
-- An address for the list's filters, its find and how far it was paged, so that they are
-  kept across a visit to a transcript and another page can link to the list already
-  narrowed. Today the address names the list or one session and nothing more.
 - Find over names and typed prompts: it needs an index of them in sessions, which is a
   store with what was typed in it. Find takes an id or a folder's name.
 - Running sessions as a group of their own, with the slot and the template each was

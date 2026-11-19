@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The page's list keeps its filters, find text and how far each group was paged in its
+  own address (`/m/sessions/?harness=claude&when=7d&more=recent:1`), so Back from a
+  transcript, a reload and a shared link bring it back as it was; Back and a reload also
+  keep the rows opened and the scroll. A list change rewrites the address and adds no
+  history entry. A transcript opened from the list carries the query, and its link back
+  uses it. What an address holds that the list does not take is named above the list.
+
 - Archive folders (interface 6): `claude.archives` and `codex.archives` name folders of
   older transcripts, laid out as the harness's root, read after the live root in order;
   a session an earlier folder holds is read from there only. `archives.answer_wait_s`
