@@ -599,7 +599,8 @@ def claim(entry: Entry) -> str:
 def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float,
                   now: float | None = None,
                   limit: int = LOOSE_DIRS_MAX) -> dict[str, Any]:
-    """The sessions folded into projects by their folders: `{projects, folders, more}`.
+    """The sessions folded into projects by their folders: `{projects, folders, more,
+    roots}`.
 
     `for_paths` takes the distinct folders the sessions ran in and answers, for each, the
     key of the project it is in or None (projects' read API's `for_paths`); this module
@@ -617,6 +618,11 @@ def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float
     many such sessions; newest `at` first, at most `limit`, and `more` how many were
     left off. A session whose head names no folder is in neither. Reads every session's
     head not read yet.
+
+    `roots` is `{harness, root, reason, parts}` per harness whose root was not read
+    whole, as a list's `roots` says: where a root could not be listed (`reason` set),
+    none of its sessions is in `projects` or `folders`, so their counts are short. A
+    harness that is not on the machine is in no `roots`: it has no sessions.
 
     Raises ValueError for a `recent_s` that is not a number, and whatever `for_paths`
     raises."""
@@ -653,7 +659,9 @@ def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float
             "recent": [claim(e) for e in live if _since(e, recent_cut)]})
     loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))
     return {"projects": projects, "folders": loose[:limit],
-            "more": max(0, len(loose) - limit)}
+            "more": max(0, len(loose) - limit),
+            "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason,
+                       "parts": r.parts} for r in gathered.roots]}
 
 
 def _since(entry: Entry, cut: int) -> bool:

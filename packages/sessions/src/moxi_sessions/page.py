@@ -149,8 +149,10 @@ an unknown one) is refused.
 `recently_s` (the setting `list.recent_s` it was cut with), `state` and `detail`,
 `projects`, `folders` and `more`. `state` is `up`; `off` when projects is not installed or
 is older than its read API's interface 2, the one with `for_paths`; or `error` when
-projects' store can't be read. `detail` is a fixed sentence for `off` and `error` that
-names no file, else null; with either, the three lists are empty and `more` is 0. The
+projects' store can't be read, or when a harness's root (as a list's `roots` names one
+with a `reason`) can't be listed, since its sessions would be in no count. A harness that
+is not on the machine has no sessions and is no error. `detail` is a fixed sentence for
+`off` and `error` that names no file, else null; with either, the three lists are empty and `more` is 0. The
 folding is projects' own: one `for_paths` call over the distinct folders the sessions
 ran in says which project holds each. A session is named by a claim,
 `<harness>/<session id>`, the id being the one the harness writes (a Codex thread id).

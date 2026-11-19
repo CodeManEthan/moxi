@@ -12039,6 +12039,7 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it return
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
 sessions	packages/sessions/src/moxi_sessions/lists.py	`folders` is `{folder, at, week}` for each folder no project holds where a session	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	none of its sessions is in `projects` or `folders`, so their counts are short. A	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/lists.py	loose.append({"folder": where, "at": _newest_at(found), "week": week})	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	return {"projects": projects, "folders": loose[:limit],	keep	folders	folders
@@ -12113,7 +12114,7 @@ sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	`find`, `window`, `
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	use	out["folder"]	out["work_dir"]
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	"detail": None, "projects": [], "folders": [], "more": 0}	keep	folders	folders
-sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_logged: set[Any] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/read.py	* `closed`: the keys of requests an earlier batch handed on with `final` false that	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/read.py	* `first`: with `head`, line 1's records (an OpenCode session's first message's), not	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	-	name	_needs_session	_require_session

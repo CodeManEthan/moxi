@@ -79,9 +79,11 @@ UP, OFF, ERROR = "up", "off", "error"
 PROJECTS_OFF = "projects is not installed, or is too old to fold folders into projects"
 PROJECTS_UNREADABLE = ("projects' store can't be read; `moxi projects list` on this "
                        "machine says why")
+ROOT_UNREADABLE = ("a harness's sessions folder can't be read; `moxi sessions list` on "
+                   "this machine says why")
 
 log = logging.getLogger("moxi.sessions.page")
-_logged: set[type] = set()
+_logged: set[Any] = set()
 _logged_lock = threading.Lock()
 
 #: A byte offset, as a file's `before` is written.
@@ -333,7 +335,10 @@ def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: the sessions folded into projects by the folder each ran in,
     and this week's folders no project holds (`lists.fold_projects`), with `state`:
     `up`; `off` when projects is not installed or offers no interface 2; `error` when
-    projects' store can't be read, its reason logged once rather than sent."""
+    projects' store can't be read, or a harness's root exists and can't be listed (its
+    sessions would be missing from every count, and a project that has some would read
+    as unused), the reason logged once rather than sent. A harness that is not on the
+    machine has no sessions, and the route answers `up` without it."""
     recent_s, now = _recent_s(), time.time()
     out: dict[str, Any] = {"shape": SHAPE, "now": now, "today": lists.local_day(now),
                            "home": _home(), "recently_s": recent_s, "state": UP,
@@ -347,16 +352,33 @@ def projects(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - an optional module's failure is a state
         _log_once(exc, "sessions' page couldn't fold the sessions into projects")
         return {**out, "state": ERROR, "detail": PROJECTS_UNREADABLE}
+    roots = folded.pop("roots")
+    failed = [root for root in roots if root["reason"] is not None]
+    if failed:
+        for root in failed:
+            _log_root_once(root)
+        return {**out, "state": ERROR, "detail": ROOT_UNREADABLE}
     return {**out, **folded}
 
 
-def _log_once(exc: BaseException, what: str) -> None:
+def _first(key: Any) -> bool:
     with _logged_lock:
-        first = type(exc) not in _logged
-        _logged.add(type(exc))
-    if first:
+        first = key not in _logged
+        _logged.add(key)
+    return first
+
+
+def _log_once(exc: BaseException, what: str) -> None:
+    if _first(type(exc)):
         log.error("%s (%s)", what, type(exc).__name__, exc_info=exc)
 
 
-__all__ = ["PROJECTS_INTERFACE", "PROJECTS_OFF", "PROJECTS_UNREADABLE", "work_dirs",
-           "listing", "more", "projects", "session", "subagents", "view_row", "window"]
+def _log_root_once(root: dict[str, Any]) -> None:
+    if _first((root["harness"], root["root"], root["reason"])):
+        log.error("sessions' page couldn't read %s's sessions at %s: %s", root["harness"],
+                  root["root"], root["reason"])
+
+
+__all__ = ["PROJECTS_INTERFACE", "PROJECTS_OFF", "PROJECTS_UNREADABLE", "ROOT_UNREADABLE",
+           "work_dirs", "listing", "more", "projects", "session", "subagents", "view_row",
+           "window"]

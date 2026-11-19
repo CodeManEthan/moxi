@@ -255,6 +255,70 @@ def test_a_store_projects_cant_read_is_an_error_with_a_fixed_sentence(roots, sta
     assert len([r for r in caplog.records if r.name == "moxi.sessions.page"]) == 1
 
 
+# -- when a harness's root can't be read ---------------------------------------------------
+
+def test_a_root_that_exists_and_cannot_be_read_is_an_error_with_a_fixed_sentence(
+        roots, stand_in, caplog):
+    claude(roots, 1, time.time() - 60, cwd="/work/moxi")
+    (roots["opencode"] / "opencode.db").write_text("not a database")
+    stand_in(Projects({"/work/moxi": "moxi"}))
+    pagehandlers._logged.clear()
+
+    with caplog.at_level(logging.ERROR, logger="moxi.sessions.page"):
+        first = read(ROUTE)
+        second = read(ROUTE)
+
+    for answer in (first, second):
+        # Its sessions would be missing from every count, so no count is sent.
+        assert answer["state"] == "error"
+        assert answer["detail"] == pagehandlers.ROOT_UNREADABLE
+        assert str(roots["opencode"]) not in str(answer)
+        assert (answer["projects"], answer["folders"], answer["more"]) == ([], [], 0)
+    logged = [r for r in caplog.records if r.name == "moxi.sessions.page"]
+    assert len(logged) == 1 and "opencode" in logged[0].getMessage()
+
+
+def test_a_configured_root_that_does_not_exist_is_an_error(roots, stand_in, tmp_path,
+                                                            own_config):
+    claude(roots, 1, time.time() - 60, cwd="/work/moxi")
+    stand_in(Projects({"/work/moxi": "moxi"}))
+    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
+
+    answer = read(ROUTE)
+
+    assert answer["state"] == "error" and answer["projects"] == []
+
+
+def test_a_harness_that_is_not_on_the_machine_has_no_sessions(roots, stand_in, tmp_path,
+                                                             monkeypatch):
+    claude(roots, 1, time.time() - 60, cwd="/work/moxi")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nowhere"))
+    stand_in(Projects({"/work/moxi": "moxi"}))
+
+    answer = read(ROUTE)
+
+    assert answer["state"] == "up" and answer["detail"] is None
+    assert [(p["key"], p["recent"]) for p in answer["projects"]] == [
+        ("moxi", [f"claude/{sid(1)}"])]
+    assert "roots" not in answer
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
+def test_a_root_listed_in_part_still_answers(roots, stand_in):
+    claude(roots, 1, time.time() - 60, cwd="/work/moxi")
+    unlisted = roots["claude"] / "-work-elsewhere"
+    unlisted.mkdir()
+    unlisted.chmod(0)
+    stand_in(Projects({"/work/moxi": "moxi"}))
+    try:
+        answer = read(ROUTE)
+    finally:
+        unlisted.chmod(0o700)
+
+    assert answer["state"] == "up"
+    assert [p["key"] for p in answer["projects"]] == ["moxi"]
+
+
 def test_a_root_with_no_sessions_answers_empty_lists_without_asking_projects(roots,
                                                                               stand_in):
     projects = stand_in(Projects())
