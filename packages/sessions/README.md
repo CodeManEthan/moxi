@@ -511,6 +511,33 @@ Other modules' pages can place the one-session view with the shell's `place()`, 
 and, for a Claude Code subagent, `agent`. It links to the page at the session's address. A
 subagent chosen in the block opens in the block, with Back to return.
 
+**On the Projects page.** With the `projects` extra too, and projects' page in the shell,
+sessions places a `project-facts` component on the Projects page. A project's row gets
+when it was last active (the newest change of any of its sessions) and `N active
+recently`, its sessions that changed within `list.recent_s`. sessions reads every session,
+so a project with none reads `not used yet`. An opened project gets a `Sessions` row, `N
+sessions this week` with a link to this page, left out when none changed in the last 7
+days; and Remove lists `its N sessions and their transcripts` among what stays. Under the
+projects, `Not a project` lists up to 20 folders no project holds where a session changed
+in the last 7 days, each with `N sessions this week`, and says how many more there are. A
+session a program started counts toward a project's last activity and its Remove line,
+never toward `active recently` or the week. The component reads the page server when it is
+placed and every 60 seconds while the tab is visible. It reports nothing, so the page
+draws none of these facts, when projects is not installed or is too old, when projects'
+store can't be read, when a harness's sessions folder exists and can't be listed (its
+sessions would be missing from every count), and when the read fails.
+
+Its read is `/api/projects`. It reads every session's first lines, once for as long as the
+page server runs, as `/api/folders` does, then asks projects' read API (`for_paths`) once
+which project holds each folder the sessions ran in; sessions never decides that itself.
+It answers `projects` (`{key, at, all, week, recent}` each: the newest change, how many
+sessions, and the sessions changed in the last 7 days and within `list.recent_s`, each
+named `<harness>/<session id>`), `folders` (`{folder, at, week}`) and `more`, beside
+`now`, `today`, `home`, `recently_s`, `state` and `detail`. `state` is `up`, `off`
+without projects or with one older than its read API's interface 2, or `error`; `detail`
+is then a fixed sentence that names no file, and an `error`'s reason goes to the page
+server's log.
+
 The list is four reads of the page server: `/api/list` (the counts and the groups, with
 the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
 group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
@@ -550,8 +577,9 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - A running session's state (working, how many subagents and shells are busy, a line for
   trouble, the turn that is open) and a session that waits for an answer: they need
   turns to say them by session.
-- A Project filter in place of Folder, and the project beside a row's name: they need the
-  projects module to answer many folders' projects in one read.
+- A Project filter in place of Folder, and the project beside a row's name: the
+  `projects` extra answers many folders' projects in one read, and the list doesn't use
+  it yet.
 - Whether a session's cache is warm or cold and until when, with a way to keep it warm:
   it needs the cache module's state by session.
 - Cost, the number of prompts and the context's size, on a row or on a transcript: they
@@ -582,7 +610,10 @@ modules.
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
 UI shell, whose page-server base sessions' page server runs on. The optional extra
 `secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with. The optional
-extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
+extra `turns` adds `moxi-turns`, which enforces the transcript-read guard. The optional
+extra `projects` adds `moxi-projects`, whose read API (interface 2, `for_paths`) says which
+project holds each folder, for the facts on the Projects page; a projects that doesn't
+offer it reads as absent.
 
 ## Interfaces
 
