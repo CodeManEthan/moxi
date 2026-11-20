@@ -29,10 +29,13 @@ export class LauncherProjectFacts extends HTMLElement {
   connectedCallback(): void {
     if (this.shadowRoot === null) {
       // A constructed sheet, which the shell's content policy lets in where a <style>
-      // element is refused: the element takes no room.
+      // element is refused: the element takes no room. The root holds an empty slot,
+      // since it draws nothing.
       const sheet = new CSSStyleSheet();
       sheet.replaceSync(":host { display: none; }");
-      this.attachShadow({ mode: "open" }).adoptedStyleSheets = [sheet];
+      const root = this.attachShadow({ mode: "open" });
+      root.adoptedStyleSheets = [sheet];
+      root.append(document.createElement("slot"));
     }
     this.#last = undefined;
     this.#reads = new FactsReads({
