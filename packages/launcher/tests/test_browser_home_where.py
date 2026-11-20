@@ -215,6 +215,11 @@ def test_a_project_picked_from_all_projects_is_the_line_and_the_launch_names_it(
 
 
 def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_off(page, shell):
+    # The shell's temp folder is under its home, where notes would give the scratch folder
+    # a notes home and the launch would be refused; a user's is outside it. Notes keeps
+    # none for it here, as the refusal tells a user to arrange.
+    done = shell.moxi("config", "set", "notes", "exclude", "--add", shell.env["TMPDIR"])
+    assert done.returncode == 0, done.stdout + done.stderr
     piece = kit.open_home(page)
     menu = open_where(piece)
     scratch = menu.locator('.others .row[data-place="scratch"]')

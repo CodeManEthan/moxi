@@ -4029,6 +4029,7 @@ launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_without_
 launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_without_projects_a_place_is_a_folder_and_a_pick_of_it_launches_in_that_folder	test_without_projects_a_place_is_a_dir_and_a_pick_of_it_launches_in_that_dir
 launcher	packages/launcher/tests/test_browser_home_where.py	found = Path(shell.env["HOME"]) / "work" / name	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_where.py	found.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_home_where.py	done = shell.moxi("config", "set", "notes", "exclude", "--add", shell.env["TMPDIR"])	keep	set	set
 launcher	packages/launcher/tests/test_browser_page.py	"""A live launch whose last relaunch failed, as the `sessions` topic holds it once	keep	sessions	sessions
 launcher	packages/launcher/tests/test_browser_page.py	assert any(f"/m/launcher/api/state?session={sid}" in url for url in check.requests)	keep	any	any
 launcher	packages/launcher/tests/test_browser_page.py	assert any(url.endswith("/m/launcher/api/catalog") for url in check.requests), check.requests	keep	any	any
