@@ -190,9 +190,14 @@ class _Stopwords:
         return False
 
 
+def _unlined(allowlists) -> tuple:
+    """`allowlists` without those that read the finding's line."""
+    return tuple(a for a in allowlists if a.target != "line")
+
+
 class _Rule:
     __slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",
-                 "path", "allowlists")
+                 "path", "allowlists", "unlined")
 
     def __init__(self, set_name, raw):
         self.set = set_name
@@ -204,6 +209,7 @@ class _Rule:
         self.keywords = tuple(raw["keywords"])
         self.path = raw["path"]
         self.allowlists = tuple(_Allowlist(a) for a in raw["allowlists"])
+        self.unlined = _unlined(self.allowlists)
 
 
 class Sets:
@@ -213,6 +219,7 @@ class Sets:
         self.data = data
         self.upstream = data["upstream"]
         self.allowlists = tuple(_Allowlist(a) for a in data["allowlists"])
+        self.unlined = _unlined(self.allowlists)
         self.rules = {name: tuple(_Rule(name, r) for r in data["sets"][name]["rules"])
                       for name in GITLEAKS_SETS}
         self.dropped = {name: tuple(d["id"] for d in data["sets"][name]["dropped"])
@@ -410,11 +417,12 @@ def line_text(t, bounds) -> str:
     return t.etext[lo:hi - 1] + "\ufffd" * cut
 
 
-def run_gitleaks(t, set_names, path, eng) -> dict:
+def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
     """The gitleaks-format sets' hits on `t`, as gitleaks' detector finds them.
 
     Returns {set: [(rule id, start, end), ...]} in `str` offsets; a path-only hit spans
-    the whole text. No decoding passes run.
+    the whole text. No decoding passes run. With `keep_marked` false, a line that holds
+    `gitleaks:allow` and an allowlist that reads the finding's line keep no hit out.
     """
     sets = load_sets()
     out = {name: [] for name in set_names}
@@ -427,6 +435,7 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
     conv = eng.to_str
     etext = t.etext
     allowed_lines: dict = {}
+    global_lists = sets.allowlists if keep_marked else sets.unlined
     for name in set_names:
         found = out[name]
         for rule in sets.rules[name]:
@@ -445,19 +454,21 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                     path and eng.compile(rule.path[eng.key]).search(path)):
                 continue
             rx = eng.compile(rule.regex[eng.key])
+            rule_lists = rule.allowlists if keep_marked else rule.unlined
             for m in rx.finditer(target):
                 bs, be = trimmed(target, *m.span())
                 if bs == be:
                     continue
                 s, e = conv(t, bs), conv(t, be)
                 bounds = gitleaks_line(t, conv(t, m.start()), s, e)
-                marked = allowed_lines.get(bounds)
-                if marked is None:
-                    lo, hi, cut = bounds
-                    marked = allowed_lines[bounds] = (
-                        etext.find(_ALLOW_MARK, lo, hi - 1 if cut else hi) >= 0)
-                if marked:
-                    continue
+                if keep_marked:
+                    marked = allowed_lines.get(bounds)
+                    if marked is None:
+                        lo, hi, cut = bounds
+                        marked = allowed_lines[bounds] = (
+                            etext.find(_ALLOW_MARK, lo, hi - 1 if cut else hi) >= 0)
+                    if marked:
+                        continue
                 span = secret_span(rx, target, bs, be, rule.group)
                 # An empty secret is no hit: a hit is a span to redact.
                 if span is None or span[1] <= span[0]:
@@ -471,9 +482,9 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                 def line(bounds=bounds):
                     return line_text(t, bounds)
 
-                if _finding_allowed(sets.allowlists, secret, match, line, path, eng):
+                if _finding_allowed(global_lists, secret, match, line, path, eng):
                     continue
-                if _finding_allowed(rule.allowlists, secret, match, line, path, eng):
+                if _finding_allowed(rule_lists, secret, match, line, path, eng):
                     continue
                 found.append((rule.id, ss, se))
     return out
@@ -508,18 +519,18 @@ def _known_spans(text, known) -> list:
     return out
 
 
-def _gitleaks_spans(t, names, path) -> list:
+def _gitleaks_spans(t, names, path, *, keep_marked) -> list:
     sets = load_sets()
     eng = _engine.active()
     out = []
     if path and path_skipped(path, eng if eng.name == "re2" else _engine.python(), sets):
         return out
     if eng.name == "re2":
-        results = run_gitleaks(t, names, path, eng)
+        results = run_gitleaks(t, names, path, eng, keep_marked=keep_marked)
     else:
         from . import fallback
 
-        results = fallback.scan(t, names, path)
+        results = fallback.scan(t, names, path, keep_marked=keep_marked)
     whole = len(t.text)
     for name in names:
         found = results.get(name)
@@ -565,19 +576,26 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
     """The hits of the named sets in `text`, sorted by start.
 
     `path`, repo-relative with `/`, turns on the path parts of the rules. `allow` keeps
-    hits someone has judged. `known` values are found first, as set "known".
+    hits someone has judged. `known` values are found first, as set "known". A line
+    that holds `gitleaks:allow`, or text a rule's line allowlist names, keeps that
+    line's gitleaks-set hits out.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    known = tuple(known)
+    return _hits(text, names, path, allow, tuple(known), keep_marked=True)
+
+
+def _hits(text, names, path, allow, known, *, keep_marked) -> list:
+    """`scan`'s hits for checked arguments. With `keep_marked` false, neither the mark
+    nor a line allowlist keeps a hit out."""
     t = _engine.Text(text)
     spans = _known_spans(text, known)
     gitleaks = [n for n in names if n in GITLEAKS_SETS]
     if gitleaks:
-        spans += _gitleaks_spans(t, gitleaks, path)
+        spans += _gitleaks_spans(t, gitleaks, path, keep_marked=keep_marked)
     if "private-names" in names:
         from . import names as _names
 
@@ -643,23 +661,34 @@ def _replace_lines(text: str, hits) -> str:
 def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) -> str:
     """`text` with every hit replaced by `[REDACTED:<rule>]`.
 
-    No secret survives: the result scans empty with the same arguments. Redacting the
-    result again changes nothing. Up to three passes replace hits; then each line that
-    still holds one becomes a placeholder; then, if a hit spans lines, the whole text.
+    Unlike `scan`, `redact` lets nothing on a secret's line keep it: a `gitleaks:allow`
+    mark and a rule's line allowlist keep no hit out. No secret survives: the result
+    scans empty with the same arguments, under `scan` and under `redact`'s own rules.
+    Redacting the result again changes nothing. Up to three passes replace hits; then
+    each line that still holds one becomes a placeholder; then, if a hit spans lines, the
+    whole text.
     """
     names = _set_names(sets)
+    if not isinstance(text, str):
+        raise TypeError("text is a str")
+    if path is not None and not isinstance(path, str):
+        path = str(path)
     known = tuple(known)
+
+    def hits_in(current):
+        return _hits(current, names, path, allow, known, keep_marked=False)
+
     current = text
     for _ in range(3):
-        hits = scan(current, names, path=path, allow=allow, known=known)
+        hits = hits_in(current)
         if not hits:
             return current
         current = _replace(current, hits)
-    hits = scan(current, names, path=path, allow=allow, known=known)
+    hits = hits_in(current)
     if not hits:
         return current
     current = _replace_lines(current, hits)
-    hits = scan(current, names, path=path, allow=allow, known=known)
+    hits = hits_in(current)
     if not hits:
         return current
     return placeholder(hits[0].rule)
