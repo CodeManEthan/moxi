@@ -36,8 +36,12 @@
 //   something or can't be read, read from `/api/ends` on the press and sent with what it
 //   showed; the server's guard refuses one whose count has grown, and the page reads the
 //   slots again and asks anew. ui's shell offers no Stop (its opened row gives the
-//   command), and after its Restart the page reloads once the shell answers again. The
-//   phone keeps its row's acts under the row, each through the sheet.
+//   command), and after its Restart the page reloads once the shell answers again.
+// - The phone, where the shell runs its acts, offers the desk's row acts but Remove, each
+//   through the shell's sheet and the act's kept confirmed route: the sheet says the
+//   desk's confirm without its redacted words, and slots' server's Stop and Restart give
+//   the count they end and send it. Where it runs none, the phone shows no act and no
+//   `Open`; the shell says it only reads here.
 // - The panel (`panel.ts`), from `Add a service` or the `add` and `adopt` addresses, at the
 //   window's right edge: a command to run, or a unit already on this computer to adopt,
 //   with the kind asked where the system can't tell it. Its button is one plain
@@ -50,9 +54,8 @@
 // job ends the page reads the rows again. Otherwise it reads `/api/rows` when it opens and
 // when its tab is shown again, and follows the topic `rows`.
 //
-// On the phone the panel, the projects list and remove are left out: from the phone a
-// service is acted on, never added or removed. Where the phone runs no acts here, each
-// sheet says to do the act at the desk.
+// On the phone the panel, the projects list and Remove are left out: from the phone a
+// service is acted on, never added or removed.
 
 import { css, html, LitElement, nothing, unsafeCSS } from "lit";
 import { keyed } from "lit/directives/keyed.js";
@@ -63,8 +66,8 @@ import { NO_SUCH_ADDRESS, NOTHING_OPEN, parseRoute, pathToWrite, resolve } from 
 import type { Address } from "./address.ts";
 
 import {
-  actsOf, jobSaid, removeConfirm, runningFact, SHELL, SHELL_RESTART, slotsConfirm, STOP_LASTS, transportSaid, usageConfirm,
-  warned,
+  actsOf, jobSaid, phoneActs, phoneRoute, phoneSheet, removeConfirm, runningFact, SHELL, SHELL_RESTART, slotsConfirm,
+  STOP_LASTS, transportSaid, usageConfirm, warned,
 } from "./acts-model.ts";
 import type { Act as RowAct, Confirm, Ends, Sends } from "./acts-model.ts";
 import { Feed, parseEnds, parseOne, parseProjects, parseRows, parseStatus, saidOf, statusPathOf } from "./feed.ts";
@@ -76,10 +79,8 @@ import {
 import type { ListShape, PageState, RowView } from "./list-model.ts";
 import { footLinks, openedLines } from "./opened-model.ts";
 import type { Line, One, Opened } from "./opened-model.ts";
-import {
-  actsOf as sheetActs, outcomeSaid, statusLost, statusSaid,
-} from "./views.ts";
-import type { Act, Said } from "./views.ts";
+import { outcomeSaid, statusLost, statusSaid } from "./views.ts";
+import type { Said } from "./views.ts";
 import { PANEL_WIDTH_PX } from "./panel.ts";
 import { addRefused } from "./panel-model.ts";
 import type { addBody, Way } from "./panel-model.ts";
@@ -131,13 +132,9 @@ const STYLES = css`
   .grp .gk { color: var(--moxi-text-dim); padding-top: 7px; overflow-wrap: anywhere; }
   .grp .gk small { display: block; font-size: 13px; line-height: 18px; margin-top: 3px; }
   .grp .gl { grid-column: 2; min-width: 0; }
-  .grp .gk button, .item .acts button { padding: 0; margin: 0; border: 0; background: none; font: inherit;
-                                        text-align: left; cursor: pointer; }
+  .grp .gk button { padding: 0; margin: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
   .grp .gk small button { color: var(--moxi-text); }
-  .grp .gk button:hover:not(:disabled), .item .acts button:hover:not(:disabled) { background: none; }
-  .item .acts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: -4px 0 7px; }
-  .item .acts:empty { display: none; }
-  .item .acts button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .grp .gk button:hover:not(:disabled) { background: none; }
   .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
   /* On a phone a fact in the text colour wraps, so it and Open stay inside the row. */
   @media (max-width: 480px) {
@@ -638,23 +635,51 @@ export class ServicesPage extends LitElement {
     if (refused !== null) await this.#slotsAsk(row, a, refused);
   }
 
-  async #act(row: Row, act: Act): Promise<void> {
+  /** A press on the phone: the act goes through the shell's sheet to its kept confirmed
+   * route, the sheet saying what the desk's confirm says without its redacted words.
+   * slots' server's Stop and Restart read what they would end first, and the sheet gives
+   * the count and sends it; when the guard refuses one, the slots are read again and the
+   * sheet asks anew with its sentence. */
+  async #phonePress(row: Row, a: RowAct): Promise<void> {
     if (this.#busy) return;
+    const slots = row.ends_slots && (a.body.act === "stop" || a.body.act === "restart");
     this.#sending = true;
     this.#told = null;
+    this.#ended = null;
     this.requestUpdate();
-    const label = `${act.label.replace(/…$/, "")} ${row.name}`;
     try {
-      const outcome = await confirm("services", act.path, act.body, act.sheet);
-      if (outcome.outcome === "accepted") {
-        this.#follow(outcome.status, label, row.id);
+      let refused: string | null = null;
+      for (;;) {
+        let ends: Ends | null = null;
+        if (slots) {
+          const answer = await api("services", `api/ends?id=${encodeURIComponent(row.id)}`);
+          ends = answer.status === 200 ? parseEnds(answer.data) : null;
+          if (ends === null) {
+            const said = transportSaid(answer.status, saidOf(answer.data));
+            this.#told = { where: row.id, said: { tone: "error", lines: [said.text] } };
+            return;
+          }
+          this.#ends = { id: row.id, ends };
+          this.requestUpdate();
+        }
+        const route = phoneRoute(a, ends !== null ? slotsConfirm(a, ends, true)?.sends ?? {} : {});
+        const sheet = phoneSheet(row, a, ends);
+        const outcome = await confirm("services", route.path, route.body, refused !== null ? [refused, ...sheet] : sheet);
+        if (outcome.outcome === "accepted") {
+          this.#follow(outcome.status, `${a.label} ${row.name}`, row.id, a);
+          return;
+        }
+        if (slots && outcome.outcome === "refused" && outcome.code === 422) {
+          refused = outcome.text;
+          continue;
+        }
+        // Nothing was sent on cancelled and desk, and confirm() has already shown where to
+        // take a desk act.
+        const said = outcomeSaid(outcome);
+        if (said !== null) this.#told = { where: row.id, said };
+        if (outcome.outcome === "unknown") void this.#rows?.refresh();
         return;
       }
-      // Nothing was sent on cancelled and desk, and confirm() has already shown where to
-      // take a desk act.
-      const said = outcomeSaid(outcome);
-      if (said !== null) this.#told = { where: row.id, said };
-      if (outcome.outcome === "unknown") void this.#rows?.refresh();
     } finally {
       this.#sending = false;
       this.requestUpdate();
@@ -797,9 +822,7 @@ export class ServicesPage extends LitElement {
       ? listShape(filter?.rows ?? all, value!.at, projects, when, { quiet: state.state === "unread" }) : null;
     const ids = new Set((value?.rows ?? []).map((row) => row.id));
     const loose = told !== null && told.where !== ADD && (told.where === null || !ids.has(told.where)) ? told.said : null;
-    return html`${this.#phone && !gatewayActs()
-        ? html`<p class="note" data-line="desk">This phone runs no acts here; each one's sheet says to do it at the desk.</p>` : nothing}
-      <section data-part="list" data-state=${state.state}>
+    return html`<section data-part="list" data-state=${state.state}>
         ${this.#busy ? html`<p class="state dim" data-line="busy">An act is running.</p>` : nothing}
         ${loose !== null ? this.#saidPart(loose) : nothing}
         ${shape === null && !none && state.line !== null ? html`<p class=${state.state === "loading" ? "state dim" : "state problem"}
@@ -870,7 +893,6 @@ export class ServicesPage extends LitElement {
    * either dim or heavy. */
   #row(item: RowView, acts: boolean) {
     const row = item.row;
-    const busy = this.#busy;
     const told = this.#told?.where === row.id ? this.#told.said : null;
     // While its act's job runs, the row's fact says what is being done.
     const job = this.#job;
@@ -880,8 +902,8 @@ export class ServicesPage extends LitElement {
     // `Open` on the phone only where it runs acts.
     const opens = acts && (!this.#phone || gatewayActs());
     const open = opens && this.#open === row.id;
-    // The closed row's one act, at the desk; the phone keeps its sheet's acts under the row.
-    const closed = acts && !this.#phone && !open ? actsOf(row).closed : null;
+    // The closed row's one act; on the phone only where it runs acts.
+    const closed = acts && !open ? this.#actsOf(row).closed : null;
     return html`<div class="item" data-id=${row.id} data-cause=${row.verdict.cause ?? ""} data-verdict=${row.verdict.state}
         data-weight=${item.weight} data-kind=${row.kind} data-open=${open ? "true" : "false"}>
       <moxi-ui-row name=${item.name} where=${item.where ?? nothing} fact=${own ? nothing : fact}
@@ -894,10 +916,6 @@ export class ServicesPage extends LitElement {
           : nothing}
         ${open ? this.#opened(row) : nothing}
       </moxi-ui-row>
-      <div class="acts" data-part="acts">${(acts && this.#phone ? sheetActs(row) : []).map((act) => html`
-        <button type="button" class="do" data-action=${act.name} ?disabled=${busy}
-          aria-label=${`${act.label.replace(/…$/, "")} ${row.name}`}
-          @click=${() => void this.#act(row, act)}>${act.label}</button>`)}</div>
       ${told !== null ? this.#saidPart(told) : nothing}
     </div>`;
   }
@@ -915,11 +933,17 @@ export class ServicesPage extends LitElement {
     return html`<div class="det" data-part="opened">
       ${lines.map((line) => line.label === "Details" ? this.#details(line)
         : line.label === "State" && ended !== null ? html`${this.#line(line)}${this.#endedPart(row, ended)}` : this.#line(line))}
-      ${this.#phone ? nothing : this.#foot(row)}
+      ${this.#foot(row)}
       ${this.#asking?.where === row.id && !this.#phone ? this.#confirmPart(row, this.#asking) : nothing}
       ${links.length ? html`<div class="links" data-part="links">${links.map((link) =>
         this.#link(link, "module-link"))}</div>` : nothing}
     </div>`;
+  }
+
+  /** The acts a row offers here: the desk's, or on the phone those it runs, none with its
+   * acts off. */
+  #actsOf(row: Row): { closed: RowAct | null; foot: RowAct[] } {
+    return this.#phone ? phoneActs(row, gatewayActs()) : actsOf(row);
   }
 
   /** A row's act as a button: `closed` on the closed row's line, `foot` under its lines. */
@@ -929,7 +953,7 @@ export class ServicesPage extends LitElement {
       : `act ${warn ? "w" : PLAIN_ACTS.has(a.name) && !a.tucked ? "" : "d"}`;
     return html`<button type="button" slot=${where === "closed" ? "acts-one" : nothing} class=${cls} data-action=${a.name}
       data-warn=${warn ? "true" : nothing} ?disabled=${this.#busy} aria-label=${`${label} ${row.name}`}
-      @click=${() => void this.#press(row, a)}>${label}</button>`;
+      @click=${() => void (this.#phone ? this.#phonePress(row, a) : this.#press(row, a))}>${label}</button>`;
   }
 
   /** slots' server's Stop and Restart are in the warning colour while its last read found
@@ -961,7 +985,7 @@ export class ServicesPage extends LitElement {
 
   /** The opened row's foot: its acts, his daemon's word beside Stop, and the tucked acts. */
   #foot(row: Row) {
-    const foot = actsOf(row).foot;
+    const foot = this.#actsOf(row).foot;
     if (!foot.length) return nothing;
     const lasts = row.form !== "module" && row.kind === "daemon" && foot.some((a) => a.name === "stop");
     const reloads = row.id === SHELL && foot.some((a) => a.name === "restart");

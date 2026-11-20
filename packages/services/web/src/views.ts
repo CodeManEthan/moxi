@@ -1,5 +1,4 @@
-// What services' page and summary block show, as plain data: each row's lines, the acts
-// it offers with the confirm sheet of each, what an
+// What services' page and summary block show, as plain data: each row's lines, what an
 // act came to, and the count by verdict. No DOM and no Lit here, so
 // the Node tests check it directly.
 
@@ -102,79 +101,6 @@ export function rowFacts(row: Row): { name: string; label: string; value: string
   add("fix", "Fix", row.verdict.fix);
   add("platform", "Added on", row.platform);
   return facts;
-}
-
-// -- the acts -----------------------------------------------------------------------------
-
-export type ActName = "start" | "stop" | "restart" | "run" | "rerun" | "enable" | "disable";
-
-/** One act a row offers. */
-export interface Act {
-  name: ActName;
-  label: string;
-  /** Relative to services' page. */
-  path: string;
-  body: { id: string; restart?: boolean };
-  /** The confirm sheet's lines. */
-  sheet: string[];
-}
-
-/** The line a `launches_session` row's run adds to its sheet. */
-export const SPENDS = "Each run launches an agent session, so this run spends usage.";
-
-function sheetOf(row: Row, name: ActName): string[] {
-  const it = row.name;
-  const lines: string[] = [];
-  switch (name) {
-    case "start":
-      lines.push(`Starts ${it} now, as moxi services start ${row.id} does.`);
-      break;
-    case "stop":
-      lines.push(row.kind === "timer"
-        ? `Ends ${it}'s run in progress; its schedule stays as it is.`
-        : `Stops ${it} until the next login or start; its flag stays as it is.`);
-      break;
-    case "restart":
-      lines.push(`Stops ${it} and starts it again.`);
-      break;
-    case "run":
-      lines.push(`Runs ${it} once now; its schedule stays as it is.`);
-      break;
-    case "rerun":
-      lines.push(`Ends ${it}'s run in progress, if one runs, and runs it once now.`);
-      break;
-    case "enable":
-      lines.push(row.switch !== null ? `Turns ${it} on through its switch, ${row.switch}.`
-        : row.kind === "timer" ? `Turns ${it}'s flag on and arms its schedule.`
-        : `Turns ${it}'s flag on: it runs now and starts at login.`);
-      break;
-    case "disable":
-      lines.push(row.switch !== null ? `Turns ${it} off through its switch, ${row.switch}.`
-        : row.kind === "timer" ? `Turns ${it}'s flag off; a run in progress finishes.`
-        : `Turns ${it}'s flag off: it stops and no longer starts at login.`);
-      break;
-  }
-  if ((name === "run" || name === "rerun" || name === "start" || name === "restart") && row.launches_session) {
-    lines.push(SPENDS);
-  }
-  return lines;
-}
-
-function act(row: Row, name: ActName, label: string, path: string, extra: { restart?: boolean } = {}): Act {
-  return { name, label, path, body: { id: row.id, ...extra }, sheet: sheetOf(row, name) };
-}
-
-/** The acts the phone offers under a row through the shell's sheet, in the order it shows
- * them. A timer runs through `/api/run` in place of start and restart; a module unit
- * without a switch takes no enable or disable. Remove is the desk's alone. */
-export function actsOf(row: Row): Act[] {
-  const found: Act[] = row.kind === "timer"
-    ? [act(row, "run", "Run now", "api/run"), act(row, "rerun", "Run again", "api/run", { restart: true }),
-       act(row, "stop", "Stop run", "api/stop")]
-    : [act(row, "start", "Start", "api/start"), act(row, "stop", "Stop", "api/stop"),
-       act(row, "restart", "Restart", "api/restart")];
-  if (row.has_switch) found.push(act(row, "enable", "Enable", "api/enable"), act(row, "disable", "Disable", "api/disable"));
-  return found;
 }
 
 // -- what an act came to ------------------------------------------------------------------

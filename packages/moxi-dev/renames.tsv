@@ -11766,6 +11766,10 @@ services	packages/services/tests/test_browser_add.py	assert round(box["width"]) 
 services	packages/services/tests/test_browser_add.py	assert any(url.endswith(link) for url in statuses), statuses	keep	any	any
 services	packages/services/tests/test_browser_add.py	"wraps": False, "refused": None})	keep	refused	refused
 services	packages/services/tests/test_browser_add.py	status=422, json={"refused": "the stand-in takes no add"}))	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	assert set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	assert "/api/ends" in seen and set(seen) <= REACHED, seen	keep	set	set
+services	packages/services/tests/test_browser_phone.py	route.fulfill(status=202, json={"act": act, "outcome": "refused", "code": answer.status,	keep	refused	refused
+services	packages/services/tests/test_browser_phone.py	"text": (data or {}).get("refused") or f"answered {answer.status}"})	keep	refused	refused
 sessions	packages/sessions/src/moxi_sessions/api.py	"Listed", "SubagentListing", "Subagent"), "find"),	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/api.py	"sessions_folders", "session_opened", "session_facts"), "lists"),	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False

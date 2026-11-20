@@ -193,7 +193,9 @@ def test_the_summary_keeps_the_contract_and_counts_the_rows_by_verdict(seeded, u
 
 
 def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "services", "page", keep=True)
+    # The page draws in text tokens and no accent but a focus ring, so the check follows
+    # the text token.
+    check = ui_component_check(ui_page, "services", "page", keep=True, tokens=("text",))
     assert check.element == "moxi-services-page"
     expect(check.locator.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
 
