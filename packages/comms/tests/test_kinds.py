@@ -125,8 +125,8 @@ def test_a_default_daemon_reads_the_group(rig):
 def test_speech_binds_as_a_person_whose_cache_is_never_read(rig, monkeypatch):
     """An older comms' daemon took `speech` as a register kind, a person's binding such
     as the operator's, and its cold-cache read answered a speech binding `no-cache`
-    without reading anything. comms keeps both: the default daemon binds a name as `speech`, and the
-    read says `person` without asking the cache module."""
+    without reading anything. comms keeps both: the default daemon binds a name as
+    `speech`, and the read says `person` without asking the cache module."""
     def refuse():
         raise AssertionError("the seam asked for the cache module")
     monkeypatch.setattr(cache, "module", refuse)
@@ -140,3 +140,21 @@ def test_speech_binds_as_a_person_whose_cache_is_never_read(rig, monkeypatch):
     clock = cache.clock_state("speech", None, kinds=rig.daemon.kinds)
     assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.PERSON)
     assert cache.clock_state("speech", None).code == cache.PERSON
+
+
+def test_the_operator_binds_as_speech(rig, monkeypatch):
+    """The binding the speech kind is for: the operator's own name, bound as a person
+    whose cache is never read."""
+    def refuse():
+        raise AssertionError("the seam asked for the cache module")
+    monkeypatch.setattr(cache, "module", refuse)
+    client = DaemonClient(rig.daemon.socket_path).connect()
+    try:
+        answer = client.bind(name="operator", scope="global", adapter="speech")
+        assert answer["identity"]["qualified"] == "operator"
+        binding = rig.daemon.bindings["operator"]
+        assert binding.adapter == "speech"
+        clock = cache.clock_state(binding.adapter, None, kinds=rig.daemon.kinds)
+        assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.PERSON)
+    finally:
+        client.close()
