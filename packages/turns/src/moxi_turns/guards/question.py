@@ -67,10 +67,11 @@ R_LAUNCH = (
 )
 #: What `on_prompt` adds.
 REMINDER = (
-    "The operator just asked to go through open questions. If he is asking now, put the "
-    "questions that are open now to him with AskUserQuestion: up to four per call, as many "
-    "calls as you need, each self-contained with your recommendation first. Once he has "
-    "answered them, count any new questions at the end of your output, as always."
+    "The person at the keyboard just asked to go through open questions. If they are asking "
+    "now, put the questions that are open now to them with AskUserQuestion: up to four per "
+    "call, as many calls as you need, each self-contained with your recommendation first. "
+    "Once they have answered them, count any new questions at the end of your output, as "
+    "always."
 )
 
 _WORD = re.compile(r"[^\W_]+")
