@@ -503,7 +503,12 @@ def cmd_explain(args, ctx: Context) -> int:
             "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
         qualified = identity_of(identity)
-        if args.message_id is not None:
+        older = None if args.message_id is None else archive.explained(
+            books.read_archive_skipped(), args.message_id, qualified)
+        if older is not None:
+            for line in _older_explain(qualified, args.message_id, queued=older["queued"]):
+                ctx.say(line)
+        elif args.message_id is not None:
             dropped = books.read_dropped(qualified, args.message_id)
             if dropped is not None:
                 from .daemon import CASE_REASONS
@@ -975,6 +980,10 @@ def _render_explain(info: dict) -> str:
 
     d = info["delivery"]
     about = "" if d is None else f"   message {d['message_id']}"
+    if info.get("archive") is not None:
+        return "\n".join(_older_explain(info["identity"], d["message_id"],
+                                        queued=info["archive"]["queued"])
+                         + _render_facts(info))
     lines = [f"{info['identity']}   "
              f"{info['case'] or 'no delivery to classify'}{about}", ""]
     if info["case"]:
@@ -986,7 +995,33 @@ def _render_explain(info: dict) -> str:
         lines += _wrap(f"comms could not classify this message: "
                        f"{info['case_error']}. The cursor's own reason, below, is what "
                        "there is to go on.", 74, "  ") + [""]
+    return "\n".join(lines + _render_facts(info))
 
+
+def _older_explain(identity: str, message_id, *, queued: bool | None) -> list[str]:
+    """The head of `explain` for a message from an older comms' record
+    (`archive.explained`): what that record says of it for `identity`, and that the
+    rest of its delivery is not read."""
+    if queued is None:
+        held = "That record can't be read now, so nothing of its delivery is known."
+    elif queued:
+        held = (f"That comms still held it in {identity}'s queue when it stopped, so "
+                "it had not reached that name then, and comms.db does not deliver it.")
+    else:
+        held = (f"That comms was not holding it in {identity}'s queue when it stopped.")
+    text = ("This message is from the older comms' record, read in place. " + held
+            + " The rest of its delivery (the hand-over, the injection, the cursor "
+            "then) was that daemon's memory and cursor files, which are not read. The "
+            "facts below are comms.db's, about this name, not about this message.")
+    return ([f"{identity}   from the older comms' record   message {message_id}", ""]
+            + _wrap(text, 74, "  ") + [""])
+
+
+def _render_facts(info: dict) -> list[str]:
+    """`explain`'s facts under the verdict: the binding, the delivery, the injection,
+    the activity, the queue and the cursor, then the text the identity was shown."""
+    d = info["delivery"]
+    lines = []
     b = info["binding"]
     if b is None:
         lines += _field("binding", "none. nothing holds this name right now",
@@ -995,7 +1030,7 @@ def _render_explain(info: dict) -> str:
         lines += _field("binding", f"{b['tier']}, adapter {b['adapter']}, "
                                    f"bound {_ago(b['bound_for'])}")
 
-    if d is None:
+    if d is None or info.get("archive") is not None:
         lines += _field("delivered", "nothing this daemon still knows about",
                         "a binding drops what it was handed when it ends, and the",
                         "daily trim drops a hand-over older than an hour")
@@ -1028,7 +1063,7 @@ def _render_explain(info: dict) -> str:
     if info["digest"]:
         lines += ["", "  the text this identity was shown, verbatim:"]
         lines += _digest_lines(info["digest"])
-    return "\n".join(lines)
+    return lines
 
 
 def _digest_lines(digest: str, max_lines: int = 14, max_chars: int = 900) -> list[str]:

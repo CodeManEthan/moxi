@@ -18,6 +18,7 @@ from moxi_comms import archive, directory
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.mcp import tools as mcp_tools
 from moxi_comms.paths import comms_db, daemon_socket
+from moxi_comms.store import books
 from moxi_comms.store.schema import ID_BASE
 
 #: The older record's ids: one the store had already used when the counter moved (so
@@ -66,6 +67,8 @@ def _build(older_dir):
     ]
     conn.executemany("INSERT INTO messages VALUES (?,?,?,?,?,?,?)", rows)
     conn.execute("INSERT INTO meta VALUES ('next_id', ?)", (str(LAST),))
+    # The older daemon's queue, as it stood when that comms stopped.
+    conn.execute("INSERT INTO queue VALUES (?, 'main@proj-a')", (OLD_ASK,))
     conn.commit()
     conn.close()
     conn = sqlite3.connect(identities)
@@ -157,6 +160,42 @@ def test_a_reply_to_an_older_message_reaches_its_author(older, rig):
     assert "replying to elder" in out
     assert wait_until(lambda: elder.queue), "the reply reached the older author"
     assert f"re:{OLD_ASK}" in rig.record.get_message(elder.queue[0]["message_id"]).content
+
+
+def test_explain_of_an_older_message_reads_the_older_queue_and_no_other_books(older,
+                                                                               rig):
+    """The older comms' explain answered from its daemon's memory and cursor files, and of
+    those its record keeps only the queue. Asked about an older message, explain reads
+    that queue for the name, takes none of comms.db's books as the message's, and says
+    plainly that the rest is not read, with the daemon up or down."""
+    c = DaemonClient(daemon_socket()).connect()
+    try:
+        held = c.call("explain", {"identity": "main@proj-a", "message_id": str(OLD_ASK)})
+        handed = c.call("explain", {"identity": "planner@proj-a",
+                                    "message_id": str(OLD_ASK)})
+    finally:
+        c.close()
+    assert held["archive"] == {"queued": True}
+    assert handed["archive"] == {"queued": False}
+    for answer in (held, handed):
+        assert answer["case"] is None, "comms.db's classifier is not this message's"
+        assert answer["cursor"]["reason"] not in (books.ALREADY_PAST, books.BEHIND)
+
+    code, out = rig.cli(["explain", "main@proj-a", str(OLD_ASK)], name="planner",
+                        scope="proj-a")
+    assert code == 0, out
+    assert out.splitlines()[0] == (f"main@proj-a   from the older comms' record   "
+                                   f"message {OLD_ASK}")
+    flat = " ".join(out.split())
+    assert "still held it in main@proj-a's queue when it stopped" in flat
+    assert "are not read" in flat
+
+    rig.daemon.stop()
+    code, out = rig.cli(["explain", "main@proj-a", str(OLD_ASK)], name="planner",
+                        scope="proj-a")
+    assert code == 75, out
+    assert f"main@proj-a   from the older comms' record   message {OLD_ASK}" in out
+    assert "are not read" in " ".join(out.split())
 
 
 def test_a_name_the_archive_retired_is_refused_at_bind_and_as_a_recipient(older, rig):

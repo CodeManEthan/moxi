@@ -1907,7 +1907,8 @@ class Daemon:
         `identity` is a qualified name, taken literally, exactly as `kind="agents"`
         prints it. `message_id` names the message to explain; without one the daemon
         picks the newest it can see for this identity, which is what a person wants when
-        they ask why an agent has gone quiet.
+        they ask why an agent has gone quiet. A message from an older comms' record
+        answers `archive` (`archive.explained`) and no case.
         """
         identity = str(frame.get("identity") or "")
         asked = frame.get("message_id")
@@ -1946,10 +1947,20 @@ class Daemon:
         except Exception:                                          # noqa: BLE001
             log.exception("explain: could not read the cursor of %s", identity)
             row = None
-        cursor = books_mod.explain_cursor(row, message_id)
+        # An id comms.db skipped for an older comms' record is that record's message:
+        # comms.db's books hold nothing of its delivery, so neither its cursor's
+        # comparison, its drop rows nor the classifier are read for it.
+        older = None
+        if message_id is not None and self.books.is_open:
+            try:
+                older = archive.explained(self.books.archive_skipped(), message_id,
+                                          identity)
+            except Exception:                                      # noqa: BLE001
+                log.exception("explain: could not read the archive's ids")
+        cursor = books_mod.explain_cursor(row, None if older else message_id)
         case = case_error = None
         dropped = None
-        if message_id is not None and self.books.is_open:
+        if older is None and message_id is not None and self.books.is_open:
             try:
                 dropped = self.books.dropped_reason(identity, message_id)
             except (TypeError, ValueError):
@@ -1957,7 +1968,9 @@ class Daemon:
             except Exception:                                      # noqa: BLE001
                 log.exception("explain: could not read why %s left %s's queue",
                               message_id, identity)
-        if dropped is not None:
+        if older is not None:
+            case = None                 # no case: the facts that would make one are gone
+        elif dropped is not None:
             case = dropped
         elif message_id is not None and message_id in waiting:
             # Queued BEFORE the cursor: a queued id is not `cursor-behind-it`, whose
@@ -1986,7 +1999,8 @@ class Daemon:
                 "activity_for": None if activity is None else now - activity,
                 "cursor": cursor,
                 "case": case,
-                "case_error": case_error}
+                "case_error": case_error,
+                "archive": older}
 
     def _resolve_query(self, frame: dict) -> dict:
         """Tier/route RESOLUTION for the send verb -- never a liveness check."""

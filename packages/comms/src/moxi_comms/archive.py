@@ -12,6 +12,8 @@ What the archive answers:
   comms.db's, as one record (`timeline`);
 * a message id comms.db skipped (below) is the archive's, so `reply` and every other
   read of one message by id find it there;
+* `explain` of such an id reads the older daemon's queue for the name, the one delivery
+  fact the record keeps, and no comms.db book (`explained`);
 * every identity the archive marks `retired` stays retired: comms refuses it at bind and
   as a recipient, as it refuses one comms.db retired (`directory.retired`).
 
@@ -115,6 +117,17 @@ class Archive:
         except sqlite3.Error as exc:
             raise ArchiveError(f"{self.record} can't be read: {exc}") from None
         return _message(row) if row else None
+
+    def queued(self, message_id, name: str) -> bool:
+        """Did the older daemon's queue (the record's `queue`) still hold `message_id`
+        for `name` when that comms stopped?"""
+        try:
+            row = self._conn("record").execute(
+                "SELECT 1 FROM queue WHERE message_id = ? AND name = ?",
+                (int(message_id), name)).fetchone()
+        except sqlite3.Error as exc:
+            raise ArchiveError(f"{self.record} can't be read: {exc}") from None
+        return row is not None
 
     def last_id(self) -> int | None:
         """The last id the older record's counter gave out (its `meta` `next_id`)."""
@@ -232,24 +245,50 @@ def skipped(conn) -> tuple[int, int] | None:
     return (int(low), int(high)) if low.isdigit() and high.isdigit() else None
 
 
+def holds(window: tuple[int, int] | None, message_id) -> bool:
+    """Is `message_id` in `window`, the ids comms.db skipped (`skipped`): an id only the
+    archive can hold?"""
+    try:
+        key = int(message_id)
+    except (TypeError, ValueError):
+        return False
+    return window is not None and window[0] < key <= window[1]
+
+
 def get_message(conn, message_id) -> Message | None:
     """The archive's message `message_id`, when the id is one comms.db skipped (`skipped`
     over `conn`, comms.db's connection); None otherwise."""
     found = current()
     if found is None or found.record is None:
         return None
-    window = skipped(conn)
-    try:
-        key = int(message_id)
-    except (TypeError, ValueError):
-        return None
-    if window is None or not window[0] < key <= window[1]:
+    if not holds(skipped(conn), message_id):
         return None
     try:
-        return found.get_message(key)
+        return found.get_message(int(message_id))
     except ArchiveError as exc:
         _warn(exc)
         return None
+
+
+def explained(window: tuple[int, int] | None, message_id, name: str) -> dict | None:
+    """What `explain` reads for an archive message, when `message_id` is in `window`
+    (`skipped`); None for an id that is comms.db's.
+
+    The older comms answered explain from its daemon's memory (the binding, the hand-over
+    times, the injection) and its cursor files, and its record keeps only one of those
+    facts: its queue, which its daemon wrote through to the record. So the answer is
+    `{"queued": ...}`: True when that queue still held the message for `name` when that
+    comms stopped, False when it did not, None when the record can't be read."""
+    if not holds(window, message_id):
+        return None
+    found = current()
+    if found is None or found.record is None:
+        return {"queued": None}
+    try:
+        return {"queued": found.queued(message_id, name)}
+    except ArchiveError as exc:
+        _warn(exc)
+        return {"queued": None}
 
 
 def skip_ids(record) -> tuple[int, int] | None:
@@ -274,4 +313,5 @@ def skip_ids(record) -> tuple[int, int] | None:
 
 
 __all__ = ["Archive", "ArchiveError", "META_SKIPPED", "NAMES_ROOM", "connect", "current",
-           "from_config", "get_message", "messages", "retired", "skip_ids", "skipped", "timeline"]
+           "explained", "from_config", "get_message", "holds", "messages", "retired",
+           "skip_ids", "skipped", "timeline"]
