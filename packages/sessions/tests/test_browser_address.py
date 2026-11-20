@@ -4,7 +4,9 @@ back with its filters, find and depth (Back and a reload with its opened rows an
 scroll too); typing and picking add no history entry; the plain address; an invalid and a
 stale address; a transcript's links carry the list's query; a read that lands after he
 moved on writes nothing; the band's `Sessions` and another page and Back; a restore that
-meets a newer list, a query change over a read, and a target carried to a transcript.
+meets a newer list, a query change over a read, and a target carried to a transcript; with
+launcher installed, a reload's scroll that lands only once launcher's running launches
+have answered.
 
 Each test runs twice: on a small install, the core with ui and sessions alone, and on
 the full one. Both are over the same roots: a hundred sessions active recently in one
@@ -15,17 +17,20 @@ older sessions, and a Codex session four days back.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
+from contextlib import suppress
 import time
 from pathlib import Path
 
 import pytest
 from moxi import modules
-from playwright.sync_api import expect
+from playwright.sync_api import Error, expect
 
 from moxi_sessions.testing import CodexRollout
 from test_browser_list import changed_at, claude, count_line, day_key, env_of, filter_button, group, noon, row, sid, tid
+from test_browser_running import running_topic
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -48,6 +53,9 @@ AGENT = "a0190b0000000001"
 NARROWED = "?folder=/work/atlas&harness=claude&when=7d"
 MORE_API = re.compile(r"/m/sessions/api/more\?")
 LIST_API = re.compile(r"/m/sessions/api/list")
+RUNNING_API = "**/m/launcher/api/running"
+#: Launcher's answer when nothing runs.
+NOTHING_RUNS = json.dumps({"state": "up", "detail": None, "count": 0, "sessions": []})
 #: The entry's memory, as the list keeps it in `history.state`.
 MEMORY = "() => (history.state || {})['moxi.sessions.list'] || null"
 #: Every address the document was rewritten to, kept from the document's start.
@@ -134,6 +142,43 @@ class Held:
         with self.page.expect_request_finished(lambda request: MORE_API.search(request.url) is not None):
             self.route.continue_()
         self.page.unroute(MORE_API)
+
+
+class HeldRunning:
+    """Answers launcher's `/api/running` on `page` with nothing running, and keeps the
+    shell's push stream from bringing launcher's topic `running`; from `hold()` on, each
+    read waits unanswered until `release()`."""
+
+    def __init__(self, page):
+        self.page = page
+        self.held: list | None = None
+        page.add_init_script(running_topic(None))
+        page.route(RUNNING_API, self._take)
+
+    def _take(self, route) -> None:
+        if self.held is not None:
+            self.held.append(route)
+        else:
+            route.fulfill(status=200, content_type="application/json", body=NOTHING_RUNS)
+
+    def hold(self) -> None:
+        self.held = []
+
+    def wait(self) -> None:
+        """Until a held read has been asked."""
+        for _ in range(400):
+            if self.held:
+                return
+            self.page.evaluate("new Promise((done) => setTimeout(done, 25))")
+        raise AssertionError("launcher's /api/running was never asked")
+
+    def release(self) -> None:
+        """Answers each held read, and every later one at once."""
+        held, self.held = self.held or [], None
+        for route in held:
+            # A read the reload's old document asked is gone with it.
+            with suppress(Error):
+                route.fulfill(status=200, content_type="application/json", body=NOTHING_RUNS)
 
 
 def open_list(page, search: str = ""):
@@ -491,3 +536,37 @@ def test_a_transcript_opened_mid_restore_carries_the_target_and_back_reaches_it(
     view = page.locator(LIST)
     expect(rows(view, "recent")).to_have_count(RECENT)
     at(page, "?more=recent:3")
+
+
+# -- 14: the landing waits for launcher's running launches --------------------------------
+
+def frames(page, count: int) -> None:
+    """Waits `count` animation frames in the page."""
+    page.evaluate("(count) => new Promise((done) => { const next = () => --count > 0 "
+                  "? requestAnimationFrame(next) : done(); requestAnimationFrame(next); })", count)
+
+
+def test_with_launcher_a_reloads_scroll_lands_only_once_launchers_running_launches_answer(fresh, shell):
+    if "launcher" in shell.leave_out or "launcher" not in {found.name for found in modules.scan()}:
+        pytest.skip("the scroll waits for launcher's running launches only with launcher installed")
+    page = fresh()
+    running = HeldRunning(page)
+    view, search, y = the_full_list(page)
+    height = row_height(view)
+    assert y > 2 * height
+    running.hold()
+    page.reload()
+    view = page.locator(LIST)
+    at(page, search)
+    expect(rows(view, D2)).to_have_count(DAY + 3)
+    # Each opened row's read has answered; only launcher's answer is still out.
+    for session in (TOP, DEEP):
+        one = row(view, "claude", session)
+        expect(one).to_have_attribute("open", "")
+        expect(one.locator(".r").first).to_be_visible()
+        expect(one.get_by_role("status")).to_have_count(0)
+    running.wait()
+    frames(page, 10)
+    assert abs(page.evaluate("scrollY") - y) > height, "the scroll landed before launcher's first answer"
+    running.release()
+    scrolled_to(page, y, height)
