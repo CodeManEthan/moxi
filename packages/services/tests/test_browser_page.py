@@ -229,6 +229,8 @@ def test_the_rows_that_need_him_rise_first_worst_first(seeded, ui_shell, ui_page
     first = panel.locator('section[data-part="first"]')
     expect(first.locator('[data-line="count"]')).to_have_text(f"{len(listed)} services")
     expect(first.get_by_role("button", name="Add a service", exact=True)).to_have_count(1)
+    # The time of the read goes with `Nothing is down.` only, never under risen rows.
+    expect(first.locator('[data-line="read"]')).to_have_count(0)
 
     # Every fail by name, then failed last runs oldest first, then rows it can't tell.
     def rank(r: dict) -> tuple | None:
@@ -612,6 +614,19 @@ def test_a_page_server_that_isnt_answering_keeps_the_last_rows_dim_with_no_acts(
     expect(web).to_have_attribute("open", "")
 
 
+def ink(line) -> tuple[str, str]:
+    """A line's colour, `text` when it is `--moxi-text`, and its ground."""
+    return tuple(line.evaluate("""el => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--moxi-text)";
+      el.parentNode.append(probe);
+      const text = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(el);
+      return [style.color === text ? "text" : style.color, style.backgroundColor];
+    }"""))
+
+
 def test_a_store_that_cant_be_read_shows_its_sentence_and_no_rows(seeded, ui_page):
     shown_without_the_topic(ui_page)
     detail = "services' store is newer than this Moxi; fix: upgrade Moxi"
@@ -620,6 +635,7 @@ def test_a_store_that_cant_be_read_shows_its_sentence_and_no_rows(seeded, ui_pag
     panel = ui_page.locator("#moxi-panel > moxi-services-page")
     expect(list_part(panel)).to_have_attribute("data-state", "error")
     expect(list_part(panel).locator('[data-line="error"]')).to_have_text(detail)
+    assert ink(list_part(panel).locator('[data-line="error"]')) == ("text", "rgba(0, 0, 0, 0)")
     expect(panel.locator("moxi-ui-row")).to_have_count(0)
     expect(panel.get_by_role("button", name="Add a service")).to_have_count(0)
 
@@ -724,6 +740,8 @@ def test_start_from_a_closed_row_reads_starting_then_running(seeded, ui_shell, u
     try:
         item.get_by_role("button", name="Start startme", exact=True).click()
         expect(drawn).to_have_attribute("fact", "starting")
+        # The row's fact says what is being done; the list draws no line of its own.
+        expect(panel.get_by_text("An act is running.")).to_have_count(0)
         expect(panel.get_by_role("button", name="Open web", exact=True)).to_be_enabled()
         # The fake supervisor gives no start time, so the fact reads `running` alone.
         expect(drawn).to_have_attribute("fact", re.compile(r"^running"))
@@ -836,6 +854,16 @@ def test_a_lost_answer_says_the_act_may_have_been_done(seeded, ui_page):
         said = row(panel, "services/lostone").locator('[data-line="said"]')
         expect(said).to_have_attribute("data-tone", "warn")
         expect(said).to_have_text("Services' page server didn't answer; it may have been done.")
+        # Told in the text colour, its left edge the plain border's, whatever its tone.
+        assert ink(said) == ("text", "rgba(0, 0, 0, 0)")
+        assert said.evaluate("""el => {
+          const probe = document.createElement("span");
+          probe.style.color = "var(--moxi-border-strong)";
+          el.parentNode.append(probe);
+          const edge = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(el).borderLeftColor === edge;
+        }""")
     finally:
         ui_page.unroute("**/m/services/api/act")
 

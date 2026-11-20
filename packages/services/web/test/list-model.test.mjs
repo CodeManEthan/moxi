@@ -241,9 +241,9 @@ test("the list's shape: the first group, its risen rows or sentence and counts, 
   assert.deepEqual(quiet.groups[0].rows[0], { row: up, name: "atlas-dev", where: "serves the api",
                                               fact: "running since 08:19", weight: "dim", line: null });
 
-  // A risen row replaces the sentence and the counts, leaves its group, and reads its
-  // project key and line two.
-  const loud = listShape([down, up, shell], null, true, WHEN);
+  // A risen row replaces the sentence, the counts and the time of the read, leaves its
+  // group, and reads its project key and line two.
+  const loud = listShape([down, up, shell], AT, true, WHEN);
   assert.equal(loud.label, "3 services");
   assert.equal(loud.sentence, null);
   assert.equal(loud.counts, null);

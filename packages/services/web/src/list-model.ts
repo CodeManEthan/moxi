@@ -371,7 +371,8 @@ export interface ListShape {
   /** The dim counts when no row rises, else null; null too when there is no row, and
    * when no row is his. */
   counts: string | null;
-  /** `read <time>` from the rows' `at`, null without one. */
+  /** `read <time>` from the rows' `at`, on the `Nothing is down.` line only: null when a
+   * row rises, and without an `at`. */
   read: string | null;
   /** Some row is his: `Add a service` goes under the label. With none, the page draws
    * `Yours` with what a service is and `Add a service` there. */
@@ -400,7 +401,7 @@ export function listShape(rows: readonly Row[], at: string | null, projects: boo
     sentence: up.length ? null : NOTHING_DOWN,
     more: up.length || his ? null : NOTHING_ADDED,
     counts: up.length || !found.length || !his ? null : countsLine(found),
-    read: read === null ? null : `read ${read}`,
+    read: up.length || read === null ? null : `read ${read}`,
     his,
     groups: groups.map((group) => ({ group, rows: group.rows.map((row) => rowView(row, { projects, risen: false }, when)) })),
   };

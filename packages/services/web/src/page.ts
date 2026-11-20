@@ -110,12 +110,11 @@ const STYLES = css`
   p { margin: 0; overflow-wrap: anywhere; }
   code { font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
   .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  .ok { color: var(--moxi-ok); }
-  .warn { color: var(--moxi-warn); }
-  .error { color: var(--moxi-error); }
   .muted { color: var(--moxi-text-dim); }
-  .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
-  .note { padding-left: 8px; border-left: 3px solid var(--moxi-warn); font-size: var(--moxi-font-size-sm); }
+  /* The lines that say the list can't be read, in the text colour on no fill: words in
+     text tokens only, as everywhere on the page. */
+  .problem { color: var(--moxi-text); }
+  .note { font-size: var(--moxi-font-size-sm); }
   :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
   /* Beside the panel, where the window has the room, the column stands at the centre of
      what the panel leaves; under that width the panel lies over the page. */
@@ -220,9 +219,6 @@ const STYLES = css`
   .yours button:hover:not(:disabled) { background: none; }
   .said { display: grid; gap: 2px; padding-left: 8px; border-left: 3px solid var(--moxi-border-strong);
            font-size: 13px; line-height: 18px; }
-  .said.ok { border-left-color: var(--moxi-ok); color: var(--moxi-text); }
-  .said.error { border-left-color: var(--moxi-error); }
-  .said.warn { border-left-color: var(--moxi-warn); color: var(--moxi-text); }
   .said.muted { color: var(--moxi-text-dim); }
   button { font: inherit; color: var(--moxi-text); max-width: 100%; }
   button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
@@ -819,7 +815,7 @@ export class ServicesPage extends LitElement {
     if (rows === null) return nothing;
     const when = { now: Date.now() / 1000 };
     const state = pageState(rows, Date.now() - this.#since, this.#phone, when);
-    if (state.state === "gone") return html`<p class="problem">${state.line}</p>`;
+    if (state.state === "gone") return html`<p class="state problem" data-line="gone">${state.line}</p>`;
     const told = this.#told;
     const value = rows.value;
     const all = state.rows && value !== null ? value.rows : null;
@@ -832,7 +828,6 @@ export class ServicesPage extends LitElement {
     const ids = new Set((value?.rows ?? []).map((row) => row.id));
     const loose = told !== null && told.where !== ADD && (told.where === null || !ids.has(told.where)) ? told.said : null;
     return html`<section data-part="list" data-state=${state.state}>
-        ${this.#busy ? html`<p class="state dim" data-line="busy">An act is running.</p>` : nothing}
         ${loose !== null ? this.#saidPart(loose) : nothing}
         ${shape === null && !none && state.line !== null ? html`<p class=${state.state === "loading" ? "state dim" : "state problem"}
           data-line=${state.state} role="status">${state.line}</p>` : nothing}
