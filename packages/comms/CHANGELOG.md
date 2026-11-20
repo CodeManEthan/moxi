@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- comms declares the `speech` adapter kind again, as a person kind: a binding of it (voice
+  binds the operator's name as `speech`) has its mail delivered live, never held for a
+  cold cache, and its cache is never read.
 - The connector's `send` and `send_and_wait` are no longer refused while an agent waits on
   a single reply from the Claude app. The message posts, and the answer ends with a note
   listing the asks still open from its recipients: newest first, at most three and a

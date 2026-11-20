@@ -17,6 +17,7 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
+| `speech` | none: voice binds it | a person speaking and listening through voice, which binds the operator's name as it; a person kind |
 
 A live row of `api.roster_rows()` and `agents --json` bound as the `connector` kind
 carries `via`, `Claude's apps, through the connector`, while the connector module is
