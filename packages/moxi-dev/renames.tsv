@@ -11838,6 +11838,8 @@ services	packages/services/tests/test_page_feed.py	"""A gather in place of the p
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"
 services	packages/services/tests/test_page_feed.py	gathers.gate.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	held.set()	keep	set	set
+services	packages/services/tests/test_page_feed.py	let_go.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 services	packages/services/tests/test_page_feed.py	return real(health=check_health)	use	health=	check_health=
 services	packages/services/tests/test_page_feed.py	self.gate.set()	keep	set	set
