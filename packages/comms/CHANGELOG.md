@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `[archive] record` and `[archive] identities` name an older comms' record and
+  identities files, which comms reads in place and never writes. `history` lists the
+  older record's messages before comms.db's; `reply` and every read by id find
+  an older message by its own id, because the daemon moves comms.db's counter past the
+  older ids once at its start; and every name the older identities file retired is
+  refused at bind and as a recipient again.
 - `moxi comms opencode <identity>` launches an OpenCode session with comms mail, as
   `moxi comms claude` and `moxi comms codex` launch theirs. It runs the OpenCode wrapper
   `moxi-comms-opencode`, whose script is not on PATH, and names itself as typed.

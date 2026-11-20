@@ -85,7 +85,7 @@ from pathlib import Path
 
 from moxi import ipc
 
-from . import (attribution, bindings, cache, claimfile, config, constants, directory,
+from . import (archive, attribution, bindings, cache, claimfile, config, constants, directory,
                membership, replies, wire)
 from .store import books as books_mod
 from .mcp import tokens as mcp_tokens_mod
@@ -655,6 +655,14 @@ class Daemon:
         # declare, which catches a module installed before comms and a store restored
         # from a backup. A failure is logged; the names stay as they were.
         self._reconcile_reserved()
+        # boot: an older comms' record named in `[archive] record` keeps its own message
+        # ids: the counter moves past them once, so an id there is the archive's
+        # (`archive.py`). A failure is logged; the counter stays as it was.
+        try:
+            archive.skip_ids(self.record)
+        except Exception:  # noqa: BLE001 - the archive never stops a start
+            log.warning("moving the message counter past the archive's ids failed",
+                        exc_info=True)
         # boot: the delivery books, fenced BEFORE any method is answered: every row a
         # binding of the last daemon held (handed, or in a digest whose turn never
         # reported) waits again, and every digest it left open ends `fenced`. Then the

@@ -153,7 +153,7 @@ import time
 
 from moxi import exit as moxi_exit
 
-from . import (api, attribution, cache, cards, claimfile, claimhold, config,
+from . import (api, archive, attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
 from .constants import BACKEND_ENV
@@ -334,6 +334,11 @@ def cmd_history(args, ctx: Context) -> int:
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
         msgs = ctx.record.history(room["room_id"], limit=args.limit)
+        # An older comms' record (`[archive] record`) reads as the start of this one:
+        # its messages first, then comms.db's, and the newest `--limit` of them all.
+        older = archive.messages(args.limit) if len(msgs) < args.limit else []
+        msgs = (older + msgs)[-args.limit:]
+        from_archive = {id(m) for m in older}
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it
@@ -353,7 +358,9 @@ def cmd_history(args, ctx: Context) -> int:
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
-        dropped = _history_dropped(db, [m.id for m, *_ in rows])
+        # The store's drop rows are comms.db's; an archive message has none.
+        dropped = _history_dropped(db, [m.id for m, *_ in rows
+                                        if id(m) not in from_archive])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -368,7 +375,8 @@ def cmd_history(args, ctx: Context) -> int:
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
                 + _history_marks(ml)
-                + _history_gone(m, dropped.get(str(m.id), {})))
+                + _history_gone(m, {} if id(m) in from_archive
+                                else dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")
     if window is not None:
