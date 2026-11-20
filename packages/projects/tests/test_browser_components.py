@@ -137,7 +137,7 @@ def test_the_page_keeps_the_contract_and_opens_its_add_in_the_panel(seeded, ui_p
                                                                     ui_component_check):
     # With services installed, the page places its `project-facts` component, which reads
     # services' routes.
-    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services",))
+    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services", "launcher"))
     assert check.element == "moxi-projects-page"
     # The shell's top line names the page; the page draws no heading of its own.
     expect(check.locator.locator("h1")).to_have_count(0)
