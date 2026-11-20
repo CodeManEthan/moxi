@@ -666,8 +666,10 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     copy's: the fingerprint is the secret without them. A copy hit is left out where a
     hit already taken of the same set and rule is the same finding: one with the same
     span, or one with the same fingerprint whose span holds the copy hit's span trimmed
-    of see-through characters at both ends. So a text whose secrets no see-through
-    character splits gets the hits it has without the copies.
+    of see-through characters at both ends. So a text gets the hits it has without the
+    copies when no see-through character splits or borders a secret, or sits in the text
+    a rule matches around one (the keyword of an assignment); where one does, a copy may
+    add a hit, such as a token whose end a following byte order mark broke.
     """
     hits = _hits(text, names, path, allow, known, keep_marked=keep_marked)
     chars = _seen_in(text)
