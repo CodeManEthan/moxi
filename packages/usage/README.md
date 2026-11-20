@@ -305,7 +305,12 @@ and it acts only when `ceiling.warn_tokens` and `ceiling.hard_tokens` are both a
 
 Past `warn_tokens` of growth the agent is told once, in one added line
 (`ceiling.warning_text`). Past `hard_tokens` the agent is latched: its tools are refused
-(`ceiling.deny_text`) until it returns, and this holds after a compaction. A latched agent
+(`ceiling.deny_text`) until it returns, and this holds after a compaction. The warning
+says to finish the smallest safe unit, commit it and return; the refusal gives the wrap-up
+recipe (commit with one `-m` in single quotes, with no heredoc, `$` or backtick; the commit
+line from `moxi repo rules`; every trailer in the last paragraph) and asks for a
+`CEILING HANDOFF` block: done, the commit or what is uncommitted, the report's path, what
+is left and the next first action. A latched agent
 may still call the return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit
 and read `.md` files under `ceiling.handoff_roots`, run git's status, diff, add and commit
 forms in its working directory or under `ceiling.work_roots`, and run the commands whose
@@ -314,7 +319,8 @@ A word written `<...>` stands for one name word (a letter or digit, then letters
 `.`, `_` and `-`): `[["moxi", "repo", "rules"], ["make", "trailers", "<key>"]]` allows
 `moxi repo rules` with no argument and `make trailers` with one key, and refuses either
 with a word more or fewer.
-Both root lists start empty, and no command beyond git is allowed until you add one.
+Both root lists start empty, and the one command allowed beyond git is `moxi repo rules`,
+which the refusal names.
 Markers live in `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the
 agents past the ceiling. The guard covers Claude and Codex subagents; turns runs no guard
 on OpenCode.

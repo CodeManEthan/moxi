@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The worker ceiling's default warning and refusal carry the wrap-up recipe: commit with
+  one `-m` in single quotes and no heredoc, `$` or backtick, get the commit line from
+  `moxi repo rules`, put every trailer in the last paragraph, and return a
+  `CEILING HANDOFF` block. `ceiling.allow_commands` defaults to `moxi repo rules`, the
+  command the refusal names; it used to start empty.
 - A command in `ceiling.allow_commands` is allowed past the worker ceiling only whole: a
   command with a word more or fewer is refused, where any words after an entry used to
   pass. A word written `<...>`, such as `<key>`, stands for one name word, so an entry

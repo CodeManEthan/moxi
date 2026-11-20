@@ -192,8 +192,8 @@ def test_the_warning_is_one_added_line_once():
     a.context(20_000 + WARN + 5)
     got = ceiling.judge(a.call(turns_call=True))
     assert isinstance(got, turns.Allow)
-    assert "100,005 tokens" in got.line and "(now 120,005)" in got.line
-    assert "150,000 tokens" in got.line
+    assert "100,005 input tokens" in got.line and "(now 120,005)" in got.line
+    assert "hard stop at 150,000 added" in got.line
     a.context(20_000 + WARN + 900)
     assert ceiling.judge(a.call()) is None
     ceiling.reset()                          # the endpoint starts again: the marker holds
@@ -504,15 +504,43 @@ def test_the_texts_fill_their_counts_and_survive_stray_braces():
     assert ceiling.fill("a {b} {", growth=1, current=2, hard=3) == "a {b} {"
 
 
-def test_the_default_texts_name_no_tool_or_path():
-    schema = settings.schema()
-    for key in ("ceiling.warning_text", "ceiling.deny_text"):
-        text = settings.current()[key]
-        assert "/" not in text and "~" not in text and "git" not in text
-    assert settings.current()["ceiling.handoff_roots"] == []
-    assert settings.current()["ceiling.work_roots"] == []
-    assert settings.current()["ceiling.allow_commands"] == []
-    assert schema is not None
+def test_the_default_texts_carry_the_wrap_up_recipe_and_ask_for_the_hand_off_block():
+    # As Core's worker ceiling did: the warning says to finish the smallest unit and
+    # return; the refusal gives the commit recipe the lexer lets through, where the commit
+    # line comes from, and the CEILING HANDOFF block to return.
+    current = settings.current()
+    warning = ceiling.fill(current["ceiling.warning_text"], growth=250_100, current=310_000,
+                           hard=300_000)
+    assert "added 250,100 input tokens" in warning and "(now 310,000)" in warning
+    assert "hard stop at 300,000" in warning
+    assert "Finish the smallest safe unit, commit it" in warning
+    assert "done, left, and where, then return to the parent" in warning
+    deny = ceiling.fill(current["ceiling.deny_text"], growth=300_100, current=None,
+                        hard=300_000)
+    assert "added 300,100 input tokens, hard stop 300,000" in deny
+    assert "`git -C <dir> ...` or `cd <dir> && git ...`" in deny
+    assert "one -m in single quotes" in deny and "no heredoc, $ or backtick" in deny
+    assert "`cd <dir> && moxi repo rules`" in deny
+    assert "every trailer in the last paragraph of the one -m" in deny
+    assert "Return CEILING HANDOFF with done, commit or uncommitted state, report path, " \
+        "left, and the next first action" in deny
+    # The commit-line command the refusal names is one a latched agent may run, whole.
+    assert current["ceiling.allow_commands"] == [["moxi", "repo", "rules"]]
+    assert current["ceiling.handoff_roots"] == [] and current["ceiling.work_roots"] == []
+
+
+def test_a_latched_agent_may_get_its_commit_line_with_no_config(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_config(THRESHOLDS)
+    a = started()
+    a.context(20_000 + HARD)
+    cwd = str(tmp_path)
+    assert ceiling.judge(a.call("Bash", {"command": f"cd {repo} && moxi repo rules"},
+                                cwd=cwd)) is None
+    got = ceiling.judge(a.call("Bash", {"command": f"cd {repo} && moxi repo rules x"},
+                               cwd=cwd))
+    assert isinstance(got, turns.Deny) and "CEILING HANDOFF" in got.reason
 
 
 def test_importing_the_judge_costs_next_to_nothing():
