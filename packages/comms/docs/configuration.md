@@ -214,7 +214,8 @@ session without naming its id states none until that look.
 
 comms' listener gives a Claude session its start context and roster changes through Moxi
 turns, which waits at most its `listen.wait_ms` (2000 by default) for every listener of an
-event and drops a late answer. The listener's own query to comms' daemon waits at most
-1.5 s, so keep `listen.wait_ms` above 1500. Set lower, a slow or stopped daemon costs a
+event and drops a late answer. The listener's own answer, its query to comms' daemon and
+any wait for a new adapter's word together, takes at most 1.5 s, so keep
+`listen.wait_ms` above 1500. Set lower, a slow or stopped daemon costs a
 session its whole start context, where it would have had the context block and a line
 saying comms was offline.

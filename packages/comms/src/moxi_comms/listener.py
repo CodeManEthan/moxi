@@ -12,9 +12,10 @@ printed when comms wrote its own hooks (`adapters/shim_roster`):
              ignored reminder naming this session as its author, once; or nothing
 
 At either event, a session whose adapter is gone while it runs gets a new one
-(`respawn_gone_adapter`), which binds the same name again with no relaunch, and is told
-only that, in one line. When no new adapter can be started, or its bind is refused, the
-line says that mail has stopped and why.
+(`respawn_gone_adapter`), which binds the same name again with no relaunch, and one line
+that says so, before the start's layer one and roster or the prompt's deltas, which it
+gets as any session does. When no new adapter can be started, or its bind is refused,
+the line says that mail has stopped and why.
 
 **comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
 the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
@@ -34,8 +35,10 @@ seeds it on a roster it could read; a session with no such directory gets no del
 since deltas without memory would announce the world every prompt.
 
 **Time.** turns bounds every listener of an event together by `listen.wait_ms` (2000 ms
-by default) and gives the event no context from a listener that is late. The daemon query
-here is bounded at `QUERY_TIMEOUT`, below that default. turns' library gives a caller no
+by default) and gives the event no context from a listener that is late. The whole answer
+here is bounded at `QUERY_TIMEOUT`, below that default: the daemon query first, then a
+respawn's wait for its word in what is left, so a slow respawn costs the line's news,
+never layer one. turns' library gives a caller no
 way to read the setting, so the bound is fixed, and `docs/configuration.md` asks for a
 `listen.wait_ms` above it.
 """
@@ -45,12 +48,13 @@ from __future__ import annotations
 from .constants import NAME_ENV
 
 import os
+import time
 from pathlib import Path
 
 #: The harnesses this listener answers for.
 HARNESSES = ("claude",)
-#: The daemon query's bound, inside turns' default `listen.wait_ms` of 2 s. A box that
-#: sets `listen.wait_ms` at or below it loses a late answer (docs/configuration.md).
+#: The answer's bound, inside turns' default `listen.wait_ms` of 2 s. A box that sets
+#: `listen.wait_ms` at or below it loses a late answer (docs/configuration.md).
 QUERY_TIMEOUT = 1.5
 #: The session's roster memory, beside its claim socket.
 MEMORY = "roster.json"
@@ -100,21 +104,24 @@ def answer(event) -> str | None:
     env = dict(event.env) if event.env else dict(os.environ)
     if not env.get(NAME_ENV):
         return None
-    respawned = respawn_gone_adapter(env)
-    if respawned is not None:
-        return respawned
+    deadline = time.monotonic() + QUERY_TIMEOUT
     socket_path = daemon_socket(env)
     state = memory_path(env)
+    text = None
     if event.event == "start":
         info = shim_roster.fetch(socket_path, timeout=QUERY_TIMEOUT)
         text, online = shim_roster.render_snapshot(info, env=env)
         if online and state is not None:
             shim_roster.write_state(state, shim_roster.roster_of(info))
+    elif state is not None:
+        text, _online = shim_roster.delta(socket_path, state, env=env,
+                                          timeout=QUERY_TIMEOUT)
+    line = respawn_gone_adapter(env, wait_s=max(0.0, deadline - time.monotonic()))
+    if line is None:
         return text
-    if state is None:
-        return None
-    text, _online = shim_roster.delta(socket_path, state, env=env, timeout=QUERY_TIMEOUT)
-    return text
+    if text is None:
+        return line
+    return f"{line}\n\n{text}" if event.event == "start" else f"{line}\n{text}"
 
 
 def respawn_gone_adapter(env, *, wait_s: float = QUERY_TIMEOUT) -> str | None:

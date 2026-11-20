@@ -766,24 +766,30 @@ def test_a_killed_adapter_is_replaced_at_the_next_prompt_with_no_relaunch(
         from moxi import files
         from moxi_comms.adapters import respawn
         with files.lock(respawn.lock_path(sid), timeout_s=0):
+            # The prompt's roster changes may follow the line: this test's process is
+            # outside the session, so its own name's leave is not filtered as self.
             said = prompt(env)
-            assert said == (f"comms: this session's comms adapter had stopped. A new one "
-                            f"is binding {NAME} again; its mail resumes once it has.")
+            assert said.startswith(f"comms: this session's comms adapter had stopped. A "
+                                   f"new one is binding {NAME} again; its mail resumes "
+                                   "once it has."), said
             time.sleep(0.3)
             assert binding(rig) is None, "a second new adapter ends at the lock"
             assert cf.adapter_gone(cf.read(sid))
 
         said = prompt(env)
-        assert said in (f"comms: this session's comms adapter had stopped. A new one has "
-                        f"bound {NAME} again, and its mail resumes.",
-                        f"comms: this session's comms adapter had stopped. A new one is "
-                        f"binding {NAME} again; its mail resumes once it has."), said
+        assert said.startswith((f"comms: this session's comms adapter had stopped. A new "
+                                f"one has bound {NAME} again, and its mail resumes.",
+                                f"comms: this session's comms adapter had stopped. A new "
+                                f"one is binding {NAME} again; its mail resumes once it "
+                                "has.")), said
         assert wait_until(lambda: binding(rig) is not None, timeout=10), "bound again"
         assert binding(rig).session_id == sid
         record = cf.read(sid)
         assert [r["pid"] for r in record["roots"]] == [proc.pid], "the same claude"
         assert wait_until(lambda: cf.socket_answers(record), timeout=5)
-        assert prompt(env) == "", "the new adapter serves: nothing more to say"
+        said = prompt(env)
+        assert "adapter had stopped" not in said and "mail has stopped" not in said, \
+            "the new adapter serves: no line about it"
         assert checks.adapter_rows() == []
         log = (session.log_dir() / f"claude-{sid}.log").read_text()
         assert "respawned adapter for claude pid" in log
@@ -819,6 +825,54 @@ def test_a_new_adapter_whose_bind_is_refused_says_mail_has_stopped_and_why(
         assert cf.adapter_gone(cf.read(sid)), "the claim file stays"
         (row,) = checks.adapter_rows()
         assert row.state == "fail" and "mail has stopped" in row.detail
+    finally:
+        release.touch()
+    proc.wait(timeout=15)
+
+
+def answer(env, event) -> str:
+    from types import SimpleNamespace
+
+    from moxi_comms import listener
+
+    return listener.answer(SimpleNamespace(event=event, harness="claude",
+                                           session_id="s-1", env=dict(env))) or ""
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_session_whose_adapter_is_gone_still_gets_layer_one_and_its_deltas(
+        rig, fake_claude, turns_plugins):
+    """A start (a resume, a `/clear`, a compaction) while the adapter is gone gets
+    layer one and the roster as any start does, the respawn line before them; a prompt
+    gets its joins and leaves after the line."""
+    from moxi import files
+    from moxi_comms import claimfile as cf
+    from moxi_comms.adapters import respawn, shim_roster
+
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b3"
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        served = answer(env, "start")
+        assert shim_roster.LABEL in served
+        kill_adapter(rig, adapter)
+        assert cf.adapter_gone(cf.read(sid))
+        line = (f"comms: this session's comms adapter had stopped. A new one is "
+                f"binding {NAME} again; its mail resumes once it has.")
+        with files.lock(respawn.lock_path(sid), timeout_s=0):
+            said = answer(env, "start")
+            assert said.startswith(line + "\n\n"), said
+            rest = said[len(line) + 2:]
+            assert shim_roster.LABEL in rest, "the roster snapshot"
+            assert rest.split(shim_roster.LABEL)[0] == served.split(shim_roster.LABEL)[0]
+
+            rig.shim(name="peer", global_=True)
+            said = answer(env, "prompt")
+            assert said.startswith(line + "\n"), said
+            assert said[len(line) + 1:] == (f"{shim_roster.DELTA_OPEN}peer [chosen] is "
+                                            f"now reachable{shim_roster.DELTA_CLOSE}")
     finally:
         release.touch()
     proc.wait(timeout=15)

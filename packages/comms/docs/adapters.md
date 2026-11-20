@@ -281,11 +281,12 @@ for the session. The new adapter takes a handle on the same `claude` (the claim 
 root, its pid checked against the start time recorded there), reads the claim file, binds
 the same name and serves the same claim socket, with the tool token the session's
 environment carries. It finds the session's endpoint as any adapter does, and ends with
-`claude`. The listener waits up to 1.5 seconds for its word and gives the session one
-line: `comms: this session's comms adapter had stopped. A new one has bound <name>
-again`. A daemon that is not running is no failure: the new adapter binds when it
-returns. Mail sent while the session was unbound waits at the daemon and is delivered
-once the name is bound again.
+`claude`. The listener waits for its word within its 1.5-second bound and gives the
+session one line, `comms: this session's comms adapter had stopped. A new one has bound
+<name> again`, before the start's layer one and roster or the prompt's roster changes,
+which the session gets as it would with its adapter alive. A daemon that is not running
+is no failure: the new adapter binds when it returns. Mail sent while the session was
+unbound waits at the daemon and is delivered once the name is bound again.
 
 When no new adapter can be started (the claim file's `claude` can't be found, or the
 system has no process handle to watch it with) or the new one's bind is refused (another

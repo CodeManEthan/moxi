@@ -5,8 +5,9 @@
 - A Claude Code session whose comms adapter dies while the session runs gets a new one
   with no relaunch: at its next start or prompt, comms' listener starts an adapter that
   watches the same `claude`, reads the claim file and binds the same name, and says so
-  in one line. When none can be started or its bind is refused, the line is `comms: mail
-  has stopped for <name>` with why. `moxi comms doctor` prints an `adapter` line and
+  in one line before the start's layer one and roster or the prompt's roster changes,
+  which the session still gets. When none can be started or its bind is refused, the
+  line is `comms: mail has stopped for <name>` with why. `moxi comms doctor` prints an `adapter` line and
   `moxi doctor` a fail row for each session whose adapter is gone. An adapter whose
   watch on `claude` fails keeps its claim file, so it is replaced too.
 - `[archive] record` and `[archive] identities` name an older comms' record and
