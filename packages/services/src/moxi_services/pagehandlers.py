@@ -524,7 +524,9 @@ def unit(call: Any) -> dict[str, Any]:
                               "enabled": None, "active": None, "wraps": False,
                               "refused": None}
     try:
-        kind = rows.check_ref(ref, backend, is_timer=asked == "timer")
+        # On systemd the suffix decides; a kind that disagrees gets the page's sentence
+        # below, never the command line's words about `--timer`.
+        kind = rows.check_ref(ref, backend, is_timer=asked == "timer" and backend != "systemd")
     except ServicesError as exc:
         answer["refused"] = _text(exc)
         return answer

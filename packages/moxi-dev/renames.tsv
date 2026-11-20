@@ -11833,6 +11833,7 @@ services	packages/services/tests/test_page.py	assert (found["found"], found["ena
 services	packages/services/tests/test_page.py	assert says in found["refused"] and found["found"] is None	keep	refused	refused
 services	packages/services/tests/test_page.py	assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]	keep	refused	refused
 services	packages/services/tests/test_page.py	assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)	keep	refused	refused
+services	packages/services/tests/test_page.py	assert unit_read(query)["refused"] == says	keep	refused	refused
 services	packages/services/tests/test_page_feed.py	"""A gather in place of the page's: each call recorded with its `health`, blocking	use	health	check_health
 services	packages/services/tests/test_page_feed.py	Gathers.__call__	name	health	check_health
 services	packages/services/tests/test_page_feed.py	assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,	use	"health"	"check_health"

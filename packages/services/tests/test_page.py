@@ -937,6 +937,14 @@ def test_unit_refuses_what_adopting_refuses(fake, query, says):
     assert [c for c in fake.calls if c[0] == "status"] == []
 
 
+@pytest.mark.parametrize(("query", "says"), [
+    ("ref=backup.timer&kind=daemon", "backup.timer is a timer, not a service"),
+    ("ref=web.service&kind=timer", "web.service is a service, not a timer"),
+])
+def test_unit_answers_a_kind_that_disagrees_with_the_suffix_in_the_pages_words(fake, query, says):
+    assert unit_read(query)["refused"] == says
+
+
 @pytest.mark.parametrize("supervisor", ["launchd", "schtasks"])
 def test_unit_asks_the_kind_where_the_supervisor_cannot_tell(fake, supervisor):
     from fake_units import Unit
