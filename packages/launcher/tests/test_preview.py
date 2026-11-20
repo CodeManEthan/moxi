@@ -299,7 +299,7 @@ def test_preview_composes_what_resolve_returns(monkeypatch):
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file",
         str(Layout("launcher").state_dir() / "runs" / "r1.prompt.md"),
-        "--model", "opus", "-n", "work-opus-Nov-08 12:45", "--permission-mode", "default"]
+        "--model", "opus", "-n", "20261108-1245-work", "--permission-mode", "default"]
     assert got.target == "terminal" and got.mode == "interactive"
     # It starts nothing and writes nothing of the launcher's.
     assert not (Layout("launcher").state_dir() / "runs").exists()
@@ -438,7 +438,7 @@ add_dir = ["{tmp_path}"]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file", prompt_file,
         "--model", "opus", "--effort", "high", "--add-dir", str(tmp_path),
-        "-n", f"{tmp_path.name}-opus-Nov-08 12:45", "--permission-mode", "acceptEdits"]
+        "-n", f"20261108-1245-{tmp_path.name}-lead", "--permission-mode", "acceptEdits"]
     assert "handoff dir:" in got.prompt_file.text      # the seat's name is its key
     assert got.values["mode"] == "interactive" and got.values["off_posture"] is False
     resolved = presets.resolve(request)

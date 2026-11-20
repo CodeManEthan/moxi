@@ -45,7 +45,7 @@ from typing import Any
 from . import catalog, live, store
 
 #: The shipped template, which `name.template` holds until it is set.
-DEFAULT = "<project>-<model>-<date:mmm-dd hh:mm>"
+DEFAULT = "<date>-<time>-<project>-<agent>"
 #: The settings that hold the templates: one for every launch, and a table of them by
 #: project key.
 TEMPLATE = "name.template"

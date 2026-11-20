@@ -13,20 +13,21 @@ const field = (name, extra = {}) => ({
   ...extra,
 });
 
-const SHIPPED = "<project>-<model>-<date:mmm-dd hh:mm>";
+// A template of a project's own, holding a model and a date with a format.
+const OWN = "<project>-<model>-<date:mmm-dd hh:mm>";
 const CONTEXT = { seat: "", project: "proj-a", cwd: "", model: "opus", identity: "", scope: "", agent: "", harness: "claude" };
 
 test("the add list offers every piece the template lacks on an install with comms and slots", () => {
   const fields = [field("identity"), field("scope"), field("slot")];
-  assert.deepEqual(addList(fields, SHIPPED), ["agent", "identity", "scope", "instance", "time"]);
+  assert.deepEqual(addList(fields, OWN), ["agent", "identity", "scope", "instance", "time"]);
   assert.deepEqual(addList(fields, ""), [...PIECES]);
 });
 
 test("the add list leaves out the comms name and scope without comms, and the number without slots", () => {
   const noComms = [field("identity", { shown: false }), field("scope", { shown: false }), field("slot")];
-  assert.deepEqual(addList(noComms, SHIPPED), ["agent", "instance", "time"]);
+  assert.deepEqual(addList(noComms, OWN), ["agent", "instance", "time"]);
   const noSlots = [field("identity"), field("scope"), field("slot", { needs_absent: true, shown: false })];
-  assert.deepEqual(addList(noSlots, SHIPPED), ["agent", "identity", "scope", "time"]);
+  assert.deepEqual(addList(noSlots, OWN), ["agent", "identity", "scope", "time"]);
   // A form that lacks the rows altogether is an install without either.
   assert.deepEqual(addList([], ""), ["project", "agent", "model", "date", "time"]);
 });
@@ -69,7 +70,7 @@ test("the answer is read with its refusal, its save, and why a failed read gave 
 });
 
 test("the note says whose template it is and what the name follows", () => {
-  const named = parseName({ state: "up", name: "proj-a-opus-Nov-08 12:45", template: SHIPPED, from: "project",
+  const named = parseName({ state: "up", name: "proj-a-opus-Nov-08 12:45", template: OWN, from: "project",
                             refused: null, save: null }, "");
   assert.equal(nameNote(named, "proj-a"),
                "From proj-a's template. It follows the project, the model and the clock; type over it to name this "
@@ -105,13 +106,13 @@ test("the editor opens on the answer's template, kept for the project the answer
 });
 
 test("a piece is taken out with the text before it, or the first with the text after it", () => {
-  assert.deepEqual(tokens(SHIPPED).map((token) => token.piece), ["project", "model", "date"]);
-  assert.equal(withoutPiece(SHIPPED, 1), "<project>-<date:mmm-dd hh:mm>");
-  assert.equal(withoutPiece(SHIPPED, 2), "<project>-<model>");
-  assert.equal(withoutPiece(SHIPPED, 0), "<model>-<date:mmm-dd hh:mm>");
+  assert.deepEqual(tokens(OWN).map((token) => token.piece), ["project", "model", "date"]);
+  assert.equal(withoutPiece(OWN, 1), "<project>-<date:mmm-dd hh:mm>");
+  assert.equal(withoutPiece(OWN, 2), "<project>-<model>");
+  assert.equal(withoutPiece(OWN, 0), "<model>-<date:mmm-dd hh:mm>");
   assert.equal(withoutPiece("<model> in <project>", 0), "<project>");
   assert.equal(withoutPiece("run-<agent>", 0), "run-");
-  assert.equal(withoutPiece(SHIPPED, 5), SHIPPED);
+  assert.equal(withoutPiece(OWN, 5), OWN);
 });
 
 test("a piece is added at the end after a dash, the date with the shipped format", () => {
@@ -121,10 +122,10 @@ test("a piece is added at the end after a dash, the date with the shipped format
 });
 
 test("the date's format is read and set on the first date piece, and shown as the name would show it", () => {
-  assert.equal(dateFormat(SHIPPED), "mmm-dd hh:mm");
+  assert.equal(dateFormat(OWN), "mmm-dd hh:mm");
   assert.equal(dateFormat("<model>-<date>"), "");
   assert.equal(dateFormat("<model>-<time:hh>"), null);
-  assert.equal(withDate(SHIPPED, "yyyy-mm-dd"), "<project>-<model>-<date:yyyy-mm-dd>");
+  assert.equal(withDate(OWN, "yyyy-mm-dd"), "<project>-<model>-<date:yyyy-mm-dd>");
   assert.equal(withDate("<date:yy>", ""), "<date>");
   const at = new Date(2026, 10, 8, 9, 5, 7);
   assert.equal(dateSample("mmm-dd hh:mm", at), "Nov-08 09:05");

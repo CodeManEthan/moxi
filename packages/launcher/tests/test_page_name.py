@@ -60,10 +60,11 @@ def test_the_answer_declares_its_keys():
 
 def test_the_name_is_the_shipped_templates_for_the_form_as_it_stands():
     assert name(cwd="/work/proj-b", model="opus") == up(
-        name="proj-b-opus-Nov-08 12:45", template=names.DEFAULT, **{"from": "global"})
-    # A project stands before the folder, and the default model leaves its piece empty.
-    assert name(project="proj-a", cwd="/work/elsewhere")["name"] == "proj-a-Nov-08 12:45"
-    assert name()["name"] == "Nov-08 12:45"
+        name="20261108-1245-proj-b", template=names.DEFAULT, **{"from": "global"})
+    # A project stands before the folder, and a launch with no agent leaves its piece empty.
+    assert name(project="proj-a", cwd="/work/elsewhere")["name"] == "20261108-1245-proj-a"
+    assert name(project="proj-a", agent="planner")["name"] == "20261108-1245-proj-a-planner"
+    assert name()["name"] == "20261108-1245"
 
 
 def test_a_project_with_a_template_of_its_own_is_named_by_it():
@@ -110,7 +111,7 @@ def test_the_home_dir_is_named_as_a_launch_there_is_named(tmp_path, monkeypatch)
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     said = name(cwd="~")
-    assert said["name"] == previewed_name("~") == "shell-Nov-08 12:45", said
+    assert said["name"] == previewed_name("~") == "20261108-1245-shell", said
 
 
 def test_a_dir_inside_a_project_is_named_by_the_projects_key_and_template(proj_a):
@@ -224,7 +225,7 @@ def test_a_template_the_save_check_refuses_has_no_name_and_nothing_to_save(
 
 def test_a_refused_template_in_the_settings_is_answered_by_the_shipped_one():
     settings_file('[name]\ntemplate = "<n>"\n')
-    assert name(project="proj-a") == up(name="proj-a-Nov-08 12:45", template=names.DEFAULT,
+    assert name(project="proj-a") == up(name="20261108-1245-proj-a", template=names.DEFAULT,
                                         **{"from": "global"})
 
 
@@ -250,7 +251,7 @@ def test_a_query_outside_the_declared_ones_is_refused():
     assert get("/api/name", "harness=opencode")[0] == 400
     assert get("/api/name", "branch=main")[0] == 400
     assert get("/api/name", "harness=codex&model=gpt&cwd=/work/proj-b")[1]["name"] == \
-        "proj-b-gpt-Nov-08 12:45"
+        "20261108-1245-proj-b"
 
 
 def test_a_failed_read_says_only_the_class(monkeypatch):

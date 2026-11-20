@@ -145,9 +145,11 @@ environment variables the launch would set, starting nothing.
 ### The session's name
 
 Every launch has a name. `--name TEXT` (or `name` in a preset) sets it; a launch that
-sets none is named from a template, `<project>-<model>-<date:mmm-dd hh:mm>` as shipped,
-which gives `docs-opus-Nov-08 12:45`. The name is recorded with the launch, a taken
-slot in the browser is labelled with it, and Claude Code shows it as the session's display name
+sets none is named from a template, `<date>-<time>-<project>-<agent>` as shipped,
+which gives `20261108-1245-docs-planner` for the seat `planner` in the project `docs`, and
+`20261108-1245-docs` for a launch with no seat or agent. The name is recorded with the
+launch, a taken slot in the browser is labelled with it, and Claude Code shows it as the
+session's display name
 unless `--native-name` (or `native_name` in `[defaults]` or a preset) sets another.
 Codex has no display name, so there it is the launcher's label only. A relaunch or a
 resume keeps the name its launch had.
@@ -718,7 +720,7 @@ Set with `moxi config set launcher <key> <value>`:
   order, the last repeating; the agents at work are named after each.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
-- `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
+- `name.template` (`<date>-<time>-<project>-<agent>`) and `name.templates` (empty):
   the template a launch's session name is made from, and a project's own by project key
   (see "The session's name").
 

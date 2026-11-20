@@ -89,9 +89,14 @@ def test_a_scope_is_rendered_only_beside_an_identity():
                         now=at(8, 9, 5)) == "proj-a"
 
 
-def test_the_shipped_template_leaves_out_a_model_on_the_default():
+def test_the_shipped_template_is_date_time_project_agent():
+    # The order and pieces Core's launcher named a session by when nothing was set.
+    assert names.DEFAULT == "<date>-<time>-<project>-<agent>"
+    assert names.render(names.DEFAULT, Pieces(project="proj-a", agent="planner", model="opus"),
+                        now=at(8, 9, 5)) == "20261108-0905-proj-a-planner"
+    # A launch with no agent leaves its piece out, dash and all.
     assert names.render(names.DEFAULT, Pieces(project="proj-a"), now=at(8, 9, 5)) == \
-        "proj-a-Nov-08 09:05"
+        "20261108-0905-proj-a"
 
 
 @pytest.mark.parametrize("text, spelled", [
@@ -276,16 +281,16 @@ def shown_as(argv) -> str | None:
 def test_a_launch_that_sets_no_name_takes_its_templates(work, harness, no_exec):
     result = api.launch(request(work, model="opus"))
     got = row().values
-    assert got["name"] == "work-opus-Nov-08 12:45"
+    assert got["name"] == "20261108-1245-work"
     # Claude Code shows it, and the row it was not typed into stays unset.
-    assert shown_as(result.argv) == "work-opus-Nov-08 12:45" and got["native_name"] == ""
+    assert shown_as(result.argv) == "20261108-1245-work" and got["native_name"] == ""
     assert result.warnings == ()
 
 
 def test_a_preview_shows_the_name_the_launch_takes_and_writes_nothing(work, harness):
     shown = api.preview(request(work, model="opus"))
-    assert shown.values["name"] == "work-opus-Nov-08 12:45"
-    assert shown_as(shown.argv) == "work-opus-Nov-08 12:45"
+    assert shown.values["name"] == "20261108-1245-work"
+    assert shown_as(shown.argv) == "20261108-1245-work"
     assert not store.path().exists()
 
 
@@ -317,7 +322,7 @@ def test_a_native_name_a_layer_sets_is_the_display_name(work, harness, no_exec, 
     result = api.launch(request(work, seat=seat, model="opus", **typed))
     got = row().values
     assert shown_as(result.argv) == "lead" and got["native_name"] == "lead"
-    assert got["name"] == "work-opus-Nov-08 12:45"
+    assert got["name"] == "20261108-1245-work" + ("-planner" if seat else "")
 
 
 def test_a_native_name_wins_over_a_typed_name(work, harness, no_exec):
@@ -327,9 +332,9 @@ def test_a_native_name_wins_over_a_typed_name(work, harness, no_exec):
 
 def test_a_codex_launch_records_its_name_and_passes_none(work, harness, no_exec):
     result = api.launch(request(work, sid=None, harness="codex", model="gpt"))
-    assert row().values["name"] == "work-gpt-Nov-08 12:45"
+    assert row().values["name"] == "20261108-1245-work"
     assert "native_name" not in row().values
-    assert not any("work-gpt" in word for word in result.argv) and "-n" not in result.argv
+    assert not any("20261108-1245-work" in word for word in result.argv) and "-n" not in result.argv
 
 
 def test_a_replay_keeps_its_rows_name(work, harness, no_exec, monkeypatch):
@@ -337,10 +342,10 @@ def test_a_replay_keeps_its_rows_name(work, harness, no_exec, monkeypatch):
     monkeypatch.setattr(names, "now", lambda: at(9, 7, 30))
     replayed = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
                                         actor="alice"))
-    assert row("r2").values["name"] == "work-opus-Nov-08 12:45"
-    assert shown_as(replayed.argv) == "work-opus-Nov-08 12:45"
+    assert row("r2").values["name"] == "20261108-1245-work"
+    assert shown_as(replayed.argv) == "20261108-1245-work"
     fresh = api.launch(request(work, rid="r3", sid=SID2, model="opus"))
-    assert shown_as(fresh.argv) == row("r3").values["name"] == "work-opus-Nov-09 07:30"
+    assert shown_as(fresh.argv) == row("r3").values["name"] == "20261109-0730-work"
 
 
 def test_a_refused_template_in_the_settings_names_the_launch_by_the_shipped_one(
@@ -348,7 +353,7 @@ def test_a_refused_template_in_the_settings_names_the_launch_by_the_shipped_one(
     settings_file('[name]\ntemplate = "<project>-<n>"\n')
     seen = []
     result = api.launch(request(work, model="opus"), warn=seen.append)
-    assert row().values["name"] == "work-opus-Nov-08 12:45"
+    assert row().values["name"] == "20261108-1245-work"
     [line] = result.warnings
     assert "launcher name.template is not used" in line and seen == [line]
 

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `name.template` ships as `<date>-<time>-<project>-<agent>`, so a launch that sets no
+  name is called, say, `20261108-1245-docs-planner`. It shipped as
+  `<project>-<model>-<date:mmm-dd hh:mm>`; a template set in the settings is kept.
 - Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
   project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
   folder or project picked again sends `scratch` off, so a launch from Home never names
