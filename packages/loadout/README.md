@@ -187,6 +187,16 @@ set heavier.
   sessions load: its own section and your items, with a menu of every project and a link
   to the project's page.
 
+With projects' page in the shell too, a project opened there has a `Loadout` row naming
+the items its own section lists, in the manifest's order (`skill release-checklist ·
+agent api-lead`; past eight, the first seven and how many more), and a `Loadout` link to
+`/m/loadout/project/<key>`. Its section is the one that address shows: the section named
+by the project's key, else the one whose path is the project's folder itself. A project
+loadout lists nothing for has no row. The row comes from loadout's `project-facts`
+component, which reads only `/api/list`, from the manifest alone: when the Projects page
+places it, every minute while that page is shown, and once when it is shown again. While
+the manifest can't be read, the row is left out.
+
 Each change runs the same `moxi loadout` command you would run in a terminal, in a
 process of its own, and a line under the act then says the command and how it ended,
 with Show for its lines and rows, and, open, each copy it kept with the command that
