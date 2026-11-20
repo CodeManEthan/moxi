@@ -130,8 +130,8 @@ def respawn_gone_adapter(env, *, wait_s: float = QUERY_TIMEOUT) -> str | None:
     stamped), and say how that went in one line; None while the adapter serves.
 
     The new adapter (`adapters.respawn`) binds the same name from the claim file. Its
-    word is waited for at most `wait_s`, inside turns' bound; one that comes later still
-    binds. A respawn that can't run or whose bind fails leaves the claim file, so the
+    start and its word are waited for at most `wait_s` together, inside turns' bound;
+    one that comes later still binds. A respawn that can't run or whose bind fails leaves the claim file, so the
     next start or prompt tries again and says the same."""
     from . import claimfile
     from .adapters import respawn

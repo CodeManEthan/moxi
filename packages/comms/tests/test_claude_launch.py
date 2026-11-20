@@ -956,3 +956,38 @@ def test_a_new_adapter_starts_isolated_in_the_sessions_runtime_dir(
     finally:
         release.touch()
     proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_respawn_waits_no_longer_than_its_bound_for_a_slow_starter(
+        monkeypatch, tmp_path):
+    """The starter's leaving and the new adapter's word share one wait, `wait_s`, which
+    the listener keeps inside turns' bound: a starter that is slow to leave costs the
+    word, not the bound."""
+    from types import SimpleNamespace
+
+    from moxi_comms.adapters import respawn
+
+    started = []
+    real = subprocess.Popen
+
+    def slow(argv, **kwargs):
+        started.append(real([sys.executable, "-c", "import time; time.sleep(3)"],
+                            **kwargs))
+        return started[-1]
+
+    monkeypatch.setattr(respawn, "claude_root",
+                        lambda record: SimpleNamespace(pid=os.getpid(), start="0"))
+    monkeypatch.setattr(respawn, "session_dir", lambda key, env: tmp_path)
+    monkeypatch.setattr(respawn.subprocess, "Popen", slow)
+    try:
+        began = time.monotonic()
+        said = respawn.respawn_adapter(dict(os.environ), "k",
+                                       {"kind": respawn.CLAUDE_KIND}, wait_s=0.5)
+        took = time.monotonic() - began
+    finally:
+        for child in started:
+            child.kill()
+            child.wait()
+    assert said is None, "no word in time"
+    assert took < 1.0, took

@@ -19,8 +19,8 @@ comms' listener calls `respawn_adapter` at the session's start and prompt
 in a session of its own, in the session's runtime directory: isolated, so neither the
 endpoint's working directory nor a PYTHONPATH or PYTHONHOME in the session's
 environment can load code into it. That process forks the adapter and leaves at once,
-so the adapter is nobody's child, and the listener waits at most `wait_s` for its word
-(`adapters.word`). The new adapter holds a lock beside the claim file,
+so the adapter is nobody's child. The listener waits at most `wait_s` for that process
+to leave and the adapter's word (`adapters.word`) together. The new adapter holds a lock beside the claim file,
 `respawn-<key>.lock`, for its whole life (`moxi.files.lock`): a second one, started by a
 second start or prompt while the first binds, finds it held, says `word.STARTING` and
 ends before it touches the claim file or its socket.
@@ -33,6 +33,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 log = logging.getLogger("comms.claude.respawn")
@@ -41,8 +42,6 @@ log = logging.getLogger("comms.claude.respawn")
 CLAUDE_KIND = "claude-shim"
 #: The lock a respawned adapter holds while it lives.
 LOCK_PREFIX = "respawn-"
-#: How long the starting process may take to fork the adapter and leave, in seconds.
-FORK_WAIT_S = 5.0
 
 
 class CannotRespawn(Exception):
@@ -71,11 +70,12 @@ def claude_root(record: dict):
 def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float):
     """Start a new adapter for the session keyed `key`, whose claim file was read as
     the record given, with the session's environment `env`, and wait at most `wait_s`
-    seconds for its word.
+    seconds, for the starting process to leave and the adapter's word together.
 
     Answers the word, `(code, reason)`, `word.STARTING` among them when a new adapter
     already serves the session; None when it didn't come in time (the adapter goes on
-    binding). Raises `CannotRespawn` when none can be started."""
+    binding, or the starting process goes on to start it). Raises `CannotRespawn` when
+    none can be started."""
     if record.get("kind") != CLAUDE_KIND:
         raise CannotRespawn("its adapter was not one `moxi comms claude` started")
     root = claude_root(record)
@@ -85,6 +85,7 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float):
         raise CannotRespawn("this system has no process handle to watch claude with")
     if key in ("", ".", "..") or "/" in key:
         raise CannotRespawn(f"its claim file's key {key!r} names no session directory")
+    deadline = time.monotonic() + wait_s
     r, w = os.pipe()
     try:
         argv = [sys.executable, "-I", "-m", __name__, key, str(root.pid), root.start,
@@ -99,12 +100,12 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float):
         os.close(w)
         w = None
         try:
-            starter.wait(FORK_WAIT_S)
+            starter.wait(max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             return None
         from .word import await_word
 
-        return await_word(r, wait_s)
+        return await_word(r, max(0.0, deadline - time.monotonic()))
     finally:
         if w is not None:
             os.close(w)
@@ -174,9 +175,8 @@ def session_of(key: str, env: dict):
     return session
 
 
-__all__ = ["CLAUDE_KIND", "CannotRespawn", "FORK_WAIT_S", "LOCK_PREFIX",
-           "claude_root", "lock_path", "main", "respawn_adapter", "session_dir",
-           "session_of"]
+__all__ = ["CLAUDE_KIND", "CannotRespawn", "LOCK_PREFIX", "claude_root", "lock_path",
+           "main", "respawn_adapter", "session_dir", "session_of"]
 
 
 if __name__ == "__main__":                                 # pragma: no cover
