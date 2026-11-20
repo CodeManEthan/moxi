@@ -229,6 +229,14 @@ tracked `.gitattributes`.
 committed text over your file, and the original is lost. Another machine that clones the
 notes repo gets the redacted text.
 
+**A mark keeps nothing in the committed copy.** The filter redacts a secret beside a
+`gitleaks:allow` mark, or on a line one of a rule's line allowlists names (a secret
+mount, a JavaScript import), though the gates let such a line through. It also finds a
+token an invisible character (a zero-width space, a soft hyphen) splits, as the gates do,
+and a note that is nothing but one secret, split or not, is left out. The placeholder is
+what git writes back over your note. To keep a value whole, give it a line in one of the
+allowlist files under "What is judged".
+
 **A clone without the filter commits unredacted text.** git ignores an attribute whose
 driver isn't configured, so a second clone of the notes repo, set up by hand, commits
 secrets as they are. notes guards only the clone at its configured root: the doctor fails

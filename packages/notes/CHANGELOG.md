@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Under `action = redact`, the committed copy redacts a secret beside a `gitleaks:allow`
+  mark or on a line a rule's line allowlist names, which the gates still pass, and a
+  token an invisible character splits, which the gates now refuse too; only an allowlist
+  line keeps a value whole. A note that is one split secret is left out. notes' code is
+  unchanged: it follows secrets' `redact` and `scan`.
 - `moxi notes home-paths [--apply] [--json] [--limit N]`: across the notes folder's files,
   each path under your home folder becomes `~` and each Claude Code session path becomes
   its session id, and links into the notes folder become relative. A dry run unless
