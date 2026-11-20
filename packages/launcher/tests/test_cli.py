@@ -57,6 +57,14 @@ def no_projects(monkeypatch):
 
 
 @pytest.fixture
+def no_notes(monkeypatch):
+    """notes not installed, whatever this environment holds: handoffs go in the
+    launcher's own folder."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
     monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
@@ -698,7 +706,7 @@ def test_handoff_dir_of_a_session_with_no_key_is_refused(capsys):
     assert code == codes.REFUSED and out == "" and "[no-key]" in err
 
 
-def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys):
+def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys, no_notes):
     monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
     code, out, _ = run(["handoff", "dir"], capsys)
     assert code == codes.OK and out == f"{handoffs.own_handoffs_dir(create=False)}\n"
@@ -706,6 +714,20 @@ def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys):
     shown = json.loads(run(["handoff", "dir", "--json"], capsys)[1])
     assert shown == {"key": "planner", "folder": str(handoffs.own_handoffs_dir(create=False)),
                      "request_id": None}
+
+
+def test_handoff_dir_with_notes_and_no_notes_dir_is_refused(monkeypatch, capsys):
+    monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
+    real, real_load = modules.available, modules.load
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    code, out, err = run(["handoff", "dir"], capsys)
+    assert code == codes.REFUSED and out == ""
+    assert "so it has no handoffs/ to read from [no-notes-dir]" in err
+    assert not handoffs.own_handoffs_dir(create=False).exists()
 
 
 def test_handoff_dir_asks_handoffs_for_the_current_session(monkeypatch, capsys):
@@ -722,7 +744,7 @@ def handoff_files(*names: str) -> Path:
     return handoffs_dir
 
 
-def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys):
+def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys, no_notes):
     handoffs_dir = handoff_files("2026-10-28-lead.md", "2026-10-29-lead.md",
                            "2026-10-29-lead-2.md", "2026-10-29-other.md")
     conn = store.connect()
@@ -738,14 +760,14 @@ def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys):
     assert [h["waiting"] for h in shown["handoffs"]] == [True, False, False]
 
 
-def test_handoffs_with_no_launch_log_count_every_file_waiting(capsys):
+def test_handoffs_with_no_launch_log_count_every_file_waiting(capsys, no_notes):
     handoff_files("2026-10-29-lead.md")
     out = run(["handoffs", "--key", "lead"], capsys)[1]
     assert out.split()[:2] == ["2026-10-29", "waiting"]
     assert not store.path().exists()
 
 
-def test_handoffs_of_this_session_by_its_comms_name(monkeypatch, capsys):
+def test_handoffs_of_this_session_by_its_comms_name(monkeypatch, capsys, no_notes):
     handoff_files("2026-10-29-planner.md")
     monkeypatch.setenv("MOXI_COMMS_NAME", "planner")
     code, out, _ = run(["handoffs"], capsys)

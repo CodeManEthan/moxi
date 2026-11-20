@@ -553,6 +553,10 @@ def test_a_launch_with_a_handoff_key_makes_its_handoff_dir_after_the_row(
         work, harness, monkeypatch):
     from moxi_launcher import handoffs
 
+    # Without notes, so the folder is the launcher's own.
+    available = handoffs.modules.available
+    monkeypatch.setattr(handoffs.modules, "available",
+                        lambda name: name != "notes" and available(name))
     handoff_dir = handoffs.own_handoffs_dir(create=False)
     seen = []
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(

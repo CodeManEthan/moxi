@@ -22,6 +22,7 @@ with what it adds: its posture, a resume, the relaunch's header and stamps.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterable, Mapping
@@ -128,10 +129,10 @@ def context(values: Mapping[str, object], *, request_id: str,
         preset_name=preset_name, project_key=project_key))
     handoff_dir = None
     if key and values.get("cwd"):
-        handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
-                                          notes_dir=values.get("notes_dir") or None,
-                                          env=env, create=create,
-                                          create_own=False))
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
+                                                   notes_dir=values.get("notes_dir") or None,
+                                                   env=env, create=create, create_own=False))
 
     role_found = None
     if values.get("agent"):

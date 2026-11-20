@@ -509,6 +509,21 @@ def test_a_seat_is_pointed_to_its_newest_waiting_handoff_once(conn, endpoint):
     assert listen_handoff.answer(start("claude", CLEARED_ID, "r2")) is None
 
 
+def test_with_notes_and_no_notes_dir_a_seat_is_pointed_to_nothing(conn, endpoint, monkeypatch):
+    # Core read a handoff only from the launch's notes directory; a handoff in the
+    # launcher's own folder is not offered while notes is installed.
+    launch_claude(conn)
+    handoff("lead")
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    real_load = modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes")
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
+    assert store.picked(conn, "lead") == []
+
+
 @pytest.mark.parametrize("source", ["clear", "compact"])
 def test_the_lines_answer_not_at_a_clear_or_compaction(conn, endpoint, source):
     launch_claude(conn)

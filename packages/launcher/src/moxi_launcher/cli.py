@@ -106,7 +106,7 @@ def _errors() -> tuple[type[BaseException], ...]:
     from . import catalog, first, handoffs
 
     return (catalog.Refused, ConfigError, core_store.StoreError, handoffs.NoKey,
-            first.HandoffUnreadable, NoPreset)
+            handoffs.NoNotesDir, first.HandoffUnreadable, NoPreset)
 
 
 def refusal_lines(error: BaseException) -> tuple[str, str | None]:

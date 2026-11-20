@@ -258,7 +258,12 @@ update. With no launch log it gives none; a log held past `timeout_s` (1 second)
 
 A handoff is a short file a session writes for the next session of its seat. Its key is
 the session's comms name without its scope, else the seat's name, else the project key; it
-is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With turns,
+is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With notes
+installed, that is notes' `handoffs/` folder for the session's directory (or its
+`notes_dir`), and a session notes gives no notes directory has no handoff folder: it is
+pointed to no handoff, its start names no folder, `moxi launcher handoff dir` refuses
+(`no-notes-dir`), and it can't relaunch itself. Without notes, the folder is the
+launcher's own. With turns,
 a seat's next start or resume is pointed to its newest waiting handoff, then shown one
 line for each other seat's waiting handoff in the same folder (newest first, at most 5, then
 how many more). A session with no key gets only those lines. A handoff counts as used only
@@ -295,7 +300,8 @@ Claude Code launch in a slot; comms is needed only for a director's relaunch.
 
 An agent runs this in its own turn, with a handoff it has just written. The launcher
 checks the handoff (a readable file of at most 64 KiB, written since this session
-started) and that no subagent is running, starts a job outside the session and prints
+started, and with notes installed in the launch's notes `handoffs/` folder, refused when
+the launch has no notes directory) and that no subagent is running, starts a job outside the session and prints
 what it waits for; the agent then ends its turn. Once the session is quiet the job exits
 it, answers the exit dialog, and starts the new session in the same pane with the same
 launch values, none of the old session's environment, and the handoff as its first turn.
@@ -604,7 +610,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
-| notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
+| notes | the `notes_dir` row, and notes' handoff folder; a launch notes gives no notes directory has none | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |

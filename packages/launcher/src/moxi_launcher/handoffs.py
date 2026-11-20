@@ -12,9 +12,11 @@ folder belongs to is not a key: working in a project's folder doesn't make a ses
 project's seat.
 
 **The folder.** With notes installed, notes' `handoffs/` folder for the session's folder,
-the launch's `notes_dir` passed as notes' override. Else the launcher's own `handoffs`
-folder in its data directory. A key named from outside its sessions (`handoffs --key`) is
-read in the folder of its newest launch, else in the caller's directory's folder.
+the launch's `notes_dir` passed as notes' override; where notes gives that folder no notes
+directory (or can't be read), the session has no handoff folder (`NoNotesDir`). Only
+without notes is it the launcher's own `handoffs` folder in its data directory. A key named
+from outside its sessions (`handoffs --key`) is read in the folder of its newest launch,
+else in the caller's directory's folder.
 
 **The file name.** `<YYYY-MM-DD>-<key>.md`, then `-2`, `-3` before `.md` when the day's name
 is taken. Files sort by their date, then that count. Read without a key (`others`), a name's
@@ -78,6 +80,23 @@ class NoKey(Exception):
     exit_code = exits.REFUSED
 
 
+class NoNotesDir(Exception):
+    """Notes is installed and gives the session's folder no notes directory, so the
+    session has no handoff folder: the launcher's own is used only without notes."""
+
+    code = "no-notes-dir"
+    exit_code = exits.REFUSED
+
+    def __init__(self, cwd: str | Path, reason: str | None = None):
+        self.cwd = str(cwd)
+        self.problem = (f"this launch has no notes directory (no notes_dir and none for "
+                        f"{cwd}), so it has no handoffs/ to read from")
+        if reason:
+            self.problem += f": {reason}"
+        self.hint = "launch it with notes_dir set, or in a folder notes keeps notes for"
+        super().__init__(f"{self.problem}; {self.hint}")
+
+
 @dataclass(frozen=True)
 class Handoff:
     """One handoff file of a key."""
@@ -126,7 +145,7 @@ def key_of_env(env: Mapping[str, str]) -> str | None:
 
 
 def own_handoffs_dir(env: Mapping[str, str] | None = None, *, create: bool = True) -> Path:
-    """The launcher's own handoff folder, used when notes is absent."""
+    """The launcher's own handoff folder, used when notes is not installed."""
     handoffs_dir = Layout(MODULE).data_dir(env) / HANDOFFS_DIR
     if create:
         files.private_dir(handoffs_dir)
@@ -139,19 +158,19 @@ def handoff_dir(cwd: str | Path, *, notes_dir: str | None = None,
     """The handoff folder for a session working in `cwd`.
 
     With notes installed, notes' `handoffs/` folder for `cwd`, `notes_dir` (a launch's
-    `notes_dir` value) passed as its override. Else, or when notes has no folder for `cwd`,
-    the launcher's own. `create` is passed to notes, and makes the launcher's own folder
-    unless `create_own` says otherwise.
+    `notes_dir` value) passed as its override; raises `NoNotesDir` when notes gives none
+    or can't be read. Without notes, the launcher's own. `create` is passed to notes, and
+    makes the launcher's own folder unless `create_own` says otherwise.
     """
-    notes_handoff_dir = _notes_handoff_dir(cwd, notes_dir, create)
-    if notes_handoff_dir is not None:
-        return Path(notes_handoff_dir)
+    if modules.available("notes"):
+        return _notes_handoff_dir(cwd, notes_dir, create)
     return own_handoffs_dir(env, create=create if create_own is None else create_own)
 
 
 def handoff_dir_of_row(row, *, env: Mapping[str, str] | None = None,
                   create: bool = True) -> Path:
-    """A launch's handoff folder, for its cwd and its `notes_dir` value."""
+    """A launch's handoff folder, for its cwd and its `notes_dir` value. Raises
+    `NoNotesDir` as `handoff_dir` does."""
     notes_dir = row.values.get("notes_dir")
     return handoff_dir(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
 
@@ -169,7 +188,8 @@ def handoff_dir_of_key(key: str, *, cwd: str | Path | None = None,
                   env: Mapping[str, str] | None = None, create: bool = False) -> KeyFolder:
     """`key`'s own handoff folder: the one of its newest launch (`handoff_dir_of_row`), so a
     seat that works in another project is read where it files. A key with no launch, or
-    no launch log at all, gets the folder of `cwd` (this directory by default)."""
+    no launch log at all, gets the folder of `cwd` (this directory by default). Raises
+    `NoNotesDir` as `handoff_dir` does."""
     launch = newest_launch(key, env=env)
     if launch is not None:
         return KeyFolder(handoff_dir_of_row(launch, env=env, create=create), launch)
@@ -208,21 +228,22 @@ def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRo
         conn.close()
 
 
-def _notes_handoff_dir(cwd, notes_dir, create):
-    if not modules.available("notes"):
-        return None
+def _notes_handoff_dir(cwd, notes_dir, create) -> Path:
     found = modules.load("notes", interface=1)
     handoffs_dir = getattr(found.api, "handoffs_dir", None) if found.api else None
     if found.state != modules.PRESENT or handoffs_dir is None:
-        log.warning("notes is installed but its handoff folder can't be read (%s); the "
-                    "launcher's own folder is used", found.reason or "no handoffs_dir")
-        return None
+        reason = found.reason or "notes has no handoffs_dir"
+        log.warning("notes is installed but its handoff folder can't be read (%s)", reason)
+        raise NoNotesDir(cwd, f"notes can't be read ({reason})")
     try:
-        return handoffs_dir(str(cwd), create=create, override=notes_dir)
-    except Exception as exc:  # noqa: BLE001 - a broken link costs notes' folder only
-        log.warning("notes' handoff folder for %s failed: %s: %s; the launcher's own "
-                    "folder is used", cwd, type(exc).__name__, exc)
-        return None
+        got = handoffs_dir(str(cwd), create=create, override=notes_dir)
+    except Exception as exc:  # noqa: BLE001 - a broken link costs the folder, not the caller
+        log.warning("notes' handoff folder for %s failed: %s: %s", cwd,
+                    type(exc).__name__, exc)
+        raise NoNotesDir(cwd, f"{type(exc).__name__}: {exc}") from None
+    if got is None:
+        raise NoNotesDir(cwd)
+    return Path(got)
 
 
 # -- the files ---------------------------------------------------------------------------
@@ -362,7 +383,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
 
     A session the launcher started is read through its launch stamp; any other through
     its comms name, in `cwd` (this directory by default). Raises `NoKey` when the session
-    has no key.
+    has no key, and `NoNotesDir` as `handoff_dir` does.
     """
     from . import listeners, store
 
@@ -390,6 +411,6 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
 
 
 __all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff", "KeyFolder",
-           "NoKey", "check_key", "current", "file_name", "handoff_dir", "handoff_dir_of_key",
-           "handoff_dir_of_row", "handoffs", "key_of_env", "key_of_row", "keyed", "newest_launch",
+           "NoKey", "NoNotesDir", "check_key", "current", "file_name", "handoff_dir",
+           "handoff_dir_of_key", "handoff_dir_of_row", "handoffs", "key_of_env", "key_of_row", "keyed", "newest_launch",
            "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked", "waiting"]

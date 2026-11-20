@@ -116,6 +116,14 @@ def test_a_file_the_launch_names_that_cant_be_read_is_refused(tmp_path):
                         request_id="r1", modules=frozenset())
 
 
+@pytest.fixture(autouse=True)
+def no_notes(monkeypatch):
+    """notes not installed, whatever this environment holds, so a seat's handoff folder is
+    the launcher's own; the test that means notes installed says so itself."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
 def test_the_context_names_the_handoff_dir_only_with_a_key(tmp_path):
     values = {"harness": "claude", "cwd": str(tmp_path)}
     none = compose.context(values, request_id="r1", modules=frozenset())
@@ -127,6 +135,19 @@ def test_the_context_names_the_handoff_dir_only_with_a_key(tmp_path):
     ignored = compose.context({**values, "identity": "planner"}, request_id="r1",
                               modules=frozenset())
     assert ignored.handoff_dir is None
+
+
+def test_with_notes_and_no_notes_dir_the_context_names_no_handoff_dir(tmp_path, monkeypatch):
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    real, real_load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    seat = compose.context({"harness": "claude", "cwd": str(tmp_path)}, request_id="r1",
+                           modules=frozenset(), preset_kind="seat", preset_name="lead")
+    assert seat.handoff_dir is None
+    assert not handoffs.own_handoffs_dir(create=False).exists()
 
 
 def test_the_context_never_makes_the_launchers_own_handoff_dir(tmp_path):

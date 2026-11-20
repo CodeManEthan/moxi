@@ -97,6 +97,7 @@ and the result says that failure, with its exit code.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import os
@@ -696,8 +697,9 @@ def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
         files.private_dir(common.scratch_root())
         files.private_dir(where)
     if handoff_key and values.get("cwd"):
-        handoffs.handoff_dir(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
-                        env=env)
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoffs.handoff_dir(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
+                                 env=env)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
     if composition.settings_file is not None:

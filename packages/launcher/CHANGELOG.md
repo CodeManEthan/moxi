@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- With notes installed, a launch notes gives no notes directory (no `notes_dir` and none
+  for its folder) has no handoff folder: a self relaunch is refused, saying the launch has
+  no `handoffs/` to read from, `moxi launcher handoff dir` and `handoffs` refuse
+  (`no-notes-dir`), and its start names no folder and points to no handoff. The launcher's
+  own folder, which these fell back to, is used only without notes. A notes that can't be
+  read counts as giving no folder.
 - `name.template` ships as `<date>-<time>-<project>-<agent>`, so a launch that sets no
   name is called, say, `20261108-1245-docs-planner`. It shipped as
   `<project>-<model>-<date:mmm-dd hh:mm>`; a template set in the settings is kept.

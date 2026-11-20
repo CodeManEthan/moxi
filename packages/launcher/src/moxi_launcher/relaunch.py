@@ -151,8 +151,8 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                   session_id: str | None, *, cwd: str | None = None) -> Path:
     """The handoff a self relaunch carries, checked: a regular, readable, non-empty file of
     at most `HANDOFF_CAP` bytes, modified after the session's current id was first seen;
-    with notes installed, in notes' handoff folder for the launch. Returns its absolute
-    path."""
+    with notes installed, in notes' handoff folder for the launch, and refused when notes
+    gives the launch no notes directory. Returns its absolute path."""
     path = Path(handoff).expanduser()
     if not path.is_absolute():
         path = Path(cwd or os.getcwd()) / path
@@ -182,7 +182,10 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                                  f"began ({seen}): it is stale",
                       "write this session's handoff, then arm the relaunch again")
     if modules.available("notes"):
-        handoff_dir = Path(handoffs.handoff_dir_of_row(row, create=False)).resolve()
+        try:
+            handoff_dir = Path(handoffs.handoff_dir_of_row(row, create=False)).resolve()
+        except handoffs.NoNotesDir as exc:
+            raise Refused("handoff", exc.problem, exc.hint) from None
         if path.resolve().parent != handoff_dir:
             raise Refused("handoff", f"the handoff {path} is not in this launch's handoff "
                                      f"folder, {handoff_dir}",
