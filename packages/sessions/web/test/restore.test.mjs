@@ -386,6 +386,23 @@ test("a target reached at the 40th read names no cap", async () => {
   assert.deepEqual(written, []);
 });
 
+test("at the cap, an opened row the 40th read shows has its read started before the target is let go", async () => {
+  const fake = server({ earlier: 100000 });
+  const started = new Set();
+  let landing = null;
+  const list = new ListReader({ read: fake.read, zone: UTC, changed: (change) => {
+    // As the view does: start the reads of the opened rows a page showed, then, at the
+    // first stop, gather the reads the scroll's landing waits for.
+    if (change === "more") for (const one of unreadOpened(list.state, started)) started.add(`${one.harness}/${one.session}`);
+    if (list.stopped && landing === null) landing = new Set(started);
+  } });
+  list.place(readAddress("?more=earlier:9999"), ["claude/e-39"]);
+  await settle();
+  assert.equal(fake.more().length, 40);
+  assert.equal(list.capped, true);
+  assert.ok(landing.has("claude/e-39"), "the landing waits for the row the 40th read showed");
+});
+
 // -- the scroll ---------------------------------------------------------------------------------
 
 test("the five acts drop the scroll; scroll events, a modifier alone, Alt+Left and Meta+[ do not", () => {

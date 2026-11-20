@@ -463,8 +463,10 @@ export class ListReader {
       this.state = added.state;
       this.moreStatus = null;
       next = added.next;
-      this.#capped(restore);
+      // The rows this page brought are told before the cap can let the target go, so
+      // the landing waits for an opened row the 40th read shows.
       this.#changed("more");
+      this.#capped(restore);
     }
   }
 
