@@ -11489,14 +11489,15 @@ secrets	packages/secrets/src/moxi_secrets/paths.py	if any(fnmatchcase(part, g) f
 secrets	packages/secrets/src/moxi_secrets/personal.py	cut = target.find(space, m.start(), m.end())	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/scan.py	__slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	__slots__ = ("set", "rule", "description", "start", "end", "line", "fingerprint")	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append(	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	etext.find(_ALLOW_MARK, lo, hi - 1 if cut else hi) >= 0)	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/scan.py	for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	hit.set, hit.rule, hit.description, start, end, 1, hit.fingerprint)))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	i = text.find(value)	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/scan.py	i = text.find(value, i + 1)	keep	find	find
-secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, start, end) in spans or any(	keep	any	any
-secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, start, end) in spans or any(	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.end) in spans or any(	keep	any	any
+secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.end) in spans or any(	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if hit.set not in GITLEAKS_SETS:	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if rule.keywords and not any(k in keywords for k in rule.keywords):	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/scan.py	load_sets	name	handle	fh
@@ -11509,6 +11510,7 @@ secrets	packages/secrets/src/moxi_secrets/scan.py	rule = load_sets().by_id.get((
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.by_id = {(r.set, r.id): r for rules in self.rules.values() for r in rules}	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.set = set_name	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	spans = {(h.set, h.rule, h.start, h.end) for h in hits}	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	spans.add((h.set, h.rule, h.start, h.end))	keep	set	set
 secrets	packages/secrets/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/corpus.py	codes |= set(range(first, last + 1))	keep	set	set
 secrets	packages/secrets/tests/corpus.py	if any(h.rule == "generic-api-key" for h in scan(value, ("broad",))):	keep	any	any
