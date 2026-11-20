@@ -754,7 +754,12 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
                      respawned: bool = False) -> int:      # pragma: no cover - forked
     """The forked adapter: the session's environment, standard streams to its log, then
     `claude_adapter.serve` until `claude` has ended. `respawned` is a new adapter for a
-    session whose adapter is gone (`respawn`)."""
+    session whose adapter is gone (`respawn`).
+
+    At its end the adapter removes the session's directory (the roster memory's) and
+    sweeps its claim socket. A respawned one does so only once `claude` has ended: one
+    that ends while `claude` runs, its bind refused, leaves the directory and its memory
+    for the adapter that binds next."""
     import logging
 
     os.environ.clear()
@@ -781,12 +786,13 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
                                     respawned=respawned)
     finally:
         say(FAILED, "the adapter ended")
-        # The session has ended: its directory (the roster memory's) goes with it, and
-        # its claim socket if the adapter did not close it.
-        from ..claimhold import remove_socket
+        if not respawned or claude_adapter.ended(handle):
+            # The session has ended: its directory goes with it, and its claim socket
+            # if the adapter did not close it.
+            from ..claimhold import remove_socket
 
-        shutil.rmtree(session.dir, ignore_errors=True)
-        remove_socket(session.claim_socket)
+            shutil.rmtree(session.dir, ignore_errors=True)
+            remove_socket(session.claim_socket)
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):

@@ -876,3 +876,46 @@ def test_a_session_whose_adapter_is_gone_still_gets_layer_one_and_its_deltas(
     finally:
         release.touch()
     proc.wait(timeout=15)
+
+
+def lock_free(sid) -> bool:
+    """Whether no new adapter holds the session's respawn lock: it holds it until its
+    end, its clean-up included."""
+    from moxi import files
+    from moxi_comms.adapters import respawn
+
+    try:
+        with files.lock(respawn.lock_path(sid), timeout_s=0):
+            return True
+    except files.LockTimeout:
+        return False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_refused_new_adapter_leaves_the_sessions_memory_while_claude_runs(
+        rig, fake_claude, turns_plugins):
+    """A new adapter whose bind is refused ends while `claude` runs: the session's
+    runtime directory (its roster memory) stays for the adapter that binds next."""
+    from moxi_comms import claimfile as cf
+    from moxi_comms import listener
+
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b4"
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        answer(env, "start")
+        memory = listener.memory_path(env)
+        assert memory is not None and memory.exists(), "start seeded the memory"
+        kill_adapter(rig, adapter)
+        rig.shim(name=NAME, global_=True)
+        said = answer(env, "prompt")
+        assert "mail has stopped" in said, said
+        assert wait_until(lambda: lock_free(sid), timeout=10), "the new adapter ended"
+        assert memory.exists(), "the roster memory stays"
+        assert listener.memory_path(env) == memory
+        assert cf.adapter_gone(cf.read(sid))
+    finally:
+        release.touch()
+    proc.wait(timeout=15)

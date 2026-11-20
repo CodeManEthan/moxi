@@ -290,9 +290,10 @@ unbound waits at the daemon and is delivered once the name is bound again.
 
 When no new adapter can be started (the claim file's `claude` can't be found, or the
 system has no process handle to watch it with) or the new one's bind is refused (another
-session took the name meanwhile), the claim file stays and the line is `comms: mail has
-stopped for <name>`, with why: no message reaches the session and a send from it is
-refused. The next start or prompt tries again; a relaunch gets the mail back for good.
+session took the name meanwhile), the claim file and the session's roster memory stay,
+and the line is `comms: mail has stopped for <name>`, with why: no message reaches the
+session and a send from it is refused. The next start or prompt tries again; a relaunch
+gets the mail back for good.
 Until an adapter binds it, `moxi comms doctor` prints an `adapter` line for the session
 and `moxi doctor` a fail row `adapter: <name>`.
 
