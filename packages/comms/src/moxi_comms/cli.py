@@ -1080,9 +1080,9 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                          "MOXI_COMMS_BACKEND, then the config file, then local)")
     sub = ap.add_subparsers(dest="verb", required=True)
 
-    # `claude` and `codex` are the wrappers (`adapters/session.py`,
-    # `adapters/codex_wrapper.py`), each with a parser of its own; `main` hands it every
-    # argument after the verb. Listed here so `--help` names them.
+    # `claude`, `codex` and `opencode` are the wrappers (`adapters/session.py`,
+    # `adapters/codex_wrapper.py`, `adapters/opencode.py`), each with a parser of its own;
+    # `main` hands it every argument after the verb. Listed here so `--help` names them.
     sub.add_parser("claude", add_help=False,
                    help="start a Claude Code session with a comms identity "
                         "(`claude --help` for its options). The options of "
@@ -1091,6 +1091,11 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="start a Codex session with a comms identity, through turns' "
                         "Codex host (`codex --help` for its options). The options of "
                         "`moxi comms` itself, such as --backend, do not apply to it")
+    sub.add_parser("opencode", add_help=False,
+                   help="start an OpenCode session for an identity in the config file's "
+                        "[opencode] roster, in this terminal (`opencode --help` for its "
+                        "options; experimental). The options of `moxi comms` itself, such "
+                        "as --backend, do not apply to it")
 
     s = sub.add_parser("send", help="message an identity by name")
     s.add_argument("to", help="name, or a comma-separated list (one post, one thread)")
@@ -1358,6 +1363,9 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     if argv[:1] == ["codex"]:
         from .adapters import codex_wrapper
         return codex_wrapper.main(argv[1:], prog=f"{prog} codex")
+    if argv[:1] == ["opencode"]:
+        from .adapters import opencode
+        return opencode.main(argv[1:], prog=f"{prog} opencode")
     args = build_parser(prog).parse_args(argv)
     ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:

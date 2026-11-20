@@ -15,7 +15,7 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 |---|---|---|
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
-| `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
+| `opencode` | `moxi comms opencode` (also `moxi-comms-opencode`) | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
 | `speech` | none: voice binds it | a person speaking and listening through voice, which binds the operator's name as it; a person kind |
 
@@ -235,7 +235,7 @@ a loop while supervision brings it back.
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
 | Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch, or on the thread `--resume THREAD_ID` names | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
-| OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
+| OpenCode | `opencode` | `moxi comms opencode <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
 request in its rollout, under the sessions root its wrapper reports; an OpenCode
@@ -386,7 +386,7 @@ launch and launch again.
 
 ## OpenCode
 
-`"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` runs an [OpenCode](https://opencode.ai) session you sit in,
+`moxi comms opencode <identity>` (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>`) runs an [OpenCode](https://opencode.ai) session you sit in,
 in the terminal you start it from. It is experimental. It was built and tested on
 OpenCode 1.18.34, with OpenCode Zen's free models (no account and no key) and with a
 local model through Ollama.

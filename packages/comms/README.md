@@ -174,7 +174,7 @@ meets.
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
-| `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
+| `moxi comms opencode` | launch an OpenCode session for a roster identity (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"`; experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-provision"` | provision standing identities |
 
@@ -244,7 +244,7 @@ the detail.
   (`--model`, `--sandbox`, `--option KEY=VALUE`); an identity listed in the config file's
   `[codex]` table launches with `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>`.
   `--headless` runs one with no window and nobody in it (below).
-- **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
+- **OpenCode**: `moxi comms opencode <name>` (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>`) runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new

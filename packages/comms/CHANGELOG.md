@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `moxi comms opencode <identity>` launches an OpenCode session with comms mail, as
+  `moxi comms claude` and `moxi comms codex` launch theirs. It runs the OpenCode wrapper
+  `moxi-comms-opencode`, whose script is not on PATH, and names itself as typed.
 - comms declares the `speech` adapter kind again, as a person kind: a binding of it (voice
   binds the operator's name as `speech`) has its mail delivered live, never held for a
   cold cache, and its cache is never read.
