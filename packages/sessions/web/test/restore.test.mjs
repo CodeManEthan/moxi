@@ -377,6 +377,22 @@ test("earlier:9999 asks 40 reads, a retry after a failure counted, then lets the
   assert.deepEqual(written, ["?more=earlier:39"]);
 });
 
+test("a 503 asked again counts toward the 40, and no call is made past the 40th", async () => {
+  let calls = 0;
+  const fake = server({ earlier: 100000 }, (path) => {
+    if (!path.startsWith("api/more")) return null;
+    calls += 1;
+    return calls === 11 || calls >= 40 ? 503 : null;
+  });
+  const list = new ListReader({ read: fake.read, zone: UTC, wait: () => Promise.resolve(), onChange: () => {} });
+  list.place(readAddress("?more=earlier:9999"), []);
+  await settle();
+  assert.equal(fake.more().length, 40, "the eleventh call's retry and the fortieth's failure are counted; nothing after");
+  assert.equal(list.restore, null);
+  assert.equal(list.capped, true);
+  assert.equal(list.state.earlier.pages, 38, "38 of the 40 calls answered");
+});
+
 test("a target reached at the 40th read names no cap", async () => {
   const fake = server({ earlier: 100000 });
   const { list, written } = reader(fake, "?more=earlier:40");

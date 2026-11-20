@@ -17,7 +17,8 @@
 // its 40th read has answered or failed, or at an act of his (a `Show`, a program line's
 // `Show` or `Hide`, a query change).
 
-import { Feed } from "./feed.ts";
+import { Feed, sleep } from "./feed.ts";
+import type { Wait } from "./feed.ts";
 import { parseList, parseMore } from "./list-feed.ts";
 import type { ListAnswer, ListRow, MoreAnswer } from "./list-feed.ts";
 import {
@@ -232,6 +233,8 @@ export interface ReaderOptions {
   /** Called after each change of what the reader holds. */
   onChange: (change: Change) => void;
   zone?: Zone;
+  /** Waits before a 503 is asked again. */
+  wait?: Wait;
 }
 
 /**
@@ -255,6 +258,7 @@ export class ListReader {
   #read: (path: string) => Promise<Answered>;
   #onChange: (change: Change) => void;
   #zone: Zone;
+  #wait: Wait;
   /** Counts query changes; a read carries the one it was asked under. */
   #generation = 0;
   /** The generation of the list shown; -1 before any. */
@@ -267,10 +271,11 @@ export class ListReader {
   #standing: Depth = NO_DEPTH;
   #closed = false;
 
-  constructor({ read, onChange, zone = LOCAL }: ReaderOptions) {
+  constructor({ read, onChange, zone = LOCAL, wait = sleep }: ReaderOptions) {
     this.#read = read;
     this.#onChange = onChange;
     this.#zone = zone;
+    this.#wait = wait;
     this.filters = { folder: null, harness: null, when: { kind: "any" }, find: "" };
     this.list = new Feed<Asked>(() => this.#askList(), (data) => this.#parseList(data), () => this.#listRead());
   }
@@ -439,8 +444,18 @@ export class ListReader {
       if (state === null || next.now !== state.now || !this.#current(generation, restore)) return;
       const asked: MoreRequest = next;
       const query = state.query;
-      if (restore !== null) restore.reads += 1;
-      const feed = new Feed<MoreAnswer>(() => this.#read(morePath(asked, query)), parseMore, () => {});
+      // Every call counts toward the restore's cap, one the feed asks again after a 503
+      // included, and none is made past it: the last answer stands as the read's.
+      const spent = (): boolean => restore !== null && restore.reads >= RESTORE_READS;
+      let last: Answered | null = null;
+      const ask = async (): Promise<Answered> => {
+        if (last !== null && spent()) return last;
+        if (restore !== null) restore.reads += 1;
+        last = await this.#read(morePath(asked, query));
+        return last;
+      };
+      const wait: Wait = (ms) => (spent() ? Promise.resolve() : this.#wait(ms));
+      const feed = new Feed<MoreAnswer>(ask, parseMore, () => {}, { wait });
       await feed.refresh();
       if (this.#closed || this.state === null) return;
       if (feed.value === null) {
