@@ -5,8 +5,9 @@
 the holder: its pid on the first line, its kind on the second, and `done` on a third once
 the holder's reconcile and crash discovery are done. It counts only while its pid is the
 lock file's, and the holder removes it as it lets the lock go. The lock is held per
-thread: another thread of the holder's process waits for it as another process does. `park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold
-it for their whole run; a launch's own crash discovery (`discovery`) holds it only around
+thread: another thread of the holder's process waits for it as another process does.
+`park`, `restore`, `unpark` and a plain resume of a parked session (`resume`) hold it for
+their whole run; a launch's own crash discovery (`discovery`) holds it only around
 discovery. A second whole-run holder waits `LOCK_WAIT_S`, then is refused `park or restore
 is running`. A launch that meets a whole-run holder whose `done` mark is written proceeds
 without discovery, since that holder ran it; before the mark, and behind another launch's

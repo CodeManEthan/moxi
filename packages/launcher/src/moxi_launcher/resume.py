@@ -45,9 +45,9 @@ terminal (on Linux and macOS the process becomes the harness, so `resume` does n
 return). A slot launch goes back to its slot when that slot is launchable, else to the
 lowest launchable one, with a line saying why; a slot that went missing is made again
 first (`create`), and a slot slots won't make again, or one another holder holds (a
-park's reservation for another session, say), falls back to the lowest too. `slot` names the slot to use
-in place of the original's: a missing one is made first, and any other is passed as it
-is, so a slot that is taken is refused by the launch's own check.
+park's reservation for another session, say), falls back to the lowest too. `slot`
+names the slot to use in place of the original's: a missing one is made first, and any
+other is passed as it is, so a slot that is taken is refused by the launch's own check.
 
 A slot launch's resume runs crash discovery first (`parks.discover_before_launch`), so a
 session whose slot crashed gets its park entry before the resume looks for one.

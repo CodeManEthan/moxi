@@ -24,7 +24,8 @@ rather than misreading it; this code reads version 1 files as well and writes ve
 Every change (create, remove, rename, hold, release, settle, a launch, and the
 `pane-died` hook's write of a run's end) runs under the one module lock, `locked()`: read
 the registry, read tmux, act, write with `write()`, which replaces the file in one step.
-The lock is held for the critical section only, never across a wait. Reads take no lock: the atomic replace always hands them a whole file.
+The lock is held for the critical section only, never across a wait. Reads take no
+lock: the atomic replace always hands them a whole file.
 
 A write drops holds that have run out, which read as absent anyway, and keeps every hold
 with a null `until`.
