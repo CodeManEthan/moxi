@@ -96,6 +96,9 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   redacted text can record it: moxi memory does, and its doctor asks for a `moxi memory
   reindex` once the version rises. Text stored earlier meets a rise, or a new rule, only
   when someone runs that reindex.
+- `seen_through(c)` says whether `scan` and `redact` read past the character `c`: the
+  invisible characters above. A store that trims stored text by counting characters can
+  count past the same ones.
 - `scan_lines(triples, sets, *, allow=None)` takes the added lines of a whole change as
   `(path, line number, text)`, scans each path's lines as one text, and returns
   `LineHit(path, line, hit)` values. It joins a path's lines with `\n` whatever their

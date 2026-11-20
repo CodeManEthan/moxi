@@ -479,3 +479,8 @@ def test_an_allowlist_line_keeps_a_split_value_and_a_split_known_value_is_found(
 def test_redact_version():
     assert REDACT_VERSION == 2
     assert "REDACT_VERSION" in moxi_secrets.__all__
+
+
+def test_seen_through_is_the_api_modules():
+    assert moxi_secrets.seen_through is scan_mod.seen_through
+    assert "seen_through" in moxi_secrets.__all__

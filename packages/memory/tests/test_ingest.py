@@ -946,7 +946,7 @@ def test_a_version_rebuild_keeps_what_no_source_read_to_its_end_gives():
         assert table.row(sc, harness, sid) is not None, sid
 
 
-def test_a_version_rebuild_keeps_the_rows_of_a_folder_that_didnt_answer(monkeypatch):
+def test_a_version_rebuild_keeps_the_rows_of_a_root_that_couldnt_be_listed(monkeypatch):
     r = T.CodexRollout(api.root("codex"))
     r.turn()
     r.user(f"osprey {MARKED}")

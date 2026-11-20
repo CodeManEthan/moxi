@@ -29,7 +29,7 @@ and a secret the older `redact` let through could straddle such a row's cut, lea
 fragment no rule matches. `recut_head` and `recut_tail` with `edge_chars` take off, before
 they redact again, the text from the stored cut to the first whitespace at least
 `edge_chars` characters away, or everything to the text's other end when there is none.
-They read past the characters secrets sees through (`moxi_secrets.scan.seen_through`), as
+They read past the characters secrets sees through (`moxi_secrets.seen_through`), as
 the text still holds them: those count nothing toward `edge_chars`, and none ends the span,
 so a control character Python reads as whitespace can't stop it inside a token it splits.
 
@@ -215,7 +215,7 @@ def _edge_head(body: str, edge_chars: int) -> int:
     """Where a head-cut body's kept part ends once its cut edge is trimmed: at the first
     whitespace, back from the end, with at least `edge_chars` counted characters after
     it, or 0 with none."""
-    from moxi_secrets.scan import seen_through
+    from moxi_secrets import seen_through
 
     counted = 0
     for position in range(len(body) - 1, -1, -1):
@@ -232,7 +232,7 @@ def _edge_tail(body: str, edge_chars: int) -> int:
     """Where a tail-cut body's kept part starts once its cut edge is trimmed: past the
     first whitespace with at least `edge_chars` counted characters before it, or the
     body's end with none."""
-    from moxi_secrets.scan import seen_through
+    from moxi_secrets import seen_through
 
     counted = 0
     for position, c in enumerate(body):
