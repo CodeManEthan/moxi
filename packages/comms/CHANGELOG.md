@@ -181,6 +181,10 @@
   so a name typed in the harness since shows there. Launcher's where still wins for a
   session it runs. Each row of the page's roster carries `harness`, the harness its
   binding's adapter kind is a session of, or null.
+- The Comms page says which project a name leads: with projects installed, a standing
+  name in `Other names` that leads a project reads `leads <key>` on its shown row
+  (`leads harbor-infra`), from projects' list of projects. A name that leads nothing, or
+  an install without projects, shows nothing of it.
 
 ## 0.3.0 (2026-11-08)
 

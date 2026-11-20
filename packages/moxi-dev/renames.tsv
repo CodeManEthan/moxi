@@ -1728,6 +1728,9 @@ comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": None}	
 comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": {"code": "gone", "row": None, "problem": "the launch has ended",	keep	refused	refused
 comms	packages/comms/tests/test_browser_page.py	texts = set()	keep	set	set
 comms	packages/comms/tests/test_browser_page.py	timeout=15_000)	keep	timeout	timeout
+comms	packages/comms/tests/test_browser_project_leads.py	assert any("/m/projects/api/projects" in url for url in asked), asked	keep	any	any
+comms	packages/comms/tests/test_browser_project_leads.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_leads.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_browser_roster.py	"waiting on planner", timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	assert any(roster_kit.ROSTER in url for url in check.requests), check.requests	keep	any	any
 comms	packages/comms/tests/test_browser_roster.py	expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold", timeout=PUSH_MS)	keep	timeout	timeout
