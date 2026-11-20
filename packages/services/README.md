@@ -148,19 +148,20 @@ first while one fails, and its `Services` link opens this page filtered to the p
   it: a bare name for yours, `<module>/<name>` for Moxi's), `project/<key>` shows one
   project's rows until `Show all`, `project/<key>/row/<id>` does both, and `add` and
   `adopt` open the panel on that way. The page writes its address as you open and close
-  things; an address naming a row or project it doesn't have opens the page and says so.
+  things. An address naming a row it doesn't have opens the page and says so; a project
+  key no row names keeps the filter and says `No service belongs to <key>.`
 - **Acts.** A closed row offers the one act that fits its state (`Start` on a stopped
   daemon, `Restart` on one failing its health check, `Run now` on a timer whose last run
   failed), and an opened row's foot the rest: start, stop and restart for a daemon, run
   now for a timer with `Run again` and `Stop run` tucked under it, turn on and turn off,
   and remove for a row you added or adopted. A press acts at once and the row follows it
   to its end. Three ask first, in place: a run whose runs launch an agent session says
-  it spends usage, `Remove` says what goes and the command it runs, and stopping or
-  restarting slots' server says what it ends. Stopping ui's shell would close the page,
-  so the page gives its command instead; restarting it reloads the page. The page
-  doesn't turn one of Moxi's own rows on or off: that is the module's setting, under
-  `Settings › <module>`, and `moxi services enable` and `disable` still do it in a
-  terminal.
+  it spends usage, `Remove` says what goes and, for a row you added, the command that
+  adds it back, and stopping or restarting slots' server says what it ends. Stopping
+  ui's shell would close the page, so the page gives its command instead; restarting it
+  reloads the page. The page doesn't turn one of Moxi's own rows on or off: that is the
+  module's setting, under `Settings › <module>`, and `moxi services enable` and
+  `disable` still do it in a terminal.
 - **Stopping slots' server.** With `moxi-slots` installed (the `slots` extra), stopping
   or restarting slots' server ends every session, open slot and job in its slots. Before
   either, the page server reads through slots' API what is in use there. With nothing in
