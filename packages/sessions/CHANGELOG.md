@@ -20,6 +20,14 @@
   false for such a head (it was null), true for a program's, and null where the head
   wasn't read and for Codex and OpenCode. Without launcher the page is as before.
 
+- With the `ui` and `projects` extras, a `project-facts` component reports to the
+  Projects page each project's last activity and sessions active recently, the opened
+  project's `Sessions` row and Remove's `Stays` line, and the folders worked in this week
+  that no project holds. Its read is the page server's new `/api/projects`, which folds
+  the sessions into projects through projects' read API. The new optional extra
+  `projects` takes `moxi-projects` 0.1.4 or later; one without interface 2 reads as
+  absent.
+
 - Archive folders (interface 6): `claude.archives` and `codex.archives` name folders of
   older transcripts, laid out as the harness's root, read after the live root in order;
   a session an earlier folder holds is read from there only. `archives.answer_wait_s`

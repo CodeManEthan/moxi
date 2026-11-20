@@ -184,10 +184,10 @@ def test_the_gate_matrix_passes():
     assert LB.gate_matrix(ROUTES)
 
 
-def test_the_page_declares_six_reads_and_nothing_the_gateways():
+def test_the_page_declares_seven_reads_and_nothing_the_gateways():
     routes = {r["path"]: r for r in LB.export(ROUTES)["routes"]}
     assert set(routes) == {"/api/window", "/api/subagents", "/api/list", "/api/more",
-                           "/api/session", "/api/folders"}
+                           "/api/session", "/api/folders", "/api/projects"}
     assert all(r["kind"] == "read" for r in routes.values())
     assert not any(r["gateway"] or r["stream"] or r["confirmed"] for r in routes.values())
     assert set(routes["/api/window"]["query"]) == {"harness", "session", "agent", "turns",
@@ -250,10 +250,10 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert done.stdout.strip() == "[]"
 
 
-def test_the_announcement_declares_the_page_and_the_window_block():
+def test_the_announcement_declares_the_page_the_window_block_and_the_project_facts():
     from moxi_sessions import module
 
-    assert set(module.COMPONENTS) == {"page", "window"}
+    assert set(module.COMPONENTS) == {"page", "window", "project-facts"}
     for name, decl in module.COMPONENTS.items():
         assert decl["script"] == f"{name}.js"
         assert decl["contract"] == 1
@@ -267,6 +267,11 @@ def test_the_announcement_declares_the_page_and_the_window_block():
     assert attrs["session"]["type"] == "string" and attrs["session"]["required"] is True
     assert attrs["agent"]["type"] == "string" and not attrs["agent"].get("required", False)
     assert "attributes" not in module.COMPONENTS["page"]
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["place"] == "inline" and not facts.get("home", False)
+    assert {name: attr["type"] for name, attr in facts["attributes"].items()} == {
+        "projects": "string", "open": "string"}
+    assert not any(attr.get("required") for attr in facts["attributes"].values())
 
 
 def test_the_export_carries_the_measured_budget():
@@ -283,7 +288,7 @@ def test_each_component_is_a_built_asset_of_the_page():
         assert decl["script"] in exported["assets"]
     assert {r["path"] for r in exported["routes"]} == {
         "/api/window", "/api/subagents", "/api/list", "/api/more", "/api/session",
-        "/api/folders"}
+        "/api/folders", "/api/projects"}
     assert LB.gate_matrix(page.PAGE)
 
 
