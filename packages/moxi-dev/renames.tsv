@@ -756,6 +756,7 @@ comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	own = sorted(set(def
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	parse_directors	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(defaults) - set(entry_keys))	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(section) - set(entry_keys))	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/respawn.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--claude", default="claude", help="the claude binary")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--director", action="append", default=[],	keep	default	default

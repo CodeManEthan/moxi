@@ -15,9 +15,11 @@ for the adapter: everything a new one needs outlives the old one.
     the endpoint    `turns.find(pid=<claude>)`, as any adapter finds it
 
 comms' listener calls `respawn_adapter` at the session's start and prompt
-(`listener.respawn_gone_adapter`). It starts `python -m moxi_comms.adapters.respawn`
-in a session of its own; that process forks the adapter and leaves at once, so the
-adapter is nobody's child, and the listener waits at most `wait_s` for its word
+(`listener.respawn_gone_adapter`). It starts `python -I -m moxi_comms.adapters.respawn`
+in a session of its own, in the session's runtime directory: isolated, so neither the
+endpoint's working directory nor a PYTHONPATH or PYTHONHOME in the session's
+environment can load code into it. That process forks the adapter and leaves at once,
+so the adapter is nobody's child, and the listener waits at most `wait_s` for its word
 (`adapters.word`). The new adapter holds a lock beside the claim file,
 `respawn-<key>.lock`, for its whole life (`moxi.files.lock`): a second one, started by a
 second start or prompt while the first binds, finds it held, says `word.STARTING` and
@@ -81,14 +83,17 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float):
         raise CannotRespawn("its claude process could not be found")
     if not sys.platform.startswith("linux"):
         raise CannotRespawn("this system has no process handle to watch claude with")
+    if key in ("", ".", "..") or "/" in key:
+        raise CannotRespawn(f"its claim file's key {key!r} names no session directory")
     r, w = os.pipe()
     try:
-        argv = [sys.executable, "-m", __name__, key, str(root.pid), root.start, str(w)]
+        argv = [sys.executable, "-I", "-m", __name__, key, str(root.pid), root.start,
+                str(w)]
         try:
             starter = subprocess.Popen(
-                argv, env=env, pass_fds=(w,), start_new_session=True,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
+                argv, env=env, cwd=session_dir(key, env), pass_fds=(w,),
+                start_new_session=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as exc:
             raise CannotRespawn(f"a new adapter could not be started: {exc}") from exc
         os.close(w)
@@ -104,6 +109,18 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float):
         if w is not None:
             os.close(w)
         os.close(r)
+
+
+def session_dir(key: str, env: dict) -> Path:
+    """The runtime directory of the session keyed `key` (0700), made when it is gone:
+    the new adapter's working directory, which `Session.write` keeps."""
+    from .session import sessions_dir
+
+    path = sessions_dir(env) / key
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    os.chmod(path, 0o700)
+    return path
 
 
 def main(argv=None) -> int:                               # pragma: no cover - forked
@@ -158,7 +175,8 @@ def session_of(key: str, env: dict):
 
 
 __all__ = ["CLAUDE_KIND", "CannotRespawn", "FORK_WAIT_S", "LOCK_PREFIX",
-           "claude_root", "lock_path", "main", "respawn_adapter", "session_of"]
+           "claude_root", "lock_path", "main", "respawn_adapter", "session_dir",
+           "session_of"]
 
 
 if __name__ == "__main__":                                 # pragma: no cover

@@ -919,3 +919,40 @@ def test_a_refused_new_adapter_leaves_the_sessions_memory_while_claude_runs(
     finally:
         release.touch()
     proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_new_adapter_starts_isolated_in_the_sessions_runtime_dir(
+        rig, fake_claude, turns_plugins, tmp_path):
+    """The new adapter's interpreter reads no `PYTHONPATH` from the session's
+    environment and runs in the session's runtime directory, not the endpoint's
+    working directory: neither can load code into it."""
+    from moxi_comms import claimfile as cf
+    from moxi_comms import listener
+
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b5"
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    marker = tmp_path / "planted-ran"
+    (planted / "sitecustomize.py").write_text(f"open({str(marker)!r}, 'w').close()\n")
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        answer(env, "start")
+        memory = listener.memory_path(env)
+        kill_adapter(rig, adapter)
+        log = session.log_dir() / f"claude-{sid}.log"
+        answer({**env, "PYTHONPATH": str(planted)}, "prompt")
+        assert wait_until(lambda: "respawned adapter for claude pid" in log.read_text(),
+                          timeout=10)
+        line = next(x for x in log.read_text().splitlines()
+                    if "respawned adapter for claude pid" in x)
+        new = int(line.rsplit("(pid ", 1)[1].rstrip(")"))
+        assert os.readlink(f"/proc/{new}/cwd") == str(memory.parent)
+        assert not marker.exists(), "the session's PYTHONPATH loaded nothing"
+        assert wait_until(lambda: cf.socket_answers(cf.read(sid)), timeout=5)
+    finally:
+        release.touch()
+    proc.wait(timeout=15)
