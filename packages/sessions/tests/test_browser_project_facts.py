@@ -191,7 +191,9 @@ def test_alone_it_reports_each_projects_sessions_and_the_work_dir_in_no_project(
     assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),
                                   "parts": [{"text": "1 session this week"}]}]
     assert report["more_folders"] == 0
-    assert [url for url in asked if "/api/" in url and "/m/sessions/api/" not in url] == []
+    # The shell's own push stream may open while the component reads; it isn't the component's.
+    assert [url for url in asked if "/api/" in url and "/m/sessions/api/" not in url
+            and "/m/ui/api/push" not in url] == []
 
 
 def test_the_projects_page_draws_sessions_facts(both, ui_contexts):
