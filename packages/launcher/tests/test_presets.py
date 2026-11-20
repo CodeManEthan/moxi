@@ -184,6 +184,33 @@ def test_a_plain_launch_takes_the_shipped_defaults():
     assert got.target == "terminal"
 
 
+def test_a_launch_with_usage_warns_at_2x_unless_it_sets_another_mark(monkeypatch):
+    """Core's launcher chose every launch's mark and stamped it; one that set none got the
+    shipped default. An install without usage neither offers the row nor stamps it."""
+    from moxi_launcher import compose
+    from moxi_launcher.compose import Context
+
+    def stamped(got):
+        ctx = Context(request_id="r1", session_id="5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f",
+                      actor="ann", runs_dir="/runs", windows=False)
+        return compose.compose(dict(got.values), ctx).env.get("MOXI_USAGE_WARN_AT")
+
+    with_usage = only("usage")
+    got = resolve(available=with_usage)
+    assert got.values["warn_at"] == "2x" and got.sources["warn_at"] == presets.SHIPPED
+    assert "usage" in got.links and stamped(got) == "2x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "1.5x"})) == "1.5x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "off"})) == "off"
+
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "usage" else real(name, **kw)))
+    got = resolve()
+    assert "warn_at" not in catalog.offered("claude", NONE)
+    assert "warn_at" not in got.values and "usage" not in got.links
+    assert stamped(got) is None
+
+
 def test_each_later_layer_wins():
     text = ('[defaults]\nmodel = "sonnet"\neffort = "low"\nnative_name = "d"\n'
             '[seat.planner]\nmodel = "opus"\neffort = "high"\n')

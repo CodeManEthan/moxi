@@ -144,11 +144,13 @@ def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goe
 def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
     values = {"harness": harness, "cwd": "/work"}
     sid = SID if harness == "claude" else None
+    warn = {"MOXI_USAGE_WARN_AT": "2x"}
     without = compose.compose(values, ctx(session_id=sid))
-    assert without.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert without.env == {**warn, "MOXI_LAUNCHER_REQUEST": "r1"}
     with_turns = compose.compose(values, ctx(session_id=sid, modules=frozenset({"turns"}),
                                              host="/host"))
-    assert with_turns.env == {"MOXI_TURNS_COMMANDS": "exit", "MOXI_LAUNCHER_REQUEST": "r1"}
+    assert with_turns.env == {"MOXI_TURNS_COMMANDS": "exit", **warn,
+                              "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
 def test_the_rows_that_stamp():
@@ -175,7 +177,7 @@ def test_the_childs_env_is_the_scrubbed_caller_with_the_stamps():
     assert env["MOXI_LAUNCHER_REQUEST"] == "r1" and env["PATH"] == "/usr/bin"
     assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env
     # A launch records the stamps only, never the caller's environment.
-    assert composition.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert composition.env == {"MOXI_USAGE_WARN_AT": "2x", "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
 # -- sizes ----------------------------------------------------------------------------------

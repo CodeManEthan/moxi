@@ -153,9 +153,9 @@ label = "Notes folder"
 
 [warn_at]
 type = "string"
-default = ""
+default = "2x"
 requires = "usage"
-doc = "The context mark at which usage warns the session, such as 1x or 1.5x."
+doc = "The context mark at which usage warns the session: 1x, 1.5x, 2x or off; 2x unless set."
 group = "lifecycle"
 sub = "Context"
 label = "Warn at context mark"

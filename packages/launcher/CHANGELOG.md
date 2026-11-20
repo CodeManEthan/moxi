@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A launch with usage installed warns at `2x` when it sets no `warn_at` of its own; the
+  row's default was empty, which left the mark to usage's `marks.default` (`off`). An
+  install without usage neither offers the row nor stamps it.
 - Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
   project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
   folder or project picked again sends `scratch` off, so a launch from Home never names

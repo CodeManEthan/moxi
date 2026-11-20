@@ -267,7 +267,8 @@ never guessed. Turn on `restart_point.measure_weekly` to measure once a week on 
 With turns installed, usage's after-tool listener tells the model, once, when a context
 passes its mark: `context 120,000 passed the 1x restart point (100,808) for <model>`. The
 mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
-`marks.default` (`off`). The main session and each of its agents are measured against
+`marks.default` (`off`). The launcher stamps its `warn_at` row, `2x` unless the launch
+sets another. The main session and each of its agents are measured against
 their own context; an agent's line also reaches its parent at the parent's next tool
 call. A mark fires once per rise past it: after a compaction brings the context below it,
 it can fire again. A floor tells turns the context below which the main session's calls
