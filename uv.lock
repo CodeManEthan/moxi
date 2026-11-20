@@ -1401,6 +1401,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
 secrets = [
     { name = "moxi-secrets" },
 ]
@@ -1422,11 +1425,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-secrets", marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui", "secrets", "turns"]
+provides-extras = ["ui", "secrets", "turns", "projects"]
 
 [package.metadata.requires-dev]
 dev = [
