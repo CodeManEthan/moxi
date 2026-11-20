@@ -20,7 +20,7 @@ const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_rea
 const row = (id, cost, extra = {}) => ({ ...sums({ cost, requests: 15, tokens: 1200 }), harness: "claude",
   session_id: id, name: null, folder: "/work/proj-a", started: at("2026-11-03 08:52"), known: true,
   cwd: "/work/proj-a", project: null, models: ["m-a"], first_ts: at("2026-11-03 08:52"),
-  last_ts: at("2026-11-03 10:20"), context: null, ...extra });
+  last_ts: at("2026-11-03 10:20"), turns: null, subagent_share: null, context: null, ...extra });
 const answer = (rows, extra = {}) => ({ since: null, until: null, tz: "UTC", filters: [], rows,
   total: sums({ cost: 20 }), unpriced_models: [], rules: [], index: { passed: false, last_pass: 1, note: null },
   today: TODAY, top: rows.length, skip: 0, count: rows.length, more: 0, ...extra });
@@ -95,14 +95,20 @@ test("a row with no model and a cost not whole leaves the models out and says wh
 
 test("the table: every figure of each session, a sort on each column the server sorts by", () => {
   const list = listRead(answer([row("s-1", 5.35, { context: { tokens: 10, window: 100 }, fresh_input: 300, cache_write: 400,
-                                                cache_read: 200, output: 300 })], { count: 54, more: 53 }));
+                                                cache_read: 200, output: 300, turns: 4, subagent_share: 0.25 })],
+                               { count: 54, more: 53 }));
   const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
   assert.deepEqual(board.columns.map((column) => [column.label, column.sort]), [
     ["Session", null], ["Folder", "project"], ["Harness", null], ["Models", null], ["Started", "started"],
-    ["Active", "active"], ["Requests", "requests"], ["Fresh input", "fresh_input"], ["Cache write", "cache_write"],
-    ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"], ["Cost", "cost"], ["Context", null]]);
+    ["Active", "active"], ["Turns", "turns"], ["Requests", "requests"], ["Fresh input", "fresh_input"],
+    ["Cache write", "cache_write"], ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"],
+    ["Subagent share", "subagent_share"], ["Cost", "cost"], ["Context", null]]);
   assert.deepEqual(board.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
-                                         "1h 28m", "15", "300", "400", "200", "300", "1.20k", "$5.35", "10 of 100"]);
+                                         "1h 28m", "4", "15", "300", "400", "200", "300", "1.20k", "25%", "$5.35",
+                                         "10 of 100"]);
+  // Turns and Subagent share say what they count on hover.
+  assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => column.label),
+                   ["Turns", "Subagent share"]);
   assert.equal(board.rows[0].key, "claude/s-1");
   // The column sorted by says its direction; the others say none; one with no sort says nothing.
   const cost = board.columns.find((column) => column.label === "Cost");
@@ -123,6 +129,15 @@ test("with projects the project column takes the project sort; a cost not whole 
   assert.deepEqual(board.rows.map((line) => [line.cells[1], line.cells.at(-1)]),
                    [["proj-b", ""], ["", "9 tokens have no price"]]);
   assert.deepEqual([board.line, board.more], ["2 sessions · showing 2", false]);
+});
+
+test("a session with no turn ids or no known share leaves those cells empty; a share under 1% says so", () => {
+  const list = listRead(answer([row("s-1", 2), row("s-2", 1, { turns: 0, subagent_share: 0 }),
+                                row("s-3", 1, { turns: 12, subagent_share: 0.004 })]));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  const at = (label) => board.columns.findIndex((column) => column.label === label);
+  assert.deepEqual(board.rows.map((line) => [line.cells[at("Turns")], line.cells[at("Subagent share")]]),
+                   [["", ""], ["0", "0%"], ["12", "under 1%"]]);
 });
 
 test("a click on the sorted column turns it around; another column starts highest first", () => {

@@ -1464,7 +1464,7 @@ export class UsagePage extends LitElement {
     const sortBy = (sort: BoardSort) => { this.boardBy = nextOrder(this.boardBy, sort); };
     return html`<div class="scroll"><table class="tbl" data-part="table" data-table="sessions">
       <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
-        aria-sort=${column.aria ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
+        aria-sort=${column.aria ?? nothing} title=${column.title ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
           class="act sort" data-sort=${column.sort} @click=${() => sortBy(column.sort as BoardSort)}>${column.label}${
           column.arrow === null ? nothing : html`<span aria-hidden="true"> ${column.arrow}</span>`}</button>`}</th>`)}</tr></thead>
       <tbody>${board.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>

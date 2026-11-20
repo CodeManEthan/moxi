@@ -340,7 +340,7 @@ export function placedRow(report: Report<AgentRow> | null, requests: RequestRow[
     ...report.total, ...ref, unpriced_models: report.unpriced_models, rules: report.rules,
     cwd: ref.folder, project: null, models,
     first_ts: firsts.length ? Math.min(...firsts) : null, last_ts: lasts.length ? Math.max(...lasts) : null,
-    context: report.context ?? null,
+    turns: null, subagent_share: null, context: report.context ?? null,
   };
 }
 

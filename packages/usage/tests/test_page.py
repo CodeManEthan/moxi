@@ -466,8 +466,8 @@ def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
     assert costs == sorted(costs, reverse=True) and len(costs) == 3
     first = body["rows"][0]
     assert set(first) == {"harness", "session_id", "name", "folder", "started", "known",
-                          "cwd", "project", "models", "first_ts", "last_ts", "context",
-                          *ROW_KEYS}
+                          "cwd", "project", "models", "first_ts", "last_ts", "turns",
+                          "subagent_share", "context", *ROW_KEYS}
     s1 = next(row for row in body["rows"] if row["session_id"] == "s1")
     assert (s1["cwd"], s1["harness"]) == ("/w/app", "claude")
     assert s1["models"] == ["m-a", "m-b", "mystery-9"]
@@ -584,7 +584,7 @@ def test_sessions_sort_by_a_column_either_way_and_page_in_that_order(many):
         assert body["count"] == 8
         seen += keys_of(body)
     assert seen == started
-    for bad in ({"sort": "turns"}, {"order": "up"}):
+    for bad in ({"sort": "title"}, {"order": "up"}):
         status, _ = asyncio.run(ask(served(), "/api/sessions", bad))
         assert status == 400
 
@@ -990,6 +990,25 @@ def test_requests_send_one_row_per_request_with_the_marks_between_them(requests_
     assert sub["total"]["turns"] is None and sub["total"]["marks"] == []
     resumed = get("/api/requests", session="s2", harness="claude", utc="true")
     assert resumed["total"]["claimed_elsewhere"] == 3 and resumed["total"]["copied_marks"] == 1
+
+
+def test_sessions_carry_their_turns_and_subagent_share_and_sort_by_both(requests_seeded):
+    rows = {row["session_id"]: row for row in get("/api/sessions", utc="true")["rows"]}
+    assert rows["s1"].keys() == page.SESSION_ROW.keys()
+    assert (rows["s1"]["turns"], rows["s2"]["turns"]) == (2, 3)
+    agent = [row for row in get("/api/session", session="s1", harness="claude", utc="true")["rows"]
+             if row["agent"] == "a"]
+    share = sum(row["cost"] for row in agent) / rows["s1"]["cost"]
+    assert rows["s1"]["subagent_share"] == pytest.approx(share) and 0 < share < 1
+    assert rows["s2"]["subagent_share"] == 0.0
+
+    def order(**query):
+        return [row["session_id"] for row in get("/api/sessions", utc="true", **query)["rows"]]
+
+    assert order(sort="turns") == ["s2", "s1"]
+    assert order(sort="turns", order="asc") == ["s1", "s2"]
+    assert order(sort="subagent_share") == ["s1", "s2"]
+    assert order(sort="subagent_share", order="asc") == ["s2", "s1"]
 
 
 def test_requests_need_a_session_and_answer_empty_for_an_unknown_one(requests_seeded):

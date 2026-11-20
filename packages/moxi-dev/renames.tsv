@@ -15860,6 +15860,7 @@ usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folde
 usage	packages/usage/src/moxi_usage/page.py	"skip": lb.Field("int", required=False),	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"sort": lb.Field("enum", required=False, values=SESSION_SORTS),	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"order": lb.Field("enum", required=False, values=("asc", "desc")),	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE_FLOAT = lb.Out("float", nullable=True)	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(folder), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(work_dir), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}	use	"folder":	"work_dir":

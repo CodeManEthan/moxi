@@ -106,13 +106,18 @@ export function sessionLine(row: SessionRow, today: string | null, projects: boo
 
 /** What the table can be sorted by, as `/api/sessions` takes it. */
 export type BoardSort = "cost" | "tokens" | "requests" | "fresh_input" | "cache_write" | "cache_read" | "output"
-  | "started" | "active" | "project";
+  | "started" | "active" | "turns" | "subagent_share" | "project";
 
 /** The table's order: a column and its direction. */
 export interface BoardOrder {
   sort: BoardSort;
   order: "asc" | "desc";
 }
+
+/** The Turns column's hover. */
+export const TURNS_TITLE = "Turns in the main session's file, whatever the range; never summed with subagents";
+/** The Subagent share column's hover. */
+export const SHARE_TITLE = "The part of the session's cost in the range its subagents ran up";
 
 /** The table's first order: dearest first. */
 export const BOARD_START: BoardOrder = { sort: "cost", order: "desc" };
@@ -125,6 +130,8 @@ export interface BoardColumn {
   label: string;
   num: boolean;
   sort: BoardSort | null;
+  /** What the column counts, for its header's hover; null when its name says it. */
+  title: string | null;
   /** The column's `aria-sort`: null for a column with no sort. */
   aria: "ascending" | "descending" | "none" | null;
   /** `↓` or `↑` after the column the table is sorted by. */
@@ -159,8 +166,8 @@ export function nextOrder(now: BoardOrder, sort: BoardSort): BoardOrder {
 export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | null, projects: boolean,
                               home: string | null, clock: Clock = LOCAL): Board {
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
-  const column = (label: string, num: boolean, sort: BoardSort | null): BoardColumn => ({
-    label, num, sort,
+  const column = (label: string, num: boolean, sort: BoardSort | null, title: string | null = null): BoardColumn => ({
+    label, num, sort, title,
     aria: sort === null ? null : sort === by.sort ? (by.order === "asc" ? "ascending" : "descending") : "none",
     arrow: sort !== null && sort === by.sort ? (by.order === "asc" ? "↑" : "↓") : null,
   });
@@ -169,10 +176,11 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
   const columns = [
     column("Session", false, null), ...(projects ? [column("Project", false, "project")] : []),
     column("Folder", false, projects ? null : "project"), column("Harness", false, null), column("Models", false, null),
-    column("Started", true, "started"), column("Active", true, "active"), column("Requests", true, "requests"),
+    column("Started", true, "started"), column("Active", true, "active"),
+    column("Turns", true, "turns", TURNS_TITLE), column("Requests", true, "requests"),
     column("Fresh input", true, "fresh_input"), column("Cache write", true, "cache_write"),
     column("Cache read", true, "cache_read"), column("Output", true, "output"), column("Tokens", true, "tokens"),
-    column("Cost", true, "cost"), column("Context", true, null),
+    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Cost", true, "cost"), column("Context", true, null),
     ...(flagged ? [column("Not whole", false, null)] : []),
   ];
   const rows = list.rows.map((row, i) => ({
@@ -185,9 +193,11 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
       row.models.join(", "),
       when(row.first_ts),
       row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)),
+      row.turns === null ? "" : row.turns.toLocaleString("en-US"),
       row.requests.toLocaleString("en-US"),
       fmtTokens(row.fresh_input), fmtTokens(row.cache_write), fmtTokens(row.cache_read), fmtTokens(row.output),
       fmtTokens(row.tokens),
+      row.subagent_share === null ? "" : percentWords(row.subagent_share * 100),
       costWords(sumRows([row])),
       row.context === null ? "" : contextCell(row.context),
       ...(flagged ? [whys[i] ?? ""] : []),

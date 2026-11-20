@@ -2,7 +2,8 @@
 usage's real page server: the closed row naming the range's dearest session with the
 count that opens it; opened, the week's ten dearest as two-line rows, the line for the
 rest of the week and its `Show`, the earlier days' line and its `Show`, the table of
-every session sorted by a column, a row's `Open` and the address it writes; a range of
+every session sorted by a column with its turns and subagent share, a row's `Open` and
+the address it writes; a range of
 seven days or fewer with no earlier line; Cost's `most to` naming today's two dearest;
 and the section at a phone's width.
 
@@ -214,7 +215,7 @@ def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
             "Output", "Tokens", "Cost ↓", "Context"} <= set(heads), heads
     column = {name: i for i, name in enumerate(head.removesuffix(" ↓") for head in heads)}
     expect(table.locator("th[aria-sort=descending]")).to_have_text("Cost ↓")
-    expect(table.locator("th[aria-sort=none]")).to_have_count(9)
+    expect(table.locator("th[aria-sort=none]")).to_have_count(11)
     first = table.locator("tbody tr").first.locator("td")
     expect(first.nth(0)).to_have_text("fix the tests")
     # A folder outside the account's home is written whole once `/api/projects` gave the home.
@@ -235,6 +236,35 @@ def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
     expect(table.locator("tbody tr").last.locator("td").nth(column["Requests"])).to_have_text("16")
     section.get_by_role("button", name="Hide table").click()
     expect(table).to_have_count(0)
+
+
+def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
+    section = sessions_of(open_page(page, "sessions"))
+    section.get_by_role("button", name="Table").click()
+    table = section.locator("table[data-part=table]")
+    expect(table.locator("tbody tr")).to_have_count(16)
+    heads = [head.removesuffix(" ↓") for head in table.locator("th").all_inner_texts()]
+    column = {name: i for i, name in enumerate(heads)}
+    assert heads.index("Active") + 1 == column["Turns"] < column["Requests"], heads
+    assert column["Tokens"] + 1 == column["Subagent share"] == column["Cost"] - 1, heads
+    expect(table.locator("th", has_text="Turns")).to_have_attribute("title", re.compile("never summed"))
+    first = table.locator("tbody tr").first.locator("td")
+    # Each request of the seed is a prompt of its own, and no session has a subagent.
+    expect(first.nth(column["Turns"])).to_have_text("16")
+    expect(first.nth(column["Subagent share"])).to_have_text("0%")
+
+    turns = table.get_by_role("button", name="Turns")
+    with page.expect_request(lambda request: "sort=turns&order=desc" in request.url):
+        turns.click()
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Turns ↓")
+    with page.expect_request(lambda request: "sort=turns&order=asc" in request.url):
+        turns.click()
+    expect(table.locator("th[aria-sort=ascending]")).to_have_text("Turns ↑")
+    expect(first.nth(column["Turns"])).to_have_text("2")
+    with page.expect_request(lambda request: "sort=subagent_share&order=desc" in request.url):
+        table.get_by_role("button", name="Subagent share").click()
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Subagent share ↓")
+    expect(table.locator("tbody tr")).to_have_count(16)
 
 
 def test_a_rows_open_writes_its_address_and_reads_as_close(page):

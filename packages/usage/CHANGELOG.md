@@ -14,6 +14,7 @@
 - The Sessions section's `Table` lists every session of the range, 200 at a time with
   `Show` for more, where it listed only the rows the lists had shown. A header button
   sorts by its column (`aria-sort`), highest first, and a second click turns it around.
+  It has a Turns column and a Subagent share column, each sortable.
 - The page's Project (or Folder) filter picks several at once: each entry is a check that
   adds it or takes it away and leaves the menu open, the button counts them (`2
   projects`), and `all` clears them. Everything under the filter line reads the files of
@@ -22,8 +23,11 @@
   the files any of them matches; several go out in `filters` joined by `, `. The page's
   report routes take several projects or folders in `project` and `folder`, one to a
   line. `/api/sessions` takes `sort` (`cost`, `tokens`, `requests`, `fresh_input`,
-  `cache_write`, `cache_read`, `output`, `started`, `active`, `project`) and `order`
-  (`asc` or `desc`), and pages with `top` and `skip` in that order.
+  `cache_write`, `cache_read`, `output`, `started`, `active`, `turns`, `subagent_share`,
+  `project`) and `order` (`asc` or `desc`), and pages with `top` and `skip` in that
+  order. Its rows carry `turns`, the distinct turns of the session's main file, and
+  `subagent_share`, the part of the session's cost its subagents ran up.
+- The `sessions` report's rows carry `turns` and `subagent_cost`.
 - `moxi usage context SESSION` with no `--harness` asks every harness and refuses a
   session more than one holds, naming them, where it took the first. It exits 0 whenever
   it names the context's state, `context unknown` included, and 2 for a session or agent

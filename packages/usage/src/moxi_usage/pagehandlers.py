@@ -292,7 +292,17 @@ def _session_row(row: Mapping[str, Any]) -> dict[str, Any]:
             "name": None, "folder": None, "started": None, "known": None,
             "cwd": _str(row.get("cwd")), "project": _str(row.get("project")),
             "models": _words(row.get("models")), "first_ts": _num(row.get("first_ts")),
-            "last_ts": _num(row.get("last_ts")), "context": None, **_row_sums(row)}
+            "last_ts": _num(row.get("last_ts")), "turns": _int(row.get("turns")),
+            "subagent_share": _share(row), "context": None, **_row_sums(row)}
+
+
+def _share(row: Mapping[str, Any]) -> float | None:
+    """The part of a session's cost its subagents ran up: 0 when the cost is 0, None
+    when either cost is not known."""
+    whole, part = _num(row.get("cost")), _num(row.get("subagent_cost"))
+    if whole is None or part is None:
+        return None
+    return part / whole if whole > 0 else 0.0
 
 
 def _by_cost(row: Mapping[str, Any]) -> tuple:

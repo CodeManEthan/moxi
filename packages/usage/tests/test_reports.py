@@ -1363,6 +1363,25 @@ def test_requests_count_turns_and_place_the_compaction_between_rows(conn):
     assert late.rows == [] and late.total["marks"] == []
 
 
+def test_sessions_count_their_main_files_turns_and_what_their_subagents_cost(conn):
+    requests_index(conn)
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/s3.jsonl", [request("x1", t)], session_id="s3")
+    source(conn, "/p/s3/subagents/agent-q.jsonl", [request("q1", t + 5, model="mystery-9")],
+           session_id="s3", kind="subagent", agent_id="q")
+    report = reports.sessions(conn, table=table())
+    first, resumed, third = (one(report, session_id=sid) for sid in ("s1", "s2", "s3"))
+    # distinct turn ids over the whole main file: the subagent's requests carry none, and
+    # the resumed copy counts the turns it carries from the first session too
+    assert (first["turns"], resumed["turns"], third["turns"]) == (2, 3, None)
+    agent = [row for row in reports.session(conn, session="s1", table=table()).rows
+             if row["agent"] == "a"]
+    assert first["subagent_cost"] == pytest.approx(sum(row["cost"] for row in agent))
+    assert 0 < first["subagent_cost"] < first["cost"]
+    assert resumed["subagent_cost"] == 0.0
+    assert third["subagent_cost"] is UNKNOWN and third["cost"] > 0
+
+
 def test_requests_without_turn_ids_have_null_turns(conn):
     t = at("2026-10-01T12:00")
     source(conn, "/oc/opencode.db", [request("o1", t, harness="opencode"),

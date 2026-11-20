@@ -423,8 +423,9 @@ sessions module. Top to bottom:
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
     `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every
-    session of the range, 200 at a time with `Show` for more, sorted by a column: a click
-    on a header sorts by it, highest first, and again the other way. A session opens in its
+    session of the range, 200 at a time with `Show` for more, with each session's turns
+    and its subagents' share of its cost, sorted by a column: a click on a header sorts
+    by it, highest first, and again the other way. A session opens in its
     row: its requests, its context, a chart of its requests with its turns and
     compactions, where its cost went, its subagents (a map, a row each, and one opened
     with its own requests), its harness, model and start, the restart point when one is
@@ -527,7 +528,7 @@ The page server's reads, each a `GET` under `/api`:
 | `limits` | none | each plan window now, from the stored readings, with `opened` |
 | `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
 | `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
-| `sessions` | `top` (1 to 200), `skip`, `sort`, `order` (`asc`, `desc`), filters | sessions, dearest first unless `sort` names another column: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
+| `sessions` | `top` (1 to 200), `skip`, `sort`, `order` (`asc`, `desc`), filters | sessions, dearest first unless `sort` names another column: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context`, `turns`, `subagent_share` and what names it |
 | `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
 | `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
 | `models` | filters | tokens and cost by model, with where each price came from |
@@ -550,7 +551,10 @@ topics `limits` and `index`.
 app-server: the stream's poller pulls and publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
 the readings store only when it exists, and `restart-point` reads the measure's file and
 the model table. A session's `context` is the whole prompt of the newest request of its
-main file and the window it ran against, null when that is not known. `window`'s sessions
+main file and the window it ran against, null when that is not known. Its `turns` is how
+many distinct turns its main file's requests carry, whatever the range, null when none
+says its turn; its `subagent_share` is the part of its cost in the range that its
+subagents ran up, from 0 to 1. `window`'s sessions
 are given for the harness's main limit when its start is known and there is an index to
 read, else null.
 

@@ -91,6 +91,8 @@ MODEL_SQL = "COALESCE(r.model, r.response_model)"
 #: own; a file with no session id is a session of its own. The `sessions` report groups
 #: by it and the `session` report filters on it, so the two count the same files.
 _SESSION_SQL = "COALESCE(f.parent_session, f.session_id, 'file:' || f.id)"
+#: Whether a file is a session's main file, not a subagent's, a workflow's or a child's.
+_MAIN_FILE_SQL = "(f.kind = 'main' AND f.parent_session IS NULL)"
 #: Requests whose `unknown` names input, cache read or output; or a cache-write column.
 _CORE_UNKNOWN = ("input", "cache_read", "output")
 _WRITE_UNKNOWN = ("cache_write", "cache_write_1h")
@@ -688,13 +690,20 @@ def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
              work_dir: Keys = None) -> Report:
     """Tokens and cost by session, a main session and its subagents together, with the
     session's title, `cwd` and project from its main file, its models and its first and
-    last request in range; the earliest session first."""
+    last request in range; the earliest session first.
+
+    `subagent_cost` is the part of `cost` its subagent, workflow and child-session files
+    ran up in range: 0 with none, `UNKNOWN` when none of theirs could be priced. `turns`
+    is how many distinct turn ids the requests of the session's main file carry, over the
+    whole file whatever the range, as its title is; None when none carries one."""
     query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
-    groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL},
-                     _table(table))
-    rows, total = _fold(groups, lambda k, e: (k["harness"], k["session"]),
-                        lambda k, e: {"harness": k["harness"], "session_id": k["session"]})
+    groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL,
+                                   "main": _MAIN_FILE_SQL}, _table(table))
+    rows, total = _fold(groups, _session_key, _session_values)
+    subs, _ = _fold([group for group in groups if not group[0]["main"]], _session_key,
+                    _session_values)
     facts = _session_facts(conn, list(rows))
+    turns = _session_turns(conn, list(rows))
     out = []
     for k, row in rows.items():
         done = row.done(times=True, models=True)
@@ -703,9 +712,19 @@ def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
             done["session_id"] = None
         for name in ("title", "cwd", "project"):
             done[name] = found.get(name)
+        done["subagent_cost"] = subs[k].done()["cost"] if k in subs else 0.0
+        done["turns"] = turns.get(k)
         out.append(done)
     out.sort(key=lambda r: (r["first_ts"] is None, r["first_ts"] or 0.0, r["harness"]))
     return _report("sessions", query, out, total)
+
+
+def _session_key(found: Mapping[str, Any], extra: Mapping[str, Any]) -> tuple:
+    return (found["harness"], found["session"])
+
+
+def _session_values(found: Mapping[str, Any], extra: Mapping[str, Any]) -> dict[str, Any]:
+    return {"harness": found["harness"], "session_id": found["session"]}
 
 
 def _session_facts(conn: sqlite3.Connection,
@@ -734,6 +753,33 @@ def _session_facts(conn: sqlite3.Connection,
         for name in ("title", "cwd", "project"):
             if slot.get(name) is None and row[name] is not None:
                 slot[name] = row[name]
+    return found
+
+
+def _session_turns(conn: sqlite3.Connection,
+                   keys: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """How many distinct turn ids the requests of each session's main file carry, every
+    request of the file counted; a session none of whose carries one is left out."""
+    ids = sorted({sid for _, sid in keys if not sid.startswith("file:")})
+    file_ids = sorted({int(sid[5:]) for _, sid in keys if sid.startswith("file:")})
+    found: dict[tuple[str, str], int] = {}
+    main = "f.kind = 'main' AND f.parent_session IS NULL AND r.turn_id IS NOT NULL"
+    for n in range(0, len(ids), _CHUNK):
+        chunk = ids[n:n + _CHUNK]
+        for row in conn.execute(
+                "SELECT f.harness, f.session_id AS session, COUNT(DISTINCT r.turn_id) AS n"
+                " FROM files f JOIN requests r ON r.file_id = f.id"
+                f" WHERE f.session_id IN ({','.join('?' * len(chunk))}) AND {main}"
+                " GROUP BY f.harness, f.session_id", chunk):
+            found[(row["harness"], row["session"])] = row["n"]
+    for n in range(0, len(file_ids), _CHUNK):
+        chunk = file_ids[n:n + _CHUNK]
+        for row in conn.execute(
+                "SELECT f.harness, 'file:' || f.id AS session, COUNT(DISTINCT r.turn_id) AS n"
+                " FROM files f JOIN requests r ON r.file_id = f.id"
+                f" WHERE f.id IN ({','.join('?' * len(chunk))}) AND {main}"
+                " GROUP BY f.id", chunk):
+            found[(row["harness"], row["session"])] = row["n"]
     return found
 
 

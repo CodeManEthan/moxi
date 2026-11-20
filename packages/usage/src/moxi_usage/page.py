@@ -86,9 +86,10 @@ USED_MAX = 10
 TOP_MAX = 200
 TOP_DEFAULT = 200
 #: What `/api/sessions` sorts by: a sum of the row, `started` (its first request), `active`
-#: (its first request to its last) or `project` (its project key, else its `cwd`).
+#: (its first request to its last), `turns`, `subagent_share` or `project` (its project
+#: key, else its `cwd`).
 SESSION_SORTS = ("cost", "tokens", "requests", "fresh_input", "cache_write", "cache_read",
-                 "output", "started", "active", "project")
+                 "output", "started", "active", "turns", "subagent_share", "project")
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -99,6 +100,7 @@ _INT = lb.Out("int")
 _MAYBE_INT = lb.Out("int", nullable=True)
 _FLOAT = lb.Out("float")
 _WHEN = lb.Out("float", nullable=True)
+_MAYBE_FLOAT = lb.Out("float", nullable=True)
 _BOOL = lb.Out("bool")
 _MAYBE_BOOL = lb.Out("bool", nullable=True)
 _WORDS = lb.Out("list", items=_TEXT)
@@ -211,7 +213,10 @@ SESSION_REF = {
 #: One session: what names it, its main file's `cwd` and project, its models, its first
 #: and last request in range, and its context. `session_id` is null for a file with no
 #: session id: no route reads such a row by id, so it has no session view, a null
-#: `context` and a null `known`.
+#: `context` and a null `known`. `turns` is how many distinct turns its main file's
+#: requests carry, whatever the range, null when none carries a turn id;
+#: `subagent_share` the part of its cost in range its subagents ran up, 0 to 1, 0 when
+#: its cost is 0 and null when its cost or its subagents' is not known.
 SESSION_ROW = {
     **SESSION_REF,
     "cwd": _MAYBE_PATH,
@@ -219,6 +224,8 @@ SESSION_ROW = {
     "models": _WORDS,
     "first_ts": _WHEN,
     "last_ts": _WHEN,
+    "turns": _MAYBE_INT,
+    "subagent_share": _MAYBE_FLOAT,
     "context": CONTEXT,
     **ROW_SUMS,
 }
