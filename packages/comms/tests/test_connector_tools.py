@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import re
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,11 +14,12 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules
 
-from moxi_comms import directory, kinds
+from moxi_comms import directory, kinds, sending
 from moxi_comms.config import CONNECTOR_WAIT_CEILING, ConnectorConfig
 from moxi_comms.client import DaemonClient, DaemonError, DaemonOffline
 from moxi_comms.connector import tools as tools_mod
 from moxi_comms.connector.link import BOUND, HELD, Link
+from moxi_comms.mcp import tools as mcp_tools
 from moxi_comms.paths import comms_db, daemon_socket
 
 from conftest import wait_until, write_transcript
@@ -163,6 +165,211 @@ def test_send_says_each_recipients_state(rig, tools):
 def test_send_refusal_is_an_error_result(rig, tools):
     got, _ = call(tools, "send", {"to": "nobody-ever", "text": "x"})
     assert got.is_error and got.refusal
+
+
+# --------------------------------------------------------------------------- open asks
+
+ANSWER_ONE = "Answer one with send and reply_to set to its id."
+ANSWER_IT = "Answer it with send and reply_to set to its id."
+
+
+def ask(rig, text="which branch?"):
+    """A verified single-reply ask from planner@proj-a to the identity, once the daemon
+    has indexed it."""
+    code, out = rig.cli(["send", "--posture", "once", ME, text], name="planner",
+                        scope="proj-a")
+    assert code == 0, out
+    mid = re.search(r"sent (\d+)", out).group(1)
+    assert wait_until(lambda: mid in rig.daemon.asks), f"ask {mid} never indexed"
+    return mid
+
+
+def open_note(result):
+    """The one note of a sent answer that lists open asks, as lines."""
+    [note] = [n for n in result.structured["notes"] if n.startswith("Still open:")]
+    assert result.text.endswith(note)
+    return note.split("\n")
+
+
+def test_a_send_over_an_open_ask_posts_and_lists_it(rig, tools):
+    planner(rig)
+    mid = ask(rig)
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "something else",
+                                  "posture": "none"})
+    assert not got.is_error, got.text
+    assert got.structured["outcome"] == "sent"
+    assert rig.record.get_message(got.structured["message_id"]).author_id == ME
+    assert open_note(got) == [
+        "Still open: 1 single-reply ask to you from this recipient.",
+        f"  msg {mid} from planner@proj-a (just now): which branch?",
+        ANSWER_IT]
+    assert got.text.startswith(f"Sent, msg {got.structured['message_id']}. "
+                               "planner@proj-a: delivered now.\n")
+
+
+def test_send_and_wait_over_an_open_ask_posts_and_lists_it(rig, tools):
+    planner(rig)
+    mid = ask(rig)
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "a new question?", "wait_s": 1})
+    assert not got.is_error, got.text
+    assert got.structured["outcome"] == "no-reply"
+    assert open_note(got)[1] == f"  msg {mid} from planner@proj-a (just now): which branch?"
+    assert got.text.startswith("No reply within 1 second.")
+
+
+def test_a_reply_to_one_of_two_open_asks_lists_only_the_other(rig, tools):
+    planner(rig)
+    first, second = ask(rig, "first?"), ask(rig, "second?")
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "this answers second",
+                                  "reply_to": second})
+    assert not got.is_error, got.text
+    assert sending.machine_line.parse(
+        rig.record.get_message(got.structured["message_id"]).content).reply_to == second
+    assert open_note(got) == [
+        "Still open: 1 single-reply ask to you from this recipient.",
+        f"  msg {first} from planner@proj-a (just now): first?",
+        ANSWER_IT]
+    again, _ = call(tools, "send", {"to": "planner@proj-a", "text": "and first",
+                                    "reply_to": first})
+    assert not again.is_error, again.text
+    assert not [n for n in again.structured["notes"] if n.startswith("Still open:")]
+
+
+def test_the_note_lists_three_newest_first_and_counts_the_rest(rig, tools):
+    planner(rig)
+    asks = [ask(rig, f"q{n}") for n in range(4)]
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "x", "posture": "none"})
+    lines = open_note(got)
+    assert lines[0] == "Still open: 4 single-reply asks to you from this recipient."
+    assert [ln.split()[1] for ln in lines[1:4]] == asks[::-1][:3]
+    assert lines[4:] == ["  and 1 more", ANSWER_ONE]
+
+
+def test_the_note_scrubs_and_cuts_an_asks_first_line(rig, tools):
+    planner(rig)
+    long = "x" * 150
+    mid = ask(rig, f"\x07be\u200bll {long}\nthe second line")
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "x", "posture": "none"})
+    line = open_note(got)[1]
+    first = ("bell " + long)[:sending.ASK_LINE_MAX_CHARS] + "..."
+    assert line == f"  msg {mid} from planner@proj-a (just now): {first}"
+    assert "\x07" not in got.text and "\u200b" not in got.text
+    assert "second line" not in got.text
+
+
+def test_a_failed_ask_read_posts_with_the_check_did_not_run_note(rig, tools):
+    planner(rig)
+    mid = ask(rig)
+    real = rig.record
+
+    class GetFails:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def get_message(self, *args, **kwargs):
+            raise OSError("disk gone")
+
+    tools.record = GetFails()
+    got, _ = call(tools, "send", {"to": "planner@proj-a", "text": "x", "posture": "none"})
+    assert not got.is_error, got.text
+    assert got.structured["notes"] == [
+        f"NOTE: the single-reply check could not read msg {mid} from the record (disk "
+        "gone), so it did not hold this send."]
+    assert got.text.endswith(got.structured["notes"][0])
+
+
+def test_the_connector_sends_under_its_cures_and_notes_open_asks(rig, tools, monkeypatch):
+    seen = []
+
+    def run(ctx, args, **kw):
+        seen.append((ctx.cures, ctx.when_asks_open))
+        return sending.SendResult(outcome=sending.OUTCOME_REFUSED,
+                                  refusal=sending.Refusal("x", "no"))
+
+    monkeypatch.setattr(sending, "run", run)
+    call(tools, "send", {"to": "planner@proj-a", "text": "x"})
+    wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_s": 1})
+    assert seen == [(sending.CURES_CONNECTOR, sending.ASKS_OPEN_NOTE)] * 2
+
+
+#: What a send through the verb can carry beside the tools' parameters, by the names
+#: `sending.run` reads off its arguments.
+VERB_ARGS = {"text", "posture", "cap", "no_cap", "audience", "new", "held", "interrupt",
+             "expires", "standing", "new_name", "check", "reply_to", "message_id"}
+
+
+def assert_connector_words(text):
+    """`text` names no tool and no parameter the connector lacks: the parameters are
+    read off the connector's own input schemas, so a later change to them is caught."""
+    have = {p for schema in tools_mod.inputs().values() for p in schema["properties"]}
+    every = VERB_ARGS | {p for schema in mcp_tools.INPUTS.values()
+                         for p in schema["properties"]}
+    lacking = every - have
+    assert {"message_id", "new", "interrupt", "expires", "held", "standing",
+            "cap"} <= lacking
+    assert "reply tool" not in text and "message_id" not in text, text
+    assert "new: true" not in text, text
+    assert not re.search(r"--\w", text), text
+    for param in lacking:
+        assert not re.search(rf"\b{param}:", text), (param, text)
+        assert not re.search(rf"\b(set|with|drop|pass|add) {param}\b", text,
+                             re.IGNORECASE), (param, text)
+        if "_" in param:
+            assert not re.search(rf"\b{param}\b", text), (param, text)
+    for tool in set(mcp_tools.INPUTS) - set(tools_mod.NAMES):
+        assert f"{tool} tool" not in text, (tool, text)
+
+
+#: The tools' texts the connector's sends never show, each with why: its own text in
+#: place of one, or a parameter it has no way to pass.
+NOT_SHOWN = {"NO_ANSWER_TOOL": "NO_ANSWER_CONNECTOR in its place",
+             "DELETE_NO_ANSWER_TOOL": "the connector deletes nothing",
+             "INTERRUPT_IGNORED_OPERATOR_TOOL": "the connector passes no interrupt"}
+
+
+def test_every_text_the_connector_shows_names_only_what_it_has(rig, tools):
+    planner(rig)
+    texts = {name: getattr(sending, name) for name in dir(sending)
+             if name.endswith(("_TOOL", "_CONNECTOR"))
+             and isinstance(getattr(sending, name), str)}
+    assert set(NOT_SHOWN) <= set(texts)
+    assert sending._no_answer(SimpleNamespace(cures=sending.CURES_CONNECTOR)) == (
+        sending.NO_ANSWER_CONNECTOR)
+    for name, text in texts.items():
+        if name not in NOT_SHOWN:
+            # The connector's rendering adds no `new`: `{new}` is always empty.
+            assert_connector_words(text.replace("{new}", ""))
+
+    # The single-reply refusal in the connector's words, which no send of its meets.
+    first, second = ask(rig, "one?"), ask(rig, "two?")
+    pairs = [(rig.record.get_message(i), SimpleNamespace(qualified="planner@proj-a"))
+             for i in (first, second)]
+    args = SimpleNamespace(posture="optional", interrupt=False, expires=None)
+    for open_asks, tags in (([pairs[0]], ["planner@proj-a"]),
+                            (pairs, ["planner@proj-a", "main@proj-b"])):
+        text = sending._ask_refusal(open_asks, tags, tags, now=rig.clock(), args=args,
+                                    cures=sending.CURES_CONNECTOR)
+        assert f"with reply_to: {open_asks[-1][0].id}" in text or (
+            f"with reply_to: {second}" in text)
+        assert_connector_words(text)
+
+    # The refusals a connector send meets on the rig, through both sending tools.
+    code, out = rig.cli(["send", "--posture", "none", ME, "fyi"], name="planner",
+                        scope="proj-a")
+    no_reply = re.search(r"sent (\d+)", out).group(1)
+    refused = [
+        call(tools, "send", {"to": "nobody-ever", "text": "x"})[0],
+        wait_call(tools, {"to": "nobody-ever", "text": "x", "wait_s": 1}),
+        call(tools, "send", {"to": "planner@proj-a", "text": "x", "reply_to": "abc"})[0],
+        call(tools, "send", {"to": "planner@proj-a", "text": "x", "reply_to": no_reply})[0],
+        call(tools, "send", {"to": "planner@proj-a", "text": "x", "reply_to": first,
+                             "posture": "open"})[0],
+    ]
+    assert [r.refusal for r in refused] == ["never-bound", "never-bound", "reply-to-shape",
+                                            "no-reply", "once-not-open"]
+    for got in refused:
+        assert got.is_error
+        assert_connector_words(got.text)
 
 
 # --------------------------------------------------------------------------- check_messages
@@ -523,7 +730,9 @@ def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools,
 def test_send_and_wait_to_a_recipient_that_cant_read_now_answers_at_once(rig, tools):
     got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_s": 5})
     assert got.structured["outcome"] == "not-delivered"
-    assert got.text.endswith(tools_mod.LATER)
+    first, *notes = got.text.split("\n")
+    assert first.endswith(tools_mod.LATER)
+    assert notes == got.structured["notes"] and notes[0].startswith("NOTE: main@proj-b is not")
 
 
 def test_send_and_wait_to_a_held_recipient_answers_at_once(rig, tools):
