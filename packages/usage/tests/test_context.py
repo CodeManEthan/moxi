@@ -86,12 +86,13 @@ def test_codexs_reported_window_wins_over_the_table():
 
 def test_a_session_or_agent_not_found_is_unknown_with_why():
     missing = api.context(SESSION)
-    assert not missing.known and missing.harness is None
+    assert not missing.known and missing.harness is None and not missing.found
     assert missing.reason.startswith(f"no session {SESSION} found in claude, codex, "
                                      "opencode")
     transcript()
     no_agent = api.context(SESSION, agent_id="a0190b00000000ff")
     assert no_agent.reason.startswith("no agent a0190b00000000ff found")
+    assert not no_agent.found and no_agent.as_dict()["found"] is False
     with pytest.raises(ValueError):
         api.context(SESSION, harness="emacs")
 
@@ -105,15 +106,48 @@ def test_a_session_with_no_request_yet_is_unknown():
     assert found.text() == "context unknown: the session holds no request yet"
 
 
-def test_the_verb_prints_the_line_and_exits_by_whether_it_is_known(capsys):
+def test_the_verb_exits_0_for_any_state_it_names_and_2_for_an_id_it_cannot_find(capsys):
+    # Core's rule for `usage now --session`: a named state, unknown included, is an
+    # answer (0); a session id that is unknown or ambiguous is a usage error (2).
     write_config(f"[[model]]\n{WINDOW}")
     transcript()
     assert cli.main(["context", SESSION]) == 0
     assert capsys.readouterr().out == "context 412,330 / 1,000,000 (41%)\n"
     assert cli.main(["context", SESSION, "--agent", AGENT, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["tokens"] == 21_005
-    assert cli.main(["context", "0190b000-0000-7000-8000-0000000000ff"]) == 1
+    assert cli.main(["context", "0190b000-0000-7000-8000-0000000000ff"]) == 2
     assert "context unknown: no session" in capsys.readouterr().out
+    assert cli.main(["context", SESSION, "--agent", "a0190b00000000ff"]) == 2
+    assert "no agent a0190b00000000ff found" in capsys.readouterr().out
+    t = ClaudeTranscript(Path(sessions.root("claude")), session_id=THREAD)
+    t.user("go")
+    t.write()
+    assert cli.main(["context", THREAD]) == 0
+    assert capsys.readouterr().out == "context unknown: the session holds no request yet\n"
+
+
+def test_an_id_in_more_than_one_harness_is_refused_naming_them(capsys):
+    # Core refused an id found in both corpora rather than take the first.
+    t = ClaudeTranscript(Path(sessions.root("claude")), session_id=THREAD)
+    t.user("go")
+    t.assistant("ok", usage=usage(input_tokens=10, cache_read=1_000, cache_write=0))
+    t.write()
+    r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
+    r.turn(context_window=200_000)
+    r.user("go")
+    r.request(token_usage(input_tokens=50_000, cached=40_000), response_id="resp_c1",
+              context_window=200_000)
+    r.turn_end()
+    r.write()
+    both = api.context(THREAD)
+    assert not both.found and not both.known and both.harness is None
+    assert both.reason == (f"session {THREAD} is in more than one harness (claude, "
+                           "codex); give --harness")
+    assert cli.main(["context", THREAD]) == 2
+    assert "more than one harness (claude, codex)" in capsys.readouterr().out
+    assert cli.main(["context", THREAD, "--harness", "codex"]) == 0
+    assert capsys.readouterr().out == "context 50,000 / 200,000 (25%)\n"
+    assert api.context(THREAD, harness="claude").tokens == 1_010
 
 
 def test_the_verb_without_a_session_is_a_usage_error(capsys):

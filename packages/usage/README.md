@@ -237,7 +237,10 @@ request: `context 412,330 / 1,000,000 (41%)`. The tokens are the whole prompt; t
 is the one the harness wrote on the request (Codex does), else the model table's, and when
 neither is known the line says `window unknown`. `--agent ID` reads one of the session's
 agents from its own file, `--harness` names the harness (else Claude Code, Codex and
-OpenCode are asked in turn). It reads through sessions alone, so it needs no turns.
+OpenCode are all asked, and a session more than one holds is refused, naming them). It
+exits 0 whenever it names the context's state, `context unknown: <why>` included, and 2
+for a session or agent it cannot find or a session in more than one harness. It reads
+through sessions alone, so it needs no turns.
 
 The restart point is where carrying on with a session costs more than restarting it. It
 is Wilson's economic order quantity: a restart costs one cache write of the settled

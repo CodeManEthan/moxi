@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `moxi usage context SESSION` with no `--harness` asks every harness and refuses a
+  session more than one holds, naming them, where it took the first. It exits 0 whenever
+  it names the context's state, `context unknown` included, and 2 for a session or agent
+  it cannot find or a session in more than one harness; it used to exit 1 for any unknown
+  context. `Context` has `found`, and its JSON a `found` key.
 - `moxi usage restart-point --measure --days N` measures over the last N days this once;
   `restart_point.days` stays the window of every other measure. N below 1, or `--days`
   without `--measure`, exits 2.

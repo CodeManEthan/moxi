@@ -25,9 +25,10 @@ when it is filling, when it reaches 100% at the recent rate, then the age of the
 reading on the line. A window it cannot state says why. It exits 0 whatever the states.
 
 `context SESSION` prints how full the session's context is, or with `--agent` one of its
-agents', with its denominator: `context 412,330 / 1,000,000 (41%)`. It exits 1 when the
-session, the agent or a request with its input tokens cannot be found, and 2 with no
-SESSION.
+agents', with its denominator: `context 412,330 / 1,000,000 (41%)`. Without `--harness`
+it asks every harness and refuses a session more than one holds, naming them. It exits 0
+whenever it names the context's state, an unknown context included, and 2 with no
+SESSION, or a session or agent it cannot find or a session in more than one harness.
 
 `restart-point` prints the measured restart point per model and population and each
 warn-at mark's threshold in tokens, or why a mark is unavailable; it exits 1 when there
@@ -415,7 +416,7 @@ def _context(args: argparse.Namespace, prog: str) -> int:
         print(found.text())
         if found.known and found.reason:
             print(f"note: {found.reason}")
-    return codes.OK if found.known else codes.ERROR
+    return codes.OK if found.found else codes.USAGE
 
 
 # --- marks ------------------------------------------------------------------------------

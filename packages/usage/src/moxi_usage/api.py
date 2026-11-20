@@ -36,8 +36,10 @@ Context (`moxi_usage.context`):
   is, or one of its agents', from its newest request, as a `Context`: `tokens` (the
   whole prompt), `window` (the one the harness reported, else the model table's) and
   `percent`, each `UNKNOWN` with a `reason` when it cannot be said; `text()` prints
-  the line with its denominator. `harness` None asks Claude, Codex and OpenCode in that
-  order. It reads through sessions alone, so it works without turns.
+  the line with its denominator. `harness` None asks Claude, Codex and OpenCode, and a
+  session more than one holds is not taken: `found` is false, as for a session or agent
+  not found, and `reason` names the harnesses. It reads through sessions alone, so it
+  works without turns.
 
 The restart point (`moxi_usage.measure`, `moxi_usage.thresholds`):
 
