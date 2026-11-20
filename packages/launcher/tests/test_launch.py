@@ -894,6 +894,21 @@ def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path
     assert nothing_written("r9") and not common.scratch_dir("r9").exists()
 
 
+def test_a_go_launch_with_no_brief_is_refused_before_anything_is_written(harness,
+                                                                          tmp_path):
+    # Core refused a go launch with no brief on preview and launch, before any row.
+    req = LaunchRequest(typed={"harness": "codex", "posture": "go", "target": "headless"},
+                        cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.PostureBrief) as caught:
+        api.preview(req)
+    assert caught.value.code == "posture-brief"
+    [refused] = api.check(req)
+    assert isinstance(refused, presets.PostureBrief)
+    with pytest.raises(presets.PostureBrief):
+        api.launch(req)
+    assert nothing_written("r9")
+
+
 def test_a_notes_dir_from_the_defaults_is_left_out_of_a_scratch_launch(harness, tmp_path):
     write_presets(f'[defaults]\nnotes_dir = "{tmp_path / "notes"}"\n')
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",

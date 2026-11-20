@@ -162,6 +162,13 @@ class ScratchNotes(Refused):
     code = "scratch-notes"
 
 
+class PostureBrief(Refused):
+    """A brief that doesn't fit the start posture: a `go` launch with nothing to start on,
+    or a brief under `with:<identity>`, whose director sends the first message."""
+
+    code = "posture-brief"
+
+
 class NeedsProjects(Refused):
     """A project key with projects not installed."""
 
@@ -516,6 +523,25 @@ def _check_place(where: str, values: Mapping[str, object], *, allow_home: bool
         return [Problem(where, named[1], f"{' and '.join(named)} each name where the "
                         "session starts", "keep one of them", "two-places")]
     return []
+
+
+def _check_posture_brief(posture: str, values: Mapping[str, object]) -> None:
+    """The start posture's rule for the brief, as Core's launcher had it: a `go` launch
+    needs a first turn to start on (a brief, a brief file or a handoff), and a launch under
+    `with:<identity>` takes no brief, since its director sends the first message. A
+    replay (a relaunch or a resume) never comes here."""
+    brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
+        values.get("brief_file"))
+    if posture == "go" and not brief and not catalog.is_set(values.get("handoff")):
+        raise PostureBrief("brief", "posture go needs a brief: nobody is at this session "
+                                    "to direct it, so with no first turn it sits idle",
+                           "give it --brief, --brief-file or --handoff, or pick another "
+                           "posture")
+    if posture.startswith(WITH) and brief:
+        who = posture[len(WITH):]
+        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
+                                    "first message",
+                           "drop the brief, or pick go")
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
@@ -1000,8 +1026,8 @@ def resolve(request, *, presets: Presets | None = None,
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
     holding its shipped default. Reads projects when a place needs it. Raises a
-    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
-    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
+    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
+    `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
     catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
@@ -1030,6 +1056,7 @@ def resolve(request, *, presets: Presets | None = None,
         problem = _posture_problem("the launch", posture, avail)
         if problem is not None:
             raise BadPreset(problem)
+        _check_posture_brief(posture, values)
 
     identity = values.get("identity") or None
     scope = values.get("scope") or None
@@ -1385,7 +1412,8 @@ def _show(value: object) -> str:
 __all__ = [
     "Agent", "BadPreset", "CACHE_TIMER_ROWS", "CODEX_START_CEILING", "COLD_GAP",
     "COMMS_INTERFACE", "ERROR", "HEADLESS_EXIT", "KINDS",
-    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
+    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "PostureBrief",
+    "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "ScratchNotes",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",

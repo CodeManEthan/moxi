@@ -509,6 +509,50 @@ def test_the_with_posture_needs_comms():
         resolve(typed={"posture": "later"})
 
 
+def test_a_go_launch_with_nothing_to_start_on_is_refused():
+    # Core's posture table: go with no brief is refused, since nobody directs the session.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"})
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert "posture go needs a brief" in caught.value.problem
+    with pytest.raises(presets.PostureBrief):
+        resolve(typed={"posture": "go", "brief": "  \n"})
+
+
+@pytest.mark.parametrize("first", [{"brief": "Build it."}, {"brief_file": "/w/brief.md"},
+                                   {"handoff": "/w/handoff.md"}])
+def test_a_go_launch_with_a_first_turn_resolves(first):
+    assert resolve(typed={"posture": "go", **first}).posture == "go"
+
+
+def test_a_brief_under_with_is_refused():
+    # Core's posture table: under with:<agent> that agent sends the first message.
+    for first in ({"brief": "Build it."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            resolve(typed={"posture": "with:lead", **first}, available=only("comms"))
+        assert caught.value.code == "posture-brief"
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    got = resolve(typed={"posture": "with:lead"}, available=only("comms"))
+    assert got.posture == "with:lead"
+
+
+def test_a_brief_under_operator_or_no_posture_is_sent():
+    # Under operator the session reads its brief and waits, as the operator ruled; with no
+    # posture the brief goes as it always did. Neither needs one.
+    for posture in ("operator", ""):
+        assert resolve(typed={"posture": posture, "brief": "Read the design."}).posture \
+            == posture
+        assert resolve(typed={"posture": posture}).posture == posture
+
+
+def test_a_go_posture_from_a_seat_needs_the_brief_too():
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\n', seat="s")
+    assert resolve('[seat.s]\nposture = "go"\n', seat="s",
+                   typed={"brief": "Go."}).posture == "go"
+
+
 @pytest.mark.parametrize("harness, target, links, mode, turns", [
     ("claude", "terminal", (), "interactive", False),
     ("claude", "slot", ("turns",), "interactive", True),

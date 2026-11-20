@@ -124,17 +124,21 @@ launcher writes it as one line, `start posture: <value>`, in the identity block 
 session starts with (the few lines naming its session id, directory, project and comms
 name, which Claude Code gets with its system prompt), or, where a session gets no
 identity block (a Codex launch without turns, or a headless one), as the second line of
-its opening prompt. The launcher does nothing else with it: the word is for the agent,
-and your own instructions can say more about each. Unset, the default, there is no line.
+its opening prompt. Past one check on the brief, the launcher does nothing else with it:
+the word is for the agent, and your own instructions can say more about each. Unset, the
+default, there is no line.
 
 - `operator`: the operator, the person running Moxi, is at this session and directs it.
-  The agent takes its work from that person as it comes.
+  The agent takes its work from that person as it comes. A brief is sent, and the
+  session reads it and then waits.
 - `go`: nobody is waiting at this session to direct it. The agent starts on its brief at
-  once and carries it through.
+  once and carries it through. A `go` launch with no brief, brief file or handoff would
+  sit idle, so `preview` and `run` refuse it (`posture-brief`).
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
-  comms; a launch lists its directors with `--director`. A director's relaunch starts the
-  new session with this posture.
+  comms; a launch lists its directors with `--director`. The director sends the first
+  message, so a brief under this posture is refused (`posture-brief`). A director's
+  relaunch starts the new session with this posture.
 - `relaunched (handoff: <file>)`: the launcher's own, never set by a preset. A session
   that relaunched itself with a handoff starts with it, and reads that file before
   anything else; the `moxi-handoff` skill the launcher ships says so.
