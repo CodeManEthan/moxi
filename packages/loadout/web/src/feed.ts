@@ -90,6 +90,15 @@ export interface Project {
   root: string;
 }
 
+/** `/api/list`: every item each section lists, and the sections. `problem` is set, and the
+ * rest empty, when the manifest can't be read. */
+export interface Listing {
+  problem: string | null;
+  manifest: string | null;
+  sections: Section[];
+  items: Item[];
+}
+
 /** `/api/projects`: the projects a section can name by key, or why there are none. */
 export interface Projects {
   projects: Project[];
@@ -433,6 +442,13 @@ export function parseReplacePreview(data: unknown): ReplacePreview | null {
   return { problem: data.problem, case: data.case, target: data.target, kept_in: data.kept_in,
            tracked: data.tracked, others: data.others, label: data.label, diff: data.diff,
            lines: data.lines, skipped: data.skipped };
+}
+
+/** `/api/list`'s value, or null when it isn't one. */
+export function parseListing(data: unknown): Listing | null {
+  if (!isObj(data) || !isStrOrNull(data.problem) || !isStrOrNull(data.manifest)
+      || !isListOf(data.sections, isSection) || !isListOf(data.items, isItem)) return null;
+  return { problem: data.problem, manifest: data.manifest, sections: data.sections, items: data.items };
 }
 
 /** `/api/projects`'s value, or null when it isn't one. */
