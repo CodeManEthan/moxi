@@ -394,6 +394,21 @@ def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkey
                                      "  Brief from launcher", "", "  Go."]
 
 
+def test_a_go_preview_starts_on_a_typed_handoff_but_not_on_words_after_the_dashes(
+        work, tmp_path, capsys):
+    # Core's go launch needs a first turn. Here a typed --handoff is one, sent as the
+    # session's first turn; the words after `--` are passed on to the harness, not sent.
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("Carry on with the build.\n")
+    code, out, err = run(["preview", "--posture", "go", "--handoff", str(handoff),
+                          "--json"], capsys)
+    assert code == codes.OK, err
+    assert any("Carry on with the build." in word for word in json.loads(out)["argv"])
+    status, out, err = run(["preview", "--posture", "go", "--", "Carry on."], capsys)
+    assert status == codes.REFUSED and out == ""
+    assert err.splitlines()[0].endswith("[posture-brief]")
+
+
 @pytest.mark.parametrize("argv, code, short", [
     (["preview", "--seat", "nobody"], codes.REFUSED, "no-preset"),
     (["preview", "--model"], codes.USAGE, "bad-value"),
