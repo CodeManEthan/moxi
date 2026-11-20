@@ -1073,6 +1073,16 @@ def test_the_page_and_the_block_fit_a_phone(seeded, ui_page, ui_width_check):
     ui_width_check(ui_page, module="services", name="summary")
 
 
+#: Each list row's name that its row cuts: shown in less than its own width.
+_CUT_NAMES = """() => {
+  const host = document.querySelector('#moxi-panel > moxi-services-page');
+  return [...host.shadowRoot.querySelectorAll('moxi-ui-row')].flatMap((row) => {
+    const name = row.shadowRoot.querySelector('.name');
+    return name !== null && name.scrollWidth > name.clientWidth + 1 ? [name.textContent.trim()] : [];
+  });
+}"""
+
+
 @pytest.mark.parametrize("width", [1280, 400])
 def test_the_list_an_opened_row_its_warning_and_the_panel_fit_the_width(seeded, units_base, ui_shell, ui_page,
                                                                          ui_width_check, width):
@@ -1080,6 +1090,12 @@ def test_the_list_an_opened_row_its_warning_and_the_panel_fit_the_width(seeded, 
     ui_page.set_viewport_size({"width": width, "height": 800})
     panel = panel_of(ui_page)
     ui_width_check(ui_page, width=width)
+    # Under 720 px each group's label stands above its rows, so no row's name is cut.
+    assert ui_page.evaluate(_CUT_NAMES) == []
+    if width < 720:
+        label = panel.locator('section[data-part="group"] [data-line="group"]').first
+        rows = panel.locator('section[data-part="group"] .gl').first
+        assert label.bounding_box()["y"] + label.bounding_box()["height"] <= rows.bounding_box()["y"] + 1
     name = name_of(ui_shell, SLOTS)
     part = opened(panel, SLOTS, name)
     ui_width_check(ui_page, width=width)

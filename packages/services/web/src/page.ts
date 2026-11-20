@@ -135,6 +135,15 @@ const STYLES = css`
   .grp .gk button { padding: 0; margin: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
   .grp .gk small button { color: var(--moxi-text); }
   .grp .gk button:hover:not(:disabled) { background: none; }
+  /* Under 720 px, as on the Projects page, each group's label stands above its rows, so a
+     row has the whole width. */
+  @media (max-width: 720px) {
+    .grp { display: block; padding: 4px 0 6px; }
+    /* The count above the rows, with Add a service beside it at the right. */
+    .grp .gk { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 9px;
+               font-size: 13px; }
+    .grp .gk small { margin-top: 0; }
+  }
   .item moxi-ui-row > .fact { color: var(--moxi-text); font-variant-numeric: tabular-nums; }
   /* On a phone a fact in the text colour wraps, so it and Open stay inside the row. */
   @media (max-width: 480px) {
