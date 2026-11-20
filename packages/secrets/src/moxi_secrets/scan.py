@@ -284,6 +284,20 @@ class Sets:
         self.keywords = tuple(sorted({k for rules in self.rules.values() for r in rules
                                       for k in r.keywords}))
         self._keyword_set = None
+        self._keyword_starts: dict = {}
+
+    def keyword_start(self, set_names):
+        """A pattern that matches, at its start, a keyword of a rule in the named
+        gitleaks-format sets, and the longest such keyword's length; None when they have
+        no keyword."""
+        key = tuple(set_names)
+        if key not in self._keyword_starts:
+            words = sorted({k for name in key for r in self.rules[name] for k in r.keywords},
+                           key=len, reverse=True)
+            self._keyword_starts[key] = (
+                (re.compile("|".join(re.escape(k) for k in words)), len(words[0]))
+                if words else None)
+        return self._keyword_starts[key]
 
     def rule_ids(self) -> frozenset:
         return frozenset(r.id for rules in self.rules.values() for r in rules)
@@ -653,12 +667,65 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
 _SPACED_RX = re.compile("[\x0b\x0c\x1c-\x1f\x85]|\r(?!\n)")
 
 
+def _spaced_copy(text, rx, names) -> str | None:
+    """The third copy `_seen_hits` scans, as long as `text`, or None when it would equal
+    the copy without the see-through characters (the characters `rx` matches).
+
+    Each character `_SPACED_RX` matches becomes a space. A run of see-through characters
+    that holds none of those, and that stands directly before a keyword of a rule in the
+    named gitleaks-format sets, read in the copy without them at the run's place and
+    lowered as the keyword check lowers, has its first character turned into a space,
+    unless a keyword of that copy runs across the place (starts before it and ends past
+    it): a run that splits a keyword, such as `sk_` and `live_` in a Stripe key's
+    `sk_live`, stays removed. The copy's scan removes the rest, so a word before such a
+    run stays apart from the token after it.
+    """
+    spaced = _SPACED_RX.search(text) is not None
+    found = load_sets().keyword_start([n for n in names if n in GITLEAKS_SETS])
+    starts = []
+    if found is not None:
+        keyword, size = found
+        copy = None
+
+        def keyword_size(position):
+            """The length of the longest keyword at `position` in the copy, or 0."""
+            ahead = copy[position:position + size].lower()
+            if not ahead.isascii():
+                ahead = ahead.replace("i\u0307", "i")
+            m = keyword.match(ahead)
+            return len(m.group()) if m else 0
+
+        removed = 0
+        for m in re.finditer(rx.pattern + "+", text):
+            run_start, run_end = m.span()
+            position = run_start - removed
+            removed += run_end - run_start
+            # One character past the run, so a carriage return at its end sees the
+            # newline after it; that character is not see-through, so no match starts there.
+            if spaced and _SPACED_RX.search(text, run_start, run_end + 1):
+                continue
+            if copy is None:
+                copy = rx.sub("", text)
+            if keyword_size(position) and not any(
+                    keyword_size(before) > position - before
+                    for before in range(max(0, position - size + 1), position)):
+                starts.append(run_start)
+    if not spaced and not starts:
+        return None
+    out = list(_SPACED_RX.sub(" ", text) if spaced else text)
+    for i in starts:
+        out[i] = " "
+    return "".join(out)
+
+
 def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     """The hits of `text` and of a copy of it without its see-through characters, the
     copy's mapped back to `text`, sorted by start. When `text` holds a see-through
-    character a rule may read as whitespace (`_SPACED_RX`), a third copy holds a space
-    for each such character and none of the others, so a boundary one gave survives;
-    its hits are mapped back the same way.
+    character a rule may read as whitespace (`_SPACED_RX`), or a run of see-through
+    characters just before a rule's keyword, a third copy (`_spaced_copy`) holds a space
+    for each of those and none of the others, so a boundary one gave, or the boundary
+    a word needs from the token after it, survives; its hits are mapped back the same
+    way.
 
     A copy hit's start and end map to the characters of `text` they came from, except
     that one at the copy's start starts at 0 and one at its end ends at `len(text)`, so
@@ -677,8 +744,9 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
         return hits
     rx = re.compile("[" + "".join("\\U%08x" % ord(c) for c in chars) + "]")
     bases = [text]
-    if _SPACED_RX.search(text):
-        bases.append(_SPACED_RX.sub(" ", text))
+    spaced = _spaced_copy(text, rx, names)
+    if spaced is not None:
+        bases.append(spaced)
     spans = {(h.set, h.rule, h.start, h.end) for h in hits}
     by_secret: dict = {}
     for h in hits:

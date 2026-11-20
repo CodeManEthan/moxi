@@ -12,7 +12,11 @@
   scanned twice; on the fallback engine that is a second worker request. One that also
   holds a vertical tab, form feed, lone carriage return, U+001C to U+001F or NEL is
   scanned a third time, with each of those as a space, so a token that one of them
-  sets apart from the word before it is found when split.
+  sets apart from the word before it is found when split. So is one where a run of the
+  others stands just before a rule's keyword, with the run as one space, so a split
+  Stripe key after `abc` and a zero-width space is found. A split token is still missed
+  where such a run glues a word onto it and its rule has no keyword at its start, or,
+  rarely, its split falls just before text that starts another rule's keyword.
 - `REDACT_VERSION`, now 2: which `redact` this is, for a store of redacted text to
   record.
 - `seen_through(c)`: whether `scan` and `redact` read past a character.

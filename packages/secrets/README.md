@@ -73,7 +73,11 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
 - `known` holds literal values the caller already holds, such as the token it is using.
   They are found first, as set `known`.
 - Both read past invisible characters. A token split by a zero-width space, a soft
-  hyphen or a like character is a hit, spanning the characters inside it. The characters
+  hyphen or a like character is a hit, spanning the characters inside it, with two gaps
+  left where such a character glues a word onto a split token and the token's rule needs
+  a word boundary there: the token is missed when its rule has no keyword at its start (a
+  Discord bot token after `abc` and a zero-width space), and, rarely, when its split
+  falls just before text that starts another rule's keyword (`sk`, `ey`). The characters
   read past are the ones a renderer may show as nothing: C0 controls other than tab and
   newline, DEL and C1 controls; format characters (category `Cf`, as the running
   Python's `unicodedata` reads it), such as zero-width spaces and joiners, bidi controls
@@ -83,8 +87,12 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   as a copy without them, whose hits are mapped back. A text that also holds one a rule
   may read as whitespace (a vertical tab, form feed, carriage return with no newline
   after it, U+001C to U+001F or NEL) is scanned a third time, as a copy with a space for
-  each of those and without the rest, so the boundary one gave a token survives. `allow`
-  and `known` judge a split value as they judge it whole.
+  each of those and without the rest, so the boundary one gave a token survives. So is
+  a text where a run of the others stands just before a rule's keyword (`sk_live` for a
+  Stripe key, read with the run's characters removed): in that copy the run is one space,
+  so the word before it stays apart from the token. A run inside a keyword (`sk_`, the
+  run, `live_`) is removed, never a space. `allow` and `known` judge a split value as
+  they judge it whole.
 - `redact(text, sets, ...)` replaces each hit with `[REDACTED:<rule id>]`, a split token
   with the characters inside it; a split token at the very start or end of the text
   takes in the invisible characters before or after it. Its result scans clean with the

@@ -504,6 +504,29 @@ def test_a_split_token_keeps_the_boundary_a_whitespace_like_character_gives(engi
         "abc" + border + ph("stripe-access-token") + " end"
 
 
+@pytest.mark.parametrize("border", ["\u200b", "\u00ad", "\x01", "\x7f"])
+@pytest.mark.parametrize("position", [12, 3])
+def test_a_split_token_after_a_word_and_a_see_through_character_is_redacted(engine_name,
+                                                                           border,
+                                                                           position):
+    # Removed, the character before the key would run "abc" into it, and Stripe's rule
+    # needs a word boundary there; the key's keyword after it keeps the two apart. At 3
+    # the split falls inside that keyword.
+    token = corpus.stripe(corpus.rng(59))
+    text = "abc" + border + corpus.split(token, "\u200b", position) + " end"
+    out = redact(text, ("credentials",))
+    assert out == "abc" + border + ph("stripe-access-token") + " end"
+    assert redact(out, ("credentials",)) == out
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("credentials",))] == [
+        ("stripe-access-token", 4, 5 + len(token))]
+    assert scan(text + " # gitleaks:allow", ("credentials",)) == []
+    assert redact(text + " # gitleaks:allow", ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end # gitleaks:allow"
+    whole = "abc" + border + token + " end"
+    assert [(h.rule, h.start, h.end) for h in scan(whole, ("credentials",))] == [
+        ("stripe-access-token", 4, 4 + len(token))]
+
+
 def test_redact_version():
     assert REDACT_VERSION == 2
     assert "REDACT_VERSION" in moxi_secrets.__all__

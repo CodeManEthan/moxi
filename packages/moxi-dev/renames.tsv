@@ -11500,6 +11500,7 @@ secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.
 secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.end) in spans or any(	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if hit.set not in GITLEAKS_SETS:	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if rule.keywords and not any(k in keywords for k in rule.keywords):	keep	any	any
+secrets	packages/secrets/src/moxi_secrets/scan.py	if keyword_size(position) and not any(	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/scan.py	load_sets	name	handle	fh
 secrets	packages/secrets/src/moxi_secrets/scan.py	out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	return "".join(sorted(c for c in set(text) if seen_through(c)))	keep	set	set
