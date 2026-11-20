@@ -768,7 +768,7 @@ GUARDS = (
           doc="Stop subagents from starting subagents of their own."),
     Guard(name="question-mode", calls={"claude": ("AskUserQuestion",)},
           judge="moxi_turns.guards.question:judge", wants=("prompts",), on_error="deny",
-          switch="guards.question_mode",
+          deadline_ms=3000, switch="guards.question_mode",
           doc="Let agents ask the person questions only in a turn where they typed something "
               "about a question."),
 )

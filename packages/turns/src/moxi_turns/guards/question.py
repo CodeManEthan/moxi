@@ -20,9 +20,11 @@ judge runs in the session's endpoint, whose parent is that process.
 The reminder: `on_prompt`, a `prompt` listener, adds one line to a prompt that asks to go
 through or answer open questions, and not in prose, when question mode is on and the
 prompt's origin is one the judge counts. A prompt asks for prose when it holds a word on
-`question_mode.prose_words`, case-folded (by default "prose"). So a message delivered by another module that
-says "go through the open questions" gets no reminder, since the judge would refuse the
-call it asks for. A prompt with no origin gets none either.
+`question_mode.prose_words`, case-folded (by default "prose" and "pros", how voice input
+spells it). So a message delivered by another module that says "go through the open
+questions" gets no reminder, since the judge would refuse the call it asks for. A prompt
+with no origin gets none either. The reminder leaves the agent to judge whether the
+questions are wanted now: a prompt can name the phrase without asking for them.
 """
 
 from __future__ import annotations
@@ -63,9 +65,10 @@ R_LAUNCH = (
 )
 #: What `on_prompt` adds.
 REMINDER = (
-    "The person at the keyboard asked to go through open questions. Put the questions open "
-    "now to them with AskUserQuestion: up to four per call, as many calls as you need, each "
-    "self-contained, with your recommendation first."
+    "The operator just asked to go through open questions. If he is asking now, put the "
+    "questions that are open now to him with AskUserQuestion: up to four per call, as many "
+    "calls as you need, each self-contained with your recommendation first. Once he has "
+    "answered them, count any new questions at the end of your output, as always."
 )
 
 _WORD = re.compile(r"[^\W_]+")

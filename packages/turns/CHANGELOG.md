@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Question mode's prompt reminder leaves the agent to judge whether the questions are
+  wanted now ("If he is asking now, ..."), and asks it to count any new questions at the
+  end of its output once they are answered. "pros", as voice input spells "prose", now
+  asks for prose too: the default of `question_mode.prose_words` is `["prose", "pros"]`.
+  Question mode's judge may take up to 3000 ms on a call, still clamped by
+  `guards.max_wait_ms`, before the call is refused.
 - Question mode counts a prompt sent from the Claude apps through Remote Control
   (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
   `["composer", "bridge"]`, so such a prompt that mentions a question lets

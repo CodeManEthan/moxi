@@ -122,7 +122,7 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   `["composer", "bridge"]`: `composer` is a prompt typed at this terminal, `bridge` one
   sent from the Claude apps through Remote Control.
 - `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
-  question-mode reminder. Default `["prose"]`.
+  question-mode reminder. Default `["prose", "pros"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
 `stop_handler.wait_ms` instead.
