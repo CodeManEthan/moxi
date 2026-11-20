@@ -5,7 +5,7 @@
 // reads under the range and the filters.
 
 import type { Measure } from "./chart-model.ts";
-import { COST_DAYS, DEFAULT_RANGE, rangeBy, rangeDays, rangeLabel, rangeMenu } from "./cost-model.ts";
+import { COST_DAYS, countWords, DEFAULT_RANGE, rangeBy, rangeDays, rangeLabel, rangeMenu } from "./cost-model.ts";
 import type { Range } from "./cost-model.ts";
 import { addDays, daysFrom } from "./days.ts";
 import type { DayRow, Lane, ModelRow, ProjectRow, Report } from "./feed.ts";
@@ -15,16 +15,17 @@ import { harnessName } from "./limits-model.ts";
 /** What the filter line is set to. An empty string is a filter that is not set. */
 export interface PageState {
   range: Range;
-  /** A project's key. */
-  project: string;
-  /** A folder's whole path. At most one of `project` and `folder` is set. */
-  folder: string;
+  /** The project keys picked; none is every project. */
+  projects: string[];
+  /** The folders picked, each a whole path. At most one of `projects` and `paths` holds
+   * any. */
+  paths: string[];
   harness: string;
   model: string;
   measure: Measure;
 }
 
-export const START: PageState = { range: DEFAULT_RANGE, project: "", folder: "", harness: "", model: "", measure: "cost" };
+export const START: PageState = { range: DEFAULT_RANGE, projects: [], paths: [], harness: "", model: "", measure: "cost" };
 
 let held: PageState = { ...START };
 const watchers = new Set<(state: PageState) => void>();
@@ -34,12 +35,12 @@ export function heldState(): PageState {
   return held;
 }
 
-/** Changes the state and tells every watcher. Setting a project clears the folder and
- * setting a folder clears the project, since a report takes the two as one place. */
+/** Changes the state and tells every watcher. Picking a project clears the folders and
+ * picking a folder clears the projects, since a report takes the two as one place. */
 export function holdState(patch: Partial<PageState>): PageState {
   const next = { ...held, ...patch };
-  if (patch.project) next.folder = "";
-  else if (patch.folder) next.project = "";
+  if (patch.projects?.length) next.paths = [];
+  else if (patch.paths?.length) next.projects = [];
   held = next;
   for (const tell of [...watchers]) tell(held);
   return held;
@@ -53,7 +54,7 @@ export function watchState(tell: (state: PageState) => void): () => void {
 
 /** Whether any filter but the range is set. */
 export function filtered(state: PageState): boolean {
-  return Boolean(state.project || state.folder || state.harness || state.model);
+  return Boolean(state.projects.length || state.paths.length || state.harness || state.model);
 }
 
 // --- the reads ----------------------------------------------------------------------------
@@ -61,14 +62,15 @@ export function filtered(state: PageState): boolean {
 export type FilterKey = "since" | "until" | "harness" | "project" | "folder" | "model";
 
 /** The query keys the state gives a report, in a fixed order; `leave` names keys to
- * leave out. All time sends no day, and with the days left out `today` is not read. */
+ * leave out. Several projects or folders go one to a line. All time sends no day, and
+ * with the days left out `today` is not read. */
 export function stateKeys(state: PageState, today: string, leave: FilterKey[] = []): [string, string][] {
   const days = leave.includes("since") && leave.includes("until") ? null : rangeDays(state.range, today);
   const keys: [FilterKey, string][] = [];
   if (days !== null) keys.push(["since", days.since], ["until", days.until]);
   if (state.harness) keys.push(["harness", state.harness]);
-  if (state.project) keys.push(["project", state.project]);
-  if (state.folder) keys.push(["folder", state.folder]);
+  if (state.projects.length) keys.push(["project", state.projects.join("\n")]);
+  if (state.paths.length) keys.push(["folder", state.paths.join("\n")]);
   if (state.model) keys.push(["model", state.model]);
   return keys.filter(([key]) => !leave.includes(key));
 }
@@ -135,6 +137,9 @@ export interface MenuItem {
   figure: string | null;
   /** The entry in force, which carries the menu's check. */
   picked: boolean;
+  /** One of several the menu can pick together: picking it adds it to those picked, or
+   * takes it away, and leaves the menu open. */
+  several: boolean;
   /** A rule is drawn above this entry. */
   ruled: boolean;
   /** What picking it sets; null for `From … to …`, which opens its two days instead. */
@@ -146,7 +151,8 @@ export interface Menu {
   key: "range" | "place" | "harness" | "model";
   /** `Range`, `Project`, `Folder`, `Harness`, `Model`. */
   label: string;
-  /** The button's words: `last 30 days`, `all`, a project, `~/code/atlas-api`. */
+  /** The button's words: `last 30 days`, `all`, a project, `~/code/atlas-api`,
+   * `2 projects`. */
   value: string;
   /** Set to something other than what the page opens with: drawn in the text colour. */
   set: boolean;
@@ -194,7 +200,9 @@ export interface FilterFacts {
 
 export const ALL = "all";
 const item = (key: string, label: string, picked: boolean, patch: Partial<PageState>): MenuItem =>
-  ({ key, label, figure: null, picked, ruled: false, patch });
+  ({ key, label, figure: null, picked, ruled: false, several: false, patch });
+const severalItem = (key: string, label: string, picked: boolean, patch: Partial<PageState>): MenuItem =>
+  ({ ...item(key, label, picked, patch), several: true });
 
 /** A folder as the page writes it whole: under the home folder, `~/code/atlas-api`. */
 export function tilde(path: string, home: string | null | undefined): string {
@@ -213,6 +221,26 @@ function chooser(key: Menu["key"], label: string, current: string, entries: [str
     key, label, value: current ? name(current) : ALL, set: current !== "",
     items: [item("", ALL, current === "", patch("")),
             ...listed.map(([value, words]) => item(value, words, value === current, patch(value)))],
+  };
+}
+
+/** Each of `values` once, `value` added when it is not among them and taken away when it is. */
+function toggled(values: string[], value: string): string[] {
+  return values.includes(value) ? values.filter((other) => other !== value) : [...values, value];
+}
+
+/** The project (or folder) menu: `all`, then the entries, any number of them picked, those
+ * picked that are not entries first. `noun` counts several picked on the button. */
+function places(label: string, noun: string, current: string[], entries: [string, string][],
+                patch: (values: string[]) => Partial<PageState>, name: (value: string) => string): Menu {
+  const listed = [...current.filter((value) => !entries.some(([key]) => key === value)).map((value): [string, string] => [value, name(value)]),
+                  ...entries];
+  return {
+    key: "place", label,
+    value: current.length === 0 ? ALL : current.length === 1 ? name(current[0]) : countWords(current.length, noun),
+    set: current.length > 0,
+    items: [item("", ALL, current.length === 0, patch([])),
+            ...listed.map(([value, words]) => severalItem(value, words, current.includes(value), patch(toggled(current, value))))],
   };
 }
 
@@ -239,27 +267,27 @@ export function filterLine(facts: FilterFacts): FilterLine {
   const range: Menu = {
     key: "range", label: "Range", value: rangeLabel(state.range, today), set: state.range.kind !== DEFAULT_RANGE.kind,
     items: rangeMenu(state.range, facts.figures, facts.allTime).map((entry): MenuItem => ({
-      ...entry, patch: entry.key === "custom" ? null : { range: { kind: entry.key } },
+      ...entry, several: false, patch: entry.key === "custom" ? null : { range: { kind: entry.key } },
     })),
   };
 
   let place: Menu | null = null;
   const home = facts.places?.home;
   const folder = (path: string): string => tilde(path, home);
-  if (facts.places !== null || state.project || state.folder) {
+  if (facts.places !== null || state.projects.length || state.paths.length) {
     const rows = facts.places?.rows ?? [];
-    if (facts.folders || state.folder) {
-      // By folder, and by project while a folder is set: the folder leads the list.
+    if (facts.folders || state.paths.length) {
+      // By folder, and by project while a folder is picked: the folders lead the list.
       const paths = facts.folders ? [...new Set(rows.map((row) => row.cwd).filter((path): path is string => !!path))] : [];
       const keys = facts.folders ? [] : [...new Set(rows.map((row) => row.project).filter((key): key is string => !!key))];
-      const menu = chooser("place", facts.folders ? "Folder" : "Project", state.folder,
-                           paths.map((path) => [path, folder(path)]), (value) => ({ folder: value, project: "" }), folder);
-      menu.items.push(...keys.map((key) => item(`project:${key}`, key, false, { project: key, folder: "" })));
+      const menu = places(facts.folders ? "Folder" : "Project", "folder", state.paths,
+                          paths.map((path) => [path, folder(path)]), (values) => ({ paths: values, projects: [] }), folder);
+      menu.items.push(...keys.map((key) => severalItem(`project:${key}`, key, false, { projects: [key], paths: [] })));
       place = menu;
     } else {
       const keys = [...new Set(rows.map((row) => row.project).filter((key): key is string => !!key))];
-      place = chooser("place", "Project", state.project, keys.map((key) => [key, key]),
-                      (value) => ({ project: value, folder: "" }), (value) => value);
+      place = places("Project", "project", state.projects, keys.map((key) => [key, key]),
+                     (values) => ({ projects: values, paths: [] }), (value) => value);
     }
   }
 

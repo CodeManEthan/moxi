@@ -33,7 +33,7 @@ test("projects go by cost and the closed row names the first three", () => {
 test("an opened project row has its share, rounded down, and its cost, and sets the project filter", () => {
   const [first] = placesSection(PROJECTS, false).rows;
   assert.deepEqual(first, { key: "project:proj-a", name: "proj-a", share: "38%", cost: "$21.49", why: null,
-                            patch: { project: "proj-a", folder: "" } });
+                            patch: { projects: ["proj-a"], paths: [] } });
 });
 
 test("files with no project are one row, their sum, that opens nothing", () => {
@@ -46,7 +46,7 @@ test("the sentence names the folders with no project, whole, each filtering to i
   assert.equal(sentence.map((part) => part.text).join(""),
                "\"no project\" is ~/code/finch and /srv/loose. A project row opens the Sessions section above, filtered to it.");
   assert.deepEqual(sentence.filter((part) => part.patch !== null).map((part) => part.patch),
-                   [{ folder: "/home/alice/code/finch", project: "" }, { folder: "/srv/loose", project: "" }]);
+                   [{ paths: ["/home/alice/code/finch"], projects: [] }, { paths: ["/srv/loose"], projects: [] }]);
 });
 
 test("three folders with no project are listed with commas, and files with no folder are said", () => {
@@ -63,7 +63,7 @@ test("with 379 folders of no project the sentence names the dearest three and co
   assert.equal(sentence.map((part) => part.text).join(""),
                "\"no project\" is ~/work/f-378, ~/work/f-377, ~/work/f-376, 376 more and files with no folder. "
                + "A project row opens the Sessions section above, filtered to it.");
-  assert.deepEqual(sentence.filter((part) => part.patch !== null).map((part) => part.patch.folder),
+  assert.deepEqual(sentence.filter((part) => part.patch !== null).map((part) => part.patch.paths[0]),
                    ["/home/alice/work/f-378", "/home/alice/work/f-377", "/home/alice/work/f-376"]);
   // `376 more` opens the table, whose rows hold every folder by name.
   assert.deepEqual(sentence.filter((part) => part.table), [{ text: "376 more", patch: null, table: true }]);
@@ -91,7 +91,7 @@ test("folders are written whole, the first two closed, with no row for files wit
   assert.equal(section.count, "4 folders");
   assert.deepEqual(section.rows.map((row) => row.name), ["~/code/atlas", "~/code/kestrel", "/srv/tool", NO_FOLDER]);
   assert.ok(!section.rows.some((row) => row.name === NO_PROJECT));
-  assert.deepEqual(section.rows[0].patch, { folder: "/home/alice/code/atlas", project: "" });
+  assert.deepEqual(section.rows[0].patch, { paths: ["/home/alice/code/atlas"], projects: [] });
   assert.equal(section.rows[3].patch, null);
   assert.deepEqual(section.sentence, [{ text: "A folder row opens the Sessions section above, filtered to it.", patch: null }]);
 });

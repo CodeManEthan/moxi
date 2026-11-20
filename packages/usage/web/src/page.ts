@@ -1102,12 +1102,13 @@ export class UsagePage extends LitElement {
       </div>` : nothing}</span></span>`;
   }
 
+  /** One entry of a menu. Picking one of several leaves the menu open. */
   #item(item: MenuItem) {
     const patch = item.patch;
-    return html`<button type="button" class="it" role="menuitemradio" aria-checked=${String(item.picked)}
-      data-item=${item.key} @click=${() => {
+    return html`<button type="button" class="it" role=${item.several ? "menuitemcheckbox" : "menuitemradio"}
+      aria-checked=${String(item.picked)} data-item=${item.key} @click=${() => {
         if (patch === null) { this.custom = !this.custom; return; }
-        this.#closeMenu();
+        if (!item.several) this.#closeMenu();
         holdState(patch);
       }}><span aria-hidden="true">${item.picked ? "✓" : nothing}</span><span>${item.label}</span>${
       item.figure === null ? html`<span></span>` : html`<span class="t">${item.figure}</span>`}</button>`;
@@ -1719,7 +1720,7 @@ export class UsagePage extends LitElement {
         @click=${() => { this.sectionTable = key; }}>${part.text}</button>`;
     }
     const patch = part.patch;
-    return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.folder ?? ""}
+    return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.paths?.[0] ?? ""}
       @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${part.text}</a>`;
   }
 

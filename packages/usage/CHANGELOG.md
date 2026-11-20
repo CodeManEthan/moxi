@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The page's Project (or Folder) filter picks several at once: each entry is a check that
+  adds it or takes it away and leaves the menu open, the button counts them (`2
+  projects`), and `all` clears them. Everything under the filter line reads the files of
+  any of them.
 - A report's `project` and `work_dir` each take one key or a sequence of them, and keep
   the files any of them matches; several go out in `filters` joined by `, `. The page's
   report routes take several projects or folders in `project` and `folder`, one to a

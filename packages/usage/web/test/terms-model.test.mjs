@@ -172,8 +172,8 @@ test("opened prices has the table once read, the unpriced models and the drawn p
 });
 
 test("the sections' terms are read by model under every filter", () => {
-  const path = termsSectionPath({ range: { kind: "7d" }, measure: "cost", harness: "codex", model: "m-a", project: "proj-a",
-                                  folder: "" }, "2026-11-08");
+  const path = termsSectionPath({ range: { kind: "7d" }, measure: "cost", harness: "codex", model: "m-a", projects: ["proj-a"],
+                                  paths: [] }, "2026-11-08");
   const query = new URLSearchParams(path.split("?")[1]);
   assert.ok(path.startsWith("api/terms?"));
   assert.equal(query.get("by"), "model");

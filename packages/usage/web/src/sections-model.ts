@@ -145,17 +145,17 @@ export function placesSection(report: Report<ProjectRow> | null, folders: boolea
   let sentence: SentencePart[] | null;
   if (folders) {
     rows = sorted.map((row) => costRow(row.cwd ?? "", named(row), sumOf(row), whole,
-                                       row.cwd === null ? null : { folder: row.cwd, project: "" }));
+                                       row.cwd === null ? null : { paths: [row.cwd], projects: [] }));
     sentence = [{ text: "A folder row opens the Sessions section above, filtered to it.", patch: null }];
   } else {
     const loose = sorted.filter((row) => row.project === null);
     const own = sorted.filter((row) => row.project !== null).map((row) =>
-      costRow(`project:${row.project}`, row.project as string, sumOf(row), whole, { project: row.project as string, folder: "" }));
+      costRow(`project:${row.project}`, row.project as string, sumOf(row), whole, { projects: [row.project as string], paths: [] }));
     const fold = loose.length === 0 ? [] : [costRow("no-project", NO_PROJECT, sumRows(loose), whole, null)];
     rows = byCost([...own, ...fold], (row) => row.sum, (row) => row.name);
     const paths = loose.map((row) => row.cwd).filter((path): path is string => path !== null);
     const parts: SentencePart[] = paths.slice(0, LOOSE_NAMED)
-      .map((path) => ({ text: folder(path), patch: { folder: path, project: "" } }));
+      .map((path) => ({ text: folder(path), patch: { paths: [path], projects: [] } }));
     const unnamed = paths.length - LOOSE_NAMED;
     if (unnamed > 0) parts.push({ text: `${unnamed.toLocaleString("en-US")} more`, patch: null, table: true });
     if (loose.some((row) => row.cwd === null)) parts.push({ text: "files with no folder", patch: null });

@@ -304,7 +304,7 @@ def test_without_projects_dirs_and_the_dir_menu_fit_a_phone(installs, ui_context
     expect(dirs_section.locator("table[data-part=table]")).to_be_visible()
     ui_width_check(page)
     filter_of(panel, "place").locator("button.pick").click()
-    expect(filter_of(panel, "place").get_by_role("menuitemradio", name="~/work/scratch")).to_be_visible()
+    expect(filter_of(panel, "place").get_by_role("menuitemcheckbox", name="~/work/scratch")).to_be_visible()
     ui_width_check(page)
 
 

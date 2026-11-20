@@ -408,13 +408,41 @@ def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small,
     expect(box.locator(".k")).to_have_text("Folder")
     expect(bars_of(panel)).to_have_count(3)
     box.locator("button.pick").click()
-    expect(box.get_by_role("menuitemradio")).to_have_text(
-        [re.compile(r"^✓\s*all$"), "/work/proj-a", "/work/proj-b"])
+    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
+    expect(box.get_by_role("menuitemcheckbox")).to_have_text(["/work/proj-a", "/work/proj-b"])
     with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url) as sent:
-        box.get_by_role("menuitemradio", name="/work/proj-b").click()
+        box.get_by_role("menuitemcheckbox", name="/work/proj-b").click()
     assert "folder=%2Fwork%2Fproj-b" in sent.value.url, sent.value.url
     expect(box.locator("button.pick")).to_have_text("/work/proj-b▾")
     expect(bars_of(panel)).to_have_count(1)
+
+
+def test_the_place_filter_picks_several_and_reads_them_one_to_a_line(small, ui_contexts):
+    page = ui_contexts(small).pages[0]
+    panel = open_page(page)
+    box = filter_of(panel, "place")
+    expect(bars_of(panel)).to_have_count(3)
+    box.locator("button.pick").click()
+    entries = box.get_by_role("menuitemcheckbox")
+    expect(entries).to_have_text(["/work/proj-a", "/work/proj-b"])
+    with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url):
+        entries.filter(has_text="/work/proj-b").click()
+    # The menu stays open to pick another.
+    expect(entries.filter(has_text="/work/proj-b")).to_have_attribute("aria-checked", "true")
+    expect(bars_of(panel)).to_have_count(1)
+    with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url) as sent:
+        entries.filter(has_text="/work/proj-a").click()
+    assert "folder=%2Fwork%2Fproj-b%0A%2Fwork%2Fproj-a" in sent.value.url, sent.value.url
+    expect(box.locator("button.pick")).to_have_text("2 folders▾")
+    expect(entries.and_(page.locator("[aria-checked=true]"))).to_have_count(2)
+    expect(bars_of(panel)).to_have_count(3)
+    # Picking one again takes it away; `all` clears them and closes the menu.
+    entries.filter(has_text="/work/proj-a").click()
+    expect(box.locator("button.pick")).to_have_text("/work/proj-b▾")
+    box.get_by_role("menuitemradio", name=re.compile(r"\ball$")).click()
+    expect(box.get_by_role("menu")).to_have_count(0)
+    expect(box.locator("button.pick")).to_have_text("all▾")
+    expect(bars_of(panel)).to_have_count(3)
 
 
 def test_the_sections_read_under_the_pages_range_and_filters(page):
