@@ -243,7 +243,8 @@ The restart point is where carrying on with a session costs more than restarting
 is Wilson's economic order quantity: a restart costs one cache write of the settled
 context, and each call costs a cache read of a context that keeps growing. `moxi usage
 restart-point --measure` measures it from the token index (no transcript is read again):
-the last `restart_point.days` (21) of sessions with 5 requests or more, per model and per
+the last `restart_point.days` (21) of sessions, or the last N with `--days N` for that one
+measure, with 5 requests or more, per model and per
 population (main sessions; subagents and workflow agents). Main sessions count only when
 the harness marked a person at the keyboard: Claude Code's `cli` entrypoint, Codex's `cli`
 source or an originator in `restart_point.interactive_originators`; set
@@ -343,7 +344,7 @@ way. If a later Codex passes the directory, the guard holds it to the same rule.
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
-    moxi usage restart-point [--measure] [--json]
+    moxi usage restart-point [--measure [--days N]] [--json]
     moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]

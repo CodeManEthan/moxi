@@ -4,7 +4,7 @@
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage limits [--harness H] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
-    moxi usage restart-point [--measure] [--json]
+    moxi usage restart-point [--measure [--days N]] [--json]
     moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
@@ -32,7 +32,8 @@ SESSION.
 `restart-point` prints the measured restart point per model and population and each
 warn-at mark's threshold in tokens, or why a mark is unavailable; it exits 1 when there
 is no measure to read. `--measure` runs the index's pass and the measure first and writes
-it (`moxi_usage.measure`).
+it (`moxi_usage.measure`); `--days N` measures that once over the last N days in place of
+`restart_point.days`, and exits 2 when N is below 1 or given without `--measure`.
 
 `marks SESSION` prints the session's warn-at marks: its context, the notice's and the
 crossing's mark with its threshold and state (armed, or fired and when), and its agents'
@@ -481,6 +482,9 @@ def _restart_parser(verbs: Any) -> None:
                     "again from the token index first.")
     restart.add_argument("--measure", action="store_true",
                          help="run the index's pass and the measure, and write it")
+    restart.add_argument("--days", type=int, metavar="N",
+                         help="with --measure, measure over the last N days, this once "
+                              "(default restart_point.days)")
     restart.add_argument("--json", action="store_true", help="print one JSON object")
 
 
@@ -489,10 +493,17 @@ def _restart_point(args: argparse.Namespace, prog: str) -> int:
 
     from . import measure
 
+    if args.days is not None and not args.measure:
+        print(f"{prog} restart-point: --days sets the window of a measure; give --measure "
+              "too", file=sys.stderr)
+        return codes.USAGE
+    if args.days is not None and args.days < 1:
+        print(f"{prog} restart-point: --days must be 1 or more", file=sys.stderr)
+        return codes.USAGE
     done = None
     if args.measure:
         try:
-            done = measure.run()
+            done = measure.run(days=args.days)
         except moxi.store.StoreTooNew as exc:
             print(f"{prog} restart-point: {exc}", file=sys.stderr)
             return codes.REFUSED

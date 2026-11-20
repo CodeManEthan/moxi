@@ -258,6 +258,26 @@ def test_the_verb_measures_then_prints_rows_and_marks(monkeypatch, capsys):
     assert found["measured"] and found["rows"][0]["marks"]["2x"]["tokens"] > 0
 
 
+def test_days_sets_one_measures_window_and_the_config_stays(monkeypatch, capsys):
+    # Core's `restart-point --measure --days N`: a one-off window over the default.
+    monkeypatch.setattr(measure, "MIN_FILES", 2)
+    pin_clock(monkeypatch)
+    for n in range(2):
+        session(n)
+    session(2, start=NOW - 10 * DAY)
+    assert cli.main(["restart-point", "--measure", "--days", "5"]) == 0
+    assert "restart point measured over 2 files" in capsys.readouterr().out
+    assert json.loads(thresholds.params_path().read_text())["days"] == 5
+    assert cli.main(["restart-point", "--measure"]) == 0
+    assert "restart point measured over 3 files" in capsys.readouterr().out
+    assert json.loads(thresholds.params_path().read_text())["days"] == 21
+    for argv in (["--measure", "--days", "0"], ["--measure", "--days", "-3"],
+                 ["--days", "5"]):
+        assert cli.main(["restart-point", *argv]) == 2
+        assert "--days" in capsys.readouterr().err
+    assert json.loads(thresholds.params_path().read_text())["days"] == 21
+
+
 def test_the_verb_without_a_measure_says_so_and_exits_1(capsys):
     assert cli.main(["restart-point"]) == 1
     assert "has not been measured" in capsys.readouterr().out

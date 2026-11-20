@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `moxi usage restart-point --measure --days N` measures over the last N days this once;
+  `restart_point.days` stays the window of every other measure. N below 1, or `--days`
+  without `--measure`, exits 2.
 - The worker ceiling's default warning and refusal carry the wrap-up recipe: commit with
   one `-m` in single quotes and no heredoc, `$` or backtick, get the commit line from
   `moxi repo rules`, put every trailer in the last paragraph, and return a
