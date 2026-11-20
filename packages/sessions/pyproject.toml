@@ -26,6 +26,10 @@ ui = ["moxi-ui>=0.2,<0.3"]
 secrets = ["moxi-secrets>=0.1,<0.2"]
 # turns enforces the transcript-read guard sessions declares.
 turns = ["moxi-turns>=0.2,<0.3"]
+# projects' read API at interface 2: which project holds each folder, for the facts
+# sessions gives the Projects page. sessions reaches it only through
+# moxi.modules.load("projects", interface=2).
+projects = ["moxi-projects>=0.1.4,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
