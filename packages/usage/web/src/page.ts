@@ -27,7 +27,9 @@
 //   div[data-part=filters]      the filter line: Range, Project (or Folder), Harness,
 //                               Model, each a menu, and Cost / Tokens
 //   div[data-part=below]        the groups under the filter line:
-//     section[data-group=chart]    one bar a day or a month, its sentence and its table
+//     section[data-group=chart]    one bar a day or a month, stacked by token class by cost;
+//                                  by tokens the cache reads and the billable work as two
+//                                  charts; its sentence and its table
 //     section[data-group=sessions] the range's dearest session and the count, and opened
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
 //                                  they leave out, the earlier days, and the table; an
@@ -64,7 +66,7 @@ import {
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { chartDraw, chartGroup } from "./chart-model.ts";
-import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
+import type { ChartDraw, ChartGroup, ChartModel, Series, Table } from "./chart-model.ts";
 import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
@@ -77,7 +79,7 @@ import type {
   RestartPoint, SessionRow, Status, TermsRow, TermsTotal,
 } from "./feed.ts";
 import {
-  allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
+  allTimePath, chartPath, chartTermsPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
   modelsSectionPath, placesPath, placesSectionPath, START, termsSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
@@ -224,6 +226,18 @@ const STYLES = css`
   svg.ch text.v { fill: var(--moxi-text); }
   svg.ch .bar { fill: var(--moxi-text); fill-opacity: 0.36; }
   svg.ch .bar.now { fill-opacity: 1; }
+  /* A stacked bar's parts: four shades of the text colour, today's at full weight and
+     the other periods' at about half. */
+  svg .seg { fill: var(--moxi-text); }
+  svg .seg.s1 { fill-opacity: 0.55; } svg .seg.s1.now { fill-opacity: 1; }
+  svg .seg.s2 { fill-opacity: 0.4; } svg .seg.s2.now { fill-opacity: 0.72; }
+  svg .seg.s3 { fill-opacity: 0.25; } svg .seg.s3.now { fill-opacity: 0.46; }
+  svg .seg.s4 { fill-opacity: 0.13; } svg .seg.s4.now { fill-opacity: 0.24; }
+  .chartn { padding: 10px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text); }
+  .chartc { padding: 0 0 4px; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0 0 6px; list-style: none;
+            font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .legend svg { display: inline-block; margin-right: 6px; vertical-align: -1px; }
   svg.ch .ax { stroke: var(--moxi-border-strong); stroke-width: 1; }
   svg.ch .gr { stroke: var(--moxi-border); stroke-width: 1; }
   svg.ch .dash { fill: none; stroke: var(--moxi-text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -387,6 +401,8 @@ export class UsagePage extends LitElement {
   #pass: string | null = null;
   /** The reads under the filter line, opened for the state they were asked with. */
   #chart: Feed<Report<DayRow>> | null = null;
+  /** The chart's cost terms by period, which stack its bars by class. */
+  #chartTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
   #figures: Feed<Report<DayRow>> | null = null;
   #allTime: Feed<Report<DayRow>> | null = null;
   #places: Feed<Report<ProjectRow>> | null = null;
@@ -619,13 +635,13 @@ export class UsagePage extends LitElement {
 
   /** Every read under the filter line that is open, each once. */
   #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
-    return [...new Set([this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
+    return [...new Set([this.#chart, this.#chartTerms, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
                         this.#modelsSection, this.#terms, this.#prices, this.#sessionsTop])].filter((feed) => feed !== null);
   }
 
   #closeBelow(): void {
     for (const feed of this.#belowFeeds()) feed.close();
-    this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
+    this.#chart = this.#chartTerms = this.#figures = this.#allTime = this.#places = this.#models = null;
     this.#placesSection = this.#modelsSection = this.#terms = this.#prices = this.#sessionsTop = null;
     this.#pricesPath = null;
     this.#closeLists();
@@ -659,7 +675,7 @@ export class UsagePage extends LitElement {
     const update = () => this.requestUpdate();
     const state = heldState();
     const today = this.#today();
-    const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
+    const paths = { chart: chartPath(state, today), chartTerms: chartTermsPath(state, today), figures: figuresPath(state, today),
                     places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
                     placesSection: placesSectionPath(state, today, this.#folders()),
                     modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today),
@@ -678,6 +694,7 @@ export class UsagePage extends LitElement {
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
+      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -911,6 +928,7 @@ export class UsagePage extends LitElement {
       if (read !== null) others.push({ what, read, report: true });
     };
     other("The chart", chart);
+    other("The chart's token classes", this.#chartTerms);
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
@@ -952,7 +970,7 @@ export class UsagePage extends LitElement {
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.asTable);
+      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -1149,10 +1167,25 @@ export class UsagePage extends LitElement {
           <span data-part="sentence">${group.sentence ?? nothing}</span>
           ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
-        ${group.chart === null ? nothing : this.#chartSvg(chartDraw(group.chart, width, hang), group.chart.aria)}
+        ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
         ${group.table === null ? nothing : this.#table(group.table)}
       </div>
     </section>`;
+  }
+
+  /** One chart of the group: its name and caption where it has them, the chart, and the
+   * legend of what its bars are stacked by. */
+  #oneChart(chart: ChartModel, width: number, hang: number) {
+    return html`${chart.name === null ? nothing : html`<p class="chartn" data-part="chart-name">${chart.name}</p>`}
+      ${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
+      ${chart.caption === null ? nothing : html`<p class="chartc" data-part="caption">${chart.caption}</p>`}
+      ${chart.series.length < 2 ? nothing : this.#legend(chart.series)}`;
+  }
+
+  #legend(series: Series[]) {
+    return html`<ul class="legend" data-part="legend">${series.map((item) => html`<li data-key=${item.key}>
+      <svg width="9" height="9" aria-hidden="true"><rect class="seg s${item.shade} now" width="9" height="9" rx="1"></rect></svg>${
+      item.label}</li>`)}</ul>`;
   }
 
   #chartSvg(draw: ChartDraw, aria: string) {
@@ -1162,7 +1195,10 @@ export class UsagePage extends LitElement {
         <text data-part="top" x="0" y="4">${draw.grid.words}</text>`}
       ${draw.bars.map((bar) => svg`<g data-period=${bar.period} data-whole=${String(bar.outline === null)}>
         <title>${bar.hover}</title>
-        <rect class=${bar.now ? "bar now" : "bar"} x=${bar.x} y=${bar.y} width=${bar.width} height=${bar.height} rx="1"></rect>
+        ${bar.parts.length === 0
+          ? svg`<rect class=${bar.now ? "bar now" : "bar"} x=${bar.x} y=${bar.y} width=${bar.width} height=${bar.height} rx="1"></rect>`
+          : bar.parts.map((part) => svg`<rect class="seg s${part.shade}${bar.now ? " now" : ""}" data-key=${part.key}
+              x=${bar.x} y=${part.y} width=${bar.width} height=${part.height}></rect>`)}
         ${bar.outline === null ? nothing : svg`<rect class="dash" x=${bar.outline.x} y=${bar.outline.y}
           width=${bar.outline.width} height=${bar.outline.height}></rect>`}
         <rect class="hit" x=${bar.slot.x} y="0" width=${bar.slot.width} height=${draw.axis}></rect>

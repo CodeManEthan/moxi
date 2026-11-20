@@ -2,8 +2,8 @@
 starts usage's real page server: the Range menu's entries and what each choice does to
 the chart and leaves alone in Cost, the two days of a range of one's own, the Harness
 and Model filters, the folder filter on a shell without projects, the chart's bars,
-sentence, today's value, dashed outline and table by cost and by tokens, a range that
-holds nothing, a range whose total is not whole with its line at the foot, the sections
+sentence, today's value, dashed outline and table by cost and by tokens, its bars by
+cost stacked by token class, the two charts by tokens, a range that holds nothing, a range whose total is not whole with its line at the foot, the sections
 reading under the same range, and all of it at a phone's width.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
@@ -250,34 +250,82 @@ def test_the_chart_draws_a_bar_a_day_with_todays_value_in_words_and_each_value_o
     expect(bars_of(panel)).to_have_count(3)
     expect(sentence_of(panel)).to_have_text(
         re.compile(rf"^The most in these 30 days was \w+( \d+)?, {MONEY}\. 27 days had no sessions\.$"))
-    now = chart.locator("rect.bar.now")
-    expect(now).to_have_count(1)
     value = chart.locator("[data-part=value]")
     expect(value).to_have_text(re.compile(rf"^{MONEY}$"))
-    expect(chart.locator("g[data-period]").last.locator("title")).to_have_text(f"today: {value.text_content()}")
+    expect(chart.locator("g[data-period]").last.locator("title")).to_have_text(
+        re.compile(rf"^today: {re.escape(value.text_content())}\n"))
     assert bars_of(panel).locator("title").count() == 3
     expect(chart.locator("[data-part=top]")).to_have_text(re.compile(r"^\$[\d.]+$"))
     labels = chart.locator("text:not([data-part])").all_text_contents()
     assert labels[-1] == "today" and len(labels) >= 2, labels
-    # Today's bar is told from the others by its weight, with no colour of its own.
-    fills = chart.locator("rect.bar").evaluate_all(
-        "bars => bars.map((bar) => [getComputedStyle(bar).fill, getComputedStyle(bar).fillOpacity])")
-    assert len({fill for fill, _ in fills}) == 1, fills
-    assert [opacity for _, opacity in fills] == ["0.36", "0.36", "1"], fills
+    # Today's bar is told from the others by its weight, with no colour of its own: each
+    # class's part of it is heavier than the same class's part of the other days.
+    expect(chart.locator("rect.seg.now")).not_to_have_count(0)
+    fills = chart.locator("rect.seg").evaluate_all(
+        """parts => parts.map((part) => [part.dataset.key, part.classList.contains("now"),
+                                          getComputedStyle(part).fill, Number(getComputedStyle(part).fillOpacity)])""")
+    assert len({fill for _, _, fill, _ in fills}) == 1, fills
+    weight = {(key, now): opacity for key, now, _, opacity in fills}
+    for key, now in weight:
+        if now:
+            assert weight[key, True] > weight.get((key, False), 0), fills
     # Every period of the range is whole, so nothing is outlined and the foot says nothing.
     expect(chart.locator("rect.dash")).to_have_count(0)
     expect(panel.locator("[data-line=range]")).to_have_count(0)
 
 
-def test_tokens_switches_the_bars_and_the_sentence(page):
+def test_by_cost_each_bar_is_stacked_by_token_class_and_its_parts_add_up_to_it(page):
+    panel = open_page(page)
+    chart = chart_of(panel)
+    today = chart.locator("g[data-period]").last
+    # Each request read 200 fresh input and 10 cache read tokens and wrote output; it
+    # wrote no cache, so that class has no part.
+    expect(today.locator("rect.seg")).to_have_count(3)
+    keys = today.locator("rect.seg").evaluate_all("parts => parts.map((part) => part.dataset.key)")
+    assert keys == ["input", "cache_read", "output"], keys
+    legend = panel.locator("[data-group=chart] [data-part=legend] li")
+    expect(legend).to_have_text(["Fresh input", "Cache write", "Cache read", "Output"])
+    # The hover gives each class's dollars, and they add up to the day's own figure.
+    lines = today.locator("title").text_content().split("\n")
+    assert re.fullmatch(rf"today: {MONEY}", lines[0]), lines
+    assert [line.rsplit(" ", 1)[0] for line in lines[1:]] == [
+        "Fresh input", "Cache write", "Cache read", "Output"], lines
+
+    def dollars(text: str) -> float:
+        return 0.0 if text.endswith("<$0.01") else float(text.rsplit("$", 1)[1].replace(",", ""))
+    assert abs(sum(dollars(line) for line in lines[1:]) - dollars(lines[0])) <= 0.02, lines
+    # The parts fill the bar, the lowest on the axis line.
+    tops = today.locator("rect.seg").evaluate_all(
+        "parts => parts.map((part) => [part.y.baseVal.value, part.height.baseVal.value])")
+    assert tops[-1][0] < tops[0][0] and tops[0][0] + tops[0][1] == pytest.approx(84, abs=0.2), tops
+
+
+def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     panel = open_page(page)
     panel.get_by_role("button", name="Tokens", exact=True).click()
     expect(panel.get_by_role("button", name="Tokens", exact=True)).to_have_attribute("aria-pressed", "true")
-    expect(chart_of(panel)).to_have_attribute("aria-label", "Tokens each day, last 30 days")
     expect(sentence_of(panel)).to_have_text(
         re.compile(r"^[\d.]+k tokens in these 30 days\. The most was \w+( \d+)?, [\d.]+k\.$"))
-    expect(chart_of(panel).locator("[data-part=value]")).to_have_text(re.compile(r"^[\d.]+k$"))
-    expect(bars_of(panel)).to_have_count(3)
+    group = panel.locator("[data-group=chart]")
+    expect(group.locator("[data-part=chart-name]")).to_have_text(["Cache reads", "Billable work"])
+    expect(chart_of(panel)).to_have_count(2)
+    cache, billable = chart_of(panel).nth(0), chart_of(panel).nth(1)
+    expect(cache).to_have_attribute("aria-label", "Cache read tokens each day, last 30 days")
+    expect(billable).to_have_attribute("aria-label", "Billable tokens each day, last 30 days")
+    expect(group.locator("[data-part=caption]")).to_have_text([
+        re.compile(r"^[\d.]+% of all tokens in this range\. Shown alone because a single stack would be one shade\.$"),
+        re.compile(r"^Fresh input \+ cache writes \+ output: the [\d.]+% of tokens that is not a cache read\.$")])
+    # Ten cache-read tokens a request: today's three requests read 30.
+    expect(cache.locator("g[data-period]")).to_have_count(3)
+    expect(cache.locator("rect.seg")).to_have_count(0)
+    expect(cache.locator("[data-part=value]")).to_have_text("30")
+    # The billable work: 200 fresh input and 1000 to 2000 output a request, stacked.
+    expect(billable.locator("g[data-period]")).to_have_count(3)
+    today = billable.locator("g[data-period]").last
+    expect(today.locator("rect.seg")).to_have_count(2)
+    expect(today.locator("title")).to_have_text("today: 5.10k\nFresh input 600\nCache write 0\nOutput 4.50k")
+    expect(billable.locator("[data-part=value]")).to_have_text("5.10k")
+    expect(group.locator("[data-part=legend] li")).to_have_text(["Fresh input", "Cache write", "Output"])
 
 
 def test_table_shows_every_figure_of_the_chart_in_its_place(page):
@@ -302,7 +350,7 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
 
     group.get_by_role("button", name="Chart").click()
     expect(group.get_by_role("table")).to_have_count(0)
-    expect(bars_of(panel)).to_have_count(3)
+    expect(chart_of(panel).nth(1).locator("g[data-period]")).to_have_count(3)
 
 
 def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_foot(page):

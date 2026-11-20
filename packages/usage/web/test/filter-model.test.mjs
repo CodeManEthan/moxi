@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  allTimePath, chartPath, customRange, figuresPath, filtered, filterLine, heldState, holdState,
+  allTimePath, chartPath, chartTermsPath, customRange, figuresPath, filtered, filterLine, heldState, holdState,
   modelsPath, modelsSectionPath, placesPath, placesSectionPath, START, stateKeys, tilde, watchState,
 } from "../src/filter-model.ts";
 
@@ -62,6 +62,12 @@ test("the chart is asked by day, and by month for all time and past 92 days", ()
                "api/daily?by=month&since=2026-08-08&until=2026-11-08");
   assert.equal(chartPath(state({ range: { kind: "custom", since: "2026-08-09", until: TODAY } }), TODAY),
                "api/daily?by=day&since=2026-08-09&until=2026-11-08");
+});
+
+test("the chart's token classes are asked of the terms by the chart's own period and filters", () => {
+  assert.equal(chartTermsPath(state({ harness: "claude", model: "m-a" }), TODAY),
+               "api/terms?by=day&since=2026-10-10&until=2026-11-08&harness=claude&model=m-a");
+  assert.equal(chartTermsPath(state({ range: { kind: "all" } }), TODAY), "api/terms?by=month");
 });
 
 test("the menu's figures have a read of their own only while a filter is set", () => {

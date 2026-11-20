@@ -85,6 +85,12 @@ export function chartPath(state: PageState, today: string): string {
   return withQuery("api/daily", [["by", rangeBy(state.range, today)], ...stateKeys(state, today)]);
 }
 
+/** The chart's cost terms: each period's cost by token class, by the chart's period,
+ * under the same range and filters. */
+export function chartTermsPath(state: PageState, today: string): string {
+  return withQuery("api/terms", [["by", rangeBy(state.range, today)], ...stateKeys(state, today)]);
+}
+
 /** The report the Range menu's preset figures are summed from while a filter is set:
  * the 90 days to today under the filters. Null with no filter, when the figures are the
  * Cost rows' own and their report serves. */

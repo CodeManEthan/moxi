@@ -1,13 +1,15 @@
 // The chart under the filter line: one bar a day (or a month), the sentence above it and
 // the table that stands in its place, worked out from a daily report with no DOM, and
-// laid out at a width. Every word, figure and place is decided here; the view draws
-// what it is given. Nothing was used in the range: there is no chart, and the page says so.
+// laid out at a width. By cost each bar is stacked by token class from the cost terms of
+// the same days; by tokens there are two charts, the cache reads alone and the billable
+// work stacked. Every word, figure and place is decided here; the view draws what it is
+// given. Nothing was used in the range: there is no chart, and the page says so.
 
 import { costWords, countWords, rangeBy, rangeDays, rangeLabel, sumRows, whyNotWhole } from "./cost-model.ts";
 import type { Range, Sum } from "./cost-model.ts";
 import { dateWord, dayWord, daysOf, monthWord } from "./days.ts";
-import type { DayRow, Report } from "./feed.ts";
-import { fmtCost, fmtTokens } from "./views.ts";
+import type { DayRow, Report, TermsRow } from "./feed.ts";
+import { fmtCost, fmtPercent, fmtTokens } from "./views.ts";
 
 export type Measure = "cost" | "tokens";
 
@@ -31,8 +33,26 @@ export interface ChartBar {
   now: boolean;
   /** False draws the dashed outline. */
   whole: boolean;
-  /** `Nov 3: $5.35`, with `, not whole` after it; null for an empty period. */
+  /** `Nov 3: $5.35`, with `, not whole` after it, then a line for each of `segments`;
+   * null for an empty period. */
   hover: string | null;
+  /** The bar's parts, bottom first, each one of the chart's `series`; empty for a bar
+   * drawn whole. */
+  segments: Segment[];
+}
+
+/** One part of a stacked bar. */
+export interface Segment {
+  key: string;
+  value: number;
+}
+
+/** One kind a chart's bars are stacked by, with the shade it is drawn in: 1 the
+ * darkest to 4 the lightest. */
+export interface Series {
+  key: string;
+  label: string;
+  shade: 1 | 2 | 3 | 4;
 }
 
 export interface ChartModel {
@@ -46,9 +66,29 @@ export interface ChartModel {
   bars: ChartBar[];
   /** The line above the chart; null where there is nothing to compare. */
   sentence: string | null;
+  /** The chart's own name and the line under it, where the group holds more than one
+   * chart: `Cache reads`. */
+  name: string | null;
+  caption: string | null;
+  /** What the bars are stacked by, bottom first, for the legend; empty when they are not. */
+  series: Series[];
 }
 
 const UNKNOWN_MODEL = "unknown model";
+
+/** The token classes a bar by cost is stacked by, bottom first, from the terms' classes
+ * (the two cache writes are one part). */
+export const COST_SERIES: Series[] = [
+  { key: "input", label: "Fresh input", shade: 4 }, { key: "cache_write", label: "Cache write", shade: 2 },
+  { key: "cache_read", label: "Cache read", shade: 3 }, { key: "output", label: "Output", shade: 1 },
+];
+/** The billable work's classes, bottom first: every token that is not a cache read. */
+export const BILLABLE_SERIES: Series[] = [
+  { key: "fresh_input", label: "Fresh input", shade: 4 }, { key: "cache_write", label: "Cache write", shade: 2 },
+  { key: "output", label: "Output", shade: 1 },
+];
+export const CACHE_READS = "Cache reads";
+export const BILLABLE_WORK = "Billable work";
 const TOKEN_CLASSES: readonly [keyof DayRow & string, string][] = [
   ["fresh_input", "Fresh input"], ["cache_read", "Cache read"], ["cache_write", "Cache write"],
   ["output", "Output"],
@@ -91,48 +131,125 @@ function periods(rows: DayRow[], range: Range, today: string, by: "day" | "month
 
 const tokenWords = (sum: Sum): string => `${sum.unknown_rows > 0 ? "at least " : ""}${fmtTokens(sum.tokens)}`;
 
+/** What a chart's bars measure: a period's value and its words from its rows and their
+ * sum, whether it is whole, and its parts. */
+interface Gauge {
+  value: (sum: Sum, rows: DayRow[]) => number;
+  words: (sum: Sum, rows: DayRow[]) => string;
+  whole: (sum: Sum) => boolean;
+  parts: (period: string, rows: DayRow[]) => Segment[];
+  /** A part's value in words, for the hover. */
+  partWords: (value: number) => string;
+}
+
+const noParts = (): Segment[] => [];
+const COST_GAUGE: Gauge = {
+  value: (sum) => sum.cost ?? 0, words: (sum) => costWords(sum), whole: (sum) => sum.complete, parts: noParts,
+  partWords: fmtCost,
+};
+const TOKENS_GAUGE: Gauge = {
+  value: (sum) => sum.tokens, words: (sum) => tokenWords(sum), whole: (sum) => sum.unknown_rows === 0, parts: noParts,
+  partWords: fmtTokens,
+};
+
+/** A gauge of tokens summed over some columns of the rows, stacked by them when there
+ * is more than one. */
+function columnsGauge(series: readonly Series[]): Gauge {
+  const count = (rows: DayRow[], key: string): number =>
+    rows.reduce((total, row) => total + (Number(row[key as keyof DayRow]) || 0), 0);
+  const value = (_sum: Sum, rows: DayRow[]): number => series.reduce((total, item) => total + count(rows, item.key), 0);
+  return {
+    value, whole: (sum) => sum.unknown_rows === 0, partWords: fmtTokens,
+    words: (sum, rows) => `${sum.unknown_rows > 0 ? "at least " : ""}${fmtTokens(value(sum, rows))}`,
+    parts: series.length < 2 ? noParts : (_period, rows) => series.map((item) => ({ key: item.key, value: count(rows, item.key) })),
+  };
+}
+
+/** Each period's cost by token class from a terms report by day or by month: dollars
+ * summed over its priced groups, the two cache writes as one. */
+export function classCosts(terms: Report<TermsRow> | null): Map<string, Segment[]> {
+  const out = new Map<string, Segment[]>();
+  for (const row of terms?.rows ?? []) {
+    if (row.period === null) continue;
+    const of = (key: string): number => row.split
+      .filter((item) => (key === "cache_write" ? item.class.startsWith("cache_write") : item.class === key))
+      .reduce((total, item) => total + item.cost, 0);
+    out.set(row.period, COST_SERIES.map((item) => ({ key: item.key, value: of(item.key) })));
+  }
+  return out;
+}
+
+/** The bars of a gauge over the periods of the range. */
+function measured(dated: DayRow[], range: Range, today: string, by: "day" | "month") {
+  return periods(dated, range, today, by).map((period) => {
+    const rows = dated.filter((row) => row.period === period);
+    return { period, rows, sum: sumRows(rows) };
+  });
+}
+
+/** The chart of one gauge: its bars, the axis's top, and no sentence. */
+function gaugeChart(dated: DayRow[], range: Range, today: string, measure: Measure, gauge: Gauge,
+                    series: Series[], aria: string): ChartModel {
+  const by = rangeBy(range, today);
+  const current = by === "day" ? today : today.slice(0, 7);
+  const sums = measured(dated, range, today, by);
+  const most = Math.max(0, ...sums.map((item) => gauge.value(item.sum, item.rows)));
+  const top = most > 0 ? niceTop(most) : null;
+  const labels = new Map(series.map((item) => [item.key, item.label]));
+  const bars = sums.map(({ period, rows, sum }): ChartBar => {
+    const empty = sum.rows === 0;
+    const whole = gauge.whole(sum);
+    const value = gauge.value(sum, rows);
+    const words = gauge.words(sum, rows);
+    const segments = empty || value <= 0 ? [] : gauge.parts(period, rows);
+    const lines = segments.map((part) => `\n${labels.get(part.key) ?? part.key} ${gauge.partWords(part.value)}`).join("");
+    const label = by === "month" ? monthWord(period) : period === today ? dayWord(period, today) : dateWord(period);
+    return {
+      period, label, empty, value, share: top === null ? 0 : value / top, words, now: period === current, whole,
+      hover: empty ? null : `${label}: ${words}${whole ? "" : ", not whole"}${lines}`, segments,
+    };
+  });
+  return {
+    measure, by, aria, top: top === null ? null : { value: top, words: axisWords(top, measure) }, bars,
+    sentence: null, name: null, caption: null, series,
+  };
+}
+
 /**
  * The chart of a daily report over `range`, asked by day or by month as `rangeBy` says.
  * Null when the range holds no request with a time: the page then shows `NOTHING_USED`.
+ * By cost, with `terms` (the cost terms of the same days, by the same period) each bar is
+ * stacked by token class, `COST_SERIES`, each part its class's share of the bar; a period
+ * the terms hold nothing for is drawn whole.
  *
  * The sentence, by cost: `The most in these 30 days was today, $19.54. 8 days had no
  * sessions.` By tokens: `71.9M tokens in these 30 days. The most was today, 22.0M.`, or
  * `At least 71.9M tokens …` when a count is not whole.
  * A range of one period has none, since its one bar says its value.
  */
-export function chartModel(report: Report<DayRow>, range: Range, measure: Measure, today: string): ChartModel | null {
+export function chartModel(report: Report<DayRow>, range: Range, measure: Measure, today: string,
+                           terms: Report<TermsRow> | null = null): ChartModel | null {
   const by = rangeBy(range, today);
   const dated = report.rows.filter((row) => row.period !== null);
   if (dated.length === 0) return null;
-  const current = by === "day" ? today : today.slice(0, 7);
-  const sums = periods(dated, range, today, by).map((period) =>
-    ({ period, sum: sumRows(dated.filter((row) => row.period === period)) }));
-  const value = (sum: Sum): number => (measure === "cost" ? sum.cost ?? 0 : sum.tokens);
-  const words = (sum: Sum): string => (measure === "cost" ? costWords(sum) : tokenWords(sum));
-  const most = Math.max(0, ...sums.map((item) => value(item.sum)));
-  const top = most > 0 ? niceTop(most) : null;
-  const name = (period: string, axis: boolean): string => {
-    if (by === "month") return monthWord(period);
-    return period === today || !axis ? dayWord(period, today) : dateWord(period);
-  };
-  const bars = sums.map(({ period, sum }): ChartBar => {
-    const empty = sum.rows === 0;
-    const whole = measure === "cost" ? sum.complete : sum.unknown_rows === 0;
-    return {
-      period, label: name(period, true), empty, value: value(sum),
-      share: top === null ? 0 : value(sum) / top, words: words(sum), now: period === current, whole,
-      hover: empty ? null : `${name(period, true)}: ${words(sum)}${whole ? "" : ", not whole"}`,
-    };
-  });
-
+  const split = classCosts(terms);
+  const gauge: Gauge = measure === "tokens" ? TOKENS_GAUGE
+    : { ...COST_GAUGE, parts: (period) => (split.get(period) ?? []).some((part) => part.value > 0) ? split.get(period) ?? [] : [] };
   const unit = by === "day" ? "day" : "month";
+  const chart = gaugeChart(dated, range, today, measure, gauge, measure === "cost" && split.size ? COST_SERIES : [],
+    `${measure === "cost" ? "Estimated cost" : "Tokens"} each ${unit}, ${rangeLabel(range, today)}`);
+
+  const sums = measured(dated, range, today, by);
+  const name = (period: string): string => (by === "month" ? monthWord(period) : dayWord(period, today));
+  const value = (sum: Sum): number => gauge.value(sum, []);
+  const words = (sum: Sum): string => gauge.words(sum, []);
   const span = `these ${countWords(sums.length, unit)}`;
   const used = sums.filter((item) => item.sum.rows > 0 && (measure === "tokens" || item.sum.cost !== null));
   const dearest = used.reduce<(typeof used)[number] | null>(
     (best, item) => (best === null || value(item.sum) >= value(best.sum) ? item : best), null);
   const parts: string[] = [];
   if (sums.length > 1) {
-    const which = dearest === null ? null : `${name(dearest.period, false)}, ${words(dearest.sum)}`;
+    const which = dearest === null ? null : `${name(dearest.period)}, ${words(dearest.sum)}`;
     if (measure === "tokens") {
       const total = tokenWords(sumRows(sums.map((item) => item.sum)));
       parts.push(`${total.charAt(0).toUpperCase()}${total.slice(1)} tokens in ${span}.`);
@@ -143,13 +260,33 @@ export function chartModel(report: Report<DayRow>, range: Range, measure: Measur
       if (none > 0) parts.push(`${countWords(none, unit)} had no sessions.`);
     }
   }
-  return {
-    measure, by,
-    aria: `${measure === "cost" ? "Estimated cost" : "Tokens"} each ${unit}, ${rangeLabel(range, today)}`,
-    top: top === null ? null : { value: top, words: axisWords(top, measure) },
-    bars,
-    sentence: parts.length ? parts.join(" ") : null,
-  };
+  return { ...chart, sentence: parts.length ? parts.join(" ") : null };
+}
+
+/**
+ * The two charts by tokens: the cache reads alone, since in one stack with the rest each
+ * bar would be nearly all one shade, and the billable work, fresh input, cache writes
+ * and output, stacked. Each names itself and says its share of the range's tokens. Null
+ * as for `chartModel`.
+ */
+export function tokenCharts(report: Report<DayRow>, range: Range, today: string): ChartModel[] | null {
+  const dated = report.rows.filter((row) => row.period !== null);
+  if (dated.length === 0) return null;
+  const unit = rangeBy(range, today) === "day" ? "day" : "month";
+  const span = rangeLabel(range, today);
+  const all = dated.reduce((total, row) => total + row.tokens, 0);
+  const reads = dated.reduce((total, row) => total + row.cache_read, 0);
+  const share = all > 0 ? reads / all : 0;
+  const cache = gaugeChart(dated, range, today, "tokens", columnsGauge([{ key: "cache_read", label: "Cache read", shade: 3 }]),
+    [], `Cache read tokens each ${unit}, ${span}`);
+  const billable = gaugeChart(dated, range, today, "tokens", columnsGauge(BILLABLE_SERIES), BILLABLE_SERIES,
+    `Billable tokens each ${unit}, ${span}`);
+  return [
+    { ...cache, name: CACHE_READS,
+      caption: `${fmtPercent(share * 100)} of all tokens in this range. Shown alone because a single stack would be one shade.` },
+    { ...billable, name: BILLABLE_WORK,
+      caption: `Fresh input + cache writes + output: the ${fmtPercent(all > 0 ? ((all - reads) / all) * 100 : 0)} of tokens that is not a cache read.` },
+  ];
 }
 
 // --- the chart's table --------------------------------------------------------------------
@@ -205,7 +342,7 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
 export const TABLE = "Table";
 export const CHART = "Chart";
 
-/** The chart's group as the view places it: one of the chart, its table, or the
+/** The chart's group as the view places it: one of the charts, their table, or the
  * sentence that nothing was used. */
 export interface ChartGroup {
   /** The group's name at its left: `Each day`, `Each month`. */
@@ -217,29 +354,34 @@ export interface ChartGroup {
   toggle: string | null;
   /** `Nothing was used in this range.`, in the chart's place. */
   nothing: string | null;
-  chart: ChartModel | null;
+  /** One chart by cost; by tokens the cache reads, then the billable work. Empty while
+   * the table or the sentence stands in their place. */
+  charts: ChartModel[];
   table: Table | null;
 }
 
 /**
- * The chart's group over a daily report of the range. With no row the range holds
- * nothing, and the group says so. Rows that all have no time have no bar to stand on,
- * so only their table shows.
+ * The chart's group over a daily report of the range, its bars by cost stacked by class
+ * from `terms` where they have answered. With no row the range holds nothing, and the
+ * group says so. Rows that all have no time have no bar to stand on, so only their table
+ * shows.
  */
 export function chartGroup(report: Report<DayRow>, range: Range, measure: Measure, today: string,
-                           asTable: boolean): ChartGroup {
+                           asTable: boolean, terms: Report<TermsRow> | null = null): ChartGroup {
   const by = rangeBy(range, today);
   const label = by === "day" ? "Each day" : "Each month";
   if (report.rows.length === 0) {
-    return { label, sentence: null, toggle: null, nothing: NOTHING_USED, chart: null, table: null };
+    return { label, sentence: null, toggle: null, nothing: NOTHING_USED, charts: [], table: null };
   }
-  const chart = chartModel(report, range, measure, today);
+  const chart = chartModel(report, range, measure, today, terms);
   if (chart === null) {
-    return { label, sentence: null, toggle: null, nothing: null, chart: null, table: chartTable(report, measure, by) };
+    return { label, sentence: null, toggle: null, nothing: null, charts: [], table: chartTable(report, measure, by) };
   }
-  return asTable
-    ? { label, sentence: chart.sentence, toggle: CHART, nothing: null, chart: null, table: chartTable(report, measure, by) }
-    : { label, sentence: chart.sentence, toggle: TABLE, nothing: null, chart, table: null };
+  if (asTable) {
+    return { label, sentence: chart.sentence, toggle: CHART, nothing: null, charts: [], table: chartTable(report, measure, by) };
+  }
+  const charts = measure === "tokens" ? tokenCharts(report, range, today) ?? [] : [chart];
+  return { label, sentence: chart.sentence, toggle: TABLE, nothing: null, charts, table: null };
 }
 
 // --- the chart, placed --------------------------------------------------------------------
@@ -261,6 +403,9 @@ export interface DrawnBar {
   /** The whole column over the period, which gives the value on hover. */
   slot: { x: number; width: number };
   hover: string;
+  /** A stacked bar's parts, bottom first, a pixel apart where each is tall enough; empty
+   * for a bar drawn whole. */
+  parts: { key: string; y: number; height: number; shade: Series["shade"] }[];
 }
 
 export interface DrawnLabel {
@@ -314,12 +459,25 @@ export function chartDraw(model: ChartModel, width: number, hang = 0): ChartDraw
     const x = centre(i) - barWidth / 2;
     const y = size.base - height;
     const outlined = Math.max(size.outlineMin, height);
+    const shades = new Map(model.series.map((item) => [item.key, item.shade]));
+    const whole = bar.segments.reduce((total, part) => total + part.value, 0);
+    const parts: DrawnBar["parts"] = [];
+    let foot = size.base;
+    for (const part of bar.segments) {
+      const shade = shades.get(part.key);
+      if (part.value <= 0 || whole <= 0 || shade === undefined) continue;
+      const tall = (part.value / whole) * height;
+      // A pixel of the background between two parts, where the part keeps some height.
+      const gap = parts.length && tall > 2 ? 1 : 0;
+      parts.push({ key: part.key, y: round(foot - tall), height: round(Math.max(0.5, tall - gap)), shade });
+      foot -= tall;
+    }
     bars.push({
       period: bar.period, x: round(x), y: round(y), width: round(barWidth), height: round(height), now: bar.now,
       outline: bar.whole ? null
         : { x: round(x) - 0.5, y: round(size.base - outlined) - 0.5, width: round(barWidth) + 1, height: round(outlined) + 1 },
       slot: { x: round(i * slot), width: round(slot) },
-      hover: bar.hover,
+      hover: bar.hover, parts,
     });
     if (bar.now) now = { i, x, y, words: bar.words };
   });
