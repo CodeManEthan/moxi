@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  contextWords, SessionList, sessionLine, sessionsClosed, sessionsTable, spanWords,
+  BOARD_PAGE, BOARD_START, contextWords, nextOrder, SessionList, sessionLine, sessionsBoard, sessionsClosed, spanWords,
 } from "../src/sessions-section.ts";
-import { earlierLine, sessionLists, sessionsPath } from "../src/sessions-model.ts";
+import { boardPath, earlierLine, listRead, sessionLists, sessionsPath } from "../src/sessions-model.ts";
 import { START } from "../src/filter-model.ts";
 
 const UTC = {
@@ -93,29 +93,67 @@ test("a row with no model and a cost not whole leaves the models out and says wh
   assert.match(line.why, /tokens have no price/);
 });
 
-test("the table holds every figure of the rows shown, naming the list when two show rows", () => {
-  const one = sessionsTable([{ label: "This week", rows: [row("s-1", 5.35, { context: { tokens: 10, window: 100 } })] },
-                             { label: "Earlier", rows: [] }], TODAY, false, null, UTC);
-  assert.deepEqual(one.columns.map((column) => column.label),
-    ["Session", "Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens", "Cost"]);
-  assert.deepEqual(one.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
-                                       "Tue 10:20", "10 of 100", "15", "1.20k", "$5.35"]);
-  const two = sessionsTable([{ label: "This week", rows: [row("s-1", 2, { project: "proj-b" })] },
-                             { label: "Earlier", rows: [row("s-1", 1, { unpriced_tokens: 9, complete: false })] }],
-                            TODAY, true, null, UTC);
-  assert.deepEqual(two.columns.map((column) => column.label).slice(0, 4), ["List", "Session", "Project", "Folder"]);
-  assert.equal(two.columns.at(-1).label, "Not whole");
-  // A session on both sides of the cut is a row of each list, kept apart.
-  assert.deepEqual(two.rows.map((line) => [line.key, line.cells[0], line.cells[2]]),
-                   [["0:claude/s-1", "This week", "proj-b"], ["1:claude/s-1", "Earlier", ""]]);
+test("the table: every figure of each session, a sort on each column the server sorts by", () => {
+  const list = listRead(answer([row("s-1", 5.35, { context: { tokens: 10, window: 100 }, fresh_input: 300, cache_write: 400,
+                                                cache_read: 200, output: 300 })], { count: 54, more: 53 }));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  assert.deepEqual(board.columns.map((column) => [column.label, column.sort]), [
+    ["Session", null], ["Folder", "project"], ["Harness", null], ["Models", null], ["Started", "started"],
+    ["Active", "active"], ["Requests", "requests"], ["Fresh input", "fresh_input"], ["Cache write", "cache_write"],
+    ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"], ["Cost", "cost"], ["Context", null]]);
+  assert.deepEqual(board.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
+                                         "1h 28m", "15", "300", "400", "200", "300", "1.20k", "$5.35", "10 of 100"]);
+  assert.equal(board.rows[0].key, "claude/s-1");
+  // The column sorted by says its direction; the others say none; one with no sort says nothing.
+  const cost = board.columns.find((column) => column.label === "Cost");
+  assert.deepEqual([cost.aria, cost.arrow], ["descending", "↓"]);
+  assert.deepEqual([board.columns[4].aria, board.columns[4].arrow], ["none", null]);
+  assert.equal(board.columns[0].aria, null);
+  assert.equal(board.line, "54 sessions · showing 1");
+  assert.equal(board.more, true);
+});
+
+test("with projects the project column takes the project sort; a cost not whole says why", () => {
+  const list = listRead(answer([row("s-1", 2, { project: "proj-b" }), row("s-2", 1, { unpriced_tokens: 9, complete: false })]));
+  const board = sessionsBoard(list, { sort: "started", order: "asc" }, TODAY, true, null, UTC);
+  assert.deepEqual(board.columns.slice(0, 3).map((column) => [column.label, column.sort]),
+                   [["Session", null], ["Project", "project"], ["Folder", null]]);
+  assert.deepEqual([board.columns[5].label, board.columns[5].aria, board.columns[5].arrow], ["Started", "ascending", "↑"]);
+  assert.equal(board.columns.at(-1).label, "Not whole");
+  assert.deepEqual(board.rows.map((line) => [line.cells[1], line.cells.at(-1)]),
+                   [["proj-b", ""], ["", "9 tokens have no price"]]);
+  assert.deepEqual([board.line, board.more], ["2 sessions · showing 2", false]);
+});
+
+test("a click on the sorted column turns it around; another column starts highest first", () => {
+  assert.deepEqual(nextOrder(BOARD_START, "cost"), { sort: "cost", order: "asc" });
+  assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "cost"), { sort: "cost", order: "desc" });
+  assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "started"), { sort: "started", order: "desc" });
 });
 
 test("the table writes a folder from the home folder, and as its last segment with no home read", () => {
-  const rows = [row("s-1", 2, { folder: "/home/alice/work/proj-a" }), row("s-2", 1, { folder: "/srv/proj-b" })];
-  const folders = (home) => sessionsTable([{ label: "This week", rows }], TODAY, false, home, UTC).rows.map((line) => line.cells[1]);
+  const list = listRead(answer([row("s-1", 2, { folder: "/home/alice/work/proj-a" }), row("s-2", 1, { folder: "/srv/proj-b" })]));
+  const folders = (home) => sessionsBoard(list, BOARD_START, TODAY, false, home, UTC).rows.map((line) => line.cells[1]);
   assert.deepEqual(folders("/home/alice"), ["~/work/proj-a", "/srv/proj-b"]);
   assert.deepEqual(folders("/home/alice/"), ["~/work/proj-a", "/srv/proj-b"]);
   assert.deepEqual(folders(null), ["proj-a", "proj-b"]);
+});
+
+test("the table is read over the whole range in its order, a page at a time", async () => {
+  const state = { ...START, harness: "claude" };
+  assert.equal(boardPath(state, TODAY, { sort: "started", order: "asc" }, BOARD_PAGE),
+               "api/sessions?since=2026-10-10&until=2026-11-08&harness=claude&sort=started&order=asc&top=200");
+  assert.equal(boardPath({ ...START, range: { kind: "all" } }, TODAY, BOARD_START, BOARD_PAGE, 200),
+               "api/sessions?sort=cost&order=desc&top=200&skip=200");
+  const { ask, asked } = server(many(450));
+  const board = new SessionList(ask, (top, skip) => boardPath(START, TODAY, BOARD_START, top, skip), BOARD_PAGE,
+                                () => {}, BOARD_PAGE);
+  await board.refresh();
+  await board.show();
+  assert.equal(board.feed.value.rows.length, 400);
+  assert.equal(board.feed.value.more, 50);
+  assert.deepEqual(asked.map((item) => item.replace(/^.*&sort/, "sort")),
+                   ["sort=cost&order=desc&top=200", "sort=cost&order=desc&top=200&skip=200"]);
 });
 
 test("a range of seven days or fewer has no earlier line", () => {

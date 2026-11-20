@@ -34,7 +34,9 @@
 //                                  range; a used day is a button that sets the range to it
 //     section[data-group=sessions] the range's dearest session and the count, and opened
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
-//                                  they leave out, the earlier days, and the table; an
+//                                  they leave out, the earlier days, and the table of
+//                                  every session, sorted by a column and read a page at
+//                                  a time; an
 //                                  opened row holds its session (div[data-part=session]):
 //                                  its lines, its chart and its acts; shown, its
 //                                  subagents (div[data-part=agents]): a map and a row
@@ -99,10 +101,12 @@ import {
   BILL, DETAILS, FIND, KINDS_LABEL, PRICE_HEADS, PRICES_LABEL, pricesFor, pricesLeft, pricesSection, kindsSection,
 } from "./terms-model.ts";
 import type { Kinds, PricesModel, PricesPart } from "./terms-model.ts";
-import { OPEN, SessionList, sessionLine, sessionsClosed, sessionsTable, SESSIONS_LABEL, SHOW } from "./sessions-section.ts";
-import type { SessionLine, SessionsClosed, TablePart } from "./sessions-section.ts";
 import {
-  earlierLine, FIRST_TOP, firstHeading, PAGE, remainder, sessionLists, sessionName, sessionsPath,
+  BOARD_PAGE, BOARD_START, nextOrder, OPEN, SessionList, sessionLine, sessionsBoard, sessionsClosed, SESSIONS_LABEL, SHOW,
+} from "./sessions-section.ts";
+import type { Board, BoardOrder, BoardSort, SessionLine, SessionsClosed } from "./sessions-section.ts";
+import {
+  boardPath, earlierLine, FIRST_TOP, firstHeading, PAGE, remainder, sessionLists, sessionName, sessionsPath,
 } from "./sessions-model.ts";
 import type { ListLine, SessionLists } from "./sessions-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
@@ -279,6 +283,8 @@ const STYLES = css`
   .tbl th:first-child, .tbl td:first-child { padding-left: 0; }
   .tbl th { color: var(--moxi-text-dim); }
   .tbl .n { text-align: right; }
+  .tbl th button.sort { color: inherit; }
+  .tbl th[aria-sort=ascending] button.sort, .tbl th[aria-sort=descending] button.sort { color: var(--moxi-text); }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
                letter-spacing: -0.005em; }
   .grp.is-open .gk { color: var(--moxi-text); }
@@ -370,6 +376,7 @@ export class UsagePage extends LitElement {
     asTable: { state: true },
     heatTable: { state: true },
     sectionTable: { state: true },
+    boardBy: { state: true },
     pricesPart: { state: true },
     searchText: { state: true },
     sessionPart: { state: true },
@@ -393,6 +400,8 @@ export class UsagePage extends LitElement {
   heatTable = false;
   /** The opened section whose table is shown under its rows. */
   sectionTable: SectionKey | "sessions" | null = null;
+  /** The Sessions table's order. */
+  boardBy: BoardOrder = BOARD_START;
   /** What is open under the price table. */
   pricesPart: PricesPart | null = null;
   /** What `Find a model` searches for. */
@@ -439,6 +448,10 @@ export class UsagePage extends LitElement {
   #lists: SessionLists | null = null;
   #listsKey: string | null = null;
   #firstList: SessionList | null = null;
+  /** The Sessions table's read, every session of the range in `boardBy`'s order, with
+   * the path of its first page. */
+  #board: SessionList | null = null;
+  #boardKey: string | null = null;
   #earlierTop: Feed<Report<SessionRow>> | null = null;
   #earlierList: SessionList | null = null;
   /** The session the address named as the page was placed: its row comes first in the
@@ -768,6 +781,7 @@ export class UsagePage extends LitElement {
       this.#closeLists();
       return;
     }
+    this.#followBoard(state, today);
     const firstPath = (top: number, skip: number): string => sessionsPath(state, today, lists.first, top, skip);
     const earlier = lists.earlier;
     const key = JSON.stringify([firstPath(1, 0), earlier === null ? null : sessionsPath(state, today, earlier, 1)]);
@@ -790,6 +804,30 @@ export class UsagePage extends LitElement {
     for (const feed of [this.#firstList, this.#earlierTop, this.#earlierList]) feed?.close();
     this.#firstList = this.#earlierTop = this.#earlierList = null;
     this.#lists = this.#listsKey = null;
+    this.#closeBoard();
+  }
+
+  /** The table is read while it is shown, again in a new order or under new filters. */
+  #followBoard(state: PageState, today: string): void {
+    if (this.sectionTable !== "sessions") {
+      this.#closeBoard();
+      return;
+    }
+    const by = this.boardBy;
+    const path = (top: number, skip: number): string => boardPath(state, today, by, top, skip);
+    const key = path(BOARD_PAGE, 0);
+    if (key === this.#boardKey) return;
+    this.#closeBoard();
+    this.#boardKey = key;
+    this.#board = new SessionList((asked: string) => api("usage", asked), path, BOARD_PAGE, () => this.requestUpdate(),
+                                  BOARD_PAGE);
+    void this.#board.refresh();
+  }
+
+  #closeBoard(): void {
+    this.#board?.close();
+    this.#board = null;
+    this.#boardKey = null;
   }
 
   /** The opened session's reads follow the address, the list it was opened from, the
@@ -896,7 +934,7 @@ export class UsagePage extends LitElement {
       void this.#status?.refresh();
       void this.#daily?.refresh();
       for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#firstList, this.#earlierTop,
-                          this.#earlierList, ...this.#openedFeeds()]) void feed?.refresh();
+                          this.#earlierList, this.#board, ...this.#openedFeeds()]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -962,6 +1000,7 @@ export class UsagePage extends LitElement {
     other("Token kinds and Prices", this.#terms);
     other("The Sessions section", this.#sessionsTop);
     other("The sessions listed", this.#firstList?.feed ?? null);
+    other("The Sessions table", this.#board?.feed ?? null);
     other("The earlier sessions", this.#earlierTop);
     other("The earlier sessions listed", this.#earlierList?.feed ?? null);
     other("Today's dearest sessions", this.#mostToday);
@@ -1331,7 +1370,8 @@ export class UsagePage extends LitElement {
   }
 
   /** Sessions: the range's dearest session and how many there are; opened, the range's
-   * last seven days dearest first, what they leave out, the earlier days, and the table. */
+   * last seven days dearest first, what they leave out, the earlier days, and the table
+   * of every session of the range. */
   #sessions(model: SessionsClosed | null, today: string) {
     const open = this.#at.piece === "sessions";
     if (model === null && open && this.#placed !== null && !(this.#sessionsTop?.loading ?? false)) {
@@ -1397,9 +1437,8 @@ export class UsagePage extends LitElement {
     const shown = this.#earlierList?.feed ?? null;
     const heading = firstHeading(lists);
     const earlierRows = (shown?.value?.rows ?? []).filter(other);
-    const parts: TablePart[] = [{ label: heading.replace(/, dearest first$/, ""), rows: firstRows },
-                                { label: "Earlier", rows: earlierRows }];
     const table = this.sectionTable === "sessions";
+    const board = this.#board?.feed ?? null;
     return html`
       ${placedRow}
       ${firstRows.length ? html`<div class="sub1" data-part="heading">${heading}</div>` : nothing}
@@ -1413,8 +1452,27 @@ export class UsagePage extends LitElement {
           ${this.#more(remainder(shown.value, false), "earlier-more", () => { void this.#earlierList?.show(); })}`}
       <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(table)}
         @click=${() => { this.sectionTable = table ? null : "sessions"; }}>${table ? HIDE_TABLE : SECTION_TABLE}</button></p>
-      ${table ? this.#table(sessionsTable(parts, today, projects,
-        this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null)) : nothing}`;
+      ${!table || board === null ? nothing : board.value === null
+        ? (board.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
+        : this.#boardTable(sessionsBoard(board.value, this.boardBy, today, projects,
+                                     this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null))}`;
+  }
+
+  /** The Sessions table: a header button per column it sorts by, the rows read, and the
+   * line that counts them with `Show` for the next page. */
+  #boardTable(board: Board) {
+    const sortBy = (sort: BoardSort) => { this.boardBy = nextOrder(this.boardBy, sort); };
+    return html`<div class="scroll"><table class="tbl" data-part="table" data-table="sessions">
+      <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
+        aria-sort=${column.aria ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
+          class="act sort" data-sort=${column.sort} @click=${() => sortBy(column.sort as BoardSort)}>${column.label}${
+          column.arrow === null ? nothing : html`<span aria-hidden="true"> ${column.arrow}</span>`}</button>`}</th>`)}</tr></thead>
+      <tbody>${board.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
+        html`<td class=${board.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
+    </table></div>
+    <div class="more" data-part="more" data-more="table"><span>${board.line}</span>${board.more
+      ? html`<button type="button" class="act" data-act="show" @click=${() => { void this.#board?.show(); }}>${SHOW}</button>`
+      : nothing}</div>`;
   }
 
   /** A line under a list: what it leaves out, and `Show`; with no act, the line alone. */

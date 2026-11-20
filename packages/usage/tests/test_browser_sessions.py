@@ -1,9 +1,10 @@
 """The Sessions section of usage's page in a browser, through a real shell that starts
 usage's real page server: the closed row naming the range's dearest session with the
 count that opens it; opened, the week's ten dearest as two-line rows, the line for the
-rest of the week and its `Show`, the earlier days' line and its `Show`, the table, a
-row's `Open` and the address it writes; a range of seven days or fewer with no earlier
-line; Cost's `most to` naming today's two dearest; and the section at a phone's width.
+rest of the week and its `Show`, the earlier days' line and its `Show`, the table of
+every session sorted by a column, a row's `Open` and the address it writes; a range of
+seven days or fewer with no earlier line; Cost's `most to` naming today's two dearest;
+and the section at a phone's width.
 
 The transcripts are written and the index built in the shell's own environment. No test
 changes what the index holds, so the tests hold under pytest-xdist in any order.
@@ -196,21 +197,42 @@ def test_a_range_of_seven_days_or_fewer_has_no_earlier_line(page):
     set_range(panel, "Last 30 days")
 
 
-def test_the_table_holds_every_figure_of_the_rows_shown(page):
+def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
     section = sessions_of(open_page(page, "sessions"))
     expect(rows_of(section)).to_have_count(10)
-    section.locator("[data-more=earlier]").get_by_role("button", name="Show").click()
-    expect(rows_of(section, "earlier")).to_have_count(2)
-    section.get_by_role("button", name="Table").click()
+    with page.expect_request(lambda request: "sort=cost" in request.url) as sent:
+        section.get_by_role("button", name="Table").click()
+    assert "order=desc" in sent.value.url and "top=200" in sent.value.url, sent.value.url
     table = section.locator("table[data-part=table]")
+    # Every session of the 30 days, not only the rows the lists show.
+    expect(table.locator("tbody tr")).to_have_count(16)
+    expect(section.locator("[data-more=table]")).to_have_text("16 sessions · showing 16")
+    expect(section.locator("[data-more=table]").get_by_role("button", name="Show")).to_have_count(0)
     heads = table.locator("th").all_inner_texts()
-    assert heads[:3] == ["List", "Session", "Project"], heads
-    assert {"Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens",
-            "Cost"} <= set(heads), heads
-    expect(table.locator("tbody tr")).to_have_count(12)
-    expect(table.locator("tbody tr").first.locator("td").nth(1)).to_have_text("fix the tests")
+    assert heads[:3] == ["Session", "Project", "Folder"], heads
+    assert {"Harness", "Models", "Started", "Active", "Requests", "Fresh input", "Cache write", "Cache read",
+            "Output", "Tokens", "Cost ↓", "Context"} <= set(heads), heads
+    column = {name: i for i, name in enumerate(head.removesuffix(" ↓") for head in heads)}
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Cost ↓")
+    expect(table.locator("th[aria-sort=none]")).to_have_count(9)
+    first = table.locator("tbody tr").first.locator("td")
+    expect(first.nth(0)).to_have_text("fix the tests")
     # A folder outside the account's home is written whole once `/api/projects` gave the home.
-    expect(table.locator("tbody tr").first.locator("td").nth(3)).to_have_text("/work/proj-a")
+    expect(first.nth(column["Folder"])).to_have_text("/work/proj-a")
+
+    # A new column starts highest first; a second click turns it around.
+    requests = table.get_by_role("button", name="Requests")
+    with page.expect_request(lambda request: "sort=requests" in request.url) as sent:
+        requests.click()
+    assert "order=desc" in sent.value.url, sent.value.url
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Requests ↓")
+    expect(table.locator("th[aria-sort=none]").filter(has_text="Cost")).to_have_count(1)
+    expect(first.nth(column["Requests"])).to_have_text("16")
+    with page.expect_request(lambda request: "sort=requests&order=asc" in request.url):
+        requests.click()
+    expect(table.locator("th[aria-sort=ascending]")).to_have_text("Requests ↑")
+    expect(first.nth(column["Requests"])).to_have_text("2")
+    expect(table.locator("tbody tr").last.locator("td").nth(column["Requests"])).to_have_text("16")
     section.get_by_role("button", name="Hide table").click()
     expect(table).to_have_count(0)
 
@@ -241,4 +263,8 @@ def test_the_opened_section_fits_a_phone(page, ui_width_check):
     ui_width_check(page, module="usage", route="sessions")
     section = sessions_of(page.locator("#moxi-panel > moxi-usage-page"))
     expect(rows_of(section)).to_have_count(10)
+    ui_width_check(page)
+    # The table scrolls inside its box.
+    section.get_by_role("button", name="Table").click()
+    expect(section.locator("table[data-part=table] tbody tr")).to_have_count(16)
     ui_width_check(page)

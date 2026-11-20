@@ -1,20 +1,21 @@
 // The Sessions section as the page draws it, with no DOM: the closed row, one row of a
-// list in the words its two lines carry, the section's table, and a list read thirty
-// rows at a time. The lists' days, headings and remainders are `sessions-model.ts`'.
+// list in the words its two lines carry, the section's table of every session in the
+// order picked, and a list read a page at a time. The lists' days, headings and remainders are `sessions-model.ts`'.
 
 import type { ApiResult } from "/m/ui/client.js";
 
-import type { Table } from "./chart-model.ts";
 import { costWords, countWords, sumRows, whyNotWhole } from "./cost-model.ts";
 import { LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import { Feed, parseReport } from "./feed.ts";
 import type { Report, SessionRow } from "./feed.ts";
 import { percentWords } from "./limits-model.ts";
-import { figuresTable } from "./sections-model.ts";
 import { tilde } from "./filter-model.ts";
-import { addPage, depthPages, lastSegment, listRead, PAGE, rowKey, sessionName, sessionWhere } from "./sessions-model.ts";
+import {
+  addPage, depthPages, lastSegment, listRead, PAGE, rowKey, sessionName, sessionWhere, TOP_MAX,
+} from "./sessions-model.ts";
 import type { ListRead } from "./sessions-model.ts";
+import { fmtSpan, fmtTokens } from "./views.ts";
 
 export const SESSIONS_LABEL = "Sessions";
 export const OPEN = "Open";
@@ -103,41 +104,99 @@ export function sessionLine(row: SessionRow, today: string | null, projects: boo
   };
 }
 
-/** The rows of one list as the table shows them, under the words that name the list. */
-export interface TablePart {
+/** What the table can be sorted by, as `/api/sessions` takes it. */
+export type BoardSort = "cost" | "tokens" | "requests" | "fresh_input" | "cache_write" | "cache_read" | "output"
+  | "started" | "active" | "project";
+
+/** The table's order: a column and its direction. */
+export interface BoardOrder {
+  sort: BoardSort;
+  order: "asc" | "desc";
+}
+
+/** The table's first order: dearest first. */
+export const BOARD_START: BoardOrder = { sort: "cost", order: "desc" };
+
+/** How many rows a read of the table asks for: the first, and each `Show`. */
+export const BOARD_PAGE = TOP_MAX;
+
+/** One column of the table; `sort` null for a column it cannot be sorted by. */
+export interface BoardColumn {
   label: string;
-  rows: SessionRow[];
+  num: boolean;
+  sort: BoardSort | null;
+  /** The column's `aria-sort`: null for a column with no sort. */
+  aria: "ascending" | "descending" | "none" | null;
+  /** `↓` or `↑` after the column the table is sorted by. */
+  arrow: string | null;
+}
+
+/** The Sessions section's table: every session of the range in the order picked, read a
+ * page at a time. */
+export interface Board {
+  columns: BoardColumn[];
+  rows: { key: string; cells: string[] }[];
+  /** `54 sessions · showing 30`. */
+  line: string;
+  /** More sessions are after the rows shown: `Show` reads the next page. */
+  more: boolean;
+}
+
+/** The order after a click on a column: the column sorted by turns around; another
+ * starts highest first. */
+export function nextOrder(now: BoardOrder, sort: BoardSort): BoardOrder {
+  return now.sort === sort ? { sort, order: now.order === "desc" ? "asc" : "desc" } : { sort, order: "desc" };
 }
 
 /**
- * The section's table: every row shown, with every figure `/api/sessions` gives. A first
- * column names the list when two lists show rows, since a session with requests on both
- * sides of their cut is a row in each. The project column is there with projects. A
- * folder is written from `home` (`~/work/proj-a`), the account's home folder that
- * `/api/projects` answers; with no `home` read, as its last segment.
+ * The table over a list read in one order: a row per session with every figure
+ * `/api/sessions` gives. The project column is there with projects; without them the
+ * folder column takes the project sort, which falls back to the folder. A folder is
+ * written from `home` (`~/work/proj-a`), the account's home folder that `/api/projects`
+ * answers; with no `home` read, as its last segment. A last column says why a cost is
+ * not whole, and is there only when some row's is not.
  */
-export function sessionsTable(parts: TablePart[], today: string | null, projects: boolean,
-                              home: string | null, clock: Clock = LOCAL): Table {
-  const shown = parts.filter((part) => part.rows.length > 0);
-  const two = shown.length > 1;
+export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | null, projects: boolean,
+                              home: string | null, clock: Clock = LOCAL): Board {
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
-  const heads = [...(two ? ["List"] : []), "Session", ...(projects ? ["Project"] : []), "Folder", "Harness",
-                 "Models", "First request", "Last request", "Context"];
-  return figuresTable(heads, shown.flatMap((part, n) => part.rows.map((row) => ({
-    key: `${n}:${rowKey(row)}`,
-    sum: sumRows([row]),
+  const column = (label: string, num: boolean, sort: BoardSort | null): BoardColumn => ({
+    label, num, sort,
+    aria: sort === null ? null : sort === by.sort ? (by.order === "asc" ? "ascending" : "descending") : "none",
+    arrow: sort !== null && sort === by.sort ? (by.order === "asc" ? "↑" : "↓") : null,
+  });
+  const whys = list.rows.map((row) => whyNotWhole(sumRows([row])));
+  const flagged = whys.some((why) => why !== null);
+  const columns = [
+    column("Session", false, null), ...(projects ? [column("Project", false, "project")] : []),
+    column("Folder", false, projects ? null : "project"), column("Harness", false, null), column("Models", false, null),
+    column("Started", true, "started"), column("Active", true, "active"), column("Requests", true, "requests"),
+    column("Fresh input", true, "fresh_input"), column("Cache write", true, "cache_write"),
+    column("Cache read", true, "cache_read"), column("Output", true, "output"), column("Tokens", true, "tokens"),
+    column("Cost", true, "cost"), column("Context", true, null),
+    ...(flagged ? [column("Not whole", false, null)] : []),
+  ];
+  const rows = list.rows.map((row, i) => ({
+    key: rowKey(row),
     cells: [
-      ...(two ? [part.label] : []),
       sessionName(row, today, clock).name,
       ...(projects ? [row.project ?? ""] : []),
       folderCell(row.folder ?? row.cwd, home),
       row.harness,
       row.models.join(", "),
       when(row.first_ts),
-      when(row.last_ts),
+      row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)),
+      row.requests.toLocaleString("en-US"),
+      fmtTokens(row.fresh_input), fmtTokens(row.cache_write), fmtTokens(row.cache_read), fmtTokens(row.output),
+      fmtTokens(row.tokens),
+      costWords(sumRows([row])),
       row.context === null ? "" : contextCell(row.context),
+      ...(flagged ? [whys[i] ?? ""] : []),
     ],
-  }))));
+  }));
+  return {
+    columns, rows, line: `${countWords(list.count, "session")} · showing ${list.rows.length.toLocaleString("en-US")}`,
+    more: list.more > 0,
+  };
 }
 
 /** A folder as the table writes it: whole from `home`, else its last segment. */
@@ -156,24 +215,27 @@ export type ListPath = (top: number, skip: number) => string;
 
 /**
  * One list of the section, read as a `Feed`. Its first read asks for `first` rows; `show`
- * reads thirty more from where it stopped and puts them below the rows shown; `refresh`
- * reads the list again to the depth it was read to, as after a pass. A read that fails
- * keeps the rows shown.
+ * reads `page` more (thirty unless given) from where it stopped and puts them below the
+ * rows shown; `refresh` reads the list again to the depth it was read to, as after a pass.
+ * A read that fails keeps the rows shown.
  */
 export class SessionList {
   readonly feed: Feed<ListRead>;
   #first: number;
+  #page: number;
   #show = false;
 
-  constructor(ask: (path: string) => Promise<ApiResult>, path: ListPath, first: number, onChange: () => void) {
+  constructor(ask: (path: string) => Promise<ApiResult>, path: ListPath, first: number, onChange: () => void,
+              page = PAGE) {
     this.#first = first;
+    this.#page = page;
     this.feed = new Feed<ListRead>(() => this.#read(ask, path), (data) => this.#fold(data), onChange);
   }
 
   async #read(ask: (path: string) => Promise<ApiResult>, path: ListPath): Promise<ApiResult> {
     const held = this.feed.value;
     const show = this.#show && held !== null;
-    const pages = show ? [{ top: PAGE, skip: held.read }] : depthPages(held?.read ?? 0, this.#first);
+    const pages = show ? [{ top: this.#page, skip: held.read }] : depthPages(held?.read ?? 0, this.#first);
     const answers: unknown[] = [];
     for (const page of pages) {
       const answer = await ask(path(page.top, page.skip));
@@ -195,7 +257,7 @@ export class SessionList {
     return list;
   }
 
-  /** Thirty more rows, below those shown; nothing while a read runs or before the first. */
+  /** A page more rows, below those shown; nothing while a read runs or before the first. */
   show(): Promise<void> {
     if (this.feed.reading || this.feed.value === null) return Promise.resolve();
     this.#show = true;

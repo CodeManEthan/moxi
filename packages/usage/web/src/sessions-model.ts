@@ -123,6 +123,15 @@ export function sessionsPath(state: PageState, today: string, days: ListDays | n
   return `api/sessions?${new URLSearchParams(keys).toString()}`;
 }
 
+/** `/api/sessions` for the section's table: the whole range under the filters, in the
+ * order picked, `top` rows after `skip`. */
+export function boardPath(state: PageState, today: string, by: { sort: string; order: string }, top: number,
+                          skip = 0): string {
+  const keys = [...stateKeys(state, today), ["sort", by.sort], ["order", by.order], ["top", String(top)]];
+  if (skip > 0) keys.push(["skip", String(skip)]);
+  return `api/sessions?${new URLSearchParams(keys).toString()}`;
+}
+
 /** The first list's heading: `This week, dearest first` for the seven days ending today,
  * `Today, dearest first` for today alone, else the list's own days. */
 export function firstHeading(lists: SessionLists): string {
