@@ -87,11 +87,32 @@ export function clip(text: string): string {
   return chars.length <= TEXT_MAX_CHARS ? text : `${chars.slice(0, TEXT_MAX_CHARS - 1).join("")}…`;
 }
 
-/** The items' parts, `<kind> <name>` each with the kind as the Loadout page words it
- * (`permission rule`, `MCP server`), in the order loadout lists them; past eight, the first
+/** The word the Loadout page gives an item switched off, in its cells. */
+export const OFF = "off";
+
+/** One item of the row: its kind and name, and whether it is off for every harness. */
+export interface RowItem {
+  kind: string;
+  name: string;
+  off?: boolean;
+}
+
+/** One item's part: `<kind> <name>`, the kind as the Loadout page words it (`permission
+ * rule`, `MCP server`), and ` off` after it when it is off; a long one is cut before ` off`,
+ * so the word stays. */
+export function itemText(item: RowItem): string {
+  const head = `${kindWord(item.kind)} ${item.name}`;
+  if (!item.off) return clip(head);
+  const tail = ` ${OFF}`;
+  const chars = Array.from(head);
+  const room = TEXT_MAX_CHARS - tail.length;
+  return chars.length <= room ? `${head}${tail}` : `${chars.slice(0, room - 1).join("")}…${tail}`;
+}
+
+/** The items' parts (`itemText`), in the order loadout lists them; past eight, the first
  * seven and `<n> more`. */
-export function itemParts(items: readonly Pick<Item, "kind" | "name">[]): Part[] {
-  const parts = items.map((item) => ({ text: clip(`${kindWord(item.kind)} ${item.name}`) }));
+export function itemParts(items: readonly RowItem[]): Part[] {
+  const parts = items.map((item) => ({ text: itemText(item) }));
   if (parts.length <= PARTS_MAX) return parts;
   return [...parts.slice(0, PARTS_MAX - 1), { text: `${parts.length - (PARTS_MAX - 1)} more` }];
 }
@@ -110,21 +131,29 @@ export function projectSections(project: Given, listing: Pick<Listing, "sections
   return names;
 }
 
+/** Whether the section that lists `item` switches it off for every harness (`*` in its
+ * `disabled`), as the Loadout page draws every cell of it `off`. */
+export function offEverywhere(item: Pick<Item, "disabled">): boolean {
+  return item.disabled.includes("*");
+}
+
 /** The items the project's sections list, each section's in loadout's order, the key
- * section's first; an item (its kind and name) both list is the first section's, once. */
-export function projectItems(project: Given, listing: Listing): Item[] {
-  const seen = new Set<string>();
-  const items: Item[] = [];
+ * section's first; an item (its kind and name) both list is named once, where the first
+ * lists it. It is off only when every section that lists it switches it off for every
+ * harness, since each section's listing is placed on its own. */
+export function projectItems(project: Given, listing: Listing): RowItem[] {
+  const byId = new Map<string, RowItem>();
   for (const name of projectSections(project, listing)) {
     for (const item of listing.items) {
       if (item.scope !== name) continue;
       const id = `${item.kind}:${item.name}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      items.push(item);
+      const off = offEverywhere(item);
+      const had = byId.get(id);
+      if (had === undefined) byId.set(id, { kind: item.kind, name: item.name, off });
+      else had.off = had.off === true && off;
     }
   }
-  return items;
+  return [...byId.values()];
 }
 
 /** The project's `Loadout` row, or null when no section of `listing` is the project's or

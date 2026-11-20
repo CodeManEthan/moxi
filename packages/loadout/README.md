@@ -193,8 +193,9 @@ page's words (`skill release-checklist · permission rule git-push`; past eight,
 seven and how many more), and a `Loadout` link to
 `/m/loadout/project/<key>`. A project's sections are the one named by its key and the one
 whose path is its folder itself, since loadout places both there: the row names the items
-of each, the key section's first, and an item both list once. (With both, that address
-shows the key section alone.) A project loadout lists nothing for has no row. The row comes from loadout's `project-facts`
+of each, the key section's first, and an item both list once. An item switched off for
+every harness there reads `off` after its name, as its cells do on this page. (With both
+sections, that address shows the key section alone.) A project loadout lists nothing for has no row. The row comes from loadout's `project-facts`
 component, which reads only `/api/list`, from the manifest alone: when the Projects page
 places it, every minute while that page is shown, and once when it is shown again. While
 the manifest can't be read, the row is left out.

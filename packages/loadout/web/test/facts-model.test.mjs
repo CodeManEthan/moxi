@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  clip, factsReport, itemParts, LABEL, ORDER, PARTS_MAX, parseGiven, projectSections, TEXT_MAX_CHARS, VERSION,
+  clip, factsReport, itemParts, LABEL, OFF, ORDER, PARTS_MAX, parseGiven, projectSections, TEXT_MAX_CHARS,
+  VERSION,
 } from "../src/facts-model.ts";
 import { parseListing } from "../src/feed.ts";
-import { kindWord } from "../src/words.ts";
+import { kindWord, stateWord } from "../src/words.ts";
 
 const HOME = "/home/me";
 const ATLAS = { key: "atlas-api", root: `${HOME}/code/atlas-api` };
@@ -169,6 +170,31 @@ test("up to eight items are all drawn; past eight, the first seven and `<n> more
   assert.equal(many.length, PARTS_MAX);
   assert.deepEqual(many.at(-1), { text: "23 more" });
   assert.deepEqual(itemParts([]), []);
+});
+
+test("an item its section switches off for every harness reads `off`, the Loadout page's word", () => {
+  const off = (kind, name, scope) => ({ ...item(kind, name, scope), disabled: ["*"] });
+  const found = report({ items: [item("skill", "release-checklist", "atlas-api"), off("mcp", "docs", "atlas-api"),
+                                 { ...item("agent", "api-lead", "atlas-api"), disabled: ["codex"] }] });
+  assert.deepEqual(texts(found), ["skill release-checklist", "MCP server docs off", "agent api-lead"],
+                   "off for one harness only is still on for the rest");
+  assert.equal(OFF, stateWord({ state: "off", edited: false }));
+});
+
+test("an item both sections list is off only when each switches it off for every harness", () => {
+  const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
+  const off = (kind, name, scope) => ({ ...item(kind, name, scope), disabled: ["*"] });
+  const found = report({ sections: [section("atlas-api"), at],
+                         items: [off("skill", "both-off", "atlas-api"), off("skill", "both-off", at.name),
+                                 off("skill", "key-off", "atlas-api"), item("skill", "key-off", at.name),
+                                 item("skill", "path-off", "atlas-api"), off("skill", "path-off", at.name)] });
+  assert.deepEqual(texts(found), ["skill both-off off", "skill key-off", "skill path-off"]);
+});
+
+test("a long name that is off is cut before `off`, so the word stays", () => {
+  const [part] = itemParts([{ kind: "skill", name: "n".repeat(TEXT_MAX_CHARS + 5), off: true }]);
+  assert.equal(Array.from(part.text).length, TEXT_MAX_CHARS);
+  assert.ok(part.text.endsWith("… off"));
 });
 
 test("a long name is cut to the contract's longest, ending `…`", () => {
