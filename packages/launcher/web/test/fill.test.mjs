@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHIP_ROWS, fillFace, fillIn, fillNote, fillOf, fillRows, fillText, fromLast, harnessStep, keptFill, lastKey, lastValue,
-  lastWhen, parseLast, WHOSE, withoutFill,
+  BY_DEFAULT, CHIP_ROWS, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST, harnessStep,
+  keptFill, lastKey, lastValue, lastWhen, parseLast, WHOSE, withoutFill,
 } from "../src/fill-model.ts";
 import { changes, offRows, turnedOn, valueNow, withOption } from "../src/options-model.ts";
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
@@ -65,9 +65,10 @@ test("an answer of the last launch is read, and one that is not one is not", () 
   assert.deepEqual(lastOf("claude", ["model", "opus"], ["add_dir", ["/work/a"]]), {
     state: "up", detail: null, at: "2026-11-10T17:52:10.995351Z", harness: "claude",
     values: [{ name: "model", value: "opus", items: null }, { name: "add_dir", value: null, items: ["/work/a"] }],
+    harnesses: null,
   });
-  assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [] }),
-                   { state: "up", detail: null, at: null, harness: null, values: [] });
+  assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], harnesses: null }),
+                   { state: "up", detail: null, at: null, harness: null, values: [], harnesses: null });
   assert.equal(parseLast({ state: "up" }), null);
   assert.equal(parseLast("no"), null);
 });
@@ -93,6 +94,30 @@ test("the harness of the last launch fills only where the form leaves the harnes
   // No launch fills nothing.
   assert.equal(harnessStep(parseLast({ state: "up", detail: null, at: null, harness: null, values: [] }),
                            shippedForm("claude")), "none");
+});
+
+/** `/api/last`'s answer with no launch: the default identity `name`, for `harnesses`. */
+const defaultOf = (name, harnesses = ["claude"]) => parseLast({
+  state: "up", detail: null, at: null, harness: null, harnesses,
+  values: [{ name: "identity", value: name, items: null }, { name: "scope", value: "", items: null }],
+});
+const IDENTITY = field("identity", { group: "seat", sub: "Comms", label: "Comms identity" });
+const SCOPE = field("scope", { group: "seat", sub: "Comms", label: "Comms scope" });
+
+test("with no launch the default identity fills a form drawn for a harness it is for, at the global scope", () => {
+  const given = defaultOf("proj-a-lead");
+  assert.equal(fills(given), true);
+  assert.equal(fills(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], harnesses: null })), false);
+  assert.equal(harnessStep(given, shippedForm("claude")), "same");
+  // Codex has no default.
+  assert.equal(harnessStep(given, shippedForm("codex", ["harness", "codex", "preset"])), "none");
+  const catalog = [...CATALOG, IDENTITY, SCOPE];
+  const form = formOf("claude", ["harness", "claude"], ["identity", null], ["scope", null]);
+  // The scope is the shipped one, which comms reads as global: nothing to fill.
+  assert.deepEqual(fillOf(given, filledFields(catalog, form, NO_PRESET), form), { identity: "proj-a-lead" });
+  // A row the preset or the defaults set is never filled over.
+  const set = formOf("claude", ["harness", "claude"], ["identity", "planner", "preset"], ["scope", null]);
+  assert.deepEqual(fillOf(given, filledFields(catalog, set, NO_PRESET), set), {});
 });
 
 test("a value fills only a row the form has, shows here and leaves at its shipped default", () => {
@@ -170,6 +195,11 @@ test("the sentence under the list says whose last launch filled it, by the line'
   assert.equal(fillNote("cwd", "Nov 3 08:20", 2),
                "Filled from this folder's last launch, Nov 3 08:20. The preset sets nothing for them.");
   assert.equal(fromLast("today 18:45"), "from the last launch, today 18:45");
+  // With no launch, the default filled it.
+  assert.equal(fillNote("project", "", 1), "Filled with this project's default comms identity, as no launch here set "
+               + "one. The preset sets nothing for it.");
+  assert.equal(fromLast(""), "the default, as no launch here set one");
+  assert.deepEqual([FROM_LAST, BY_DEFAULT], ["From last launch", "Default"]);
   const hour = (at) => `${at.getHours()}:${String(at.getMinutes()).padStart(2, "0")}`;
   const day = (at) => `day ${at.getDate()}`;
   const now = new Date(2026, 10, 10, 20, 0);

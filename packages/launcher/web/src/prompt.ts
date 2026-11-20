@@ -144,7 +144,8 @@ import type {
 } from "./options-model.ts";
 
 import {
-  CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, FROM_LAST, fromLast, HARNESS_ROW, harnessStep, keptFill,
+  BY_DEFAULT, CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast, HARNESS_ROW, harnessStep,
+  keptFill,
   lastKey, lastWhen, parseLast, withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
@@ -867,7 +868,7 @@ export class LauncherPrompt extends LitElement {
       if (asked !== this.#lastAsked) return;
       const read = answer.status === 200 ? parseLast(answer.data) : null;
       this.#lastRead = true;
-      if (read !== null && read.state === "up" && read.at !== null) this.#waiting = { ...read, key };
+      if (read !== null && read.state === "up" && fills(read)) this.#waiting = { ...read, key };
       this.#settle();
       this.requestUpdate();
     });
@@ -1103,16 +1104,18 @@ export class LauncherPrompt extends LitElement {
     return this.last === null ? "" : lastWhen(this.last.at ?? "", new Date());
   }
 
-  /** `· From last launch <label>` on the line, once a value is filled, and its list while
-   * it is open: each value with `Clear`, then where the values came from. */
+  /** `· From last launch <label>` on the line, once a value is filled, or `· Default <label>`
+   * for the default filled with no launch, and its list while it is open: each value with
+   * `Clear`, then where the values came from. */
   #fillItem() {
     const rows = fillRows(this.#fill, this.fields as PanelField[], this.#home);
     const face = fillFace(rows);
     if (face === null || this.last === null) return nothing;
     const open = this.menu === "fill";
-    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${FROM_LAST}</span><span
+    const from = this.last.at === null ? BY_DEFAULT : FROM_LAST;
+    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${from}</span><span
       class=${open ? "anchor open" : "anchor"} data-item="fill"><button type="button" class="pre" aria-haspopup="true"
-        aria-expanded=${open ? "true" : "false"} aria-label=${`${FROM_LAST} ${face.text}`}
+        aria-expanded=${open ? "true" : "false"} aria-label=${`${from} ${face.text}`}
         @click=${() => { this.menu = open ? "" : "fill"; }}><span class=${face.danger ? "dg" : ""}>${face.text}</span><span
         class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu fill" data-menu="fill">
         ${rows.map((row) => html`<div class=${row.danger ? "fr dg" : "fr"} data-fill=${row.name}><span>${row.label}</span><span

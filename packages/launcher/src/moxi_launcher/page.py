@@ -165,10 +165,13 @@ FORM_MODE = _table(target=_text(), mode=_text(nullable=True))
 HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
                 items=Out("list", items=Out("string", mark="redact"), nullable=True))
 #: The newest launch of the key asked for: when it was made, its harness, and each value
-#: its own request gave for a row that may be filled from an earlier launch. `at` and
-#: `harness` are null, and `values` empty, when the key has no such launch.
+#: its own request gave for a row that may be filled from an earlier launch, its comms
+#: identity the one launches of the key bound, else the default. `at` and `harness` are
+#: null when the key has no such launch, and `values` then holds only the default
+#: identity, if any, for the harnesses `harnesses` names (null with a launch).
 LAST = {**STANDING, "at": _text(nullable=True), "harness": _text(nullable=True),
-        "values": Out("list", items=HANDED)}
+        "values": Out("list", items=HANDED),
+        "harnesses": Out("list", items=Out("string"), nullable=True)}
 
 #: An earlier launch that can be run again: `head` is the start of its brief, else its
 #: model and effort, else its harness; `target` and `slot` say where it ran.

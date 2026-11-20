@@ -4,7 +4,9 @@
 // The last launch is keyed as the line names it: the seat while one is applied, else the
 // project, else the folder (`lastQuery`), so a launch never fills from another seat's or
 // another project's launch, even in the same folder. `/api/last` answers that launch's
-// harness and the values its own request gave, never one of a row that is not carried.
+// harness and the values its own request gave, never one of a row that is not carried. Its
+// comms identity is the one launches there bound, at the global scope, else the default
+// identity; with no launch it answers only that default, for the harnesses it names.
 //
 // A value fills only where the form has the row, the row is shown on this install, and the
 // form leaves it at its shipped default: what the user's `[defaults]` or the applied preset
@@ -44,6 +46,9 @@ function text(value: unknown): string | null {
 /** The words in front of the item on the line above the box. */
 export const FROM_LAST = "From last launch";
 
+/** The words in front of the item when no launch was made there and the default filled. */
+export const BY_DEFAULT = "Default";
+
 /** The control that takes a filled value back to what the form is filled with. */
 export const CLEAR = "Clear";
 
@@ -64,13 +69,15 @@ export interface LastValue {
 }
 
 /** `/api/last`'s answer: when the launch was made and its harness, both null with no launch,
- * and the values it carries. */
+ * the values it carries, and with no launch the harnesses its values (the default identity)
+ * are for. */
 export interface Last {
   state: "up" | "error";
   detail: string | null;
   at: string | null;
   harness: string | null;
   values: LastValue[];
+  harnesses: string[] | null;
 }
 
 export function parseLast(data: unknown): Last | null {
@@ -79,7 +86,15 @@ export function parseLast(data: unknown): Last | null {
     .map((row) => ({ name: row.name as string, value: text(row.value),
                      items: Array.isArray(row.items) ? row.items.filter((item): item is string => typeof item === "string")
                        : null }));
-  return { state: data.state, detail: text(data.detail), at: text(data.at), harness: text(data.harness), values };
+  const harnesses = Array.isArray(data.harnesses)
+    ? data.harnesses.filter((item): item is string => typeof item === "string") : null;
+  return { state: data.state, detail: text(data.detail), at: text(data.at), harness: text(data.harness), values,
+           harnesses };
+}
+
+/** Whether an answer fills anything: a launch, or with none a default. */
+export function fills(last: Last): boolean {
+  return last.at !== null || last.values.length > 0;
 }
 
 /** Which key a query of `/api/last` names: the first given of `seat`, `project`, `cwd`. */
@@ -99,11 +114,13 @@ export function lastValue(field: FieldDescriptor, row: LastValue): FormValue {
 /** What the harness of the last launch does to the fill: `same` when the form is drawn for
  * it, `read` when the form leaves the harness at its shipped default so it fills and the
  * form is read again for it, `none` when nothing fills (no launch, or `[defaults]` or the
- * preset sets another harness). */
+ * preset sets another harness). With no launch, the default fills (`same`) only for a form
+ * drawn for one of the harnesses it is for. */
 export type HarnessStep = "same" | "read" | "none";
 
 export function harnessStep(last: Last, form: Form): HarnessStep {
-  if (last.at === null || last.harness === null) return "none";
+  if (last.at === null) return last.values.length > 0 && (last.harnesses ?? []).includes(form.harness) ? "same" : "none";
+  if (last.harness === null) return "none";
   if (last.harness === form.harness) return "same";
   const row = form.rows.find((item) => item.name === HARNESS_ROW);
   return (row?.source ?? "shipped") === "shipped" ? "read" : "none";
@@ -211,12 +228,15 @@ export function lastWhen(at: string, now: Date, hour: Clock = HOUR, day: Clock =
 }
 
 /** The dim sentence under the item's list: `Filled from this project's last launch, today
- * 18:45. The preset sets nothing for it.`, `them` for several values. */
+ * 18:45. The preset sets nothing for it.`, `them` for several values; with no launch (`when`
+ * empty), `Filled with this project's default comms identity, as no launch here set one.`. */
 export function fillNote(key: LastKey, when: string, count: number): string {
-  return `Filled from ${WHOSE[key]} last launch, ${when}. The preset sets nothing for ${count > 1 ? "them" : "it"}.`;
+  const tail = `The preset sets nothing for ${count > 1 ? "them" : "it"}.`;
+  if (when === "") return `Filled with ${WHOSE[key]} default comms identity, as no launch here set one. ${tail}`;
+  return `Filled from ${WHOSE[key]} last launch, ${when}. ${tail}`;
 }
 
-/** The note under a filled value in the panel. */
+/** The note under a filled value in the panel; with no launch (`when` empty), the default's. */
 export function fromLast(when: string): string {
-  return `from the last launch, ${when}`;
+  return when === "" ? "the default, as no launch here set one" : `from the last launch, ${when}`;
 }
