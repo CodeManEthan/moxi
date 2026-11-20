@@ -193,7 +193,12 @@ def test_earlier_pages_back_under_the_header(seeded, ui_page):
     expect(texts(panel)).to_have_text([f"turn {n}" for n in range(TURNS - 5, TURNS)])
     panel.get_by_role("button", name="Earlier turns").click()
     expect(texts(panel)).to_have_text([f"turn {n}" for n in range(TURNS)])
-    expect(panel.locator('[data-line="start"]')).to_have_text("This is the start of the session.")
+    # With launcher installed, whose log holds no launch, the start says the session was
+    # started by hand.
+    launcher = ui_page.evaluate("async () => (await import('/m/ui/client.js')).installed('launcher')")
+    expect(panel.locator('[data-line="start"]')).to_have_text(
+        re.compile(r"^Started (?:today|yesterday) \d{1,2}:\d\d(?: [AP]M)? in proj-a, by hand$") if launcher
+        else "This is the start of the session.")
     expect(head(panel).locator('[data-line="name"]')).to_have_text("fix-tooltips")
 
 
