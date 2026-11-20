@@ -160,6 +160,28 @@ def test_a_journal_end_unread_under_the_lock_is_read_after_it(monkeypatch):
     assert reads == [1]
 
 
+def test_rows_a_crashed_reading_would_not_ask_about_read_no_journal(monkeypatch):
+    reads = []
+    monkeypatch.setattr(runs, "_journal_boots",
+                        lambda: reads.append(1) or {OLD_BOOT.replace("-", ""): 5000.0})
+    settled = RunEnd(6000, None, None, settled="no session")
+    registry.write(Registry({1: Row(1.0, last=last(EARLIER, died(4990, status=0))),
+                             2: Row(1.0, last=last(EARLIER, settled)),
+                             3: Row(1.0, last=last(EARLIER)),
+                             4: Row(1.0, last=last(THIS_OLD, died(9950, signal=1))),
+                             5: Row(1.0, last=last(None, died(4990, signal=1))),
+                             6: Row(1.0)}))
+    with registry.locked():
+        pass
+    assert reads == []
+    rows = registry.read().rows
+    rows[7] = Row(1.0, last=last(EARLIER, died(4990, signal=1)))
+    registry.write(Registry(rows))
+    with registry.locked():
+        pass
+    assert reads == [1]
+
+
 def test_the_journal_read_takes_list_boots_json(monkeypatch, fence):
     tool = fence.short / "bin" / "journalctl"
     tool.parent.mkdir(parents=True)

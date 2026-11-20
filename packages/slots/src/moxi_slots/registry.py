@@ -79,8 +79,9 @@ class Registry:
 def locked(timeout: float = LOCK_WAIT, path: Path | None = None) -> Iterator[None]:
     """Hold the module lock (or the lock file at `path`); `TryAgain` when it is not had in
     `timeout` seconds. Before it takes the module lock it reads the journal for the
-    registry's earlier boots (`runs.read_journal_first`), and while it holds either lock
-    no journal is read (`runs.journal_closed`)."""
+    earlier boots a crashed reading of the registry would ask about
+    (`runs.read_journal_first`), and while it holds either lock no journal is read
+    (`runs.journal_closed`)."""
     from moxi import files
 
     from . import runs

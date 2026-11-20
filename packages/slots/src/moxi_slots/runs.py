@@ -31,9 +31,10 @@ before its server's end (a shutdown that signalled the session just before the s
 went). A server's end is, for a server of an earlier boot, that boot's last journal
 entry (`journalctl --list-boots`), and for one of this boot, the current server's start
 time. Where a server's end can't be read, only a run with no end recorded reads crashed.
-The journal is never read under the module lock: `registry.locked` reads it for every
-earlier boot the registry names before it takes the lock (`read_journal_first`), and
-while the lock is held `journal_end` answers only from what it has read.
+The journal is never read under the module lock: `registry.locked` reads it, before it
+takes the lock, for every earlier boot a crashed reading of the registry would ask about
+(`read_journal_first`), and while the lock is held `journal_end` answers only from what
+it has read.
 Every time compared is from one boot's clock. With no server answering, nothing reads
 crashed.
 """
@@ -185,12 +186,24 @@ def _earlier_boot(server: str) -> str | None:
     return None if _boot_key(boot) == _boot_key(boot_id() or "") else boot
 
 
+def _journal_asked(last: Last | None) -> str | None:
+    """The earlier boot whose journal end `crashed` asks about for last launch `last`, or
+    None when it asks none: no server recorded, this boot's server, no end recorded,
+    settled, or ended by itself. Occupancy is tmux's, not the registry's, so an occupied
+    slot's row still names its boot."""
+    if last is None or last.server is None or last.ended is None:
+        return None
+    if last.ended.settled is not None or ended_by_itself(last):
+        return None
+    return _earlier_boot(last.server)
+
+
 def read_journal_first(reg: registry.Registry) -> None:
-    """Read the journal's end of every earlier boot a slot of `reg` was last placed under,
-    so a crashed reading taken under the module lock finds it read."""
+    """Read the journal's end of every earlier boot a crashed reading of `reg`'s rows would
+    ask about, so one taken under the module lock finds it read. A registry no reading
+    would ask about reads no journal."""
     for row in reg.rows.values():
-        boot = None if row.last is None or row.last.server is None \
-            else _earlier_boot(row.last.server)
+        boot = _journal_asked(row.last)
         if boot is not None:
             journal_end(boot)
 
