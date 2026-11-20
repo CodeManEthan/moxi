@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -183,9 +184,23 @@ def moxi(shell, *args: str) -> subprocess.CompletedProcess:
     return done
 
 
+#: One signed-in session per shell for the reads a test makes without a browser. Each
+#: sign-in is a session, and the shell keeps at most 20, dropping the oldest first: a new
+#: one per read would soon drop the browser's own.
+_SESSIONS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+
+def session(shell) -> Any:
+    """The shell's one signed-in session for reads without a browser."""
+    found = _SESSIONS.get(shell)
+    if found is None or found.get("/m/ui/api/modules")[0] != 200:
+        found = _SESSIONS[shell] = shell.session()
+    return found
+
+
 def get(shell, path: str) -> Any:
     """GET `path` on services' page, through the shell, signed in with no browser."""
-    status, data = shell.session().request("GET", f"/m/services/{path}")
+    status, data = session(shell).request("GET", f"/m/services/{path}")
     assert status == 200, (path, status, data)
     return data
 
