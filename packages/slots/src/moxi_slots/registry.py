@@ -78,12 +78,21 @@ class Registry:
 @contextmanager
 def locked(timeout: float = LOCK_WAIT, path: Path | None = None) -> Iterator[None]:
     """Hold the module lock (or the lock file at `path`); `TryAgain` when it is not had in
-    `timeout` seconds."""
+    `timeout` seconds. Before it takes the module lock it reads the journal for the
+    registry's earlier boots (`runs.read_journal_first`), and while it holds either lock
+    no journal is read (`runs.journal_closed`)."""
     from moxi import files
 
+    from . import runs
+
+    if path is None:
+        try:
+            runs.read_journal_first(read())
+        except RegistryError:
+            pass
     try:
         with files.lock(places.module_lock() if path is None else path,
-                        timeout_s=timeout):
+                        timeout_s=timeout), runs.journal_closed():
             yield
     except files.LockTimeout as exc:
         raise TryAgain(f"the slots lock was not had in {timeout:g} s ({exc}); try "

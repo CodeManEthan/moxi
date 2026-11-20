@@ -6,11 +6,13 @@ import json
 
 import pytest
 
-from moxi_slots import runs
+from moxi_slots import registry, runs
 from moxi_slots.model import ENDED, FREE, MISSING, OCCUPIED, Last, RunEnd
 from moxi_slots.panes import ServerNow
+from moxi_slots.registry import Registry, Row
 
-pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/runs.py")
+pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/runs.py",
+                                 "packages/slots/src/moxi_slots/registry.py")
 
 BOOT = "11111111-2222-3333-4444-555555555555"
 OLD_BOOT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -118,6 +120,44 @@ def test_a_boot_the_journal_did_not_list_is_asked_about_again_later(monkeypatch)
     assert runs.journal_end(OLD_BOOT) is None
     clock[0] += 2
     assert runs.journal_end(OLD_BOOT) == 5000.0
+
+
+def test_the_journal_is_read_before_the_module_lock_and_never_under_it(monkeypatch):
+    held, reads = [False], []
+
+    def boots():
+        reads.append(held[0])
+        return {OLD_BOOT.replace("-", ""): 5000.0}
+
+    monkeypatch.setattr(runs, "_journal_boots", boots)
+    record = last(EARLIER, died(4990, signal=1))
+    with registry.locked():
+        held[0] = True
+        registry.write(Registry({1: Row(1.0, last=record)}))
+        assert runs.journal_end(OLD_BOOT) is None
+        assert not runs.crashed(MISSING, record, NOW)
+        held[0] = False
+    assert reads == []
+    with registry.locked():
+        held[0] = True
+        assert runs.crashed(MISSING, registry.read().rows[1].last, NOW)
+        held[0] = False
+    assert reads == [False]
+    assert runs.crashed(MISSING, record, NOW)
+    assert reads == [False]
+
+
+def test_a_journal_end_unread_under_the_lock_is_read_after_it(monkeypatch):
+    reads = []
+    monkeypatch.setattr(runs, "_journal_boots",
+                        lambda: reads.append(1) or {OLD_BOOT.replace("-", ""): 5000.0})
+    with runs.journal_closed():
+        with runs.journal_closed():
+            assert runs.journal_end(OLD_BOOT) is None
+        assert runs.journal_end(OLD_BOOT) is None
+    assert reads == []
+    assert runs.journal_end(OLD_BOOT) == 5000.0
+    assert reads == [1]
 
 
 def test_the_journal_read_takes_list_boots_json(monkeypatch, fence):

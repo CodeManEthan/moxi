@@ -28,6 +28,9 @@ before its server's end (a shutdown that signalled the session just before the s
 went). A server's end is, for a server of an earlier boot, that boot's last journal
 entry (`journalctl --list-boots`), and for one of this boot, the current server's start
 time. Where a server's end can't be read, only a run with no end recorded reads crashed.
+The journal is never read under the module lock: `registry.locked` reads it for every
+earlier boot the registry names before it takes the lock (`read_journal_first`), and
+while the lock is held `journal_end` answers only from what it has read.
 Every time compared is from one boot's clock. With no server answering, nothing reads
 crashed.
 """
@@ -37,7 +40,10 @@ from __future__ import annotations
 import secrets
 import shlex
 import sys
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import registry, tmux
@@ -68,6 +74,9 @@ _journal_ends: dict[str, float] = {}
 #: that boot reads unknown until `JOURNAL_RETRY_S` has passed, then the journal is read
 #: again, so a long-lived process does not keep one failed read for good.
 _journal_misses: dict[str, float] = {}
+#: How deep this thread is in `journal_closed` blocks: while it is above 0, the module
+#: lock is held and `journal_end` reads no journal.
+_closed = threading.local()
 
 
 def new_token() -> str:
@@ -130,10 +139,13 @@ def _boot_key(boot: str) -> str:
 
 def journal_end(boot: str) -> float | None:
     """When boot `boot`'s journal ends (its last entry, epoch seconds), or None when the
-    journal can't be read or doesn't list that boot."""
+    journal can't be read or doesn't list that boot. Inside `journal_closed` it reads no
+    journal: a boot not read before is None there."""
     key = _boot_key(boot)
     if key in _journal_ends:
         return _journal_ends[key]
+    if getattr(_closed, "depth", 0):
+        return None
     missed = _journal_misses.get(key)
     if missed is not None and time.monotonic() - missed < JOURNAL_RETRY_S:
         return None
@@ -143,6 +155,33 @@ def journal_end(boot: str) -> float | None:
         return _journal_ends[key]
     _journal_misses[key] = time.monotonic()
     return None
+
+
+def _earlier_boot(server: str) -> str | None:
+    """The boot of server `server` (`<boot id>:<pid>`) when it is not this boot."""
+    boot = server.rsplit(":", 1)[0]
+    return None if _boot_key(boot) == _boot_key(boot_id() or "") else boot
+
+
+def read_journal_first(reg: registry.Registry) -> None:
+    """Read the journal's end of every earlier boot a slot of `reg` was last placed under,
+    so a crashed reading taken under the module lock finds it read."""
+    for row in reg.rows.values():
+        boot = None if row.last is None or row.last.server is None \
+            else _earlier_boot(row.last.server)
+        if boot is not None:
+            journal_end(boot)
+
+
+@contextmanager
+def journal_closed() -> Iterator[None]:
+    """For the length of the block, this thread's `journal_end` reads no journal."""
+    depth = getattr(_closed, "depth", 0)
+    _closed.depth = depth + 1
+    try:
+        yield
+    finally:
+        _closed.depth = depth
 
 
 def _journal_boots() -> dict[str, float]:
@@ -175,8 +214,8 @@ def server_end(server: str, current: ServerNow) -> float | None:
     """When server `server` (`<boot id>:<pid>`) ended, by `current`'s reading of it:
     this boot's current server start for a server of this boot, else that boot's last
     journal entry; None when unknown."""
-    boot = server.rsplit(":", 1)[0]
-    if _boot_key(boot) == _boot_key(boot_id() or ""):
+    boot = _earlier_boot(server)
+    if boot is None:
         return None if current.start_time is None else float(current.start_time)
     return journal_end(boot)
 
@@ -268,8 +307,9 @@ def _log_failure(args: list[str], exc: Exception) -> None:
 
 
 __all__ = ["HOOK", "LOCK_WAIT_S", "BOOT_ID", "WINDOW_S", "JOURNAL_TIMEOUT_S",
-           "JOURNAL_RETRY_S", "HOOKS_LOG_BYTES", "new_token", "boot_id", "server_id", "server_pid",
-           "hook_command", "set_hook_args", "journal_end", "server_end", "ended_by_itself",
+           "JOURNAL_RETRY_S", "HOOKS_LOG_BYTES", "new_token", "boot_id", "server_id",
+           "server_pid", "hook_command", "set_hook_args", "journal_end",
+           "read_journal_first", "journal_closed", "server_end", "ended_by_itself",
            "crashed", "write_ended", "main"]
 
 
