@@ -412,10 +412,10 @@ and nothing has gone well since; a session merely waiting is never red.
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
-in the shell and four pieces other pages can show: the box on the shell's home that
+in the shell and five pieces other pages can show: the box on the shell's home that
 starts a session, the Sessions row under it, a launched session's state, red when it
-needs a look, and a block on the modules view listing each running launched session with
-its state.
+needs a look, a block on the modules view listing each running launched session with
+its state, and its facts on the Projects page.
 
 The page has four parts.
 
@@ -550,6 +550,35 @@ prompt box, and no ask since the session's last request that ended without a nud
 step it can't read counts against it, so the row says `goes cold` whenever a nudge is
 not certain. These reads write nothing, send nothing to a session and never ask slots.
 
+**On the Projects page.** With projects' page in the shell too, the launcher's
+`project-facts` component gives that page what the launcher knows of each project. A
+project's row counts the launched sessions running there (`2 running`). An opened project
+shows:
+
+- in `Agents`, after its lead, where the lead runs (`running now in slot 4`), when a
+  launch under the lead's name runs there. The launcher knows only its own launches, so it
+  says nothing of an agent with none: that agent may still run somewhere else.
+- `Launch`: the project's own preset in Home's words, its harness, model and effort, each
+  value of it that can do harm, and where it launches (`preset claude · sonnet · medium,
+  in your terminal`), or `no preset`; when a launch there was last made (`last launched
+  today 18:45`); and how a launch there names its session, from the project's own
+  template (`names sessions like atlas-api-own, its own template`) or the one for every
+  project. The row only shows them: the preset is set in the presets file and the
+  template on Home.
+- `Sessions`: each launched session running there, newest first, with where it runs
+  (`slot 3`, `headless`, `terminal`) and, with sessions installed, when it was last
+  active. Remove's step says they keep running.
+
+The component reads only the launcher's own routes: `/api/running` when it is placed, on
+the launcher's `running` topic and every 30 seconds; `/api/presets` and `/api/catalog`
+when it is placed and every 30 seconds; and, for the opened project, `/api/last` and `/api/name` when it
+opens and every 30 seconds. While the page is hidden it reads nothing. A read that fails
+drops only what it fed, until the next one works: the presets or the catalog failing
+drops the preset, since a preset shown without the values that can do harm would read
+safer than it is. A time that can't be read is left out, never guessed. The project's
+`last active` time comes from the sessions running there, so without sessions the
+launcher gives the row no time.
+
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
 The page server starts when the page or the shell's home is first opened and stops once
@@ -601,7 +630,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | comms | identities, scopes, directors and the `with:` start posture; a headless launch with an identity, and the `headless_exit` row; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
-| projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
+| projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- With the `ui` extra, a `project-facts` component reports to the Projects page how many
+  launched sessions run in each project, and for the opened project where its lead runs,
+  a `Launch` row (its preset, its last launch and how it names sessions) and a `Sessions`
+  row of what runs there. It reads only the launcher's existing routes.
 - Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
   project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
   folder or project picked again sends `scratch` off, so a launch from Home never names
