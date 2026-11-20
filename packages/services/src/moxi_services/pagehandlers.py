@@ -312,6 +312,7 @@ def row_value(view: verdict.View, *, settings: frozenset[str] = frozenset(),
         "stopped": view.stopped,
         "removing": bool(user and user.removing),
         "platform": user.platform if user else None,
+        "wrapped": state.is_wrapped(row),
     }
 
 

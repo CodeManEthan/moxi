@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   actsOf, addAgain, inUse, jobSaid, phoneActs, phoneRoute, phoneSheet, removeConfirm, runningFact, SHELL_RESTART,
-  shellWord, slotsConfirm, transportSaid, UNREAD, usageConfirm, warned,
+  shellWord, slotsConfirm, transportSaid, UNREAD, usageConfirm, warned, WRAPPED_OFF_REMOVE, WRAPPED_REMOVE,
 } from "../src/acts-model.ts";
 import { moduleRow, row, timer } from "./fixtures.mjs";
 
@@ -144,8 +144,20 @@ test("the usage confirm and Remove's", () => {
   const adopted = removeConfirm(of(row, "running", "ok", { form: "adopted", argv: null, unit: "web.service" }));
   assert.equal(adopted.command, null);
   assert.equal(adopted.lines[2].text, "Remove takes it off this list only.");
-  assert.equal(removeConfirm(of(timer, "armed", "ok", { form: "adopted", platform: "win32" })).lines[0].text,
-               "its entry and the small file beside it");
+  const remove = (fields) => removeConfirm(of(timer, "armed", "ok", { form: "adopted", argv: null, unit: "backup.timer", ...fields }))
+    .lines.map((l) => l.text);
+  // The small file goes exactly where the server says the timer is wrapped.
+  assert.deepEqual(remove({ wrapped: true }), [
+    "its entry and the small file beside it", "its past lines in the system log", WRAPPED_REMOVE]);
+  assert.deepEqual(remove({ wrapped: true, flag: false }), [
+    "its entry and the small file beside it", "its past lines in the system log", WRAPPED_OFF_REMOVE]);
+  // An adopted timer on Windows or macOS has no such file.
+  for (const platform of ["win32", "darwin"]) {
+    assert.deepEqual(remove({ platform, wrapped: false }), [
+      "its entry", "its past lines in the system log", "Remove takes it off this list only."]);
+  }
+  // An adopted Linux daemon has none either.
+  assert.equal(adopted.lines[0].text, "its entry");
   assert.equal(addAgain(timer({ doc: null, timing: { every: null, at: ["09:00", "17:30"], days: ["mon"] },
                                 health: ["/bin/sh", "-c", "curl -f x"], launches_session: true })),
                "moxi services add backup --timer --at 09:00,17:30 --days mon --health '/bin/sh -c '\\''curl -f x'\\''' --launches-session -- /usr/bin/python3 -m http.server");

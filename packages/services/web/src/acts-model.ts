@@ -253,11 +253,17 @@ export function addAgain(row: Row): string | null {
   return [...words.map(shellWord), "--", ...(row.argv as string[]).map(shellWord)].join(" ");
 }
 
+/** Remove's closing line for a wrapped timer, as the adopt panel words it; for one he
+ * turned off, whose runs only the file held off, its schedule is turned off first. */
+export const WRAPPED_REMOVE = "Remove takes that file away and leaves the timer as it was.";
+export const WRAPPED_OFF_REMOVE = "It is off, so Remove turns its schedule off first, then takes that file away.";
+
 /** Remove's confirm of his row: what goes, what stays, and for a written row the command
- * that adds it again. */
+ * that adds it again. A wrapped timer (the server's `wrapped`) loses the small file beside
+ * it as well. */
 export function removeConfirm(row: Row): Confirm {
   const goes = row.form === "written" ? "its entry and the unit Moxi wrote"
-    : row.platform === "win32" && row.kind === "timer" ? "its entry and the small file beside it"
+    : row.wrapped ? "its entry and the small file beside it"
       : "its entry";
   const stays = [row.cwd ? `everything in ${row.cwd}` : null, "its past lines in the system log"]
     .filter((s): s is string => s !== null).join(", ");
@@ -265,7 +271,8 @@ export function removeConfirm(row: Row): Confirm {
   const command = row.form === "written" ? addAgain(row) : null;
   lines.push({ label: null, text: row.form === "written"
     ? "Moxi keeps no copy. To have it back, add it again with this command:"
-    : "Remove takes it off this list only." });
+    : row.wrapped ? (row.flag === false ? WRAPPED_OFF_REMOVE : WRAPPED_REMOVE)
+      : "Remove takes it off this list only." });
   return { ask: `Remove ${row.name}?`, lines, command, go: "Remove", keep: "Keep it", warn: false, sends: {} };
 }
 

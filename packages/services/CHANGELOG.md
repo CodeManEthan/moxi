@@ -14,8 +14,8 @@
   README's "One verdict per row".
 - The page's rows gain a timer's declared schedule (`timing`), `ends_slots` on slots'
   server, `has_settings` on a module row whose module has settings, the last run's
-  `exit` code, when its health check ran (`checked.at`) and a failing timer's
-  `streak`; the list gains `at`, when the supervisor was read, and the stream sends it
+  `exit` code, when its health check ran (`checked.at`), a failing timer's
+  `streak` and `wrapped` on an adopted Linux timer; the list gains `at`, when the supervisor was read, and the stream sends it
   again at least once a minute. One row's read gains the unit that runs it, every id
   the supervisor knows it by, and a timer's runs today; a new desk read says what the
   supervisor knows of a unit not yet adopted. A module row in `moxi

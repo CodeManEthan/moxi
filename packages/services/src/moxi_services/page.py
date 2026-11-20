@@ -171,6 +171,8 @@ TIMING = lb.Out("table", nullable=True, items={
 #: - `stopped`: a daemon's recorded stop by hand, UTC, a user's or a module's; else null.
 #: - `launches_session` True for a row whose runs launch an agent session, so its runs
 #:   spend usage.
+#: - `wrapped` True for an adopted Linux timer, which has services' small file (its
+#:   drop-in) beside its service; Remove takes that file away.
 ROW = lb.Out("table", items={
     "id": _TEXT,
     "module": _TEXT,
@@ -203,6 +205,7 @@ ROW = lb.Out("table", items={
     "stopped": _MAYBE,
     "removing": _FLAG,
     "platform": _MAYBE,
+    "wrapped": _FLAG,
 })
 
 #: A module whose run-time declarations failed: its static daemons and timers are listed.

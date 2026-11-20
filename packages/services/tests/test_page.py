@@ -243,6 +243,22 @@ def test_ends_slots_is_true_on_slots_server_only(site):
     assert read("/api/row", "id=slots/server")["row"]["ends_slots"] is True
 
 
+def test_wrapped_is_true_for_an_adopted_linux_timer_only(site):
+    from services_kit import add, adopted
+
+    clock(site)
+    a_daemon()
+    a_timer("hourly")
+    add(**adopted("backup", platform="linux"))
+    add(**adopted("nightly", unit="nightly.timer", platform="win32"))
+    add(**adopted("mac", unit="mac.timer", platform="darwin"))
+    add(**adopted("served", kind="daemon", unit="served.service", platform="linux"))
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["wrapped"]} == {"services/backup"}
+    assert read("/api/row", "id=backup")["row"]["wrapped"] is True
+    assert read("/api/row", "id=nightly")["row"]["wrapped"] is False
+
+
 def test_has_settings_is_true_for_a_module_row_whose_module_has_settings(site):
     clock(site)
     site.module("slots", SLOTS)

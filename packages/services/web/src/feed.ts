@@ -106,6 +106,9 @@ export interface Row {
   stopped: string | null;
   removing: boolean;
   platform: string | null;
+  /** True for an adopted Linux timer: services' small file (its drop-in) sits beside its
+   * service, and Remove takes it away. */
+  wrapped: boolean;
 }
 
 /** A module whose run-time declarations failed. */
@@ -239,7 +242,7 @@ export function parseRow(value: unknown): Row | null {
       || checked === undefined || streak === undefined || timing === undefined
       || !isBool(v.ends_slots) || !isBool(v.has_settings) || !isWords(v.argv) || !isStrOrNull(v.cwd) || !isStrOrNull(v.unit)
       || !isStrOrNull(v.schedule) || !isWords(v.health) || !isStrOrNull(v.stopped)
-      || !isBool(v.removing) || !isStrOrNull(v.platform)) return null;
+      || !isBool(v.removing) || !isStrOrNull(v.platform) || !isBool(v.wrapped)) return null;
   return {
     id: v.id, module: v.module, name: v.name, form: v.form as Row["form"], kind: v.kind as Row["kind"],
     doc: v.doc, project: v.project, launches_session: v.launches_session, flag: v.flag,
@@ -248,7 +251,7 @@ export function parseRow(value: unknown): Row | null {
     ends_slots: v.ends_slots, has_settings: v.has_settings,
     argv: v.argv === null ? null : [...v.argv], cwd: v.cwd, unit: v.unit, schedule: v.schedule,
     health: v.health === null ? null : [...v.health], stopped: v.stopped, removing: v.removing,
-    platform: v.platform,
+    platform: v.platform, wrapped: v.wrapped,
   };
 }
 

@@ -9,6 +9,7 @@ export function row(fields = {}) {
     state: "active", enabled: true, pid: 4242, since: "2026-11-03T09:15:00Z", detail: null,
     last_run: null, checked: null, streak: null, timing: null, ends_slots: false, has_settings: false, argv: ["/usr/bin/python3", "-m", "http.server"], cwd: null,
     unit: null, schedule: null, health: null, stopped: null, removing: false, platform: "linux",
+    wrapped: false,
     ...fields,
   };
 }
