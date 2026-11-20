@@ -67,6 +67,12 @@ SITECUSTOMIZE = textwrap.dedent('''\
 
         state.health = _checked
 
+        if _spec.get("installed") is not None:
+            import moxi.modules
+
+            _installed, _kept = moxi.modules.installed, set(_spec["installed"])
+            moxi.modules.installed = lambda: [e for e in _installed() if e.name in _kept]
+
         if _spec.get("slots"):
             import types
 
@@ -98,7 +104,8 @@ def fake_site(base: Path, spec: dict[str, Any]) -> Path:
     supervisor's own name, each a `fake_units.Unit`'s fields, and `fail`, the
     `[act, name]` pairs whose act fails. `health` gives a running module daemon's check
     by its id, `[verdict, line]`, in place of the module's own. With `slots` true, slots'
-    API answers from `<base>/slots.json`, which `slots_said` writes."""
+    API answers from `<base>/slots.json`, which `slots_said` writes. `installed`, when
+    given, names the only modules the page server finds installed, as on a small install."""
     site = base / "site"
     site.mkdir(parents=True)
     path = base / "units.json"

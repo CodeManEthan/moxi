@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The page is rebuilt around what needs you: the rows that need you rise into a first
+  group, worst first, the rest are grouped by project and Moxi's by module, each row
+  says in words what it is doing, and an opened row shows its lines and the acts of its
+  foot. Acts go at a press and are followed to their end, asking in place only where
+  they spend usage, remove a row or end slots' sessions; adding and adopting move into a
+  panel; the page has addresses for a row, a project, and the panel. With the gateway's
+  acts on, the phone offers every row act but Remove through the shell's sheet.
 - A verdict gains `cause` in `moxi services list --json`, `show --json`, `watch --json`
   and the page's reads: one word for each case a verdict tells apart, listed in the
   README's "One verdict per row".

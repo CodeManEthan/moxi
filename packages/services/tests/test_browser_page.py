@@ -1068,3 +1068,84 @@ def test_the_page_and_the_block_fit_a_phone(seeded, ui_page, ui_width_check):
     expect(ui_page.locator("#moxi-panel > moxi-services-page section[data-part=\"list\"]")
            ).to_have_attribute("data-state", "up")
     ui_width_check(ui_page, module="services", name="summary")
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_the_list_an_opened_row_its_warning_and_the_panel_fit_the_width(seeded, units_base, ui_shell, ui_page,
+                                                                         ui_width_check, width):
+    slots_said(units_base, slots=THREE)
+    ui_page.set_viewport_size({"width": width, "height": 800})
+    panel = panel_of(ui_page)
+    ui_width_check(ui_page, width=width)
+    name = name_of(ui_shell, SLOTS)
+    part = opened(panel, SLOTS, name)
+    ui_width_check(ui_page, width=width)
+    part.get_by_role("button", name=f"Stop {name}", exact=True).click()
+    asked = confirm_of(part)
+    expect(asked).to_have_attribute("data-warn", "true")
+    ui_width_check(ui_page, width=width)
+    asked.get_by_role("button", name="Keep it running", exact=True).click()
+    expect(asked).to_have_count(0)
+    panel.get_by_role("button", name="Add a service", exact=True).click()
+    expect(panel.locator('moxi-services-panel [data-part="panel"]')).to_be_visible()
+    ui_width_check(ui_page, width=width)
+
+
+# --- themes -------------------------------------------------------------------------------
+
+#: Every shown element under the page, its rows and its panel: with words of its own, its
+#: text colour; and every element's colours of text, ground and border. The three tokens'
+#: colours are measured in the page.
+_COLOURS = """() => {
+  const host = document.querySelector('#moxi-panel > moxi-services-page');
+  const probe = (token) => {
+    const span = document.createElement('span');
+    span.style.color = `var(${token})`;
+    host.shadowRoot.append(span);
+    const colour = getComputedStyle(span).color;
+    span.remove();
+    return colour;
+  };
+  const words = [];
+  const drawn = new Set();
+  const walk = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) walk(el.shadowRoot);
+      if (el.getClientRects().length === 0 || el.closest('[hidden]')) continue;
+      const style = getComputedStyle(el);
+      for (const name of ['color', 'background-color', 'border-top-color', 'border-right-color',
+                          'border-bottom-color', 'border-left-color']) drawn.add(style.getPropertyValue(name));
+      const own = [...el.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim() !== '');
+      if (own) words.push({ text: el.textContent.trim().slice(0, 40), colour: style.color });
+    }
+  };
+  walk(host.shadowRoot);
+  return { text: probe('--moxi-text'), dim: probe('--moxi-text-dim'), danger: probe('--moxi-danger'),
+           accent: probe('--moxi-accent'), words, drawn: [...drawn] };
+}"""
+
+
+def test_every_word_is_in_a_text_token_but_the_slots_servers_two_acts_in_light_and_dark(
+        seeded, units_base, ui_shell, ui_page):
+    # With three sessions in the slots, read by a Stop he then keeps from going, the
+    # server's two acts are in the warning colour.
+    slots_said(units_base, slots=THREE)
+    panel = panel_of(ui_page)
+    name = name_of(ui_shell, SLOTS)
+    part = opened(panel, SLOTS, name)
+    part.get_by_role("button", name=f"Stop {name}", exact=True).click()
+    confirm_of(part).get_by_role("button", name="Keep it running", exact=True).click()
+    expect(confirm_of(part)).to_have_count(0)
+    expect(panel.locator('button[data-warn="true"]')).to_have_text(["Restart", "Stop"])
+    tokens = {}
+    for scheme in ("light", "dark"):
+        ui_page.emulate_media(color_scheme=scheme)
+        ui_page.wait_for_timeout(100)
+        found = ui_page.evaluate(_COLOURS)
+        tokens[scheme] = (found["text"], found["dim"])
+        assert len(found["words"]) > 50, found["words"]
+        stray = [item for item in found["words"] if item["colour"] not in (found["text"], found["dim"])]
+        assert stray == [{"text": "Restart", "colour": found["danger"]},
+                         {"text": "Stop", "colour": found["danger"]}], (scheme, found["danger"], stray)
+        assert found["accent"] not in found["drawn"], (scheme, found["accent"])
+    assert tokens["light"] != tokens["dark"], tokens
