@@ -8,6 +8,10 @@
   asks for prose too: the default of `question_mode.prose_words` is `["prose", "pros"]`.
   Question mode's judge may take up to 3000 ms on a call, still clamped by
   `guards.max_wait_ms`, before the call is refused.
+- Until a Claude Code session's endpoint has sent its guard table, the runner refuses
+  every `AskUserQuestion` call, a subagent's too, with "turns' guards aren't loaded, so
+  question mode can't check this call; ask in prose", since it can't tell whether
+  question mode is on. Other tools pass as before, and a headless session is not refused.
 - Question mode counts a prompt sent from the Claude apps through Remote Control
   (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
   `["composer", "bridge"]`, so such a prompt that mentions a question lets

@@ -9,7 +9,9 @@ its origin as the harness stamped it. It allows the call when a prompt whose ori
 launched with. A subagent's call is always refused: a subagent can't reach the person.
 Every other call is refused, naming why. A prompt the runner can't tie to the turn is not
 in the list, so a miss refuses (fails closed), and so does every break
-(`on_error = "deny"`).
+(`on_error = "deny"`). Until the endpoint has sent the Claude runner its guard table, the
+runner refuses every `AskUserQuestion` call itself, since it can't tell whether question
+mode is on.
 
 The launch prompt: a brief a launcher hands over arrives through turns' own delivery,
 whose origin is `plugin`, so it never counts. A prompt given on the command line

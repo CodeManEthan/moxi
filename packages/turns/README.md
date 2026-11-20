@@ -74,7 +74,9 @@ its switch, for example `moxi config set turns guards.removal true`:
 - **Question mode** (`turns.question-mode`, switch `guards.question_mode`): lets Claude
   Code's `AskUserQuestion` run only in a turn where you typed something that mentions a
   question, and never from a subagent. A prompt that asks to go through open questions
-  gets a one-line reminder of this.
+  gets a one-line reminder of this. Until the session's endpoint has sent its guards,
+  Claude Code's runner can't tell whether question mode is on, so it refuses every
+  `AskUserQuestion` call and tells the agent to ask in prose.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
