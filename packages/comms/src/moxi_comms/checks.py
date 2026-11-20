@@ -28,7 +28,8 @@ SUPERVISOR_RESTART = ("restart the unit `moxi install comms` wrote for comms/dae
 #: The fix of a live session that has lost its tool token.
 RELAUNCH = "relaunch that session to give it comms' tools"
 #: The fix of a session whose adapter is gone.
-RELAUNCH_STOPPED = "relaunch that session to get its mail back"
+STOPPED_FIX = ("give that session a prompt, which starts a new adapter for it; if its "
+               "line says none could bind, relaunch the session")
 #: The fix when comms' socket unit holds the port and this daemon runs outside it.
 SUPERVISED = "stop this daemon and start it through its service"
 
@@ -48,8 +49,9 @@ def doctor_rows(env=None) -> list:
 
 def adapter_rows(*, env=None, proc=None) -> list:
     """An `adapter: <identity>` fail row for each session whose comms adapter is gone
-    while the session runs (`claimfile.gone_records`): its mail has stopped, and only a
-    relaunch binds it again."""
+    while the session runs (`claimfile.gone_records`): its mail has stopped until the
+    session's next start or prompt starts a new adapter (`listener.respawn_gone_adapter`),
+    or, when none can bind, until it is relaunched."""
     from moxi.doctor import Row
 
     from . import claimfile
@@ -61,7 +63,7 @@ def adapter_rows(*, env=None, proc=None) -> list:
         rows.append(Row(MODULE, f"adapter: {who}", "fail",
                         f"mail has stopped: the comms adapter of session {session} is "
                         "gone while the session runs, so no message reaches it and its "
-                        "sends are refused", RELAUNCH_STOPPED))
+                        "sends are refused until a new adapter binds it", STOPPED_FIX))
     return rows
 
 
@@ -293,6 +295,6 @@ def _port_of(url) -> int | None:
         return None
 
 
-__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "RELAUNCH_STOPPED", "adapter_rows", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",
-           "endpoint_row", "health", "mcp_rows", "port_row", "port_taken_fix", "revoked_rows",
-           "tokens_row"]
+__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "STOPPED_FIX", "SUPERVISED",
+           "adapter_rows", "doctor_rows", "endpoint_row", "health", "mcp_rows", "port_row",
+           "port_taken_fix", "revoked_rows", "tokens_row"]

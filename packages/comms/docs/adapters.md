@@ -274,14 +274,26 @@ longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "co
 and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
 own process before it starts OpenCode's server, so it waits for no adapter's word.
 
-A Claude Code session's adapter that dies while `claude` runs is not started again:
-the launch that forked it is `claude` now, and nothing else holds what it held. The
-session stays unbound until it is relaunched, and comms says so. Its claim file stays,
-with a socket that answers no one under a live `claude`. At every start and prompt,
-comms' listener gives the session one line, `comms: mail has stopped for <name>`, saying
-that no message reaches it, that a send from it is refused, and to relaunch the session.
-`moxi comms doctor` prints an `adapter` line for it, and `moxi doctor` a fail row
-`adapter: <name>`.
+A Claude Code session's adapter that dies while `claude` runs is replaced with no
+relaunch. Its claim file stays, with a socket that answers no one under a live `claude`.
+At the session's next start or prompt, comms' listener sees it and starts a new adapter
+for the session. The new adapter takes a handle on the same `claude` (the claim file's
+root, its pid checked against the start time recorded there), reads the claim file, binds
+the same name and serves the same claim socket, with the tool token the session's
+environment carries. It finds the session's endpoint as any adapter does, and ends with
+`claude`. The listener waits up to 1.5 seconds for its word and gives the session one
+line: `comms: this session's comms adapter had stopped. A new one has bound <name>
+again`. A daemon that is not running is no failure: the new adapter binds when it
+returns. Mail sent while the session was unbound waits at the daemon and is delivered
+once the name is bound again.
+
+When no new adapter can be started (the claim file's `claude` can't be found, or the
+system has no process handle to watch it with) or the new one's bind is refused (another
+session took the name meanwhile), the claim file stays and the line is `comms: mail has
+stopped for <name>`, with why: no message reaches the session and a send from it is
+refused. The next start or prompt tries again; a relaunch gets the mail back for good.
+Until an adapter binds it, `moxi comms doctor` prints an `adapter` line for the session
+and `moxi doctor` a fail row `adapter: <name>`.
 
 ## Codex
 

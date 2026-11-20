@@ -11,8 +11,10 @@ printed when comms wrote its own hooks (`adapters/shim_roster`):
     prompt   the roster's joins and leaves since this session last looked, and each
              ignored reminder naming this session as its author, once; or nothing
 
-At either event, a session whose adapter is gone while it runs is told only that its
-mail has stopped (`mail_stopped`).
+At either event, a session whose adapter is gone while it runs gets a new one
+(`respawn_gone_adapter`), which binds the same name again with no relaunch, and is told
+only that, in one line. When no new adapter can be started, or its bind is refused, the
+line says that mail has stopped and why.
 
 **comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
 the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
@@ -98,9 +100,9 @@ def answer(event) -> str | None:
     env = dict(event.env) if event.env else dict(os.environ)
     if not env.get(NAME_ENV):
         return None
-    stopped = mail_stopped(env)
-    if stopped is not None:
-        return stopped
+    respawned = respawn_gone_adapter(env)
+    if respawned is not None:
+        return respawned
     socket_path = daemon_socket(env)
     state = memory_path(env)
     if event.event == "start":
@@ -115,28 +117,53 @@ def answer(event) -> str | None:
     return text
 
 
-def mail_stopped(env) -> str | None:
-    """The line for a session whose adapter is gone while it runs (`claimfile.
-    adapter_gone`, its claim file found by the claim socket the wrapper stamped), said
-    at every start and prompt until it is relaunched; None while the adapter serves.
+def respawn_gone_adapter(env, *, wait_s: float = QUERY_TIMEOUT) -> str | None:
+    """Start a new adapter for this session when its adapter is gone while it runs
+    (`claimfile.adapter_gone`, its claim file found by the claim socket the wrapper
+    stamped), and say how that went in one line; None while the adapter serves.
 
-    Nothing binds the session again: its adapter was forked by the launch, which is
-    `claude` now, and nothing else holds what the launch held."""
+    The new adapter (`adapters.respawn`) binds the same name from the claim file. Its
+    word is waited for at most `wait_s`, inside turns' bound; one that comes later still
+    binds. A respawn that can't run or whose bind fails leaves the claim file, so the
+    next start or prompt tries again and says the same."""
     from . import claimfile
+    from .adapters import respawn
+    from .adapters.word import BOUND, OFFLINE, STARTING
     from .claimhold import CLAIM_SOCKET_ENV
 
     value = env.get(CLAIM_SOCKET_ENV)
     if not value:
         return None
-    for _key, record in claimfile.all_records(env):
+    for key, record in claimfile.all_records(env):
         if record.get("socket") != str(value) or not claimfile.adapter_gone(record):
             continue
         who = (record.get("claim") or {}).get("qualified") or "this session"
-        return (f"comms: mail has stopped for {who}. This session's comms adapter is "
-                "gone, so no message reaches this session and a send from it is "
-                "refused. Relaunch the session to get its mail back.")
+        try:
+            word = respawn.respawn_adapter(env, key, record, wait_s=wait_s)
+        except respawn.CannotRespawn as exc:
+            return mail_stopped_line(who, f"a new one can't be started: {exc}")
+        if word is None or word[0] == STARTING:
+            return (f"comms: this session's comms adapter had stopped. A new one is "
+                    f"binding {who} again; its mail resumes once it has.")
+        code, why = word
+        if code == BOUND:
+            return (f"comms: this session's comms adapter had stopped. A new one has "
+                    f"bound {who} again, and its mail resumes.")
+        if code == OFFLINE:
+            return (f"comms: this session's comms adapter had stopped. A new one serves "
+                    f"it and binds {who} when the comms daemon is back.")
+        return mail_stopped_line(who, "a new one could not bind it: "
+                                      f"{why or 'it ended before it bound'}")
     return None
 
 
-__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "mail_stopped",
-           "memory_path"]
+def mail_stopped_line(who: str, why: str) -> str:
+    """The line for a session whose adapter is gone and could not be replaced."""
+    return (f"comms: mail has stopped for {who}. This session's comms adapter is gone, "
+            f"and {why}. No message reaches this session and a send from it is refused; "
+            "the next prompt tries a new adapter again, or relaunch the session to get "
+            "its mail back.")
+
+
+__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "mail_stopped_line",
+           "memory_path", "respawn_gone_adapter"]

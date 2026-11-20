@@ -72,11 +72,13 @@ whether the digest was handled.
 **What ends it.** `claude`'s exit, seen on the handle the wrapper took before it forked
 (a pidfd, so a reused pid cannot stand in for it). The adapter closes its binding, which
 deregisters the name, and removes its claim socket and claim file. An adapter that dies
-first leaves the session unbound until it is relaunched: nothing respawns it, since the
-launch that forked it is `claude` now. Its claim file stays (an adapter whose watch on
-`claude` fails keeps it too), and with a socket that answers no one under a live
-`claude` it is how comms' listener tells the session at each prompt that its mail has
-stopped, and how `moxi comms doctor` names it (`claimfile.adapter_gone`).
+first leaves its claim file (an adapter whose watch on `claude` fails keeps it too): a
+socket that answers no one under a live `claude` (`claimfile.adapter_gone`). At the
+session's next start or prompt, comms' listener sees it and starts a new adapter for the
+same session (`respawn`), which takes `claude`'s handle again, reads the claim file and
+binds the same name: no relaunch. A respawned adapter serves unbound while the daemon is
+away and binds when it returns, and one whose bind is refused keeps the claim file, so
+the listener and `moxi comms doctor` say that mail has stopped.
 """
 
 from __future__ import annotations
@@ -625,7 +627,7 @@ def ended(fd: int) -> bool:
 
 
 def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
-          turns=None) -> int:
+          turns=None, respawned: bool = False) -> int:
     """The adapter process's life: bind, give the wrapper its word, deliver until
     `claude` ends, close.
 
@@ -647,12 +649,19 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     environment: the shim keeps its hash (the value leaves the environment) and registers
     it after every bind, the first before `BOUND` is said, so `claude` starts after it.
     The form of layer one the session was taught is read first, while the token is still
-    there to show it."""
+    there to show it.
+
+    `respawned` is a new adapter for a session whose adapter is gone while `claude` runs
+    (`respawn`). Nobody waits to exec anything on its word: comms' listener reads it if
+    it comes in time, and an undelivered `BOUND` changes nothing. A daemon that is not
+    there is no failure (the supervisor binds when it returns, as an MCP shim respawned
+    by Claude Code did), said as `OFFLINE`. A bind that fails keeps the claim file, since
+    `claude` still runs and the file is how its session learns that mail has stopped."""
     from moxi import exit as moxi_exit
 
     from ..context import layer_one_form
     from .binding import ToolToken
-    from .word import BOUND, exit_of, word_for
+    from .word import BOUND, OFFLINE, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
     if ended(harness_fd):
@@ -664,19 +673,27 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
         shim.tool_token = ToolToken.from_env()
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
-        adapter.start()
+        adapter.start(tolerate_offline=respawned)
     except Exception as exc:                                  # noqa: BLE001
-        log.warning("the launch of this session failed: %s", exc)
+        log.warning("the %s of this session failed: %s",
+                    "respawn" if respawned else "launch", exc)
         word = word_for(exc)
         say(word, str(exc))
-        shim.stop(remove_claim_file=True)
+        shim.stop(remove_claim_file=not respawned)
         return exit_of(word)
-    if say(BOUND) is False:
+    if respawned:
+        if shim.offline:
+            say(OFFLINE, "the comms daemon is not running; this adapter binds when it "
+                         "returns")
+        else:
+            say(BOUND)
+    elif say(BOUND) is False:
         log.warning("the wrapper of claude pid %d stopped waiting before the bind was "
                     "answered; letting the name go", harness_pid)
         adapter.stop(remove_claim_file=True)
         return moxi_exit.TEMPFAIL
-    log.info("adapter for claude pid %d is up (pid %d)", harness_pid, os.getpid())
+    log.info("%sadapter for claude pid %d is up (pid %d)",
+             "respawned " if respawned else "", harness_pid, os.getpid())
     claude_ended = False
     try:
         wait_for_exit(harness_fd)
@@ -688,7 +705,7 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
             # The claim file stays: it is how the session and doctor learn that this
             # session's mail has stopped (`claimfile.adapter_gone`).
             log.error("this adapter is ending while claude pid %d runs: its mail stops "
-                      "until the session is relaunched", harness_pid)
+                      "until the session's next prompt starts a new one", harness_pid)
         adapter.stop(remove_claim_file=claude_ended)
     return 0
 

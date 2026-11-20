@@ -836,7 +836,7 @@ comms	packages/comms/src/moxi_comms/cards.py	_budget	kwonly	truncated	truncated
 comms	packages/comms/src/moxi_comms/cards.py	_decode	kwonly	truncated	truncated
 comms	packages/comms/src/moxi_comms/cards.py	answer	name	e	exc
 comms	packages/comms/src/moxi_comms/cards.py	render	kwonly	truncated	truncated
-comms	packages/comms/src/moxi_comms/checks.py	__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "RELAUNCH_STOPPED", "adapter_rows", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",	keep	RELAUNCH	RELAUNCH
+comms	packages/comms/src/moxi_comms/checks.py	__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "STOPPED_FIX", "SUPERVISED",	keep	RELAUNCH	RELAUNCH
 comms	packages/comms/src/moxi_comms/claimfile.py	if roots and not any(proc.alive(r.pid, r.start) for r in roots):	keep	any	any
 comms	packages/comms/src/moxi_comms/claimfile.py	return any(r.reach == TREE and proc.alive(r.pid, r.start) for r in roots_of(record))	keep	any	any
 comms	packages/comms/src/moxi_comms/claimfile.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

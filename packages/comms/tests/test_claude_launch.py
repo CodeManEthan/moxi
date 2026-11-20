@@ -698,3 +698,127 @@ def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, monk
         os.close(handle)
     assert started == []
     assert binding(rig, "reviewer@proj-a") is None
+
+
+# ------------------------------------------------------------- an adapter that dies
+
+def start_wrapper(sid, script):
+    """The wrapper in a child process, past its launch: `(proc, adapter pid)` once its
+    adapter has bound and `claude` (the stand-in) runs."""
+    from conftest import ADDITIONS_COMMS_ONLY_PATCH
+
+    code = (ADDITIONS_COMMS_ONLY_PATCH +
+            "from moxi_comms.adapters import session; raise SystemExit(session.main("
+            f"['--name', {NAME!r}, '--session-id', {sid!r}, '--claude', "
+            f"{str(script)!r}]))")
+    proc = subprocess.Popen([sys.executable, "-c", code], env=dict(os.environ),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    log = session.log_dir() / f"claude-{sid}.log"
+    assert wait_until(lambda: log.exists() and "is up (pid" in log.read_text(),
+                      timeout=15), proc.stderr
+    line = next(x for x in log.read_text().splitlines() if "is up (pid" in x)
+    return proc, int(line.rsplit("(pid ", 1)[1].rstrip(")"))
+
+
+def claude_env(pid) -> dict:
+    """The environment `claude` started with: what turns hands comms' listener."""
+    raw = open(f"/proc/{pid}/environ", "rb").read().split(b"\0")
+    return dict(x.decode().split("=", 1) for x in raw if b"=" in x)
+
+
+def prompt(env) -> str:
+    from types import SimpleNamespace
+
+    from moxi_comms import listener
+
+    said = listener.answer(SimpleNamespace(event="prompt", harness="claude",
+                                           session_id="s-1", env=dict(env)))
+    return " ".join((said or "").split())
+
+
+def kill_adapter(rig, pid):
+    import signal
+
+    os.kill(pid, signal.SIGKILL)
+    assert wait_until(lambda: binding(rig) is None, timeout=10), "the binding went"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_killed_adapter_is_replaced_at_the_next_prompt_with_no_relaunch(
+        rig, fake_claude, turns_plugins):
+    """An MCP shim Claude Code spawned again bound its session again. A killed adapter
+    is replaced the same way: the session's next prompt starts a new adapter, which
+    watches the same `claude`, binds the same name and serves the same claim socket,
+    and ends with `claude`."""
+    from moxi_comms import checks, claimfile as cf
+
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b1"
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        assert prompt(env) == "", "a live adapter is not named"
+        kill_adapter(rig, adapter)
+        assert cf.adapter_gone(cf.read(sid))
+        assert len(checks.adapter_rows()) == 1
+
+        from moxi import files
+        from moxi_comms.adapters import respawn
+        with files.lock(respawn.lock_path(sid), timeout_s=0):
+            said = prompt(env)
+            assert said == (f"comms: this session's comms adapter had stopped. A new one "
+                            f"is binding {NAME} again; its mail resumes once it has.")
+            time.sleep(0.3)
+            assert binding(rig) is None, "a second new adapter ends at the lock"
+            assert cf.adapter_gone(cf.read(sid))
+
+        said = prompt(env)
+        assert said in (f"comms: this session's comms adapter had stopped. A new one has "
+                        f"bound {NAME} again, and its mail resumes.",
+                        f"comms: this session's comms adapter had stopped. A new one is "
+                        f"binding {NAME} again; its mail resumes once it has."), said
+        assert wait_until(lambda: binding(rig) is not None, timeout=10), "bound again"
+        assert binding(rig).session_id == sid
+        record = cf.read(sid)
+        assert [r["pid"] for r in record["roots"]] == [proc.pid], "the same claude"
+        assert wait_until(lambda: cf.socket_answers(record), timeout=5)
+        assert prompt(env) == "", "the new adapter serves: nothing more to say"
+        assert checks.adapter_rows() == []
+        log = (session.log_dir() / f"claude-{sid}.log").read_text()
+        assert "respawned adapter for claude pid" in log
+    finally:
+        release.touch()
+    proc.wait(timeout=15)
+    assert wait_until(lambda: binding(rig) is None, timeout=10), "it ends with claude"
+    assert wait_until(lambda: cf.read(sid) is None, timeout=10)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_a_new_adapter_whose_bind_is_refused_says_mail_has_stopped_and_why(
+        rig, fake_claude, turns_plugins):
+    """A new adapter that can't bind (another session took the name meanwhile) keeps
+    the claim file: the session is told that mail has stopped and why, and doctor names
+    it."""
+    from moxi_comms import checks, claimfile as cf
+
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b2"
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        kill_adapter(rig, adapter)
+        rig.shim(name=NAME, global_=True)
+        assert binding(rig) is not None
+        said = prompt(env)
+        assert said.startswith(f"comms: mail has stopped for {NAME}. This session's "
+                               "comms adapter is gone, and a new one could not bind "
+                               "it:"), said
+        assert "already bound" in said and "relaunch the session" in said
+        assert cf.adapter_gone(cf.read(sid)), "the claim file stays"
+        (row,) = checks.adapter_rows()
+        assert row.state == "fail" and "mail has stopped" in row.detail
+    finally:
+        release.touch()
+    proc.wait(timeout=15)

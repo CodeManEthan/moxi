@@ -750,9 +750,11 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
 
 
 def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
-                     ready_fd: int) -> int:                # pragma: no cover - forked
+                     ready_fd: int, *,
+                     respawned: bool = False) -> int:      # pragma: no cover - forked
     """The forked adapter: the session's environment, standard streams to its log, then
-    `claude_adapter.serve` until `claude` has ended."""
+    `claude_adapter.serve` until `claude` has ended. `respawned` is a new adapter for a
+    session whose adapter is gone (`respawn`)."""
     import logging
 
     os.environ.clear()
@@ -775,7 +777,8 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
     say = teller(ready_fd)
     try:
         shim = adapter_shim(session, harness_pid)
-        return claude_adapter.serve(shim, harness_pid, handle, say=say)
+        return claude_adapter.serve(shim, harness_pid, handle, say=say,
+                                    respawned=respawned)
     finally:
         say(FAILED, "the adapter ended")
         # The session has ended: its directory (the roster memory's) goes with it, and

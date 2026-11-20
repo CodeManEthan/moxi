@@ -15,8 +15,8 @@ one session, and by nothing else:
 A file is LIVE when its socket answers, or failing that when one of its `tree` roots is
 alive (the recorded pid with the recorded start time). A file whose socket answers no one
 while a `tree` root is alive is an adapter that died under a running session
-(`adapter_gone`): comms' listener tells that session its mail has stopped, and `moxi
-comms doctor` names it. A clean shutdown deletes the file; the runtime dir is cleared at
+(`adapter_gone`): comms' listener starts a new adapter for that session at its next start
+or prompt (`adapters.respawn`), and `moxi comms doctor` names it until one binds. A clean shutdown deletes the file; the runtime dir is cleared at
 boot.
 """
 
@@ -153,7 +153,7 @@ def is_live(record: dict | None, proc: ProcView | None = None) -> bool:
 def adapter_gone(record: dict | None, proc: ProcView | None = None) -> bool:
     """Is this the file of an adapter that is gone while its session runs: nothing
     answers its socket, and one of its `tree` roots is alive? Mail to the identity it
-    held has stopped, and nothing binds it again until the session is relaunched."""
+    held has stopped until a new adapter binds it (`adapters.respawn`)."""
     return bool(record) and tree_root_alive(record, proc) and not socket_answers(record)
 
 

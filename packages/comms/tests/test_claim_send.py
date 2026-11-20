@@ -133,11 +133,11 @@ def test_a_dead_adapter_is_refused_while_nobody_holds_the_name(rig, world):
     assert rig.record.history(rig.names_channel) == []
 
 
-def test_a_dead_adapter_says_mail_has_stopped_in_the_session_and_in_doctor(rig, world):
-    """Core's shim was the session's own MCP child, so a respawn bound the session again.
-    This adapter is a fork of the launch that nothing respawns: while it is gone and its
-    session runs, the session is told at each prompt that mail has stopped, and doctor
-    names the identity."""
+def test_a_dead_adapter_no_new_one_can_replace_says_mail_has_stopped(rig, world):
+    """A gone adapter is replaced at the session's next prompt (`adapters.respawn`).
+    One that no new adapter can replace (this one is not the Claude wrapper's) leaves
+    the session told at each prompt that mail has stopped and why, and doctor names the
+    identity."""
     import os
     from types import SimpleNamespace
 
@@ -159,7 +159,7 @@ def test_a_dead_adapter_says_mail_has_stopped_in_the_session_and_in_doctor(rig, 
     assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
     said = " ".join(prompt().split())
     assert said.startswith(f"comms: mail has stopped for {PLANNER}.")
-    assert "Relaunch the session" in said
+    assert "a new one can't be started" in said and "relaunch the session" in said
     (row,) = checks.adapter_rows()
     assert row.name == f"adapter: {PLANNER}" and row.state == "fail"
     assert "mail has stopped" in row.detail and row.fix
