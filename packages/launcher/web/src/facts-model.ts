@@ -28,7 +28,7 @@ import type { Last } from "./fill-model.ts";
 import { lastWhen } from "./fill-model.ts";
 import type { Named } from "./name-model.ts";
 import { DAY, HOUR, runWords } from "./prompt-model.ts";
-import type { Clock, Run } from "./prompt-model.ts";
+import type { Clock } from "./prompt-model.ts";
 import { clock, runsWhere } from "./running-model.ts";
 import type { Running, RunningEntry, Where } from "./running-model.ts";
 
@@ -205,17 +205,22 @@ function presetValue(preset: Preset, name: string): string | null {
   return found !== undefined && typeof found.value === "string" && found.value !== "" ? found.value : null;
 }
 
-/** Where a preset puts the launch: `in slot 3`, `in a new slot`, `in your terminal`,
- * `headless`; null when it sets no target, or a slot that is no number. */
+/** Where a launch into a slot that names none goes: the launcher takes the lowest slot
+ * free then, or makes a new one when none is. The page reads no slot, so it states the
+ * rule rather than which case holds now. */
+export const ANY_SLOT = "in the lowest free slot, or a new one when none is free";
+
+/** Where a preset puts the launch: `in slot 3`, `in your terminal`, `headless`, or
+ * `ANY_SLOT` for a slot it names no number for; null when it sets no target, or a slot
+ * that is no number. */
 export function presetWhere(preset: Preset): string | null {
   const target = presetValue(preset, "target");
   if (target === "terminal" || target === "headless") return runWords({ target });
   if (target !== "slot") return null;
   const said = presetValue(preset, "slot");
+  if (said === null) return ANY_SLOT;
   const slot = slotNumber(said);
-  if (said !== null && slot === null) return null;
-  const run: Run = { target: "slot", slot, named: slot !== null };
-  return runWords(run);
+  return slot === null ? null : runWords({ target: "slot", slot, named: true });
 }
 
 /** What a preset sets, as Home's menu row lists it: its harness, model and effort, then

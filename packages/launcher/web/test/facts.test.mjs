@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACTIVITY, agentsOf, claimOf, clip, epochOf, factsReport, lastClause, LINES_MAX, nameLine, nameUp, NO_PRESET, ORDER,
+  ACTIVITY, agentsOf, ANY_SLOT, claimOf, clip, epochOf, factsReport, lastClause, LINES_MAX, nameLine, nameUp, NO_PRESET, ORDER,
   parseGiven, presetClause, presetWhere, runningWhere, sessionLine, sessionsSection, staysLine, TEXT_MAX_CHARS, upOnly,
   VERSION,
 } from "../src/facts-model.ts";
@@ -151,11 +151,29 @@ test("the last launch's clause says today's time, else the day and the time; non
 test("where a preset puts the launch, in Home's words", () => {
   const where = (values) => presetWhere(preset("p", "x", values));
   assert.equal(where([["target", "slot"], ["slot", "3"]]), "in slot 3");
-  assert.equal(where([["target", "slot"]]), "in a new slot");
   assert.equal(where([["target", "terminal"]]), "in your terminal");
   assert.equal(where([["target", "headless"]]), "headless");
   assert.equal(where([]), null);
   assert.equal(where([["target", "slot"], ["slot", "three"]]), null);
+});
+
+test("a preset's slot with no number says the launcher's rule: the lowest free slot, else a new one", () => {
+  const where = (values) => presetWhere(preset("p", "x", values));
+  assert.equal(ANY_SLOT, "in the lowest free slot, or a new one when none is free");
+  assert.equal(where([["target", "slot"]]), ANY_SLOT);
+  assert.equal(where([["target", "slot"], ["slot", ""]]), ANY_SLOT);
+});
+
+test("a preset's slot with no number never says only `in a new slot`, which holds only while none is free", () => {
+  const where = presetWhere(preset("p", "x", [["target", "slot"]]));
+  assert.notEqual(where, "in a new slot");
+  assert.ok(where.startsWith("in the lowest free slot"));
+});
+
+test("a preset's slot with no number reaches the Launch line whole", () => {
+  const sonnet = preset("atlas-api", "atlas-api", [["model", "sonnet"], ["effort", "high"], ["target", "slot"]]);
+  assert.equal(presetClause(presets([sonnet]), CATALOG, "atlas-api"),
+               "preset claude · sonnet · high, in the lowest free slot, or a new one when none is free");
 });
 
 test("where a running launch runs, in `agents`", () => {
