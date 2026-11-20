@@ -19,9 +19,9 @@ declared stores. These rows add what only slots knows, and write no doctor recor
                   drift row (a registered slot with no session, a session with no row,
                   a slot with two run windows)
     holds         warn on holds in the registry that have run out
-    hooks         warn when the `pane-died` hook failed to write a run's end in the last
-                  `HOOK_FAILURES_DAYS` days (`hooks.log`): those runs read crashed after
-                  the next server start
+    hooks         warn when the `pane-died` hook failed to write a run's end, or did not
+                  start, in the last `HOOK_FAILURES_DAYS` days (`hooks.log`): those runs
+                  read crashed after the next server start
 
 Further rows come from `CHECKS`, each a function returning rows, run after these.
 """

@@ -158,8 +158,32 @@ def test_the_hook_reaches_a_state_dir_with_awkward_characters(server, tmp_path):
     got = wait_for(lambda: registry.read(state_dir / "slots.json").rows[1].last.ended,
                    timeout=10, what="the record in the odd directory")
     assert got.status == 5
+    assert not places.hooks_log(state_dir).exists()
     assert pane_field(pane, "pane_dead") == "1"
     assert pane_field(pane, "pane_in_mode") == "0"
+
+
+def test_a_hook_that_cannot_start_leaves_a_line_for_the_doctor(server, tmp_path,
+                                                               monkeypatch):
+    state_dir = tmp_path / "it's #{here} $HOME 100%s"
+    state_dir.mkdir()
+    gone = tmp_path / "moved" / "python"
+    with monkeypatch.context() as patched:
+        patched.setattr(runs.sys, "executable", str(gone))
+        command = runs.hook_command(1, "tok", state_dir)
+    slots.create()
+    before = time.time()
+    window = tmux.call("new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=slot-1:",
+                       "sh", "-c", "sleep 0.3; exit 5").out.strip()
+    tmux.call("set-option", "-w", "-t", window, "remain-on-exit", "on", ";",
+              "set-hook", "-w", "-t", window, runs.HOOK, command)
+    log = places.hooks_log(state_dir)
+    [logged] = wait_for(lambda: log.exists() and files.read_records(log), timeout=10,
+                        what="the hooks log line")
+    assert (logged["slot"], logged["run"]) == ("1", "tok")
+    assert logged["error"] == f"the hook could not start {gone} (exit 127)"
+    assert int(before) <= logged["at"] <= time.time() + 1
+    assert not (state_dir / "slots.json").exists()
 
 
 def test_status_trusted_is_a_bool(server, base, tmp_path):

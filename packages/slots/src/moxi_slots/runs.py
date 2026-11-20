@@ -17,7 +17,10 @@ before finds a different token and writes nothing.
 The hook prints nothing and always exits 0: tmux shows a `run-shell` command's output, or
 its failing status, over the pane. A write it fails (the lock not had, the registry
 unreadable) goes as one line to the state directory's `hooks.log`, which the doctor
-reports, since the run it missed then reads crashed after the next server start.
+reports, since the run it missed then reads crashed after the next server start. A hook
+that cannot start at all (its Python moved, the module not importable) exits non-zero,
+which `main` never does, and the hook's shell then appends that line itself, naming the
+exit status.
 
 A run ended by itself when its `ended` record has status 0 and no signal and the caller
 placed it with `status_trusted`. A slot is crashed (`crashed`) when it is not occupied,
@@ -115,17 +118,36 @@ def _tmux_quoted(text: str) -> str:
     return "'" + text.replace("'", "'\"'\"'") + "'"
 
 
+#: The hooks log line the hook's shell writes when this module did not run: `printf`'s
+#: format, given the time, the slot, the token, the Python and the exit status.
+_NOT_STARTED = ('{"at":%s,"slot":"%s","run":"%s",'
+                '"error":"the hook could not start %s (exit %s)"}\\n')
+
+
+def _word(text: str) -> str:
+    """`text` as one shell word inside a tmux format (a `#` doubled)."""
+    return shlex.quote(text).replace("#", "##")
+
+
 def hook_command(number: int, token: str, state_dir: Path | str | None = None) -> str:
     """The `pane-died` hook's command for slot `number`'s run `token`: a `run-shell -b`
-    of this module in this Python, its output and status dropped."""
+    of this module in this Python, its output and status dropped. When it exits
+    non-zero (it did not start) the shell appends a line to `hooks.log` itself."""
+    import json
+
     from . import places
 
     state_dir = places.state_dir() if state_dir is None else state_dir
-    words = [shlex.quote(w).replace("#", "##")
-             for w in (sys.executable, "-I", "-m", __name__, str(state_dir), str(number),
-                       token)]
+    words = [_word(w) for w in (sys.executable, "-I", "-m", __name__, str(state_dir),
+                                str(number), token)]
     words += ["'#{pane_dead_status}'", "'#{pane_dead_signal}'", "'#{pane_dead_time}'"]
-    return "run-shell -b " + _tmux_quoted(" ".join(words) + " >/dev/null 2>&1 || :")
+    logged = ["s=$?;", "printf", _word(_NOT_STARTED), '"$(date +%s)"',
+              _word(json.dumps(str(number))[1:-1]), _word(json.dumps(token)[1:-1]),
+              _word(json.dumps(sys.executable)[1:-1]), '"$s"',
+              ">>" + _word(str(places.hooks_log(Path(state_dir))))]
+    return "run-shell -b " + _tmux_quoted(
+        " ".join(words) + " >/dev/null 2>&1 || { " + " ".join(logged)
+        + "; } 2>/dev/null || :")
 
 
 def set_hook_args(window: str, number: int, token: str) -> list[str]:

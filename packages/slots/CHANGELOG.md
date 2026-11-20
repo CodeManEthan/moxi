@@ -24,11 +24,12 @@
   slot's last launch, and sets a `pane-died` hook on the run window that writes
   `Last.ended` (a `RunEnd`: the pane's death time, its exit status, the signal that
   ended it) for that token only, so a late hook of an earlier run writes nothing. The
-  hook waits up to 60 s for the module lock; a write it fails goes as a line to
-  `hooks.log` in the state directory, and `moxi doctor` warns of it, since the run it
-  missed reads crashed later. `start` and `respawn` take
-  `status_trusted` (default True), kept as `Last.status_trusted`, for a command whose
-  exit status doesn't tell a clean end from a kill. `moxi slots show` prints `ended`.
+  hook waits up to 60 s for the module lock; a write it fails, or a hook that does
+  not start (its Python moved), goes as a line to `hooks.log` in the state directory,
+  and `moxi doctor` warns of it, since the run it missed reads crashed later. `start`
+  and `respawn` take `status_trusted` (default True), kept as `Last.status_trusted`, for
+  a command whose exit status doesn't tell a clean end from a kill. `moxi slots show`
+  prints `ended`.
 
 - `start(None, ..., create=True)` takes the lowest registered slot with no session
   running that it may use, a missing one included when it has no hold but the caller's,
