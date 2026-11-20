@@ -306,8 +306,10 @@ class Context:
     (`mcp.inprocess`). None connects to the daemon socket, as the verbs do.
 
     `cures` is the vocabulary a refusal or a note names its cure in (`CURES`): `cli`,
-    the verb's command lines and flags, or `tool`, the names and parameters of comms'
-    tools, so an agent that has only the tools can act on every cure it is given.
+    the verb's command lines and flags; `tool`, the names and parameters of comms'
+    tools, so an agent that has only the tools can act on every cure it is given; or
+    `connector`, the tools' words narrowed to the connector's own tools and parameters
+    (`send` with `reply_to` for a reply, no reply tool, no `new`).
 
     `when_asks_open` says what an open single-reply ask does to a send (`ASKS_OPEN`):
     `refuse`, the verb's rule, refuses a plain send while one is open; `note` posts it,
@@ -424,10 +426,12 @@ class Context:
         self.say(text)
 
 
-#: The vocabularies a cure is named in: the verb's command lines and flags, or the
-#: names and parameters of comms' tools.
-CURES_CLI, CURES_TOOL = "cli", "tool"
-CURES = (CURES_CLI, CURES_TOOL)
+#: The vocabularies a cure is named in: the verb's command lines and flags, the names
+#: and parameters of comms' tools, or those of the connector's tools. The connector
+#: shares every tools' text that names nothing it lacks; the few that differ are
+#: rendered by `_connector`.
+CURES_CLI, CURES_TOOL, CURES_CONNECTOR = "cli", "tool", "connector"
+CURES = (CURES_CLI, CURES_TOOL, CURES_CONNECTOR)
 
 
 #: What an open single-reply ask does to a send: refuse a plain send, or post it with a
@@ -437,9 +441,14 @@ ASKS_OPEN = (ASKS_OPEN_REFUSE, ASKS_OPEN_NOTE)
 
 
 def _tool(ctx) -> bool:
-    """Does `ctx` name cures in the tools' words? A caller's own stand-in context, with
-    no `cures`, names them as the verb does."""
-    return getattr(ctx, "cures", CURES_CLI) == CURES_TOOL
+    """Does `ctx` name cures in the tools' words, comms' tools' or the connector's? A
+    caller's own stand-in context, with no `cures`, names them as the verb does."""
+    return getattr(ctx, "cures", CURES_CLI) in (CURES_TOOL, CURES_CONNECTOR)
+
+
+def _connector(ctx) -> bool:
+    """Does `ctx` name cures in the connector's words?"""
+    return getattr(ctx, "cures", CURES_CLI) == CURES_CONNECTOR
 
 
 def _noting(ctx) -> bool:
@@ -1062,9 +1071,14 @@ NO_ANSWER = ("the daemon did not answer, so this message may have been sent; che
              "`moxi comms history` before sending it again")
 NO_ANSWER_TOOL = ("the daemon did not answer, so this message may have been sent; check "
                   "the history tool before sending it again")
+#: The connector has no history tool.
+NO_ANSWER_CONNECTOR = ("the daemon did not answer, so this message may have been sent; "
+                       "ask the agent whether it arrived before sending it again")
 
 
 def _no_answer(ctx) -> str:
+    if _connector(ctx):
+        return NO_ANSWER_CONNECTOR
     return NO_ANSWER_TOOL if _tool(ctx) else NO_ANSWER
 
 
@@ -1418,7 +1432,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         elif open_asks:
             _refuse(ctx, "single-reply",
                     _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args,
-                                 tool=_tool(ctx)))
+                                 cures=getattr(ctx, "cures", CURES_CLI)))
             return _REFUSED, None
 
     # ---- 4. the reply checks --------------------------------------------------------
@@ -1757,6 +1771,10 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
         names_text = _and([t for t in names_text.split(",") if t] or ["them"])
 
     def new_flag() -> str:
+        if _connector(ctx):
+            # The connector has no `new`, and no plain send of its meets the
+            # single-reply refusal.
+            return ""
         flag = _new_flag(ctx, sender, resolved)
         return (" and new: true" if flag else "") if tool else flag
 
@@ -2143,13 +2161,20 @@ def _cure_flags(args, *, tool: bool = False) -> str:
 
 
 def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
-                 tool: bool = False) -> str:
-    """What a refused plain send prints: who asked, when, and both cures, as command
-    lines or, with `tool`, as the tools and their parameters."""
+                 cures: str = CURES_CLI) -> str:
+    """What a refused plain send prints: who asked, when, and both cures, in the
+    vocabulary `cures` names: command lines, or the tools and their parameters. The
+    connector's words name only the reply cure, as `send` with `reply_to`: it has no
+    `new`."""
     from .daemon import _epoch
     open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
     newest = open_asks[0][0].id
-    if tool:
+    if cures == CURES_CONNECTOR:
+        cure = (f"send with reply_to: {newest}" if len(resolved) == 1 else
+                f"send to {_and(tags)} with reply_to: {newest}"
+                ) + _cure_flags(args, tool=True)
+        tail = "Nothing was sent."
+    elif cures == CURES_TOOL:
         cure = (f"the reply tool with message_id: {newest}" if len(resolved) == 1 else
                 f"the send tool to {_and(tags)} with reply_to: {newest}"
                 ) + _cure_flags(args, tool=True)
