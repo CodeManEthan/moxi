@@ -523,7 +523,9 @@ def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools,
 def test_send_and_wait_to_a_recipient_that_cant_read_now_answers_at_once(rig, tools):
     got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_s": 5})
     assert got.structured["outcome"] == "not-delivered"
-    assert got.text.endswith(tools_mod.LATER)
+    first, *notes = got.text.split("\n")
+    assert first.endswith(tools_mod.LATER)
+    assert notes == got.structured["notes"] and notes[0].startswith("NOTE: main@proj-b is not")
 
 
 def test_send_and_wait_to_a_held_recipient_answers_at_once(rig, tools):
