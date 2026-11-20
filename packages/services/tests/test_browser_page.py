@@ -1,15 +1,14 @@
 """services' page and home block in a browser, through a real shell that starts services'
 real page server over a fake supervisor (`browser_kit`): the contract check on both, the
 block's count of rows by verdict, the page's frame (no heading of its own), the first
-group's risen rows (SV1), a running daemon's time (SV2), a timer's runs (SV3), a run that
-spends usage (SV4), the groups by project and Moxi's (SV5), a failed daemon's state and
-log (SV6), a project's address (SV7), each address and what the page writes back, the
-list's states, the opened row's lines, the acts on the closed row and in the foot as plain
-presses followed to their end (done, did not hold, refused, a lost answer), a Moxi
-daemon's stop by hand, the in-place confirms (a run that spends usage, Remove, slots'
-server's Stop and Restart over a fake slots API, the guard's refusal asked anew, ui's
-shell), and the 360 px width check. The panel that adds a service is
-`test_browser_add.py`'s.
+group's risen rows, a running daemon's time, a timer's runs, a run that spends usage, the
+groups by project and Moxi's, a failed daemon's state and log, a project's address, each
+address and what the page writes back, the list's states, the opened row's lines, the acts
+on the closed row and in the foot as plain presses followed to their end (done, did not
+hold, refused, a lost answer), a Moxi daemon's stop by hand, the in-place confirms (a run
+that spends usage, Remove, slots' server's Stop and Restart over a fake slots API, the
+guard's refusal asked anew, ui's shell), and the 360 px width check. The panel that adds a
+service is `test_browser_add.py`'s.
 """
 
 from __future__ import annotations
@@ -224,7 +223,7 @@ def test_the_page_draws_no_heading_lede_or_read_again(seeded, ui_page):
     expect(panel.locator('[data-part="list"] h2, [data-part="list"] h3')).to_have_count(0)
 
 
-def test_sv1_the_rows_that_need_him_rise_first_worst_first(seeded, ui_shell, ui_page):
+def test_the_rows_that_need_him_rise_first_worst_first(seeded, ui_shell, ui_page):
     panel = panel_of(ui_page)
     listed = get(ui_shell, "api/rows")["rows"]
     first = panel.locator('section[data-part="first"]')
@@ -289,7 +288,7 @@ def test_the_groups_go_by_project_then_no_project_then_moxi(seeded, ui_shell, ui
     expect(loose.locator('.item[data-id="services/spare"] moxi-ui-row')).to_have_attribute("fact", "off")
 
 
-def test_sv5_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
+def test_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
     panel = panel_of(ui_page)
     listed = get(ui_shell, "api/rows")["rows"]
     risen = set(ids(panel.locator('section[data-part="first"] .item')))
@@ -309,7 +308,7 @@ def test_sv5_moxis_own_rows_are_one_group_by_module(seeded, ui_shell, ui_page):
     assert not [i for i in ids(moxi.locator(".item")) if i.startswith("services/")]
 
 
-def test_sv2_a_running_daemon_says_since_when(seeded, ui_page):
+def test_a_running_daemon_says_since_when(seeded, ui_page):
     panel = panel_of(ui_page)
     web = row(panel, "services/web").locator("moxi-ui-row")
     since = clock(ui_page, WEB_SINCE)
@@ -332,7 +331,7 @@ def label(part, name: str):
     return part.locator(f'[data-line="{name}"]')
 
 
-def test_sv3_a_timer_says_when_it_last_ran_and_opened_lists_its_runs(seeded, ui_page):
+def test_a_timer_says_when_it_last_ran_and_opened_lists_its_runs(seeded, ui_page):
     panel = panel_of(ui_page)
     last = clock(ui_page, BACKUP_RAN[-1])
     expect(row(panel, "services/backup").locator("moxi-ui-row")).to_have_attribute(
@@ -349,7 +348,7 @@ def test_sv3_a_timer_says_when_it_last_ran_and_opened_lists_its_runs(seeded, ui_
     expect_path(ui_page, "/m/services/row/backup")
 
 
-def test_sv4_a_timer_whose_runs_launch_a_session_says_it_spends_usage(seeded, ui_page):
+def test_a_timer_whose_runs_launch_a_session_says_it_spends_usage(seeded, ui_page):
     panel = panel_of(ui_page)
     expect(row(panel, "services/agent-run").locator("moxi-ui-row")).to_have_attribute(
         "where", re.compile(r"spends usage$"))
@@ -362,7 +361,7 @@ def test_sv4_a_timer_whose_runs_launch_a_session_says_it_spends_usage(seeded, ui
     expect(label(part, "Usage")).to_have_count(0)
 
 
-def test_sv6_a_failed_daemon_opened_says_its_state_and_how_to_read_its_log(seeded, ui_shell, ui_page):
+def test_a_failed_daemon_opened_says_its_state_and_how_to_read_its_log(seeded, ui_shell, ui_page):
     ready_copying(ui_page.context)
     reads = []
     ui_page.on("request", lambda request: reads.append(request.url) if "/m/services/api/row?" in request.url else None)
@@ -405,7 +404,7 @@ def test_a_moxi_row_opened_links_its_module_and_settings(seeded, ui_shell, ui_pa
         expect(links.last).to_have_text(f"Settings › {mod['module']}")
 
 
-def test_sv7_a_project_address_shows_its_rows_alone_until_show_all(seeded, ui_shell, ui_page):
+def test_a_project_address_shows_its_rows_alone_until_show_all(seeded, ui_shell, ui_page):
     ui_page.goto("/m/services/project/alpha")
     panel = ui_page.locator("#moxi-panel > moxi-services-page")
     expect(list_part(panel)).to_have_attribute("data-state", "up")
