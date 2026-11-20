@@ -1664,6 +1664,7 @@ comms	packages/comms/tests/test_api.py	base = {"HOME": "/h", "MOXI_COMMS_CLAIM_S
 comms	packages/comms/tests/test_api.py	before = len(rig.record.history(rig.names_channel))	keep	record	record
 comms	packages/comms/tests/test_api.py	for name, params in {"attributed": ["message_id", "deadline"],	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_api.py	op = api.Sender.operator("900001").environ(base)	use	.environ	.sender_env
+comms	packages/comms/tests/test_archive.py	assert first is not None and first.record is not None	keep	record	record
 comms	packages/comms/tests/test_archive.py	old = rig.record.get_message(str(OLD_ASK))	keep	record	record
 comms	packages/comms/tests/test_archive.py	assert rig.record.get_message(str(SHADOWED)) is None or \	keep	record	record
 comms	packages/comms/tests/test_archive.py	"before the counter moved" not in rig.record.get_message(str(SHADOWED)).content, \	keep	record	record

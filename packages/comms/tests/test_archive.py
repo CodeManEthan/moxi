@@ -132,6 +132,17 @@ def test_the_start_moves_the_counter_past_the_archives_ids(older, rig):
     assert archive.skip_ids(rig.record) is None, "once"
 
 
+def test_the_archive_is_read_once_at_the_start_not_when_the_config_changes(older, rig):
+    """`[archive]` is read at the daemon's start: a config.toml changed later leaves the
+    archive it read, and the connections its threads hold, as they were."""
+    first = archive.current()
+    assert first is not None and first.record is not None
+    write_config(None, '[archive]\nrecord = ""\n')
+    assert archive.current() is first
+    code, out = rig.cli(["history", "planner@proj-a"])
+    assert code == 0 and "what did the old build decide?" in out, out
+
+
 def test_history_lists_the_older_record_first(older, rig):
     code, out = rig.cli(["history", "planner@proj-a"])
     assert code == 0, out

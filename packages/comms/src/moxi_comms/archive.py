@@ -218,21 +218,14 @@ _warned: set = set()
 
 
 def current() -> Archive | None:
-    """This process's archive, from the config file as it stands at the first ask after
-    the file last changed; None when it names none, or when the file does not load."""
+    """This process's archive, read from the config file once, at the first ask: the
+    daemon's at its start (`skip_ids`), a verb's in its own run. A later change to the
+    file is not read until the process starts again, so a connection one thread holds is
+    never closed under it. None when the file names none, or does not load."""
     from . import config
 
-    path = config.config_path()
-    try:
-        stamp = path.stat()
-        key = (str(path), stamp.st_size, stamp.st_mtime_ns, stamp.st_ino)
-    except OSError:
-        key = (str(path), None)
+    key = str(config.config_path())
     if key not in _current:
-        for old in _current.values():
-            if old is not None:
-                old.close()
-        _current.clear()
         try:
             _current[key] = from_config(config.load())
         except config.ConfigError:
