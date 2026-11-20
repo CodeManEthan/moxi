@@ -259,7 +259,7 @@ def test_the_verb_measures_then_prints_rows_and_marks(monkeypatch, capsys):
 
 
 def test_days_sets_one_measures_window_and_the_config_stays(monkeypatch, capsys):
-    # Core's `restart-point --measure --days N`: a one-off window over the default.
+    # `--days N` with `--measure` sets the window of this one measure; the config's stays.
     monkeypatch.setattr(measure, "MIN_FILES", 2)
     pin_clock(monkeypatch)
     for n in range(2):

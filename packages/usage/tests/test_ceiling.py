@@ -505,9 +505,9 @@ def test_the_texts_fill_their_counts_and_survive_stray_braces():
 
 
 def test_the_default_texts_carry_the_wrap_up_recipe_and_ask_for_the_hand_off_block():
-    # As Core's worker ceiling did: the warning says to finish the smallest unit and
-    # return; the refusal gives the commit recipe the lexer lets through, where the commit
-    # line comes from, and the CEILING HANDOFF block to return.
+    # The warning says to finish the smallest unit and return; the refusal gives the
+    # commit recipe the lexer lets through, where the commit line comes from, and the
+    # CEILING HANDOFF block to return.
     current = settings.current()
     warning = ceiling.fill(current["ceiling.warning_text"], growth=250_100, current=310_000,
                            hard=300_000)

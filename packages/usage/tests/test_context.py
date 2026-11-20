@@ -107,8 +107,8 @@ def test_a_session_with_no_request_yet_is_unknown():
 
 
 def test_the_verb_exits_0_for_any_state_it_names_and_2_for_an_id_it_cannot_find(capsys):
-    # Core's rule for `usage now --session`: a named state, unknown included, is an
-    # answer (0); a session id that is unknown or ambiguous is a usage error (2).
+    # A named state, unknown included, is an answer (0); a session id that is unknown or
+    # ambiguous is a usage error (2).
     write_config(f"[[model]]\n{WINDOW}")
     transcript()
     assert cli.main(["context", SESSION]) == 0
@@ -127,7 +127,7 @@ def test_the_verb_exits_0_for_any_state_it_names_and_2_for_an_id_it_cannot_find(
 
 
 def test_an_id_in_more_than_one_harness_is_refused_naming_them(capsys):
-    # Core refused an id found in both corpora rather than take the first.
+    # An id two harnesses hold is refused, not resolved to the first that holds it.
     t = ClaudeTranscript(Path(sessions.root("claude")), session_id=THREAD)
     t.user("go")
     t.assistant("ok", usage=usage(input_tokens=10, cache_read=1_000, cache_write=0))

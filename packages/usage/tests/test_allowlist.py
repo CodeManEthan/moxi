@@ -135,7 +135,7 @@ def table(p):
     expect_bash("escaped quote inside double quotes", "git -C %s commit -m \"say \\\"hi\\\"\"" % repo, want=True)
     expect_bash("message that looks like an option", "git -C %s commit -m '--amend'" % repo, want=True)
 
-    # The user's commands (ceiling.allow_commands), whole, as Core's wrap-up forms were ------------
+    # The user's commands (ceiling.allow_commands), each allowed only whole ------------
     expect_bash("a listed prefix, bare", "make handoff", want=True)
     expect_bash("a listed command with more words", "make handoff report --quiet", want=False)
     expect_bash("a listed command with one word more", "make handoff x", want=False)

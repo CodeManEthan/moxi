@@ -185,8 +185,8 @@ def test_a_plain_launch_takes_the_shipped_defaults():
 
 
 def test_a_launch_with_usage_warns_at_2x_unless_it_sets_another_mark(monkeypatch):
-    """Core's launcher chose every launch's mark and stamped it; one that set none got the
-    shipped default. An install without usage neither offers the row nor stamps it."""
+    """Every launch with usage installed is stamped with a mark: its own, else the shipped
+    default of 2x. An install without usage neither offers the row nor stamps it."""
     from moxi_launcher import compose
     from moxi_launcher.compose import Context
 
