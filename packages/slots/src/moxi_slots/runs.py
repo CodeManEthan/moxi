@@ -20,7 +20,9 @@ unreadable) goes as one line to the state directory's `hooks.log`, which the doc
 reports, since the run it missed then reads crashed after the next server start. A hook
 that cannot start at all (its Python moved, the module not importable) exits non-zero,
 which `main` never does, and the hook's shell then appends that line itself, naming the
-exit status.
+exit status, or the signal when one ended the hook (a status of 128 + N). The shell
+creates the file 0600, as `main` does; it does not roll it (the next write from `main`
+does), and with no state directory it writes nothing.
 
 A run ended by itself when its `ended` record has status 0 and no signal and the caller
 placed it with `status_trusted`. A slot is crashed (`crashed`) when it is not occupied,
@@ -123,6 +125,10 @@ def _tmux_quoted(text: str) -> str:
 #: format, given the time, the slot, the token, the Python and the exit status.
 _NOT_STARTED = ('{"at":%s,"slot":"%s","run":"%s",'
                 '"error":"the hook could not start %s (exit %s)"}\\n')
+#: The line when a signal ended the hook (a status of 128 + N): the same, with the
+#: signal's number in place of the status.
+_KILLED = ('{"at":%s,"slot":"%s","run":"%s",'
+           '"error":"the hook %s was ended by signal %s"}\\n')
 
 
 def _word(text: str) -> str:
@@ -133,7 +139,8 @@ def _word(text: str) -> str:
 def hook_command(number: int, token: str, state_dir: Path | str | None = None) -> str:
     """The `pane-died` hook's command for slot `number`'s run `token`: a `run-shell -b`
     of this module in this Python, its output and status dropped. When it exits
-    non-zero (it did not start) the shell appends a line to `hooks.log` itself."""
+    non-zero (it did not start, or a signal ended it) the shell appends a line to
+    `hooks.log` itself, creating the file 0600 (`umask 077`)."""
     import json
 
     from . import places
@@ -142,9 +149,11 @@ def hook_command(number: int, token: str, state_dir: Path | str | None = None) -
     words = [_word(w) for w in (sys.executable, "-I", "-m", __name__, str(state_dir),
                                 str(number), token)]
     words += ["'#{pane_dead_status}'", "'#{pane_dead_signal}'", "'#{pane_dead_time}'"]
-    logged = ["s=$?;", "printf", _word(_NOT_STARTED), '"$(date +%s)"',
-              _word(json.dumps(str(number))[1:-1]), _word(json.dumps(token)[1:-1]),
-              _word(json.dumps(sys.executable)[1:-1]), '"$s"',
+    fields = ['"$(date +%s)"', _word(json.dumps(str(number))[1:-1]),
+              _word(json.dumps(token)[1:-1]), _word(json.dumps(sys.executable)[1:-1])]
+    logged = ["s=$?;", "umask", "077;", "if", "[", '"$s"', "-gt", "128", "];", "then",
+              "printf", _word(_KILLED), *fields, '"$((s-128))";', "else",
+              "printf", _word(_NOT_STARTED), *fields, '"$s";', "fi",
               ">>" + _word(str(places.hooks_log(Path(state_dir))))]
     return "run-shell -b " + _tmux_quoted(
         " ".join(words) + " >/dev/null 2>&1 || { " + " ".join(logged)
