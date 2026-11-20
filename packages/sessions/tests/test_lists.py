@@ -278,7 +278,8 @@ def test_a_day_counts_the_sessions_started_in_a_terminal_and_a_programs_apart(ro
     assert a_day["count"] == 4 and a_day["program"] == {"count": 2}
     assert ids(a_day["rows"]) == [tid(6), sid(3), sid(2), sid(1)]
     assert a_day["before"] is None
-    assert all(row["by_program"] is None and not row["recent"] for row in a_day["rows"])
+    assert [row["by_program"] for row in a_day["rows"]] == [None, False, False, False]
+    assert [row["recent"] for row in a_day["rows"]] == [False] * 4
     assert answer["total"] == 6 and answer["today"] == "2026-11-10"
 
 

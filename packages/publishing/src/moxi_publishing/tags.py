@@ -17,6 +17,7 @@ same values the local gate does:
     ready = ["moxi-comms"]               # confirmed; optional, see below
     check-workflow = "ci.yml"            # the workflow file of the check job
     check-job = "linux"                  # the job that must pass on main at the commit
+    full-jobs = ["other (windows-latest)", "secrets-windows"]   # and these, in that run
 
 When the table holds `ready`, every member must be on exactly one of the two lists, so a
 member added later is never ready by default: one on neither or on both counts as not
@@ -29,8 +30,13 @@ seven checks, for a tag on commit C naming distribution D and version V:
 1. shape: the tag is annotated and peels, through tag objects only, to C; its name is
    `D-vV` with V normalised; D is a member at C, and V is D's `project.version` at C;
 2. CHANGELOG: D's CHANGELOG at C has `## V (YYYY-MM-DD)` as its first version heading;
-3. main and green: C is on the first-parent line of the main ref, and GitHub has a
-   successful run of `check-job` in `check-workflow`, from a push to the main branch, at C;
+3. main and green: C is on the first-parent line of the main ref, and GitHub has a run
+   of `check-workflow`, from a push to the main branch, at C, in which `check-job`
+   concluded `success` and so did every job named exactly as a `full-jobs` name. A
+   `full-jobs` name with no such job, a job concluded any other way, or a missing or
+   empty `full-jobs` refuses; a job still running refuses with "wait for it". The jobs
+   read are the run's latest attempt (the jobs list's default), and each `full-jobs`
+   job's conclusion goes in the verdict's notes;
 4. ready: D is not on the not-ready list at C, and, where the table keeps a ready list,
    D is on that list;
 5. siblings: each required dependency of D on another member admits at least one
@@ -65,6 +71,7 @@ NOT_READY = "not-ready"
 READY = "ready"
 CHECK_WORKFLOW = "check-workflow"
 CHECK_JOB = "check-job"
+FULL_JOBS = "full-jobs"
 #: Where GitHub's API and the package index are read; tests point these at a fake.
 GITHUB_API_ENV = "MOXI_PUBLISHING_GITHUB_API_URL"
 PYPI_ENV = "MOXI_PUBLISHING_PYPI_URL"
@@ -239,6 +246,15 @@ class Workspace:
                 found[dist] = f"on neither [tool.{TABLE}] {NOT_READY} nor {READY}"
         return found
 
+    def full_jobs(self) -> list[str]:
+        """The `full-jobs` names, in their order; empty when the key is missing or empty.
+        Raises `ReleaseError` when it is not a list of names."""
+        listed = self.table.get(FULL_JOBS, [])
+        if not isinstance(listed, list) or not all(
+                isinstance(x, str) and x.strip() for x in listed):
+            raise ReleaseError(f"[tool.{TABLE}] {FULL_JOBS} is not a list of job names")
+        return listed
+
     def setting(self, key: str) -> str | None:
         value = self.table.get(key)
         return value if isinstance(value, str) and value.strip() else None
@@ -284,6 +300,13 @@ def read_file(git, commit: str, path: str) -> bytes | None:
         return read_blobs(git, [spec])[spec]
     except ScanError as exc:
         raise ReleaseError(str(exc)) from None
+
+
+def release_table(git, commit: str) -> dict:
+    """The root `pyproject.toml`'s `[tool.moxi-publishing]` at `commit`, empty when the file
+    has no such table. Raises `ReleaseError` when the file is missing or can't be read."""
+    return _table(_toml(read_file(git, commit, "pyproject.toml"),
+                        f"{commit[:12]}:pyproject.toml"), "tool", TABLE)
 
 
 def workspace(git, commit: str) -> Workspace:
@@ -625,7 +648,7 @@ def _changelog(*, git, ws, member, version, **_):
     return True, f"{path} is headed {heading.line.strip()}"
 
 
-def _main(*, git, ws, where, web, **_):
+def _main(*, git, ws, where, web, verdict, **_):
     done = git("rev-list", "--first-parent", where.main_ref, "--")
     if done.returncode != 0:
         return False, f"{where.main_ref} can't be read; fetch first"
@@ -636,27 +659,72 @@ def _main(*, git, ws, where, web, **_):
     for key, value in ((CHECK_WORKFLOW, workflow), (CHECK_JOB, job)):
         if value is None:
             return False, f"[tool.{TABLE}] has no {key}, so nothing says which check to wait for"
+    full = ws.full_jobs()
+    if not full:
+        return False, (f"[tool.{TABLE}] has no {FULL_JOBS}, so nothing says which jobs "
+                       f"beside {job} to wait for")
     if not where.github:
         return False, "no GitHub repo is set (moxi-publishing.github); enable with --github"
     from urllib.parse import quote
 
+    short = ws.commit[:12]
     runs = web.github(f"/repos/{where.github}/actions/workflows/{quote(workflow)}/runs"
                       f"?head_sha={ws.commit}&event=push&branch={quote(where.main_branch)}"
-                      f"&per_page=100", f"{workflow}'s runs at {ws.commit[:12]}")
+                      f"&per_page=100", f"{workflow}'s runs at {short}")
+    first_refusal = None
     for run in (runs or {}).get("workflow_runs", []) if isinstance(runs, dict) else []:
         if not isinstance(run, dict) or run.get("head_sha") != ws.commit or run.get(
                 "event") != "push" or run.get("head_branch") != where.main_branch:
             continue
+        # The jobs list's default filter is `latest`: the jobs of the run's latest
+        # attempt, so a re-run reads as its last attempt went.
         jobs = web.github(f"/repos/{where.github}/actions/runs/{run.get('id')}/jobs"
                           f"?per_page=100", f"the jobs of run {run.get('id')}")
-        for one in (jobs or {}).get("jobs", []) if isinstance(jobs, dict) else []:
-            name = one.get("name", "") if isinstance(one, dict) else ""
-            if (name == job or name.startswith(job + " (")) and one.get(
-                    "conclusion") == "success":
-                return True, (f"{ws.commit[:12]} is on {where.main_ref}, and {workflow}'s "
-                              f"{job} passed there on a push to {where.main_branch}")
+        jobs = [one for one in ((jobs or {}).get("jobs", []) if isinstance(jobs, dict)
+                                else []) if isinstance(one, dict)]
+        if not any(isinstance(name := one.get("name"), str) and (
+                name == job or name.startswith(job + " (")) and one.get(
+                "conclusion") == "success" for one in jobs):
+            continue
+        notes, wrong, pending = _full_jobs(jobs, full, workflow=workflow, short=short)
+        if not wrong and not pending:
+            verdict.notes.extend(notes)
+            return True, (f"{short} is on {where.main_ref}, and {workflow}'s {job} and "
+                          f"the {len(full)} jobs {FULL_JOBS} names passed there on a push "
+                          f"to {where.main_branch}")
+        if first_refusal is None:
+            said = f"{workflow}'s {job} passed on a push to {where.main_branch} at {short}, but "
+            said += "; ".join(wrong + pending)
+            if not wrong:
+                said += "; wait for it"
+            first_refusal = notes, said
+    if first_refusal is not None:
+        verdict.notes.extend(first_refusal[0])
+        return False, first_refusal[1]
     return False, (f"{workflow}'s {job} has no successful run from a push to "
-                   f"{where.main_branch} at {ws.commit[:12]}; wait for it, or push main")
+                   f"{where.main_branch} at {short}; wait for it, or push main")
+
+
+def _full_jobs(jobs, full, *, workflow, short):
+    """(a note per job matching a `full-jobs` name, what refuses, what is still running)
+    for one run's `jobs`. A name matches a job of exactly that name; every match must have
+    concluded `success`."""
+    notes, wrong, pending = [], [], []
+    for name in full:
+        matched = [one for one in jobs if one.get("name") == name]
+        if not matched:
+            wrong.append(f"no job is named {name!r}")
+            notes.append(f"{workflow}'s {name} at {short}: no such job")
+        for one in matched:
+            if one.get("status", "completed") != "completed":
+                pending.append(f"{name} is {one.get('status')}")
+                notes.append(f"{workflow}'s {name} at {short}: {one.get('status')}")
+            else:
+                conclusion = one.get("conclusion")
+                notes.append(f"{workflow}'s {name} at {short}: {conclusion}")
+                if conclusion != "success":
+                    wrong.append(f"{name} concluded {conclusion}")
+    return notes, wrong, pending
 
 
 def _ready(*, ws, member, **_):
@@ -800,5 +868,5 @@ __all__ = ["CORE", "CATALOGUE", "CHANGELOG", "SEPARATOR", "TABLE", "NOT_READY",
            "CHECKS", "ReleaseError", "normalised", "tag_name", "parse_tag", "Heading",
            "version_headings", "first_version_heading", "same_version",
            "changelog_section", "Member", "Workspace", "repo_git", "read_file",
-           "workspace", "work_tree_workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
+           "release_table", "workspace", "work_tree_workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
            "peel", "resolve", "gate", "admitted", "file_hashes", "released"]

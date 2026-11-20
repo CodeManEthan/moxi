@@ -450,6 +450,13 @@ def test_a_sample_over_the_budget_is_named():
     assert health.over_budget({"rss": 10, "fds": 1}, {"rss": "120M", "fds": 64}) == []
 
 
+def test_handles_in_a_windows_sample_are_never_compared_with_the_fds_budget():
+    handles = {"pid": 1, "rss": 30 * 1024**2, "cpu_s": 1.0, "handles": 232}
+    assert health.over_budget(handles, health.SHELL_BUDGET) == []
+    assert health.over_budget({**handles, "rss": 90 * 1024**2}, health.SHELL_BUDGET) == [
+        "RSS 90 MB over its 80M"]
+
+
 # --- the announcement ---------------------------------------------------------------------
 
 

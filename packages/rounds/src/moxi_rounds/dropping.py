@@ -41,10 +41,11 @@ hold, and the stage stays owed: it is commissioned again, or taken out of the pl
 **What goes.** A drop deletes no branch, so the work can be commissioned again. Once
 its event is on the log, the worktree and scratch folder of each build it ended are
 removed under the removal rule (`removal`), and those the rule keeps are named with
-why (`kept`) and left for a later sweep. Then CI's own refs each such build pushed are
-removed from the remote under the keep rule (`ci_refs.remove`), and each is named with
-what became of it (`refs`); one left there stays for `drop --leftovers --refs`. The
-build's branch in the repo stays.
+why (`kept`) and left for a later sweep. Then CI's own refs of each such build (those
+it recorded pushing, and those `ref` and `full_ref` give its branch) are removed from
+the remote under the keep rule (`ci_refs.remove`), and each is named with what became
+of it (`refs`); one left there stays for `drop --leftovers --refs`. The build's branch
+in the repo stays.
 
 `left_behind` gives the questions on a project's list that came from a round since
 dropped, for the opening of a later round to print: whoever takes that work up adopts

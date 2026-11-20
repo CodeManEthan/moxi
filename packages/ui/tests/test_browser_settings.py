@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 from moxi import modules
 from moxi_dev.testing import wait_for
+from moxi_ui.testing.browser import copied, ready_copying
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -264,13 +265,13 @@ def test_a_section_whose_file_wont_parse_says_why_in_the_pane(ui_shell, ui_page)
             path.write_text(before)
 
 
-def test_a_click_on_a_key_copies_it(ui_shell, ui_page):
-    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=ui_shell.url)
+def test_a_click_on_a_key_copies_it(ui_page):
+    ready_copying(ui_page.context)
     view = _settings(ui_page)
     key = _row(view, "limit").locator("[data-line=key]")
     key.click()
     expect(_row(view, "limit").locator("[data-line=copied]")).to_have_text("Copied")
-    assert ui_page.evaluate("navigator.clipboard.readText()") == "limit"
+    assert copied(ui_page) == "limit"
     expect(_row(view, "limit").locator("[data-line=copied]")).to_have_count(0, timeout=4000)
 
 
@@ -1107,7 +1108,7 @@ def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_
             provider="cloudflare", change="r0.1")
         Devices.of(shell.state_dir("ui")).mark_stale(lambda device: device.id == old.id)
         page = ui_contexts(shell).pages[0]
-        page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=shell.url)
+        ready_copying(page.context)
         view = _settings(page, "settings/ui")
         stale = view.locator(f".dev[data-device='{old.id}'] [data-line=device]")
         expect(stale).to_have_text(re.compile(r" · the address changed; pair it again$"))
@@ -1120,7 +1121,7 @@ def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_
         expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible()
         pairing.get_by_role("button", name="Copy the link instead").click()
         expect(pairing.locator("[data-line=copied]")).to_have_text("Copied")
-        code = urlsplit(page.evaluate("navigator.clipboard.readText()")).fragment.removeprefix("c=")
+        code = urlsplit(copied(page)).fragment.removeprefix("c=")
         # The phone redeems the page's own code through the tunnel's stand-in.
         with PhoneBridge(shell.home, shell.gateway_port) as bridge:
             phone = PhoneSession(bridge)
@@ -1401,7 +1402,7 @@ def test_the_form_in_submit_mode_takes_catalog_rows(ui_page, ui_width_check):
     expect(_field(form, "permission_mode")).to_contain_text("permission posture")
     ui_width_check(ui_page)
     form.get_by_role("button", name="Launch").click()
-    ui_page.wait_for_function("window.__submitted !== undefined")
+    ui_page.wait_for_function("() => window.__submitted !== undefined")
     assert ui_page.evaluate("window.__submitted") == {
         "model": "opus", "add_dir": ["/srv/b"], "remote_control": "here", "prompt_file": None,
         "permission_mode": "default"}

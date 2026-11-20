@@ -17,6 +17,9 @@ export interface RosterRow {
   module: string | null;
   tier: string | null;
   adapter: string | null;
+  /** The harness a live row's adapter kind is a session of (`claude`, `codex`,
+   * `opencode`); null for any other row. */
+  harness: string | null;
   directors: string[];
   session_id: string | null;
   /** When the session took the name, on the server's clock, epoch seconds. */
@@ -29,6 +32,9 @@ export interface RosterRow {
   /** Who holds a send-only name: `module`, `program` (a name a program registered), or
    * null (one an older comms kept, or not a send-only name). */
   holder: string | null;
+  /** comms' words for what a live row's binding is, when its kind says so (`Claude's apps,
+   * through the connector`); null for every other row. */
+  via: string | null;
 }
 
 /** A live name's cache: `warm` or `cold`, and when it goes or went cold, epoch seconds. */
@@ -79,7 +85,8 @@ export function parseRoster(data: unknown): Roster | null {
     .filter((row) => typeof row === "object" && row !== null && typeof row.qualified === "string")
     .map((row): RosterRow => ({ ...row, live: row.live === true, directors: strings(row.directors),
                                 awaiting: strings(row.awaiting), cache: parseCacheFact(row.cache),
-                                holder: typeof row.holder === "string" ? row.holder : null }));
+                                holder: typeof row.holder === "string" ? row.holder : null,
+                                via: typeof row.via === "string" && row.via !== "" ? row.via : null }));
   return { state, detail: null, rows: kept };
 }
 

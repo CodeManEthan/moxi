@@ -25,6 +25,8 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets, store
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="the fake harness is a script run by its #! line")]
@@ -434,7 +436,7 @@ def test_an_empty_box_sends_no_brief_file_though_the_defaults_name_one(
         file.unlink()
 
 
-def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text_in_it(
+def test_a_handoff_the_defaults_name_shows_under_the_box_is_sent_alone_and_clear_leaves_it_out(
         fake, ui_page, ui_shell, harness, tmp_path):
     words = "the last watch left the lamps lit"
     typed = "ring the harbour bell"
@@ -448,19 +450,28 @@ def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text
         return words not in " ".join(argv) and str(handoff) not in " ".join(argv)
 
     try:
-        # The box empty, in a slot: the session starts with no first turn.
+        # The defaults' handoff is on its line under the box; the box stays on.
         piece = kit.open_home(ui_page)
         box = piece.locator("textarea")
         expect(box).to_have_value("")
-        body = press(ui_page, piece)
-        assert not {"handoff", "brief"} & set(body["values"]), body
-        assert {"handoff", "brief"} <= set(body["leave_out"]), body
-        expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
-        row = kit.newest_launch(ui_shell)
-        assert (row.brief, row.handoff_path) == (None, None) and unsent(row.argv), row
-        # Text in the box, in the background: the first turn is that text alone.
-        box.fill(typed)
+        expect(box).to_be_enabled()
+        line = piece.locator("[data-handoff]")
+        expect(line.locator(".k")).to_have_text("Handoff from a file")
+        expect(line.locator(".file")).to_have_text(str(handoff))
+        # The box empty, in the background: the handoff alone is the first turn.
         pick_run(piece, "Headless")
+        body = press(ui_page, piece)
+        assert body["values"]["handoff"] == str(handoff) and "brief" not in body["values"], body
+        expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
+        row = kit.newest_launch(ui_shell)
+        assert (row.brief, row.handoff_path) == (None, str(handoff)), row
+        # It stays for the next launch, as the defaults give it. Cleared, the box's text
+        # alone is the first turn, and the defaults can't give the handoff.
+        expect(line).to_be_visible()
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        expect(box).to_be_focused()
+        box.fill(typed)
         body = press(ui_page, piece)
         assert body["values"]["brief"] == typed and "handoff" not in body["values"], body
         assert "handoff" in body["leave_out"], body
@@ -470,7 +481,6 @@ def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text
         assert unsent(run["argv"]), run["argv"]
         row = kit.newest_launch(ui_shell)
         assert (row.brief, row.handoff_path) == (typed, None), row
-        assert all(unsent(run["argv"]) for run in harness.runs())
     finally:
         file.unlink()
 
@@ -593,7 +603,7 @@ def test_a_launch_followed_to_the_end_of_its_watch_says_it_stopped_watching(fake
 # --- the terminal ---------------------------------------------------------------------------
 
 def test_your_terminal_copies_the_command_and_starts_nothing(fake, ui_context, ui_shell):
-    kit.ready_copying(ui_context)
+    _copying.ready_copying(ui_context)
     page = ui_context.pages[0]
     piece = kit.open_home(page)
     box = piece.locator("textarea")
@@ -607,7 +617,7 @@ def test_your_terminal_copies_the_command_and_starts_nothing(fake, ui_context, u
     expect(box).to_have_value(BRIEF)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Copy command")
-    command = kit.copied(page)
+    command = _copying.copied(page)
     assert command.startswith("moxi launcher run ") and BRIEF in command, command
     # The page ran nothing: no start, and no row until the user runs the command.
     assert (len(fake.starts()), _count(ui_shell)) == (before, rows)

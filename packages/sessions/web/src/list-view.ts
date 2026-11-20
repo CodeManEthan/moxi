@@ -19,12 +19,19 @@
 // before, and again after a newer list only when that list shows the session changed.
 // Several rows can be open at once. `Read the transcript` goes to the session's route,
 // and `Copy` puts the harness's resume command on the clipboard.
+//
+// With launcher installed the list also reads launcher's `/api/running` with each read of
+// the list, and at the desk follows launcher's topic `running`; the running group
+// (`running.ts`, `list.ts`) is drawn first. A running row opens in place as the list's rows
+// do. `Keep warm` posts the launch's request id to launcher's `/api/keep-warm` and is
+// disabled until the answer and the next value of `running` have come, or for 20 s; a
+// refusal's words are the row's third line until the next value.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, gateway, installed, navigate } from "/m/ui/client.js";
+import { api, gateway, installed, navigate, subscribe } from "/m/ui/client.js";
 import type { ApiResult } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
@@ -38,8 +45,13 @@ import {
 } from "./list.ts";
 import type {
   EmptyView, FilterKey, FilterLine, Filters, GroupView, LineView, ListState, MenuItem, MoreRequest, Query, RowView,
-  StatusLine, When,
+  RunningGroupView, RunningRowView, StatusLine, When,
 } from "./list.ts";
+import {
+  answered, expired, KEEP_WARM, KEEP_WARM_PATH, NO_PRESSES, parseRunning, pressBody, pressed, pressNote, PRESS_WAIT_MS,
+  RUNNING_PATH, RUNNING_TOPIC, runningRead, valueCame,
+} from "./running.ts";
+import type { Presses, RunningRead } from "./running.ts";
 
 import { COPIED, COPIED_MS, openedView, readAgain } from "./opened.ts";
 import type { SaidView } from "./opened.ts";
@@ -110,6 +122,10 @@ const STYLES = css`
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  /* Keep warm is set in the text colour: the one act a session going cold uncovered carries. */
+  .do.warm { color: var(--moxi-text); }
+  .do:hover:not(:disabled) { text-decoration: underline; }
+  .do:disabled { color: var(--moxi-text-faint); opacity: 0.6; cursor: default; }
   /* A row opened in place: label, what it says, and an act at the right end. */
   .det { margin: 9px 0 3px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border); font-size: 13px; line-height: 18px;
          cursor: auto; }
@@ -182,6 +198,14 @@ export class SessionsList extends LitElement {
   #copyTimer: ReturnType<typeof setTimeout> | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #findTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Launcher's running launches as last read, one read at a time; and the topic's stop. */
+  #running: RunningRead | null = null;
+  #runningOut = false;
+  #runningAgain = false;
+  #stopRunning: (() => void) | null = null;
+  /** The presses of `Keep warm`, and each press's longest wait, by request id. */
+  #presses: Presses = NO_PRESSES;
+  #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
 
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readList();
@@ -201,6 +225,9 @@ export class SessionsList extends LitElement {
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener("click", this.#pressed);
     this.#timer = setInterval(this.#shown, REFRESH_MS);
+    if (installed("launcher") && !gateway()) {
+      this.#stopRunning = subscribe("launcher", RUNNING_TOPIC, (data) => this.#takeRunning(data));
+    }
     this.#readList();
   }
 
@@ -220,6 +247,11 @@ export class SessionsList extends LitElement {
     if (this.#timer !== null) clearInterval(this.#timer);
     if (this.#findTimer !== null) clearTimeout(this.#findTimer);
     this.#timer = this.#findTimer = null;
+    this.#stopRunning?.();
+    this.#stopRunning = null;
+    for (const wait of this.#pressWaits.values()) clearTimeout(wait);
+    this.#pressWaits.clear();
+    this.#presses = NO_PRESSES;
   }
 
   // -- reading -----------------------------------------------------------------------------
@@ -239,6 +271,63 @@ export class SessionsList extends LitElement {
 
   #readList(): void {
     void this.#feed?.refresh();
+    void this.#readRunning();
+  }
+
+  /** Reads launcher's running launches, with launcher installed; one read at a time, and
+   * one more after it when another was asked for meanwhile. */
+  async #readRunning(): Promise<void> {
+    if (!installed("launcher")) {
+      this.#running = null;
+      return;
+    }
+    if (this.#runningOut) {
+      this.#runningAgain = true;
+      return;
+    }
+    this.#runningOut = true;
+    try {
+      do {
+        this.#runningAgain = false;
+        const answer = await api("launcher", RUNNING_PATH);
+        if (!this.isConnected) return;
+        this.#running = runningRead(answer);
+        if (this.#running?.value) this.#presses = valueCame(this.#presses, this.#running.value);
+        this.requestUpdate();
+      } while (this.#runningAgain);
+    } finally {
+      this.#runningOut = false;
+    }
+  }
+
+  /** A value of the topic `running`. */
+  #takeRunning(data: unknown): void {
+    const value = parseRunning(data);
+    if (value === null || !this.isConnected) return;
+    this.#running = runningRead({ status: 200, data });
+    if (value.state === "up") this.#presses = valueCame(this.#presses, value);
+    this.requestUpdate();
+  }
+
+  /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
+   * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`;
+   * a press that went reads that value at once. */
+  async #press(request: string): Promise<void> {
+    if (this.#presses.waiting[request] !== undefined) return;
+    this.#presses = pressed(this.#presses, request);
+    clearTimeout(this.#pressWaits.get(request));
+    this.#pressWaits.set(request, setTimeout(() => {
+      this.#pressWaits.delete(request);
+      this.#presses = expired(this.#presses, request);
+      this.requestUpdate();
+    }, PRESS_WAIT_MS));
+    this.requestUpdate();
+    const answer = await api("launcher", KEEP_WARM_PATH, pressBody(request));
+    if (!this.isConnected) return;
+    const note = pressNote(answer);
+    this.#presses = answered(this.#presses, request, note);
+    this.requestUpdate();
+    if (note === null) void this.#readRunning();
   }
 
   #listRead(): void {
@@ -472,14 +561,16 @@ export class SessionsList extends LitElement {
       ? html`<p class="status" data-line="unknown" role="status">${this.line}</p>` : nothing;
     if (status?.state === "gone") return html`${address}${this.#status(status)}`;
     if (state === null) return html`${address}${status !== null ? this.#status(status) : nothing}`;
-    const view = listView(state, { launcher: installed("launcher") });
+    const desk = !gateway();
+    const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk });
     const filters = filterLine(state, this.#filters);
     return html`${address}
       ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count)}` : nothing}
       ${status !== null ? this.#status(status) : nothing}
       ${this.#moreStatus !== null ? this.#status(this.#moreStatus) : nothing}
       ${view.empty !== null ? this.#empty(view.empty)
-        : view.groups.length ? html`<div class="grps" data-part="groups">
+        : view.groups.length || view.running !== null ? html`<div class="grps" data-part="groups">
+            ${view.running !== null ? this.#runningGroup(view.running, desk) : nothing}
             ${repeat(view.groups, (group) => group.key, (group) => this.#group(group))}</div>` : nothing}
       ${view.notices.map((notice) => html`<p class="note" data-line="unread" data-harness=${notice.harness}>${notice.line}${
         notice.reason !== null && !gateway() ? html`: <span data-line="reason">${notice.reason}</span>` : nothing}</p>`)}
@@ -597,13 +688,32 @@ export class SessionsList extends LitElement {
     </section>`;
   }
 
-  #row(row: RowView) {
+  /** The launches running now: a label and their rows, or a line in their place. */
+  #runningGroup(group: RunningGroupView, desk: boolean) {
+    return html`<section class="grp" data-group="running">
+      <div class="gk" data-line="label">${group.label}</div>
+      <div class="gl">
+        ${repeat(group.rows, (row) => row.key, (row) => this.#row(row, row))}
+        ${group.line !== null ? html`<p class="one d" data-line="running-unread" role="status">${group.line}${
+          group.reason !== null && desk ? html`: <span data-line="reason">${group.reason}</span>` : nothing}</p>` : nothing}
+      </div>
+    </section>`;
+  }
+
+  #row(row: RowView, running: RunningRowView | null = null) {
     const toggle = (): void => this.#toggleRow(row);
-    return html`<moxi-ui-row toggles data-key=${row.key} name=${row.name} where=${ifDefined(row.where ?? undefined)}
-        fact=${ifDefined(row.fact ?? undefined)} lead=${ifDefined(row.lead ?? undefined)}
-        time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}
-        rest=${ifDefined(row.rest ?? undefined)} ?open=${row.open} @moxi-row-toggle=${toggle}>
-      ${row.act !== null && !gateway() ? html`<button type="button" slot="acts" class="do" data-action="open"
+    const desk = !gateway();
+    const keep = running !== null && running.keepWarm !== null && desk ? running : null;
+    return html`<moxi-ui-row ?toggles=${row.act !== null || row.lines === 1} data-key=${row.key}
+        data-request=${ifDefined(running?.request)} name=${row.name} where=${ifDefined(row.where ?? undefined)}
+        fact=${ifDefined(row.fact ?? undefined)} ?fact-heavy=${row.factHeavy} lead=${ifDefined(row.lead ?? undefined)}
+        ?lead-heavy=${row.leadHeavy} time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}
+        rest=${ifDefined(row.rest ?? undefined)} note=${ifDefined(running?.note ?? undefined)} ?open=${row.open}
+        @moxi-row-toggle=${toggle}>
+      ${keep !== null ? html`<button type="button" slot="acts" class="do warm" data-action="keep-warm"
+        title=${keep.keepWarm as string} aria-description=${keep.keepWarm as string} ?disabled=${keep.pressing}
+        @click=${() => void this.#press(keep.request)}>${KEEP_WARM}</button>` : nothing}
+      ${row.act !== null && desk ? html`<button type="button" slot="acts" class="do" data-action="open"
         aria-expanded=${row.open ? "true" : "false"} @click=${toggle}>${row.act}</button>` : nothing}
       ${row.open ? this.opened(row) : nothing}
     </moxi-ui-row>`;

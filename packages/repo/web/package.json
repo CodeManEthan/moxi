@@ -1,7 +1,7 @@
 {
   "name": "moxi-repo-web",
   "private": true,
-  "description": "The repo module's web sources: its git hooks page, read-only.",
+  "description": "The repo module's web sources: its git hooks page.",
   "license": "MIT",
   "type": "module",
   "scripts": {

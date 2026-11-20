@@ -959,7 +959,8 @@ class Starters:
 
     async def servers(self) -> dict[str, Any]:
         """The `/servers` data: one row per module the shell has started or recorded, and
-        for each running server one sample (pid, RSS, CPU seconds, open fds or handles)
+        for each running server one sample (pid, RSS, CPU seconds, open fds, or open
+        handles on Windows)
         and its open requests and streams from its health route. Sampled now, on this
         call only."""
         rows = self.rows()
@@ -1017,20 +1018,25 @@ def _health_open(info: RuntimeInfo) -> dict[str, int] | None:
 
 
 def sample(pid: int) -> dict[str, Any] | None:
-    """One psutil sample of process `pid`: `{"pid", "rss", "cpu_s", "fds"}`, fds being
-    open handles on Windows; None when the process can't be read."""
+    """One psutil sample of process `pid`: `{"pid", "rss", "cpu_s", "fds"}`, or on Windows
+    `{"pid", "rss", "cpu_s", "handles"}` with its open handles and no `fds`, since a handle
+    count is not a count of fds; None when the process can't be read."""
     try:
         import psutil
 
         process = psutil.Process(pid)
         with process.oneshot():
             times = process.cpu_times()
-            return {
+            taken = {
                 "pid": pid,
                 "rss": process.memory_info().rss,
                 "cpu_s": round(times.user + times.system, 3),
-                "fds": process.num_handles() if sys.platform == "win32" else process.num_fds(),
             }
+            if sys.platform == "win32":
+                taken["handles"] = process.num_handles()
+            else:
+                taken["fds"] = process.num_fds()
+            return taken
     except Exception:  # noqa: BLE001 - psutil.Error, or a platform without the field
         return None
 

@@ -212,12 +212,14 @@ const TAKE_IN_SESSION = "This page's server runs inside an agent's session, so i
 const refusedWords = (code: string | null): string => (code === null ? "Comms refused it." : `Comms refused it (${code}).`);
 
 /** How a would-send or a sent message reaches one recipient, by its delivery; null for a
- * delivery with no words. */
-export function deliveryWords(recipient: Recipient, when: (at: number) => string): string | null {
+ * delivery with no words. `working` is true when turns says the recipient's session has a
+ * turn open now, so a live message waits for that turn to end. */
+export function deliveryWords(recipient: Recipient, when: (at: number) => string, working = false): string | null {
   const name = nameOf(recipient.qualified);
   switch (recipient.delivery) {
     case "live":
-      return `Delivered. ${name} reads it at its next turn boundary.`;
+      return working ? `Delivered. ${name} is working; it reads this when its turn ends.`
+        : `Delivered. ${name} reads it at its next turn boundary.`;
     case "held-cold": {
       const at = recipient.cold_at === null ? "" : ` at ${when(recipient.cold_at)}`;
       return `Held until ${name}'s next turn. Its cache went cold${at}, and nothing wakes it for mail. `
@@ -284,10 +286,12 @@ function notSentWords(act: "check" | "send", answer: SendAnswer, to: string | nu
   }
 }
 
-/** The dry-run line after `If sent now`, for an answer of `check` to the address `to`. */
-export function checkWords(answer: SendAnswer, when: (at: number) => string, to: string | null = null): Said {
+/** The dry-run line after `If sent now`, for an answer of `check` to the address `to`.
+ * `working` says whether an address's session has a turn open now, as turns read it. */
+export function checkWords(answer: SendAnswer, when: (at: number) => string, to: string | null = null,
+                           working: (qualified: string) => boolean = () => false): Said {
   if (answer.outcome !== "would-send") return notSentWords("check", answer, to);
-  const phrases = answer.recipients.map((recipient) => deliveryWords(recipient, when));
+  const phrases = answer.recipients.map((recipient) => deliveryWords(recipient, when, working(recipient.qualified)));
   return said(null, phrases.filter((phrase): phrase is string => phrase !== null).join(" "), { key: IF_SENT });
 }
 

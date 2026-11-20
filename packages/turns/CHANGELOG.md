@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Question mode counts a prompt sent from the Claude apps through Remote Control
+  (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
+  `["composer", "bridge"]`, so such a prompt that mentions a question lets
+  `AskUserQuestion` run and gets the question-mode reminder. A `plugin` prompt and one
+  with no origin are still refused. To count only prompts typed at the terminal again, set
+  `question_mode.origins = ["composer"]`.
+- The panel at `/m/turns/` is redrawn as groups of rows. Sessions fall under `problem`,
+  `idle` and `working`, latest change first, each row with its name (a launched
+  session's launch name with launcher installed, else its folder and start), how long it
+  has been in its state, and what is busy or in trouble. `Open` opens one row at a time at
+  `session/<key>`, with `Now`, `Agents`, `Prompt box`, `Session`, `Details` and `Copy id`.
+  A reach line at the foot says which sessions show here and which don't, with `Copy` on
+  `moxi install turns` where it applies, and `Settings › turns` beside it. The page says
+  when a read failed, a scan failed, no session runs or an address names none; a row
+  whose session's watch is down while its reads answer keeps its group and says
+  `read every 30 s` on a dim line of its own. The page
+  server sends each session's turn start time, session id, whether it has a prompt box,
+  when it ended its last turn, since when it can't be read, and the `reach`; it reads
+  every session again within 30 s, and reads `reach` on a thread of its own.
 - The Claude runner now takes a session as headless only when Claude Code's own
   `session.start` says nobody is at the prompt (`isInteractive` false). It used to read
   the session's surfaces in whichever start hook ran first, and Claude Code usually runs

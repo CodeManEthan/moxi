@@ -3,7 +3,8 @@
 // for the address the box writes to: the row's lead, or the address pressed. `Directs` and
 // `Directed by` gather the name's addresses. Each line is there only when its fact is:
 // `Session` comes with launcher's join (`launched-model.ts`), whose cache read wins over
-// comms' on the `Cache` line as it does on the row.
+// comms' on the `Cache` line as it does on the row; where launcher gives none, with
+// sessions' header of the session (`session-model.ts`).
 // Every string here goes into the page as text.
 
 import type { AgentRow, Ask } from "./agents-model.ts";
@@ -96,6 +97,9 @@ export interface OpenedFacts {
   hasCache: boolean;
   /** The sessions module is installed: `Session` links to the session's transcript. */
   hasSessions?: boolean;
+  /** sessions' `Session` line for the address's session (`session-model.ts`), drawn where
+   * launcher gives none; null or absent where sessions gives nothing. */
+  session?: { value: string; route: string } | null;
   showsDetails: boolean;
 }
 
@@ -115,6 +119,9 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
     const { name, harness, route } = launched.session;
     before.push({ key: "session", label: SESSION_LABEL, value: [name, harness].filter(Boolean).join(" · "), tail: null,
                   link: facts.hasSessions && route !== null ? { kind: "sessions", route } : null });
+  } else if (bound && facts.session) {
+    before.push({ key: "session", label: SESSION_LABEL, value: facts.session.value, tail: null,
+                  link: facts.hasSessions ? { kind: "sessions", route: facts.session.route } : null });
   }
   const cacheLink: Link | null = facts.hasCache ? { kind: "cache" } : null;
   const cache = rosterRow?.cache ?? null;
