@@ -246,18 +246,18 @@ export class SessionsList extends LitElement {
   };
   /** An act of his drops the saved scroll; a press or a key also writes the scroll, so a
    * band pick has it written before the shell moves. */
-  #acted = (event: Event): void => {
+  #onAct = (event: Event): void => {
     const act = this.#scroll.take(event as Event & Act);
     if (act && (event.type === "pointerdown" || event.type === "keydown")) this.#remember();
   };
-  #scrolled = (): void => {
+  #onScroll = (): void => {
     if (this.#scrollTimer !== null) clearTimeout(this.#scrollTimer);
     this.#scrollTimer = setTimeout(() => {
       this.#scrollTimer = null;
       this.#remember();
     }, SCROLL_WAIT_MS);
   };
-  #hidden = (): void => this.#remember();
+  #onPageHide = (): void => this.#remember();
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -269,12 +269,12 @@ export class SessionsList extends LitElement {
     this.#remembered = memory.opened;
     this.#scroll = new SavedScroll(memory.y);
     this.#landing = false;
-    this.#reader = new ListReader({ read: (path) => api("sessions", path), changed: (change) => this.#changed(change) });
+    this.#reader = new ListReader({ read: (path) => api("sessions", path), onChange: (change) => this.#onChange(change) });
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener("click", this.#pressed);
-    for (const type of ACTS) document.addEventListener(type, this.#acted, { capture: true, passive: true });
-    addEventListener("scroll", this.#scrolled, { passive: true });
-    addEventListener("pagehide", this.#hidden);
+    for (const type of ACTS) document.addEventListener(type, this.#onAct, { capture: true, passive: true });
+    addEventListener("scroll", this.#onScroll, { passive: true });
+    addEventListener("pagehide", this.#onPageHide);
     this.#timer = setInterval(this.#shown, REFRESH_MS);
     if (installed("launcher")) {
       this.#runningFirst = new Promise((done) => { this.#runningCame = done; });
@@ -299,9 +299,9 @@ export class SessionsList extends LitElement {
     this.#copyTimer = null;
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener("click", this.#pressed);
-    for (const type of ACTS) document.removeEventListener(type, this.#acted, { capture: true });
-    removeEventListener("scroll", this.#scrolled);
-    removeEventListener("pagehide", this.#hidden);
+    for (const type of ACTS) document.removeEventListener(type, this.#onAct, { capture: true });
+    removeEventListener("scroll", this.#onScroll);
+    removeEventListener("pagehide", this.#onPageHide);
     if (this.#timer !== null) clearInterval(this.#timer);
     if (this.#findTimer !== null) clearTimeout(this.#findTimer);
     if (this.#scrollTimer !== null) clearTimeout(this.#scrollTimer);
@@ -390,7 +390,7 @@ export class SessionsList extends LitElement {
 
   /** After each change of what the reader holds: the opened rows' reads, the writer, the
    * scroll's landing, then a redraw. */
-  #changed(change: Change): void {
+  #onChange(change: Change): void {
     const reader = this.#reader;
     if (reader === null) return;
     if (change === "list") this.#readOpened();

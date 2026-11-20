@@ -92,7 +92,7 @@ function reader(fake, search = "", opened = []) {
   let at = search;
   const list = new ListReader({
     read: fake.read, zone: UTC,
-    changed: (change) => {
+    onChange: (change) => {
       changes.push(change);
       const address = list.address();
       if (address !== null && address !== at) {
@@ -338,7 +338,7 @@ test("an opened row in a group the restore pages in is read once the page that s
   const fake = server({ recent: 50 });
   const changes = [];
   const shown = [];
-  const list = new ListReader({ read: fake.read, zone: UTC, changed: (change) => {
+  const list = new ListReader({ read: fake.read, zone: UTC, onChange: (change) => {
     changes.push(change);
     if (list.state !== null) shown.push(unreadOpened(list.state, new Set()).map((one) => one.session));
   } });
@@ -390,7 +390,7 @@ test("at the cap, an opened row the 40th read shows has its read started before 
   const fake = server({ earlier: 100000 });
   const started = new Set();
   let landing = null;
-  const list = new ListReader({ read: fake.read, zone: UTC, changed: (change) => {
+  const list = new ListReader({ read: fake.read, zone: UTC, onChange: (change) => {
     // As the view does: start the reads of the opened rows a page showed, then, at the
     // first stop, gather the reads the scroll's landing waits for.
     if (change === "more") for (const one of unreadOpened(list.state, started)) started.add(`${one.harness}/${one.session}`);

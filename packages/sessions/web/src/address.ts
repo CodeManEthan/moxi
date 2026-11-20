@@ -266,8 +266,8 @@ export function memoryOf(state: unknown): Memory {
 /** `state` with `memory` under its key and everything else it held kept; null when it
  * already holds that memory, so nothing need be written. */
 export function withMemory(state: unknown, memory: Memory): Record<string, unknown> | null {
-  const now = memoryOf(state);
-  if (now.y === memory.y && now.opened.length === memory.opened.length
-      && now.opened.every((key, at) => key === memory.opened[at])) return null;
+  const held = memoryOf(state);
+  if (held.y === memory.y && held.opened.length === memory.opened.length
+      && held.opened.every((key, position) => key === memory.opened[position])) return null;
   return { ...(isRecord(state) ? state : {}), [MEMORY_KEY]: { opened: [...memory.opened], y: memory.y } };
 }

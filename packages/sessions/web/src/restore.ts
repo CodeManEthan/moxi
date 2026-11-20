@@ -230,7 +230,7 @@ export interface ReaderOptions {
   /** Reads one of sessions' routes. */
   read: (path: string) => Promise<Answered>;
   /** Called after each change of what the reader holds. */
-  changed: (change: Change) => void;
+  onChange: (change: Change) => void;
   zone?: Zone;
 }
 
@@ -253,7 +253,7 @@ export class ListReader {
   readonly list: Feed<Asked>;
 
   #read: (path: string) => Promise<Answered>;
-  #changed: (change: Change) => void;
+  #onChange: (change: Change) => void;
   #zone: Zone;
   /** Counts query changes; a read carries the one it was asked under. */
   #generation = 0;
@@ -267,9 +267,9 @@ export class ListReader {
   #standing: Depth = NO_DEPTH;
   #closed = false;
 
-  constructor({ read, changed, zone = LOCAL }: ReaderOptions) {
+  constructor({ read, onChange, zone = LOCAL }: ReaderOptions) {
     this.#read = read;
-    this.#changed = changed;
+    this.#onChange = onChange;
     this.#zone = zone;
     this.filters = { folder: null, harness: null, when: { kind: "any" }, find: "" };
     this.list = new Feed<Asked>(() => this.#askList(), (data) => this.#parseList(data), () => this.#listRead());
@@ -333,7 +333,7 @@ export class ListReader {
     this.moreStatus = null;
     this.#letGo();
     this.readList();
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   /** A group's `Show`, or `Earlier`'s. */
@@ -341,7 +341,7 @@ export class ListReader {
     if (this.state === null) return;
     this.#letGo();
     this.#queueRead(showMore(this.state, key), null);
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   /** The `Show` under a day's opened program sessions. */
@@ -349,7 +349,7 @@ export class ListReader {
     if (this.state === null) return;
     this.#letGo();
     this.#queueRead(showMoreProgram(this.state, key), null);
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   /** A day's program line's `Show` or `Hide`. */
@@ -359,7 +359,7 @@ export class ListReader {
     const { state, read } = toggleProgram(this.state, key);
     this.state = state;
     this.#queueRead(read, null);
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   // -- the list ----------------------------------------------------------------------------
@@ -393,7 +393,7 @@ export class ListReader {
       if (this.restore !== null) this.restore.failed = true;
       this.stopped = true;
     }
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   #take(asked: Asked): void {
@@ -407,7 +407,7 @@ export class ListReader {
     if (this.restore !== null) this.restore.failed = false;
     for (const read of reads) this.#queueRead(read, this.restore);
     if (this.restore === null) this.stopped = true;
-    this.#changed("list");
+    this.#onChange("list");
     this.#plan();
   }
 
@@ -421,7 +421,7 @@ export class ListReader {
       this.#pending -= 1;
       if (this.#closed) return;
       if (this.#pending === 0) {
-        this.#changed(null);
+        this.#onChange(null);
         this.#plan();
       }
     });
@@ -452,7 +452,7 @@ export class ListReader {
           }
         }
         this.#capped(restore);
-        this.#changed(null);
+        this.#onChange(null);
         return;
       }
       if (!this.#current(generation, restore)) {
@@ -465,7 +465,7 @@ export class ListReader {
       next = added.next;
       // The rows this page brought are told before the cap can let the target go, so
       // the landing waits for an opened row the 40th read shows.
-      this.#changed("more");
+      this.#onChange("more");
       this.#capped(restore);
     }
   }
@@ -491,7 +491,7 @@ export class ListReader {
     }
     this.state = planned.state;
     this.#queueRead(planned.read, restore);
-    this.#changed(null);
+    this.#onChange(null);
   }
 
   /** At the restore's 40th read, answered or failed: the target is let go, named as the
@@ -506,7 +506,7 @@ export class ListReader {
     this.restore = null;
     this.stopped = true;
     if (capped) this.capped = true;
-    this.#changed(null);
+    this.#onChange(null);
   }
 }
 
