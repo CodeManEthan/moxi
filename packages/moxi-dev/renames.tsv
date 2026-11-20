@@ -2344,7 +2344,7 @@ comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0),
 comms	packages/comms/tests/test_mcp_tokens.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)	keep	record	record
 comms	packages/comms/tests/test_mcp_tokens.py	self.broken: set = set()	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"REPLY_OWN_UNREADABLE_TOOL", "INTERRUPT_IGNORED_OPERATOR_TOOL"} <= set(texts)	keep	set	set
-comms	packages/comms/tests/test_mcp_tools.py	"agents": set(), "whoami": set(), "history": {"identity", "limit"},	keep	set	set
+comms	packages/comms/tests/test_mcp_tools.py	"agents": set(), "whoami": set(), "history": {"identity", "limit", "skip"},	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"expired": []}	keep	expired	expired
 comms	packages/comms/tests/test_mcp_tools.py	"withdrawn": ["later-two"], "delivered": [],	keep	delivered	delivered
 comms	packages/comms/tests/test_mcp_tools.py	assert "reviewer" in s["withdrawn"] + s["delivered"]	keep	delivered	delivered

@@ -152,6 +152,33 @@ def test_the_history_tool_reads_the_same_record_as_the_verb(older, rig):
     assert got.content[0].text.splitlines() == out.splitlines()
 
 
+def test_the_history_tool_pages_back_to_the_older_record_with_skip(older, rig):
+    """The tool reads at most `HISTORY_LIMIT` messages at once, so `skip` is its way
+    further back: it passes over the newest messages first, into the older record."""
+    for n in range(3):
+        rig.post_as("main@proj-a", ["planner@proj-a"], f"newer {n}")
+    tools = mcp_tools.Tools(rig.daemon)
+
+    def page(**params):
+        got = tools.history("planner@proj-a", "no-claim",
+                            {"identity": "planner@proj-a", "limit": 2, **params})
+        assert not got.is_error, got.content[0].text
+        return got.structured_content["messages"]
+
+    assert [m["text"] for m in page()] == ["newer 1", "newer 2"]
+    found, skip = None, 0
+    while found is None and skip <= 20:
+        rows = page(skip=skip)
+        assert rows, f"paged past every message at skip {skip} without the older ask"
+        found = next((m for m in rows if m["id"] == str(OLD_ASK)), None)
+        skip += 2
+    assert found is not None, "skip reaches the older record"
+    assert skip > 2 and found["state"] == "archived"
+    assert page(skip=10_000) == [], "past the oldest message there is nothing"
+    bad = tools.history("planner@proj-a", "no-claim", {"limit": 2, "skip": -1})
+    assert bad.is_error and "skip -1" in bad.content[0].text
+
+
 def test_a_reply_to_an_older_message_reaches_its_author(older, rig):
     elder = rig.shim(name="elder")
     code, out = rig.cli(["reply", "--posture", "none", str(OLD_ASK), "it kept the hold."],

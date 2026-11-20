@@ -100,7 +100,8 @@ def descriptions(expiry: str = "24h") -> dict[str, str]:
             "An identity is a name only one session can hold at a time."),
         "history": (
             "Read recent messages to and from an identity, newest last, with who really "
-            "sent each. A message that expired or was withdrawn is shown as such."),
+            "sent each. A message that expired or was withdrawn is shown as such. To read "
+            "further back, skip that many of the newest messages."),
         "remove": (
             "Withdraw a message you sent from every recipient who hasn't had it yet. One "
             "already delivered can't be withdrawn; the result says who had it."),
@@ -158,6 +159,7 @@ INPUTS: dict[str, dict] = {
         "identity": {"type": "string", "description": "default: yours"},
         "limit": {"type": "integer", "minimum": HISTORY_LIMIT[0],
                   "maximum": HISTORY_LIMIT[1], "default": HISTORY_DEFAULT},
+        "skip": {"type": "integer", "minimum": 0, "default": 0},
     }},
     "remove": {"type": "object", "properties": {"message_id": _ID},
                "required": ["message_id"]},
@@ -352,10 +354,14 @@ class Tools:
         if not HISTORY_LIMIT[0] <= limit <= HISTORY_LIMIT[1]:
             return refused("limit-shape", f"limit {limit} is outside "
                            f"{HISTORY_LIMIT[0]}-{HISTORY_LIMIT[1]}. Nothing was read.")
+        skip = params.get("skip") or 0
+        if not isinstance(skip, int) or isinstance(skip, bool) or skip < 0:
+            return refused("skip-shape", f"skip {skip} is not a count of messages. "
+                           "Nothing was read.")
         who = identity_of(params.get("identity") or identity)
         try:
             return _history(self.daemon, self._context(), who, limit,
-                            self._read)
+                            self._read, skip=skip)
         except DaemonError as exc:
             return _read_refused(exc)
 
@@ -408,9 +414,10 @@ class Tools:
         async def whoami() -> CallToolResult:
             return await call(self.whoami, {})
 
-        async def history(identity: str | None = None,
-                          limit: int = HISTORY_DEFAULT) -> CallToolResult:
-            return await call(self.history, {"identity": identity, "limit": limit})
+        async def history(identity: str | None = None, limit: int = HISTORY_DEFAULT,
+                          skip: int = 0) -> CallToolResult:
+            return await call(self.history, {"identity": identity, "limit": limit,
+                                             "skip": skip})
 
         async def delete(message_id: str | int) -> CallToolResult:
             return await call(self.delete, {"message_id": message_id})
@@ -452,10 +459,13 @@ DELIVERED, WAITING, EXPIRED, WITHDRAWN = "delivered", "waiting", "expired", "wit
 ARCHIVED = "archived"
 
 
-def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
+def _history(daemon, ctx: sending.Context, identity: str, limit: int, read, *,
+             skip: int = 0):
     """`moxi comms history <identity> --limit <limit>`'s rows, in its words, with each
     message's state: withdrawn by its author, waiting for a recipient, expired before
-    reaching one, delivered, or archived (from an older comms' record).
+    reaching one, delivered, or archived (from an older comms' record). `skip` passes
+    over the newest messages first (`archive.timeline`), so a page reaches further back
+    than `HISTORY_LIMIT` allows in one.
 
     The verb's rendering lives in the CLI, which nothing in the daemon may import (it
     reads cards); its row is spelled again here, and a test holds the two lines equal."""
@@ -470,7 +480,7 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
         room = directory.room_by_name(db, NAMES)
         # An older comms' record (`[archive] record`) reads as the start of this one.
         msgs, from_archive = archive.timeline(ctx.record, room["room_id"] if room else None,
-                                              limit)
+                                              limit, skip=skip)
         rows, effective = [], {}
         for m in msgs:
             ml = machine_line.parse(m.content)

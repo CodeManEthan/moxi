@@ -224,15 +224,19 @@ def messages(limit: int | None = None) -> list[Message]:
         return []
 
 
-def timeline(record, room_id, limit: int) -> tuple[list[Message], Callable[[Message], bool]]:
-    """The newest `limit` `#names` messages of the one record `history` reads: the
-    archive's first, then comms.db's (`record.history` of `room_id`), ascending. Also a
-    test for whether one of them is the archive's, by the object, since an archive id can
-    be one comms.db also used."""
-    msgs = record.history(room_id, limit=limit) if room_id is not None else []
-    older = messages(limit) if len(msgs) < limit else []
+def timeline(record, room_id, limit: int, *,
+             skip: int = 0) -> tuple[list[Message], Callable[[Message], bool]]:
+    """The newest `limit` `#names` messages of the one record `history` reads, after the
+    newest `skip` of it: the archive's first, then comms.db's (`record.history` of
+    `room_id`), ascending. Also a test for whether one of them is the archive's, by the
+    object, since an archive id can be one comms.db also used. `skip` is how a page
+    reaches further back, whichever store it lands in."""
+    want = limit + skip
+    msgs = record.history(room_id, limit=want) if room_id is not None else []
+    older = messages(want - len(msgs)) if len(msgs) < want else []
     from_archive = {id(m) for m in older}
-    return (older + msgs)[-limit:], lambda m: id(m) in from_archive
+    both = older + msgs
+    return both[:max(len(both) - skip, 0)][-limit:], lambda m: id(m) in from_archive
 
 
 def skipped(conn) -> tuple[int, int] | None:

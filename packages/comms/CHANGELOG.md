@@ -12,7 +12,8 @@
 - `[archive] record` and `[archive] identities` name an older comms' record and
   identities files, which comms reads in place and never writes. `moxi comms history`
   and a session's `history` tool list the older record's messages before comms.db's,
-  the tool with the state `archived`; `explain <name> <id>` of an older message says
+  the tool with the state `archived` and a `skip` to page back past the newest
+  messages it reads at once; `explain <name> <id>` of an older message says
   whether the older queue still held it for that name and that the rest of its delivery
   is not read; `reply` and every read by id find
   an older message by its own id, because the daemon moves comms.db's counter past the
