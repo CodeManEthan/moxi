@@ -233,7 +233,7 @@ notes repo gets the redacted text.
 `gitleaks:allow` mark, or on a line one of a rule's line allowlists names (a secret
 mount, a JavaScript import), though the gates let such a line through. It also finds a
 token an invisible character (a zero-width space, a soft hyphen) splits, as the gates do,
-and a note that is nothing but one secret, split or not, is left out. The placeholder is
+and a note that is one secret with no line end, split or not, is left out. The placeholder is
 what git writes back over your note. To keep a value whole, give it a line in one of the
 allowlist files under "What is judged".
 
