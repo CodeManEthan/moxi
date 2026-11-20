@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `moxi launcher clear-expired [--dry-run]` and `moxi launcher keep-warm --session ID
+  [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs did; they run
+  the same ask cache's timer starts. `--dry-run` writes nothing and prints each
+  session's verdict and what a run would do, and `keep-warm --dry-run` with no session
+  reads every live launch keep-warm is on for.
 - Exit-session holds while the session runs a background shell or Monitor, as Core's
   did, until the session has been idle an hour (`held`, word `shells`); only then does it
   exit and stop them at Claude's exit dialog. `--dry-run` says which.

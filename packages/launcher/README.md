@@ -395,6 +395,21 @@ with a hold, from its own tool shell:
     moxi launcher keep-warm holds
 
 A hold stays open until it is released, across a relaunch or a resume of the session.
+
+**Asking by hand.** cache's timer makes both asks on its own. To make them now, or to
+check a session nobody watches:
+
+    moxi launcher clear-expired [--dry-run] [--json]
+    moxi launcher keep-warm --session ID [--dry-run] [--json]
+    moxi launcher keep-warm --dry-run [--json]
+
+`clear-expired` makes the expiry ask of every live launch that recycles on expiry.
+`keep-warm --session ID` makes the keep-warm ask of that session; with `--dry-run` and
+no session, of every live launch keep-warm is on for. Each ask is the one the timer
+makes. `--dry-run` takes its reads and writes nothing, and prints each session's verdict:
+the quiet ends as a run would end them, `blocked` with its word, or `would-clear`,
+`would-compact` or `would-nudge` where a run would act. Each exits 1 when a verdict is
+`blocked`, `failed` or `unconfirmed`.
 Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
@@ -600,6 +615,8 @@ nothing has used it for a while.
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
+| `moxi launcher clear-expired [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, now |
+| `moxi launcher keep-warm --session ID [--dry-run] [--json]`, `keep-warm --dry-run [--json]` | the keep-warm ask of one session now; with `--dry-run` alone, of every live launch keep-warm is on for |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
 | `moxi launcher show [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
 

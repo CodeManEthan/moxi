@@ -123,6 +123,12 @@ PARSES = [
     (["keep-warm", "release", "build-7"], {"action": "release", "name": "build-7"}),
     (["keep-warm", "holds"], {"action": "holds", "json": False}),
     (["keep-warm", "holds", "--json"], {"action": "holds", "json": True}),
+    (["keep-warm", "--session", SID], {"verb": "keep-warm", "action": None, "session": SID,
+                                       "dry_run": False, "json": False}),
+    (["keep-warm", "--dry-run", "--json"], {"action": None, "session": None,
+                                            "dry_run": True, "json": True}),
+    (["clear-expired"], {"verb": "clear-expired", "dry_run": False, "json": False}),
+    (["clear-expired", "--dry-run", "--json"], {"dry_run": True, "json": True}),
     (["show"], {"verb": "show", "session_id": None, "json": False}),
     (["show", SID, "--json"], {"session_id": SID, "json": True}),
     (["log", "--table", "runs"], {"verb": "log", "table": "runs"}),
@@ -165,6 +171,11 @@ REFUSED = [
     ["keep-warm", "open", "x"],
     ["keep-warm", "hold", "x", "--json"],
     ["keep-warm", "holds", "x"],
+    ["keep-warm", "--json"],
+    ["keep-warm", "--session", SID, "holds"],
+    ["keep-warm", "--dry-run", "hold", "x"],
+    ["clear-expired", SID],
+    ["clear-expired", "--session", SID],
     ["show", SID, OTHER],
     ["log", "--table", "nope"],
 ]
@@ -414,6 +425,47 @@ def test_relaunch_from_record_without_slots_is_refused(conn, capsys):
     run_ = ended_run(conn, "relaunch-failed", word="no-pane")
     status, _, err = run(["relaunch", "--from-record", run_.run_id], capsys)
     assert status == codes.REFUSED and err.splitlines()[0].endswith("[no-slots]")
+
+
+# -- clear-expired and keep-warm by hand ----------------------------------------------------
+
+
+def swept(code, *lines, dry_run=False):
+    return result(code, *lines, outcome="dry-run" if dry_run else "asked", dry_run=dry_run,
+                  sessions=[])
+
+
+def test_clear_expired_runs_the_sweep_and_prints_its_lines(monkeypatch, capsys):
+    from moxi_launcher import recycle
+
+    seen = calls(monkeypatch, recycle, "clear_expired",
+                 swept(codes.OK, f"session {SID} (launch r1): cleared"))
+    status, out, err = run(["clear-expired"], capsys)
+    assert (status, out, err) == (codes.OK, f"session {SID} (launch r1): cleared\n", "")
+    assert seen == [((), {"dry_run": False})]
+    status, out, _ = run(["clear-expired", "--dry-run", "--json"], capsys)
+    assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((), {"dry_run": True})
+
+
+def test_clear_expired_with_a_verdict_to_see_exits_1_on_stderr(monkeypatch, capsys):
+    from moxi_launcher import recycle
+
+    calls(monkeypatch, recycle, "clear_expired",
+          swept(codes.ERROR, f"session {SID} (launch r1): blocked (draft)"))
+    status, out, err = run(["clear-expired"], capsys)
+    assert (status, out) == (codes.ERROR, "") and "blocked (draft)" in err
+
+
+def test_keep_warm_by_hand_passes_the_session_and_the_dry_run(monkeypatch, capsys):
+    seen = calls(monkeypatch, keepwarm, "keep_warm", swept(codes.OK, "nudged"))
+    assert run(["keep-warm", "--session", SID], capsys)[0] == codes.OK
+    assert run(["keep-warm", "--dry-run"], capsys)[0] == codes.OK
+    assert seen == [((SID,), {"dry_run": False}), ((None,), {"dry_run": True})]
+
+
+def test_clear_expired_with_no_launch_log_says_none_recycles(capsys):
+    status, out, _ = run(["clear-expired", "--dry-run"], capsys)
+    assert (status, out) == (codes.OK, "no live launch recycles on expiry\n")
 
 
 # -- exit-session and exits -----------------------------------------------------------------
