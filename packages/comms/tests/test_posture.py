@@ -15,6 +15,8 @@ rig are pure and run once.
 
 from __future__ import annotations
 
+import os
+import re
 import sqlite3
 import threading
 import time
@@ -24,7 +26,7 @@ import pytest
 from conftest import (no_cold_at, queued, send_turn, wait_for_payload, wait_for_queue,
                       wait_until, write_transcript)
 
-from moxi_comms import attribution, cli, constants, directory, glossary
+from moxi_comms import attribution, cli, constants, directory, glossary, sending
 from moxi_comms import machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
@@ -281,6 +283,39 @@ def test_a_plain_send_to_the_asker_is_refused_on_a_verified_open_ask(rig, pair):
     assert f'  moxi comms reply {ask.id} "text"' in out
     assert "add --new" in out
     assert posted(rig) == before
+
+
+def test_a_context_that_does_not_note_open_asks_keeps_the_refusal_word_for_word(rig, pair):
+    """Only the connector's tools note open asks; the verb, and every context that
+    leaves `when_asks_open` alone, refuses the plain send with the same text."""
+    assert sending.Context().when_asks_open == sending.ASKS_OPEN_REFUSE
+    ask = open_ask(rig)
+    before = posted(rig)
+    code, out = rig.cli(["send", "--posture", "none", "planner", "on main."], **REVIEWER)
+    assert code == 3
+    assert re.sub(r"\(\d+s ago\)", "(AGE)", out).splitlines() == [
+        f"planner asked you for a single reply in msg {ask.id} (AGE), and it is still "
+        "open. If this message is that reply, send it with",
+        f'  moxi comms reply {ask.id} "text" --posture none',
+        "so it threads and closes the ask. If it is something else, add --new and it "
+        "goes as a new message. Nothing was sent."]
+    assert posted(rig) == before
+
+
+def test_a_noting_context_posts_the_same_send_and_lists_the_ask(rig, pair):
+    """The same plain send through `sending.run` with a context that notes open asks."""
+    ask = open_ask(rig)
+    with rig.session_holding(SenderIdentity(qualified=R, scope="global", name=R)) as path:
+        ctx = sending.Context(record=rig.record, clock=rig.clock,
+                              env={**os.environ, "MOXI_COMMS_PROJECT": "proj-a",
+                                   "MOXI_COMMS_CLAIM_SOCKET": path},
+                              cures=sending.CURES_CONNECTOR,
+                              when_asks_open=sending.ASKS_OPEN_NOTE)
+        got = sending.run(ctx, SimpleNamespace(text="on main.", posture="none"),
+                          tags=["planner"])
+    assert got.outcome == sending.OUTCOME_SENT, got.lines()
+    [note] = [n for n in got.notes if n.startswith("Still open:")]
+    assert f"  msg {ask.id} from {P} (just now): which branch?" in note.split("\n")
 
 
 def test_the_multi_recipient_cure_keeps_every_recipient(rig, pair):

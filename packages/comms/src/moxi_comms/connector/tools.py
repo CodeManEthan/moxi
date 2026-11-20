@@ -186,7 +186,7 @@ class Tools:
     `Result`); `on_refused(code, text, **fields)` an error result.
 
     `record` and `env` are what the send verb reads (the record, the config's roots);
-    `clock` ages messages."""
+    `clock` ages messages, and is the send's clock, which ages the asks it judges."""
 
     def __init__(self, link, *, result: Callable, on_refused: Callable, wait_default_s: int,
                  wait_max: int, record=None, env: Mapping[str, str] | None = None,
@@ -275,7 +275,8 @@ class Tools:
             message_id=None)
         context = sending.Context(record=self.record, socket_path=link.socket_path,
                                   env=dict(self.env if self.env is not None else os.environ),
-                                  deadline=DEADLINE, cures=sending.CURES_CONNECTOR,
+                                  deadline=DEADLINE, clock=self.clock,
+                                  cures=sending.CURES_CONNECTOR,
                                   when_asks_open=sending.ASKS_OPEN_NOTE)
         return await asyncio.to_thread(sending.run, context, args, tags=tags,
                                        sender=sender)

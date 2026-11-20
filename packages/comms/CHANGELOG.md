@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The connector's `send` and `send_and_wait` are no longer refused while an agent waits on
+  a single reply from the Claude app. The message posts, and the answer ends with a note
+  listing the asks still open from its recipients: newest first, at most three and a
+  count of the rest, each with its age and its first line. A reply through the connector
+  lists the others the same way, leaving out the ask it answers. Both tools now speak every
+  note of their send, and `send_and_wait` returns a `notes` field. The connector's refusals
+  name only its own tools and parameters (`sending.CURES_CONNECTOR`). Agent sessions'
+  tools and `moxi comms send` keep the refusal and its text.
 - With turns installed, comms' page reads turns' `/api/sessions` while a send box is
   open, with each check and every 30 s, and joins each session whose turn is open to its
   address by session id. A message the dry run would deliver to that session now reads
