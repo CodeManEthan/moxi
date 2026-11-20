@@ -11849,7 +11849,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	None if updated is None 
 sessions	packages/sessions/src/moxi_sessions/catalog.py	_activity	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	flight.done.set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	if _spoken(record) and record.role == "user" and record.injected is False:	keep	injected	injected
-sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in paths))	keep	any	any
+sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in why)}	keep	any	any
 sessions	packages/sessions/src/moxi_sessions/catalog.py	live: set[str] = set()           # the files whose heads a catalog keeps	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_head	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_prompt	name	handle	fh
@@ -12041,6 +12041,11 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	turn and the prompt of the
 sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it returns and of no other session, unless `folder` is asked.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	`folders` is `{folder, at, week}` for each folder no project holds where a session	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	sessions is in `projects` or `folders`; where `lost` names a folder or a file, the	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	loose.append({"folder": where, "at": _newest_at(found), "week": week})	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/lists.py	loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/lists.py	return {"projects": projects, "folders": loose[:limit],	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/module.py	is 5 plus the archive folders, `corpus` and `find`'s `include_archives`), the verb	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/opencode.py	"session": ("id", "parent_id", "title", "directory", "version", "model", "agent",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	SessionRow	name	directory	work_dir
@@ -12100,6 +12105,9 @@ sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "r
 sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "read", _target("folders"), query=WORK_DIRS_QUERY,	use	_target("folders")	_target("work_dirs")
 sessions	packages/sessions/src/moxi_sessions/page.py	number; `folder`, an absolute path a session's own record names (compared as written,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/page.py	starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	"folder": _PATH, "at": _MAYBE_FLOAT, "week": _INT})),	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	* `folders`: `{folder, at, week}` for each folder that no project holds and where a	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/page.py	`projects`, `folders` and `more`. `state` is `up`; `off` when projects is not installed or	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	"until": _seconds(query, "until"), "find": query.get("find")}	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	**The list.** `listing`, `more`, `session` and `folders` read through the process's one	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	-	name	folders	work_dirs
@@ -12108,6 +12116,8 @@ sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_filters	name	folde
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	`find`, `window`, `subagents` and the list's functions (`moxi_sessions.lists`) and write	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	use	out["folder"]	out["work_dir"]
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	"detail": None, "projects": [], "folders": [], "more": 0}	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_logged: set[Any] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/read.py	* `closed`: the keys of requests an earlier batch handed on with `final` false that	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/read.py	* `first`: with `head`, line 1's records (an OpenCode session's first message's), not	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	-	name	_needs_session	_require_session
@@ -12293,6 +12303,7 @@ sessions	packages/sessions/tests/test_api.py	assert {"retention", "Retention"} <
 sessions	packages/sessions/tests/test_api.py	before = {"find", "sources", "subagents", "window", "retention", "Retention"}	keep	find	find
 sessions	packages/sessions/tests/test_api.py	found = modules.load("sessions", interface=2)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_api.py	test_the_list_answers_through_the_api_over_the_roots_the_process_names	name	folders	session_dirs
+sessions	packages/sessions/tests/test_api.py	assert set(module.OPTIONAL) == {"ui", "secrets", "turns", "projects"}	keep	set	set
 sessions	packages/sessions/tests/test_archives.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO, "--harness", "codex")	keep	find	find
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO)	keep	find	find
@@ -12332,6 +12343,10 @@ sessions	packages/sessions/tests/test_browser_page.py	expect(view).to_have_attri
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{LONG}")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{SESSION}")	keep	sessions	sessions
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folders	folders
+sessions	packages/sessions/tests/test_browser_project_facts.py	return Path(shell.env["HOME"])	keep	HOME	HOME
+sessions	packages/sessions/tests/test_browser_project_facts.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/tests/test_browser_questions.py	"""A Claude Code session in `folder` under the home folder, last changed at `at`:	use	`folder`	`work_dir`
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	use	input=	input_tokens=
@@ -12690,6 +12705,8 @@ sessions	packages/sessions/tests/test_page.py	package="moxi_sessions")	keep	pack
 sessions	packages/sessions/tests/test_page.py	return body["refused"]	keep	refused	refused
 sessions	packages/sessions/tests/test_page.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page.py	test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why	name	directory	subagents_dir
+sessions	packages/sessions/tests/test_page.py	assert not any(attr.get("required") for attr in facts["attributes"].values())	keep	any	any
+sessions	packages/sessions/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "window", "project-facts"}	keep	set	set
 sessions	packages/sessions/tests/test_page_list.py	"find"}	keep	find	find
 sessions	packages/sessions/tests/test_page_list.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	"harness", "since", "until", "folder",	keep	folder	folder
@@ -12727,6 +12744,18 @@ sessions	packages/sessions/tests/test_page_list.py	opencode.user("Do the thing."
 sessions	packages/sessions/tests/test_page_list.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page_list.py	test_the_filters_narrow_the_list_and_keep_the_counts_exact	name	by_folder	by_work_dir
 sessions	packages/sessions/tests/test_page_list.py	test_two_folder_requests_at_once_read_each_head_once.ask	name	folder	work_dir
+sessions	packages/sessions/tests/test_page_projects.py	assert (answer["projects"], answer["folders"], answer["more"]) == ([], [], 0)	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [("/work/moxi", 1)]	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [("/work/moxi", 1)]	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [f["folder"] for f in answer["folders"]] == [f"/work/f{n:02d}" for n in range(1, 21)]	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [f["folder"] for f in answer["folders"]] == [f"/work/f{n:02d}" for n in range(1, 21)]	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["folders"] == [] and answer["more"] == 0	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["folders"][0]["at"] == pytest.approx(now - 600, abs=1)	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["state"] == "up" and answer["projects"] == answer["folders"] == []	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	opencode.user("Do the thing.", at=now - 180)	keep	at	at
+sessions	packages/sessions/tests/test_page_projects.py	self.offers = set(offers)	keep	set	set
 sessions	packages/sessions/tests/test_prompt_kept.py	assert cat._prompt(entry, program=None) is None	keep	program	program
 sessions	packages/sessions/tests/test_prompt_kept.py	if isinstance(r, Message) and r.role == "user" and r.injected is False]	keep	injected	injected
 sessions	packages/sessions/tests/test_prompt_kept.py	rewrite	name	handle	fh
