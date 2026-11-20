@@ -27,18 +27,24 @@
 // opened row of the list reads (`/api/session`), asked for the route's one session when it
 // opens, when its tab is shown again and on `Refresh`, beside the turns.
 //
+// With launcher installed, opening a Claude Code session's transcript asks launcher once
+// whether a launch holds it (`/api/state`); where launcher refuses it as never launched
+// and its head says a person started it, the line at the session's start says it was
+// started by hand (`startedLine`). A Codex or OpenCode session is not asked about.
+//
 // While the turns are on their way the page says so; a session that is not there and a
 // read that fails each show the page server's reason, and only that.
 
 import { css, html, nothing } from "lit";
-import { api, navigate } from "/m/ui/client.js";
+import { api, installed, navigate } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
 import { parseSession } from "./list-feed.ts";
 import type { SessionAnswer } from "./list-feed.ts";
 import { openedStatus } from "./opened.ts";
 import { BASE, VIEW } from "./styles.ts";
-import { detailFields, headPath, headView } from "./transcript.ts";
+import { notLaunched, statePath } from "./running.ts";
+import { detailFields, headPath, headView, startedLine } from "./transcript.ts";
 import { SessionView } from "./view.ts";
 import { headerFields, headingOf, parseRoute, routeOf, windowView } from "./views.ts";
 import type { EntryView, Target } from "./views.ts";
@@ -89,6 +95,8 @@ export class SessionsPage extends SessionView {
   #head: Feed<SessionAnswer> | null = null;
   /** Whether `Details` is open. */
   #details = false;
+  /** Whether launcher refused the route's session as never launched, for that route. */
+  #byHand: { route: string; yes: boolean } | null = null;
 
   protected willUpdate(): void {
     if (this.route === this.#loadedFor) return;
@@ -101,6 +109,10 @@ export class SessionsPage extends SessionView {
     // A subagent is not a session of the list, so its facts are not asked for.
     const path = target !== null ? headPath(target) : null;
     if (path !== null) this.#head = new Feed<SessionAnswer>(() => api("sessions", path), parseSession, () => this.requestUpdate());
+    this.#byHand = null;
+    if (path !== null && target !== null && target.harness === "claude" && installed("launcher")) {
+      void this.#readLaunched(this.route, target.session);
+    }
     if (target !== null) this.setAttribute("data-view", "session");
     else this.removeAttribute("data-view");
     this.openSession(target);
@@ -115,6 +127,19 @@ export class SessionsPage extends SessionView {
   protected refreshSession(): void {
     super.refreshSession();
     void this.#head?.refresh();
+  }
+
+  /** Launcher's one answer for the session `route` opened: whether no launch holds it. */
+  async #readLaunched(route: string, session: string): Promise<void> {
+    const answer = await api("launcher", statePath(session));
+    if (!this.isConnected || this.route !== route) return;
+    this.#byHand = { route, yes: notLaunched(answer) };
+    this.requestUpdate();
+  }
+
+  protected startLine(target: Target): string | null {
+    const byHand = this.#byHand !== null && this.#byHand.route === this.route && this.#byHand.yes;
+    return startedLine(target, this.#head?.value ?? null, byHand);
   }
 
   protected pick(entry: EntryView): void {

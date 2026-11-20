@@ -81,6 +81,8 @@ OPENCODE_REPLY = "Renamed it in four files."
 LEFT_OUT = re.compile(r"\b(running|working|busy|warm|cold|waiting|slot|held|turn \d|prompts|effort|Answer|"
                       r"Project|Comms|Cache|Cost|by hand)\b|\$")
 
+START_LINE = "This is the start of the session."
+
 #: What a page shows, top to bottom: each run of text, each control, each element with a
 #: name of its own, and each row with the facts the list gave it.
 SHOWN = """el => {
@@ -534,7 +536,12 @@ def test_a_session_is_picked_up_by_its_copied_resume_command_or_read_in_full_wit
         expect(panel.locator('[data-part="subagents"]')).to_contain_text("Read the tooltip code")
         # The header's acts are the way back, `Refresh` and `Details`.
         expect(head.get_by_role("button")).to_have_text(["Refresh", "Details"])
-        steps.append(shown(page))
+        # Where the turns reach the start, a full install, whose launcher launched none of
+        # these, says the session was started by hand; the small one can't know.
+        start = window.locator('[data-line="start"]')
+        launcher = page.evaluate("async () => (await import('/m/ui/client.js')).installed('launcher')")
+        expect(start).to_have_text(re.compile(r"^Started .* in proj-a, by hand$") if launcher else START_LINE)
+        steps.append([line for line in shown(page) if line != START_LINE and not line.endswith(", by hand")])
 
         # And back, to the list from its top.
         head.get_by_role("link", name="Sessions").click()

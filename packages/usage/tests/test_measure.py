@@ -235,8 +235,16 @@ def test_with_no_index_and_no_pass_nothing_is_written():
     assert not thresholds.params_path().exists()
 
 
+def pin_clock(monkeypatch):
+    """Make the verb's and the timer's measure read the fixture's NOW, not the real clock,
+    so the sessions the fixture dates a day before NOW never age out of the window."""
+    real = measure.run
+    monkeypatch.setattr(measure, "run", lambda **kwargs: real(**{"now": NOW, **kwargs}))
+
+
 def test_the_verb_measures_then_prints_rows_and_marks(monkeypatch, capsys):
     monkeypatch.setattr(measure, "MIN_FILES", 2)
+    pin_clock(monkeypatch)
     for n in range(2):
         session(n)
     write_config('[[model]]\nid = "claude-model-x"\ninput = 10.0\noutput = 50.0\n'
@@ -257,6 +265,7 @@ def test_the_verb_without_a_measure_says_so_and_exits_1(capsys):
 
 def test_the_timers_command_runs_one_measure(monkeypatch, capsys):
     monkeypatch.setattr(measure, "MIN_FILES", 1)
+    pin_clock(monkeypatch)
     session(1)
     assert measure.main([]) == 0
     assert "restart point measured over 1 files" in capsys.readouterr().out

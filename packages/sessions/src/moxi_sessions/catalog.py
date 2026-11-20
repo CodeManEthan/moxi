@@ -39,8 +39,9 @@ could not be listed has `subagents` None, not 0.
 * From the head of the file (`Head`; an OpenCode session's come from its row): `folder`,
   `started`, `by_program` and, for Claude Code, the name its first lines give.
   `by_program` is True where a Claude head's `entrypoint` was read and starts with `sdk`,
-  and None everywhere else: a session is listed with the ones started in a terminal
-  unless its record says a program started it.
+  False where it was read and does not (a person started the session), and None where
+  it was not read and for every Codex and OpenCode session: a session is listed with the
+  ones started in a terminal unless its record says a program started it.
 * From the session's last turn (`window(entry, turns=1)`): `name`, `model` and
   `activity`.
 * From the whole session (`read_prompt`): `prompt`, the last message in the file's
@@ -238,7 +239,8 @@ class Head:
 
     * `folder`: the session's directory.
     * `started`: when it started, in epoch seconds.
-    * `by_program`: True where a Claude head's `entrypoint` starts with `sdk`, else None.
+    * `by_program`: True where a Claude head's `entrypoint` starts with `sdk`, False
+      where it is another value, None where it was not read and for the other harnesses.
     * `name`: the name a Claude file's first lines give the session.
     * `spawn`: a Codex rollout's spawn link (`Header.spawn`): None for a thread no thread
       spawned, `UNKNOWN` where line 1 was not read. None for the other harnesses.
@@ -319,11 +321,12 @@ def _time(value: Any) -> float | None:
 
 
 def by_program(entrypoint: Any) -> bool | None:
-    """True for an `entrypoint` a program's run writes (`sdk-cli`, `sdk-py`); None for
-    any other value and for one that was not read."""
-    if isinstance(entrypoint, str) and entrypoint.startswith(PROGRAM_ENTRYPOINT):
-        return True
-    return None
+    """True for an `entrypoint` a program's run writes (`sdk-cli`, `sdk-py`); False for
+    one a person's run writes (`cli`, `claude-vscode`, any other text); None for one that
+    was not read (not text, or empty)."""
+    if not isinstance(entrypoint, str) or not entrypoint:
+        return None
+    return entrypoint.startswith(PROGRAM_ENTRYPOINT)
 
 
 def cut(text: str, limit: int = ACTIVITY_BYTES) -> str:

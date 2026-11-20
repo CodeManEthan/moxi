@@ -168,6 +168,12 @@ export abstract class SessionView extends LitElement {
     ${this.renderSubagents()}`;
   }
 
+  /** The line drawn where the turns reach the session's start, in place of the view's own;
+   * null keeps the view's own. */
+  protected startLine(_target: Target): string | null {
+    return null;
+  }
+
   /** The header's facts as `fields` (none when null), the link to the parent session,
    * "Earlier" and the records. */
   protected renderTurns(target: Target, answer: WindowAnswer, fields: Field[] | null = headerFields(answer)) {
@@ -176,6 +182,7 @@ export abstract class SessionView extends LitElement {
       : typeof header.parent === "string" && header.parent !== "" ? { harness: target.harness, session: header.parent, agent: null }
       : null;
     const shown = pages(answer, this.#earlier);
+    const start = shown.startLine !== null ? this.startLine(target) ?? shown.startLine : null;
     return html`${fields !== null ? html`<dl data-part="header">${fields.map((field) => html`
         <dt>${field.label}</dt><dd data-field=${field.name}>${field.code ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>`
         : nothing}
@@ -184,7 +191,7 @@ export abstract class SessionView extends LitElement {
       <div class="bar" data-part="earlier">
         ${shown.hasEarlier && shown.before !== null ? html`<button type="button" data-action="earlier"
           ?disabled=${this.#paging} @click=${() => void this.#readEarlier(shown.before as string)}>Earlier turns</button>` : nothing}
-        ${shown.startLine !== null ? html`<span class="dim" data-line="start">${shown.startLine}</span>` : nothing}
+        ${start !== null ? html`<span class="dim" data-line="start">${start}</span>` : nothing}
         ${shown.limitLine !== null ? html`<span class="warn" data-line="limit">${shown.limitLine}</span>` : nothing}
         ${this.#pagingLine !== null ? html`<span class="problem" data-line="earlier" role="status">${this.#pagingLine}</span>` : nothing}
       </div>
