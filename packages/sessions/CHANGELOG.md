@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The page's list keeps its filters, find text and how far each group was paged in its
+  own address (`/m/sessions/?harness=claude&when=7d&more=recent:1`), so Back from a
+  transcript, a reload and a shared link bring it back as it was; Back and a reload also
+  keep the rows opened and the scroll. A list change rewrites the address and adds no
+  history entry. A transcript opened from the list carries the query, and its link back
+  uses it. What an address holds that the list does not take is named above the list.
 - With launcher installed, the page's list starts with the sessions launcher runs now,
   under `N running`, named, placed and ordered as Home draws them, each with its cache
   fact, and `Keep warm` at the desk for a waiting session whose cache a press would

@@ -137,6 +137,13 @@ export interface Query {
 
 const usable = (seconds: number): number | null => (Number.isFinite(seconds) ? seconds : null);
 
+/** The find field's text as it is sent: trimmed, and only once it holds two characters,
+ * cut at 256; null when it is not sent. */
+export function findSent(text: string): string | null {
+  const typed = text.trim();
+  return charCount(typed) >= FIND_MIN ? cutAt(typed, FIND_MAX) : null;
+}
+
 /**
  * The query a state of the filters makes on the server's day `today`.
  *
@@ -155,13 +162,12 @@ export function queryOf(filters: Filters, today: string, zone: Zone = LOCAL): Qu
     if (when.from !== null) since = usable(zone.start(when.from));
     if (when.to !== null) until = usable(zone.start(dayAfter(when.to, 1)));
   }
-  const typed = filters.find.trim();
   return {
     harness: filters.harness !== null && filters.harness !== "" ? filters.harness : null,
     since,
     until,
     folder: filters.folder !== null && filters.folder !== "" ? filters.folder : null,
-    find: charCount(typed) >= FIND_MIN ? cutAt(typed, FIND_MAX) : null,
+    find: findSent(filters.find),
   };
 }
 
@@ -347,10 +353,12 @@ export interface Refreshed {
  * read from their start checks their first row. Rows opened in place stay open, and an
  * opened program line stays open.
  *
- * A list asked with another query keeps nothing but the opened rows' keys.
+ * A list asked with another query, or asked to `restart` (a query he changed, even back
+ * to the kept one's), keeps nothing but the opened rows' keys.
  */
-export function refresh(kept: ListState | null, answer: ListAnswer, query: Query): Refreshed {
-  const old = kept !== null && sameQuery(kept.query, query) ? kept : null;
+export function refresh(kept: ListState | null, answer: ListAnswer, query: Query,
+                        { restart = false }: { restart?: boolean } = {}): Refreshed {
+  const old = !restart && kept !== null && sameQuery(kept.query, query) ? kept : null;
   const now = answer.now;
   const reads: MoreRequest[] = [];
   const fresh = new Set<string>();
