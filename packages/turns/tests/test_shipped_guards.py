@@ -71,8 +71,19 @@ def test_the_declarations_match_the_design():
     assert (q.calls, q.who, q.wants, q.on_error, q.switch) == (
         {"claude": ("AskUserQuestion",)}, "any", ("prompts",), "deny", "guards.question_mode")
     assert q.judge == "moxi_turns.guards.question:judge"
+    assert q.deadline_ms == 3000
     assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),
                                 (("start",), "moxi_turns.startline:answer"))
+
+
+def test_question_modes_deadline_is_clamped_by_max_wait():
+    q = BY_NAME["question-mode"]
+    assert q.deadline() == 3000                      # max_wait_ms's default
+    assert q.deadline(10_000) == 3000
+    assert q.deadline(1200) == 1200
+    on = guards.On(found(q), ("switch",))
+    assert entry_for(on, "claude", 3000).deadline_ms == 3000
+    assert entry_for(on, "claude", 800).deadline_ms == 800
 
 
 def test_each_judge_target_imports():
@@ -410,9 +421,20 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
     assert qm.on_prompt(prompt_event(text, "bridge")) is None
 
 
+def test_pros_asks_for_prose_by_default(turns_env):
+    assert config.schema().keys[qm.PROSE_KEY].default == ["prose", "pros"]
+    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    for text in ("let's go through the open questions in pros",
+                 "let's go through the open questions in prose"):
+        assert qm.on_prompt(prompt_event(text, "composer")) is None
+    assert qm.on_prompt(prompt_event("let's go through the open questions",
+                                     "composer")) == qm.REMINDER
+
+
 def test_the_reminder_reads_the_prose_words_setting(turns_env):
     text = "let's go through the open questions in pros"
-    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    write_config(turns_env, '[guards]\nquestion_mode = true\n'
+                            '[question_mode]\nprose_words = ["prose"]\n')
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
     write_config(turns_env, '[guards]\nquestion_mode = true\n'
                             '[question_mode]\nprose_words = ["Prose", "PROS"]\n')
@@ -423,9 +445,13 @@ def test_the_reminder_reads_the_prose_words_setting(turns_env):
                                      "composer")) == qm.REMINDER
 
 
-def test_the_reminder_names_no_one():
-    assert "operator" not in qm.REMINDER and "AskUserQuestion" in qm.REMINDER
-    assert "up to four per call" in qm.REMINDER
+def test_the_reminder_leaves_the_agent_to_judge_whether_they_are_asking_now():
+    assert qm.REMINDER == (
+        "The person at the keyboard just asked to go through open questions. If they are "
+        "asking now, put the questions that are open now to them with AskUserQuestion: up "
+        "to four per call, as many calls as you need, each self-contained with your "
+        "recommendation first. Once they have answered them, count any new questions at the "
+        "end of your output, as always.")
 
 
 # -- through the Claude endpoint -------------------------------------------------------------
