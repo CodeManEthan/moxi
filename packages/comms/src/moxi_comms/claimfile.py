@@ -13,8 +13,11 @@ one session, and by nothing else:
   * a `ClaimServer` binding: `comms-claim-srv-<pid>-<start>-<qualified>.json`.
 
 A file is LIVE when its socket answers, or failing that when one of its `tree` roots is
-alive (the recorded pid with the recorded start time). A clean shutdown deletes the
-file; the runtime dir is cleared at boot.
+alive (the recorded pid with the recorded start time). A file whose socket answers no one
+while a `tree` root is alive is an adapter that died under a running session
+(`adapter_gone`): comms' listener tells that session its mail has stopped, and `moxi
+comms doctor` names it. A clean shutdown deletes the file; the runtime dir is cleared at
+boot.
 """
 
 from __future__ import annotations
@@ -147,6 +150,19 @@ def is_live(record: dict | None, proc: ProcView | None = None) -> bool:
     return socket_answers(record) or tree_root_alive(record, proc)
 
 
+def adapter_gone(record: dict | None, proc: ProcView | None = None) -> bool:
+    """Is this the file of an adapter that is gone while its session runs: nothing
+    answers its socket, and one of its `tree` roots is alive? Mail to the identity it
+    held has stopped, and nothing binds it again until the session is relaunched."""
+    return bool(record) and tree_root_alive(record, proc) and not socket_answers(record)
+
+
+def gone_records(env=None, proc: ProcView | None = None) -> list:
+    """`(key, record)` for every file whose adapter is gone while its session runs
+    (`adapter_gone`)."""
+    return [(k, r) for k, r in all_records(env) if adapter_gone(r, proc)]
+
+
 def live_records(proc: ProcView | None = None) -> list:
     return [(k, r) for k, r in all_records() if is_live(r, proc)]
 
@@ -191,8 +207,8 @@ def sweep_dead_harness_files(proc: ProcView | None = None) -> list:
     return gone
 
 
-__all__ = ["BOUND", "HOLDS", "OFFLINE", "STANDBY", "STATES", "WAITING", "all_records",
-           "claim_dir", "file_for", "held_identity", "is_live", "key_of",
+__all__ = ["BOUND", "HOLDS", "OFFLINE", "STANDBY", "STATES", "WAITING", "adapter_gone",
+           "all_records", "claim_dir", "file_for", "gone_records", "held_identity", "is_live", "key_of",
            "live_records", "membership_table", "names_identity", "read", "read_path",
            "remove", "roots_of", "socket_answers", "sweep_dead_harness_files",
            "tree_root_alive", "write"]

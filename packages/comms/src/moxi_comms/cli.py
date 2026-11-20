@@ -800,6 +800,12 @@ def cmd_doctor(args, ctx: Context) -> int:
             row("waiting", line)
     for line in _store_rows(ctx.env):
         row("store", line)
+    # A session whose adapter is gone while it runs: its mail has stopped.
+    from .checks import adapter_rows
+
+    for gone in adapter_rows(env=ctx.env):
+        row("adapter", f"{gone.name.removeprefix('adapter: ')}: {gone.detail}; "
+                       f"{gone.fix}")
     # turns' own rows (its config, the listeners registered with it, the live endpoints,
     # its Claude plugins) are turns' to declare; `moxi doctor` runs them. comms keeps the
     # bound sessions that have no endpoint, above.

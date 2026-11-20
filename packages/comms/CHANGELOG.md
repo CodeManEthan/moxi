@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A Claude Code session whose comms adapter dies while the session runs is told so: at
+  each start and prompt, comms' listener gives it `comms: mail has stopped for <name>`
+  and says to relaunch. `moxi comms doctor` prints an `adapter` line and `moxi doctor` a
+  fail row for each such session. An adapter whose watch on `claude` fails keeps its
+  claim file, so it is named too. Nothing binds the session again until it is
+  relaunched.
 - `[archive] record` and `[archive] identities` name an older comms' record and
   identities files, which comms reads in place and never writes. `moxi comms history`
   and a session's `history` tool list the older record's messages before comms.db's,

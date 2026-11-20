@@ -27,6 +27,8 @@ SUPERVISOR_RESTART = ("restart the unit `moxi install comms` wrote for comms/dae
                       "its supervisor (systemctl --user restart on systemd)")
 #: The fix of a live session that has lost its tool token.
 RELAUNCH = "relaunch that session to give it comms' tools"
+#: The fix of a session whose adapter is gone.
+RELAUNCH_STOPPED = "relaunch that session to get its mail back"
 #: The fix when comms' socket unit holds the port and this daemon runs outside it.
 SUPERVISED = "stop this daemon and start it through its service"
 
@@ -35,13 +37,32 @@ Ask = Callable[[], Mapping | None]
 
 
 def doctor_rows(env=None) -> list:
-    """The move of comms 0.2's files and what it left, the reserved names, then comms'
-    tools."""
+    """The move of comms 0.2's files and what it left, the reserved names, comms'
+    tools, then each session whose adapter is gone."""
     from . import reserved
     from .store import upgrade_0_2
 
     return (upgrade_0_2.doctor_rows(env) + reserved.doctor_rows(env)
-            + mcp_rows(env=env))
+            + mcp_rows(env=env) + adapter_rows(env=env))
+
+
+def adapter_rows(*, env=None, proc=None) -> list:
+    """An `adapter: <identity>` fail row for each session whose comms adapter is gone
+    while the session runs (`claimfile.gone_records`): its mail has stopped, and only a
+    relaunch binds it again."""
+    from moxi.doctor import Row
+
+    from . import claimfile
+
+    rows = []
+    for key, record in claimfile.gone_records(env, proc):
+        who = (record.get("claim") or {}).get("qualified") or key
+        session = record.get("launch_session") or key
+        rows.append(Row(MODULE, f"adapter: {who}", "fail",
+                        f"mail has stopped: the comms adapter of session {session} is "
+                        "gone while the session runs, so no message reaches it and its "
+                        "sends are refused", RELAUNCH_STOPPED))
+    return rows
 
 
 def restart() -> str:
@@ -272,6 +293,6 @@ def _port_of(url) -> int | None:
         return None
 
 
-__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",
+__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "RELAUNCH_STOPPED", "adapter_rows", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",
            "endpoint_row", "health", "mcp_rows", "port_row", "port_taken_fix", "revoked_rows",
            "tokens_row"]

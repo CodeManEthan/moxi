@@ -11,6 +11,9 @@ printed when comms wrote its own hooks (`adapters/shim_roster`):
     prompt   the roster's joins and leaves since this session last looked, and each
              ignored reminder naming this session as its author, once; or nothing
 
+At either event, a session whose adapter is gone while it runs is told only that its
+mail has stopped (`mail_stopped`).
+
 **comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
 the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
 `start` (`context.layer_one_form`): the tools taught as the way to send and read, the CLI
@@ -95,6 +98,9 @@ def answer(event) -> str | None:
     env = dict(event.env) if event.env else dict(os.environ)
     if not env.get(NAME_ENV):
         return None
+    stopped = mail_stopped(env)
+    if stopped is not None:
+        return stopped
     socket_path = daemon_socket(env)
     state = memory_path(env)
     if event.event == "start":
@@ -109,4 +115,28 @@ def answer(event) -> str | None:
     return text
 
 
-__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "memory_path"]
+def mail_stopped(env) -> str | None:
+    """The line for a session whose adapter is gone while it runs (`claimfile.
+    adapter_gone`, its claim file found by the claim socket the wrapper stamped), said
+    at every start and prompt until it is relaunched; None while the adapter serves.
+
+    Nothing binds the session again: its adapter was forked by the launch, which is
+    `claude` now, and nothing else holds what the launch held."""
+    from . import claimfile
+    from .claimhold import CLAIM_SOCKET_ENV
+
+    value = env.get(CLAIM_SOCKET_ENV)
+    if not value:
+        return None
+    for _key, record in claimfile.all_records(env):
+        if record.get("socket") != str(value) or not claimfile.adapter_gone(record):
+            continue
+        who = (record.get("claim") or {}).get("qualified") or "this session"
+        return (f"comms: mail has stopped for {who}. This session's comms adapter is "
+                "gone, so no message reaches this session and a send from it is "
+                "refused. Relaunch the session to get its mail back.")
+    return None
+
+
+__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "mail_stopped",
+           "memory_path"]

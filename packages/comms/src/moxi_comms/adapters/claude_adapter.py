@@ -72,7 +72,11 @@ whether the digest was handled.
 **What ends it.** `claude`'s exit, seen on the handle the wrapper took before it forked
 (a pidfd, so a reused pid cannot stand in for it). The adapter closes its binding, which
 deregisters the name, and removes its claim socket and claim file. An adapter that dies
-first leaves the session unbound until it is relaunched.
+first leaves the session unbound until it is relaunched: nothing respawns it, since the
+launch that forked it is `claude` now. Its claim file stays (an adapter whose watch on
+`claude` fails keeps it too), and with a socket that answers no one under a live
+`claude` it is how comms' listener tells the session at each prompt that its mail has
+stopped, and how `moxi comms doctor` names it (`claimfile.adapter_gone`).
 """
 
 from __future__ import annotations
@@ -673,11 +677,19 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
         adapter.stop(remove_claim_file=True)
         return moxi_exit.TEMPFAIL
     log.info("adapter for claude pid %d is up (pid %d)", harness_pid, os.getpid())
+    claude_ended = False
     try:
         wait_for_exit(harness_fd)
+        claude_ended = True
     finally:
-        log.info("claude pid %d has ended; closing this session's comms", harness_pid)
-        adapter.stop(remove_claim_file=True)
+        if claude_ended:
+            log.info("claude pid %d has ended; closing this session's comms", harness_pid)
+        else:
+            # The claim file stays: it is how the session and doctor learn that this
+            # session's mail has stopped (`claimfile.adapter_gone`).
+            log.error("this adapter is ending while claude pid %d runs: its mail stops "
+                      "until the session is relaunched", harness_pid)
+        adapter.stop(remove_claim_file=claude_ended)
     return 0
 
 

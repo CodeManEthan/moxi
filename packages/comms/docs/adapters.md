@@ -274,6 +274,15 @@ longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "co
 and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
 own process before it starts OpenCode's server, so it waits for no adapter's word.
 
+A Claude Code session's adapter that dies while `claude` runs is not started again:
+the launch that forked it is `claude` now, and nothing else holds what it held. The
+session stays unbound until it is relaunched, and comms says so. Its claim file stays,
+with a socket that answers no one under a live `claude`. At every start and prompt,
+comms' listener gives the session one line, `comms: mail has stopped for <name>`, saying
+that no message reaches it, that a send from it is refused, and to relaunch the session.
+`moxi comms doctor` prints an `adapter` line for it, and `moxi doctor` a fail row
+`adapter: <name>`.
+
 ## Codex
 
 **Through turns' host.** `moxi comms codex` (also `moxi-comms-codex`) starts a Codex
