@@ -3,8 +3,9 @@
 ## Unreleased
 
 - `[archive] record` and `[archive] identities` name an older comms' record and
-  identities files, which comms reads in place and never writes. `history` lists the
-  older record's messages before comms.db's; `reply` and every read by id find
+  identities files, which comms reads in place and never writes. `moxi comms history`
+  and a session's `history` tool list the older record's messages before comms.db's,
+  the tool with the state `archived`; `reply` and every read by id find
   an older message by its own id, because the daemon moves comms.db's counter past the
   older ids once at its start; and every name the older identities file retired is
   refused at bind and as a recipient again.

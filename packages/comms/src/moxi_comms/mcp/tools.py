@@ -34,7 +34,7 @@ from typing import Literal
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.types import CallToolResult, TextContent
 
-from .. import attribution, config, directory, machine_line, sending
+from .. import archive, attribution, config, directory, machine_line, sending
 from ..client import DaemonError, DaemonOffline
 from ..provision import NAMES
 from ..roster_view import SEND_ONLY, render_agents
@@ -191,7 +191,8 @@ OUTPUTS: dict[str, dict] = {
         "id": _STR, "from": _STR, "to": _STRS, "text": _STR, "at": _STR,
         "attribution": _STR,
         "state": {"type": "string",
-                  "enum": ["delivered", "waiting", "expired", "withdrawn"]}})}}),
+                  "enum": ["delivered", "waiting", "expired", "withdrawn",
+                           "archived"]}})}}),
     "remove": _object({"message_id": _STR, "withdrawn": _STRS, "delivered": _STRS,
                        "expired": _STRS}),
 }
@@ -445,14 +446,16 @@ def _read_refused(e: DaemonError) -> CallToolResult:
 
 # --------------------------------------------------------------------------- history
 
-#: What one message in `history` came to.
+#: What one message in `history` came to. `archived` is a message from an older comms'
+#: record, whose delivery comms.db's books do not hold.
 DELIVERED, WAITING, EXPIRED, WITHDRAWN = "delivered", "waiting", "expired", "withdrawn"
+ARCHIVED = "archived"
 
 
 def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
     """`moxi comms history <identity> --limit <limit>`'s rows, in its words, with each
     message's state: withdrawn by its author, waiting for a recipient, expired before
-    reaching one, or delivered.
+    reaching one, delivered, or archived (from an older comms' record).
 
     The verb's rendering lives in the CLI, which nothing in the daemon may import (it
     reads cards); its row is spelled again here, and a test holds the two lines equal."""
@@ -465,7 +468,9 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             return _result(text, {"messages": []})
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.record.history(room["room_id"], limit=limit) if room else []
+        # An older comms' record (`[archive] record`) reads as the start of this one.
+        msgs, from_archive = archive.timeline(ctx.record, room["room_id"] if room else None,
+                                              limit)
         rows, effective = [], {}
         for m in msgs:
             ml = machine_line.parse(m.content)
@@ -480,13 +485,16 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
-        ids = [m.id for m, *_ in rows]
+        # comms.db's books hold no row for an older message, and a row under its id is
+        # another message's.
+        ids = [m.id for m, *_ in rows if not from_archive(m)]
         dropped = _dropped(db, ids)
         waiting = _waiting(db, ids)
     lines = [] if rows else [f"no {NAMES} history for {identity}."]
     messages = []
     for m, ml, author, direction in rows:
-        gone = dropped.get(str(m.id), {})
+        older = from_archive(m)
+        gone = {} if older else dropped.get(str(m.id), {})
         lines.append(f"{m.id}  {m.timestamp}  {direction:<4} {author.qualified} "
                      f"({author.tier}, {attribution.rendered(author.attribution)})"
                      f"  -> {', '.join(ml.recipients)}"
@@ -497,7 +505,7 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             "id": str(m.id), "from": author.qualified, "to": list(ml.recipients),
             "text": ml.text, "at": str(m.timestamp),
             "attribution": attribution.rendered(author.attribution),
-            "state": _state(m, gone, waiting=str(m.id) in waiting)})
+            "state": ARCHIVED if older else _state(m, gone, waiting=str(m.id) in waiting)})
     if window is not None:
         lines.append(f"(time-scoped to the {identity} binding: {window[0]} .. "
                      f"{window[1] if window[1] is not None else 'now'})")

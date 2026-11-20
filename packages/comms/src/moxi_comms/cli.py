@@ -333,12 +333,8 @@ def cmd_history(args, ctx: Context) -> int:
             return moxi_exit.OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.record.history(room["room_id"], limit=args.limit)
-        # An older comms' record (`[archive] record`) reads as the start of this one:
-        # its messages first, then comms.db's, and the newest `--limit` of them all.
-        older = archive.messages(args.limit) if len(msgs) < args.limit else []
-        msgs = (older + msgs)[-args.limit:]
-        from_archive = {id(m) for m in older}
+        # An older comms' record (`[archive] record`) reads as the start of this one.
+        msgs, from_archive = archive.timeline(ctx.record, room["room_id"], args.limit)
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it
@@ -359,8 +355,7 @@ def cmd_history(args, ctx: Context) -> int:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
         # The store's drop rows are comms.db's; an archive message has none.
-        dropped = _history_dropped(db, [m.id for m, *_ in rows
-                                        if id(m) not in from_archive])
+        dropped = _history_dropped(db, [m.id for m, *_ in rows if not from_archive(m)])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -375,7 +370,7 @@ def cmd_history(args, ctx: Context) -> int:
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
                 + _history_marks(ml)
-                + _history_gone(m, {} if id(m) in from_archive
+                + _history_gone(m, {} if from_archive(m)
                                 else dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")

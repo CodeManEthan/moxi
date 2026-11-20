@@ -8,7 +8,8 @@ or shared-memory file is made beside it and nothing in it changes.
 
 What the archive answers:
 
-* `history` lists the archive's `#names` messages before comms.db's, as one record;
+* `history`, the verb and a session's tool, lists the archive's `#names` messages before
+  comms.db's, as one record (`timeline`);
 * a message id comms.db skipped (below) is the archive's, so `reply` and every other
   read of one message by id find it there;
 * every identity the archive marks `retired` stays retired: comms refuses it at bind and
@@ -33,6 +34,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 from urllib.parse import quote
 
 from .record import Message
@@ -209,6 +211,17 @@ def messages(limit: int | None = None) -> list[Message]:
         return []
 
 
+def timeline(record, room_id, limit: int) -> tuple[list[Message], Callable[[Message], bool]]:
+    """The newest `limit` `#names` messages of the one record `history` reads: the
+    archive's first, then comms.db's (`record.history` of `room_id`), ascending. Also a
+    test for whether one of them is the archive's, by the object, since an archive id can
+    be one comms.db also used."""
+    msgs = record.history(room_id, limit=limit) if room_id is not None else []
+    older = messages(limit) if len(msgs) < limit else []
+    from_archive = {id(m) for m in older}
+    return (older + msgs)[-limit:], lambda m: id(m) in from_archive
+
+
 def skipped(conn) -> tuple[int, int] | None:
     """The ids comms.db's counter skipped for the archive, `(from, to)`, from its `meta`
     over `conn`; None when it skipped none."""
@@ -261,4 +274,4 @@ def skip_ids(record) -> tuple[int, int] | None:
 
 
 __all__ = ["Archive", "ArchiveError", "META_SKIPPED", "NAMES_ROOM", "connect", "current",
-           "from_config", "get_message", "messages", "retired", "skip_ids", "skipped"]
+           "from_config", "get_message", "messages", "retired", "skip_ids", "skipped", "timeline"]

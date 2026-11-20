@@ -16,6 +16,7 @@ from conftest import wait_until, write_config
 
 from moxi_comms import archive, directory
 from moxi_comms.client import DaemonClient, DaemonError
+from moxi_comms.mcp import tools as mcp_tools
 from moxi_comms.paths import comms_db, daemon_socket
 from moxi_comms.store.schema import ID_BASE
 
@@ -127,6 +128,25 @@ def test_history_lists_the_older_record_first(older, rig):
     rig.post_as("main@proj-a", ["planner@proj-a"], "a new one")
     code, out = rig.cli(["history", "planner@proj-a"])
     assert out.index("what did the old build decide?") < out.index("a new one")
+
+
+def test_the_history_tool_reads_the_same_record_as_the_verb(older, rig):
+    """The session's `history` tool lists what `moxi comms history` lists, older record
+    first, and calls an older message `archived`: comms.db's books say nothing of how
+    one went."""
+    rig.post_as("main@proj-a", ["planner@proj-a"], "a new one")
+    got = mcp_tools.Tools(rig.daemon).history(
+        "planner@proj-a", "no-claim", {"identity": "planner@proj-a", "limit": 20})
+    assert not got.is_error, got.content[0].text
+    rows = {m["id"]: m for m in got.structured_content["messages"]}
+    assert rows[str(OLD_ASK)]["text"] == "what did the old build decide?"
+    assert rows[str(OLD_ASK)]["from"] == "elder"
+    assert rows[str(OLD_ASK)]["state"] == "archived"
+    newest = got.structured_content["messages"][-1]
+    assert newest["text"] == "a new one" and newest["state"] != "archived"
+    code, out = rig.cli(["history", "planner@proj-a", "--limit", "20"])
+    assert code == 0, out
+    assert got.content[0].text.splitlines() == out.splitlines()
 
 
 def test_a_reply_to_an_older_message_reaches_its_author(older, rig):
