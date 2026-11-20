@@ -321,8 +321,10 @@ bottom:
 - **`Other names · <names> · Show`**: the standing names with no session, mail or ask;
   a scoped address with neither mail nor a session, by its full address; and the
   send-only names, `sent by <module>` for a module's and `sent by a program` for one a
-  program registered. Each but a send-only name has
-  `Message`.
+  program registered. Each but a send-only name has `Message`. Shown, with projects
+  installed, a standing name that leads a project says so on line two (`leads
+  harbor-infra`; `leads atlas-api and orbit-cli` for two), on its bare address, or on its
+  first address when it has no bare one.
 - **The foot**: `Comms is answering · read <time>` and `Comms settings`. Under it, one
   dim line each while it holds: a read that failed and why, and an address the page
   doesn't have.
@@ -452,6 +454,8 @@ reads adds to it when installed:
 - **sessions**: where a session works and its `Session` line when launcher gives none (on
   an install without launcher, every session), and the `Sessions` link on the `Session`
   line. Without sessions, a row launcher doesn't run shows no where and no `Session` line.
+- **projects**: which project each standing name in `Other names` leads, read from
+  projects' list of projects while one is there. Without projects, nothing of it shows.
 
 Not on the page yet: launching an agent from a name with mail (`Launch`), and whether a
 session's turn is open.
