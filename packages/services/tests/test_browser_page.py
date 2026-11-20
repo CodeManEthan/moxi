@@ -25,6 +25,9 @@ from playwright.sync_api import expect
 
 from browser_kit import fake_site, get, moxi, seed, slots_said, stored, written
 
+_copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
+copied, ready_copying = _copying.copied, _copying.ready_copying
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="services' page is checked in a browser on Linux; the "
@@ -360,7 +363,7 @@ def test_sv4_a_timer_whose_runs_launch_a_session_says_it_spends_usage(seeded, ui
 
 
 def test_sv6_a_failed_daemon_opened_says_its_state_and_how_to_read_its_log(seeded, ui_shell, ui_page):
-    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    ready_copying(ui_page.context)
     reads = []
     ui_page.on("request", lambda request: reads.append(request.url) if "/m/services/api/row?" in request.url else None)
     panel = panel_of(ui_page)
@@ -372,7 +375,7 @@ def test_sv6_a_failed_daemon_opened_says_its_state_and_how_to_read_its_log(seede
     assert one["log"].startswith("journalctl --user -u "), one["log"]
     log.get_by_role("button", name=f"Copy {one['log']}").click()
     expect(log.get_by_role("button", name=f"Copy {one['log']}")).to_have_text("Copied")
-    assert ui_page.evaluate("navigator.clipboard.readText()") == one["log"]
+    assert copied(ui_page) == one["log"]
     unit = label(part, "Unit")
     expect(unit.locator('[data-line="mono"]')).to_have_text(one["unit"])
     expect(unit.locator('[data-line="dim"]')).to_have_text(" · a command you added; Moxi wrote the unit")
@@ -881,7 +884,7 @@ def test_a_run_that_spends_usage_asks_in_place_then_runs(seeded, ui_page):
 
 
 def test_remove_asks_in_place_with_what_goes_and_the_command_then_the_row_goes(seeded, ui_shell, ui_page):
-    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    ready_copying(ui_page.context)
     panel = panel_of(ui_page)
     posts = posts_to(ui_page, "api/act")
     part = opened(panel, "services/goner", "goner")
@@ -899,7 +902,7 @@ def test_remove_asks_in_place_with_what_goes_and_the_command_then_the_row_goes(s
     copy = asked.get_by_role("button", name=f"Copy {again}", exact=True)
     copy.click()
     expect(copy).to_have_text("Copied")
-    assert ui_page.evaluate("navigator.clipboard.readText()") == again
+    assert copied(ui_page) == again
     asked.get_by_role("button", name="Keep it", exact=True).click()
     expect(asked).to_have_count(0)
     assert posts == []
@@ -1040,7 +1043,7 @@ def test_slots_that_cant_be_read_ask_with_the_unread_warning_and_send_its_marker
 
 
 def test_ui_shells_stop_is_a_command_and_its_restart_reloads_the_page(seeded, ui_shell, ui_page):
-    ui_page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    ready_copying(ui_page.context)
     name = name_of(ui_shell, SHELL)
     panel = panel_of(ui_page)
     part = opened(panel, SHELL, name)
@@ -1048,7 +1051,7 @@ def test_ui_shells_stop_is_a_command_and_its_restart_reloads_the_page(seeded, ui
     expect(stop.locator('[data-line="text"]')).to_have_text("Stopping it closes this page, so it is done at the terminal:")
     expect(stop.locator('[data-line="mono"]')).to_have_text("moxi services stop ui/shell")
     stop.get_by_role("button", name="Copy moxi services stop ui/shell", exact=True).click()
-    assert ui_page.evaluate("navigator.clipboard.readText()") == "moxi services stop ui/shell"
+    assert copied(ui_page) == "moxi services stop ui/shell"
     foot = part.locator('[data-part="foot"]')
     expect(foot.locator("button")).to_have_text(["Restart"])
     expect(foot.locator('[data-line="shell-restart"]')).to_have_text("Restart reloads this page.")
