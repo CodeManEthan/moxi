@@ -48,13 +48,13 @@ def fuzz_names(names_config):
 @pytest.fixture
 def count_scans(monkeypatch):
     """Counts the scans redact makes: count_scans() -> the count since the last call."""
-    real = scan_mod._hits
+    real = scan_mod._seen_hits
     seen = [0]
 
     def counting(*args, **kwargs):
         seen[0] += 1
         return real(*args, **kwargs)
-    monkeypatch.setattr(scan_mod, "_hits", counting)
+    monkeypatch.setattr(scan_mod, "_seen_hits", counting)
 
     def take():
         n, seen[0] = seen[0], 0

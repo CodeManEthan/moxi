@@ -1,5 +1,8 @@
 """The scan: the named sets, hits, redaction and line batches.
 
+Every scan reads past the see-through characters (`seen_through`): it scans the text as
+given, and, when it holds any, a copy without them whose hits it maps back.
+
 `sets.json` is read once per process. A gitleaks-format rule is compiled the first time
 its keyword appears. On RE2 the credentials and broad sets run here; without RE2 they run
 in the fallback worker child (`moxi_secrets.fallback`), which calls `run_gitleaks` below
@@ -31,10 +34,63 @@ _ALLOW_MARK = "gitleaks:allow"
 _PLACEHOLDER = re.compile(r"\[REDACTED:([^\[\]]*)\]")
 _RULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules")
 
+#: Which `redact` this is. It rises with a release in which `redact`, called with its
+#: default keywords, redacts in some text a span the release before returned whole,
+#: because of how it reads text (a suppression it stops applying, characters it newly
+#: sees through). A change of rule data alone (a rule, regex, keyword, allowlist or
+#: stopword in sets.json or the private-names lists) leaves it as it is.
+REDACT_VERSION = 2
+
+#: Unicode 17.0's Default_Ignorable_Code_Point: the 27 ranges DerivedCoreProperties.txt
+#: lists, unassigned code points included, as (first, last).
+_DEFAULT_IGNORABLE = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4,
+    0x17B5), (0x180B, 0x180D), (0x180E, 0x180E), (0x180F, 0x180F), (0x200B, 0x200F),
+    (0x202A, 0x202E), (0x2060, 0x2064), (0x2065, 0x2065), (0x2066, 0x206F), (0x3164,
+    0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0000), (0xE0001, 0xE0001),
+    (0xE0002, 0xE001F), (0xE0020, 0xE007F), (0xE0080, 0xE00FF), (0xE0100, 0xE01EF),
+    (0xE01F0, 0xE0FFF))
+_IGNORABLE_FIRSTS = tuple(first for first, _ in _DEFAULT_IGNORABLE)
+#: The see-through characters ASCII holds.
+_ASCII_SEEN = "".join(chr(c) for c in (*range(0x20), 0x7F) if chr(c) not in "\t\n")
+_ASCII_SEEN_RX = re.compile("[" + "".join("\\x%02x" % ord(c) for c in _ASCII_SEEN) + "]")
+
 
 class SetUnavailable(Exception):
     """A set a caller asked for cannot run: its list will not load, or its extra is not
     installed. The message names a key and position or an install line, never an entry."""
+
+
+# -- the see-through set --------------------------------------------------------------------
+
+def seen_through(c: str) -> bool:
+    """Whether the scan reads past the character `c`: a character a renderer may show as
+    nothing. That is a C0 control other than tab and newline, DEL or a C1 control; a
+    format character (category Cf, as the running Python's `unicodedata` reads it); or a
+    code point Unicode names default-ignorable, assigned or not."""
+    code = ord(c)
+    if code < 0x20:
+        return c not in "\t\n"
+    if code < 0x7F:
+        return False
+    if code <= 0x9F:
+        return True
+    import unicodedata
+
+    if unicodedata.category(c) == "Cf":
+        return True
+    k = bisect_right(_IGNORABLE_FIRSTS, code) - 1
+    return k >= 0 and code <= _DEFAULT_IGNORABLE[k][1]
+
+
+def _seen_in(text: str) -> str:
+    """The distinct see-through characters `text` holds."""
+    if text.isascii():
+        if _ASCII_SEEN_RX.search(text) is None:
+            return ""
+        return "".join(c for c in _ASCII_SEEN if c in text)
+    return "".join(sorted(c for c in set(text) if seen_through(c)))
 
 
 # -- hits -----------------------------------------------------------------------------------
@@ -579,13 +635,58 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
     hits someone has judged. `known` values are found first, as set "known". A line
     that holds `gitleaks:allow`, or text a rule's line allowlist names, keeps that
     line's gitleaks-set hits out.
+
+    The scan reads past see-through characters (`seen_through`): it also finds what the
+    text holds with them removed, so a token a zero-width space or a soft hyphen splits
+    is a hit, spanning the characters that split it.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    return _hits(text, names, path, allow, tuple(known), keep_marked=True)
+    return _seen_hits(text, names, path, allow, tuple(known), keep_marked=True)
+
+
+def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
+    """The hits of `text` and of a copy of it without its see-through characters, the
+    copy's mapped back to `text`, sorted by start.
+
+    A copy hit's start and end map to the characters of `text` they came from, except
+    that one at the copy's start starts at 0 and one at its end ends at `len(text)`, so
+    it takes in the see-through characters at that end. Its line and fingerprint are the
+    copy's: the fingerprint is the secret without them. A copy hit is left out where a
+    hit of `text` of the same set and rule is the same finding: the same fingerprint
+    over an overlapping span, or the same span. So a text whose secrets no see-through
+    character splits gets the hits it has without the copy.
+    """
+    hits = _hits(text, names, path, allow, known, keep_marked=keep_marked)
+    chars = _seen_in(text)
+    if not chars:
+        return hits
+    rx = re.compile("[" + "".join("\\U%08x" % ord(c) for c in chars) + "]")
+    copy = rx.sub("", text)
+    if not copy:
+        return hits
+    # Each removed character's offset in the copy, where it would sit: a copy offset `c`
+    # maps to `c` plus the count of these at or before it.
+    shifted = [m.start() - i for i, m in enumerate(rx.finditer(text))]
+    size = len(copy)
+    spans = {(h.set, h.rule, h.start, h.end) for h in hits}
+    by_secret: dict = {}
+    for h in hits:
+        by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))
+    out = list(hits)
+    for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked):
+        start = h.start + bisect_right(shifted, h.start) if h.start else 0
+        end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(text)
+        if (h.set, h.rule, start, end) in spans or any(
+                s < end and start < e
+                for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):
+            continue
+        out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))
+    out.sort(key=lambda h: h.start)
+    return out
 
 
 def _hits(text, names, path, allow, known, *, keep_marked) -> list:
@@ -662,11 +763,13 @@ def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) ->
     """`text` with every hit replaced by `[REDACTED:<rule>]`.
 
     Unlike `scan`, `redact` lets nothing on a secret's line keep it: a `gitleaks:allow`
-    mark and a rule's line allowlist keep no hit out. No secret survives: the result
-    scans empty with the same arguments, under `scan` and under `redact`'s own rules.
-    Redacting the result again changes nothing. Up to three passes replace hits; then
-    each line that still holds one becomes a placeholder; then, if a hit spans lines, the
-    whole text.
+    mark and a rule's line allowlist keep no hit out. Like `scan`, it reads past
+    see-through characters, and replaces a token they split together with the characters
+    inside it; every character outside a hit comes back as it was. No secret survives:
+    the result scans empty with the same arguments, under `scan` and under `redact`'s own
+    rules. Redacting the result again changes nothing. Up to three passes replace hits;
+    then each line that still holds one becomes a placeholder; then, if a hit spans
+    lines, the whole text.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
@@ -676,7 +779,7 @@ def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) ->
     known = tuple(known)
 
     def hits_in(current):
-        return _hits(current, names, path, allow, known, keep_marked=False)
+        return _seen_hits(current, names, path, allow, known, keep_marked=False)
 
     current = text
     for _ in range(3):

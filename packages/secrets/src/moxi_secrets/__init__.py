@@ -17,9 +17,9 @@ Standard library only at import.
 from .allow import Allowlist, AllowlistError
 from .names import PrivateNames, private_names
 from .paths import is_secret_path
-from .scan import (SETS, Hit, LineHit, SetInfo, SetUnavailable, describe, redact, scan,
-                   scan_lines)
+from .scan import (REDACT_VERSION, SETS, Hit, LineHit, SetInfo, SetUnavailable, describe,
+                   redact, scan, scan_lines)
 
-__all__ = ["SETS", "Allowlist", "AllowlistError", "Hit", "LineHit", "PrivateNames",
-           "SetInfo", "SetUnavailable", "describe", "is_secret_path", "private_names",
-           "redact", "scan", "scan_lines"]
+__all__ = ["REDACT_VERSION", "SETS", "Allowlist", "AllowlistError", "Hit", "LineHit",
+           "PrivateNames", "SetInfo", "SetUnavailable", "describe", "is_secret_path",
+           "private_names", "redact", "scan", "scan_lines"]
