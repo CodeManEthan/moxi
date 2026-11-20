@@ -5436,6 +5436,8 @@ loadout	packages/loadout/tests/test_page.py	assert any(f["changes"] for f in bod
 loadout	packages/loadout/tests/test_page.py	assert not any(r["gateway"] or r["stream"] for r in routes.values())	keep	any	any
 loadout	packages/loadout/tests/test_page.py	assert says in answer["refused"]	keep	refused	refused
 loadout	packages/loadout/tests/test_page.py	assert status == 422 and "other arguments" in answer["refused"]	keep	refused	refused
+loadout	packages/loadout/tests/test_page.py	assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}	keep	set	set
+loadout	packages/loadout/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "drift", "project-facts"}	keep	set	set
 loadout	packages/loadout/tests/test_page.py	entered.set()	keep	set	set
 loadout	packages/loadout/tests/test_page.py	inner = LB.app(page.PAGE, module="loadout", server_id=SERVER_ID, strict=True)	keep	strict	strict
 loadout	packages/loadout/tests/test_page.py	lo	name	folder	loadout_dir

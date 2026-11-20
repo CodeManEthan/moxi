@@ -1036,6 +1036,18 @@ def test_an_id_that_names_no_job_is_refused(lo):
     assert get("/api/job", "job=..%2Fx")[0] == 422
 
 
+def test_the_components_are_the_page_the_drift_block_and_the_project_facts():
+    from moxi_loadout import module
+
+    assert set(module.COMPONENTS) == {"page", "drift", "project-facts"}
+    for name, decl in module.COMPONENTS.items():
+        assert decl["script"] == f"{name}.js"
+        assert decl["contract"] == 1
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}
+    assert all(spec["type"] == "string" for spec in facts["attributes"].values())
+
+
 def test_the_page_states_its_group_and_order_among_the_pages():
     from moxi_loadout import module
 
