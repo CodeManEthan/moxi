@@ -3362,6 +3362,18 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	and list this session's named holds. `show` shows	keep	show	show
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(recycle.clear_expired(dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(keepwarm.keep_warm(args.session, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	"clear-expired", help="ask now whether each session that recycles on expiry is due",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="print each session's verdict and what a run would do; writes "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	clear.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"keep-warm", help="ask keep-warm about a session now, or open, release or list "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	keep_warm.add_argument("--session", metavar="ID", help="the session to ask about")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="print each session's verdict and what a run would do; "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	keep_warm.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	if args.session is not None or args.dry_run:	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	elif args.session is None and not args.dry_run:	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3455,6 +3467,7 @@ launcher	packages/launcher/src/moxi_launcher/handoffs.py	folder	name	notes_folde
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	own_folder	name	folder	handoffs_dir
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	request_id = env.get(listeners.REQUEST)	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	return handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	got = handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
 launcher	packages/launcher/src/moxi_launcher/identity.py	check	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from before a launch's row, as a `launch-refused` event's detail	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
@@ -3531,6 +3544,8 @@ launcher	packages/launcher/src/moxi_launcher/keepwarm.py	named, dropped = set(na
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	named: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	return Verdict(None, getattr(refused_exc, "code", None) or "refused", refused_exc.problem)	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	said = "opened" if opened.new else f"is already open (since {opened.hold.opened_at})"	keep	opened	opened
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	cover. With `dry_run` the ask writes nothing and ends, where it would nudge, as	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	"caller_env": caller_env, "dry_run": dry_run}	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.RELAUNCH):	use	listeners.RELAUNCH	listeners.RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.REQUEST):	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	where = handoffs.folder(_cwd(event, env), create=key is not None)	use	handoffs.folder	handoffs.handoff_dir
@@ -3609,6 +3624,7 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	"harnesses": Out("list", items=Out("string"), nullable=True)}	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
@@ -3698,6 +3714,7 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return any(getattr(entry, "name", None) == name	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	_agents_folder	_agents_dir
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	folder_place	dir_place
@@ -3744,6 +3761,9 @@ launcher	packages/launcher/src/moxi_launcher/recycle.py	root = Path(home) if hom
 launcher	packages/launcher/src/moxi_launcher/recycle.py	said = f"the session {'cleared' if command == 'clear' else 'compacted'}"	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	reads; a fault after its run was written ends the run `exc`. With `dry_run` the ask	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/recycle.py	bad = any(a.verdict.outcome not in (None, *job.DONE) for a in asked)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/recycle.py	"outcome": "dry-run" if dry_run else "asked", "dry_run": dry_run,	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	_no_live_agents	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	_session_of	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	_store	name	opened	store_conn
@@ -4097,6 +4117,8 @@ launcher	packages/launcher/tests/test_cli.py	handoff_files	name	folder	handoffs_
 launcher	packages/launcher/tests/test_cli.py	return lambda name: handoffs_dir(name, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
+launcher	packages/launcher/tests/test_cli.py	"sessions", "resume", "clear-expired", "keep-warm", "show"}	keep	show	show
+launcher	packages/launcher/tests/test_cli.py	assert any("Carry on with the build." in word for word in json.loads(out)["argv"])	keep	any	any
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
@@ -4137,6 +4159,13 @@ launcher	packages/launcher/tests/test_cli_acts.py	status, out, err = run(["show"
 launcher	packages/launcher/tests/test_cli_acts.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli_acts.py	too_new	name	raw	conn
 launcher	packages/launcher/tests/test_cli_acts.py	{"self": True, "dry_run": True, "json": True}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	"dry_run": False, "json": False}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	"dry_run": True, "json": True}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired"], {"verb": "clear-expired", "dry_run": False, "json": False}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired", "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((), {"dry_run": False})]	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((), {"dry_run": True})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((SID,), {"dry_run": False}), ((None,), {"dry_run": True})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME
@@ -4260,6 +4289,9 @@ launcher	packages/launcher/tests/test_keepwarm.py	self.delivered, self.closed = 
 launcher	packages/launcher/tests/test_keepwarm.py	self.delivered, self.closed = [], 0	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keepwarm.py	self.delivered.append((text, options))	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keepwarm.py	test_cache_s_timer_asks_by_the_request_stamp_alone	name	environ	env
+launcher	packages/launcher/tests/test_keepwarm.py	assert len(session.delivered) == 1	keep	delivered	delivered
+launcher	packages/launcher/tests/test_keepwarm.py	assert got.exit_code == 0 and got.data["dry_run"] is True	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_keepwarm.py	assert store.runs(conn) == [] and session.delivered == []	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keepwarm_cover.py	[(text, _)] = got.session.delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keepwarm_cover.py	assert got.runs == [] and got.session.delivered == []	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keepwarm_cover.py	assert got.session.delivered == [] and got.runs == []	keep	delivered	delivered
@@ -4354,6 +4386,7 @@ launcher	packages/launcher/tests/test_names.py	file.parent.mkdir(parents=True, e
 launcher	packages/launcher/tests/test_names.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id="running", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
+launcher	packages/launcher/tests/test_names.py	assert not any("20261108-1245-work" in word for word in result.argv) and "-n" not in result.argv	keep	any	any
 launcher	packages/launcher/tests/test_page.py	"page": "page", "prompt": "block", "sessions": "block", "state": "inline"}	keep	sessions	sessions
 launcher	packages/launcher/tests/test_page.py	"refused": None, "why": None})	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	-	name	test_no_answer_declares_an_environment_a_brief_or_a_process	test_no_answer_declares_an_env_a_brief_or_a_process
@@ -4489,6 +4522,7 @@ launcher	packages/launcher/tests/test_page_launch.py	refused = requested("r1")["
 launcher	packages/launcher/tests/test_page_launch.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_launch.py	return ("refused", type(exc).__name__, str(exc))	keep	refused	refused
 launcher	packages/launcher/tests/test_page_launch.py	return [r["code"] for r in said["refused"]]	keep	refused	refused
+launcher	packages/launcher/tests/test_page_launch.py	"off_posture_rows", "SHIPPED", "TYPED", "LEFT_OUT", "dir_place", "HOME",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_page_name.py	"refused", "save"}	keep	refused	refused
 launcher	packages/launcher/tests/test_page_name.py	-	name	test_a_folder_inside_a_project_is_named_by_the_projects_key_and_template	test_a_dir_inside_a_project_is_named_by_the_projects_key_and_template
 launcher	packages/launcher/tests/test_page_name.py	-	name	test_the_home_folder_is_named_as_a_launch_there_is_named	test_the_home_dir_is_named_as_a_launch_there_is_named
@@ -4669,6 +4703,7 @@ launcher	packages/launcher/tests/test_recycle.py	test_a_claude_launch_with_its_o
 launcher	packages/launcher/tests/test_recycle.py	test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked	name	locker	lock_conn
 launcher	packages/launcher/tests/test_recycle.py	test_the_crossing_handler_gives_up_on_a_locked_store_within_its_bound	name	locker	lock_conn
 launcher	packages/launcher/tests/test_recycle.py	usage_group	name	connection	conn
+launcher	packages/launcher/tests/test_recycle.py	assert got.data["dry_run"] is False and session.commands == [("clear", 4,	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_relaunch.py	-	name	_folder	_handoff_dir
 launcher	packages/launcher/tests/test_relaunch.py	-	name	environ	test_env
 launcher	packages/launcher/tests/test_relaunch.py	-	name	test_a_relative_handoff_is_read_from_the_working_folder	test_a_relative_handoff_is_read_from_the_working_dir
