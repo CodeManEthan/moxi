@@ -163,7 +163,7 @@ def handoff_dir(cwd: str | Path, *, notes_dir: str | None = None,
     makes the launcher's own folder unless `create_own` says otherwise.
     """
     if modules.available("notes"):
-        return _notes_handoff_dir(cwd, notes_dir, create)
+        return _notes_handoff_dir(cwd, notes_dir, create=create)
     return own_handoffs_dir(env, create=create if create_own is None else create_own)
 
 
@@ -228,7 +228,18 @@ def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRo
         conn.close()
 
 
-def _notes_handoff_dir(cwd, notes_dir, create) -> Path:
+def notes_home(cwd: str | Path) -> Path | None:
+    """The notes directory notes gives a session in `cwd`, or None: notes not installed,
+    not readable, or giving that folder none. Makes nothing."""
+    if not modules.available("notes"):
+        return None
+    try:
+        return _notes_handoff_dir(cwd, None, create=False).parent
+    except NoNotesDir:
+        return None
+
+
+def _notes_handoff_dir(cwd, notes_dir, *, create: bool) -> Path:
     found = modules.load("notes", interface=1)
     handoffs_dir = getattr(found.api, "handoffs_dir", None) if found.api else None
     if found.state != modules.PRESENT or handoffs_dir is None:
@@ -410,7 +421,9 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff", "KeyFolder",
-           "NoKey", "NoNotesDir", "check_key", "current", "file_name", "handoff_dir",
-           "handoff_dir_of_key", "handoff_dir_of_row", "handoffs", "key_of_env", "key_of_row", "keyed", "newest_launch",
-           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked", "waiting"]
+__all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff",
+           "KeyFolder", "NoKey", "NoNotesDir", "check_key", "current", "file_name",
+           "handoff_dir", "handoff_dir_of_key", "handoff_dir_of_row", "handoffs",
+           "key_of_env", "key_of_row", "keyed", "newest_launch", "notes_home",
+           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked",
+           "waiting"]

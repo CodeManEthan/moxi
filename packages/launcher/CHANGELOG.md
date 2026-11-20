@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A scratch launch keeps no notes, as Core's did: a `notes_dir` typed or set by its preset
+  is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
+  folder notes would keep notes for (a temporary folder under a notes place) is refused at
+  preview and launch.
 - With notes installed, a launch notes gives no notes directory (no `notes_dir` and none
   for its folder) has no handoff folder: a self relaunch is refused, saying the launch has
   no `handoffs/` to read from, `moxi launcher handoff dir` and `handoffs` refuse

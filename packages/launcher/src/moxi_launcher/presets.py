@@ -155,6 +155,13 @@ class NotYet(Refused):
     code = "not-yet"
 
 
+class ScratchNotes(Refused):
+    """A scratch launch given a notes folder: by its `notes_dir` value, or by a folder
+    notes would keep notes for. A scratch launch keeps nothing."""
+
+    code = "scratch-notes"
+
+
 class NeedsProjects(Refused):
     """A project key with projects not installed."""
 
@@ -1012,6 +1019,8 @@ def resolve(request, *, presets: Presets | None = None,
     values["cwd"] = cwd or ""
     values["scratch"] = scratch
     values["project"] = project.key if project is not None else ""
+    if scratch and values.get("notes_dir"):
+        _scratch_notes_dir(values, sources)
 
     _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
@@ -1273,6 +1282,18 @@ def _named(request, found: Presets) -> Preset | None:
     return None
 
 
+def _scratch_notes_dir(values: dict, sources: dict) -> None:
+    """A scratch launch has no notes home: a `notes_dir` typed or set by its preset is
+    refused by name, and one from `[defaults]`, which is set for every launch, is left
+    out."""
+    if sources.get("notes_dir") == DEFAULTS:
+        values["notes_dir"], sources["notes_dir"] = "", LEFT_OUT
+        return
+    raise ScratchNotes("notes_dir", "a scratch launch keeps no notes, so it takes no "
+                                    "notes_dir", "leave notes_dir out, or launch in a "
+                                                 "folder of your own")
+
+
 def _place(place: Mapping[str, object], caller: str, avail, what: str
            ) -> tuple[str | None, bool, object | None]:
     """(cwd, scratch, project) from the one place named, else the caller's directory."""
@@ -1365,7 +1386,7 @@ __all__ = [
     "Agent", "BadPreset", "CACHE_TIMER_ROWS", "CODEX_START_CEILING", "COLD_GAP",
     "COMMS_INTERFACE", "ERROR", "HEADLESS_EXIT", "KINDS",
     "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
-    "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
+    "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "ScratchNotes",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",
     "harness_of",

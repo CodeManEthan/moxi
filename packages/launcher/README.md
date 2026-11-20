@@ -221,7 +221,11 @@ passes on: every `CLAUDE*` variable except your own Claude Code configuration an
 sign-in (`CLAUDE_CONFIG_DIR`, the provider switches such as `CLAUDE_CODE_USE_BEDROCK`,
 `CLAUDE_CODE_OAUTH_TOKEN` and the others in the launcher's keep-list), and each
 module's own session stamps. A scratch launch works in a folder of its own under
-`moxi-scratch-<uid>` in the system's temporary folder, which only you may use.
+`moxi-scratch-<uid>` in the system's temporary folder, which only you may use. It keeps
+no notes: a `notes_dir` typed or set by its preset is refused (`scratch-notes`), one from
+`[defaults]` is left out, and with notes installed a preview or launch whose scratch
+folder notes would keep notes for is refused too. With no notes folder it has no handoff
+folder either (see "Handoffs").
 
 Another module can ask the launch log how a session was launched. The launcher offers
 interface 1, `moxi.modules.load("launcher", interface=1).api`, whose

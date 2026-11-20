@@ -878,6 +878,57 @@ def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     assert where.is_dir()
 
 
+def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path):
+    # Core's scratch launch had no notes home, and refused a notes_dir by name.
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF, "notes_dir": str(tmp_path / "notes")},
+                        cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.ScratchNotes) as caught:
+        api.preview(req)
+    assert (caught.value.code, caught.value.row) == ("scratch-notes", "notes_dir")
+    assert caught.value.problem == "a scratch launch keeps no notes, so it takes no notes_dir"
+    [refused] = api.check(req)
+    assert isinstance(refused, presets.ScratchNotes)
+    with pytest.raises(presets.ScratchNotes):
+        api.launch(req)
+    assert nothing_written("r9") and not common.scratch_dir("r9").exists()
+
+
+def test_a_notes_dir_from_the_defaults_is_left_out_of_a_scratch_launch(harness, tmp_path):
+    write_presets(f'[defaults]\nnotes_dir = "{tmp_path / "notes"}"\n')
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    assert api.preview(req).values["notes_dir"] == ""
+
+
+def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, monkeypatch):
+    # Core put the scratch folder to the notes resolver and refused one that got a home.
+    from moxi import modules
+
+    homes = []
+
+    def handoffs_dir(path, *, create=False, override=None):
+        homes.append(path)
+        return tmp_path / "notes-home" / "handoffs"
+
+    found = SimpleNamespace(state=modules.PRESENT, ok=True, reason="",
+                            api=SimpleNamespace(handoffs_dir=handoffs_dir))
+    real, real_load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        found if name == "notes" else real_load(name, interface=interface))
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.ScratchNotes) as caught:
+        api.preview(req)
+    assert (caught.value.code, caught.value.row) == ("scratch-notes", "scratch")
+    assert f"resolves to a notes home ({tmp_path / 'notes-home'})" in caught.value.problem
+    assert homes == [str(common.scratch_dir("r9"))]
+    with pytest.raises(presets.ScratchNotes):
+        api.launch(req)
+    assert nothing_written("r9") and not common.scratch_dir("r9").exists()
+
+
 @POSIX
 def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path):
     import tempfile
