@@ -5453,7 +5453,7 @@ loadout	packages/loadout/tests/test_page.py	assert body["folder"] == str(lo)	kee
 loadout	packages/loadout/tests/test_page.py	kit.claude().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_pagejob.py	"exit": 3, "outcome": None, "lines": ["refused"]}	keep	refused	refused
 loadout	packages/loadout/tests/test_pagejob.py	"lines": ["refused"]}))	keep	refused	refused
-loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for an install or uninstall" in line	keep	any	any
+loadout	packages/loadout/tests/test_pagejob.py	assert any("waiting for the core lock, which pid " in line	keep	any	any
 loadout	packages/loadout/tests/test_pagejob.py	assert not {"homes", "git"} & set(ledger.read())	keep	set	set
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
