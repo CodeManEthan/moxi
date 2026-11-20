@@ -463,6 +463,22 @@ range of days), and the count: `62 sessions`, or `15 of 62 sessions` once someth
 narrows the list. The list is read when the page opens, when its tab is shown again, and
 every 30 seconds while the tab is visible; groups you showed more of stay as they were.
 
+**Running now.** With launcher installed, the sessions it runs now come first, under `N
+running`, in the order Home draws them: a session that waits on agents while nothing will
+keep its cache warm leads. A row is named by the launch's name, with where it runs beside
+it (`slot 3 · atlas-api`), its cache fact (`goes cold at 14:20`), what it waits on
+(`waiting on 2 agents`) and its newest message, or `launched` before it has one. A running
+session is drawn in this group only, not again under `Active recently` or its day, though
+`N more` still counts it. With a filter set the group keeps the launches whose session
+the narrowed list holds; under the find field there is no group. With nothing running
+there is no group, and a read that fails draws `Running` with `Moxi couldn't read the
+running sessions`. A waiting session whose cache a press would cover has `Keep warm` at the
+desk (not through the phone gateway): it asks launcher to keep that cache warm, and stays
+disabled until launcher has answered and its next value has come, or for 20 seconds; a
+refusal's words show on the row until the next value. A launch whose session id launcher
+has not learned has nothing to open. Without launcher none of this is drawn and the list
+starts with `Active recently`.
+
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
 can be open at once. The session is read when its row is opened. Opened, a row shows the
 newest message a person typed (`You`) and the model's newest message after it (`Reply`),
@@ -489,7 +505,14 @@ a Codex subagent thread each open at their own id. Over the session, the first l
 typed for it, else its folder and when it started) and `Refresh`. The second has the
 harness, the model and from when to when, and `Details`, which shows and hides the rest:
 the harness's name, the session's id, its title, directory, last activity, version,
-parent session, entrypoint and the file it was read from. A subagent, and a session
+parent session, entrypoint and the file it was read from. Where the turns reach a Claude Code
+session's start, the line there reads `Started today 07:40 in harbor-infra, by hand` when
+both of these say a person started it: its head names an entrypoint that isn't a
+program's (`by_program` false), and launcher, asked once when the transcript opens,
+refuses the session as never launched. Anywhere else (a Codex or OpenCode session, whose
+record doesn't say who started it, a Claude Code session whose head wasn't read or names
+a program, one a launch holds, or no launcher) the line is the plain `This is the start
+of the session.` A subagent, and a session
 another one started, is not in the list, so it keeps a heading that names it by its id or
 title, with those facts in the open. Under the header come the session's last five turns,
 oldest first. Each message shows as
@@ -552,7 +575,11 @@ which does not search every session's first lines as a `find` does. On a page se
 first open the name comes a fraction of a second after the turns, while the server lists
 the sessions it can show.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
-request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+request. With launcher installed the page also reads three of launcher's routes and its
+push topic: `/api/running` (the launches running now) with each read of the list; the topic
+`running` at the desk, which brings each new value as launcher has it; `/api/keep-warm` on a
+`Keep warm` press; and `/api/state?session=<id>` once when a Claude Code session's transcript
+opens. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
 the list read in memory for as long as it runs, and keeps no more of a message than it
 sends.
@@ -575,17 +602,17 @@ zero and no greyed control stands in for it. What is left out, and what each nee
   narrowed. Today the address names the list or one session and nothing more.
 - Find over names and typed prompts: it needs an index of them in sessions, which is a
   store with what was typed in it. Find takes an id or a folder's name.
-- Running sessions as a group of their own, with the slot and the template each was
-  started from, the effort on the `Session` line, and `Resume` that starts the session
-  from the page: they need the launcher's read of what it launched.
+- The template a running session was started from, the effort on the `Session` line, and
+  `Resume` that starts the session from the page: they need more of launcher's read of
+  what it launched than `/api/running` gives.
 - A running session's state (working, how many subagents and shells are busy, a line for
   trouble, the turn that is open) and a session that waits for an answer: they need
   turns to say them by session.
 - A Project filter in place of Folder, and the project beside a row's name: the
   `projects` extra answers many folders' projects in one read, and the list doesn't use
   it yet.
-- Whether a session's cache is warm or cold and until when, with a way to keep it warm:
-  it needs the cache module's state by session.
+- Whether the cache of a session launcher doesn't run is warm or cold and until when,
+  with a way to keep it warm: it needs the cache module's state by session.
 - Cost, the number of prompts and the context's size, on a row or on a transcript: they
   need the usage module's figures by session.
 - Mail counts, such as one message held for a session: they need comms' count of mail

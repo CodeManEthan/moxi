@@ -438,7 +438,7 @@ def test_a_claude_session_gives_every_detail(roots):
     t.write()
 
     assert details(roots) == Details(
-        work_dir="/work/proj-a", started=START, by_program=None, name="fix the tests",
+        work_dir="/work/proj-a", started=START, by_program=False, name="fix the tests",
         model="claude-model-y", activity=Said(START + 1, "agent", "All fixed."),
         prompt=Said(START, "you", "please fix them"))
 
@@ -487,7 +487,8 @@ def test_an_opencode_session_gives_its_work_dir_start_and_model_and_no_name(root
 
 
 @pytest.mark.parametrize("entrypoint, expected", [
-    ("sdk-cli", True), ("sdk-py", True), ("cli", None), ("claude-vscode", None)])
+    ("sdk-cli", True), ("sdk-py", True), ("cli", False), ("claude-vscode", False),
+    ("", None), (7, None)])
 def test_a_program_is_told_by_the_entrypoint_the_head_writes(roots, entrypoint, expected):
     t = transcript(roots, entrypoint=entrypoint)
     t.user("go")
@@ -879,7 +880,7 @@ def test_a_failed_last_turn_read_gives_nulls_and_is_tried_again(roots, monkeypat
 
     monkeypatch.setattr(catalog_module, "window", broken)
     failed = cat.details(only(cat))
-    assert failed == Details(work_dir="/work/proj-a", started=START,
+    assert failed == Details(work_dir="/work/proj-a", started=START, by_program=False,
                              prompt=Said(START, "you", "one"))
 
     monkeypatch.setattr(catalog_module, "window", real)

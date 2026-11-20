@@ -61,7 +61,8 @@ server's life; so does `/api/projects`, and no other request.
 an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (how many;
 null where the session's subagents folder could not be listed),
 `folder`, `started`, `by_program` (true where the record says a program started the
-session, else null), `name` (one typed for the session in the harness, else null),
+session, false where it says a person did, null where it says neither: every Codex and
+OpenCode session, and a Claude Code session whose head was not read), `name` (one typed for the session in the harness, else null),
 `model`, `activity` (`{at, who, text}`: the newest thing said in the last turn, whoever
 said it, `who` being `you`, `agent` or null, `text` cut at 300 bytes; or null), `prompt`
 (`{at, text, truncated}`: the newest message of the whole session that its record marks

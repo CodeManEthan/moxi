@@ -296,8 +296,8 @@ test("line two is the typed message: its time, You: and its text, with Open as t
   }), TODAY, TODAY, false, UTC);
   assert.deepEqual(view, {
     key: "claude/s1", harness: "claude", session: "s1", route: "claude/s1",
-    name: "kestrel-web · started today 18:45", where: null, fact: null,
-    lead: null, time: "19:09", saidBy: "you",
+    name: "kestrel-web · started today 18:45", where: null, fact: null, factHeavy: false,
+    lead: null, leadHeavy: false, time: "19:09", saidBy: "you",
     rest: "Run the visual regression suite and report every diff over 0.5%.",
     lines: 2, act: "Open", open: false, on: TODAY,
   });
@@ -487,7 +487,7 @@ test("the count is M sessions, and N of M sessions when a filter or the find fie
 test("a machine with no session reads No sessions yet, with the link only where the launcher is", () => {
   const state = stateOf([recent([])], { all: 0, total: 0, harnesses: [] });
   assert.deepEqual(draw(state), {
-    count: null, groups: [], notices: [], unlisted: null,
+    count: null, running: null, groups: [], notices: [], unlisted: null,
     empty: { line: "No sessions yet.", sentence: NO_SESSIONS_SENTENCE, start: null },
   });
   assert.equal(draw(state, { launcher: true }).empty.start, "Start one from Home");
