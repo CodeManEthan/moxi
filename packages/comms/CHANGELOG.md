@@ -14,8 +14,8 @@
   and a session's `history` tool list the older record's messages before comms.db's,
   the tool with the state `archived` and a `skip` to page back past the newest
   messages it reads at once; `explain <name> <id>` of an older message says
-  whether the older queue still held it for that name and that the rest of its delivery
-  is not read; `reply` and every read by id find
+  whether the older queue still held it for that name and whether that name's older
+  cursor file stood at or past it, and that the rest of its delivery is not read; `reply` and every read by id find
   an older message by its own id, because the daemon moves comms.db's counter past the
   older ids once at its start; and every name the older identities file retired is
   refused at bind and as a recipient again.

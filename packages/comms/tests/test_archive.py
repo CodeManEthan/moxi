@@ -9,6 +9,7 @@ that comms' own shape and names them in `[archive]` before the rig's daemon star
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -71,6 +72,14 @@ def _build(older_dir):
     conn.execute("INSERT INTO queue VALUES (?, 'main@proj-a')", (OLD_ASK,))
     conn.commit()
     conn.close()
+    # The older comms' cursor files beside its record: main's short of the old ask,
+    # planner's past it.
+    cursors = older_dir / "cursors" / "local"
+    cursors.mkdir(parents=True)
+    (cursors / "main@proj-a.json").write_text(json.dumps(
+        {"cursor": str(OLD_ASK - 1), "updated_at": "2026-10-01T09:00:00+00:00"}))
+    (cursors / "planner@proj-a.json").write_text(json.dumps(
+        {"cursor": str(OLD_ASK + 1), "updated_at": "2026-10-01T11:00:00+00:00"}))
     conn = sqlite3.connect(identities)
     conn.executescript("""
         CREATE TABLE agents (name TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'global',
@@ -86,8 +95,9 @@ def _build(older_dir):
 
 
 def _fingerprint(older_dir) -> dict:
-    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(older_dir.iterdir())}
+    return {str(p.relative_to(older_dir)): (hashlib.sha256(p.read_bytes()).hexdigest()
+                                            if p.is_file() else "dir")
+            for p in sorted(older_dir.rglob("*"))}
 
 
 @pytest.fixture
@@ -189,24 +199,32 @@ def test_a_reply_to_an_older_message_reaches_its_author(older, rig):
     assert f"re:{OLD_ASK}" in rig.record.get_message(elder.queue[0]["message_id"]).content
 
 
-def test_explain_of_an_older_message_reads_the_older_queue_and_no_other_books(older,
-                                                                               rig):
-    """The older comms' explain answered from its daemon's memory and cursor files, and of
-    those its record keeps only the queue. Asked about an older message, explain reads
-    that queue for the name, takes none of comms.db's books as the message's, and says
-    plainly that the rest is not read, with the daemon up or down."""
+def test_explain_of_an_older_message_reads_the_older_queue_and_cursor_files(older, rig):
+    """The older comms' explain answered from its daemon's memory, its queue and the
+    name's cursor file, which it compared with the message id. Asked about an older
+    message, explain reads that queue and that cursor file for the name, compares the
+    cursor with the id as that explain did, takes none of comms.db's books as the
+    message's, and says plainly that the daemon's memory is gone, with the daemon up or
+    down. An id in the skipped range that the older record holds as no mail is not
+    called an older message."""
     c = DaemonClient(daemon_socket()).connect()
     try:
         held = c.call("explain", {"identity": "main@proj-a", "message_id": str(OLD_ASK)})
         handed = c.call("explain", {"identity": "planner@proj-a",
                                     "message_id": str(OLD_ASK)})
+        notice = c.call("explain", {"identity": "main@proj-a",
+                                    "message_id": str(OLD_NOTE)})
     finally:
         c.close()
-    assert held["archive"] == {"queued": True}
-    assert handed["archive"] == {"queued": False}
+    assert held["archive"]["queued"] is True
+    assert held["archive"]["cursor"]["reason"] == archive.BEHIND
+    assert held["archive"]["cursor"]["position"] == str(OLD_ASK - 1)
+    assert handed["archive"]["queued"] is False
+    assert handed["archive"]["cursor"]["reason"] == archive.ALREADY_PAST
     for answer in (held, handed):
         assert answer["case"] is None, "comms.db's classifier is not this message's"
         assert answer["cursor"]["reason"] not in (books.ALREADY_PAST, books.BEHIND)
+    assert notice["archive"] is None, "a #notices id is not an older message"
 
     code, out = rig.cli(["explain", "main@proj-a", str(OLD_ASK)], name="planner",
                         scope="proj-a")
@@ -215,14 +233,22 @@ def test_explain_of_an_older_message_reads_the_older_queue_and_no_other_books(ol
                                    f"message {OLD_ASK}")
     flat = " ".join(out.split())
     assert "still held it in main@proj-a's queue when it stopped" in flat
-    assert "are not read" in flat
+    assert (f"Its cursor file for main@proj-a stands at {OLD_ASK - 1}, written "
+            "2026-10-01T09:00:00+00:00: short of this message") in flat
+    assert "daemon's memory, which is gone" in flat
+    code, out = rig.cli(["explain", "planner@proj-a", str(OLD_ASK)], name="planner",
+                        scope="proj-a")
+    assert "at or past this message" in " ".join(out.split())
+    code, out = rig.cli(["explain", "main@proj-a", str(OLD_NOTE)], name="planner",
+                        scope="proj-a")
+    assert "from the older comms' record" not in out
 
     rig.daemon.stop()
     code, out = rig.cli(["explain", "main@proj-a", str(OLD_ASK)], name="planner",
                         scope="proj-a")
     assert code == 75, out
     assert f"main@proj-a   from the older comms' record   message {OLD_ASK}" in out
-    assert "are not read" in " ".join(out.split())
+    assert "short of this message" in " ".join(out.split())
 
 
 def test_a_name_the_archive_retired_is_refused_at_bind_and_as_a_recipient(older, rig):

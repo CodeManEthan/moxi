@@ -506,7 +506,7 @@ def cmd_explain(args, ctx: Context) -> int:
         older = None if args.message_id is None else archive.explained(
             books.read_archive_skipped(), args.message_id, qualified)
         if older is not None:
-            for line in _older_explain(qualified, args.message_id, queued=older["queued"]):
+            for line in _older_explain(qualified, args.message_id, older):
                 ctx.say(line)
         elif args.message_id is not None:
             dropped = books.read_dropped(qualified, args.message_id)
@@ -988,7 +988,7 @@ def _render_explain(info: dict) -> str:
     about = "" if d is None else f"   message {d['message_id']}"
     if info.get("archive") is not None:
         return "\n".join(_older_explain(info["identity"], d["message_id"],
-                                        queued=info["archive"]["queued"])
+                                        info["archive"])
                          + _render_facts(info))
     lines = [f"{info['identity']}   "
              f"{info['case'] or 'no delivery to classify'}{about}", ""]
@@ -1004,23 +1004,45 @@ def _render_explain(info: dict) -> str:
     return "\n".join(lines + _render_facts(info))
 
 
-def _older_explain(identity: str, message_id, *, queued: bool | None) -> list[str]:
+def _older_explain(identity: str, message_id, older: dict) -> list[str]:
     """The head of `explain` for a message from an older comms' record
-    (`archive.explained`): what that record says of it for `identity`, and that the
-    rest of its delivery is not read."""
+    (`archive.explained`): what that record's queue and the name's cursor file there say
+    of it for `identity`, and that the rest of its delivery is not read."""
+    queued, cursor = older.get("queued"), older.get("cursor")
     if queued is None:
         held = "That record can't be read now, so nothing of its delivery is known."
     elif queued:
         held = (f"That comms still held it in {identity}'s queue when it stopped, so "
                 "it had not reached that name then, and comms.db does not deliver it.")
     else:
-        held = (f"That comms was not holding it in {identity}'s queue when it stopped.")
+        held = f"That comms was not holding it in {identity}'s queue when it stopped."
     text = ("This message is from the older comms' record, read in place. " + held
-            + " The rest of its delivery (the hand-over, the injection, the cursor "
-            "then) was that daemon's memory and cursor files, which are not read. The "
-            "facts below are comms.db's, about this name, not about this message.")
+            + _older_cursor(identity, cursor)
+            + " The rest of its delivery (the hand-over, the injection) was that "
+            "daemon's memory, which is gone. The facts below are comms.db's, about this "
+            "name, not about this message.")
     return ([f"{identity}   from the older comms' record   message {message_id}", ""]
             + _wrap(text, 74, "  ") + [""])
+
+
+def _older_cursor(identity: str, cursor: dict | None) -> str:
+    """The older cursor file's sentence for `_older_explain`, led by a space."""
+    if cursor is None:
+        return ""
+    reason, at = cursor["reason"], cursor.get("updated_at")
+    when = f", written {at}" if at else ""
+    if reason == archive.ALREADY_PAST:
+        return (f" Its cursor file for {identity} stands at {cursor['position']}{when}: "
+                "at or past this message, so a turn of that name completed with it.")
+    if reason == archive.BEHIND:
+        return (f" Its cursor file for {identity} stands at {cursor['position']}{when}: "
+                "short of this message, so no turn of that name completed with it.")
+    if reason == archive.NO_CURSOR:
+        return f" It kept no cursor file for {identity}."
+    if reason == archive.NOT_AN_ID:
+        return (f" Its cursor file for {identity} holds {cursor['position']!r}, which is "
+                "not a message id, so nothing can be compared with it.")
+    return f" Its cursor file for {identity} can't be read as a cursor."
 
 
 def _render_facts(info: dict) -> list[str]:

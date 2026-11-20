@@ -12,10 +12,17 @@ What the archive answers:
   comms.db's, as one record (`timeline`);
 * a message id comms.db skipped (below) is the archive's, so `reply` and every other
   read of one message by id find it there;
-* `explain` of such an id reads the older daemon's queue for the name, the one delivery
-  fact the record keeps, and no comms.db book (`explained`);
+* `explain` of such an id, once the archive holds it as a `#names` message, reads the
+  older daemon's queue for the name, the one delivery fact the record keeps, and the
+  name's cursor file beside the record, compared with the id as the older comms' explain
+  compared it; it reads no comms.db book (`explained`);
 * every identity the archive marks `retired` stays retired: comms refuses it at bind and
   as a recipient, as it refuses one comms.db retired (`directory.retired`).
+
+**The cursor files.** The older comms kept each name's cursor, the last message id a
+turn of that name completed, in a file of its own beside its record:
+`cursors/local/<name>.json`, `{"cursor": "<id>", "updated_at": "<time>"}`. comms reads
+the one file explain asks about, and never writes it.
 
 **The ids.** The older comms and comms.db count message ids from the same base, so the
 same id can name a message in each. At its start the daemon raises comms.db's counter to
@@ -47,6 +54,12 @@ log = logging.getLogger("comms.archive")
 META_SKIPPED = "archive_skipped"
 #: The older record's room whose messages `history` lists.
 NAMES_ROOM = "#names"
+#: The older comms' cursor files, beside its record: `<dir>/<name>.json`.
+CURSORS_DIR = Path("cursors") / "local"
+#: How a name's older cursor stands against a message id (`Archive.cursor`): at or past
+#: it, short of it, no file, a file that isn't a cursor, a cursor that isn't an id.
+ALREADY_PAST, BEHIND, NO_CURSOR, UNREADABLE, NOT_AN_ID = (
+    "already-past", "behind", "no-cursor", "unreadable", "not-a-message-id")
 
 
 class ArchiveError(Exception):
@@ -117,6 +130,42 @@ class Archive:
         except sqlite3.Error as exc:
             raise ArchiveError(f"{self.record} can't be read: {exc}") from None
         return _message(row) if row else None
+
+    def is_mail(self, message_id) -> bool:
+        """Is `message_id` one of the record's `#names` messages?"""
+        try:
+            row = self._conn("record").execute(
+                "SELECT 1 FROM messages WHERE id = ? AND channel_id = "
+                "(SELECT channel_id FROM channels WHERE name = ?)",
+                (int(message_id), NAMES_ROOM)).fetchone()
+        except sqlite3.Error as exc:
+            raise ArchiveError(f"{self.record} can't be read: {exc}") from None
+        return row is not None
+
+    def cursor(self, name: str, message_id) -> dict:
+        """`name`'s cursor file beside the record, read and compared with `message_id`
+        as the older comms' explain compared them: `{"reason", "position",
+        "updated_at", "path"}`, `reason` one of `ALREADY_PAST`, `BEHIND`, `NO_CURSOR`,
+        `UNREADABLE`, `NOT_AN_ID`. The file is only read."""
+        import json
+
+        path = self.record.parent / CURSORS_DIR / f"{name}.json"
+        out = {"reason": NO_CURSOR, "position": None, "updated_at": None,
+               "path": str(path)}
+        if not path.is_file():
+            return out
+        try:
+            parsed = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {**out, "reason": UNREADABLE}
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("cursor"), (str, int)):
+            return {**out, "reason": UNREADABLE}
+        out.update(position=str(parsed["cursor"]), updated_at=parsed.get("updated_at"))
+        try:
+            position = int(parsed["cursor"])
+        except ValueError:
+            return {**out, "reason": NOT_AN_ID}
+        return {**out, "reason": ALREADY_PAST if position >= int(message_id) else BEHIND}
 
     def queued(self, message_id, name: str) -> bool:
         """Did the older daemon's queue (the record's `queue`) still hold `message_id`
@@ -275,24 +324,30 @@ def get_message(conn, message_id) -> Message | None:
 
 
 def explained(window: tuple[int, int] | None, message_id, name: str) -> dict | None:
-    """What `explain` reads for an archive message, when `message_id` is in `window`
-    (`skipped`); None for an id that is comms.db's.
+    """What `explain` reads for an archive message: `message_id` is in `window`
+    (`skipped`) and the archive holds it as a `#names` message. None for any other id,
+    which is comms.db's to explain.
 
     The older comms answered explain from its daemon's memory (the binding, the hand-over
-    times, the injection) and its cursor files, and its record keeps only one of those
-    facts: its queue, which its daemon wrote through to the record. So the answer is
-    `{"queued": ...}`: True when that queue still held the message for `name` when that
-    comms stopped, False when it did not, None when the record can't be read."""
+    times, the injection), its queue, which its daemon wrote through to the record, and
+    the name's cursor file. The memory went with that daemon; the other two are read. So
+    the answer is `{"queued": ..., "cursor": ...}`: `queued` True when that queue still
+    held the message for `name` when that comms stopped, False when it did not; `cursor`
+    `Archive.cursor`'s reading of the name's cursor file against the id. Both are None
+    when the record can't be read."""
     if not holds(window, message_id):
         return None
     found = current()
     if found is None or found.record is None:
-        return {"queued": None}
+        return None
     try:
-        return {"queued": found.queued(message_id, name)}
+        if not found.is_mail(message_id):
+            return None
+        return {"queued": found.queued(message_id, name),
+                "cursor": found.cursor(name, message_id)}
     except ArchiveError as exc:
         _warn(exc)
-        return {"queued": None}
+        return {"queued": None, "cursor": None}
 
 
 def skip_ids(record) -> tuple[int, int] | None:
@@ -316,6 +371,7 @@ def skip_ids(record) -> tuple[int, int] | None:
     return window
 
 
-__all__ = ["Archive", "ArchiveError", "META_SKIPPED", "NAMES_ROOM", "connect", "current",
+__all__ = ["ALREADY_PAST", "BEHIND", "CURSORS_DIR", "NOT_AN_ID", "NO_CURSOR", "UNREADABLE",
+           "Archive", "ArchiveError", "META_SKIPPED", "NAMES_ROOM", "connect", "current",
            "explained", "from_config", "get_message", "holds", "messages", "retired",
            "skip_ids", "skipped", "timeline"]
