@@ -476,6 +476,18 @@ def test_an_allowlist_line_keeps_a_split_value_and_a_split_known_value_is_found(
                   known=[value]) == "x " + ph("known") + " y"
 
 
+def test_a_split_value_that_overlaps_its_own_whole_copy_is_redacted_whole(engine_name):
+    # The value starts and ends with the same two characters, so two copies of it can
+    # share them; the first copy is split, the second is whole in the text.
+    r = corpus.rng(57)
+    border, middle = "Q7", corpus.chars(r, 20)
+    value = border + middle + border
+    text = border + corpus.split(middle, "​") + border + middle + border
+    assert redact(text, ("credentials",), known=[value]) == ph("known")
+    assert [(h.start, h.end) for h in scan(text, ("credentials",), known=[value])] == [
+        (0, len(value) + 1), (len(value) - 1, len(text))]
+
+
 def test_redact_version():
     assert REDACT_VERSION == 2
     assert "REDACT_VERSION" in moxi_secrets.__all__

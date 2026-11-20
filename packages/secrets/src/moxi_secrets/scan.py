@@ -680,8 +680,13 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked):
         start = h.start + bisect_right(shifted, h.start) if h.start else 0
         end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(text)
+        inner_start, inner_end = start, end
+        while inner_start < inner_end and seen_through(text[inner_start]):
+            inner_start += 1
+        while inner_end > inner_start and seen_through(text[inner_end - 1]):
+            inner_end -= 1
         if (h.set, h.rule, start, end) in spans or any(
-                s < end and start < e
+                s <= inner_start and inner_end <= e
                 for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):
             continue
         out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))
