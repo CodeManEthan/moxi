@@ -9,7 +9,10 @@
   newline, format characters, and Unicode's default-ignorable code points), so a token
   split by a zero-width space or a soft hyphen is found. `redact` replaces it in place
   and leaves every other character as it was. A text holding such a character is
-  scanned twice; on the fallback engine that is a second worker request.
+  scanned twice; on the fallback engine that is a second worker request. One that also
+  holds a vertical tab, form feed, lone carriage return, U+001C to U+001F or NEL is
+  scanned a third time, with each of those as a space, so a token that one of them
+  sets apart from the word before it is found when split.
 - `REDACT_VERSION`, now 2: which `redact` this is, for a store of redacted text to
   record.
 - `seen_through(c)`: whether `scan` and `redact` read past a character.

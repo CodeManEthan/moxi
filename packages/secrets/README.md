@@ -80,8 +80,11 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   and the byte order mark; and every code point Unicode 17.0 names default-ignorable,
   assigned or not, such as variation selectors and Hangul fillers. Tab, newline and the
   Unicode spaces aren't among them. A text holding any is scanned twice: as given, and
-  as a copy without them, whose hits are mapped back. `allow` and `known` judge a split
-  value as they judge it whole.
+  as a copy without them, whose hits are mapped back. A text that also holds one a rule
+  may read as whitespace (a vertical tab, form feed, carriage return with no newline
+  after it, U+001C to U+001F or NEL) is scanned a third time, as a copy with a space for
+  each of those and without the rest, so the boundary one gave a token survives. `allow`
+  and `known` judge a split value as they judge it whole.
 - `redact(text, sets, ...)` replaces each hit with `[REDACTED:<rule id>]`, a split token
   with the characters inside it; a split token at the very start or end of the text
   takes in the invisible characters before or after it. Its result scans clean with the

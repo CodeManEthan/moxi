@@ -488,6 +488,22 @@ def test_a_split_value_that_overlaps_its_own_whole_copy_is_redacted_whole(engine
         (0, len(value) + 1), (len(value) - 1, len(text))]
 
 
+@pytest.mark.parametrize("border", ["\x0b", "\r"])
+def test_a_split_token_keeps_the_boundary_a_whitespace_like_character_gives(engine_name,
+                                                                            border):
+    # Stripe's rule needs a word boundary before the key; with the vertical tab or the
+    # lone carriage return removed, "abc" would run into it.
+    token = corpus.stripe(corpus.rng(58))
+    text = "abc" + border + corpus.split(token, "​", 12) + " end"
+    assert redact(text, ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end"
+    whole = "abc" + border + token + " end"
+    assert [(h.rule, h.start, h.end) for h in scan(whole, ("credentials",))] == [
+        ("stripe-access-token", 4, 4 + len(token))]
+    assert redact(whole, ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end"
+
+
 def test_redact_version():
     assert REDACT_VERSION == 2
     assert "REDACT_VERSION" in moxi_secrets.__all__

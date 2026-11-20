@@ -648,49 +648,77 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
     return _seen_hits(text, names, path, allow, tuple(known), keep_marked=True)
 
 
+#: The see-through characters a rule may read as whitespace, as `str.isspace` does: VT,
+#: FF, a carriage return no newline follows, U+001C to U+001F and NEL.
+_SPACED_RX = re.compile("[\x0b\x0c\x1c-\x1f\x85]|\r(?!\n)")
+
+
 def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     """The hits of `text` and of a copy of it without its see-through characters, the
-    copy's mapped back to `text`, sorted by start.
+    copy's mapped back to `text`, sorted by start. When `text` holds a see-through
+    character a rule may read as whitespace (`_SPACED_RX`), a third copy holds a space
+    for each such character and none of the others, so a boundary one gave survives;
+    its hits are mapped back the same way.
 
     A copy hit's start and end map to the characters of `text` they came from, except
     that one at the copy's start starts at 0 and one at its end ends at `len(text)`, so
     it takes in the see-through characters at that end. Its line and fingerprint are the
     copy's: the fingerprint is the secret without them. A copy hit is left out where a
-    hit of `text` of the same set and rule is the same finding: the same fingerprint
-    over an overlapping span, or the same span. So a text whose secrets no see-through
-    character splits gets the hits it has without the copy.
+    hit already taken of the same set and rule is the same finding: one with the same
+    span, or one with the same fingerprint whose span holds the copy hit's span trimmed
+    of see-through characters at both ends. So a text whose secrets no see-through
+    character splits gets the hits it has without the copies.
     """
     hits = _hits(text, names, path, allow, known, keep_marked=keep_marked)
     chars = _seen_in(text)
     if not chars:
         return hits
     rx = re.compile("[" + "".join("\\U%08x" % ord(c) for c in chars) + "]")
-    copy = rx.sub("", text)
-    if not copy:
-        return hits
-    # Each removed character's offset in the copy, where it would sit: a copy offset `c`
-    # maps to `c` plus the count of these at or before it.
-    shifted = [m.start() - i for i, m in enumerate(rx.finditer(text))]
-    size = len(copy)
+    bases = [text]
+    if _SPACED_RX.search(text):
+        bases.append(_SPACED_RX.sub(" ", text))
     spans = {(h.set, h.rule, h.start, h.end) for h in hits}
     by_secret: dict = {}
     for h in hits:
         by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))
     out = list(hits)
+    for base in bases:
+        taken = []
+        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked):
+            inner_start, inner_end = h.start, h.end
+            while inner_start < inner_end and seen_through(text[inner_start]):
+                inner_start += 1
+            while inner_end > inner_start and seen_through(text[inner_end - 1]):
+                inner_end -= 1
+            if (h.set, h.rule, h.start, h.end) in spans or any(
+                    s <= inner_start and inner_end <= e
+                    for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):
+                continue
+            taken.append(h)
+        for h in taken:
+            spans.add((h.set, h.rule, h.start, h.end))
+            by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append(
+                (h.start, h.end))
+        out += taken
+    out.sort(key=lambda h: h.start)
+    return out
+
+
+def _copy_hits(base, rx, names, path, allow, known, *, keep_marked) -> list:
+    """The hits of `base` without the characters `rx` matches, mapped back to `base`:
+    a hit at the copy's start starts at 0, and one at its end ends at `len(base)`."""
+    copy = rx.sub("", base)
+    if not copy:
+        return []
+    # Each removed character's offset in the copy, where it would sit: a copy offset `c`
+    # maps to `c` plus the count of these at or before it.
+    shifted = [m.start() - i for i, m in enumerate(rx.finditer(base))]
+    size = len(copy)
+    out = []
     for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked):
         start = h.start + bisect_right(shifted, h.start) if h.start else 0
-        end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(text)
-        inner_start, inner_end = start, end
-        while inner_start < inner_end and seen_through(text[inner_start]):
-            inner_start += 1
-        while inner_end > inner_start and seen_through(text[inner_end - 1]):
-            inner_end -= 1
-        if (h.set, h.rule, start, end) in spans or any(
-                s <= inner_start and inner_end <= e
-                for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):
-            continue
+        end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(base)
         out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))
-    out.sort(key=lambda h: h.start)
     return out
 
 
