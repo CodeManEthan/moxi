@@ -17,8 +17,11 @@ Allowed:
   `.md` files under one of `handoff_roots`, and deletes and moves nothing;
 * `Bash` running one of git's wrap-up forms (status, diff, add, commit and a few reads,
   `GIT_FORMS`), as `git [-C <dir>] <form>` or `cd <dir> && git <form>`;
-* `Bash` running a command whose words start with one of `commands`, the argument-word
-  prefixes the user adds (`ceiling.allow_commands`), bare or after `cd <dir> &&`.
+* `Bash` running a command whose words are, whole, one of `commands`, the word lists
+  the user adds (`ceiling.allow_commands`), bare or after `cd <dir> &&`. A listed word
+  written `<...>`, such as `<key>`, stands for one name word there (`NAME_WORD`); every
+  other word must match as written, and a command with a word more or a word fewer is
+  refused.
 
 Claude's `Bash` and Codex's shell tool, which Codex's hooks also name `Bash`, both carry
 the shell text in `command`. The directory a command runs in is `<dir>` when named, else
@@ -62,12 +65,17 @@ boundary: the hooks `git commit` runs still run.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 
 #: The suffix a hand-off file must have.
 HANDOFF_SUFFIX = ".md"
 #: The most lines one hand-off `Read` may ask for.
 READ_LIMIT_MAX = 200
+
+#: The shape of the one word a `<...>` word of an allowed command stands for: a letter or
+#: digit, then up to 127 letters, digits, dots, underscores and hyphens.
+NAME_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 #: git's wrap-up forms, as the words after `git` (and after `-C <dir>`). `add -- <path>...`
 #: and `commit -m <text> [-m <text>]...` take arguments and are matched apart.
@@ -123,7 +131,7 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
     """Is this call a wrap-up operation? `(True, "")`, or `(False, reason)`.
 
     `handoff_roots` and `work_roots` are absolute directories (a relative one is
-    ignored); `commands` are argument-word prefixes; `home` is what a leading `~/`
+    ignored); `commands` are the allowed commands' word lists; `home` is what a leading `~/`
     expands to, the process's home when None. A malformed argument never allows a call.
     """
     try:
@@ -436,8 +444,8 @@ def _git_form(args: list[str], repo: str) -> None:
     raise Refused(f"git {t[0]} is not a wrap-up git form")
 
 
-def _prefixes(commands: object) -> list[tuple[str, ...]]:
-    """The usable command prefixes: non-empty lists of non-empty strings."""
+def _commands(commands: object) -> list[tuple[str, ...]]:
+    """The usable allowed commands: non-empty lists of non-empty strings."""
     if not isinstance(commands, (list, tuple)):
         return []
     out = []
@@ -446,6 +454,20 @@ def _prefixes(commands: object) -> list[tuple[str, ...]]:
                 and all(isinstance(w, str) and w for w in c)):
             out.append(tuple(c))
     return out
+
+
+def _is_command(words: Sequence[str], listed: Sequence[str]) -> bool:
+    """`words` are the allowed command `listed`, word for word, a `<...>` word matching
+    any one name word."""
+    if len(words) != len(listed):
+        return False
+    for word, want in zip(words, listed):
+        if len(want) > 2 and want.startswith("<") and want.endswith(">"):
+            if not NAME_WORD.fullmatch(word):
+                return False
+        elif word != want:
+            return False
+    return True
 
 
 def _bash(command: object, cwd: object, work_roots: object, commands: object,
@@ -476,8 +498,8 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
         in_cd = False
     if not rest:
         raise Refused("nothing after '&&'")
-    for prefix in _prefixes(commands):
-        if tuple(rest[:len(prefix)]) == prefix:
+    for listed in _commands(commands):
+        if _is_command(rest, listed):
             return
     if rest[0] != "git":
         raise Refused(f"{rest[0]} is not a wrap-up command")
@@ -497,4 +519,4 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
 
 
 __all__ = ["allowed", "lex", "patch_files", "Refused", "AND", "GIT_FORMS",
-           "HANDOFF_SUFFIX", "READ_LIMIT_MAX"]
+           "HANDOFF_SUFFIX", "NAME_WORD", "READ_LIMIT_MAX"]

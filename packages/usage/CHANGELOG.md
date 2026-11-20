@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A command in `ceiling.allow_commands` is allowed past the worker ceiling only whole: a
+  command with a word more or fewer is refused, where any words after an entry used to
+  pass. A word written `<...>`, such as `<key>`, stands for one name word, so an entry
+  can allow one argument and no more. An entry that relied on trailing words needs a
+  `<...>` word for each.
 - Every setting carries page fields, which `moxi config usage show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, the
   unit of each wait, age and token count, seven settings shown first (the default

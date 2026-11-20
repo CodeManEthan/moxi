@@ -309,7 +309,11 @@ Past `warn_tokens` of growth the agent is told once, in one added line
 may still call the return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit
 and read `.md` files under `ceiling.handoff_roots`, run git's status, diff, add and commit
 forms in its working directory or under `ceiling.work_roots`, and run the commands whose
-words start with an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
+words are, whole, an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
+A word written `<...>` stands for one name word (a letter or digit, then letters, digits,
+`.`, `_` and `-`): `[["moxi", "repo", "rules"], ["make", "trailers", "<key>"]]` allows
+`moxi repo rules` with no argument and `make trailers` with one key, and refuses either
+with a word more or fewer.
 Both root lists start empty, and no command beyond git is allowed until you add one.
 Markers live in `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the
 agents past the ceiling. The guard covers Claude and Codex subagents; turns runs no guard

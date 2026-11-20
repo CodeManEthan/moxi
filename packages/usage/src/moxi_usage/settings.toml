@@ -218,7 +218,7 @@ group = "Worker ceiling"
 [ceiling.allow_commands]
 type = "list"
 default = []
-doc = "More commands a subagent past its ceiling may run, each a list of the argument words a command must start with."
+doc = "More commands a subagent past its ceiling may run, each the list of a whole command's words; a word written <...>, such as <key>, stands for one name word."
 read = "use"
 label = "Commands it may still run"
 group = "Worker ceiling"
