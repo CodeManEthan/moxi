@@ -22,8 +22,13 @@ A caller always names the sets it wants. There is no default set.
 
 - **credentials** follows gitleaks: a rule runs only when one of its keywords is in the
   text, its secret must pass the rule's entropy floor, and global and per-rule allowlists
-  drop allowed findings. A line holding `gitleaks:allow` keeps its hits out of credentials
-  and broad, never out of private names or personal data. The local list adds rules for
+  drop allowed findings. In `scan`, a line holding `gitleaks:allow` keeps its hits out of
+  credentials and broad, never out of private names or personal data, and so does a line
+  that a rule's line allowlist names (broad's generic rule has two: a
+  `--mount=type=secret,` or JavaScript import line, and a BitBake recipe's license and
+  source lines). `redact` honours neither: text beside a secret never keeps it out of a
+  redacted copy, since whoever wrote that text may not be the one who reads the copy.
+  The local list adds rules for
   Bitwarden access tokens, Google OAuth tokens and client secrets, bare Discord and
   Telegram bot tokens, URL credentials, private key headers, ntfy tokens and
   `Authorization: Bearer` values. gitleaks' decoding passes (base64, hex, percent-encoding)
@@ -67,9 +72,30 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   the path alone, spanning the whole text.
 - `known` holds literal values the caller already holds, such as the token it is using.
   They are found first, as set `known`.
-- `redact(text, sets, ...)` replaces each hit with `[REDACTED:<rule id>]`. Its result
-  scans clean with the same arguments, and redacting it again changes nothing. Text
-  outside hits comes back character for character, `surrogateescape` bytes included.
+- Both read past invisible characters. A token split by a zero-width space, a soft
+  hyphen or a like character is a hit, spanning the characters inside it. The characters
+  read past are the ones a renderer may show as nothing: C0 controls other than tab and
+  newline, DEL and C1 controls; format characters (category `Cf`, as the running
+  Python's `unicodedata` reads it), such as zero-width spaces and joiners, bidi controls
+  and the byte order mark; and every code point Unicode 17.0 names default-ignorable,
+  assigned or not, such as variation selectors and Hangul fillers. Tab, newline and the
+  Unicode spaces aren't among them. A text holding any is scanned twice: as given, and
+  as a copy without them, whose hits are mapped back. `allow` and `known` judge a split
+  value as they judge it whole.
+- `redact(text, sets, ...)` replaces each hit with `[REDACTED:<rule id>]`, a split token
+  with the characters inside it; a split token at the very start or end of the text
+  takes in the invisible characters before or after it. Its result scans clean with the
+  same arguments, under `scan` and under `redact`'s own rules, and redacting it again
+  changes nothing. Text outside hits comes back character for character,
+  `surrogateescape` bytes and invisible characters included.
+- `REDACT_VERSION` says which `redact` this is (2). It rises with a release in which
+  `redact`, with its default keywords, redacts in some text a span the release before
+  returned whole because of how it reads text: a suppression it stops applying,
+  characters it newly reads past. A change of rule data alone (a rule, regex, keyword,
+  allowlist or stopword, a gitleaks bump among them) leaves it as it is. A store of
+  redacted text can record it: moxi memory does, and its doctor asks for a `moxi memory
+  reindex` once the version rises. Text stored earlier meets a rise, or a new rule, only
+  when someone runs that reindex.
 - `scan_lines(triples, sets, *, allow=None)` takes the added lines of a whole change as
   `(path, line number, text)`, scans each path's lines as one text, and returns
   `LineHit(path, line, hit)` values. It joins a path's lines with `\n` whatever their
