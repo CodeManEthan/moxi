@@ -188,8 +188,9 @@ set heavier.
   to the project's page.
 
 With projects' page in the shell too, a project opened there has a `Loadout` row naming
-the items its own section lists, in the manifest's order (`skill release-checklist ·
-agent api-lead`; past eight, the first seven and how many more), and a `Loadout` link to
+the items its own section lists, in the manifest's order and with each kind in this
+page's words (`skill release-checklist · permission rule git-push`; past eight, the first
+seven and how many more), and a `Loadout` link to
 `/m/loadout/project/<key>`. Its section is the one that address shows: the section named
 by the project's key, else the one whose path is the project's folder itself. A project
 loadout lists nothing for has no row. The row comes from loadout's `project-facts`

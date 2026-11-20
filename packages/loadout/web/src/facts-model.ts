@@ -12,6 +12,7 @@
 
 import { routeOf, sectionFor } from "./address-model.ts";
 import type { Item, Listing } from "./feed.ts";
+import { kindWord } from "./words.ts";
 
 /** The event a facts component dispatches, with its report as the `detail`. */
 export const FACTS_EVENT = "moxi-project-facts";
@@ -85,10 +86,11 @@ export function clip(text: string): string {
   return chars.length <= TEXT_MAX_CHARS ? text : `${chars.slice(0, TEXT_MAX_CHARS - 1).join("")}…`;
 }
 
-/** The items' parts, `<kind> <name>` each, in the order loadout lists them; past eight,
- * the first seven and `<n> more`. */
-export function itemParts(items: readonly Item[]): Part[] {
-  const parts = items.map((item) => ({ text: clip(`${item.kind} ${item.name}`) }));
+/** The items' parts, `<kind> <name>` each with the kind as the Loadout page words it
+ * (`permission rule`, `MCP server`), in the order loadout lists them; past eight, the first
+ * seven and `<n> more`. */
+export function itemParts(items: readonly Pick<Item, "kind" | "name">[]): Part[] {
+  const parts = items.map((item) => ({ text: clip(`${kindWord(item.kind)} ${item.name}`) }));
   if (parts.length <= PARTS_MAX) return parts;
   return [...parts.slice(0, PARTS_MAX - 1), { text: `${parts.length - (PARTS_MAX - 1)} more` }];
 }

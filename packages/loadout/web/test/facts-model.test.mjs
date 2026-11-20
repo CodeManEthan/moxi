@@ -5,6 +5,7 @@ import {
   clip, factsReport, itemParts, LABEL, ORDER, PARTS_MAX, parseGiven, TEXT_MAX_CHARS, VERSION,
 } from "../src/facts-model.ts";
 import { parseListing } from "../src/feed.ts";
+import { kindWord } from "../src/words.ts";
 
 const HOME = "/home/me";
 const ATLAS = { key: "atlas-api", root: `${HOME}/code/atlas-api` };
@@ -101,10 +102,27 @@ test("a project with a section that lists nothing, or no section, has no row", (
 
 // -- the line --------------------------------------------------------------------------------
 
-test("the items keep loadout's order, every kind as loadout names it", () => {
+test("the items keep loadout's order, every kind as the Loadout page words it", () => {
   const kinds = ["skill", "agent", "hook", "permissions", "mcp"];
   const found = report({ items: kinds.map((kind) => item(kind, `${kind}-one`, "atlas-api")) });
-  assert.deepEqual(texts(found), kinds.map((kind) => `${kind} ${kind}-one`));
+  assert.deepEqual(texts(found), ["skill skill-one", "agent agent-one", "hook hook-one",
+                                  "permission rule permissions-one", "MCP server mcp-one"]);
+});
+
+test("a `permissions` item reads `permission rule <name>`, the Loadout page's word", () => {
+  const found = report({ items: [item("permissions", "git-push", "atlas-api")] });
+  assert.deepEqual(texts(found), ["permission rule git-push"]);
+  assert.equal(texts(found)[0], `${kindWord("permissions")} git-push`);
+});
+
+test("an `mcp` item reads `MCP server <name>`, the Loadout page's word", () => {
+  const found = report({ items: [item("mcp", "docs", "atlas-api")] });
+  assert.deepEqual(texts(found), ["MCP server docs"]);
+  assert.equal(texts(found)[0], `${kindWord("mcp")} docs`);
+});
+
+test("a kind the page has no word for reads by its own name", () => {
+  assert.deepEqual(itemParts([{ kind: "plugin", name: "x" }]).map((part) => part.text), ["plugin x"]);
 });
 
 test("up to eight items are all drawn; past eight, the first seven and `<n> more`", () => {
