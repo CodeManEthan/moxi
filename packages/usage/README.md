@@ -411,10 +411,20 @@ sessions module. Top to bottom:
   under it follows them.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
-  are not whole, and `Table`, its rows as a table.
+  are not whole, and `Table`, its rows as a table. By cost each bar is stacked by token
+  class (fresh input, cache write, cache read, output), each part that class's own
+  dollars from the cost terms, under a legend; the hover gives every class. By tokens
+  there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
+  work`, fresh input, cache writes and output stacked.
+- **The heat map.** Each day's estimated cost over the 53 weeks to today, whatever the
+  range, under the other filters: weeks as columns, five shades on the quantiles of the
+  days that cost something. A used day says its cost, tokens and classes on hover, and a
+  click or Enter sets the range to that day. `Table` lists the used days.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
-    `Show` for thirty more, and the days before them as `Earlier`. A session opens in its
+    `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every
+    session of the range, 200 at a time with `Show` for more, sorted by a column: a click
+    on a header sorts by it, highest first, and again the other way. A session opens in its
     row: its requests, its context, a chart of its requests with its turns and
     compactions, where its cost went, its subagents (a map, a row each, and one opened
     with its own requests), its harness, model and start, the restart point when one is
@@ -479,7 +489,7 @@ for bad news (it draws in the theme's text, border and background colours, with 
 accent, warning or error colour); a group for a harness with no plan window read
 (OpenCode, Claude without the turns module, Codex with no rollout); a title the harness
 made up, as a session's name; a decimal on a percent; a line for a harness whose folder
-was never on the machine; cost by class as a stacked chart; and the tabs and the `daily`,
+was never on the machine; and the tabs and the `daily`,
 `terms` and `session/<id>` addresses of the page before it. It has no screen of its own
 for a phone, and fits a window 360 px wide.
 
@@ -517,7 +527,7 @@ The page server's reads, each a `GET` under `/api`:
 | `limits` | none | each plan window now, from the stored readings, with `opened` |
 | `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
 | `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
-| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
+| `sessions` | `top` (1 to 200), `skip`, `sort`, `order` (`asc`, `desc`), filters | sessions, dearest first unless `sort` names another column: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
 | `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
 | `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
 | `models` | filters | tokens and cost by model, with where each price came from |

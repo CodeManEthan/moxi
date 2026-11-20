@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The page's chart by cost stacks each bar by token class (fresh input, cache write,
+  cache read, output), each part the class's own dollars from `/api/terms` by the chart's
+  period, under a legend, with every class on hover. By tokens it draws two charts:
+  `Cache reads` alone and `Billable work` (fresh input, cache writes, output) stacked,
+  each with its share of the range's tokens.
+- The page has a heat map under the chart: each day's estimated cost over the 53 weeks to
+  today, whatever the range, under the other filters, in five shades set by the
+  quantiles of the days that cost something. A used day is a button that sets the range
+  to it; `Table` lists the used days.
+- The Sessions section's `Table` lists every session of the range, 200 at a time with
+  `Show` for more, where it listed only the rows the lists had shown. A header button
+  sorts by its column (`aria-sort`), highest first, and a second click turns it around.
 - The page's Project (or Folder) filter picks several at once: each entry is a check that
   adds it or takes it away and leaves the menu open, the button counts them (`2
   projects`), and `all` clears them. Everything under the filter line reads the files of
