@@ -414,6 +414,26 @@ def stored_keys(conn):
     source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
 
 
+def test_several_places_keep_the_files_any_of_them_matches(conn):
+    stored_keys(conn)
+
+    def count(**filters):
+        return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
+
+    assert count(project=["key-app", "/w/app"]) == count(project="key-app") + count(project="/w/app") == 4
+    assert count(project=("key-app", "key-app")) == 3
+    assert count(work_dir=["/w/app", "/w/app-wt/"]) == 4
+    assert count(work_dir=["/w/app"], project=["key-app", "nothing"]) == 1
+    assert count(project=[]) == count(work_dir=[]) == count(project=["", ""]) == 5
+    found = reports.daily(conn, project=["key-app", "/w/app"], work_dir=["/w/app", "/w/app-wt"],
+                          table=table())
+    assert found.filters == {"project": "key-app, /w/app", "folder": "/w/app, /w/app-wt"}
+    with pytest.raises(reports.ReportError, match="whole path"):
+        count(work_dir=["/w/app", "app"])
+    with pytest.raises(reports.ReportError, match="project key"):
+        count(project=["key-app", 3])
+
+
 def test_projects_by_dir_group_by_cwd_alone(conn):
     stored_keys(conn)
     report = reports.projects(conn, by="folder", table=table())

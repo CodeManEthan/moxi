@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A report's `project` and `work_dir` each take one key or a sequence of them, and keep
+  the files any of them matches; several go out in `filters` joined by `, `. The page's
+  report routes take several projects or folders in `project` and `folder`, one to a
+  line. `/api/sessions` takes `sort` (`cost`, `tokens`, `requests`, `fresh_input`,
+  `cache_write`, `cache_read`, `output`, `started`, `active`, `project`) and `order`
+  (`asc` or `desc`), and pages with `top` and `skip` in that order.
 - `moxi usage context SESSION` with no `--harness` asks every harness and refuses a
   session more than one holds, naming them, where it took the first. It exits 0 whenever
   it names the context's state, `context unknown` included, and 2 for a session or agent

@@ -254,7 +254,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_one_is_the_gateways()
         "/api/limits": ("read", set(), False),
         "/api/window": ("read", {"harness", "limit_id", "minutes"}, False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
-        "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
+        "/api/sessions": ("read", {"top", "skip", "sort", "order", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
         "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
@@ -558,6 +558,47 @@ def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
     # the total is the range's whichever rows are sent
     assert past["total"] == get("/api/sessions", utc="true")["total"]
     assert get("/api/sessions", folder="/w/tool", top="1", skip="1")["count"] == 3
+
+
+def test_sessions_sort_by_a_column_either_way_and_page_in_that_order(many):
+    assert keys_of(get("/api/sessions", sort="cost", order="desc", utc="true")) == ORDER
+    # least first, ties in the order by cost, and an unpriced row last either way
+    assert keys_of(get("/api/sessions", sort="cost", order="asc", utc="true")) == [
+        ("claude", "tie-a"), ("claude", "tie-b"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("codex", "tie-a"), ("claude", "mid"), ("claude", "dear"),
+        ("claude", "unpriced")]
+    started = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-b"), ("claude", "tie-a"),
+               ("codex", "tie-a"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+               ("claude", "/w/loose-b")]
+    assert keys_of(get("/api/sessions", sort="started", order="asc", utc="true")) == started
+    assert keys_of(get("/api/sessions", sort="started", utc="true")) == started[::-1]
+    assert keys_of(get("/api/sessions", sort="active", utc="true"))[0] == ("claude", "dear")
+    assert keys_of(get("/api/sessions", sort="project", order="asc", utc="true")) == [
+        ("claude", "dear"), ("claude", "mid"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("claude", "tie-a"), ("claude", "tie-b"), ("codex", "tie-a")]
+    tokens = [row["tokens"] for row in get("/api/sessions", sort="tokens", order="asc")["rows"]]
+    assert tokens == sorted(tokens)
+    seen = []
+    for skip in (0, 3, 6):
+        body = get("/api/sessions", sort="started", order="asc", top="3", skip=str(skip), utc="true")
+        assert body["count"] == 8
+        seen += keys_of(body)
+    assert seen == started
+    for bad in ({"sort": "turns"}, {"order": "up"}):
+        status, _ = asyncio.run(ask(served(), "/api/sessions", bad))
+        assert status == 400
+
+
+def test_the_place_filters_take_several_one_to_a_line(many):
+    def count(**query):
+        return get("/api/sessions", utc="true", **query)["count"]
+
+    assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1
+    assert count(folder="/w/tool\n/w/loose-a") == 4
+    assert count(project="/w/tool\n/w/loose-a\n") == 4
+    assert count(folder="\n") == count() == 8
+    body = get("/api/daily", folder="/w/tool\n/w/app", utc="true")
+    assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]
 
 
 def test_a_file_with_no_session_id_is_a_row_with_a_null_id_and_no_context(many):

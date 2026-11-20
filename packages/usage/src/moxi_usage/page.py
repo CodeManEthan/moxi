@@ -5,9 +5,9 @@
     GET  /api/window    one plan window opened (`harness=&limit_id=&minutes=`): when it
                         started, its period's readings, and the sessions it was used by
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
-    GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
-                        how many there are and how many come after, each with its context
-                        and what names it
+    GET  /api/sessions  tokens and cost by session, dearest first or by `sort` and
+                        `order`: the `top` after `skip`, how many there are and how many
+                        come after, each with its context and what names it
     GET  /api/session   one session by agent and model (`session=ID`), with its context
                         and what names it
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
@@ -35,7 +35,9 @@ the measure's file and the model table and writes nothing. The one act starts a 
 
 A report route takes the filters `since` and `until` (`YYYY-MM-DD`, both days included),
 `harness`, `project`, `folder` (a folder's whole path: the files
-whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
+whose `cwd` it is, whatever project key they carry), `model` and `utc`; `project` and
+`folder` each take one key or several, one to a line, and keep the files any of them
+matches. Days are cut in
 the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
 keys it reads.
 
@@ -83,6 +85,10 @@ USED_MAX = 10
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
 TOP_MAX = 200
 TOP_DEFAULT = 200
+#: What `/api/sessions` sorts by: a sum of the row, `started` (its first request), `active`
+#: (its first request to its last) or `project` (its project key, else its `cwd`).
+SESSION_SORTS = ("cost", "tokens", "requests", "fresh_input", "cache_write", "cache_read",
+                 "output", "started", "active", "project")
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -106,13 +112,15 @@ def _named(value: lb.Out) -> lb.Out:
 
 _DATE = lb.Field("string", required=False, max=10)
 _ANY = lb.Field("string", required=False, max=4096)
+#: Several project keys or folders, one to a line.
+_PLACES = lb.Field("string", required=False, max=16384)
 #: The filters of every report route but `status` and `cost`.
 FILTERS = {
     "since": _DATE,
     "until": _DATE,
     "harness": lb.Field("enum", required=False, values=HARNESSES),
-    "project": _ANY,
-    "folder": _ANY,
+    "project": _PLACES,
+    "folder": _PLACES,
     "model": _ANY,
     "utc": lb.Field("bool", required=False),
 }
@@ -551,7 +559,10 @@ PAGE = lb.Page(
                  returns=DAILY),
         lb.Route("/api/sessions", "read", "moxi_usage.pagehandlers:sessions",
                  query={"top": lb.Field("int", required=False, max=TOP_MAX),
-                        "skip": lb.Field("int", required=False), **FILTERS},
+                        "skip": lb.Field("int", required=False),
+                        "sort": lb.Field("enum", required=False, values=SESSION_SORTS),
+                        "order": lb.Field("enum", required=False, values=("asc", "desc")),
+                        **FILTERS},
                  returns=SESSIONS),
         lb.Route("/api/session", "read", "moxi_usage.pagehandlers:session",
                  query={"session": lb.Field("string", max=512), **FILTERS},
@@ -596,6 +607,6 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
            "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS",
-           "SESSION_REF", "SESSION_ROW",
+           "SESSION_REF", "SESSION_ROW", "SESSION_SORTS",
            "SPLIT", "SUMMARY", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]
