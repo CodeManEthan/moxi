@@ -218,8 +218,8 @@ def test_dry_run_prints_the_plan_and_spawns_nothing(oc_rig):
 
 
 def test_the_comms_verb_runs_the_wrapper_under_its_own_name(oc_rig):
-    """Core put its OpenCode wrapper on PATH as a console script, beside the Claude and
-    Codex ones. comms' verb `moxi comms opencode` is that command: the same wrapper,
+    """An older comms put its OpenCode wrapper on PATH as a console script, beside the
+    Claude and Codex ones. comms' verb `moxi comms opencode` is that command: the same wrapper,
     the same session and binding, and every line it writes names it as typed."""
     w = oc_rig
     proc = w.launch(run=RUN_VERB)

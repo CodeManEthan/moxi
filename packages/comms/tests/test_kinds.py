@@ -123,9 +123,9 @@ def test_a_default_daemon_reads_the_group(rig):
 
 
 def test_speech_binds_as_a_person_whose_cache_is_never_read(rig, monkeypatch):
-    """Core's daemon took `speech` as a register kind (voice binds the operator as it),
-    and its cold-cache read answered a speech binding `no-cache` without reading
-    anything. comms keeps both: the default daemon binds a name as `speech`, and the
+    """An older comms' daemon took `speech` as a register kind, a person's binding such
+    as the operator's, and its cold-cache read answered a speech binding `no-cache`
+    without reading anything. comms keeps both: the default daemon binds a name as `speech`, and the
     read says `person` without asking the cache module."""
     def refuse():
         raise AssertionError("the seam asked for the cache module")
