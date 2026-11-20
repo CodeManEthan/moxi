@@ -3,7 +3,7 @@
 ## Unreleased
 
 - With the `ui` extra and projects, a `project-facts` component gives a project opened
-  on the Projects page a `Loadout` row of the items its section lists, linked to
+  on the Projects page a `Loadout` row of the items its sections list, linked to
   `/m/loadout/project/<key>`. It reads only `/api/list`.
 - The page is redrawn around what needs you. Placed comes first: each problem is an
   item and one word (`changed`, `in the way`, `not placed`, `out of date`, `would be

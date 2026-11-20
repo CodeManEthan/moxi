@@ -4,13 +4,14 @@
 // page", is the contract it fills.
 //
 // The join is loadout's own. An item is in a section when its `scope` is the section's
-// name, and the project's section is the one the Loadout page's filtered view shows for it
-// (`sectionFor`): the key section named by the project's key ignoring case, else the path
-// section whose root is the project's root exactly. A path section under the root but not
-// at it is not the project's here. Loadout's judgment is the answer's `problem`: set, the
-// list can't be read, and nothing is reported, as on a failed read.
+// name. A section is the project's when it is the key section named by the project's key
+// ignoring case, or the path section whose root is the project's root exactly; loadout
+// places both into the project's folder, so the row names the items of each, the key
+// section's first. A path section under the root but not at it is not the project's here.
+// Loadout's judgment is the answer's `problem`: set, the list can't be read, and nothing is
+// reported, as on a failed read.
 
-import { routeOf, sectionFor } from "./address-model.ts";
+import { routeOf } from "./address-model.ts";
 import type { Item, Listing } from "./feed.ts";
 import { kindWord } from "./words.ts";
 
@@ -95,12 +96,41 @@ export function itemParts(items: readonly Pick<Item, "kind" | "name">[]): Part[]
   return [...parts.slice(0, PARTS_MAX - 1), { text: `${parts.length - (PARTS_MAX - 1)} more` }];
 }
 
+/** The names of the project's sections in `listing`: the key section named by its key
+ * ignoring case, then the path section whose root is its root exactly; either may be
+ * missing. */
+export function projectSections(project: Given, listing: Pick<Listing, "sections">): string[] {
+  const lower = project.key.toLowerCase();
+  const keyed = listing.sections.find((s) => s.where === "key" && s.name.toLowerCase() === lower);
+  const rooted = listing.sections.find((s) => s.where === "path" && s.root === project.root);
+  const names: string[] = [];
+  for (const found of [keyed, rooted]) {
+    if (found !== undefined && !names.includes(found.name)) names.push(found.name);
+  }
+  return names;
+}
+
+/** The items the project's sections list, each section's in loadout's order, the key
+ * section's first; an item (its kind and name) both list is the first section's, once. */
+export function projectItems(project: Given, listing: Listing): Item[] {
+  const seen = new Set<string>();
+  const items: Item[] = [];
+  for (const name of projectSections(project, listing)) {
+    for (const item of listing.items) {
+      if (item.scope !== name) continue;
+      const id = `${item.kind}:${item.name}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      items.push(item);
+    }
+  }
+  return items;
+}
+
 /** The project's `Loadout` row, or null when no section of `listing` is the project's or
- * its section lists nothing. Its link opens the Loadout page filtered to the project. */
+ * its sections list nothing. Its link opens the Loadout page filtered to the project. */
 export function sectionOf(project: Given, listing: Listing): Section | null {
-  const name = sectionFor(project, listing);
-  if (name === null) return null;
-  const items = listing.items.filter((item) => item.scope === name);
+  const items = projectItems(project, listing);
   if (!items.length) return null;
   return { label: LABEL, lines: [{ parts: itemParts(items) }],
            link: { text: LABEL, module: "loadout", route: routeOf({ piece: "project", key: project.key }) } };

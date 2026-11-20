@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  clip, factsReport, itemParts, LABEL, ORDER, PARTS_MAX, parseGiven, TEXT_MAX_CHARS, VERSION,
+  clip, factsReport, itemParts, LABEL, ORDER, PARTS_MAX, parseGiven, projectSections, TEXT_MAX_CHARS, VERSION,
 } from "../src/facts-model.ts";
 import { parseListing } from "../src/feed.ts";
 import { kindWord } from "../src/words.ts";
@@ -81,11 +81,45 @@ test("a path section at the project's root is matched; one under the root, or be
   }
 });
 
-test("a key section is the project's before a path section at its root, as on the Loadout page", () => {
+test("a key section alone: its items are the row's", () => {
+  const found = report({ sections: [section("user", "user"), section("atlas-api")] });
+  assert.deepEqual(projectSections(ATLAS, listing()), ["atlas-api"]);
+  assert.deepEqual(texts(found), ["skill release-checklist", "agent api-lead"]);
+});
+
+test("a path section at the root alone: its items are the row's", () => {
   const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
-  const found = report({ sections: [at, section("atlas-api")],
-                         items: [item("skill", "by-path", at.name), item("skill", "by-key", "atlas-api")] });
-  assert.deepEqual(texts(found), ["skill by-key"]);
+  const over = { sections: [section("user", "user"), at],
+                 items: [item("skill", "tidy-notes", "user"), item("hook", "fmt", at.name), item("mcp", "docs", at.name)] };
+  assert.deepEqual(projectSections(ATLAS, listing(over)), [at.name]);
+  assert.deepEqual(texts(report(over)), ["hook fmt", "MCP server docs"]);
+});
+
+test("a key section and a path section at the root: both count, the key section's items first", () => {
+  const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
+  const over = { sections: [at, section("atlas-api")],
+                 items: [item("skill", "by-path", at.name), item("agent", "path-lead", at.name),
+                         item("skill", "by-key", "atlas-api")] };
+  assert.deepEqual(projectSections(ATLAS, listing(over)), ["atlas-api", at.name]);
+  const found = report(over);
+  assert.deepEqual(texts(found), ["skill by-key", "skill by-path", "agent path-lead"]);
+  assert.equal(found.projects["atlas-api"].sections.length, 1, "one row");
+  assert.equal(found.projects["atlas-api"].sections[0].link.route, "project/atlas-api", "the link is the key's view");
+});
+
+test("an item both sections list is named once, where the key section lists it", () => {
+  const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
+  const found = report({ sections: [section("atlas-api"), at],
+                         items: [item("skill", "first", "atlas-api"), item("skill", "shared", "atlas-api"),
+                                 item("skill", "shared", at.name), item("agent", "shared", at.name),
+                                 item("skill", "own", at.name)] });
+  assert.deepEqual(texts(found), ["skill first", "skill shared", "agent shared", "skill own"]);
+});
+
+test("a path section with items but an empty key section: the path section's items still show", () => {
+  const at = section(`${HOME}/code/atlas-api`, "path", `${HOME}/code/atlas-api`);
+  const found = report({ sections: [section("atlas-api"), at], items: [item("skill", "by-path", at.name)] });
+  assert.deepEqual(texts(found), ["skill by-path"]);
 });
 
 test("a path section named like the key is no key section, and the user section is never a project's", () => {

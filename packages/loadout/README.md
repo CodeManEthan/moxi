@@ -191,9 +191,10 @@ With projects' page in the shell too, a project opened there has a `Loadout` row
 the items its own section lists, in the manifest's order and with each kind in this
 page's words (`skill release-checklist · permission rule git-push`; past eight, the first
 seven and how many more), and a `Loadout` link to
-`/m/loadout/project/<key>`. Its section is the one that address shows: the section named
-by the project's key, else the one whose path is the project's folder itself. A project
-loadout lists nothing for has no row. The row comes from loadout's `project-facts`
+`/m/loadout/project/<key>`. A project's sections are the one named by its key and the one
+whose path is its folder itself, since loadout places both there: the row names the items
+of each, the key section's first, and an item both list once. (With both, that address
+shows the key section alone.) A project loadout lists nothing for has no row. The row comes from loadout's `project-facts`
 component, which reads only `/api/list`, from the manifest alone: when the Projects page
 places it, every minute while that page is shown, and once when it is shown again. While
 the manifest can't be read, the row is left out.
