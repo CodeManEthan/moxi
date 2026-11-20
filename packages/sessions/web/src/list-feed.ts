@@ -34,7 +34,8 @@ export interface ListRow {
   subagents: number | null;
   folder: string | null;
   started: number | null;
-  /** True where the record says a program started the session, else null. */
+  /** True where the record says a program started the session, false where it says a
+   * person did (a Claude Code head that was read), else null. */
   by_program: boolean | null;
   /** A name typed for the session in its harness, else null. */
   name: string | null;

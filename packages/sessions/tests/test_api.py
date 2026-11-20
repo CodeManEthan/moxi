@@ -30,7 +30,7 @@ def test_the_announcement_offers_interfaces_2_to_6():
     assert module.SETUP == "moxi_sessions.setup:setup"
     target, _, name = module.SETUP.partition(":")
     assert callable(getattr(importlib.import_module(target), name))
-    assert set(module.OPTIONAL) == {"ui", "secrets", "turns"}
+    assert set(module.OPTIONAL) == {"ui", "secrets", "turns", "projects"}
     assert module.GATED == {} and module.INTERNAL_ENV == {}
 
 

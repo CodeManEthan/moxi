@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { openedStatus, OPENED_WAITING } from "../src/opened.ts";
-import { BACK, DETAILS, detailFields, headPath, headView, REFRESH } from "../src/transcript.ts";
+import { notLaunched, statePath } from "../src/running.ts";
+import { BACK, DETAILS, detailFields, headPath, headView, REFRESH, startedLine } from "../src/transcript.ts";
 
 // -- fixtures -----------------------------------------------------------------------------------
 
@@ -164,4 +165,58 @@ test("Details names a subagent and its parent", () => {
   const fields = detailFields({ ...WINDOW, agent: "a1", header: { ...WINDOW.header, parent: "s0", entrypoint: "cli" } }, null);
   assert.deepEqual(fields.map((one) => one.name),
                    ["harness", "session", "agent", "title", "cwd", "last_activity", "version", "parent", "entrypoint", "path"]);
+});
+
+// -- started by hand ----------------------------------------------------------------------------
+
+test("launcher is asked once for the session, and only its not-launched refusal says by hand", () => {
+  assert.equal(statePath("ses 1"), "api/state?session=ses+1");
+  const refused = (code) => ({ state: "up", detail: null, sessions: [], refused: { code, row: null, problem: "p", hint: "h" } });
+  assert.equal(notLaunched({ status: 200, data: refused("not-launched") }), true);
+  for (const answer of [{ status: 200, data: refused("slot-busy") }, { status: 200, data: { state: "up", sessions: [{}], refused: null } },
+                        { status: 200, data: { state: "error", detail: "x", sessions: [], refused: null } },
+                        { status: 404, data: null }, { status: 0, data: null }, { status: 200, data: "x" }]) {
+    assert.equal(notLaunched(answer), false, JSON.stringify(answer));
+  }
+});
+
+test("a session started by hand says when and where at its start, and nothing else does", () => {
+  const value = answer(row({ by_program: false }));
+  assert.equal(startedLine(TARGET, value, true, UTC), "Started today 07:40 in proj-a, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: at("2026-11-07 23:10") })), true, UTC),
+               "Started yesterday 23:10 in proj-a, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, folder: null })), true, UTC), "Started today 07:40, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: null })), true, UTC), "Started in proj-a, by hand");
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, started: null, folder: "" })), true, UTC), "Started by hand");
+  // Launched, not read, a program's, another session's, a subagent: no line.
+  assert.equal(startedLine(TARGET, value, false, UTC), null);
+  assert.equal(startedLine(TARGET, null, true, UTC), null);
+  assert.equal(startedLine(TARGET, answer(row({ by_program: true })), true, UTC), null);
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false, session: `${ID}-fork` })), true, UTC), null);
+  assert.equal(startedLine({ ...TARGET, agent: "a1" }, value, true, UTC), null);
+});
+
+test("a Claude Code session whose head says a person started it gets the by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: false })), true, UTC), "Started today 07:40 in proj-a, by hand");
+});
+
+test("a Claude Code session a program started gets no by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: true })), true, UTC), null);
+});
+
+test("a Claude Code session whose head was not read gets no by-hand line", () => {
+  assert.equal(startedLine(TARGET, answer(row({ by_program: null })), true, UTC), null);
+});
+
+test("a Codex session launcher refuses gets no by-hand line", () => {
+  const target = { harness: "codex", session: ID, agent: null };
+  assert.equal(startedLine(target, answer(row({ harness: "codex", by_program: null })), true, UTC), null);
+  // Not even if an answer said false: Codex's record says nothing of who started it.
+  assert.equal(startedLine(target, answer(row({ harness: "codex", by_program: false })), true, UTC), null);
+});
+
+test("an OpenCode session launcher refuses gets no by-hand line", () => {
+  const target = { harness: "opencode", session: "ses_1", agent: null };
+  assert.equal(startedLine(target, answer(row({ harness: "opencode", session: "ses_1", by_program: null })), true, UTC),
+               null);
 });
