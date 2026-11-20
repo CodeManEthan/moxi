@@ -70,7 +70,12 @@ class ArchiveError(Exception):
 
 def connect(path: Path) -> sqlite3.Connection:
     """`path` opened read-only and immutable: SQLite takes no lock and writes no file
-    beside it. Raises `ArchiveError` when it is not there or is not a database."""
+    beside it. Raises `ArchiveError` when it is not there or is not a database.
+
+    An older comms' record is in write-ahead-log mode, and SQLite makes its `-shm` and
+    `-wal` files beside such a database at any open without `immutable`, read-only
+    included. `moxi.store` has no immutable opener, so this open is SQLite's own, and
+    `tests/write-sites.txt` lists it."""
     if not path.is_file():
         raise ArchiveError(f"{path} is not a file")
     try:
