@@ -15,6 +15,8 @@
   `Show` for more, where it listed only the rows the lists had shown. A header button
   sorts by its column (`aria-sort`), highest first, and a second click turns it around.
   It has a Turns column and a Subagent share column, each sortable.
+  A press on a row, or Enter on its session's name, opens the session first in the
+  section, as its address does.
 - The page's Project (or Folder) filter picks several at once: each entry is a check that
   adds it or takes it away and leaves the menu open, the button counts them (`2
   projects`), and `all` clears them. Everything under the filter line reads the files of

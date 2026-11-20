@@ -425,8 +425,9 @@ sessions module. Top to bottom:
     `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every
     session of the range, 200 at a time with `Show` for more, with each session's turns
     and its subagents' share of its cost, sorted by a column: a click on a header sorts
-    by it, highest first, and again the other way. A session opens in its
-    row: its requests, its context, a chart of its requests with its turns and
+    by it, highest first, and again the other way. A press on a table row opens its
+    session first in the section, as its address does, and hides the table. A session
+    opens in its row: its requests, its context, a chart of its requests with its turns and
     compactions, where its cost went, its subagents (a map, a row each, and one opened
     with its own requests), its harness, model and start, the restart point when one is
     measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.

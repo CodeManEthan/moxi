@@ -142,7 +142,8 @@ export interface BoardColumn {
  * page at a time. */
 export interface Board {
   columns: BoardColumn[];
-  rows: { key: string; cells: string[] }[];
+  /** `session` is the session the row opens; null for a row with no session id. */
+  rows: { key: string; cells: string[]; session: { harness: string; id: string } | null }[];
   /** `54 sessions · showing 30`. */
   line: string;
   /** More sessions are after the rows shown: `Show` reads the next page. */
@@ -185,6 +186,7 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
   ];
   const rows = list.rows.map((row, i) => ({
     key: rowKey(row),
+    session: row.session_id === null ? null : { harness: row.harness, id: row.session_id },
     cells: [
       sessionName(row, today, clock).name,
       ...(projects ? [row.project ?? ""] : []),

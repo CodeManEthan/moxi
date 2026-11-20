@@ -2,8 +2,8 @@
 usage's real page server: the closed row naming the range's dearest session with the
 count that opens it; opened, the week's ten dearest as two-line rows, the line for the
 rest of the week and its `Show`, the earlier days' line and its `Show`, the table of
-every session sorted by a column with its turns and subagent share, a row's `Open` and
-the address it writes; a range of
+every session sorted by a column with its turns and subagent share, a table row
+opening its session, a row's `Open` and the address it writes; a range of
 seven days or fewer with no earlier line; Cost's `most to` naming today's two dearest;
 and the section at a phone's width.
 
@@ -265,6 +265,40 @@ def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
         table.get_by_role("button", name="Subagent share").click()
     expect(table.locator("th[aria-sort=descending]")).to_have_text("Subagent share ↓")
     expect(table.locator("tbody tr")).to_have_count(16)
+
+
+def test_a_table_row_opens_its_session_first_in_the_section(page):
+    section = sessions_of(open_page(page, "sessions"))
+    # The section's own toggle: an opened session has a `Table` act of its own.
+    toggle = section.locator("[data-part=table-toggle]")
+    toggle.click()
+    table = section.locator("table[data-part=table]")
+    with page.expect_request(lambda request: "sort=requests&order=desc" in request.url):
+        table.get_by_role("button", name="Requests").click()
+    with page.expect_request(lambda request: "sort=requests&order=asc" in request.url):
+        table.get_by_role("button", name="Requests").click()
+    # The fewest requests: a session of twenty days ago, which no list shows unless asked.
+    earliest = table.locator(f'tr[data-row="claude/{session_id(21)}"]')
+    expect(table.locator("tbody tr").first).to_have_attribute("data-row", f"claude/{session_id(21)}")
+    with page.expect_request(lambda request: "/m/usage/api/session?" in request.url
+                             and session_id(21) in request.url):
+        earliest.locator("td").last.click()
+    assert path_of(page) == f"/m/usage/sessions/claude/{session_id(21)}"
+    expect(table).to_have_count(0)
+    placed = section.locator(f'[data-list=placed] moxi-ui-row[data-key="claude/{session_id(21)}"]')
+    expect(placed).to_have_attribute("open", "")
+    expect(placed.get_by_role("link", name="Close")).to_have_attribute("aria-expanded", "true")
+
+    # By the keyboard: the session's name is a link to its address, and Enter opens it.
+    toggle.click()
+    name = table.locator(f'tr[data-row="claude/{session_id(1)}"]').get_by_role("link")
+    expect(name).to_have_attribute("href", f"/m/usage/sessions/claude/{session_id(1)}")
+    name.focus()
+    page.keyboard.press("Enter")
+    expect(section.locator(f'[data-list=placed] moxi-ui-row[data-key="claude/{session_id(1)}"]')).to_have_attribute(
+        "open", "")
+    assert path_of(page) == f"/m/usage/sessions/claude/{session_id(1)}"
+    expect(table).to_have_count(0)
 
 
 def test_a_rows_open_writes_its_address_and_reads_as_close(page):

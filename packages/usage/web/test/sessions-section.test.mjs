@@ -110,6 +110,7 @@ test("the table: every figure of each session, a sort on each column the server 
   assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => column.label),
                    ["Turns", "Subagent share"]);
   assert.equal(board.rows[0].key, "claude/s-1");
+  assert.deepEqual(board.rows[0].session, { harness: "claude", id: "s-1" });
   // The column sorted by says its direction; the others say none; one with no sort says nothing.
   const cost = board.columns.find((column) => column.label === "Cost");
   assert.deepEqual([cost.aria, cost.arrow], ["descending", "↓"]);
@@ -144,6 +145,11 @@ test("a click on the sorted column turns it around; another column starts highes
   assert.deepEqual(nextOrder(BOARD_START, "cost"), { sort: "cost", order: "asc" });
   assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "cost"), { sort: "cost", order: "desc" });
   assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "started"), { sort: "started", order: "desc" });
+});
+
+test("a table row with no session id opens nothing", () => {
+  const list = listRead(answer([row(null, 2, { folder: null, cwd: "/work/loose" })]));
+  assert.equal(sessionsBoard(list, BOARD_START, TODAY, false, null, UTC).rows[0].session, null);
 });
 
 test("the table writes a folder from the home folder, and as its last segment with no home read", () => {

@@ -36,7 +36,8 @@
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
 //                                  they leave out, the earlier days, and the table of
 //                                  every session, sorted by a column and read a page at
-//                                  a time; an
+//                                  a time, a row opening its session first in the
+//                                  section as its address does; an
 //                                  opened row holds its session (div[data-part=session]):
 //                                  its lines, its chart and its acts; shown, its
 //                                  subagents (div[data-part=agents]): a map and a row
@@ -285,6 +286,9 @@ const STYLES = css`
   .tbl .n { text-align: right; }
   .tbl th button.sort { color: inherit; }
   .tbl th[aria-sort=ascending] button.sort, .tbl th[aria-sort=descending] button.sort { color: var(--moxi-text); }
+  .tbl tr[data-opens] { cursor: pointer; }
+  .tbl td a.go { color: var(--moxi-text); text-decoration: none; }
+  .tbl tr[data-opens]:hover a.go, .tbl td a.go:focus-visible { text-decoration: underline; }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
                letter-spacing: -0.005em; }
   .grp.is-open .gk { color: var(--moxi-text); }
@@ -1459,20 +1463,47 @@ export class UsagePage extends LitElement {
   }
 
   /** The Sessions table: a header button per column it sorts by, the rows read, and the
-   * line that counts them with `Show` for the next page. */
+   * line that counts them with `Show` for the next page. A row with a session opens it:
+   * a plain press anywhere on it, or its name, a link to the session's address. */
   #boardTable(board: Board) {
     const sortBy = (sort: BoardSort) => { this.boardBy = nextOrder(this.boardBy, sort); };
+    const plain = (event: MouseEvent): boolean => event.button === 0 && !event.metaKey && !event.ctrlKey
+      && !event.shiftKey && !event.altKey;
     return html`<div class="scroll"><table class="tbl" data-part="table" data-table="sessions">
       <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
         aria-sort=${column.aria ?? nothing} title=${column.title ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
           class="act sort" data-sort=${column.sort} @click=${() => sortBy(column.sort as BoardSort)}>${column.label}${
           column.arrow === null ? nothing : html`<span aria-hidden="true"> ${column.arrow}</span>`}</button>`}</th>`)}</tr></thead>
-      <tbody>${board.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
-        html`<td class=${board.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
+      <tbody>${board.rows.map((row) => {
+        const session = row.session;
+        const go = (event: MouseEvent): void => {
+          if (session === null || !plain(event)) return;
+          event.preventDefault();
+          this.#openFromTable(session);
+        };
+        return html`<tr data-row=${row.key} data-opens=${session === null ? nothing : ""} @click=${go}>${row.cells.map((cell, i) =>
+          html`<td class=${board.columns[i]?.num ? "n" : ""}>${i === 0 && session !== null
+            ? html`<a class="go" href=${addressPath(sessionAddress(session.harness, session.id))}
+                @click=${(event: MouseEvent) => { if (!plain(event)) event.stopPropagation(); }}>${cell}</a>`
+            : cell}</td>`)}</tr>`;
+      })}</tbody>
     </table></div>
     <div class="more" data-part="more" data-more="table"><span>${board.line}</span>${board.more
       ? html`<button type="button" class="act" data-act="show" @click=${() => { void this.#board?.show(); }}>${SHOW}</button>`
       : nothing}</div>`;
+  }
+
+  /** A table row's session opens as its address opens it: first in the section, with its
+   * whole figures whatever the range, the table hidden and the section scrolled to. */
+  #openFromTable(session: { harness: string; id: string }): void {
+    this.#placed = session;
+    this.#openedIn = null;
+    this.sectionTable = null;
+    this.open(sessionAddress(session.harness, session.id));
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector("section[data-group=sessions]")?.scrollIntoView({ block: "start" });
+    });
   }
 
   /** A line under a list: what it leaves out, and `Show`; with no act, the line alone. */
