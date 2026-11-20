@@ -11,14 +11,15 @@
   watch on `claude` fails keeps its claim file, so it is replaced too.
 - `[archive] record` and `[archive] identities` name an older comms' record and
   identities files, which comms reads in place and never writes. `moxi comms history`
-  and a session's `history` tool list the older record's messages before comms.db's,
-  the tool with the state `archived` and a `skip` to page back past the newest
-  messages it reads at once; `explain <name> <id>` of an older message says
-  whether the older queue still held it for that name and whether that name's older
-  cursor file stood at or past it, and that the rest of its delivery is not read; `reply` and every read by id find
+  and a session's `history` tool list the older record's messages before comms.db's, the
+  tool with the state `archived` and a `skip` to page back past the newest messages it
+  reads at once; `explain <name> <id>` of an older message says whether the older queue
+  still held it for that name and whether that name's older cursor file stood at or past
+  it, and that the rest of its delivery is not read; `reply` and every read by id find
   an older message by its own id, because the daemon moves comms.db's counter past the
-  older ids once at its start; and every name the older identities file retired is
-  refused at bind and as a recipient again.
+  older ids once at its start (an older id comms.db had already used stays comms.db's
+  message by id, and the older message under it is reached through `history`); and every
+  name the older identities file retired is refused at bind and as a recipient again.
 - `moxi comms opencode <identity>` launches an OpenCode session with comms mail, as
   `moxi comms claude` and `moxi comms codex` launch theirs. It runs the OpenCode wrapper
   `moxi-comms-opencode`, whose script is not on PATH, and names itself as typed.

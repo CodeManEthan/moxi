@@ -29,8 +29,10 @@ same id can name a message in each. At its start the daemon raises comms.db's co
 the archive's last id once (`skip_ids`) and records the ids it skipped in comms.db's
 `meta` (`archive_skipped`, `"<from> <to>"`: every id above `from` up to `to`). comms.db
 never writes an id in that range, so an id there is the archive's, and an id outside it
-is comms.db's alone. An archive id comms.db had already written before the skip is
-reached through `history`, not by id.
+is comms.db's alone. An archive id comms.db had already written before the skip names
+comms.db's message by id: `reply`, `explain` and every other read by that id reach
+comms.db's message. The archive's message under that id is reached through `history`
+only.
 
 The archive is read once per process from the config file, as the daemon reads `[archive]`
 at its start (`current`). A file that is missing or can't be read is logged once and
