@@ -298,7 +298,7 @@ Claude Code's exit dialog, a job that outlives the session). Each act but keep-w
 waits for the session to be quiet first: no turn open, no subagent at work, no draft in
 the prompt, and nobody using its pane or opening a turn in the last 2 minutes
 (`relaunch.person_s`). Keep-warm takes its own reads instead (below), since it nudges
-because subagents are at work. A background shell never holds an act.
+because subagents are at work. A background shell holds only exit-session (below).
 
 A launch has one act open at a time. A second one is refused (`run-open`, exit 3), naming
 the open run. Each act is a run in the launch log, with its events and its outcome.
@@ -346,8 +346,12 @@ still live.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
 exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,
-the commands it granted turns. In a slot the exit dialog is answered too; elsewhere the
-session is left at the dialog for a person (`at-dialog`). Every exit tried writes a row to
+the commands it granted turns. A background shell or Monitor the session runs holds the
+exit (`held`, `shells`) until the session has been idle an hour, as cache reads its last
+request; with cache not installed the idle time is unknown and the shells hold. Past the
+hour, Claude's exit dialog stops them. In a slot the exit dialog is answered too, with
+"Exit and stop tasks"; elsewhere the session is left at the dialog for a person
+(`at-dialog`). Every exit tried writes a row to
 the exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
 `not-exited` or `refused`.
 

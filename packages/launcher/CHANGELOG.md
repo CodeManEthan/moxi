@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Exit-session holds while the session runs a background shell or Monitor, as Core's
+  did, until the session has been idle an hour (`held`, word `shells`); only then does it
+  exit and stop them at Claude's exit dialog. `--dry-run` says which.
 - The start posture checks the brief, as Core's did: `preview` and `run` refuse a `go`
   launch with no brief, brief file or handoff, and a brief under `with:<identity>`, whose
   director sends the first message (`posture-brief`). A brief under `operator` is sent.

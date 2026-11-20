@@ -13,9 +13,10 @@ that holds the act is a word, and the words come in this order:
 | `person` | slot: `pane_use` (copy mode, or a client or the pane active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
 | `unreadable` | any read failed, or `facts().stale` | always |
 
-**A `shell` entry never counts as live work**, whichever harness reports it: background
-shells stop at Claude's exit dialog, or with a clear or compact's stop, so they hold
-nothing.
+**A `shell` entry never counts as live work** in this read, whichever harness reports
+it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
+Exit-session reads them itself after this read (`exits.background_shells`), and holds
+for them until the session has been idle an hour.
 
 **A turn no delivery opened holds as a person's, whatever way it came.** turns marks such
 a turn with `opening` and `command` both None, in `facts().turn` and as a `turn.started`
