@@ -1,9 +1,12 @@
 """memory's doctor checks: `rows()`, which the announcement's `DOCTOR` names.
 
-- index: the current generation, its schema and tokenizer, rows per tier, whether the
-  first full read is still filling it, a rebuild running, older generations left to
-  remove and the sessions the last rebuild dropped and kept. `warn` with no index yet, and
-  when a rebuild was killed before it finished and none has finished since.
+- index: the current generation, its schema and tokenizer, which secrets `redact` stored
+  its rows (`redact version N`), rows per tier, whether the first full read is still
+  filling it, a rebuild running, older generations left to remove and the sessions the
+  last rebuild dropped and kept. `warn` with no index yet, when a rebuild was killed
+  before it finished and none has finished since, and while the redact version is below
+  the installed secrets' (rows stored before may hold secrets today's `redact` catches,
+  until `moxi memory reindex` redacts them again).
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
   same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
   can't read, and a request waiting for the writer lock. A request queued behind a
@@ -77,6 +80,7 @@ def _plural(n: int, word: str) -> str:
 
 def _index() -> Row:
     from . import index
+    from .ingest import REPLACED_KEY
 
     try:
         reader = index.open_read()
@@ -94,10 +98,21 @@ def _index() -> Row:
         filling = str(index.meta_get(conn, "first_read") or "0") in ("0", "")
         dropped = index.meta_get(conn, "dropped")
         kept = index.meta_get(conn, "kept")
+        replaced = index.meta_get(conn, REPLACED_KEY)
+        stored = index.stored_redact_version(conn)
         generation = r.generation
     parts = [f"generation {generation}", f"schema {schema}", f"tokenizer {tokenizer}",
-             f"{tiers} messages and calls", f"{tails} result tails"]
+             f"redact version {stored}", f"{tiers} messages and calls",
+             f"{tails} result tails"]
     state = "ok"
+    from .rows import redact_version
+
+    now = redact_version()
+    if stored < now:
+        parts.append(f"rows stored under redact version {stored} may hold secrets that "
+                     f"secrets' redact version {now} catches; run `{REINDEX}` once to "
+                     "redact them again")
+        state = "warn"
     if filling:
         parts.append("still filling: the first full read hasn't finished")
     running = index.rebuild_running()
@@ -112,7 +127,11 @@ def _index() -> Row:
     if dropped not in (None, "", 0, "0"):
         parts.append(f"the last rebuild dropped {dropped} sessions whose transcripts are "
                      "gone")
-    if kept not in (None, "", 0, "0"):
+    if replaced is not None:
+        parts.append(f"the last rebuild redacted again the rows stored under redact "
+                     f"version {replaced}: it dropped no session, and kept what it couldn't "
+                     f"read to its end of {kept or 0} sessions")
+    elif kept not in (None, "", 0, "0"):
         parts.append(f"the last rebuild kept {kept} sessions it couldn't read, from folders "
                      "that didn't answer it or compressed rollouts")
     from . import state as store
