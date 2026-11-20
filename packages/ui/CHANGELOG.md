@@ -2,12 +2,10 @@
 
 ## Unreleased
 
-- On the Modules view nothing already on the page moves when a block's data arrives late.
-  Each block at the top keeps one height, 20rem, whatever it shows, and scrolls within it
-  when it holds more; the Page servers block now sits last, under the Installed list, and
-  its list is mostly drawn with the rest of the page. A block or a list that filled late
-  used to push the blocks and links below it down by up to a few hundred pixels, so a
-  click that landed just as it filled could release off its link and open nothing.
+- On the Modules view the Page servers block now sits last, under the Installed list, and
+  its list is mostly drawn with the rest of the page. When the list arrives late it no
+  longer pushes the blocks and links already on the page down by a few hundred pixels, so
+  a click that lands on a link just as the list arrives opens what it pressed.
 - A page's push stream closes as the page leaves. In Firefox, a reload or a navigation
   within about 50 ms of the view's topics changing could leave the shell holding a push
   stream no page read, beside the new page's own, for 30 s and more. Each such stream
