@@ -132,11 +132,12 @@ def test_projects_closed_names_the_dearest_three_and_its_count_opens_it(page):
     count = section.locator("[data-part=count]")
     expect(count).to_have_text("3 projects")
     expect(rows_of(section)).to_have_count(0)
-    # The sections follow the chart: Projects, Models, Token kinds, Prices.
+    # The sections follow the chart and the heat map: Sessions, Projects, Models, Token
+    # kinds, Prices.
     below = panel.locator("[data-part=below] > section")
-    expect(below).to_have_count(6)
+    expect(below).to_have_count(7)
     order = below.evaluate_all("nodes => nodes.map((node) => node.dataset.group)")
-    assert order == ["chart", "sessions", "projects", "models", "kinds", "prices"], order
+    assert order == ["chart", "heat", "sessions", "projects", "models", "kinds", "prices"], order
 
     count.click()
     expect(page).to_have_url(re.compile(r"/m/usage/projects$"))

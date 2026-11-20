@@ -107,12 +107,12 @@ def check_colours_and_headings(page, what: str) -> None:
     alone, and from the text tokens at least.
 
     It is checked once every read of the page has answered: no part says it is still
-    reading, and all six groups under the filter line are drawn (a closed section is
+    reading, and all seven groups under the filter line are drawn (a closed section is
     absent until its read answers). A read that answers during the sweep draws its part
     again, and each node that takes away changes every colour the sweep compares."""
     panel = page.locator(PANEL)
     expect(panel.locator("[data-part=reading], [data-opened=reading]")).to_have_count(0)
-    expect(panel.locator("[data-part=below] > section")).to_have_count(6)
+    expect(panel.locator("[data-part=below] > section")).to_have_count(7)
     expect(panel.get_by_role("heading")).to_have_count(0)
     seen = panel.evaluate(f"(el) => ({REACHED})()")
     assert seen["tokens"] > len(ALLOWED), seen
@@ -287,7 +287,12 @@ def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(inst
     # The thread is three days old: nothing of Codex today.
     expect(chart.locator("[data-part=none]")).to_have_text("Nothing was used in this range.")
     expect(chart.locator("svg[data-part=chart]")).to_have_count(0)
-    expect(panel.locator("[data-part=below] section[data-group]")).to_have_count(1)
+    # No section is drawn; the heat map, which does not follow the range, still holds
+    # the thread's day.
+    groups = panel.locator("[data-part=below] section[data-group]")
+    expect(groups).to_have_count(2)
+    assert groups.evaluate_all("nodes => nodes.map((node) => node.dataset.group)") == ["chart", "heat"]
+    expect(section(panel, "heat").locator("svg[data-part=heat]").get_by_role("button")).to_have_count(1)
     expect(panel.locator("[data-group=cost] [data-cost]")).to_have_count(3)
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     expect(panel.locator("[data-part=foot]")).to_be_visible()

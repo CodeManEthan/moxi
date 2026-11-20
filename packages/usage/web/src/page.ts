@@ -30,6 +30,8 @@
 //     section[data-group=chart]    one bar a day or a month, stacked by token class by cost;
 //                                  by tokens the cache reads and the billable work as two
 //                                  charts; its sentence and its table
+//     section[data-group=heat]     each day's cost over the 53 weeks to today, whatever the
+//                                  range; a used day is a button that sets the range to it
 //     section[data-group=sessions] the range's dearest session and the count, and opened
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
 //                                  they leave out, the earlier days, and the table; an
@@ -65,7 +67,7 @@ import {
   addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
-import { chartDraw, chartGroup } from "./chart-model.ts";
+import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
 import type { ChartDraw, ChartGroup, ChartModel, Series, Table } from "./chart-model.ts";
 import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
@@ -79,10 +81,12 @@ import type {
   RestartPoint, SessionRow, Status, TermsRow, TermsTotal,
 } from "./feed.ts";
 import {
-  allTimePath, chartPath, chartTermsPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
+  allTimePath, chartPath, chartTermsPath, customRange, figuresPath, filterLine, heatPath, heldState, holdState, modelsPath,
   modelsSectionPath, placesPath, placesSectionPath, START, termsSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
+import { HEAT_LABEL, HEAT_SIZE, heatDraw, heatModel, LESS, MORE } from "./heat-model.ts";
+import type { HeatModel } from "./heat-model.ts";
 import {
   COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, READING, shouldPass,
 } from "./frame-model.ts";
@@ -233,6 +237,18 @@ const STYLES = css`
   svg .seg.s2 { fill-opacity: 0.4; } svg .seg.s2.now { fill-opacity: 0.72; }
   svg .seg.s3 { fill-opacity: 0.25; } svg .seg.s3.now { fill-opacity: 0.46; }
   svg .seg.s4 { fill-opacity: 0.13; } svg .seg.s4.now { fill-opacity: 0.24; }
+  /* The heat map's five steps: the text colour from faint to full; an unused day is a
+     border's shade. */
+  svg .hc { fill: var(--moxi-text); }
+  svg .hc.h0 { fill: var(--moxi-border); fill-opacity: 1; }
+  svg .hc.h1 { fill-opacity: 0.16; } svg .hc.h2 { fill-opacity: 0.32; } svg .hc.h3 { fill-opacity: 0.5; }
+  svg .hc.h4 { fill-opacity: 0.72; } svg .hc.h5 { fill-opacity: 1; }
+  svg.ch.hm { margin: 6px 0 2px; }
+  svg.ch.hm rect[role=button] { cursor: pointer; }
+  .scroll.heat { padding: 0; }
+  .scale { display: flex; align-items: center; gap: 3px; padding: 0 0 8px; font-size: var(--moxi-font-size-sm);
+           line-height: 18px; color: var(--moxi-text-dim); }
+  .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
   .chartn { padding: 10px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text); }
   .chartc { padding: 0 0 4px; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
   .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0 0 6px; list-style: none;
@@ -352,6 +368,7 @@ export class UsagePage extends LitElement {
     menu: { state: true },
     custom: { state: true },
     asTable: { state: true },
+    heatTable: { state: true },
     sectionTable: { state: true },
     pricesPart: { state: true },
     searchText: { state: true },
@@ -372,6 +389,8 @@ export class UsagePage extends LitElement {
   custom = false;
   /** The chart's table stands in its place. */
   asTable = false;
+  /** The heat map's table stands in its place. */
+  heatTable = false;
   /** The opened section whose table is shown under its rows. */
   sectionTable: SectionKey | "sessions" | null = null;
   /** What is open under the price table. */
@@ -403,6 +422,8 @@ export class UsagePage extends LitElement {
   #chart: Feed<Report<DayRow>> | null = null;
   /** The chart's cost terms by period, which stack its bars by class. */
   #chartTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
+  /** The heat map's days: the 53 weeks to today under every filter but the range. */
+  #heat: Feed<Report<DayRow>> | null = null;
   #figures: Feed<Report<DayRow>> | null = null;
   #allTime: Feed<Report<DayRow>> | null = null;
   #places: Feed<Report<ProjectRow>> | null = null;
@@ -635,13 +656,13 @@ export class UsagePage extends LitElement {
 
   /** Every read under the filter line that is open, each once. */
   #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
-    return [...new Set([this.#chart, this.#chartTerms, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
+    return [...new Set([this.#chart, this.#chartTerms, this.#heat, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
                         this.#modelsSection, this.#terms, this.#prices, this.#sessionsTop])].filter((feed) => feed !== null);
   }
 
   #closeBelow(): void {
     for (const feed of this.#belowFeeds()) feed.close();
-    this.#chart = this.#chartTerms = this.#figures = this.#allTime = this.#places = this.#models = null;
+    this.#chart = this.#chartTerms = this.#heat = this.#figures = this.#allTime = this.#places = this.#models = null;
     this.#placesSection = this.#modelsSection = this.#terms = this.#prices = this.#sessionsTop = null;
     this.#pricesPath = null;
     this.#closeLists();
@@ -675,7 +696,7 @@ export class UsagePage extends LitElement {
     const update = () => this.requestUpdate();
     const state = heldState();
     const today = this.#today();
-    const paths = { chart: chartPath(state, today), chartTerms: chartTermsPath(state, today), figures: figuresPath(state, today),
+    const paths = { chart: chartPath(state, today), chartTerms: chartTermsPath(state, today), heat: heatPath(state, today), figures: figuresPath(state, today),
                     places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
                     placesSection: placesSectionPath(state, today, this.#folders()),
                     modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today),
@@ -695,6 +716,7 @@ export class UsagePage extends LitElement {
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -929,6 +951,7 @@ export class UsagePage extends LitElement {
     };
     other("The chart", chart);
     other("The chart's token classes", this.#chartTerms);
+    other("The heat map", this.#heat);
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
@@ -980,6 +1003,9 @@ export class UsagePage extends LitElement {
       this.#kinds(kindsSection(this.#terms?.value ?? null)),
       this.#pricesGroup(pricesSection(this.#terms?.value ?? null, this.#prices?.value ?? null, today)),
     ].filter((drawn) => drawn !== nothing);
+    // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
+    const heatReport = frame.below ? this.#heat?.value ?? null : null;
+    const heat = heatReport === null ? null : heatModel(heatReport, today);
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -989,8 +1015,8 @@ export class UsagePage extends LitElement {
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
-      ${group === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
-        group === null ? nothing : this.#chartGroup(group)}${sections}</div>`}
+      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
+        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat)}${sections}</div>`}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1169,6 +1195,43 @@ export class UsagePage extends LitElement {
             @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
         ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
         ${group.table === null ? nothing : this.#table(group.table)}
+      </div>
+    </section>`;
+  }
+
+  /** The heat map's group: its sentence and the map, or its table in the map's place. */
+  #heatGroup(model: HeatModel) {
+    const wide = !window.matchMedia("(max-width: 720px)").matches;
+    const draw = heatDraw(model, Math.max(120, this.width - (wide ? 100 : 0)));
+    const pick = (day: string) => {
+      const range = customRange(day, day);
+      if (range !== null) holdState({ range });
+    };
+    const keyed = (event: KeyboardEvent, day: string) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      pick(day);
+    };
+    return html`<section class="grp" data-group="heat">
+      <div class="gk">${HEAT_LABEL}</div>
+      <div class="gl">
+        <div class="chartl"><span data-part="sentence">${model.sentence}</span>
+          <button type="button" class="act" data-part="table-toggle"
+            @click=${() => { this.heatTable = !this.heatTable; }}>${this.heatTable ? CHART : TABLE}</button></div>
+        ${this.heatTable ? this.#table(model.table) : html`<div class="scroll heat">
+          <svg class="ch hm" data-part="heat" role="group" aria-label=${model.aria} width=${draw.width}
+            height=${draw.height} viewBox="0 0 ${draw.width} ${draw.height}">${svg`
+            ${draw.months.map((month) => svg`<text x=${month.x} y=${HEAT_SIZE.months - 3}>${month.text}</text>`)}
+            ${draw.weekdays.map((weekday) => svg`<text x="0" y=${weekday.y} dominant-baseline="middle">${weekday.text}</text>`)}
+            ${draw.cells.map((cell) => cell.used
+              ? svg`<rect class="hc h${cell.step}" data-day=${cell.day} x=${cell.x} y=${cell.y} width=${draw.cell}
+                  height=${draw.cell} rx="2" tabindex="0" role="button" aria-label=${cell.aria}
+                  @click=${() => pick(cell.day)} @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}
+                  ><title>${cell.hover}</title></rect>`
+              : svg`<rect class="hc h0" data-day=${cell.day} x=${cell.x} y=${cell.y} width=${draw.cell}
+                  height=${draw.cell} rx="2"><title>${cell.hover}</title></rect>`)}`}</svg></div>
+          <p class="scale" data-part="scale" aria-hidden="true">${LESS}${[1, 2, 3, 4, 5].map((step) =>
+            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`}
       </div>
     </section>`;
   }

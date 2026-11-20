@@ -3,7 +3,8 @@ starts usage's real page server: the Range menu's entries and what each choice d
 the chart and leaves alone in Cost, the two days of a range of one's own, the Harness
 and Model filters, the folder filter on a shell without projects, the chart's bars,
 sentence, today's value, dashed outline and table by cost and by tokens, its bars by
-cost stacked by token class, the two charts by tokens, a range that holds nothing, a range whose total is not whole with its line at the foot, the sections
+cost stacked by token class, the two charts by tokens, the 53 weeks' heat map, a range that
+holds nothing, a range whose total is not whole with its line at the foot, the sections
 reading under the same range, and all of it at a phone's width.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
@@ -511,6 +512,71 @@ def test_the_sections_read_under_the_pages_range_and_filters(page):
     expect(filter_of(panel, "range").locator("button.pick")).to_have_text("last 7 days▾")
     expect(filter_of(panel, "model").locator("button.pick")).to_have_text(f"{HAIKU}▾")
     expect(panel.locator("section[data-group=models] [data-part=rows] .tr2")).to_have_count(1)
+
+
+# --- the heat map ----------------------------------------------------------------------------
+
+def heat_of(panel):
+    return panel.locator("[data-group=heat]")
+
+
+def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_range(page):
+    panel = open_page(page)
+    heat = heat_of(panel)
+    expect(heat.locator(".gk")).to_have_text("53 weeks")
+    expect(heat.locator("[data-part=sentence]")).to_have_text(
+        "Each day's estimated cost over the last 53 weeks, whatever the range. Pick a day to see it alone.")
+    grid = heat.locator("svg[data-part=heat]")
+    expect(grid).to_have_attribute("aria-label", "Estimated cost each day, last 53 weeks")
+    expect(grid.locator("rect.hc")).to_have_count(371)
+    # The five sessions fall on five days, 200 days ago the oldest; each is a button.
+    days = grid.get_by_role("button")
+    expect(days).to_have_count(5)
+    expect(grid.locator("text")).to_contain_text(["M", "W", "F"])
+    expect(heat.locator("[data-part=scale]")).to_have_text("lessmore")
+    # It does not follow the range.
+    pick(panel, "range", "Last 7 days")
+    expect(chart_of(panel).locator("g[data-period]")).to_have_count(2)
+    expect(days).to_have_count(5)
+    # The oldest day says its cost and tokens, and picking it sets the range to it.
+    oldest = days.first
+    expect(oldest).to_have_attribute("aria-label", re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}$"))
+    expect(oldest.locator("title")).to_have_text(
+        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens\nFresh input 600\nCache write 0\n"
+                   r"Cache read 30\nOutput 4\.50k$"))
+    date, year = oldest.get_attribute("aria-label").split(":")[0].rsplit(" ", 1)
+    oldest.click()
+    # The range names the day's year only when it is not this year.
+    expect(filter_of(panel, "range").locator("button.pick")).to_have_text(
+        re.compile(rf"^{date}( {year})?▾$"))
+    expect(chart_of(panel).locator("g[data-period]")).to_have_count(1)
+    expect(chart_of(panel).locator("g[data-period]")).to_have_attribute(
+        "data-period", oldest.get_attribute("data-day"))
+    # A day is reached by the keyboard too: Enter on the newest sets the range to it.
+    newest = days.last.get_attribute("data-day")
+    days.last.focus()
+    page.keyboard.press("Enter")
+    expect(chart_of(panel).locator("g[data-period]")).to_have_attribute("data-period", newest)
+    expect(days).to_have_count(5)
+
+
+def test_the_heat_map_follows_the_other_filters_and_its_table_lists_the_used_days(page):
+    panel = open_page(page)
+    heat = heat_of(panel)
+    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_count(5)
+    pick(panel, "harness", "Codex")
+    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_count(1)
+    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_attribute(
+        "aria-label", re.compile(r": no price$"))
+    pick(panel, "harness", "all")
+    heat.get_by_role("button", name="Table").click()
+    expect(heat.locator("svg[data-part=heat]")).to_have_count(0)
+    table = heat.get_by_role("table")
+    expect(table.locator("thead th")).to_have_text(["Day", "Est. cost", "Tokens"])
+    expect(table.locator("tbody tr")).to_have_count(5)
+    expect(table.locator("tbody tr").last.locator("td").nth(1)).to_have_text(re.compile(rf"^{MONEY}$"))
+    heat.get_by_role("button", name="Chart").click()
+    expect(heat.locator("svg[data-part=heat]")).to_be_visible()
 
 
 # --- the contract and a phone's width ------------------------------------------------------

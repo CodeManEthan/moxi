@@ -10,6 +10,7 @@ import type { Range } from "./cost-model.ts";
 import { addDays, daysFrom } from "./days.ts";
 import type { DayRow, Lane, ModelRow, ProjectRow, Report } from "./feed.ts";
 import { filesByHarness } from "./frame-model.ts";
+import { heatSince } from "./heat-model.ts";
 import { harnessName } from "./limits-model.ts";
 
 /** What the filter line is set to. An empty string is a filter that is not set. */
@@ -89,6 +90,13 @@ export function chartPath(state: PageState, today: string): string {
  * under the same range and filters. */
 export function chartTermsPath(state: PageState, today: string): string {
   return withQuery("api/terms", [["by", rangeBy(state.range, today)], ...stateKeys(state, today)]);
+}
+
+/** The heat map's report: each day of the 53 weeks to today, under every filter but
+ * the range. */
+export function heatPath(state: PageState, today: string): string {
+  return withQuery("api/daily", [["by", "day"], ["since", heatSince(today)], ["until", today],
+                                 ...stateKeys(state, today, ["since", "until"])]);
 }
 
 /** The report the Range menu's preset figures are summed from while a filter is set:
