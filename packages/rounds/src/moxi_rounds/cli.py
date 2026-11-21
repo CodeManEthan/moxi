@@ -49,7 +49,8 @@
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
-`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
+`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL, `file:<path>#<anchor>` or
+`page:<page>/<act id>@<UTC time>`, his act on a page.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
@@ -433,9 +434,10 @@ def _declare_rule(verbs) -> None:
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a ruling "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "ruling without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
     parser.add_argument("--chose", metavar="K",
@@ -549,10 +551,11 @@ def _declare_ask(verbs) -> None:
                              "left out with --adopt and --move")
     parser.add_argument("--from", dest="origin", metavar="PTR",
                         help="a pointer to where the question came from, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>, as "
-                             "file:design.md#<anchor> for a section of the design; a "
-                             "question with no origin is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>, or file:<path in the "
+                             "round's folder>#<anchor>, as file:design.md#<anchor> for "
+                             "a section of the design; a question with no origin is "
+                             "refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
                              "operator's own: a pointer to where he asked it; with "
@@ -787,13 +790,16 @@ def _declare_mark(verbs) -> None:
                              "message that shows the waiting item done; "
                              "with --close or --accept-risk, a pointer to where the "
                              "lead wrote why, one token: comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL, or file:<path "
-                             "in the round's folder>#<anchor>; "
+                             "<session>@<UTC time>, an https:// URL, file:<path "
+                             "in the round's folder>#<anchor>, or page:<page>/<act "
+                             "id>@<UTC time>; "
                              "with --shown, a pointer to where he was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
-                             "time>, or the https:// URL of a page that listed them; "
-                             "never a file, the pointer of one of the rulings, or a "
-                             "message from before one of them was said")
+                             "time>, the https:// URL of a page that listed them, or "
+                             "page:<page>/<act id>@<UTC time> for his act on a page "
+                             "that showed them; never a file, the pointer of one of "
+                             "the rulings, a message from before one of them was "
+                             "said, or a page's act from before one was recorded")
     _writes(parser)
 
 
@@ -1022,7 +1028,8 @@ def _declare_fold(verbs) -> None:
                         help="with --records-only, a pointer to the record of the "
                              "change, one token: file:<path in the round's "
                              "folder>#<anchor> as a rule, or comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL")
+                             "<session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>")
     _writes(parser)
 
 
@@ -1470,9 +1477,10 @@ def _declare_drop(verbs) -> None:
     parser.add_argument("--record", metavar="PTR",
                         help="with --by operator, a pointer to where he dropped it; "
                              "with --by lead, a pointer to why; one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a drop "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "drop without one is refused")
     parser.add_argument("--withdraw-questions", action="store_true",
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "

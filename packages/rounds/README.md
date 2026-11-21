@@ -140,12 +140,20 @@ one token:
   `2026-01-02T03:04Z`;
 - an `https://` URL;
 - `file:<path in the round's folder>#<anchor>`, as `file:design.md#index` for a section
-  of the design.
+  of the design;
+- `page:<page>/<act id>@<UTC time>`, one act of the operator's on a module's page, as
+  `page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z`: the module whose page it was
+  (lower-case letters, digits and `-`, from a letter), the id the page gave that one act
+  (8 to 64 letters, digits, `_` and `-`) and the time to the second. A page on this
+  machine has no `https://` address, so what it records points at the act itself, and
+  the act id keeps two acts in one second apart.
 
-A question with no `--from` and a ruling with no `--record` are refused. A question that
-is the operator's own takes `--record` in place of `--from`. `mark --shown` takes a
-message, a session or a URL, and never a file, the pointer of one of the rulings it
-marks, or a message from before one of them was said.
+Only the shape is checked. A question with no `--from` and a ruling with no `--record`
+are refused. A question that is the operator's own takes `--record` in place of
+`--from`. `mark --shown` takes a message, a session, a URL or a page's act, and never a
+file, the pointer of one of the rulings it marks, a message from before one of them was
+said, or a page's act whose time is before one of them was recorded: a page can only
+show a ruling on record.
 
 ## Flows and steps
 
