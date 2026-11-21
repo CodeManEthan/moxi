@@ -77,7 +77,8 @@ still spawning, where a project's launches include those made through its seats,
 when comms reports that name retired, and its scope is always the empty one, which comms
 reads as global: a project scope is never carried. Each carries comms' refusal of a
 launch under it, if any (a retired name's among them), so the page shows the name with
-why it can't launch. With no such name, and for any
+why it can't launch, and a note when a live session holds the same name in a project
+scope. With no such name, and for any
 harness but Codex, it is the default (`default_identity`): on a seat named for one of
 its project's agents that sets no identity, the seat's own name; else a project of kind
 `agent`'s own key; else the project's `lead`; else `<key>-lead`, only when comms lists
@@ -1526,39 +1527,68 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
     that harness bound (`binding_launch`) and when that launch was made, whatever comms
     says of it now; else, for a harness in `DEFAULT_HARNESSES`, `default_identity` with no
     time. Each carries comms' refusal of a launch under that name (`comms_refusal`), a
-    retired name's among them, null when comms lets it through. A harness whose identity row
-    is not carried, or that has neither, is left out; the scope is the empty one, which
-    comms reads as global."""
+    retired name's among them, null when comms lets it through, and the note a live
+    namesake in a project scope gives (`namesake_note`), null with none. A harness whose
+    identity row is not carried, or that has neither, is left out; the scope is the empty
+    one, which comms reads as global."""
     out: list[dict[str, Any]] = []
     unbound: list[str] = []
     said: dict[str, catalog.Refused | None] = {}
+    live: list[tuple] = []
 
     def refusal_of(name: str) -> catalog.Refused | None:
         if name not in said:
             said[name] = comms_refusal(name)
         return said[name]
 
+    def identity_entry(harness: str, name: str, at: str | None) -> dict[str, Any]:
+        if not live:
+            live.append(live_bindings())
+        return _identity(harness, name, at, refusal_of(name), namesake_note(name, live[0]))
+
     for harness in catalog.HARNESSES:
         if not getattr(catalog.row(harness, "identity"), "carry", False):
             continue
         row = binding_launch(found, harness)
         name = _bare(row.identity) if row is not None else ""
-        refused = refusal_of(name) if name else None
         if row is not None and name:
-            out.append(_identity(harness, name, row.created_at, refused))
+            out.append(identity_entry(harness, name, row.created_at))
         elif harness in DEFAULT_HARNESSES:
             unbound.append(harness)
     default = default_identity(query, *key) if unbound else None
     if default is not None:
-        refused = refusal_of(default)
-        out += [_identity(harness, default, None, refused) for harness in unbound]
+        out += [identity_entry(harness, default, None) for harness in unbound]
     return out
 
 
-def _identity(harness: str, name: str, at: str | None,
-              refused: catalog.Refused | None) -> dict[str, Any]:
+def _identity(harness: str, name: str, at: str | None, refused: catalog.Refused | None,
+              note: str | None) -> dict[str, Any]:
     return {"harness": harness, "identity": name, "at": at,
-            "refused": None if refused is None else _refused(refused)}
+            "refused": None if refused is None else _refused(refused), "note": note}
+
+
+def live_bindings() -> tuple:
+    """The names live sessions hold now, as comms' roster lists them (each with its
+    `name` and `qualified`); empty when comms is not installed or can't be read."""
+    roster = getattr(joiner.comms_api(), "roster", None)
+    if roster is None:
+        return ()
+    try:
+        return tuple(roster().bound)
+    except Exception:  # noqa: BLE001  (comms down: nothing to note)
+        return ()
+
+
+def namesake_note(name: str, bound: tuple) -> str | None:
+    """The note beside an identity filled at the global scope when a live session holds the
+    same name in a project scope, so a launch meant for that binding picks its scope;
+    None with no such session."""
+    for agent in bound:
+        qualified = str(getattr(agent, "qualified", "") or "")
+        if getattr(agent, "name", None) == name and "@" in qualified:
+            return (f"{qualified} is live in its project scope; the global name is the one "
+                    "filled. Pick that scope only if you mean that binding")
+    return None
 
 
 def _bare(identity: str | None) -> str:

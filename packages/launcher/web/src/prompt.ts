@@ -86,7 +86,8 @@
 // change; one the user edits becomes his, and leaves the item. A filled value that can do
 // harm asks nothing and stays after a launch. A filled comms identity comms refuses a
 // launch under (held, reserved, retired) shows comms' refusal beside it, in the list and
-// under its row. The button is off until the fill is read and made, and the request names
+// under its row, and so does the note when a live session holds the same name in a project
+// scope. The button is off until the fill is read and made, and the request names
 // each filled row.
 //
 // `Run again` under the box lists the recent launches of what the line names, read when the
@@ -147,7 +148,7 @@ import type {
 } from "./options-model.ts";
 
 import {
-  BY_DEFAULT, CLEAR, filledAt, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
+  BY_DEFAULT, CLEAR, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
   HARNESS_ROW, harnessStep, keptFill, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote, withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
@@ -1111,12 +1112,15 @@ export class LauncherPrompt extends LitElement {
         this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
   }
 
-  /** comms' refusal of the filled identity, under the row `name` names when it is the identity;
-   * nothing when comms lets it through. */
+  /** comms' refusal of the filled identity and the note of a live namesake in a project scope,
+   * under the row `name` names when it is the identity; nothing when there is neither. */
   #refusedBeside(name: string) {
-    const found = name === "identity" && this.last !== null
-      ? filledRefusal(this.last, this.#fill, this.#form?.harness ?? "") : null;
-    return found === null ? nothing : html`<p class="nref" data-refused=${found.code}>${refusalNote(found)}</p>`;
+    if (name !== "identity" || this.last === null) return nothing;
+    const harness = this.#form?.harness ?? "";
+    const found = filledRefusal(this.last, this.#fill, harness);
+    const note = filledNote(this.last, this.#fill, harness);
+    return html`${found === null ? nothing : html`<p class="nref" data-refused=${found.code}>${refusalNote(found)}</p>`}${
+      note === null ? nothing : html`<p class="nref" data-namesake>${note}.</p>`}`;
   }
 
   /** When the launch the fill came from was made; null for a default identity. */

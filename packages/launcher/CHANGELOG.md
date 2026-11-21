@@ -12,7 +12,9 @@
   `lead`, else `<key>-lead` when comms lists that name. `/api/last` answers the identity
   apart from the values, once for each harness, in `identities`. A filled identity comms
   refuses a launch under shows comms' refusal beside it, as Core's desk showed why a
-  default couldn't launch; each identity in `/api/last` carries it as `refused`. A
+  default couldn't launch; each identity in `/api/last` carries it as `refused`. One
+  whose name a live session holds in a project scope shows a note naming that binding
+  (`note`). A
   harness picked by hand fills the comms identity for that harness, unless the identity
   was set by hand.
 - `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm

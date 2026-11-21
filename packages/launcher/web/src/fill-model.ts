@@ -20,6 +20,9 @@
 // launch does not use. A harness the user picks by hand lets go of every filled value and
 // fills the comms identity for that harness, unless the user set the identity here.
 //
+// A filled comms identity comms refuses a launch under shows the refusal beside it, and one
+// whose name a live session holds in a project scope shows a note naming that binding.
+//
 // A filled value is not a change. It is named on its own item on the line above the box,
 // with what it is, where it came from and `Clear`, and under its row in the panel. One the
 // user edits becomes his change and leaves the item. A filled value that can do harm asks
@@ -75,12 +78,14 @@ export interface LastValue {
 
 /** The comms identity a form drawn for `harness` fills with: the name the newest launch of that
  * harness bound, made `at`, else the default, with a null `at`; `refused` is comms' refusal of a
- * launch under it, null when comms lets one through. */
+ * launch under it, null when comms lets one through; `note` says a live session holds the same
+ * name in a project scope, null when none does. */
 export interface LastIdentity {
   harness: string;
   identity: string;
   at: string | null;
   refused: Refusal | null;
+  note: string | null;
 }
 
 /** `/api/last`'s answer: when the launch was made and its harness, both null with no launch,
@@ -107,7 +112,7 @@ export function parseLast(data: unknown): Last | null {
   const identities = (Array.isArray(data.identities) ? data.identities : [])
     .filter((row): row is Fields => isTable(row) && typeof row.harness === "string" && typeof row.identity === "string")
     .map((row) => ({ harness: row.harness as string, identity: row.identity as string, at: text(row.at),
-                     refused: refusalOf(row.refused) }));
+                     refused: refusalOf(row.refused), note: text(row.note) }));
   return { state: data.state, detail: text(data.detail), at: text(data.at), harness: text(data.harness), values,
            identities };
 }
@@ -273,6 +278,14 @@ export function filledRefusal(last: Last, filled: Readonly<Record<string, FormVa
                               harness: string): Refusal | null {
   const found = identityFor(last, harness);
   return found !== null && filled.identity === found.identity ? found.refused : null;
+}
+
+/** The note beside the identity filled, for a form drawn for `harness`, when a live session
+ * holds the same name in a project scope; null when none is filled, or no such session. */
+export function filledNote(last: Last, filled: Readonly<Record<string, FormValue>>,
+                           harness: string): string | null {
+  const found = identityFor(last, harness);
+  return found !== null && filled.identity === found.identity ? found.note : null;
 }
 
 /** A refusal in a sentence: what is wrong, then what to do. */

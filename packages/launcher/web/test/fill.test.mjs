@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BY_DEFAULT, CHIP_ROWS, filledAt, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
+  BY_DEFAULT, CHIP_ROWS, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
   harnessStep, keptFill, lastKey, lastValue, lastWhen, parseLast, pickedHarnessFill, refusalNote, WHOSE, withoutFill,
 } from "../src/fill-model.ts";
 import { changes, offRows, turnedOn, valueNow, withOption } from "../src/options-model.ts";
@@ -70,8 +70,8 @@ test("an answer of the last launch is read, and one that is not one is not", () 
     values: [{ name: "model", value: "opus", items: null }, { name: "add_dir", value: null, items: ["/work/a"] }],
     identities: [],
   });
-  const identities = [{ harness: "claude", identity: "scout", at: AT, refused: null },
-                       { harness: "codex", identity: "cdx", at: null, refused: null }];
+  const identities = [{ harness: "claude", identity: "scout", at: AT, refused: null, note: null },
+                       { harness: "codex", identity: "cdx", at: null, refused: null, note: null }];
   assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], identities }),
                    { state: "up", detail: null, at: null, harness: null, values: [], identities });
   assert.equal(parseLast({ state: "up" }), null);
@@ -189,6 +189,20 @@ test("comms' refusal of the identity filled is shown beside it while it stays fi
   assert.equal(filledRefusal(given, {}, "claude"), null);
   assert.equal(filledRefusal(given, { identity: "mine" }, "claude"), null);
   assert.equal(filledRefusal(given, { identity: "boss" }, "codex"), null);
+});
+
+test("a live namesake in a project scope is noted beside the identity filled while it stays filled", () => {
+  const note = "boss@proj-a is live in its project scope; the global name is the one filled. "
+    + "Pick that scope only if you mean that binding";
+  const given = parseLast({ state: "up", detail: null, at: null, harness: null, values: [],
+                            identities: [{ harness: "claude", identity: "boss", at: null, refused: null, note },
+                                         { harness: "codex", identity: "cdx", at: null, refused: null, note: 3 }] });
+  assert.deepEqual(given.identities.map((row) => row.note), [note, null]);
+  assert.equal(filledNote(given, { identity: "boss" }, "claude"), note);
+  // Cleared, edited, or for another harness: nothing to show.
+  assert.equal(filledNote(given, {}, "claude"), null);
+  assert.equal(filledNote(given, { identity: "mine" }, "claude"), null);
+  assert.equal(filledNote(given, { identity: "boss" }, "codex"), null);
 });
 
 test("a value fills only a row the form has, shows here and leaves at its shipped default", () => {

@@ -641,6 +641,29 @@ def test_each_identity_carries_comms_refusal_of_a_launch_under_it(world, monkeyp
     assert [entry["refused"] for entry in last(project="proj-a")["identities"]] == [None, None]
 
 
+def test_an_identity_with_a_live_namesake_in_a_project_scope_carries_a_note(world,
+                                                                          monkeypatch):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    comms_saying(monkeypatch)
+    live = (SimpleNamespace(name="boss", qualified="boss@proj-a"),
+            SimpleNamespace(name="cdx", qualified="cdx"))
+    roster = SimpleNamespace(bound=live, standing=())
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: SimpleNamespace(
+        roster=lambda: roster, identity_state=lambda name, scope=None: SimpleNamespace(
+            state="free", qualified=name, holder=None, reason=None)))
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # The global name stays filled, with the live binding in the project scope named.
+    assert said["claude"]["identity"] == "boss"
+    assert said["claude"]["note"] == (
+        "boss@proj-a is live in its project scope; the global name is the one filled. "
+        "Pick that scope only if you mean that binding")
+    # A live binding of the global name itself is no namesake.
+    assert said["codex"]["note"] is None
+
+
 def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
                                                                         monkeypatch):
     assert last(project="proj-a")["values"] == []
@@ -650,7 +673,7 @@ def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
     said = last(project="proj-a")
     assert (said["at"], said["harness"], said["values"]) == (None, None, [])
     assert said["identities"] == [{"harness": "claude", "identity": "proj-a-lead", "at": None,
-                                   "refused": None}]
+                                   "refused": None, "note": None}]
     world.projects["proj-a"].lead = "boss"
     assert identity_of(last(project="proj-a")) == "boss"
     # A folder has no default.

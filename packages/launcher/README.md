@@ -544,7 +544,9 @@ project's agents that sets no identity is filled with its own name, else a proje
 kind `agent` with its own key, any other with its `lead`, or with `<key>-lead` when
 comms lists that name; `Default` on the line names it. A filled identity comms refuses a
 launch under (held by a live session, reserved or retired) shows comms' refusal beside
-it, in the item's list and under its row, as the launch would meet it. A harness you
+it, in the item's list and under its row, as the launch would meet it. One whose name a
+live session holds in a project scope shows a note there naming that binding, so you
+pick its scope only if you mean it. A harness you
 pick in the chip lets go of the values filled and fills the comms identity for that
 harness, unless you set the identity yourself. Under the box,
 `Run again` lists up to three earlier launches there; pointing at one shows what a click

@@ -3619,6 +3619,7 @@ launcher	packages/launcher/src/moxi_launcher/page.py	query={"session": Field("st
 launcher	packages/launcher/src/moxi_launcher/page.py	query={**_PAGED, "request": Field("string", required=False, max=QUERY_MAX)},	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	query={**_PAGED, "run": Field("string", required=False, max=QUERY_MAX),	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	query={**{key: Field("string", required=False, max=QUERY_MAX)	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	refused=Out("table", items=REFUSAL.items, nullable=True),	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/page.py	return Out("string", mark=mark, nullable=nullable)	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	return Out("table", items=items, nullable=nullable)	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	state=_text(), session_id=_text(nullable=True), live=Out("bool", nullable=True),	keep	nullable=	nullable=
@@ -3626,12 +3627,11 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
-launcher	packages/launcher/src/moxi_launcher/page.py	refused=Out("table", items=REFUSAL.items, nullable=True))	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"folder": os.path.basename(os.path.normpath(found.cwd))},	keep	folder	folder
-launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"refused": None if refused is None else _refused(refused)}	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"refused": None if refused is None else _refused(refused), "note": note}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"refused": None, "save": None, **answer}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	(`made_again`), and a request the launcher refuses now, is answered `refused`."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	**The stream** carries two topics, `sessions` (every live launch's state) and `launches`	keep	sessions	sessions
@@ -4461,7 +4461,7 @@ launcher	packages/launcher/tests/test_page_keep_warm.py	return body["refused"]	k
 launcher	packages/launcher/tests/test_page_keep_warm.py	session_id=sid, actor="launcher", state="acting",	use	actor=	by=
 launcher	packages/launcher/tests/test_page_keep_warm.py	session_id=sid, actor="launcher", state="armed",	use	actor=	by=
 launcher	packages/launcher/tests/test_page_keep_warm.py	super().__init__(deadline=joiner.JOIN_BUDGET_S, clock=lambda: self.now,	keep	deadline	deadline
-launcher	packages/launcher/tests/test_page_last.py	"refused": None}]	keep	refused	refused
+launcher	packages/launcher/tests/test_page_last.py	"refused": None, "note": None}]	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	-	name	test_recents_are_the_seats_else_the_projects_else_the_folders	test_recents_are_the_seats_else_the_projects_else_the_dirs
 launcher	packages/launcher/tests/test_page_last.py	-	name	test_the_last_launch_is_the_seats_else_the_projects_else_the_folders	test_the_last_launch_is_the_seats_else_the_projects_else_the_dirs
 launcher	packages/launcher/tests/test_page_last.py	assert [entry["refused"] for entry in last(project="proj-a")["identities"]] == [None, None]	keep	refused	refused
