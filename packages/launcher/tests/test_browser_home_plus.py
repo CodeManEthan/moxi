@@ -1,8 +1,9 @@
 """The `+` on Home in a browser, through a real shell that starts the launcher's real page
 server. `Continue the last session` offers only a session the shell's own user made in the
 place the line names, and resumes it in a slot with the lines under the box, the box's text
-as the resume's brief, and the box emptied once the resume starts; a brief from a file turns the box off and launches with that file as the
-first turn; a handoff from a file, or one a preset names, is on its line under the box,
+as the resume's brief, and the box emptied once the resume starts, or, from an empty box, with
+no first turn, a `go` session too; a brief from a file turns the box off and launches with
+that file as the first turn; a handoff from a file, or one a preset names, is on its line under the box,
 goes in the launch beside the box's text, and `Clear` takes it out of the next launch or
 copied command only: after that, or once a preset is picked, the preset's handoff is back
 on the line and in the launch.
@@ -142,6 +143,27 @@ def test_his_own_last_session_is_offered_and_resumes_in_a_slot_with_the_box_as_i
     # The resume that started with the box's text lets go of it, as a launch does.
     expect(piece.locator("textarea")).to_have_value("")
     expect(piece.locator(".go")).to_be_enabled()
+
+
+def test_his_own_go_session_continued_with_an_empty_box_resumes_with_no_first_turn(
+        page, shell, fake, work_dir):
+    sid = kit.seed(shell, "his-go-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell),
+                   posture="go")
+    piece = kit.open_home(page)
+    expect(piece.locator("textarea")).to_have_value("")
+    menu = plus_menu(page, piece)
+    before = len(fake.starts())
+    with page.expect_request(lambda request: request.url.endswith(RESUME)) as sent:
+        entry(menu, "Continue the last session").click()
+    assert json.loads(sent.value.post_data) == {"session": sid, "plain": True}
+    expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Resumed in slot 3 · "),
+                                                                    timeout=20_000)
+    expect(piece.locator('.said [data-line="refused"]')).to_have_count(0)
+    start = started(fake, before + 1)
+    assert "--resume" in start["argv"] and sid in start["argv"], start["argv"]
+    assert not any(word.startswith("Brief from launcher") for word in start["argv"]), start["argv"]
+    row = kit.newest_launch(shell)
+    assert (row.resume_of, row.brief) == ("his-go-in-folder", None), row
 
 
 def test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file(page, work_dir):

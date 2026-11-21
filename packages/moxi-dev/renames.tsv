@@ -3631,7 +3631,8 @@ launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", ite
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	"slot": Field("string", required=False, max=QUERY_MAX),	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	"brief": Field("string", required=False),	keep	required	required
-launcher	packages/launcher/src/moxi_launcher/page.py	"brief_file": Field("string", required=False, max=PATH_MAX)},	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	"brief_file": Field("string", required=False, max=PATH_MAX),	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	"plain": Field("bool", required=False)},	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
@@ -4016,6 +4017,7 @@ launcher	packages/launcher/tests/test_browser_home_plus.py	test_clear_takes_the_
 launcher	packages/launcher/tests/test_browser_home_plus.py	test_continue_the_last_session_is_not_offered_for_another_actors_session	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	timeout=20_000)	keep	timeout	timeout
+launcher	packages/launcher/tests/test_browser_home_plus.py	assert not any(word.startswith("Brief from launcher") for word in start["argv"]), start["argv"]	keep	any	any
 launcher	packages/launcher/tests/test_browser_home_presets.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_home_presets.py	where = Path(shell.env["HOME"]) / "work" / key	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_presets.py	where.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -4599,6 +4601,9 @@ launcher	packages/launcher/tests/test_page_resume.py	store.insert(conn, request_
 launcher	packages/launcher/tests/test_page_resume.py	assert said == {"refused": None, "command": f"moxi launcher resume {SID} --brief "	keep	refused	refused
 launcher	packages/launcher/tests/test_page_resume.py	refused = resumed({"session": SID})["refused"]	keep	refused	refused
 launcher	packages/launcher/tests/test_page_resume.py	assert requested("r9")["refused"]["code"] == "posture-brief"	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	"refused": None, "command": f"moxi launcher resume {OTHER}"}	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	assert any("Build it." in word for word in rig.calls("start")[-1]["argv"])	keep	any	any
+launcher	packages/launcher/tests/test_page_resume.py	assert not any("Build it." in word or word.startswith("Brief from launcher")	keep	any	any
 launcher	packages/launcher/tests/test_page_running.py	"folder": "proj-a"}	keep	folder	folder
 launcher	packages/launcher/tests/test_page_running.py	"folder": "sub"}	keep	folder	folder
 launcher	packages/launcher/tests/test_page_running.py	"target", "slot", "project_key", "folder"}	keep	folder	folder

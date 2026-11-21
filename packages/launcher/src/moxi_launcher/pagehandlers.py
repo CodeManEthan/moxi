@@ -116,13 +116,15 @@ again, as the presets file is now, and writes the request file
 the refusal the job recorded before it. A ticket used a second time is a 409, whether its
 request file is still there or the launch log already knows its id.
 
-`/api/resume` takes a session id, a slot in place of the launch's own, and a brief or a
-brief file (an absolute path), sent as the resumed session's first turn. It answers the
+`/api/resume` takes a session id, a slot in place of the launch's own, a brief or a brief
+file (an absolute path), sent as the resumed session's first turn, and `plain`, which Home's
+`Continue the last session` sends with an empty box: a resume with no first turn, which a
+`go` launch takes too. It answers the
 refusals a resume meets before anything runs, as `moxi launcher resume` words them: no
 launch holds the id, the launch ran headless (nothing to resume it into), it has no session
 id, its harness is no longer launched, its session is live now (liveness read at the call),
-its liveness can't be read, the brief doesn't fit (both given, none for a `go` launch, one
-under `with:<identity>`), or a relaunch, exit or recycle under way owns it (an open run
+its liveness can't be read, the brief doesn't fit (both given, none for a `go` launch that
+is not `plain`, one under `with:<identity>`), or a relaunch, exit or recycle under way owns it (an open run
 whose job still runs). A launch that ran in a terminal is not resumed here: the
 answer is the `moxi launcher resume <id>` command to copy, with its `--brief` or
 `--brief-file`, since run here it would take the
@@ -2047,13 +2049,16 @@ def resumable(session: str) -> store.LaunchRow:
 def resumed(body: Mapping[str, Any]) -> Any:
     """What `/api/resume` answers for the page's `body`: a refusal, the command to copy
     for a launch that ran in a terminal, or, for a slot launch, 202 with the status path
-    once the job that resumes it is started."""
+    once the job that resumes it is started. `plain` in `body` goes to the job's request
+    as it goes to the brief's check."""
     session = str(body.get("session") or "").strip()
     slot = str(body.get("slot") or "").strip() or None
+    plain = body.get("plain") is True
     try:
         row = resumable(session)
         brief, brief_file = resuming.checked_brief(row, str(body.get("brief") or ""),
-                                                   str(body.get("brief_file") or ""))
+                                                   str(body.get("brief_file") or ""),
+                                                   plain=plain)
     except REFUSALS as exc:
         return {"refused": _refusal(exc), "command": None}
     if row.target != "slot":
@@ -2070,7 +2075,7 @@ def resumed(body: Mapping[str, Any]) -> Any:
             words += ["--brief-file", brief_file]
         return {"refused": None, "command": _command(words)}
     request_id = _new_request_id()
-    given = {"brief": brief, "brief_file": brief_file}
+    given = {"brief": brief, "brief_file": brief_file, "plain": True if plain else None}
     return _run_job(request_id, {"act": "resume", "request_id": request_id,
                                  "session": session, "slot": slot,
                                  **{k: v for k, v in given.items() if v is not None}},

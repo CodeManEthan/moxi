@@ -30,7 +30,9 @@
   is refused before anything starts (`posture-brief`), since a resumed session does not
   wake itself either, and a brief under `with:<identity>` is refused as on a launch. The
   posture is the one the launch was configured with, so a `go` launch's relaunch needs a
-  brief to resume too.
+  brief to resume too. Home's `Continue the last session` with an empty box asks for a
+  plain resume (`plain` on `/api/resume`), which a `go` launch takes with no brief and no
+  first turn; the command line and the page's resume keep the refusal.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
   brief, brief file or handoff, and a brief under `with:<identity>`, whose director
   sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent
@@ -311,7 +313,8 @@
   names that can be resumed now, in a slot or by copying its resume command, with the
   lines under the box saying how the resume went. The box's text goes as the resume's
   brief, or the brief file while one is set, and a resume that starts empties the box as
-  a launch does; an empty box sends none, so a `go` session is refused.
+  a launch does; an empty box sends none and resumes the session with no first turn, a
+  `go` session too.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an

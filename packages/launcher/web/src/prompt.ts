@@ -125,8 +125,8 @@
 // in a slot or copies the resume command. A click resumes it at once through `/api/resume`,
 // with the lines under the box a launch has, in a resume's words. The box's text goes as the
 // resume's brief, or the brief file in its place while one is set, and a resume that starts
-// empties the box and lets go of the file as a launch does; an empty box sends none.
-// With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
+// empties the box and lets go of the file as a launch does; an empty box sends none, and
+// the session resumes with no first turn, a `go` session too. With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
 // continue.
 //
 // Every menu opens inside the page: after a render while one is open, and on a resize, the

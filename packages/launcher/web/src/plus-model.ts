@@ -10,7 +10,8 @@
 // the box names, made by the user the page server launches as; it is read from
 // `/api/sessions` each time the menu opens, never when the piece loads. A click on it is
 // `POST /api/resume` with that session and the box's text as its brief, or the brief file
-// in its place while one is set, as a launch sends them; an empty box sends none. A scratch
+// in its place while one is set, as a launch sends them. An empty box sends no brief and
+// `plain`, which asks for a resume with no first turn, a `go` session's too. A scratch
 // folder has no past sessions: with Scratch on the line the entry says there is none to
 // continue, and no other place's session is offered.
 //
@@ -84,8 +85,18 @@ export function continueWords(past: Past): string {
 /** The body of the click's `POST /api/resume`: the session, and `brief`, the box's text, as
  * its brief, or `briefFile` in its place while one is set, as a launch sends them. Each goes
  * only when it holds more than spaces, as a past session's resume on the launcher page
- * sends them. */
-export function resumeBody(past: Past, brief: string, briefFile: string): ResumeBody {
+ * sends them. With neither, `plain` goes: Home's continue resumes the session with no
+ * first turn, where the page's resume refuses a `go` session with no brief. */
+export function resumeBody(past: Past, brief: string, briefFile: string): ContinueBody {
   const session = past.session_id ?? "";
-  return briefFile === "" ? pastResumeBody(session, brief, "") : pastResumeBody(session, "", briefFile);
+  const body: ContinueBody = briefFile === "" ? pastResumeBody(session, brief, "")
+    : pastResumeBody(session, "", briefFile);
+  if (body.brief === undefined && body.brief_file === undefined) body.plain = true;
+  return body;
+}
+
+/** The body of Home's continue: a past session's resume body, with `plain` when it sends
+ * no brief. */
+export interface ContinueBody extends ResumeBody {
+  plain?: true;
 }

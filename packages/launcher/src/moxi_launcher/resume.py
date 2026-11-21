@@ -20,8 +20,11 @@ is not sent again. A brief given to the resume (`--brief` or `--brief-file`, one
 its first turn, sent as a launch sends its own (`first`). The start posture rules it as it
 rules a launch's (`presets.check_resume_brief`): a resume of a `go` launch needs one, since
 a resumed session does not wake itself either, and a resume under `with:<identity>` takes
-none. It keeps the session id it resumes, and that id then belongs to the new launch, so every later act on the id finds
-the new launch. A Codex launch with a comms name resumes like any other: its replay runs
+none. A caller that asks for a plain resume (`plain`, which Home's `Continue the last
+session` sends with an empty box; the command line has no flag for it) resumes a `go`
+launch with no brief too, and with no first turn. It keeps the session id it resumes,
+and that id then belongs to the new launch, so every later act on the id finds the new
+launch. A Codex launch with a comms name resumes like any other: its replay runs
 comms' Codex wrapper with the wrapper's own flags and then `--resume <thread id>`, and the
 wrapper binds the name to that thread and continues it. Only a resume passes `--resume`: a
 relaunch, a repair and a recycle start a new thread.
@@ -40,8 +43,8 @@ It is refused, with nothing written, when:
   call, whatever the list said;
 - its liveness can't be read (`liveness-unread`, exit 1);
 - the brief doesn't fit: both `--brief` and `--brief-file` given, a brief file's path not
-  absolute, no brief for a `go` launch (a `go` launch that relaunched itself too), or a
-  brief under `with:<identity>` (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
+  absolute, no brief for a `go` launch (a `go` launch that relaunched itself too) unless
+  the resume is `plain`, or a brief under `with:<identity>` (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
   the resume composes.
 
 The check that the session is not live is made again as the new launch's row is written,
@@ -247,6 +250,7 @@ def live_refusal(row: store.LaunchRow, session_id: str | None, *, live: bool | N
 
 def resume(session_id: str, *, slot: int | str | None = None,
            brief: str | None = None, brief_file: str | None = None,
+           plain: bool = False,
            request_id: str | None = None, caller_env: Mapping[str, str] | None = None,
            turns: Any = LOOK, slots_api: Any = LOOK,
            launch: Callable[..., Any] | None = None,
@@ -257,7 +261,8 @@ def resume(session_id: str, *, slot: int | str | None = None,
     on Linux and macOS.
 
     `slot` is the slot to use in place of the original's; `brief` or `brief_file` the
-    brief sent as the resumed session's first turn (`checked_brief` checks them);
+    brief sent as the resumed session's first turn (`checked_brief` checks them, with
+    `plain`, which lets a `go` launch resume with neither);
     `request_id` the new launch's (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
     for turns' and slots' APIs (None: not installed) and `api.launch`."""
     env = dict(os.environ if caller_env is None else caller_env)
@@ -272,7 +277,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
             refused = live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
-        brief, brief_file = checked_brief(row, brief, brief_file)
+        brief, brief_file = checked_brief(row, brief, brief_file, plain=plain)
         # A relaunch, exit or recycle under way owns the session: between its exit and
         # its respawn the session reads not live, and a resume then would run a second.
         slots_found = _slots(slots_api)
@@ -304,11 +309,11 @@ def resume(session_id: str, *, slot: int | str | None = None,
         "target": result.target, "slot": result.slot, "duplicate": result.duplicate})
 
 
-def checked_brief(row: store.LaunchRow, brief: str | None,
-                  brief_file: str | None) -> tuple[str | None, str | None]:
+def checked_brief(row: store.LaunchRow, brief: str | None, brief_file: str | None, *,
+                  plain: bool = False) -> tuple[str | None, str | None]:
     """The brief and brief file a resume of `row` sends, checked: a brief file's path as a
     launch's is (absolute, `~` expanded), and the start posture's rule for the brief
-    (`presets.check_resume_brief`). The posture is the one the launch was configured with,
+    (`presets.check_resume_brief`, which `plain` lets a `go` launch pass with neither). The posture is the one the launch was configured with,
     which its values keep: a relaunch's row shows its own in the `posture` column
     (`relaunched (handoff: ...)`, `with:<director>`), and a `go` launch that relaunched
     itself still needs a brief to resume. Raises the refusal they meet; each one not given
@@ -318,7 +323,7 @@ def checked_brief(row: store.LaunchRow, brief: str | None,
         brief_file = catalog.row(row.harness, "brief_file").check(brief_file)
     brief_file = brief_file or None
     presets.check_resume_brief(str(row.values.get("posture") or ""), brief=brief or "",
-                               brief_file=brief_file or "")
+                               brief_file=brief_file or "", plain=plain)
     return brief, brief_file
 
 

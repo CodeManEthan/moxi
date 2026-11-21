@@ -89,7 +89,7 @@ run it in. A refusal before the launch row is written is recorded as a `launch-r
 event under the request id, with its `code`, `row`, `problem` and `hint`, which the page
 reads back; after the row is written, the row says what happened. For `resume` the job
 runs `resume.resume` for the session the file names, with the brief or brief file it
-names, and with the request id as the new
+names and its `plain`, and with the request id as the new
 launch's, so a retry never launches twice, bounded the same way; it runs only a resume into
 a slot, and refuses one whose launch turns out to be in a terminal, since that would take
 the job's place. Its refusals before the row are recorded as a launch's are. The job
@@ -1037,6 +1037,7 @@ def resume_request(request_id: str, data: Mapping[str, Any], *,
     return resume.resume(session.strip(), slot=slot,
                          brief=brief if isinstance(brief, str) else None,
                          brief_file=brief_file if isinstance(brief_file, str) else None,
+                         plain=data.get("plain") is True,
                          request_id=request_id, launch=in_slot)
 
 

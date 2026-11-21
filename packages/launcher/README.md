@@ -142,7 +142,9 @@ default, there is no line.
   not wake itself either, so a resume of a `go` launch needs a brief (`--brief` or
   `--brief-file`), and is refused without one (`posture-brief`). That holds for the
   session a `go` launch was relaunched into too: a resume reads the posture the launch was
-  configured with, not the `relaunched` or `with:` one its relaunch started on.
+  configured with, not the `relaunched` or `with:` one its relaunch started on. Home's
+  `Continue the last session` with an empty box is the one resume that takes none: it
+  resumes the session with no first turn.
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
@@ -541,8 +543,11 @@ takes a brief from a file instead, which turns the box off while it is set, take
 handoff from a file, and offers to continue your last session in the place on the line;
 with `Scratch` on the line there is none to continue. A continue sends the box's text as
 the resume's brief, or the brief file while one is set, and the box empties once the
-resume starts, as after a launch. An empty box sends no brief, so a `go` session is
-refused until you type one. A slot or headless launch is
+resume starts, as after a launch. An empty box sends no brief and resumes the session
+with no first turn, a `go` session too: the page and the command line refuse that for a
+`go` session, Home's continue does not. A session that ran in a terminal gives its resume
+command to copy as the page does, and the command line keeps its rule when you run it. A
+slot or headless launch is
 previewed and handed to a detached job as on the page, and a line under the box says
 where it started, or why it failed or was refused. A terminal launch is not run: its
 command is copied for you to paste.

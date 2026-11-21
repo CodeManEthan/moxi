@@ -553,17 +553,19 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
                            "drop the brief, or pick go")
 
 
-def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "") -> None:
+def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "",
+                       plain: bool = False) -> None:
     """The start posture's rule for the brief a resume is given, as a launch's: one of
     `brief` and `brief_file`, not both; a resume of a `go` launch needs one, since a
-    resumed session does not wake itself either; and a resume under `with:<identity>`
-    takes none, since its director sends the first message. `posture` is the one the
-    resumed launch was configured with, not the one a relaunch shows. Raises `BadValue` or
-    `PostureBrief`."""
+    resumed session does not wake itself either, unless `plain` asks for a resume with no
+    first turn whatever the posture (Home's `Continue the last session` with an empty box);
+    and a resume under `with:<identity>` takes none, since its director sends the first
+    message. `posture` is the one the resumed launch was configured with, not the one a
+    relaunch shows. Raises `BadValue` or `PostureBrief`."""
     if brief and catalog.is_set(brief_file):
         raise BadValue("brief", "both brief and brief_file are given", "give one of them")
     given = bool(brief.strip()) or catalog.is_set(brief_file)
-    if posture == "go" and not given:
+    if posture == "go" and not given and not plain:
         raise PostureBrief("brief", "posture go needs a brief on a resume: a resumed "
                                     "session does not wake itself either, so with no first "
                                     "turn it sits idle",
