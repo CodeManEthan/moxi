@@ -153,6 +153,20 @@ def test_each_claude_origin_kind_names_its_writer(transcript, origin, expected):
     assert api.writer(message) == expected
 
 
+@pytest.mark.parametrize("origin, expected", [
+    ("peer", "peer"), ("coordinator", "coordinator"), ("channel", "channel"),
+    ("plugin", "hook"), ("task-notification", "task"),
+    ("human", "harness"), ("some-new-kind", "harness"),
+])
+def test_an_origin_naming_its_sender_beats_the_meta_flag(transcript, origin, expected):
+    """Claude Code writes every peer, coordinator and channel line, and some plugin and
+    task lines, with `isMeta` beside the origin. The origin names the sender; a meta
+    line whose origin names none of them is the harness's."""
+    message = claude_user(transcript, "hi", origin=origin, isMeta=True)
+    assert message.injected is True and message.origin_kind == origin
+    assert api.writer(message) == expected
+
+
 def test_a_claude_line_with_no_origin_is_an_unknown_writer(transcript):
     message = claude_user(transcript, "hi")
     assert message.origin_kind is None

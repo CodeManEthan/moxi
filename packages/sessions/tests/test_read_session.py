@@ -101,8 +101,10 @@ def one_message(transcript, text, **fields):
 def test_the_person_the_model_and_mail_show_redacted_with_the_writer_named(transcript):
     transcript.user(f"deploy with {TOKEN}", origin="human")
     transcript.assistant(f"done: {TOKEN}")
-    transcript.user("from the lead", origin="peer", new_prompt=False)
-    transcript.user("from the coordinator", origin="coordinator", new_prompt=False)
+    # Claude Code marks mail between sessions isMeta beside the origin naming its sender.
+    transcript.user("from the lead", origin="peer", isMeta=True, new_prompt=False)
+    transcript.user("from the coordinator", origin="coordinator", isMeta=True,
+                    new_prompt=False)
     result, _ = read(claude_source(transcript), turns=10)
     shown = messages_shown(result)
     assert [row["writer"] for row in shown] == ["person", "model", "peer", "coordinator"]
@@ -116,7 +118,7 @@ def test_the_person_the_model_and_mail_show_redacted_with_the_writer_named(trans
 def test_every_row_s_writer_is_api_writer_s(transcript):
     transcript.user("typed", origin="human")
     transcript.assistant("answer")
-    transcript.user("mail", origin="peer", new_prompt=False)
+    transcript.user("mail", origin="peer", isMeta=True, new_prompt=False)
     transcript.user("plain")
     recs = [r for r in claude.read_records(transcript.write())
             if r.kind == "message" and not r.reasoning]
@@ -126,11 +128,15 @@ def test_every_row_s_writer_is_api_writer_s(transcript):
 
 @pytest.mark.parametrize("fields, kind", [
     ({"origin": "plugin"}, "hook"),
+    ({"origin": "plugin", "isMeta": True}, "hook"),
     ({"origin": "task-notification"}, "task"),
-    ({"origin": "channel"}, "channel"),
+    ({"origin": "task-notification", "isMeta": True}, "task"),
+    ({"origin": "channel", "isMeta": True}, "channel"),
     ({"origin": "human", "isMeta": True}, "harness"),
+    ({"isMeta": True}, "harness"),
     ({"isCompactSummary": True}, "summary"),
-], ids=["plugin", "task-notification", "channel", "meta", "compaction-summary"])
+], ids=["plugin", "plugin-meta", "task-notification", "task-notification-meta",
+        "channel", "meta", "meta-no-origin", "compaction-summary"])
 def test_other_claude_messages_are_one_line_of_kind_and_size(transcript, fields, kind):
     text = f"plain words {TOKEN}"
     row = one_message(transcript, text, **fields)
