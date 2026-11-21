@@ -228,10 +228,14 @@ and a steered chat can pass on:
   alphabet. In tests, about 29% of random 40-character base32 runs, 11% of lowercase
   base36 runs, 77% of lowercase-letter runs and every hex run came back whole, against
   none of base62;
-- by chance, a bare base64 secret holding a `/` or `+`, such as an AWS secret access key.
-  A run found only by how random it looks must pass an entropy floor, and the floor for
-  base64 runs holding `/` or `+` is 4.5: about 2 in 100 random 40-character runs fall
-  under it and come back whole;
+- a bare base64 secret holding a `/` or `+`, such as an AWS secret access key, glued
+  after a character other than whitespace, a quote, a backtick, `=`, `:`, `(`, `[`, `{`,
+  `,`, `<` or `>` (after a `.`, `-`, `_`, `@` or `&`, say). The rule for such runs starts
+  only after those characters, so it stays off URLs, file paths and page hashes. And, by
+  chance, one written where it does look: a run found only by how random it looks must
+  pass an entropy floor, and the floor for base64 runs holding `/` or `+` is 4.5, so
+  about 2 in 100 random 40-character runs fall under it and come back whole, and about 1
+  in 100 hold a `//`, which the rule takes for a path;
 - the edges of a shape. A keyed rule needs the key name directly before the value, so text
   between them (`api_key=Bearer X`, `api_key=(X)`, the value in the next field or on the
   next line) leaves no keyed value, and characters glued to a value with no space can
