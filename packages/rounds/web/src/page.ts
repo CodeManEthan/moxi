@@ -36,7 +36,8 @@ import {
   closedFoldText, closedWords, EMPTY_HEAD, EMPTY_TEXT, foldKey, foldsOf, footWords, holdOf, isManyProjects, isOpenNow,
   isShown, isUnreadableShown, itemAddress, itemMarker, itemsOf, itemView, KEY_COLUMNS, KEY_HERE, KEY_STATES, KEY_TITLE,
   layoutOf, LOCAL, linesShown, markAttributes, markKey, moreLabel, noLongerOpen, NOTHING_WAITS, OPEN_ROUNDS,
-  parseAddress, parseMarkKey, PASSAGE_LINES, phoneWaiting, PHONE_PX, phraseShown, placePopover, popoverWidth,
+  parseAddress, parseMarkKey, PASSAGE_LINES, phoneWaiting, PHONE_PX, phraseShown, placePopover, POP_WIDE, POP_WIDTH,
+  popoverWidth, revealBy,
   READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
   slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard,
   stripStep, stripTabs, UNREADABLE_LEAD, unreadableWords, WAITING_LEAD, waitingCounts, walkFoot, WALK_BUTTON,
@@ -131,12 +132,12 @@ export class RoundsPage extends LitElement {
     .labels, .line { display: flex; align-items: center; }
     .labels { position: sticky; top: 0; z-index: 2; background: var(--moxi-bg); font-size: 11px;
               color: var(--moxi-text-dim); border-bottom: 1px solid var(--moxi-border); height: 26px; }
-    .labels .col { width: var(--moxi-rail-cell); text-align: center; flex: none; }
+    .labels .col { width: var(--moxi-rail-cell); text-align: center; flex: none; white-space: nowrap; }
     .labels .stagecol { width: var(--moxi-rail-label); flex: none; padding-left: 4px; }
     .name { width: 180px; flex: none; position: sticky; left: 0; z-index: 1; background: inherit;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
     .labels .name { background: var(--moxi-bg); }
-    .phrase { flex: 1; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    .phrase { flex: 1; min-width: 120px; contain: inline-size; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               padding-left: 12px; }
     .age { width: 44px; flex: none; text-align: right; color: var(--moxi-text-dim); padding-right: 4px; }
     .group { font-weight: 600; margin: 18px 0 4px; }
@@ -158,13 +159,16 @@ export class RoundsPage extends LitElement {
     .fold button { background: none; border: 0; cursor: pointer; padding: 0; }
     .unreadable .phrase { white-space: normal; }
     .closed .name { color: var(--moxi-text-dim); }
-    .closedfold { margin-top: 18px; }
+    .closedfold { margin-top: 18px; padding-left: 0; }
+    .emptyhead { font-size: 18px; margin: 24px 0 6px; }
 
     .foot { margin-top: 24px; color: var(--moxi-text-dim); display: flex; flex-direction: column; gap: 2px; }
 
-    .pop { position: fixed; z-index: 10; max-height: min(70vh, 640px); overflow: auto;
+    .pop { position: fixed; z-index: 10; box-sizing: border-box; width: ${POP_WIDTH}px; top: -9999px; left: 0;
+           max-height: min(70vh, 640px); overflow: auto;
            background: var(--moxi-bg-raised); border: 1px solid var(--moxi-border-strong); border-radius: 10px;
            box-shadow: 0 10px 30px var(--moxi-border-strong); }
+    .pop.wide { width: ${POP_WIDE}px; }
     .pop .phead { position: sticky; top: 0; background: var(--moxi-bg-raised); display: flex; gap: 10px;
                   align-items: flex-start; padding: 12px 14px 10px; border-bottom: 1px solid var(--moxi-border); }
     .pop .phead .titles { flex: 1; }
@@ -192,20 +196,21 @@ export class RoundsPage extends LitElement {
     .walkbtn { background: none; border: 1px solid var(--moxi-border); border-radius: 4px; cursor: pointer;
                padding: 0 6px; }
     .key-row { display: flex; gap: 10px; align-items: center; }
-    .key-row moxi-ui-rail { width: 56px; }
+    .key-row moxi-ui-rail { --moxi-rail-cell: 32px; }
 
     .phone .round { display: block; width: 100%; text-align: left; background: none; border: 0;
                     border-bottom: 1px solid var(--moxi-border); padding: 10px 2px; cursor: pointer; }
     .phone .round .top { display: flex; align-items: center; gap: 8px; }
     .phone .round .slug { font-weight: 600; font-size: 15px; display: block; margin-bottom: 4px; }
     .phone .round .grow { flex: 1; }
-    .phone .round .phrase { padding: 4px 0 0; white-space: normal; min-width: 0; }
+    .phone .round .phrase { display: block; padding: 4px 0 0; white-space: normal; min-width: 0; contain: none; }
     .phone .recent { display: flex; gap: 8px; align-items: center; padding: 6px 2px; white-space: nowrap; }
     .phone .recent .act { overflow: hidden; text-overflow: ellipsis; color: var(--moxi-text-dim); }
     .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 78vh; overflow: auto; z-index: 10;
              background: var(--moxi-bg-raised); border-top: 1px solid var(--moxi-border-strong);
              border-radius: 12px 12px 0 0; padding: 14px 16px 24px;
              box-shadow: 0 -10px 30px var(--moxi-border-strong); }
+    .sheet .sheetslug { font-size: 15px; }
     .sheet .x { float: right; background: none; border: 0; font-size: 18px; cursor: pointer; }
   `;
 
@@ -230,6 +235,8 @@ export class RoundsPage extends LitElement {
   #media: MediaQueryList | null = null;
   #timers: number[] = [];
   #placed = false;
+  /** Whether the popover just opened, so its marker may be scrolled into room once. */
+  #reveal = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -346,6 +353,7 @@ export class RoundsPage extends LitElement {
     const route = this.#recordRoute(this.#address!);
     if (route !== null && this.#record?.route !== route) void this.#readRecord(this.#address!);
     this.#placed = false;
+    this.#reveal = true;
   }
 
   #recordRoute(address: Address): string | null {
@@ -471,8 +479,11 @@ export class RoundsPage extends LitElement {
         ?? itemsOf(value).find((one) => one.kind === item.kind && one.holder === item.holder && one.id === item.id);
       const marker = found ? itemMarker(found) : null;
       if (!marker) return root.querySelector(".waiting");
+      // A round whose flow has no such step (a ruling to read back with no docket) hangs
+      // the popover under its line, from the round's name.
       return root.querySelector(`moxi-ui-rail[data-round="${esc(marker.round)}"][data-line="0"] `
-                                + `moxi-ui-mark[key="${esc(marker.key)}"]`);
+                                + `moxi-ui-mark[key="${esc(marker.key)}"]`)
+        ?? root.querySelector(`.line [data-name="${esc(marker.round)}"]`);
     }
     if (address.kind !== "step") return null;
     const round = value.rounds.find((one) => one.name === address.round);
@@ -491,8 +502,18 @@ export class RoundsPage extends LitElement {
     const anchor = this.#anchorOf(this.#address);
     if (!anchor) return;
     const box = (rect: DOMRect) => ({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
-    const marker = box(anchor.getBoundingClientRect());
+    let marker = box(anchor.getBoundingClientRect());
     const row = anchor.closest(".line, .waiting, .card, .head");
+    if (this.#reveal && row && this.#record?.read !== null) {
+      // Once the record is in and the popover has its height: scroll a marker or a card
+      // near the window's foot up, so the popover opens under it rather than beside it.
+      this.#reveal = false;
+      const by = revealBy(marker, pop.offsetHeight, window.innerHeight);
+      if (by !== 0) {
+        window.scrollBy(0, by);
+        marker = box(anchor.getBoundingClientRect());
+      }
+    }
     const line = row ? box(row.getBoundingClientRect()) : marker;
     const at = placePopover(marker, line, { width: pop.offsetWidth, height: pop.offsetHeight },
                             { width: window.innerWidth, height: window.innerHeight });
@@ -590,7 +611,7 @@ export class RoundsPage extends LitElement {
   }
 
   #empty(value: Board): TemplateResult {
-    return html`<p style="font-size: 18px; margin: 24px 0 6px">${EMPTY_HEAD}</p>
+    return html`<p class="emptyhead">${EMPTY_HEAD}</p>
       <p class="dim">${EMPTY_TEXT}</p>${this.#closedFold(value)}`;
   }
 
@@ -641,25 +662,30 @@ export class RoundsPage extends LitElement {
   #round(round: Round, value: Board, labelAt: number, many: boolean): TemplateResult {
     const shown = linesShown(round, this.#unfolded);
     const now = this.#feed?.now() ?? null;
-    return html`${shown.map((line, n) => {
+    const folds = foldsOf(round, value.columns);
+    const drawn = (line: Line): TemplateResult => {
       const at = round.lines.indexOf(line);
-      const first = n === 0;
+      const first = at === 0;
       return html`<div class="line ${this.#isOpenLine(round, line) ? "open" : ""}">
         <span class="name">${first ? html`<button type="button" class="link" data-name=${round.name}
             aria-expanded=${this.#address?.kind === "round" && this.#address.round === round.name ? "true" : "false"}
             @click=${() => this.#toggle({ kind: "round", round: round.name })}>${round.slug}</button>${many
             ? html`<span class="project">${round.project}</span>` : nothing}` : nothing}</span>
         ${this.#rail(round, line, at, value.columns, labelAt, first)}
-        <span class="phrase">${phraseShown(first ? round.phrase : line.phrase).map((part, i) => html`${i ? ", " : ""}<span
+        <span class="phrase">${phraseShown(first ? round.phrase : line.phrase, { roundLine: first }).map((part, i) => html`${i ? ", " : ""}<span
           class="w-${part.weight}">${part.text}</span>`)}</span>
         <span class="age">${first ? ageWord(round.last_at, now) : ""}</span>
       </div>`;
-    })}${foldsOf(round, value.columns).map((fold) => {
+    };
+    // A fold's lines are drawn under its own line, so the fold still shows, opened.
+    const folded = new Set(folds.map((fold) => fold.fold));
+    return html`${shown.filter((line) => line.fold === null || !folded.has(line.fold)).map(drawn)}${folds.map((fold) => {
       const key = foldKey(round.name, fold.fold);
       const open = this.#unfolded.has(key);
       return html`<div class="fold"><button type="button" aria-expanded=${open ? "true" : "false"}
           @click=${() => this.#flip(key)}>${open ? "▾" : "▸"} ${fold.text}</button>
-        ${this.#smallRail(fold.cells, fold.text)}${fold.more ? html`<span class="dim">+${fold.more}</span>` : nothing}</div>`;
+        ${this.#smallRail(fold.cells, fold.text)}${fold.more ? html`<span class="dim">+${fold.more}</span>` : nothing}</div>
+        ${open ? shown.filter((line) => line.fold === fold.fold).map(drawn) : nothing}`;
     })}`;
   }
 
@@ -716,7 +742,7 @@ export class RoundsPage extends LitElement {
     if (value.closed.length === 0) return nothing;
     const open = this.#unfolded.has(CLOSED_FOLD);
     const layout = layoutOf(value.columns);
-    return html`<div class="fold closedfold" style="padding-left: 0"><button type="button" aria-expanded=${open ? "true" : "false"}
+    return html`<div class="fold closedfold"><button type="button" aria-expanded=${open ? "true" : "false"}
         @click=${() => this.#flip(CLOSED_FOLD)}>${open ? "▾" : "▸"} ${closedFoldText(value.closed)}</button></div>
       ${open ? value.closed.map((one) => html`<div class="line closed">
         <span class="name"><button type="button" class="link" data-name=${one.name}
@@ -749,8 +775,9 @@ export class RoundsPage extends LitElement {
     const loading = read === null && address.kind !== "key" ? html`<p class="dim">${READING}</p>` : nothing;
     if (address.kind === "key") {
       head = { title: KEY_TITLE, sub: "", cell: null };
-      body = html`${KEY_STATES.map((one) => html`<div class="key-row">${this.#oneMark({ ...DONE, state: one.state,
-        settled: one.state === "done" })}<span>${one.words}</span></div>`)}<p>${KEY_HERE}</p><p class="dim">${KEY_COLUMNS}</p>`;
+      body = html`${KEY_STATES.map((one) => html`<div class="key-row"><moxi-ui-rail><moxi-ui-mark
+        ${attributes({ state: one.state, quiet: "", label: stateWords({ ...DONE, state: one.state }) })}></moxi-ui-mark></moxi-ui-rail>
+        <span>${one.words}</span></div>`)}<p>${KEY_HERE}</p><p class="dim">${KEY_COLUMNS}</p>`;
     } else if (read?.kind === "record" && (address.kind === "step")) {
       const cell = this.#cellFor(address, value);
       const top = stepHead(read.record, cell);
@@ -781,7 +808,7 @@ export class RoundsPage extends LitElement {
       <span>${walkFoot(at, this.#sequence.length)}</span>
       <button type="button" class="walkbtn" aria-label="Next" ?disabled=${at === this.#sequence.length - 1}
         @click=${() => this.#walk(1)}>›</button>` : nothing;
-    return html`<div class="pop" role="dialog" aria-label=${head.title} style="width: ${width}px; top: -9999px; left: 0">
+    return html`<div class="pop ${width > POP_WIDTH ? "wide" : ""}" role="dialog" aria-label=${head.title}>
       <div class="phead">${head.cell ? this.#oneMark(head.cell) : nothing}<div class="titles">
         <div class="title">${head.title}</div><div class="dim">${head.sub}</div></div>${close}</div>
       <div class="body">${loading}${failed}${body}</div>
@@ -913,7 +940,7 @@ export class RoundsPage extends LitElement {
           <span class="slug">${round.slug}</span>
           <span class="top">${this.#smallRail(round.lines[0].cells, round.slug)}<span class="grow"></span>
             <span class="dim">${ageWord(round.last_at, now)}</span></span>
-          <span class="phrase" style="display: block">${phraseShown(round.phrase).map((part, i) => html`${i ? ", " : ""}<span
+          <span class="phrase">${phraseShown(round.phrase).map((part, i) => html`${i ? ", " : ""}<span
             class="w-${part.weight}">${part.text}</span>`)}</span></button>`)}
         ${view.unreadable.map((one) => html`<div class="round"><span class="slug">${slugOf(one.name)}</span>
           <span class="w-bad">${UNREADABLE_LEAD}</span> <span class="dim">${unreadableWords(one)}</span></div>`)}
@@ -928,7 +955,7 @@ export class RoundsPage extends LitElement {
     const questions = sheetQuestions(value, round.name);
     return html`<div class="sheet" role="dialog" aria-label=${round.slug}>
       <button type="button" class="x" aria-label="Close" @click=${() => this.#close({ focus: false })}>×</button>
-      <div class="strong" style="font-size: 15px">${round.slug}</div>
+      <div class="strong sheetslug">${round.slug}</div>
       <div class="dim">${round.project}</div>
       ${round.description ? html`<p>${round.description}</p>` : nothing}
       <moxi-ui-rail vertical>${sheetMarks(round, value.columns).map((mark) => html`<moxi-ui-mark

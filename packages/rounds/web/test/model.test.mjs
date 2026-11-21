@@ -4,8 +4,8 @@ import test from "node:test";
 import {
   addressRoute, ageWord, arrange, cardView, cellLabel, chips, closedWords, foldsOf, footWords, holdOf, isOpenNow,
   isShown, itemMarker, itemsOf, itemView, layoutOf, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
-  parseAddress, parseMarkKey, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
-  recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripStep,
+  parseAddress, parseMarkKey, passageText, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
+  recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripStep,
   timeWord, waitingCounts, walkFoot, walkStep,
 } from "../src/model.ts";
 
@@ -98,6 +98,8 @@ test("a phrase shows its first three parts, and nothing owed when it has none", 
   const phrase = ["15 questions", "1 to read back", "CI linux red on B13", "check owed (builder)"]
     .map((text) => ({ text, weight: "moves" }));
   assert.equal(phraseShown(phrase).length, 3);
+  assert.deepEqual(phraseShown([]), [{ text: "nothing owed", weight: "quiet" }]);
+  assert.deepEqual(phraseShown([], { roundLine: false }), []);
   assert.equal(phraseText(phrase), "15 questions, 1 to read back, CI linux red on B13");
   assert.equal(phraseText([]), "nothing owed");
 });
@@ -261,9 +263,15 @@ test("a step record's sections in order, with CI red first and green folded", ()
     round: "kestrel/a", column: "check", stage: "B1", state: "failed", word: "red",
     facts: [{ key: "builder", value: "builder-1" }, { key: "worktree", value: "/home/u/w/a" }],
     ci: { commit: "0123456789ab", at: "2026-11-21T11:00:00Z", reading: "red",
-          jobs: [{ name: "lint", reading: "green" }, { name: "linux", reading: "red" }, { name: "mac", reading: "pending" }] },
-    runs: [{ step: "check", exit_code: 1, duration_s: 29.4, commit: "0123456789ab", at: "2026-11-21T11:00:00Z",
-             output: "/home/u/.cache/check-1.log" }],
+          jobs: [{ name: "lint", reading: "green" },
+                 { name: "linux", reading: "red", url: "https://github.com/o/r/actions/runs/446/job/135" },
+                 { name: "mac", reading: "pending" }] },
+    runs: [{ step: "check.local", exit_code: 0, duration_s: 12, commit: "0123456789ab", at: "2026-11-21T09:00:00Z",
+             output: null },
+           { step: "check", exit_code: 1, duration_s: 29.4, commit: "0123456789ab", at: "2026-11-21T11:00:00Z",
+             output: "/home/u/.cache/check-1.log" },
+           { step: "check.local", exit_code: 0, duration_s: 31, commit: "0123456789ab", at: "2026-11-21T10:00:00Z",
+             output: null }],
     verdicts: [], findings: null, drift: null, gates: null, decisions: null, items: [], settled: [], close: [], fixes: [],
     next: { state: "ready", by: "builder", who: "builder-1", waits: [{ reason: "CI is red", fix: "push a fix" }],
             then: ["moxi rounds check kestrel/a B1"], reads: [], write: null, questions: [] },
@@ -276,10 +284,13 @@ test("a step record's sections in order, with CI red first and green folded", ()
                     "What happened"]);
   assert.equal(sections[0].rows[0][1].session, "claude-1");
   assert.equal(sections[0].rows[1][1].text, "~/w/a");
-  assert.deepEqual(sections[1].rows.map((row) => row.map((one) => one.text).join(" ")), ["red linux", "pending mac"]);
+  assert.deepEqual(sections[1].rows.map((row) => row.map((one) => one.text).join("")),
+                   ["red linux  run 446 job 135", "pending mac"]);
   assert.deepEqual(sections[1].folds.map((one) => one.label), ["1 green job"]);
   assert.equal(sections[2].rows[0].map((one) => one.text).join(""), "check failed (exit 1) in 29 s at 0123456, 11:00");
   assert.equal(sections[2].rows[1][0].text, "~/.cache/check-1.log");
+  assert.equal(sections[2].rows[2].map((one) => one.text).join(""), "local check passed in 31 s at 0123456, 10:00");
+  assert.deepEqual(sections[2].folds.map((one) => [one.label, one.rows.length]), [["1 earlier run", 1]]);
   assert.deepEqual(sections[3].wells, ["moxi rounds check kestrel/a B1"]);
   assert.equal(sections[4].rows.length, 4);
   assert.equal(sections[4].rows[0][1].text, "check.run B1 #3");
@@ -379,6 +390,14 @@ test("a popover goes under its line, else over it, else beside the marker", () =
   assert.equal(popoverWidth({ kind: "step", round: "a/b", column: "check", stage: null }), 460);
 });
 
+test("a marker near the window's foot scrolls up so its popover opens under its line", () => {
+  const marker = { top: 300, left: 380, width: 24, height: 24 };
+  assert.equal(revealBy(marker, 300, 800), 0);
+  assert.equal(revealBy({ ...marker, top: 556 }, 560, 800), 406);
+  assert.equal(revealBy({ ...marker, top: 500 }, 200, 800), 0);
+  assert.equal(revealBy({ ...marker, top: 40 }, 200, 800), -110);
+});
+
 test("the builder links to Live sessions only when exactly one session's folder is the worktree", () => {
   const sessions = [{ key: "s1", cwd: "/home/u/w/a/" }, { key: "s2", cwd: "/home/u/w/b" }, { key: "s3", cwd: null }];
   assert.equal(sessionAt("~/w/a", sessions, "/home/u"), "s1");
@@ -397,4 +416,12 @@ test("the phone sheet: one vertical rail, here only at the round's step, and its
   assert.deepEqual(marks.filter((m) => m.attributes.here !== null).map((m) => m.attributes.label), ["docket"]);
   assert.ok(marks.every((m) => m.attributes.quiet === ""));
   assert.deepEqual(sheetQuestions(waitingBoard(), "kestrel/a"), ["Q1 Which?", "Q2 Why?"]);
+});
+
+test("a passage joins the source's wrapped lines and keeps its paragraphs, lists and code", () => {
+  const source = "Whether it also lives in a file is open. Every setting is a\nvariable\nalone.\n\n"
+    + "- one item\n  wrapped\n- two\n1. first\n\n```\ncode line\nkept\n```\nafter";
+  assert.equal(passageText(source),
+               "Whether it also lives in a file is open. Every setting is a variable alone.\n\n"
+               + "- one item wrapped\n- two\n1. first\n\n```\ncode line\nkept\n```\nafter");
 });

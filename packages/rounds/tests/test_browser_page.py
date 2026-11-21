@@ -1,22 +1,24 @@
 """rounds' page in a browser, through a real shell that starts rounds' real page server
 over `page_kit`'s rounds, seeded under the shell's own home. The shell has only ui, rounds
-and projects. One test per job of the page: the contract check; what waits on him and
-the walk through it; a question with its options and passage from its marker; a failed
-check's red job, run and output file; a build's verdict; a strip card and its stage's
-tabs; the folds of a many-stage round; a round's card and the key; an address that opens
-its popover; a new question without a reload; the strip's way back to a line a filter
-hides; a closed round's card; and the phone layout at 390 px."""
+and projects. One test per job of the page: the contract check; no style the shell's
+policy refuses; what waits on him and the walk through it; a question with its options
+and passage from its marker; a failed check's red job, run and output file; a build's
+verdict; a strip card and its stage's tabs; the folds of a many-stage round; a round's
+card and the key; an address that opens its popover; a ruling of a round with no docket,
+under its line; a new question without a reload; the strip's way back to a line a filter hides; a closed round's card; and the phone
+layout at 390 px."""
 
 from __future__ import annotations
 
 import re
+import textwrap
 
 import pytest
 from playwright.sync_api import expect
 
 import page_kit
 from moxi import modules
-from moxi_rounds import asking
+from moxi_rounds import asking, opening, ruling
 from page_kit import BUSY, SHUT
 
 pytestmark = pytest.mark.browser
@@ -96,6 +98,25 @@ def test_a_question_opens_from_its_marker_with_its_options_and_passage(shell, ui
     expect(pop).to_contain_text("To answer: tell the round's lead.")
     expect(pop.locator(".well")).to_contain_text("moxi rounds rule kestrel/billing-export Q1 --chose K")
     expect(pop).to_contain_text("1 of 3")
+
+
+def test_the_page_sets_no_style_the_shells_policy_refuses(shell, ui_page):
+    # The shell allows no inline style, so a style attribute is dropped with a policy
+    # error: the popover kept no width of its own.
+    ui_page.add_init_script(
+        "window.refused = [];"
+        "document.addEventListener('securitypolicyviolation',"
+        " (event) => window.refused.push(event.violatedDirective));")
+    panel = open_panel(ui_page)
+    mark(panel, "docket").click()
+    expect(popover(panel).locator(".question")).to_be_visible()
+    assert popover(panel).bounding_box()["width"] == 560
+    ui_page.keyboard.press("Escape")
+    panel.get_by_role("button", name="1 closed round").click()
+    panel.locator(f'.closed [data-name="{SHUT}"]').click()
+    expect(popover(panel).locator(".title")).to_have_text("archive")
+    assert popover(panel).bounding_box()["width"] == 460
+    assert ui_page.evaluate("() => window.refused") == []
 
 
 def test_a_failed_check_shows_its_red_job_its_run_and_its_output(shell, ui_page):
@@ -187,6 +208,34 @@ def test_a_new_question_appears_without_a_reload(ui_shells, ui_shell_options, ui
     with page_kit.under(own):
         asking.ask("kestrel/ledger", "Which ledger comes first?", by="scout", origin="comms:1")
     expect(waiting).to_contain_text("4 questions in 3 rounds", timeout=20_000)
+
+
+def test_a_ruling_of_a_round_with_no_docket_opens_under_its_line(ui_shells, ui_shell_options,
+                                                                 ui_contexts):
+    # A shell of its own, so the round it adds changes no other test's counts.
+    own = ui_shells(**ui_shell_options)
+    quick = "kestrel/quick"
+    with page_kit.under(own):
+        page_kit.seed(page_kit.shell_home(own) / "notes")
+        page_kit.write_config(page_kit.FLOWS + textwrap.dedent("""\
+            [flows.quick]
+            steps = [ { step = "design", by = "lead" }, { step = "build", by = "builder" },
+                      { step = "finish", by = "builder" } ]
+            """))
+        opening.open_round(quick, description="a round with no docket", by="planner",
+                           flow="quick")
+        # Recorded before this second: a ruling of the second a list is read in waits
+        # for the next list.
+        ruling.rule(quick, text="Quick rounds skip the docket.", record=page_kit.PTR, by="lead",
+                    at="2026-01-02T00:00:00Z")
+    page = ui_contexts(own).pages[0]
+    panel = open_panel(page)
+    expect(panel.locator(f'moxi-ui-rail[data-round="{quick}"][data-line="0"] '
+                         'moxi-ui-mark[key="docket"]')).to_have_count(0)
+    page.goto(f"/m/rounds/shown/{quick}/C1")
+    pop = popover(panel)
+    expect(pop.locator(".title")).to_have_text("Ruling C1, to read back")
+    expect(pop).to_be_in_viewport()
 
 
 def test_show_its_line_sets_the_filter_that_hides_it_and_scrolls_to_it(shell, ui_page):

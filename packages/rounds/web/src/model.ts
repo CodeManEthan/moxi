@@ -26,7 +26,10 @@ const pad = (n: number): string => String(n).padStart(2, "0");
 
 /** This browser's zone and its own way of writing a time. */
 export const LOCAL: Clock = {
-  time: (at) => new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  time: (at) => {
+    const d = new Date(at * 1000);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  },
   day: (at) => {
     const d = new Date(at * 1000);
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -174,9 +177,11 @@ export function cellAt(line: Line | Recent, columns: readonly Column[], column: 
 /** How many of a phrase's parts the board shows. */
 export const PHRASE_SHOWN = 3;
 
-/** A phrase's parts as the board shows them: the first three; `nothing owed` for none. */
-export function phraseShown(phrase: readonly PhrasePart[]): PhrasePart[] {
-  return phrase.length === 0 ? [{ text: "nothing owed", weight: "quiet" }] : phrase.slice(0, PHRASE_SHOWN);
+/** A phrase's parts as the board shows them: the first three. A round's own line with
+ * none reads `nothing owed`; a stage's line with none reads nothing, its markers say it. */
+export function phraseShown(phrase: readonly PhrasePart[], { roundLine = true } = {}): PhrasePart[] {
+  if (phrase.length === 0) return roundLine ? [{ text: "nothing owed", weight: "quiet" }] : [];
+  return phrase.slice(0, PHRASE_SHOWN);
 }
 
 /** A phrase as one line of text. */
@@ -627,9 +632,9 @@ export interface Context {
 function eventsSection(events: readonly Happened[], ctx: Context): Section | null {
   if (events.length === 0) return null;
   const row = (one: Happened): Row => [
-    { text: timeWord(one.at, ctx.today, ctx.clock), mono: true, tone: "dim" },
+    { text: `${timeWord(one.at, ctx.today, ctx.clock)}  `, mono: true, tone: "dim" },
     { text: [one.type ?? "event", one.of].filter(Boolean).join(" ") },
-    ...(one.by ? [{ text: one.by, tone: "dim" as const }] : []),
+    ...(one.by ? [{ text: `, by ${one.by}`, tone: "dim" as const }] : []),
   ];
   const cut = Math.max(0, events.length - EVENTS_SHOWN);
   return section("What happened", events.slice(cut).map(row),
@@ -641,10 +646,14 @@ const CI_ORDER = ["red", "pending", "green"];
 function ciSection(ci: NonNullable<RecordValue["ci"]>, ctx: Context): Section {
   const head = `CI at ${shortCommit(ci.commit)}, read ${timeWord(ci.at, ctx.today, ctx.clock)}: ${ci.reading ?? "not read"}`;
   const jobs = [...ci.jobs].sort((a, b) => CI_ORDER.indexOf(a.reading ?? "") - CI_ORDER.indexOf(b.reading ?? ""));
-  const row = (job: (typeof jobs)[number]): Row => [
-    { text: job.reading ?? "-", tone: job.reading === "red" ? "failed" : job.reading === "green" ? "done" : "dim" },
-    { text: job.name ?? job.workflow ?? "a job" },
-  ];
+  const row = (job: (typeof jobs)[number]): Row => {
+    const ids = jobIds(job.url);
+    return [
+      { text: `${job.reading ?? "-"} `, tone: job.reading === "red" ? "failed" : job.reading === "green" ? "done" : "dim" },
+      { text: job.name ?? job.workflow ?? "a job" },
+      ...(ids ? [{ text: `  ${ids}`, mono: true, tone: "dim" as const }] : []),
+    ];
+  };
   const shown = jobs.filter((one) => one.reading !== "green" && one.reading !== "pending").map(row);
   const pending = jobs.filter((one) => one.reading === "pending");
   const green = jobs.filter((one) => one.reading === "green");
@@ -655,12 +664,35 @@ function ciSection(ci: NonNullable<RecordValue["ci"]>, ctx: Context): Section {
   return section(head, shown, folds);
 }
 
+/** A CI job's run and job ids from its address, `run 446 job 135`, or null. */
+export function jobIds(url: string | null): string | null {
+  const found = url ? /\/runs\/(\d+)(?:\/job\/(\d+))?/.exec(url) : null;
+  return found ? `run ${found[1]}${found[2] ? ` job ${found[2]}` : ""}` : null;
+}
+
+/** Checks run shown at once, newest first; the earlier ones fold. */
+export const RUNS_SHOWN = 2;
+
+/** The checks run, newest first: the newest `RUNS_SHOWN` shown and the rest folded. */
+function runsSection(runs: NonNullable<RecordValue["runs"]>, ctx: Context): Section {
+  const newest = [...runs].sort((a, b) => (epoch(b.at) ?? 0) - (epoch(a.at) ?? 0));
+  const earlier = newest.slice(RUNS_SHOWN);
+  return section("Checks run", newest.slice(0, RUNS_SHOWN).flatMap((one) => runRows(one, ctx)),
+                 earlier.length ? [{ label: count(earlier.length, "earlier run"),
+                                     rows: earlier.flatMap((one) => runRows(one, ctx)) }] : []);
+}
+
+/** A check step in words: `local check` for the local one, else its name. */
+export function checkWord(step: string | null): string {
+  return step === null ? "check" : step === "check.local" ? "local check" : step;
+}
+
 function runRows(run: NonNullable<RecordValue["runs"]>[number], ctx: Context): Row[] {
   const passed = run.exit_code === 0;
   const what = run.exit_code === null ? "ran" : passed ? "passed" : `failed (exit ${run.exit_code})`;
   const took = run.duration_s === null ? "" : ` in ${Math.round(run.duration_s)} s`;
   const rows: Row[] = [[
-    { text: `${run.step ?? "check"} ` },
+    { text: `${checkWord(run.step)} ` },
     { text: what, tone: run.exit_code === null ? undefined : passed ? "done" : "failed" },
     { text: `${took} at ` }, { text: shortCommit(run.commit), mono: true },
     { text: `, ${timeWord(run.at, ctx.today, ctx.clock)}` },
@@ -713,7 +745,7 @@ export function stepSections(record: RecordValue, ctx: Context): Section[] {
   const round = record.round ?? "";
   if (record.facts?.length) made.push(section(null, record.facts.map((one) => factRow(one, ctx, record.facts!))));
   if (record.ci) made.push(ciSection(record.ci, ctx));
-  if (record.runs?.length) made.push(section("Checks run", record.runs.flatMap((one) => runRows(one, ctx))));
+  if (record.runs?.length) made.push(runsSection(record.runs, ctx));
   if (record.verdicts?.length) {
     made.push(section(record.verdicts.length === 1 ? "Verdict" : "Verdicts",
                       record.verdicts.flatMap((one) => verdictRows(one, ctx))));
@@ -848,6 +880,26 @@ export const ANSWER_LEAD = "To answer: tell the round's lead. The lead records i
 export const READ_PASSAGE = "Read the whole passage";
 export const PASSAGE_LINES = 7;
 
+/** A passage as it reads: the source's hard-wrapped lines joined within each paragraph,
+ * and a paragraph, a list item, a heading or a fenced block still starting a line. */
+export function passageText(text: string): string {
+  const out: string[] = [];
+  let fenced = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const fence = line.trimStart().startsWith("```");
+    const starts = fenced || fence || line === "" || /^\s*([-*+]|\d+[.)]|#+|>|\|)\s/.test(line);
+    const last = out.length - 1;
+    if (!starts && last >= 0 && out[last] !== "" && !out[last].trimStart().startsWith("```") && !fenced) {
+      out[last] = `${out[last]} ${line.trim()}`;
+    } else {
+      out.push(line);
+    }
+    if (fence) fenced = !fenced;
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** A waiting item's popover: its head, its text, its lines, its options, its passage and
  * the command that records an answer. */
 export interface ItemView {
@@ -885,7 +937,7 @@ export function itemView(record: RecordValue, ctx: Context): ItemView {
   if (kind === "question") {
     lines.push([holdsWords(item), asked("asked")].filter(Boolean).join("; ") + ".");
     options = (item.options ?? []).map((one) => ({ key: one.key, text: one.text }));
-    if (record.passage && item.from) passage = { from: `From ${pointerPath(item.from)}`, text: record.passage };
+    if (record.passage && item.from) passage = { from: `From ${pointerPath(item.from)}`, text: passageText(record.passage) };
   } else if (kind === "decision") {
     lines.push(DECISION_IS);
     const from = [item.from ? `From ${item.from}` : "", item.by ? `found by ${item.by}` : "",
@@ -1014,11 +1066,27 @@ export function placePopover(marker: Box, line: Box, size: { width: number; heig
   return { top, left: Math.max(GAP_PX, marker.left - GAP_PX - size.width) };
 }
 
+/** Where a marker that opens near the window's foot, or under its top edge, is scrolled
+ * to: this far from the top, so its popover opens under its line. */
+export const REVEAL_TOP_PX = 150;
+/** The window's top band a marker is scrolled out of. */
+export const REVEAL_EDGE_PX = 60;
+
+/** How far to scroll the window, for `scrollBy`, so an opened marker's popover of
+ * `height` opens under its line: 0 when it has the room already. */
+export function revealBy(marker: Box, height: number, viewHeight: number): number {
+  const short = marker.top + marker.height + GAP_PX + height > viewHeight || marker.top < REVEAL_EDGE_PX;
+  return short ? Math.round(marker.top - REVEAL_TOP_PX) : 0;
+}
+
 /** A popover's width: 560 px for a question or a decision, 460 px otherwise. */
+export const POP_WIDTH = 460;
+export const POP_WIDE = 560;
+
 export function popoverWidth(address: Address | null): number {
   return address && (address.kind === "question" || address.kind === "decision"
                      || (address.kind === "walk" && address.item !== null
-                         && ["question", "decision"].includes(address.item.kind))) ? 560 : 460;
+                         && ["question", "decision"].includes(address.item.kind))) ? POP_WIDE : POP_WIDTH;
 }
 
 // --- Live sessions -------------------------------------------------------------------------
