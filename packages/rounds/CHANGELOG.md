@@ -235,7 +235,17 @@ decisions and the round's close.
   `tiers`, `models` and per-project tables. `defaults.dormant_days` and
   `defaults.sitting_at`, for parts not built yet, are declared and checked, and nothing
   reads them.
+- The rounds page, with the `ui` extra (`moxi-ui` 0.2.4 or later): at `/m/rounds/` in the
+  browser UI shell, every open round as one line of its steps, the steps in columns lined
+  up across rounds, with a line for each build in flight. It shows what waits on the
+  operator with `Go through in order`, the ten builds last acted on, the rounds grouped
+  as `Your turn`, `Stuck or red`, `Moving` and `Wrapping up`, the closed rounds folded,
+  and the key. A marker opens its step's record, a question, decision or job in place,
+  and the address keeps what is open. It reads only and writes nothing. At 720 px and
+  under it is a column of rounds, each opening a sheet with a vertical rail. Its routes
+  are `/api/rounds`, `/api/record` and the stream `/api/events`, none open to the phone
+  gateway.
 - Not in this version: prepared answers, the suggestion of a sitting, parent and child
-  rounds, and `list --dormant`.
+  rounds, `list --dormant`, and acting from the page.
 - rounds needs moxi 0.1.7 or later and moxi-projects 0.1.4 or later. The `notes` extra
   gives a project that names no notes folder notes' default one.
