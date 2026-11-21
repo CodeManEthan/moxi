@@ -568,15 +568,26 @@ def plain_name(name: str) -> bool:
     return bool(_PLAIN_NAME.fullmatch(name)) and name not in (".", "..")
 
 
+_FOLD_UNSAFE = re.compile(r"[^a-z0-9-]+")
+
+
+def scratch_name(session_name: str) -> str:
+    """The name of a scratch launch's folder: the session name itself when it is a plain
+    name, else the name folded to lowercase letters, digits and single dashes, at most
+    63 characters, or `launch` when nothing is left. A folded name holds no `.`, `..` or
+    separator, so the folder stays under `scratch_root()`."""
+    if plain_name(session_name):
+        return session_name
+    folded = re.sub(r"-{2,}", "-", _FOLD_UNSAFE.sub("-", session_name.lower())).strip("-")
+    return folded[:63].strip("-") or "launch"
+
+
 def scratch_dir(session_name: str) -> Path:
-    """Where a scratch launch works: a folder named by its session name under
-    `scratch_root()`, always as an absolute path (a slot launch is refused a relative
-    one). Only the path: the launch makes the folder, and a later launch under the same
-    name works in the same one. Raises ValueError for a name that is not a plain name,
-    which would put the folder outside `scratch_root()`."""
-    if not plain_name(session_name):
-        raise ValueError(f"session name {session_name!r} is not a plain name")
-    return scratch_root() / session_name
+    """Where a scratch launch works: a folder named by its session name (`scratch_name`)
+    under `scratch_root()`, always as an absolute path (a slot launch is refused a
+    relative one). Only the path: the launch makes the folder, and a later launch under
+    the same name works in the same one."""
+    return scratch_root() / scratch_name(session_name)
 
 
 def scratch_root_problem(root: Path | None = None) -> str | None:
@@ -849,6 +860,6 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
            "locator", "no_credentials", "option_stamps", "prompt_path", "read_settings",
-           "replay_env", "scratch_dir", "scratch_root", "scratch_root_problem", "scrub",
-           "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
+           "replay_env", "scratch_dir", "scratch_name", "scratch_root",
+           "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
            "skip_key_owed", "stamps", "without_settings", "write_prompt", "write_settings"]

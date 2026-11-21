@@ -236,9 +236,10 @@ module's own session stamps. A scratch launch works in `/tmp/scratch-<uid>/<sess
 name>`: a folder named by its session name, under a parent of your own, by your numeric
 uid, made 0700 if missing, which only you may use. `TMPDIR` is not read. A launch under a
 name the folder already has works in it again. A session name that is not a plain name
-(letters, digits, `.`, `_` and `-`) is refused for a scratch launch (`bad-value`, row
-`name`), and so is a parent that is a link, not a folder, another user's or open to
-others (`scratch-root`). On Windows the parent is `scratch-<user name>` in your own
+(letters, digits, `.`, `_` and `-`) names the folder folded: lowercase letters, digits
+and single dashes, at most 63 characters (`My spike` works in `my-spike`, `..` in
+`launch`), so the folder stays in the parent. A parent that is a link, not a folder,
+another user's or open to others is refused (`scratch-root`). On Windows the parent is `scratch-<user name>` in your own
 temporary folder. It keeps no notes: a `notes_dir` typed or set by its preset is refused (`scratch-notes`), one from
 `[defaults]` is left out, and with notes installed a preview or launch whose scratch
 folder notes would keep notes for is refused too. With no notes folder it has no handoff

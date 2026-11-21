@@ -200,10 +200,9 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
 
     `request` gives `request_id`, `session_id` and `actor`, each read as None when it is
     missing (an id is then minted, the actor read from the environment). A scratch launch
-    works in `common.scratch_dir(name)`, named by the launch's session name, which the
-    launch makes; this only names it. It raises `catalog.BadValue` (row `name`) for a
-    session name that is not a plain name, and `presets.ScratchNotes` when notes would
-    give that folder a notes home.
+    works in `common.scratch_dir(name)`, named by the launch's session name (folded to a
+    folder name when it is not a plain one), which the launch makes; this only names it.
+    It raises `presets.ScratchNotes` when notes would give that folder a notes home.
     `preview` and the launch both come here, so the same request, its ids given, composes
     the same argv.
 
@@ -221,7 +220,7 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
         session_id = str(uuid.uuid4())
     if replay is None and (getattr(resolved, "scratch", False)
                            or (values.get("scratch") and not values.get("cwd"))):
-        values["cwd"] = str(_scratch_dir(str(values.get("name") or "")))
+        values["cwd"] = str(common.scratch_dir(str(values.get("name") or "")))
         home = handoffs.notes_home(values["cwd"])
         if home is not None:
             root = common.scratch_root()
@@ -242,18 +241,6 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
                   env=env, child_env=child_env, modules=modules,
                   create=create, replay=replay)
     return compose(values, ctx)
-
-
-def _scratch_dir(name: str) -> Path:
-    """The scratch folder of the session `name`, or `catalog.BadValue` on the row `name`
-    for one that is not a plain name, which can't name a folder."""
-    try:
-        return common.scratch_dir(name)
-    except ValueError:
-        raise catalog.BadValue(
-            "name", f"the session name {name!r} is not a plain name, and a scratch "
-                    "launch's folder is named by it",
-            "name the session with letters, digits, '.', '_' and '-' only") from None
 
 
 def _replay(request) -> dict[str, object] | None:

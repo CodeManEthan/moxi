@@ -993,25 +993,22 @@ def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_i
     assert row("r2").cwd == str(where) and (where / "left.txt").exists()
 
 
-@pytest.mark.parametrize("name", ["my spike", "../x", "a/b", "..", "."])
-def test_a_scratch_launch_under_a_name_that_is_not_a_plain_name_is_refused(
-        harness, tmp_path, name):
+@POSIX
+@pytest.mark.parametrize(("name", "dir_name"), [
+    ("my spike", "my-spike"), ("../x", "x"), ("a/b", "a-b"), ("..", "launch"),
+    (".", "launch"), ("Fix: the  pager!", "fix-the-pager")])
+def test_a_scratch_launch_under_a_name_that_is_not_a_plain_name_folds_it_for_its_dir(
+        harness, tmp_path, name, dir_name):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF, "name": name}, cwd=str(tmp_path),
                         request_id="r9")
-    with pytest.raises(catalog.BadValue) as caught:
-        api.preview(req)
-    assert (caught.value.code, caught.value.row) == ("bad-value", "name")
-    assert caught.value.problem == (f"the session name {name!r} is not a plain name, and a "
-                                    "scratch launch's folder is named by it")
-    assert caught.value.exit_code == exits.USAGE
-    with pytest.raises(catalog.BadValue):
-        api.launch(req)
-    assert nothing_written("r9") and not common.scratch_root().exists()
-    # Outside a scratch launch the same name is the session's.
-    req = LaunchRequest(typed={"harness": "codex", "target": "headless", "brief": BRIEF,
-                               "name": name}, cwd=str(tmp_path), request_id="r9")
-    assert api.preview(req).values["name"] == name
+    shown = api.preview(req)
+    where = common.scratch_root() / dir_name
+    assert (shown.values["name"], shown.values["cwd"]) == (name, str(where))
+    api.launch(req)
+    # The session keeps its name; only the folder's is folded, and it stays in the parent.
+    assert (row("r9").values["name"], row("r9").cwd) == (name, str(where))
+    assert where.is_dir() and where.parent == common.scratch_root()
 
 
 def scratch_request(tmp_path, rid: str = "r9") -> LaunchRequest:
@@ -1197,11 +1194,14 @@ def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
     assert not common.scratch_root().exists()
 
 
-def test_the_scratch_dir_of_a_name_that_is_not_a_plain_name_is_refused():
-    for name in ("../x", "a/b", "..", ".", "", "my spike"):
-        with pytest.raises(ValueError):
-            common.scratch_dir(name)
-    assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"
+def test_the_scratch_dir_of_a_name_that_is_not_a_plain_name_is_folded_into_the_parent():
+    root = common.scratch_root()
+    for name, dir_name in (("../x", "x"), ("a/b", "a-b"), ("a\\b", "a-b"),
+                           ("..", "launch"), (".", "launch"), ("", "launch"),
+                           ("-/-", "launch"), ("My Spike", "my-spike"),
+                           ("x" * 70 + " y", "x" * 63)):
+        assert common.scratch_dir(name) == root / dir_name
+    assert common.scratch_dir("r-1.a_b") == root / "r-1.a_b"
 
 
 def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tmp_path):

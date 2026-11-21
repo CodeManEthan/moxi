@@ -354,8 +354,7 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
 
     The composer's refusals are not among them, since this composes nothing: `preview` and
     `launch` give those, such as a scratch folder notes would give a notes home
-    (`presets.ScratchNotes` from `compose.build`) or a session name that can't name one
-    (`catalog.BadValue`, row `name`), a headless launch with no brief, or a
+    (`presets.ScratchNotes` from `compose.build`), a headless launch with no brief, or a
     brief or handoff file that can't be read."""
     caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
