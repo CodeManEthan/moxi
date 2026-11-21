@@ -474,3 +474,49 @@ def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypat
     launched = api.launch(req)
     assert shown.warnings == launched.warnings
     assert rig.runs() == []
+
+
+def test_a_preview_shows_the_limit_mark_it_stamps(tmp_path, monkeypatch):
+    monkeypatch.setattr(common, "usage_default_mark", lambda: "2x")
+    Harness.on_path(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    work.mkdir()
+    req = api.LaunchRequest(typed={"recycle_at_limit": "compact", "warn_at": "1.5x"},
+                            cwd=str(work), request_id="r1", session_id=SID, actor="ann")
+    got = api.preview(req)
+    assert got.env["MOXI_USAGE_CROSSING_AT"] == "1.5x"
+    assert got.values["limit_at"] == ""
+
+
+def test_a_preview_refuses_a_scratch_launch_set_to_recycle_itself(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    req = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "relaunch"},
+                            request_id="r1", session_id=SID, actor="ann")
+    with pytest.raises(api.ScratchRecycle) as caught:
+        api.preview(req)
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+    assert caught.value.problem == "a scratch launch can't recycle itself"
+    compact = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "compact"},
+                                request_id="r2", session_id=SID, actor="ann")
+    assert api.preview(compact).values["recycle_at_limit"] == "compact"
+
+
+def test_a_preview_of_a_scratch_holds_a_defaults_relaunch_off(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    write_presets('[defaults]\nrecycle_at_limit = "relaunch"\n'
+                  '[seat.s]\nscratch = true\n[seat.r]\nscratch = true\n'
+                  'recycle_at_limit = "relaunch"\n')
+    typed = api.LaunchRequest(typed={"scratch": True}, request_id="r1", session_id=SID,
+                              actor="ann")
+    seat = api.LaunchRequest(seat="s", request_id="r2", session_id=SID, actor="ann")
+    for req in (typed, seat):
+        got = api.preview(req)
+        assert got.values["recycle_at_limit"] == "off"
+        assert presets.SCRATCH_RECYCLE_OFF in got.warnings
+    with pytest.raises(api.ScratchRecycle):
+        api.preview(api.LaunchRequest(seat="r", request_id="r3", session_id=SID,
+                                      actor="ann"))
+    with pytest.raises(api.ScratchRecycle):
+        api.preview(api.LaunchRequest(typed={"scratch": True,
+                                             "recycle_at_limit": "relaunch"},
+                                      request_id="r4", session_id=SID, actor="ann"))

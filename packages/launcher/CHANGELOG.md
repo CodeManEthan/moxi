@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A relaunch or repair job no longer fails as it ends: it read `relaunch.fallback` and
+  `relaunch.notice_retry_s` in a way the launcher's settings don't support, so every
+  note and notice was lost and the job crashed before it told anyone.
 - A one-off, project or scratch launch with usage installed warns at `2x` when it sets no
   `warn_at` of its own; the row's default was empty, which left the mark to usage's
   `marks.default` (`off`). A seat launch outside a scratch folder, and a Codex launch,
@@ -12,6 +15,75 @@
   folder or project picked again sends `scratch` off, so a launch from Home never names
   two places. A preset that sets `scratch` moves the line to `Scratch`, and `Continue the
   last session` says there is none to continue there.
+- `moxi launcher relaunch --self` needs a launch made with `--recycle-at-limit relaunch`.
+  Any other launch, one that compacts at its limit among them, is refused
+  `no-self-recycle` (exit 3), a dry run too. A director's call and a repair need no such
+  launch.
+- The line a `--recycle-at-limit relaunch` launch gets at its mark now opens "This launch
+  lets you recycle yourself", names the mark it passed, and tells the agent to recycle only
+  when it is mid-work, to let running subagents finish and start nothing new, and to write
+  its handoff with its handoff skill. The shipped `moxi-handoff` skill triggers on that
+  line, and its last step says to end the turn and make no further tool call.
+- `limit_at` has no default of its own: unset, a launch recycles at its `warn_at` mark,
+  or at `1x` when it warns at none. `moxi launcher show`, the page and its feed name the
+  mark such a launch was stamped with beside "at limit".
+- A scratch launch can't set `--recycle-at-limit relaunch` (`scratch-recycle`, exit 3): a
+  scratch has no notes directory to keep a handoff in. Its preview refuses it too, on the
+  command line and the page, and `presets check` flags a preset that sets it and
+  launches in a scratch. A `[defaults]` relaunch holds `off` on a scratch launch, with a
+  warning. `compact` is open to it. A scratch
+  launch recorded with the option before is refused the self relaunch, gets no recycle
+  line, and recycles `off` when it is relaunched or resumed, with a warning. A scratch
+  launch refused the self relaunch for any other value is pointed at compacting or a
+  launch in a directory, not at the option it can't take.
+- A relaunch of a launch that names no model comes back on the model the session last
+  used, read from the newest request in its transcript that names one, and records it as
+  a `model-pin` event; the new row keeps no model, so a resume of it runs the row's own. The
+  arm, the call and the dry run name the model and how it was chosen, in `--json` as
+  `model` and `model_how`.
+- A relaunch checks that its own launch would be accepted before it touches the session:
+  at the arm, at a director's call, in the job just before the exit, and in a repair
+  before it launches. A launch that would be refused refuses the relaunch (`launch-check`,
+  exit 3) or ends its run `refused`, with the session left as it was. A repair refused so
+  launches nothing, and its notice says the session is down and names the `--from-record`
+  command that tries it again. The session's own comms name and slot don't count against
+  it. `--dry-run` prints the model and the check's verdict.
+- A director's relaunch reads the session's cache again just before the exit, and a
+  session that warmed up since the call ends the run `held`, word `warm`.
+- A self relaunch that ends with its session still running tells the session in one
+  turn: when it was not exited, when it stopped with an error before the exit, and when
+  the session's id changed (a `/clear`), which now ends the run `changed` with nothing
+  exited. The directors hear only when that turn can't be delivered.
+- `moxi launcher relaunch --stop RUN` stops an open relaunch or repair run by signalling
+  its job: before the exit the run ends `stopped` and a self run's session is told; from
+  the exit on, the run ends once the relaunch has been tried. A repair's session is down
+  already, so its stop is recorded and its line says so. It is refused for an unknown
+  run, one that is not a relaunch, one that has ended, and one whose job is gone.
+- A self relaunch refused by turns' pace (`rate`, `in-flight`) waits 60 s before it
+  tries again, and every retry waits 2 s, so the run no longer loops at once.
+- A relaunch's slot hold lasts 510 s, not `relaunch.wait_s`: it spans the exit, the
+  dialog, the name step and the respawn. A hold left by a dead run of the same launch is
+  released and taken again, once.
+- A run left at the exit dialog (`exit-pending`) can be repaired with `--from-record` once
+  a person has answered the dialog and the session has exited; its notice names the
+  command.
+- `relaunch --status RUN` exits as the run ended: 0 relaunched, 75 held or still running,
+  1 any other end. Its lines go to stdout whatever the code. A run still open whose job is
+  gone says it has no end coming and exits 1, and it, like a run left at the exit dialog,
+  names the `--from-record` command when a repair would take it.
+- A director's relaunch that came back names the identity, slot, new session, posture,
+  model and whether comms has bound the name, in its line and in the run's `ended` event.
+  The job waits up to 60 s for the bind, and a comms read that fails says `unreadable`,
+  not "not yet bound".
+- The armed text, the dry run and the came-back line say how the model was chosen in
+  words: "pinned from your transcript", "the row's", or "default:" and the reason.
+- The armed text names the model the session comes back on and ends "End your turn now
+  and make no further tool call."
+- A self relaunch's handoff must be UTF-8 text and not blank, and when the session's
+  start was never seen it must be written since the launch was made.
+- A director named without a scope directs only in the launch's own scope.
+- A director's relaunch follows its run for `relaunch.follow_s` (300 s shipped);
+  `--help` and the README say to give Bash a timeout of at least that plus 30 s.
 - Home's `+` has `Handoff from a file`, where the harness's form has the `handoff` row.
   The handoff a launch sends, set there or named by `[defaults]` or the applied preset,
   shows on a line under the box with `Clear`; a cleared one is sent as left out, so no

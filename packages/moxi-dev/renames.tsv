@@ -3409,6 +3409,8 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="stop the run RUN: before the exit it ends stopped; from the exit "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	if args.dry_run and (args.status is not None or args.stop is not None	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3549,6 +3551,17 @@ launcher	packages/launcher/src/moxi_launcher/job.py	run_request.start	name	error
 launcher	packages/launcher/src/moxi_launcher/job.py	self.event("released", {"slot": slot, "holder": self.holder})	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/job.py	slot=choice.slot, respawn=choice.respawn,	keep	respawn	respawn
 launcher	packages/launcher/src/moxi_launcher/job.py	that read saw. Its end is `compacted`, `blocked` (still held at the bound, or turns'	keep	compacted	compacted
+launcher	packages/launcher/src/moxi_launcher/job.py	`relaunch.wait_s` after the run was armed it ends `expired`. Within 60 s of a refusal	keep	expired	expired
+launcher	packages/launcher/src/moxi_launcher/job.py	gone) ends the run `changed`, untouched. Then, for every run, the	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/job.py	one that would be refused ends the run `refused`, word the refusal's code, with the	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	step 2's is: one that would be refused ends the repair `refused`, nothing launched. Its	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	who may answer it), or `error` after it acted on the session (or in a repair, whose	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/job.py	is no longer the run's (a `/clear` since) ends the run `changed`, untouched. A self	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/job.py	self.end("changed", "changed",	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/job.py	`refused`, its word the refusal's code, with the session untouched."""	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	refused = check(dataclasses.replace(request, replacing=self.replacing))	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/job.py	self.end("refused", refused.code, str(refused.problem))	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/job.py	"released": bool(released)})	keep	released	released
 launcher	packages/launcher/src/moxi_launcher/joiner.py	* `activity`: the session's latest message, through sessions' `find` and `window`, the	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/joiner.py	_logged: set[type] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/joiner.py	by = "you" if record.injected is False else None	keep	injected	injected
@@ -3597,6 +3610,24 @@ launcher	packages/launcher/src/moxi_launcher/notices.py	return NOTE.format(run=r
 launcher	packages/launcher/src/moxi_launcher/notices.py	return _record(conn, run, "notice-refused", to, body, "refused",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/notices.py	| `expired`, `held`, `not-held`, `stopped` | untouched | a self run's session, one note |	keep	expired	expired
 launcher	packages/launcher/src/moxi_launcher/notices.py	| `relaunch-failed`, `first-turn-not-sent`, `gone`, `error` | down, or up without its handoff | directors, then fallback |	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/notices.py	| `changed` | untouched: a `/clear` since, the conversation that armed the run is gone | a self run's session, one note |	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/notices.py	| `refused` | untouched: its launch would have been refused | a self run's session, one note; a director's directors, then fallback |	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	| `refused`, a repair | down: the repair's launch would have been refused | directors, then fallback, with the `--from-record` command to repeat it |	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	| `error`, before the exit | still up | a self run's session, one note; a director's or repair's directors, then fallback |	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/notices.py	NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped", "refused", "changed")	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/notices.py	NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped", "refused", "changed")	keep	expired	expired
+launcher	packages/launcher/src/moxi_launcher/notices.py	NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped", "refused", "changed")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	#: on it, also told by a note; `error` only when the run wrote no `exit` event.	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/notices.py	#: The outcomes told past the session, to the directors and then the fallback; `refused`	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	"gone", "error", "refused")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	"changed": ("Relaunch note from launcher: run {run} did not run ({detail}). Nothing was "	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/notices.py	"refused": "Nothing was exited or launched: the launch would have been refused.",	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	#: What a repair that ended `refused` says of its session, which it found down.	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	return outcome != "error" or not any(event.kind == "exit" for event in events)	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/notices.py	run=run.run_id, word=run.word or run.outcome or "ended", detail=detail,	keep	run	run
+launcher	packages/launcher/src/moxi_launcher/notices.py	why=f" ({word})" if word else "", said=f"{word}: {detail}" if word else detail)	keep	said	said
+launcher	packages/launcher/src/moxi_launcher/notices.py	exited). A repair that ended `refused` left its session down: its text says so and	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/notices.py	refused_repair = outcome == "refused" and run.mode == "repair"	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/page.py	"NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",	keep	NAME	NAME
 launcher	packages/launcher/src/moxi_launcher/page.py	"PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",	keep	REQUEST	REQUEST
 launcher	packages/launcher/src/moxi_launcher/page.py	"REFUSAL", "REQUEST", "RUN", "RUNNING", "RUNNING_LAUNCH", "RUNS", "RUN_EVENT",	keep	REQUEST	REQUEST
@@ -3745,6 +3776,7 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	self.snapshots = (l
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch holds is answered `refused` (`not-launched`), not an error."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/pin.py	found = sessions.find(row.harness, session_id, root=root)	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	_agents_folder	_agents_dir
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	folder_place	dir_place
@@ -3769,6 +3801,7 @@ launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.notify_all()
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.wait_for(lambda: self.events > seen or self.gone is not None,	keep	_changed	_changed
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
 launcher	packages/launcher/src/moxi_launcher/quiet.py	with self._changed:	keep	_changed	_changed
+launcher	packages/launcher/src/moxi_launcher/recycle.py	-	name	scratch_relaunch	is_scratch_relaunch
 launcher	packages/launcher/src/moxi_launcher/recycle.py	- `cleared` or `compacted`.	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	RAN = {"clear": "cleared", "compact": "compacted"}	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	_act	name	error	exc
@@ -3806,6 +3839,8 @@ launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	started = api.run_job(name, argv, env=common.scrub(env, modules.session_env()),	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	or `error` after the exit, and a repair that failed so),	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	refused = (check(request) if check is not None	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/resume.py	"""Whether `row`'s session is live, and, when that can't be read, why: turns' `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/resume.py	"sessions", "static_refusal"]	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	can't. Live is read from turns first (`find` by that id), then from the launch's own	keep	find	find
@@ -4203,6 +4238,7 @@ launcher	packages/launcher/tests/test_compose_env.py	-	name	test_the_scrub_leave
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.endswith("_") for name in found.session_env)	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env	keep	any	any
 launcher	packages/launcher/tests/test_compose_env.py	assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",	keep	set	set
+launcher	packages/launcher/tests/test_compose_env.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_doctor.py	-	name	test_a_system_that_cannot_read_an_environment_is_off	test_a_system_that_cannot_read_an_env_is_off
 launcher	packages/launcher/tests/test_doctor.py	assert set(rows) == {"catalog.claude", "catalog.codex"}	keep	set	set
 launcher	packages/launcher/tests/test_doctor.py	cache.ask	name	environ	env
@@ -4403,6 +4439,7 @@ launcher	packages/launcher/tests/test_names.py	file.parent.mkdir(parents=True, e
 launcher	packages/launcher/tests/test_names.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id="running", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
+launcher	packages/launcher/tests/test_notices.py	said = notices.text(run("refused", "no-cwd", "x", mode="self"), None,	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	"page": "page", "prompt": "block", "sessions": "block", "state": "inline"}	keep	sessions	sessions
 launcher	packages/launcher/tests/test_page.py	"refused": None, "why": None})	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	-	name	test_no_answer_declares_an_environment_a_brief_or_a_process	test_no_answer_declares_an_env_a_brief_or_a_process
@@ -4645,6 +4682,9 @@ launcher	packages/launcher/tests/test_page_waits.py	assert {c["session_id"] for 
 launcher	packages/launcher/tests/test_page_waits.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
+launcher	packages/launcher/tests/test_pin.py	base_env = ({"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_pin.py	"""sessions' `find` and `records_back` over hits and requests made up here: one entry	keep	find	find
+launcher	packages/launcher/tests/test_pin.py	new = sessions.testing.CodexRollout(root, thread_id=THREAD, start=old.clock + 86400 * 3)	keep	start	start
 launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
 launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir
 launcher	packages/launcher/tests/test_presets.py	-	name	test_the_callers_directory_gets_its_project_key	test_the_callers_dir_gets_its_project_key
@@ -4742,6 +4782,15 @@ launcher	packages/launcher/tests/test_relaunch.py	test_the_caller_as_its_own_tar
 launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir	name	connection	conn
 launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir.Rooted.projects_root	name	environ	env
 launcher	packages/launcher/tests/test_relaunch.py	test_with_notes_installed_the_handoff_must_be_in_the_launchs_folder	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_relaunch.py	run=run.run_id, slot="3", person="2 minutes", model="opus", how="the row's").splitlines())	keep	run	run
+launcher	packages/launcher/tests/test_relaunch.py	@pytest.mark.parametrize("dry_run", [False, True])	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records_back`, the newest request naming `model`."""	keep	find	find
+launcher	packages/launcher/tests/test_relaunch.py	("relaunched", 0), ("held", 75), ("not-exited", 1), ("refused", 1), ("stopped", 1),	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch.py	assert not any("--from-record" in line for line in result.lines)	keep	any	any
+launcher	packages/launcher/tests/test_relaunch.py	assert refused("feedfacecafebeef") == "no-run"	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch.py	assert refused(compact.run_id) == "not-relaunch"	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch.py	store.end_run(conn, compact.run_id, "compacted")	keep	compacted	compacted
+launcher	packages/launcher/tests/test_relaunch.py	assert refused(run.run_id) == "not-open"	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch_flags.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_relaunch_job.py	FakeSession.__init__	kwonly	agents_complete	agents_complete
 launcher	packages/launcher/tests/test_relaunch_job.py	Result("failed", "timeout"), Result("refused", "gone"),	keep	refused	refused
@@ -4762,6 +4811,27 @@ launcher	packages/launcher/tests/test_relaunch_job.py	self.commands, self.delive
 launcher	packages/launcher/tests/test_relaunch_job.py	self.delivered = delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "busy-turn"), Result("ran")])	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession(facts_seq=[facts(turn_open=True)], delivered="refused")	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	comms=comms, sessions=sessions, cache=cache, launch=fake_launch,	keep	sessions	sessions
+launcher	packages/launcher/tests/test_relaunch_job.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "refused" and comms.sent == []	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	unread = FakeSession(delivered="refused")	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert missed.outcome == "refused" and unread.deliveries	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	@pytest.mark.parametrize("delivered", ["started", "refused"])	keep	delivered	delivered
+launcher	packages/launcher/tests/test_relaunch_job.py	@pytest.mark.parametrize("delivered", ["started", "refused"])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "not-allowed")], delivered=delivered)	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "not-allowed")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "changed" and got.run.word == "changed"	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession(facts_seq=[facts(session_id=CLEARED)], delivered="refused")	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "changed"	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "changed" and session.commands == []	keep	changed	changed
+launcher	packages/launcher/tests/test_relaunch_job.py	"""sessions' `find` and `records_back`, the newest request naming each model of	keep	find	find
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "busy-turn"), Result("refused", "busy-turn"),	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert (got.outcome, got.run.word) == ("refused", "no-cwd")	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", reason), Result("ran")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	got = go(conn, run, session=FakeSession([Result("refused", "busy-turn"), Result("ran")]))	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	session = FakeSession([Result("refused", "rate"), Result("ran")])	keep	refused	refused
+launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "expired" and got.run.word == "rate"	keep	expired	expired
+launcher	packages/launcher/tests/test_relaunch_job.py	assert released == {"slot": "3", "holder": old.run_id, "released": True}	keep	released	released
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
@@ -4786,6 +4856,7 @@ launcher	packages/launcher/tests/test_replay.py	looks = (any(word in name for wo
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_replay.py	rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})	keep	refused	refused
+launcher	packages/launcher/tests/test_replay.py	assert not any("recycle_at_limit" in said for said in replayed.warnings)	keep	any	any
 launcher	packages/launcher/tests/test_resume.py	"""slots' `supported`, `show` and `create`, from a table of slots by number."""	keep	show	show
 launcher	packages/launcher/tests/test_resume.py	"""turns' `find`: live for the ids in `live`, raising for the ids in `failing`."""	keep	find	find
 launcher	packages/launcher/tests/test_resume.py	[past] = resume.sessions(conn=conn, turns=None).data["sessions"]	keep	sessions	sessions
@@ -6236,6 +6307,7 @@ moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/proc.py	status	name	at	position
+moxi	packages/moxi/src/moxi/proc.py	out, err = proc.communicate(timeout=grace_s)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
 moxi	packages/moxi/src/moxi/run.py	"seconds": round(max(seconds, 0.0), 3), "result": result, "exit": code,	keep	round	round
 moxi	packages/moxi/src/moxi/run.py	Args.__init__	name	runtime	is_runtime
@@ -8568,7 +8640,7 @@ repo	packages/repo/src/moxi_repo/commit_proof.py	return any(os.path.lexists(os.p
 repo	packages/repo/src/moxi_repo/commit_proof.py	shape = _Shape(separators or ":", set())	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	"fail": "closed",	keep	closed	closed
 repo	packages/repo/src/moxi_repo/commit_rules.py	block_keys: set[str] = set()	keep	set	set
-repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines, which no tag check reads	keep	set	set
+repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines; tag-checked if tag_check_trailers	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	return any(name.startswith(token) for name in self.configured)	keep	any	any
 repo	packages/repo/src/moxi_repo/committer.py	"""Hold the committer's lock for the block, waiting up to `wait` seconds (None: as	keep	wait	wait
 repo	packages/repo/src/moxi_repo/committer.py	"min_interval": spec.min_interval, "message": spec.message,	use	"min_interval"	"min_interval_s"
@@ -9921,6 +9993,7 @@ rounds	packages/rounds/src/moxi_rounds/tracing.py	now = {one.id: one for one in 
 rounds	packages/rounds/src/moxi_rounds/tracing.py	open_now = set(asked) | {	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/tracing.py	return repo is not None and any(part.get("repo") == repo for part in one.scope)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/tracing.py	seen: set[str] = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/tracing.py	"stale", "stale_data", "recorded", "PASSES", "FAILS", "NOT_RUN", "outcome",	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	"""The report as the verb read it under the lock: its `block`, or the `error`	keep	error	error
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	__all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "lists", "path", "record"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	__all__ = ["VERIFIES", "Recorded", "applies", "record"]	keep	record	record
@@ -9984,6 +10057,8 @@ rounds	packages/rounds/tests/conftest.py	notes_root.mkdir(parents=True, exist_ok
 rounds	packages/rounds/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/conftest.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/conftest.py	return {"PATH": os.environ.get("PATH", ""), "HOME": str(self.root.parent),	keep	HOME	HOME
+rounds	packages/rounds/tests/conftest.py	if not proc.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/tests/conftest.py	proc.wait(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_api.py	"a round that has ended": ["show", D],	keep	show	show
 rounds	packages/rounds/tests/test_api.py	"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_api.py	"one round": ["show", A],	keep	show	show
@@ -10012,6 +10087,7 @@ rounds	packages/rounds/tests/test_api.py	one = api.round(A)	use	api.round	api.ro
 rounds	packages/rounds/tests/test_api.py	refused()	keep	refused	refused
 rounds	packages/rounds/tests/test_api.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_api.py	spoil	name	file	fh
+rounds	packages/rounds/tests/test_api.py	assert set(declared["project"]["entry-points"]) == expected	keep	set	set
 rounds	packages/rounds/tests/test_ask.py	"record": "comms:1234567"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ask.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ask.py	actor="planner", flow="fix")	use	actor=	by=
@@ -10156,6 +10232,8 @@ rounds	packages/rounds/tests/test_build_drop.py	assert cli.main(["projects", "se
 rounds	packages/rounds/tests/test_build_drop.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_build_drop.py	assert {key: dropped.event[key] for key in ("stage", "by", "record", "tips")} == {	keep	record	record
 rounds	packages/rounds/tests/test_build_drop.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_build_drop.py	proc.communicate(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_build_drop.py	@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])	keep	round	round
 rounds	packages/rounds/tests/test_build_step.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_build_step.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_build_step.py	log.append(planned, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")	use	actor=	by=
@@ -10516,6 +10594,7 @@ rounds	packages/rounds/tests/test_finish.py	exclude.parent.mkdir(parents=True, e
 rounds	packages/rounds/tests/test_finish.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_finish.py	script.parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_finish.py	test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep.stop	name	_folder	_target_dir
+rounds	packages/rounds/tests/test_finish.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_finish_actions.py	-	name	test_with_no_merge_the_cleanup_removes_only_the_scratch_folder	test_with_no_merge_the_cleanup_removes_only_the_scratch_dir
 rounds	packages/rounds/tests/test_finish_actions.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_finish_actions.py	assert any("worktree, which is gone" in one.reason for one in refused.value.unmet)	keep	any	any
@@ -11004,6 +11083,8 @@ rounds	packages/rounds/tests/test_removal.py	exclude.parent.mkdir(parents=True, 
 rounds	packages/rounds/tests/test_removal.py	make(tree, repo, monkeypatch, tmp_path)	keep	auto	auto
 rounds	packages/rounds/tests/test_removal.py	make(tree, repo, monkeypatch, tmp_path)	keep	start	start
 rounds	packages/rounds/tests/test_removal.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_removal.py	@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])	keep	round	round
+rounds	packages/rounds/tests/test_removal.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_rendering.py	"round.dropped", {"by": "operator", "record": "comms:30", "questions": {}}))	keep	record	record
 rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_folder_with_no_log_is_never_written_into	test_a_dir_with_no_log_is_never_written_into
 rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_note_names_no_folder_of_the_machine_it_was_written_on	test_a_note_names_no_dir_of_the_machine_it_was_written_on
@@ -16925,6 +17006,7 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stal
 rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="refuse at once when another check on this machine holds "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok

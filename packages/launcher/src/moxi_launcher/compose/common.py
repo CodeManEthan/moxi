@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from moxi import files, modules, names, paths
+from moxi import config, files, modules, names, paths
 
 from .. import catalog, store
 from ..codex_trust import Trust
@@ -647,15 +647,52 @@ def commands(values: Mapping[str, object]) -> tuple[str, ...]:
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark when it recycles at its limit. A row at `off` stamps nothing."""
+    and the crossing mark (`limit_mark`) when it recycles at its limit. A row at `off`
+    stamps nothing."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    if values.get("recycle_at_limit") in ("relaunch", "compact") and values.get("limit_at"):
-        _stamp(env, "usage", 1, "CROSSING_AT_ENV", str(values["limit_at"]))
+    if values.get("recycle_at_limit") in ("relaunch", "compact"):
+        _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
     return env
+
+
+#: The mark a limit crossing falls back to when no other mark applies.
+LIMIT_FALLBACK = "1x"
+
+
+def limit_mark(values: Mapping[str, object]) -> str:
+    """The mark a launch that recycles at its limit is stamped to cross at, read when the
+    launch is composed: `limit_at` when it is a mark; else `warn_at` when it is one; else,
+    when `warn_at` is unset, usage's config `marks.default` when usage loads and that is a
+    mark, since usage warns an unstamped launch at it; else `LIMIT_FALLBACK` (`warn_at` is
+    `off`, or usage warns at none). So the recycle line comes with usage's warning."""
+    marks = catalog.launcher()["limit_at"].values
+    for name in ("limit_at", "warn_at"):
+        if values.get(name) in marks:
+            return str(values[name])
+    if not catalog.is_set(values.get("warn_at")):
+        default = usage_default_mark()
+        if default in marks:
+            return str(default)
+    return LIMIT_FALLBACK
+
+
+def usage_default_mark() -> str | None:
+    """usage's config `marks.default`, the mark usage warns a launch at that stamps none;
+    None when usage is not installed or does not load, or its config can't be read."""
+    if not modules.available("usage"):
+        return None
+    found = modules.load("usage", interface=1)
+    if not found.ok:
+        return None
+    try:
+        value = config.load("usage", config.schema_for(found))["marks.default"]
+    except Exception:  # noqa: BLE001  (a config usage can't read warns at none)
+        return None
+    return value if isinstance(value, str) else None
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
@@ -841,7 +878,8 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "locator", "no_credentials", "option_stamps", "prompt_path", "read_settings",
+           "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
+           "prompt_path", "read_settings", "usage_default_mark",
            "replay_env", "scratch_dir", "scratch_root", "scratch_root_problem", "scrub",
            "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
            "skip_key_owed", "stamps", "without_settings", "write_prompt", "write_settings"]

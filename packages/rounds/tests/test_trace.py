@@ -401,7 +401,8 @@ def test_a_design_never_frozen_does_not_pass_and_holds_nothing(round_dir):
     assert tracing.shown(found, register(round_dir)) is None
 
 
-def test_a_version_whose_event_holds_no_result_reads_as_not_checked(round_dir):
+def test_a_version_whose_event_holds_no_result_did_not_run_the_check(round_dir):
+    # Core's gates read a trace-check run that failed as no pass.
     fold(round_dir)
     events = log.read(log.round_log(round_dir))
     del events[-1]["trace"]
@@ -409,7 +410,8 @@ def test_a_version_whose_event_holds_no_result_reads_as_not_checked(round_dir):
     found = state.fold(events)
 
     assert tracing.recorded(versions.current(found)) is None
-    assert tracing.passes(found) and not tracing.is_asked(found)
+    assert tracing.outcome(versions.current(found)) == tracing.NOT_RUN
+    assert not tracing.passes(found) and not tracing.is_asked(found)
 
 
 # -- what a ruling with no row holds up --------------------------------------------------
