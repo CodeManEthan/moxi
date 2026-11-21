@@ -346,7 +346,12 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
-    named slot that is held, occupied or missing)."""
+    named slot that is held, occupied or missing).
+
+    The composer's refusals are not among them, since this composes nothing: `preview` and
+    `launch` give those, such as a scratch folder notes would give a notes home
+    (`presets.ScratchNotes` from `compose.build`), a headless launch with no brief, or a
+    brief or handoff file that can't be read."""
     caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
