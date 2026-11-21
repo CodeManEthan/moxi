@@ -70,6 +70,7 @@
 import { css, html, LitElement, nothing, svg } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
+import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
@@ -271,6 +272,8 @@ const STYLES = css`
   svg.ch.hm { margin: 6px 0 2px; }
   svg.ch.hm rect[role=button] { cursor: pointer; }
   .scroll.heat { padding: 0; }
+  [data-group=heat] .gl { transition: opacity 180ms ease; }
+  [data-group=heat] .gl.held { opacity: 0.6; }
   .scale { display: flex; align-items: center; gap: 3px; padding: 0 0 8px; font-size: var(--moxi-font-size-sm);
            line-height: 18px; color: var(--moxi-text-dim); }
   .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
@@ -787,16 +790,18 @@ export class UsagePage extends LitElement {
       // Under the same filters the paths change only with a new day. The menus' lists
       // then keep their last value until the new reads answer, so the filter line keeps
       // every filter, and a menu the person opened stays open, while the lists reload.
+      // The heat map keeps its last days, drawn faded, until its new read answers.
       const filters = JSON.stringify([state, this.#folders()]);
       const sameFilters = filters === this.#askedFilters;
       this.#askedFilters = filters;
       const heldPlaces = sameFilters ? this.#places?.value ?? null : null;
       const heldModels = sameFilters ? this.#models?.value ?? null : null;
+      const heldHeat = this.#heat?.value ?? null;
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
-      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update).hold(heldHeat);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -1056,7 +1061,9 @@ export class UsagePage extends LitElement {
     ].filter((drawn) => drawn !== nothing);
     // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
     const heatReport = frame.below ? this.#heat?.value ?? null : null;
-    const heat = heatReport === null ? null : heatModel(heatReport, today, state.range);
+    // The last read's days are held while the new read is out.
+    const heat = heatReport === null ? null
+      : { model: heatModel(heatReport, today, state.range), report: heatReport, held: this.#heat?.held === true };
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -1067,7 +1074,7 @@ export class UsagePage extends LitElement {
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
       ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
-        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat)}${sections}</div>`}
+        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat.model, heat.report, heat.held)}${sections}</div>`}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1255,26 +1262,27 @@ export class UsagePage extends LitElement {
   }
 
   /** The heat map's group: its name, its sentence and the map, or its table in the
-   * map's place. */
-  #heatGroup(model: HeatModel) {
+   * map's place. While `held`, the last read's days are drawn faded; the map is drawn
+   * anew for each report, so a cell's focus does not outlast the read it came from. */
+  #heatGroup(model: HeatModel, report: Report<DayRow>, held: boolean) {
     const draw = heatDraw(model);
     const pick = (day: string) => {
       const range = customRange(day, day);
       if (range !== null) holdState({ range });
     };
-    const keyed = (event: KeyboardEvent, day: string) => {
+    const pickByKey = (event: KeyboardEvent, day: string) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       pick(day);
     };
     return html`<section class="grp" data-group="heat">
       <div class="gk">${HEAT_LABEL}</div>
-      <div class="gl">
+      <div class=${held ? "gl held" : "gl"}>
         <p class="chartn" data-part="chart-name">${model.title}</p>
         <div class="chartl"><span data-part="sentence">${model.sentence}</span>
           <button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.heatTable = !this.heatTable; }}>${this.heatTable ? CHART : TABLE}</button></div>
-        ${this.heatTable ? this.#table(model.table) : html`<div class="scroll heat">
+        ${this.heatTable ? this.#table(model.table) : keyed(report, html`<div class="scroll heat">
           <svg class="ch hm" data-part="heat" role="group" aria-label=${model.aria} width=${draw.width}
             height=${draw.height} viewBox="0 0 ${draw.width} ${draw.height}">${svg`
             ${draw.months.map((month) => svg`<text x=${month.x} y=${HEAT_SIZE.months - 3}>${month.text}</text>`)}
@@ -1282,9 +1290,9 @@ export class UsagePage extends LitElement {
             ${draw.cells.map((cell) => svg`<rect class="hc h${cell.step}" data-day=${cell.day} data-used=${String(cell.used)}
                 x=${cell.x} y=${cell.y} width=${draw.cell} height=${draw.cell} rx="2" tabindex="0" role="button"
                 aria-label=${cell.aria} @click=${() => pick(cell.day)}
-                @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
+                @keydown=${(event: KeyboardEvent) => pickByKey(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
           <p class="scale" data-part="scale" aria-hidden="true">${LESS}${[1, 2, 3, 4, 5].map((step) =>
-            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`}
+            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`)}
       </div>
     </section>`;
   }

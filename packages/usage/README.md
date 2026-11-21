@@ -445,9 +445,10 @@ sessions module. Top to bottom:
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
   narrow page its box scrolls), each month is named over its first column, and the five
   shades sit on the quantiles of the days that cost something. Every day is a button: a
-  click or Enter sets the range to it. A day is named by its date (`2026-11-03: 1.75
-  USD`); each day says its cost and tokens on hover, and its token classes (at 0 on a day
-  nothing was used) when it is in the range. `Table` lists the days that cost something,
+  click or Enter sets the range to it. While the map's new read is out the last map stays
+  drawn, faded, and it is drawn anew when the read answers. A day is named by its date
+  (`2026-11-03: 1.75 USD`); each day says its cost and tokens on hover, and its token
+  classes (at 0 on a day nothing was used) when it is in the range. `Table` lists the days that cost something,
   and a used day whose cost is not whole, by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, a table of every session of the range, dearest first, read 500 at

@@ -606,6 +606,11 @@ export class Feed<V> {
     return this;
   }
 
+  /** The value shown is one `hold` gave: the feed's own first read is still out. */
+  get held(): boolean {
+    return this.loading && this.value !== null;
+  }
+
   /** The server's time now in epoch seconds: this browser's clock until a body gave `now`. */
   now(): number {
     return this.#clock() + (this.offset ?? 0);

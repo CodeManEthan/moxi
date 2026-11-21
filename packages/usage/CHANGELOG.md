@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- After a day is picked on the heat map, or a filter is changed, the last map stays drawn,
+  faded, until the map's new read answers, and is then drawn anew. It was gone until
+  then.
 - The Sessions table scrolls to every row it has read. Under the shell's style policy
   (`style-src 'self'`) its spacer rows' height was refused, so the box stopped after
   about 30 rows, and each draw logged a console error. The page writes no style

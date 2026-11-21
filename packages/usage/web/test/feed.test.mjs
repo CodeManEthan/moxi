@@ -113,9 +113,20 @@ test("a held value shows until the feed's own read answers", async () => {
   assert.equal(feed.hold(held), feed);
   assert.equal(feed.value, held);
   assert.equal(feed.loading, true);
+  assert.equal(feed.held, true);
   await feed.refresh();
   assert.equal(feed.loading, false);
+  assert.equal(feed.held, false);
   assert.deepEqual(feed.value.rows, REPORT.rows);
+});
+
+test("a feed holding nothing is not held, nor one whose own read failed", async () => {
+  assert.equal(feedOf([]).feed.hold(null).held, false);
+  const { feed } = feedOf([{ status: 500, data: null }]);
+  feed.hold({ ...REPORT, rows: [] });
+  await feed.refresh();
+  assert.equal(feed.failure.status, 500);
+  assert.equal(feed.held, false);
 });
 
 test("a closed feed drops answers and events", async () => {

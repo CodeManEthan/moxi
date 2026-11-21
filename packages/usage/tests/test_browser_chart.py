@@ -688,19 +688,32 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(used).to_have_count(5)
 
 
-def test_a_picked_day_draws_the_heat_map_anew_and_the_focus_leaves_the_day(page):
+def test_a_picked_day_keeps_the_heat_map_drawn_and_faded_until_its_read_answers(page):
     panel = open_page(page)
-    grid = heat_of(panel).locator("svg[data-part=heat]")
+    body = heat_of(panel).locator(".gl")
+    grid = body.locator("svg[data-part=heat]")
     newest = grid.locator("rect[data-used=true]").last
     expect(newest).to_be_visible()
+    expect(body).to_have_css("opacity", "1")
     day = newest.get_attribute("data-day")
+    # The map's own read starts on its first day; it is held back after the pick.
+    first = grid.get_by_role("button").first.get_attribute("data-day")
+    held = []
+    page.route(re.compile(rf"/m/usage/api/daily\?by=day&since={first}&"), lambda route: held.append(route))
     newest.focus()
-    expect(newest).to_be_focused()
     page.keyboard.press("Enter")
     expect(chart_of(panel).locator("g[data-period]")).to_have_attribute("data-period", day)
-    # The map is drawn again from its new read, and the day's new cell does not hold the
+    # While the read is out the last map stays drawn, faded, and the day keeps the focus.
+    expect(body).to_have_css("opacity", "0.6")
+    expect(grid.locator("rect[data-used=true]")).to_have_count(5)
+    expect(newest).to_be_focused()
+    assert held
+    for route in held:
+        route.continue_()
+    # Then the map is drawn anew from its read, and the day's new cell does not hold the
     # focus the old one had.
-    cell = panel.locator(f'svg[data-part=heat] rect[data-day="{day}"]')
+    expect(body).to_have_css("opacity", "1")
+    cell = grid.locator(f'rect[data-day="{day}"]')
     expect(cell).to_be_visible()
     expect(cell).not_to_be_focused()
 
