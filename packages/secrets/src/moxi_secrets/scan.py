@@ -57,6 +57,16 @@ _ASCII_SEEN = "".join(chr(c) for c in (*range(0x20), 0x7F) if chr(c) not in "\t\
 _ASCII_SEEN_RX = re.compile("[" + "".join("\\x%02x" % ord(c) for c in _ASCII_SEEN) + "]")
 
 
+#: Strict mode: the rules whose shape is randomness alone. They keep their entropy floor,
+#: judged on the value's most random stretch; every other rule has none.
+RANDOM_RULES = ("high-entropy-run", "high-entropy-slash-run")
+#: Strict mode: at most this many steps of the most-random-stretch search per text; a
+#: text that needs more comes back unscanned.
+STRETCH_STEPS = 2_000_000
+#: Strict mode: the longest stretch the search reads.
+STRETCH_MAX_CHARS = 512
+
+
 class SetUnavailable(Exception):
     """A set a caller asked for cannot run: its list will not load, or its extra is not
     installed. The message names a key and position or an install line, never an entry."""
@@ -252,20 +262,27 @@ def _unlined(allowlists) -> tuple:
 
 
 class _Rule:
-    __slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",
-                 "path", "allowlists", "unlined")
+    __slots__ = ("set", "id", "description", "regex", "strict_regex", "group", "entropy",
+                 "keywords", "path", "allowlists", "unlined", "requires")
 
     def __init__(self, set_name, raw):
         self.set = set_name
         self.id = raw["id"]
         self.description = raw["description"]
         self.regex = raw["regex"]
+        self.strict_regex = raw.get("strictRegex")
         self.group = raw["secretGroup"]
         self.entropy = raw["entropy"]
         self.keywords = tuple(raw["keywords"])
         self.path = raw["path"]
         self.allowlists = tuple(_Allowlist(a) for a in raw["allowlists"])
         self.unlined = _unlined(self.allowlists)
+        self.requires = tuple(raw.get("requires", ()))
+
+    def shaped(self, secret, eng) -> bool:
+        """Whether `secret` matches each of the rule's `requires` regexes."""
+        key = eng.key
+        return all(eng.compile(p[key]).search(secret) for p in self.requires)
 
 
 class Sets:
@@ -353,6 +370,74 @@ def _entropy(secret: str) -> float:
         freq = count * inv
         total -= freq * log2(freq)
     return total
+
+
+class _OverBudget(Exception):
+    """The most-random-stretch search of one text ran past `STRETCH_STEPS`."""
+
+
+class _Budget:
+    """The steps one text's stretch searches have left."""
+
+    __slots__ = ("left",)
+
+    def __init__(self, steps: int):
+        self.left = steps
+
+
+_XLOGX: list = []
+
+
+def _xlogx(k: int) -> float:
+    """k * log2(k), 0 for 0, from a table."""
+    if k >= len(_XLOGX):
+        from math import log2
+
+        _XLOGX.extend(n * log2(n) if n else 0.0
+                      for n in range(len(_XLOGX), max(k + 1, STRETCH_MAX_CHARS + 2)))
+    return _XLOGX[k]
+
+
+def random_enough(secret: str, floor: float, budget) -> bool:
+    """Whether `secret` passes the entropy floor `floor` on its most random stretch.
+
+    The value passes when it, or any stretch of it at least 2 ** ceil(floor) characters
+    and at most `STRETCH_MAX_CHARS` long, has entropy above `floor` as `_entropy`
+    computes it. Text glued to a value only adds stretches, so padding can't pull a value
+    under. No stretch's entropy exceeds the log of how many distinct characters the value
+    holds, so a value with fewer than 2 ** floor of them fails without a search. Each
+    character a stretch reads is a step taken from `budget`; past its end the search
+    raises `_OverBudget`.
+    """
+    from math import ceil, log2
+
+    if _entropy(secret) > floor:
+        return True
+    if len(set(secret)) < 2 ** floor:
+        return False
+    least = 2 ** ceil(floor)
+    size = len(secret)
+    if size <= least:
+        return False
+    ascii_only = secret.isascii()
+    for i in range(size - least + 1):
+        counts: dict = {}
+        weight = 0.0
+        nbytes = 0
+        stop = min(size, i + STRETCH_MAX_CHARS)
+        budget.left -= stop - i
+        if budget.left < 0:
+            raise _OverBudget
+        for j in range(i, stop):
+            c = secret[j]
+            k = counts.get(c, 0)
+            counts[c] = k + 1
+            weight += _xlogx(k + 1) - _xlogx(k)
+            nbytes += 1 if ascii_only else _utf8_size(c)
+            n = j - i + 1
+            if n >= least and n / nbytes * log2(nbytes) - weight / nbytes > floor:
+                return True
+    return False
 
 
 def path_skipped(path, eng, sets: Sets | None = None) -> bool:
@@ -487,18 +572,36 @@ def line_text(t, bounds) -> str:
     return t.etext[lo:hi - 1] + "\ufffd" * cut
 
 
-def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
+def run_gitleaks(t, set_names, path, eng, *, keep_marked=True, strict=False) -> dict:
     """The gitleaks-format sets' hits on `t`, as gitleaks' detector finds them.
 
     Returns {set: [(rule id, start, end), ...]} in `str` offsets; a path-only hit spans
     the whole text. No decoding passes run. With `keep_marked` false, a line that holds
     `gitleaks:allow` and an allowlist that reads the finding's line keep no hit out.
+
+    With `strict`, nothing beside a value keeps it whole: no mark and no allowlist (global
+    or per rule, whatever it reads) is consulted; each rule runs its regex without
+    gitleaks' end condition where it has one (`strictRegex`); a rule in `RANDOM_RULES`
+    judges its floor on the value's most random stretch (`random_enough`) and every other
+    rule has no floor. A rule's `requires` still holds. When the stretch searches need
+    more than `STRETCH_STEPS` steps, every set comes back None: the text is unscanned.
     """
     sets = load_sets()
+    if strict:
+        try:
+            return _run_gitleaks(t, set_names, path, eng, keep_marked=False, strict=True,
+                                 budget=_Budget(STRETCH_STEPS), sets=sets)
+        except _OverBudget:
+            return {name: None for name in set_names}
+    return _run_gitleaks(t, set_names, path, eng, keep_marked=keep_marked, strict=False,
+                         budget=None, sets=sets)
+
+
+def _run_gitleaks(t, set_names, path, eng, *, keep_marked, strict, budget, sets) -> dict:
     out = {name: [] for name in set_names}
     # Every path pattern searches the path as the engine sees it, mapped as the text is.
     path = eng.path_target(path) if path else None
-    if path and _path_allowance(sets.allowlists, path, eng):
+    if path and not strict and _path_allowance(sets.allowlists, path, eng):
         return out
     keywords = sets.keywords_in(t, eng)
     target = eng.target(t)
@@ -513,17 +616,18 @@ def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
                 # A path-only rule reads no keyword, entropy or marker.
                 if (path and rule.path is not None
                         and eng.compile(rule.path[eng.key]).search(path)
-                        and not _path_allowance(rule.allowlists, path, eng)):
+                        and (strict or not _path_allowance(rule.allowlists, path, eng))):
                     found.append((rule.id, 0, len(etext)))
                 continue
             if rule.keywords and not any(k in keywords for k in rule.keywords):
                 continue
-            if path and _path_allowance(rule.allowlists, path, eng):
+            if path and not strict and _path_allowance(rule.allowlists, path, eng):
                 continue
             if rule.path is not None and not (
                     path and eng.compile(rule.path[eng.key]).search(path)):
                 continue
-            rx = eng.compile(rule.regex[eng.key])
+            regex = rule.strict_regex if strict and rule.strict_regex else rule.regex
+            rx = eng.compile(regex[eng.key])
             rule_lists = rule.allowlists if keep_marked else rule.unlined
             for m in rx.finditer(target):
                 bs, be = trimmed(target, *m.span())
@@ -545,6 +649,14 @@ def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
                     continue
                 ss, se = conv(t, span[0]), conv(t, span[1])
                 secret = etext[ss:se]
+                if rule.requires and not rule.shaped(secret, eng):
+                    continue
+                if strict:
+                    if (rule.entropy and rule.id in RANDOM_RULES
+                            and not random_enough(secret, rule.entropy, budget)):
+                        continue
+                    found.append((rule.id, ss, se))
+                    continue
                 if rule.entropy and _entropy(secret) <= rule.entropy:
                     continue
                 match = etext[s:e]
@@ -589,18 +701,19 @@ def _known_spans(text, known) -> list:
     return out
 
 
-def _gitleaks_spans(t, names, path, *, keep_marked) -> list:
+def _gitleaks_spans(t, names, path, *, keep_marked, strict) -> list:
     sets = load_sets()
     eng = _engine.active()
     out = []
-    if path and path_skipped(path, eng if eng.name == "re2" else _engine.python(), sets):
+    if path and not strict and path_skipped(
+            path, eng if eng.name == "re2" else _engine.python(), sets):
         return out
     if eng.name == "re2":
-        results = run_gitleaks(t, names, path, eng, keep_marked=keep_marked)
+        results = run_gitleaks(t, names, path, eng, keep_marked=keep_marked, strict=strict)
     else:
         from . import fallback
 
-        results = fallback.scan(t, names, path, keep_marked=keep_marked)
+        results = fallback.scan(t, names, path, keep_marked=keep_marked, strict=strict)
     whole = len(t.text)
     for name in names:
         found = results.get(name)
@@ -642,7 +755,8 @@ def _opaque(start, end, regions, starts) -> bool:
     return k >= 0 and end <= regions[k][1]
 
 
-def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> list:
+def scan(text: str, sets, *, path: str | None = None, allow=None, known=(),
+         strict: bool = False) -> list:
     """The hits of the named sets in `text`, sorted by start.
 
     `path`, repo-relative with `/`, turns on the path parts of the rules. `allow` keeps
@@ -653,13 +767,21 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
     The scan reads past see-through characters (`seen_through`): it also finds what the
     text holds with them removed, so a token a zero-width space or a soft hyphen splits
     is a hit, spanning the characters that split it.
+
+    With `strict`, nothing beside a value keeps it whole: no mark, allowlist or stopword
+    is read, a rule's regex runs without gitleaks' end condition, only the rules in
+    `RANDOM_RULES` keep an entropy floor (judged on the value's most random stretch), and
+    private names drop their `allowed` entries and the author's name and email. A text
+    whose floor search runs past `STRETCH_STEPS` steps comes back unscanned. `allow` and
+    `known` still apply as given.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    return _seen_hits(text, names, path, allow, tuple(known), keep_marked=True)
+    return _seen_hits(text, names, path, allow, tuple(known), keep_marked=not strict,
+                      strict=strict)
 
 
 #: The see-through characters a rule may read as whitespace, as `str.isspace` does: VT,
@@ -718,7 +840,7 @@ def _spaced_copy(text, rx, names) -> str | None:
     return "".join(out)
 
 
-def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
+def _seen_hits(text, names, path, allow, known, *, keep_marked, strict=False) -> list:
     """The hits of `text` and of a copy of it without its see-through characters, the
     copy's mapped back to `text`, sorted by start. When `text` holds a see-through
     character a rule may read as whitespace (`_SPACED_RX`), or a run of see-through
@@ -737,8 +859,10 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     copies when no see-through character splits or borders a secret, or sits in the text
     a rule matches around one (the keyword of an assignment); where one does, a copy may
     add a hit, such as a token whose end a following byte order mark broke.
+
+    `keep_marked` and `strict` reach the scan of every copy.
     """
-    hits = _hits(text, names, path, allow, known, keep_marked=keep_marked)
+    hits = _hits(text, names, path, allow, known, keep_marked=keep_marked, strict=strict)
     chars = _seen_in(text)
     if not chars:
         return hits
@@ -754,7 +878,8 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     out = list(hits)
     for base in bases:
         taken = []
-        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked):
+        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked,
+                            strict=strict):
             inner_start, inner_end = h.start, h.end
             while inner_start < inner_end and seen_through(text[inner_start]):
                 inner_start += 1
@@ -774,7 +899,7 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     return out
 
 
-def _copy_hits(base, rx, names, path, allow, known, *, keep_marked) -> list:
+def _copy_hits(base, rx, names, path, allow, known, *, keep_marked, strict) -> list:
     """The hits of `base` without the characters `rx` matches, mapped back to `base`:
     a hit at the copy's start starts at 0, and one at its end ends at `len(base)`."""
     copy = rx.sub("", base)
@@ -785,25 +910,25 @@ def _copy_hits(base, rx, names, path, allow, known, *, keep_marked) -> list:
     shifted = [m.start() - i for i, m in enumerate(rx.finditer(base))]
     size = len(copy)
     out = []
-    for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked):
+    for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked, strict=strict):
         start = h.start + bisect_right(shifted, h.start) if h.start else 0
         end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(base)
         out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))
     return out
 
 
-def _hits(text, names, path, allow, known, *, keep_marked) -> list:
+def _hits(text, names, path, allow, known, *, keep_marked, strict) -> list:
     """`scan`'s hits for checked arguments. With `keep_marked` false, neither the mark
-    nor a line allowlist keeps a hit out."""
+    nor a line allowlist keeps a hit out; `strict` is `scan`'s."""
     t = _engine.Text(text)
     spans = _known_spans(text, known)
     gitleaks = [n for n in names if n in GITLEAKS_SETS]
     if gitleaks:
-        spans += _gitleaks_spans(t, gitleaks, path, keep_marked=keep_marked)
+        spans += _gitleaks_spans(t, gitleaks, path, keep_marked=keep_marked, strict=strict)
     if "private-names" in names:
         from . import names as _names
 
-        spans += _names.spans(t)
+        spans += _names.spans(t, strict=strict)
     if "personal-data" in names:
         from . import personal
 
@@ -862,7 +987,8 @@ def _replace_lines(text: str, hits) -> str:
                      for k, line in enumerate(lines))
 
 
-def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) -> str:
+def redact(text: str, sets, *, path: str | None = None, allow=None, known=(),
+           strict: bool = False) -> str:
     """`text` with every hit replaced by `[REDACTED:<rule>]`.
 
     Unlike `scan`, `redact` lets nothing on a secret's line keep it: a `gitleaks:allow`
@@ -872,32 +998,44 @@ def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) ->
     the result scans empty with the same arguments, under `scan` and under `redact`'s own
     rules. Redacting the result again changes nothing. Up to three passes replace hits;
     then each line that still holds one becomes a placeholder; then, if a hit spans
-    lines, the whole text.
+    lines, the whole text. `strict` is `scan`'s, in every pass.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    known = tuple(known)
+    return redacted(text, names, path=path, allow=allow, known=tuple(known),
+                    strict=strict)[0]
+
+
+def redacted(text: str, names: tuple, *, path=None, allow=None, known=(),
+             strict: bool = False) -> tuple:
+    """`redact`'s text for checked arguments, and whether a pass found the text, or a
+    part of it, unscanned."""
+    unscanned = False
 
     def hits_in(current):
-        return _seen_hits(current, names, path, allow, known, keep_marked=False)
+        nonlocal unscanned
+        found = _seen_hits(current, names, path, allow, known, keep_marked=False,
+                           strict=strict)
+        unscanned = unscanned or any(h.rule == UNSCANNED for h in found)
+        return found
 
     current = text
     for _ in range(3):
         hits = hits_in(current)
         if not hits:
-            return current
+            return current, unscanned
         current = _replace(current, hits)
     hits = hits_in(current)
     if not hits:
-        return current
+        return current, unscanned
     current = _replace_lines(current, hits)
     hits = hits_in(current)
     if not hits:
-        return current
-    return placeholder(hits[0].rule)
+        return current, unscanned
+    return placeholder(hits[0].rule), unscanned
 
 
 # -- line batches ---------------------------------------------------------------------------

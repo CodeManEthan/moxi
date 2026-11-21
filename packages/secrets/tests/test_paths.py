@@ -1,12 +1,14 @@
-"""Secret paths: `is_secret_path` with `/` and `\\`, in mixed case, never opening a file."""
+"""Secret paths: `is_secret_path` with `/` and `\\`, in mixed case, never opening a file;
+`secret_path` finding one in a tool call's input."""
 
 from __future__ import annotations
 
+import json
 from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 
-from moxi_secrets import is_secret_path
+from moxi_secrets import is_secret_path, secret_path
 
 SECRET = [
     "auth.json", "home/u/.codex/auth.json",
@@ -69,3 +71,59 @@ def test_the_file_is_never_opened(tmp_path):
 def test_a_path_that_is_not_text_is_refused():
     with pytest.raises(TypeError):
         is_secret_path(b".env")
+
+
+PLAIN = "hunter2-plain"         # a password no redaction set catches
+
+
+@pytest.mark.parametrize("tool_input", [
+    {"file_path": "/work/project/.env"}, {"filePath": "/work/project/.env"},
+    {"command": "cat .env | head"}, {"cmd": ["cat", "/work/.env"]},
+    json.dumps({"cmd": ["cat", ".env"]})])
+def test_a_tool_input_naming_a_secret_path_is_found(tool_input):
+    found = secret_path(tool_input)
+    assert found is not None and found.endswith(".env")
+
+
+@pytest.mark.parametrize("command, path", [
+    (f"cat > /work/app/.env <<EOF\nDB_PASS={PLAIN}\nEOF", "/work/app/.env"),
+    (f"cat ~/.ssh/id_rsa && echo {PLAIN}", "~/.ssh/id_rsa"),
+    (f"echo PASS={PLAIN}>/work/app/.env", "/work/app/.env"),
+    (f"printf '{{\"path\":\"/work/app/.env\",\"content\":\"DB_PASS={PLAIN}\"}}'",
+     "/work/app/.env"),
+    (f"printf '{{\"content\":\"DB_PASS={PLAIN}\",\"path\":\"/work/app/.env\"}}'",
+     "/work/app/.env"),
+    (f"tool --out=/work/app/.env,DB_PASS:{PLAIN}", "/work/app/.env"),
+    (f"cat /work/app/.env:{PLAIN}", "/work/app/.env"),
+    (f"cat /work/app/.env\x00{PLAIN}", "/work/app/.env"),
+    ("*** Begin Patch\n*** Update File: /work/app/.env\n@@\n"
+     f"-ADMIN_PASS=old\n+ADMIN_PASS={PLAIN}\n*** End Patch\n", "/work/app/.env")])
+def test_a_path_joined_to_other_text_comes_back_alone(command, path):
+    assert secret_path({"command": command, "description": "x"}) == path
+
+
+@pytest.mark.parametrize("value", [
+    "cat > /x/.env <<EOF\nA=1\nEOF", "cat ~/.ssh/id_rsa && echo done",
+    ["bash", "-lc", "cat /x/.env | head -n 3"], "*** Update File: /x/.env\n+A=1",
+    {"a": ["not this", {"b": "then /x/.env with words"}]}])
+def test_the_path_found_is_one_word(value):
+    found = secret_path(value)
+    assert found is not None and found.split() == [found]
+
+
+@pytest.mark.parametrize("value", [
+    {"command": "ls -la src/"}, {"file_path": "/work/README.md"}, "cat docs/env.md",
+    ["git", "status"], 42, None, "{not json", json.dumps({"a": "b"})])
+def test_an_input_naming_no_secret_path_finds_none(value):
+    assert secret_path(value) is None
+
+
+def test_nesting_past_its_depth_finds_none():
+    value: object = "/x/.env"
+    for _ in range(40):
+        value = [value]
+    assert secret_path(value) is None
+    shallow: object = "/x/.env"
+    for _ in range(30):
+        shallow = [shallow]
+    assert secret_path(shallow) == "/x/.env"

@@ -16,7 +16,7 @@ A caller always names the sets it wants. There is no default set.
 | set | what it finds | where its patterns come from |
 |---|---|---|
 | `credentials` | keys and tokens of known shapes | gitleaks' default rules, pinned to one tag, minus its generic rule, plus a local list |
-| `broad` | unknown secrets, by context or by how random they look | gitleaks' generic rule and two local rules |
+| `broad` | unknown secrets, by context or by how random they look | gitleaks' generic rule and three local rules |
 | `private-names` | what identifies you: names, logins, private package and organisation names, emails | your own list, in secrets' config file |
 | `personal-data` | payment card numbers, IBANs, US SSNs | candidate patterns checked by python-stdnum's validators |
 
@@ -34,7 +34,15 @@ A caller always names the sets it wants. There is no default set.
   `Authorization: Bearer` values. gitleaks' decoding passes (base64, hex, percent-encoding)
   aren't run in-process.
 - **broad** finds more and pays for it in false positives. Pick it where a false positive
-  is cheap.
+  is cheap. Its local rules: `credential-assignment` (a quoted value after a key named
+  like a password or secret); `high-entropy-run` (a run of 40 or more letters, digits,
+  `+`, `_` and `-` with entropy above 4.3, which keeps hex digests and UUIDs out); and
+  `high-entropy-slash-run`, for the base64 runs the first leaves out: 40 or more
+  characters of `A-Za-z0-9+/`, up to two `=` after them, bounded by characters outside
+  that alphabet, holding a `/` or `+`, an upper-case letter, a lower-case letter and a
+  digit, no `//`, and entropy above 4.5. That finds a bare AWS secret access key; paths
+  of plain words, URLs, digests and UUIDs stay quiet, and so, by chance, do about 2 in
+  100 random 40-character base64 runs.
 - **private-names** matches plain text, never a regex. A `words` entry hits unless a letter
   or digit stands right next to one of its letter-or-digit ends, so `alexa` hits
   `alexa-quill` and `Alexa's`, not `alexa2000`. Case is ignored: each letter matches the
@@ -119,6 +127,15 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   `*_history`, anything under `.ssh/`, `*.pem`, `credentials`, `.netrc`, `.pgpass`,
   `*.p12`, `*.pfx`, `*.jks`, `*.keystore`. It matches names and paths case-insensitively,
   with `\` read as `/`, and never opens the file.
+- `secret_path(value)` returns the first path in a tool call's input that
+  `is_secret_path` names, or None. It tests every whitespace-separated word of every
+  string, inside lists and nested objects, and inside a string that holds a JSON object or
+  list; each word is also split at shell joins (`=`, `<`, `>`, `|`, `;`, `&`, `,`, `:`,
+  quotes and brackets), so `--env-file=.env` and `cat<.env` count. What it returns is one
+  word, never text with whitespace in it, so a reader can show a call as its tool and
+  that path alone. moxi memory's ingest uses it.
+- `scan` and `redact` take `strict=False`, and `chat_redact(text)` redacts for a chat;
+  see [For a chat](#for-a-chat).
 - `private_names()` returns your list, frozen, for a local caller such as a publishing
   step that needs the author name.
 - `describe()` returns each set's rule ids, source, pin, dropped rules and whether it can
@@ -131,6 +148,57 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
 Any `str` a caller made by decoding bytes with UTF-8 and `surrogateescape` scans, redacts
 and fingerprints without raising. A private-names scan that can't read the list raises
 `SetUnavailable` and never returns zero hits for a list it didn't read.
+
+## For a chat
+
+A text that leaves the machine, such as a read tool's answer in the Claude apps, goes
+through `chat_redact(text)` and nothing else. It:
+
+1. redacts the text with `CHAT_SETS` in strict mode, with no path, `allow` or `known`;
+2. removes C0 controls other than newline and tab, DEL, C1 controls and every format
+   character (category `Cf`), the characters a host's scrub removes;
+3. redacts what is left again the same way, and returns that.
+
+The first pass sees the raw text, so a zero-width space, VT, FF, lone CR or NEL between
+a word and a token still gives the token its boundary; the second judges exactly the
+text sent. When either pass finds the text unscanned, it returns `[REDACTED:unscanned]`
+alone, never the text. When a chat set can't run it raises `SetUnavailable`.
+
+`CHAT_SETS` is `("credentials", "broad", "personal-data")`, fixed in code, so every
+reader redacts with the same sets. personal-data needs python-stdnum; without it
+`chat_redact` refuses.
+
+**Strict mode** (`strict=True` on `scan` and `redact`) decides whether a value is
+redacted by the rules' shapes alone. Nothing beside a value keeps it whole:
+
+- no `gitleaks:allow` mark and no allowlist is read: line, match (the name before a
+  value, such as `author-api_key`), secret (`false`, `null`, `EXAMPLE`, a value of letters
+  only), stopwords, and paths;
+- gitleaks' end condition is dropped: 151 rules need a quote, space, `;`, `\n` or the
+  text's end after a value, so a `,`, `&` or `)` after it kept it whole.
+  `rules/sets.json` holds each such rule's regex without that end as `strictRegex`,
+  written by the generator for RE2 and the fallback alike;
+- only the rules whose shape is randomness alone, `high-entropy-run` and
+  `high-entropy-slash-run`, keep an entropy floor, and it is met when the value or any
+  stretch of it from 32 to 512 characters passes, so padding glued on can't pull a value
+  under. Every other rule has no floor: a value after a key-like name or with a known
+  prefix is redacted whatever its entropy;
+- private names drop their `allowed` entries and the author's name and email.
+
+Keywords, personal data's checksums, a rule's `requires` and the placeholder check stay,
+since they only add hits or hold no secret. The floor's search skips a value with too
+few distinct characters to pass (a run of dashes costs one pass) and does at most 2
+million steps per text; a text that needs more comes back unscanned. Strict reaches every
+copy a scan reads past invisible characters, and the fallback worker's requests for each.
+
+It costs readability: values of letters only after a key-like name
+(`token = request.headers`) become placeholders. And it finds secrets by shape, so some
+stay whole: a secret with no key-like name, no known prefix and under 40 characters; a
+hex value with no name; a secret in words or encoded; text between a key name and its
+value (`api_key=Bearer X`, `api_key=(X)`); text glued where a regex needs a boundary;
+a token split by a character the scrub keeps, such as a no-break space; and by chance a
+bare random run of a small alphabet (about 3 in 10 40-character base32 runs, 1 in 10 of
+lowercase base36).
 
 ## The engine
 
@@ -232,9 +300,12 @@ The rules change only through a moxi-secrets release. `rules/upstream/` holds gi
 `config/gitleaks.toml` byte for byte, its MIT licence, and a `PIN` file (tag, commit,
 sha256, date). `rules/credentials.toml` extends it, `rules/broad.toml` holds the broad
 set, and `_generate.py` resolves both into `rules/sets.json`, the file the scanner loads,
-with each pattern's fallback translation beside it. A rule that uses a gitleaks field the
-scanner doesn't implement, or that `rules/drop.txt` lists, is left out with its reason. A
-test regenerates `sets.json` and refuses any difference.
+with each pattern's fallback translation beside it, and strict mode's regex without
+gitleaks' end condition for each rule that ends with it. A rule that uses a gitleaks field
+the scanner doesn't implement, or that `rules/drop.txt` lists, is left out with its
+reason. `broad.toml`, which no gitleaks binary reads, may also give a rule `requires`, a
+list of regexes its secret must each match. A test regenerates `sets.json` and refuses
+any difference.
 
 To move to a new gitleaks tag, from the repo root, with the network and Go:
 
