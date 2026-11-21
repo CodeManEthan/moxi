@@ -7,9 +7,12 @@ These are the checks no one package can make alone: a tool's answer as the app g
 after the host's scrub; the call log's rows as the host writes them; and a secret planted
 in a transcript and in a note, read through every tool, never coming back. The data is
 real: a Claude Code transcript under the test's home, memory's index of it built by
-memory's own ingest, and a notes root set in notes' config. Outside a workspace with
-memory, sessions, notes and secrets' chat redaction installed beside the host, the module
-skips.
+memory's own ingest, and a notes root set in notes' config. Beside the canary, which is a
+secret's shape in any frame, read_session is planted shapes that only a change or a join
+after the redaction would make (a key's value apart from its name by a no-break space, a
+subagent id holding `token` before its title), and opens a nested subagent by the pair a
+search_memory hit gives. Outside a workspace with memory, sessions, notes and secrets'
+chat redaction installed beside the host, the module skips.
 """
 
 from __future__ import annotations
@@ -284,3 +287,76 @@ def test_a_withheld_read_tool_is_absent_and_answers_as_no_tool(world):
     [row] = [r for r in rows if r.get("rpc") == "tools/call"
              and r.get("tool") == "search_notes"]
     assert "files_read" not in row
+
+
+#: A made-up value of a key-named secret's shape, and a title of no rule's shape alone.
+KEYED = "Xk9Lm2Qw7Rt5Zp3Vb8Nc4Hd6Jf1Gs0Ty"
+TITLE = "Qm7vXk2pLr9sTb4wZ8"
+SESSION_KEYED = "0190b000-0000-7000-8000-00000000d00b"
+#: A subagent id that holds a key's name.
+AGENT_KEYED = "a9fTokenQ2x"
+
+
+def test_shapes_a_squeeze_or_a_join_would_make_come_back_redacted(world, scrubbed):
+    """A key's name and its value apart by a no-break space in a tool call, which one
+    line made after the redaction would join; and a subagent id holding `token` before
+    its title, which the header joins. Neither piece is a secret's shape alone."""
+    t = sessions_api.testing.ClaudeTranscript(sessions_api.root("claude"),
+                                              session_id=SESSION_KEYED,
+                                              cwd=f"{world}/work/proj-b")
+    t.user("set the service up", origin="human")
+    t.request().tool_use("Bash", {"command": f"export API_KEY=\u00a0{KEYED}"})
+    child = t.subagent(AGENT_KEYED)
+    child.title(TITLE)
+    child.user("look into it", origin="human")
+    t.write()
+
+    _, got, _ = _calls(_registry(), [
+        ("read_session", {"session": SESSION_KEYED, "turns": 10})])
+    main = got["read_session"]
+    assert not main["isError"], main
+    [call_row] = [r for r in main["structuredContent"]["rows"] if r["kind"] == "tool call"]
+    assert KEYED not in _shown(main) and "[REDACTED:" in call_row["call"]
+
+    _, got, _ = _calls(_registry(), [
+        ("read_session", {"session": SESSION_KEYED, "agent": AGENT_KEYED})])
+    sub = got["read_session"]
+    assert not sub["isError"], sub
+    header = sub["content"][0]["text"].splitlines()[1]
+    assert f"{AGENT_KEYED}: {TITLE}" not in header and "[REDACTED:" in header
+    assert scrubbed == []
+
+
+def test_a_nested_subagent_s_hit_opens_through_read_session(world):
+    """An OpenCode subagent's subagent: search_memory names its hit by the main session
+    and the grandchild's id, and read_session opens that pair."""
+    store = os.path.split(sessions_api.root("opencode"))    # the database file itself
+    db = sessions_api.testing.OpenCodeDb(store[0], name=store[1])
+    main = db.session(work_dir=f"{world}/work/proj-c")
+    main.user("start the survey")
+    child = main.child(title="the child")
+    child.user("split the survey")
+    grandchild = child.child(title="the grandchild")
+    grandchild.user("check the lighthouse")
+    grandchild.assistant().text("The lighthouse beacon is lit.")
+    db.write()
+    config = {**_memory_config(), "harnesses": ["opencode"],
+              "index.include_subagents": True}
+    assert ingest.run("walk", config=config, launcher=links.Link(links.NONE),
+                      then=lambda args: None) is not None
+
+    _, got, _ = _calls(_registry(), [
+        ("search_memory", {"words": "lighthouse beacon", "subagents": True})])
+    hits = got["search_memory"]["structuredContent"]["hits"]
+    assert hits, got["search_memory"]
+    pairs = {(h["session"], h["agent"]) for h in hits}
+    assert pairs == {(main.id, grandchild.id)}
+
+    _, got, _ = _calls(_registry(), [
+        ("read_session", {"session": main.id, "agent": grandchild.id,
+                          "harness": "opencode"})])
+    read = got["read_session"]
+    assert not read["isError"], read
+    assert read["structuredContent"]["agent"] == grandchild.id
+    assert "The lighthouse beacon is lit." in _shown(read)
+
