@@ -11,8 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi.config import Settings
+from moxi.paths import Layout
 
-from moxi_launcher import job, notices, store
+from moxi_launcher import job, notices, settings, store
 from moxi_launcher import job as job_module
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -260,9 +262,11 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
         return launch(request) if callable(launch) else (launch or launched_result())
 
     clock = Clock()
+    if not isinstance(settings, Settings):
+        settings = {**SETTINGS, **(settings or {})}
     runner = cls(conn, run.run_id, turns=FakeTurns(session), slots_api=slots_api,
-                 comms=comms, sessions=sessions, cache=cache, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
-                 clock=clock, sleep=clock.sleep)
+                 comms=comms, sessions=sessions, cache=cache, launch=fake_launch,
+                 settings=settings, clock=clock, sleep=clock.sleep)
     if stop:
         runner.ask_stop(15)
     outcome = runner.go()
@@ -709,6 +713,39 @@ def test_a_refused_notice_goes_once_to_the_fallback(conn):
     assert [s[2] for s in comms.sent] == [["boss"], ["lead"]]
 
 
+def real_settings(text: str = "") -> Settings:
+    """The launcher's settings as the job reads them in use: `settings.current()`, which
+    reads by key and has no `get`, over a config file holding `text`."""
+    path = Layout("launcher").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return settings.current()
+
+
+def test_a_directors_notice_reads_the_real_settings(conn):
+    comms = FakeComms(outcomes=("refused", "sent"))
+    got = go(conn, arm(conn, mode="director"), comms=comms,
+             settings=real_settings('[relaunch]\nfallback = "lead"\n'),
+             launch=launched_result(state="failed", outcome=None, reason="spawn-failed"))
+    assert got.outcome == "relaunch-failed"
+    assert [s[2] for s in comms.sent] == [["boss"], ["lead"]]
+    assert f"--from-record {got.run.run_id}" in comms.sent[1][3]
+
+
+def test_a_self_runs_note_reads_the_real_settings(conn, checks):
+    refusing(checks)
+    comms = FakeComms()
+    got = go(conn, arm(conn), comms=comms, settings=real_settings())
+    assert got.outcome == "refused" and comms.sent == []
+    assert got.session.deliveries[0].startswith("Relaunch note from launcher: run ")
+    unread = FakeSession(delivered="refused")
+    missed = go(conn, arm(conn), comms=comms, session=unread,
+                settings=real_settings('[relaunch]\nfallback = "lead"\n'))
+    assert missed.outcome == "refused" and unread.deliveries
+    assert [s[2] for s in comms.sent] == [["boss"]]
+    assert "note-not-taken (the run ended refused: no-cwd)" in comms.sent[0][3]
+
+
 def test_an_offline_daemon_is_tried_once_more_then_recorded(conn):
     comms = FakeComms(outcomes=("offline",))
     got = go(conn, arm(conn, mode="director"), comms=comms,
@@ -1102,6 +1139,12 @@ def test_a_repair_whose_launch_would_be_refused_launches_nothing(conn, checks):
     assert (got.outcome, got.run.word) == ("refused", "no-cwd")
     assert got.requests == [] and checks.asked[0].replacing is None
     assert [s[2] for s in comms.sent] == [["boss"]]
+    said = comms.sent[0][3]
+    assert "Nothing was exited" not in said
+    assert ("The session is down and nothing was launched: the repair's launch would have "
+            "been refused.") in said
+    assert said.endswith("Once the launch's problem is fixed, to try the repair again: moxi "
+                         f"launcher relaunch --from-record {original.run_id}")
 
 
 def test_repairable_runs():
@@ -1298,6 +1341,62 @@ def test_a_relaunch_records_what_came_back(conn, state):
                                     "model_how", "identity_state")} == {
         "session_id": "new-sid", "identity": "planner", "posture": "with:boss",
         "model": "opus", "model_how": "row", "identity_state": state}
+
+
+class SlowBind(FakeComms):
+    """comms whose name is free at the name step, then binds on the `bind_at`th read
+    after the launch ran, or whose reads after it fail with `error`."""
+
+    def __init__(self, bind_at=None, error=None, *, offline=False):
+        super().__init__()
+        self.bind_at, self.error, self.offline = bind_at, error, offline
+        self.launched, self.reads = False, 0
+
+    def identity_state(self, name, scope=None):
+        if not self.launched:
+            return SimpleNamespace(state="free")
+        self.reads += 1
+        if self.error is not None:
+            raise self.error
+        if self.offline:
+            return SimpleNamespace(state="offline", reason="the daemon is not running")
+        bound = self.bind_at is not None and self.reads >= self.bind_at
+        return SimpleNamespace(state="held" if bound else "free")
+
+
+def came_back_with(conn, comms):
+    run = arm(conn, mode="director")
+
+    def launch(request):
+        comms.launched = True
+        return launched_result(session_id="new-sid")
+
+    got = go(conn, run, comms=comms, launch=launch)
+    assert got.outcome == "relaunched"
+    return got, ended_detail(conn, run)["identity_state"]
+
+
+def test_a_relaunch_waits_for_the_new_session_to_bind_its_name(conn):
+    comms = SlowBind(bind_at=3)
+    got, state = came_back_with(conn, comms)
+    assert state == "held" and comms.reads == 3
+    assert got.job.sleep.__self__.slept.count(job.BIND_POLL_S) == 2
+
+
+def test_a_relaunch_stops_waiting_for_the_bind_at_its_bound(conn):
+    comms = SlowBind()
+    got, state = came_back_with(conn, comms)
+    assert state == "free" and comms.reads > 1
+    waited = got.job.sleep.__self__.slept.count(job.BIND_POLL_S) * job.BIND_POLL_S
+    assert 0 < waited <= job.BIND_WAIT_S
+
+
+@pytest.mark.parametrize("comms, said", [
+    (SlowBind(error=RuntimeError("socket closed")), "unreadable: socket closed"),
+    (SlowBind(offline=True), "unreadable: the daemon is not running")])
+def test_a_bind_read_that_fails_is_unreadable_not_unbound(conn, comms, said):
+    _, state = came_back_with(conn, comms)
+    assert state == said and comms.reads == 1
 
 
 def test_a_relaunch_without_comms_records_no_identity_state(conn):

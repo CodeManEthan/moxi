@@ -105,11 +105,11 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
 
 #: Why a scratch launch may not recycle itself, and what to do instead. A scratch folder
 #: has no notes directory to keep a handoff in, so a launch that works in one is refused
-#: `recycle_at_limit = relaunch` (`api.check`), an older such row is refused the self arm
-#: and gets no line at its mark, and a replay of one recycles `off`. `compact` stays open
-#: to a scratch.
-SCRATCH_RECYCLE = ("a scratch launch can't recycle itself",
-                   "recycle with compact, or launch in a directory")
+#: `recycle_at_limit = relaunch` wherever its values are checked
+#: (`catalog.refuse_scratch_recycle`), an older such row is refused the self arm and gets
+#: no line at its mark, and a replay of one recycles `off`. `compact` stays open to a
+#: scratch.
+SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 
 #: Stands for a seam looked up here.
 LOOK: Any = object()
@@ -508,6 +508,6 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_AFTER", "RELAUNCH_LINE",
-           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "cache_read",
-           "claude_projects", "codex_sessions", "crossing_line", "end", "on_crossing",
-           "relaunch_line", "scratch_relaunch", "start_compact", "verdict_of"]
+           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict",
+           "ask_expiry", "cache_read", "claude_projects", "codex_sessions", "crossing_line",
+           "end", "on_crossing", "relaunch_line", "scratch_relaunch", "start_compact", "verdict_of"]

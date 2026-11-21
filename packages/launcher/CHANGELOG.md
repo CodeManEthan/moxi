@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A relaunch or repair job no longer fails as it ends: it read `relaunch.fallback` and
+  `relaunch.notice_retry_s` in a way the launcher's settings don't support, so every
+  note and notice was lost and the job crashed before it told anyone.
 - Home's line above the box offers `Scratch`, a throwaway folder, beside the folder and
   project picks. Picked, the launch sends `scratch` and neither `cwd` nor `project`; a
   folder or project picked again sends `scratch` off, so a launch from Home never names
@@ -19,7 +22,9 @@
 - `limit_at` has no default of its own: unset, a launch recycles at its `warn_at` mark,
   or at `1x` when it warns at none.
 - A scratch launch can't set `--recycle-at-limit relaunch` (`scratch-recycle`, exit 3): a
-  scratch has no notes directory to keep a handoff in. `compact` is open to it. A scratch
+  scratch has no notes directory to keep a handoff in. Its preview refuses it too, on the
+  command line and the page, and `presets check` flags a preset or `[defaults]` that sets
+  both. `compact` is open to it. A scratch
   launch recorded with the option before is refused the self relaunch, gets no recycle
   line, and recycles `off` when it is relaunched or resumed, with a warning.
 - A relaunch of a launch that names no model comes back on the model the session last
@@ -30,9 +35,10 @@
 - A relaunch checks that its own launch would be accepted before it touches the session:
   at the arm, at a director's call, in the job just before the exit, and in a repair
   before it launches. A launch that would be refused refuses the relaunch (`launch-check`,
-  exit 3) or ends its run `refused`, with the session left as it was. The session's own
-  comms name and slot don't count against it. `--dry-run` prints the model and the
-  check's verdict.
+  exit 3) or ends its run `refused`, with the session left as it was. A repair refused so
+  launches nothing, and its notice says the session is down and names the `--from-record`
+  command that tries it again. The session's own comms name and slot don't count against
+  it. `--dry-run` prints the model and the check's verdict.
 - A director's relaunch reads the session's cache again just before the exit, and a
   session that warmed up since the call ends the run `held`, word `warm`.
 - A self relaunch that ends with its session still running tells the session in one
@@ -41,7 +47,8 @@
   exited. The directors hear only when that turn can't be delivered.
 - `moxi launcher relaunch --stop RUN` stops an open relaunch or repair run by signalling
   its job: before the exit the run ends `stopped` and a self run's session is told; from
-  the exit on, the run ends once the relaunch has been tried. It is refused for an unknown
+  the exit on, the run ends once the relaunch has been tried. A repair's session is down
+  already, so its stop is recorded and its line says so. It is refused for an unknown
   run, one that is not a relaunch, one that has ended, and one whose job is gone.
 - A self relaunch refused by turns' pace (`rate`, `in-flight`) waits 60 s before it
   tries again, and every retry waits 2 s, so the run no longer loops at once.
@@ -52,9 +59,15 @@
   a person has answered the dialog and the session has exited; its notice names the
   command.
 - `relaunch --status RUN` exits as the run ended: 0 relaunched, 75 held or still running,
-  1 any other end. Its lines go to stdout whatever the code.
+  1 any other end. Its lines go to stdout whatever the code. A run still open whose job is
+  gone says it has no end coming and exits 1, and it, like a run left at the exit dialog,
+  names the `--from-record` command when a repair would take it.
 - A director's relaunch that came back names the identity, slot, new session, posture,
   model and whether comms has bound the name, in its line and in the run's `ended` event.
+  The job waits up to 60 s for the bind, and a comms read that fails says `unreadable`,
+  not "not yet bound".
+- The armed text, the dry run and the came-back line say how the model was chosen in
+  words: "pinned from your transcript", "the row's", or "default:" and the reason.
 - The armed text names the model the session comes back on and ends "End your turn now
   and make no further tool call."
 - A self relaunch's handoff must be UTF-8 text and not blank, and when the session's

@@ -10,7 +10,8 @@ relaunches it flagged.
 | `relaunched`, flagged (its word the finding) | new, held on a screen or not ready | directors, then fallback |
 | `expired`, `held`, `not-held`, `stopped` | untouched | a self run's session, one note |
 | `changed` | untouched: a `/clear` since, the conversation that armed the run is gone | a self run's session, one note |
-| `refused` | untouched: its launch would have been refused | a self run's session, one note; a director's or repair's directors, then fallback |
+| `refused` | untouched: its launch would have been refused | a self run's session, one note; a director's directors, then fallback |
+| `refused`, a repair | down: the repair's launch would have been refused | directors, then fallback, with the `--from-record` command to repeat it |
 | `not-exited` | still up, maybe at its exit dialog | a self run's session, one note; a director's directors, then fallback |
 | `exit-pending` | still up, at its exit dialog | directors, then fallback |
 | `error`, before the exit | still up | a self run's session, one note; a director's or repair's directors, then fallback |
@@ -96,12 +97,14 @@ _SESSION = {
     "first-turn-not-sent": "The session was launched again, without its handoff.",
     "gone": "The session is down.",
     "error": "The session may be down.",
-    "changed": "The session was not touched: the conversation that armed the run is gone.",
     "refused": "Nothing was exited or launched: the launch would have been refused.",
     NOTE_NOT_TAKEN: "The session was not touched, and did not take the note saying so.",
     RELAUNCHED: "The session was launched again and is running, but it may be held on a "
                 "screen or not yet ready: attach to its slot to see it.",
 }
+#: What a repair that ended `refused` says of its session, which it found down.
+_REPAIR_REFUSED = ("The session is down and nothing was launched: the repair's launch would "
+                   "have been refused.")
 
 
 def is_flagged(run: store.Run) -> bool:
@@ -126,8 +129,9 @@ def owes_note(run: store.Run, outcome: str | None,
 
 def note_text(run: store.Run) -> str:
     """The note a self run's session left in place is sent."""
-    return NOTES.get(run.outcome or "", NOTE).format(run=run.run_id, word=run.word or run.outcome or "ended",
-                       detail=run.detail or "no detail")
+    return NOTES.get(run.outcome or "", NOTE).format(
+        run=run.run_id, word=run.word or run.outcome or "ended",
+        detail=run.detail or "no detail")
 
 
 def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: float) -> bool:
@@ -154,7 +158,8 @@ def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
          repairable: bool = False) -> str:
     """A notice's text: the session, the slot, the run, the outcome, and the repair
     command when the outcome allows one (for `exit-pending`, once the session has
-    exited)."""
+    exited). A repair that ended `refused` left its session down: its text says so and
+    names the command that repeats the repair, of the run it repaired."""
     session = run.session_id
     slot = f" in slot {run.slot}" if run.slot else ""
     said = outcome
@@ -166,8 +171,12 @@ def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
              f"ended {said}."]
     if run.detail and outcome != NOTE_NOT_TAKEN:
         lines.append(run.detail)
-    lines.append(_SESSION.get(outcome, ""))
-    if repairable:
+    refused_repair = outcome == "refused" and run.mode == "repair"
+    lines.append(_REPAIR_REFUSED if refused_repair else _SESSION.get(outcome, ""))
+    if refused_repair:
+        lines.append("Once the launch's problem is fixed, to try the repair again: moxi "
+                     f"launcher relaunch --from-record {run.repair_of or run.run_id}")
+    elif repairable:
         when = ("Once a person has answered the dialog and the session has exited, to "
                 "launch it again" if run.outcome == "exit-pending" else "To launch it again")
         lines.append(f"{when} from the run's record: moxi launcher relaunch "
@@ -265,9 +274,11 @@ def _words(error: BaseException) -> str:
 
 
 def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
-    """The settings a notice reads: the fallback and the reserved-name retry bound."""
-    return {"fallback": str(current.get("relaunch.fallback") or ""),
-            "retry_s": float(current.get("relaunch.notice_retry_s", 30))}
+    """The settings a notice reads: the fallback and the reserved-name retry bound.
+    `current` is the launcher's `moxi.config.Settings`, which reads by key and has no
+    `get`, or a mapping that holds the keys."""
+    return {"fallback": str(current["relaunch.fallback"] or ""),
+            "retry_s": float(current["relaunch.notice_retry_s"])}
 
 
 __all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",

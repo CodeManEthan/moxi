@@ -299,9 +299,9 @@ def test_a_self_arm_writes_its_run_starts_its_job_and_prints_the_armed_text(conn
     assert "MOXI_LAUNCHER_REQUEST" not in job.env and "MOXI_TURNS_COMMANDS" not in job.env
     assert job.env["CLAUDE_CONFIG_DIR"] == "/cfg" and job.env["PATH"] == "/usr/bin"
     assert result.lines == tuple(relaunch.ARMED.format(
-        run=run.run_id, slot="3", person="2 minutes", model="opus", how="row").splitlines())
+        run=run.run_id, slot="3", person="2 minutes", model="opus", how="the row's").splitlines())
     assert result.lines[0].startswith(f"armed {run.run_id}: this session exits")
-    assert "on opus (row)." in result.lines[2]
+    assert "on opus (the row's)." in result.lines[2]
     assert result.lines[-1] == "End your turn now and make no further tool call."
     assert session.closed == 1
 
@@ -424,13 +424,13 @@ def test_the_arm_says_the_model_the_relaunch_comes_back_on(conn, tmp_path, dry_r
     assert (result.data["model"], result.data["model_how"]) == ("claude-fable-5-2", "pinned")
     assert seen.asked == [SID]
     if not dry_run:
-        assert "on claude-fable-5-2 (pinned)." in " ".join(result.lines)
+        assert "on claude-fable-5-2 (pinned from your transcript)." in " ".join(result.lines)
 
 
 def test_the_armed_text_names_the_default_model_when_none_is_read(conn, tmp_path):
     drop_model(conn)
     result = arm(conn, handoff(tmp_path), sessions=None)
-    assert ("on the harness's default model (default:no-sessions)."
+    assert ("on the harness's default model (default: no-sessions)."
             in " ".join(result.lines))
 
 
@@ -480,10 +480,10 @@ def test_the_arm_checks_its_own_launch_replacing_its_session_on_its_pin(conn, tm
 
 def test_a_dry_run_prints_the_model_and_the_checks_verdict(conn, tmp_path):
     result = arm(conn, handoff(tmp_path), dry_run=True)
-    assert result.lines[1] == "it would come back on opus (row); its launch check passes"
+    assert result.lines[1] == "it would come back on opus (the row's); its launch check passes"
     assert result.data["launch_check"] == "passes"
     called = call(conn, dry_run=True)
-    assert called.lines[1] == "it would come back on opus (row); its launch check passes"
+    assert called.lines[1] == "it would come back on opus (the row's); its launch check passes"
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -1102,7 +1102,8 @@ def came_back(conn, *, state="held", word=None, detail=None, model="claude-opus-
 def test_a_directors_relaunch_says_what_came_back(conn):
     run = came_back(conn)
     line = (f"run {run.run_id}: relaunched planner in slot 3 as session new-sid, posture "
-            "with:boss, model claude-opus-5-5 (pinned); comms bound; new launch r2")
+            "with:boss, model claude-opus-5-5 (pinned from its transcript); comms bound; "
+            "new launch r2")
     assert relaunch.status(run.run_id, conn=conn).lines[0] == line
     followed = relaunch.follow_run(conn, run.run_id, 0)
     assert followed.exit_code == 0 and followed.lines == (line,)
@@ -1114,13 +1115,69 @@ def test_a_directors_relaunch_line_says_when_comms_has_not_bound_the_name(conn):
                     new_session=None)
     assert relaunch.status(run.run_id, conn=conn).lines[0] == (
         f"run {run.run_id}: relaunched session {SID} in slot 3 as session not known yet, "
-        "posture with:boss, model the harness's default model (default:no-model-line); "
+        "posture with:boss, model the harness's default model (default: no-model-line); "
         "comms not yet bound; flagged no-ready: no ready in 60 s; new launch r2")
+
+
+def test_a_directors_relaunch_line_says_when_comms_could_not_be_read(conn):
+    run = came_back(conn, state="unreadable: the daemon is down", how="row")
+    line = relaunch.status(run.run_id, conn=conn).lines[0]
+    assert "model claude-opus-5-5 (the row's); comms unreadable (the daemon is down);" in line
+    assert "not yet bound" not in line
 
 
 def test_a_directors_relaunch_without_comms_names_no_bind(conn):
     run = came_back(conn, state=None)
     assert "comms" not in relaunch.status(run.run_id, conn=conn).lines[0]
+
+
+def stale_run(conn, *, mode="self", exited=True):
+    run = store.insert_run(conn, kind="relaunch", mode=mode, request_id="r1",
+                           session_id=SID, by="planner", slot="3", job="slots:relaunch-x",
+                           at="2026-10-31T10:00:00.000000Z")
+    store.add_run_event(conn, run.run_id, "wait", {"word": "turn", "detail": "a turn"})
+    if exited:
+        store.add_run_event(conn, run.run_id, "exit", {"turn_number": 4})
+    return run
+
+
+def test_status_of_an_open_run_whose_job_is_gone_says_it_has_no_end(conn):
+    run = stale_run(conn)
+    result = relaunch.status(run.run_id, conn=conn, slots_api=JobSlots(None))
+    assert result.exit_code == 1 and result.data["job_gone"] is True
+    assert result.lines[1:3] == (
+        "the run has no end and its job slots:relaunch-x is not running",
+        f"its record shows an exit: moxi launcher relaunch --from-record {run.run_id} "
+        "launches the session again once it has exited")
+    assert not any(line.startswith("waiting on") for line in result.lines)
+
+
+def test_status_of_a_stale_run_that_never_exited_names_no_repair(conn):
+    run = stale_run(conn, exited=False)
+    result = relaunch.status(run.run_id, conn=conn, slots_api=JobSlots(None))
+    assert result.exit_code == 1
+    assert result.lines[1] == "the run has no end and its job slots:relaunch-x is not running"
+    assert not any("--from-record" in line for line in result.lines)
+
+
+def test_status_of_an_open_run_whose_job_runs_still_exits_75(conn):
+    run = stale_run(conn)
+    result = relaunch.status(run.run_id, conn=conn,
+                             slots_api=JobSlots(running_job(os.getpid())))
+    assert result.exit_code == 75 and result.data["job_gone"] is False
+    assert result.lines[1].startswith("waiting on: turn")
+
+
+def test_status_of_an_exit_pending_run_names_the_repair(conn):
+    run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                           session_id=SID, by="planner", slot="3", job="slots:x")
+    store.end_run(conn, run.run_id, "exit-pending", word="person")
+    result = relaunch.status(run.run_id, conn=conn)
+    assert result.exit_code == 1
+    assert result.lines[1] == (
+        f"the session was left at its exit dialog: moxi launcher relaunch --from-record "
+        f"{run.run_id} launches it again once a person has answered the dialog and the "
+        "session has exited")
 
 
 def test_status_of_no_such_run_is_refused(conn):
@@ -1180,9 +1237,13 @@ def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
 def test_a_repair_run_is_stopped_too(conn, child):
     run = open_relaunch(conn, mode="repair", job="slots:repair-x")
     sent = []
-    relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)),
-                      kill=lambda pid, sig: sent.append((pid, sig)))
+    result = relaunch.stop_run(run.run_id, conn=conn,
+                               slots_api=JobSlots(running_job(child.pid)),
+                               kill=lambda pid, sig: sent.append((pid, sig)))
     assert sent == [(child.pid, relaunch.STOP_SIGNAL)]
+    assert result.lines == (f"stop sent to run {run.run_id}: its session is down already, "
+                            "so the stop is recorded and the run ends after the launch is "
+                            "tried",)
 
 
 def test_a_stop_of_no_run_another_kind_or_an_ended_run_is_refused(conn):

@@ -316,8 +316,10 @@ comes back on, would be accepted now: at the arm, at a director's call, again in
 just before the exit, and in a repair before it launches. The session's own comms name
 and slot don't count against it. A launch that would be refused (its directory gone, its
 harness not found, its name held by another session) refuses the relaunch, `launch-check`
-at the command or `refused` in the job, with the session left as it was. `--dry-run`
-prints the model and the check's verdict. The armed text names the model too, and tells
+at the command or `refused` in the job, with the session left as it was. A repair's
+session is down already: a repair refused so launches nothing, and its notice says the
+session is down and names the `--from-record` command that tries the repair again.
+`--dry-run` prints the model and the check's verdict. The armed text names the model too, and tells
 the agent to end its turn and make no further tool call. When a self relaunch ends with
 the session still running (it was not exited, it stopped with an error before the exit,
 or the session's id changed after a `/clear`, which ends the run `changed`), the session
@@ -340,24 +342,27 @@ An agent making the call gives Bash a timeout of at least `relaunch.follow_s` pl
 since Bash's own default is shorter. The job reads the session's cache again just before
 the exit, so a session that warmed up since the call is left alone (`held`, `warm`). A
 relaunch that came back names its identity, slot, new session, posture and model, and
-whether comms has bound the name. A director named without a scope is read in the
-launch's own scope.
+whether comms has bound the name, waiting up to 60 s for the bind, or that comms could
+not be read. A director named without a scope is read in the launch's own scope.
 
     moxi launcher relaunch --status RUN
     moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
 
-`--status` shows a run and its events, what it waits on first, and exits as the run
-ended: 0 relaunched, 75 held or still running, 1 any other end. `--stop` stops an armed run:
-before the exit the run ends `stopped` and a self run's session is told; from the exit
-on, the run ends once the relaunch has been tried. A relaunch that exited the
-session and failed to start the new one tells the session's directors (or the comms
-identity in `relaunch.fallback`) through comms, naming the command that repairs it:
-`--from-record` starts the session again from the run's record, in its slot, or the
-lowest free one when someone outside the session's own line of launches has taken it. It
-refuses when the slot already runs the relaunched session, and when the session itself is
-still live. A run left at the exit dialog (`exit-pending`) can be repaired too, once a
-person has answered the dialog and the session has exited.
+`--status` shows a run and its events, what it waits on first, and exits as the run ended:
+0 relaunched, 75 held or still running, 1 any other end. A run still open whose job is
+gone will get no end: `--status` says so and exits 1, naming `--from-record` when its
+record shows an exit, as it does for a run left at the exit dialog. `--stop` stops an
+armed run: before the exit the run ends `stopped` and a self run's session is told; from
+the exit on, the run ends once the relaunch has been tried. A repair's session is down
+already, so a stop of a repair is recorded and the run ends once its launch has been
+tried. A relaunch that exited the session and failed to start the new one tells the
+session's directors (or the comms identity in `relaunch.fallback`) through comms, naming
+the command that repairs it: `--from-record` starts the session again from the run's
+record, in its slot, or the lowest free one when someone outside the session's own line of
+launches has taken it. It refuses when the slot already runs the relaunched session, and
+when the session itself is still live. A run left at the exit dialog (`exit-pending`) can
+be repaired too, once a person has answered the dialog and the session has exited.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
 exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,
@@ -395,8 +400,15 @@ own reads:
   `relaunch` is what lets a session recycle itself (it also needs slots and a slot
   launch); its line opens "This launch lets you recycle yourself". A scratch launch has
   no notes directory to keep a handoff in, so it can't take `relaunch`
-  (`scratch-recycle`, exit 3); `compact` is open to it. With `--limit-at` unset the mark
-  is the launch's `warn_at`, or `1x` when it warns at none.
+  (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
+  page, refuse the pair, and `presets check` flags a preset or `[defaults]` that sets
+  both. `compact` is open to it. With `--limit-at` unset, the mark is the one usage
+  warns this launch at: its `warn_at` when that is a mark; when `warn_at` is unset,
+  usage's own `marks.default` when usage loads and that is a mark; otherwise (`warn_at`
+  is `off`, or usage's default is off or can't be read) `1x`. The mark is fixed when the
+  launch is composed: a later change to usage's `marks.default` moves usage's notice but
+  not the stamped mark, and a relaunch composes its mark again from the values then. A
+  `compact` launch takes its mark the same way.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out: running subagents, or
