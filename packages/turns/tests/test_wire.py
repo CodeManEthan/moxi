@@ -144,6 +144,17 @@ def test_framing_is_moxi_ipcs(make_endpoint, connect):
     assert caught.value.code == -32602
 
 
+def test_a_by_or_senders_of_the_wrong_shape_is_invalid(make_endpoint, connect):
+    ep, _ = make_endpoint()
+    client = connect(ep)
+    for method, params in (("deliver", {"text": "x", "by": 3}),
+                           ("deliver", {"text": "x", "senders": "ann"}),
+                           ("steer", {"text": "x", "senders": ["ann", ""]})):
+        with pytest.raises(ipc.RpcError) as caught:
+            client.call(method, params, timeout_s=5)
+        assert caught.value.code == -32602
+
+
 def test_probe(turns_env):
     # The hosts' internal legs still judge their own sockets by a probe.
     assert protocol.probe(turns_env / "nothing")[0] == protocol.STALE
