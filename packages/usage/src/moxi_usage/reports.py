@@ -694,8 +694,9 @@ def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
 
     `subagent_cost` is the part of `cost` its subagent, workflow and child-session files
     ran up in range: 0 with none, `UNKNOWN` when none of theirs could be priced. `turns`
-    is how many distinct turn ids the requests of the session's main file carry, over the
-    whole file whatever the range, as its title is; None when none carries one."""
+    is how many turns the session's main file holds (`_session_turns`: a Claude
+    transcript's prompts, a prompt that drew no request included; another harness's turn
+    ids), over the whole file whatever the range, as its title is; None with none."""
     query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
     groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL,
                                    "main": _MAIN_FILE_SQL}, _table(table))
@@ -758,27 +759,36 @@ def _session_facts(conn: sqlite3.Connection,
 
 def _session_turns(conn: sqlite3.Connection,
                    keys: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
-    """How many distinct turn ids the requests of each session's main file carry, every
-    request of the file counted; a session none of whose carries one is left out."""
+    """How many turns each session's main file holds: for a Claude transcript the
+    distinct prompt ids it wrote, a prompt that drew no request included; for a Codex
+    rollout, an OpenCode session, and a Claude transcript not read since the index kept
+    prompts (`prompts_read` 0), the distinct turn ids its requests carry. A session with
+    none is left out."""
     ids = sorted({sid for _, sid in keys if not sid.startswith("file:")})
     file_ids = sorted({int(sid[5:]) for _, sid in keys if sid.startswith("file:")})
     found: dict[tuple[str, str], int] = {}
-    main = "f.kind = 'main' AND f.parent_session IS NULL AND r.turn_id IS NOT NULL"
+    main = "f.kind = 'main' AND f.parent_session IS NULL"
+    prompted = "f.harness = 'claude' AND f.prompts_read = 1"
+    turns = (f"SELECT f.id, p.turn_id FROM files f JOIN prompts p ON p.file_id = f.id"
+             f" WHERE {{where}} AND {main} AND {prompted}"
+             f" UNION ALL SELECT f.id, r.turn_id FROM files f"
+             f" JOIN requests r ON r.file_id = f.id WHERE {{where}} AND {main}"
+             f" AND NOT ({prompted}) AND r.turn_id IS NOT NULL")
     for n in range(0, len(ids), _CHUNK):
         chunk = ids[n:n + _CHUNK]
+        where = f"f.session_id IN ({','.join('?' * len(chunk))})"
         for row in conn.execute(
-                "SELECT f.harness, f.session_id AS session, COUNT(DISTINCT r.turn_id) AS n"
-                " FROM files f JOIN requests r ON r.file_id = f.id"
-                f" WHERE f.session_id IN ({','.join('?' * len(chunk))}) AND {main}"
-                " GROUP BY f.harness, f.session_id", chunk):
+                "SELECT f.harness, f.session_id AS session, COUNT(DISTINCT t.turn_id) AS n"
+                f" FROM ({turns.format(where=where)}) t JOIN files f ON f.id = t.id"
+                " GROUP BY f.harness, f.session_id", [*chunk, *chunk]):
             found[(row["harness"], row["session"])] = row["n"]
     for n in range(0, len(file_ids), _CHUNK):
         chunk = file_ids[n:n + _CHUNK]
+        where = f"f.id IN ({','.join('?' * len(chunk))})"
         for row in conn.execute(
-                "SELECT f.harness, 'file:' || f.id AS session, COUNT(DISTINCT r.turn_id) AS n"
-                " FROM files f JOIN requests r ON r.file_id = f.id"
-                f" WHERE f.id IN ({','.join('?' * len(chunk))}) AND {main}"
-                " GROUP BY f.id", chunk):
+                "SELECT f.harness, 'file:' || f.id AS session, COUNT(DISTINCT t.turn_id) AS n"
+                f" FROM ({turns.format(where=where)}) t JOIN files f ON f.id = t.id"
+                " GROUP BY f.id", [*chunk, *chunk]):
             found[(row["harness"], row["session"])] = row["n"]
     return found
 

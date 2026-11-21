@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The token index moves to version 3 and keeps the prompt ids of each Claude transcript,
+  a prompt that drew no request (`/exit`, `/clear`, another local command) included. The
+  Sessions table's Turns counts a Claude session's prompts from them, where it counted
+  only the prompts that drew a request; Codex and OpenCode sessions count their turns as
+  before. The first pass after the upgrade reads every Claude transcript again from its
+  start, about as long as `--rebuild` takes over them; Codex and OpenCode are not read
+  again. A transcript that pass can't read, such as one on an offline archive drive,
+  keeps its old count until it is read. An older usage can't open a version 3 index.
+  usage needs the moxi-sessions that has `Batch.prompt_ids`.
 - The page's opened Sessions section is its table of every session of the range, read at
   once; the two lists of two-line rows (the last seven days' ten dearest with `Show`, and
   `Earlier`) and the section's `Table` toggle are gone. A session opens first in the

@@ -179,6 +179,10 @@ that Codex imported from elsewhere (its turn ids, or the imports file, say so) i
 so it is not counted twice. A rollout whose only mark is the desktop app's originator is
 counted.
 
+Beside its requests, a Claude transcript keeps the prompt ids it wrote, a prompt that drew
+no request (`/exit`, `/clear`, another local command) included; the Sessions table's Turns
+counts them.
+
 With Moxi's projects module installed, the pass records each session's project key while
 its directory exists, so a build worktree's sessions keep their project after the worktree
 is removed. A directory that no longer exists is never looked up.
@@ -441,8 +445,10 @@ sessions module. Top to bottom:
     `Load more`). Its columns are the project (or the folder, without the projects
     module), the session's name (with a `codex` badge on a Codex session), its start, how
     long it was active (its first to its last request; the header's hover says so), its
-    turns (0 where none is recorded; the header's hover: `Prompts in the main session
-    file; never summed with subagents`), its Input, Cache create, Cache read and Output
+    turns (for Claude every prompt in its main transcript, one that drew no request
+    included; for Codex and OpenCode the turns its requests name; 0 where none is
+    recorded; the header's hover: `Prompts in the main session file; never summed with
+    subagents`), its Input, Cache create, Cache read and Output
     tokens, each with a bar against the most of its column among the rows read, its
     subagents' share of its cost as a meter, and its estimated cost. A click on a header
     sorts by it, highest first, and again the other way, rows of one value by session id
