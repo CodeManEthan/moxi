@@ -149,7 +149,7 @@ def test_only_a_str_is_redacted():
 # --- a reader's change between the passes ----------------------------------------------------
 
 #: A made-up token of the GitHub personal-token rule's shape.
-GHP = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+GHP = corpus.github(corpus.rng(11))
 _PATH = __import__("re").compile(r"/(?:home|srv)/[^\s\"'`<>|,;(){}\[\]]*")
 
 
@@ -191,6 +191,6 @@ def test_a_placeholder_inside_a_path_survives_the_cut():
 @pytest.mark.parametrize("text", [
     "", "plain words", f"token {GHP} here", "a​b\x1bc", f"key={VALUE}",
     "4111 1111 1111 1111",
-])
+], ids=["empty", "plain", "token", "invisible", "keyed", "card"])
 def test_between_none_is_the_redaction_as_before(text):
     assert chat_redact(text, between=None) == chat_redact(text)
