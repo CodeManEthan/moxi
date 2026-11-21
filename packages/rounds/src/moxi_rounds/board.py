@@ -739,7 +739,7 @@ ACT_WORDS: dict[str, str] = {
     "finish.done": "landed", "lock.cleared": "finish lock cleared",
     "build.dropped": "dropped", "round.dropped": "round dropped",
     "thread.decided": "thread decided", "repair": "record repaired",
-    "round.closed": "round closed"}
+    "round.closed": "round closed", "lead.changed": "lead changed"}
 
 
 def act_words(event: Mapping) -> str:
@@ -828,7 +828,7 @@ EVENT_STEPS: dict[str, str | None] = {
     "wait.marked": CLOSE, "finish.action": steps.FINISH, "finish.done": steps.FINISH,
     "lock.cleared": steps.FINISH, "repair": None, "round.closed": CLOSE,
     "round.dropped": CLOSE, "verdict.recorded": None, "ruling.recorded": None,
-    "check.ran": None, "brief.sized": None}
+    "check.ran": None, "brief.sized": None, "lead.changed": None}
 
 
 def event_step(event: Mapping) -> tuple[str | None, str | None]:
