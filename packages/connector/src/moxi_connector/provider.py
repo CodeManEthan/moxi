@@ -37,10 +37,13 @@ The connector scrubs every answer after the provider gives it: from the text par
 from every string of the structured value, at any depth, it removes the C0 control
 characters but newline and tab, DEL, the C1 range and every Unicode format character
 (category `Cf`: bidi controls, zero-width characters, the soft hyphen, the byte order
-mark, tag characters). A provider that redacts removes those same characters before it
-redacts, and hands the connector text the scrub leaves unchanged: no text may reach the
-chat that redaction didn't see in its final form, and the scrub must never be the step
-that joins the halves of a split secret.
+mark, tag characters). A provider that redacts hands the connector text its last
+redaction saw in final form, so the scrub leaves it unchanged: no text may reach the chat
+that redaction didn't see as it goes out. For a provider that redacts, that means
+redacting the raw text, then removing those characters, then redacting again. Removing
+them first and redacting once is not enough: the redactor sees through some invisible
+characters, and removing one can glue a word onto a key and break the boundary its
+pattern needs.
 
 Two providers that declare one tool name both lose it: no provider's tool shadows
 another's. A tool whose `call` raises answers "The tool failed; the connector's log has

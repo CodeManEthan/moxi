@@ -14,8 +14,9 @@ characters that let text hide words from a reader's eye, or split a token so tha
 pattern no longer matches it, while a model still reads every one.
 
 It runs after the provider answers, so no provider can forget it. A provider that redacts
-removes these same characters before it redacts, so the scrub never joins the halves of a
-value redaction didn't see whole (`moxi_connector.provider` states that rule).
+redacts the raw text, removes these same characters, then redacts again, so its last
+redaction saw the text in the form the scrub leaves, and the scrub changes nothing
+redaction didn't see (`moxi_connector.provider` states that rule).
 
 Standard library only.
 """
