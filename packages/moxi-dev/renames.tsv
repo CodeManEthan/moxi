@@ -4131,6 +4131,8 @@ launcher	packages/launcher/tests/test_cli.py	handoff_files	name	folder	handoffs_
 launcher	packages/launcher/tests/test_cli.py	return lambda name: handoffs_dir(name, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
+launcher	packages/launcher/tests/test_cli.py	assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)	keep	any	any
+launcher	packages/launcher/tests/test_cli.py	assert set(shown["env"]) == {common.REQUEST_ENV, "MOXI_USAGE_WARN_AT"}	keep	set	set
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
@@ -11989,7 +11991,7 @@ sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	name	at	positio
 sessions	packages/sessions/src/moxi_sessions/claude.py	_usage_request	kwonly	final	final
 sessions	packages/sessions/src/moxi_sessions/claude.py	`closed` entry). With `kinds` None, or a kind `MARKER_BYTES` has no entry for, every	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/claude.py	`final` true is never also in `closed`. Only request records ever come twice, and a	keep	closed	closed
-sessions	packages/sessions/src/moxi_sessions/claude.py	`final`, `closed` and `open_key` are the same as without it.	keep	closed	closed
+sessions	packages/sessions/src/moxi_sessions/claude.py	`final`, `closed`, `open_key` and `started` are the same as without it.	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/claude.py	`~` and the home directory taken from its `HOME`. A process that reports its session's	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/claude.py	and raw.find(b'"promptId"', first + 10) < 0):	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/claude.py	cut = raw.find(stop, 1, end)	keep	find	find
@@ -12239,7 +12241,7 @@ sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack.__init__	kwonly	
 sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack._map	kwonly	unterminated	unterminated
 sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	e	exc
 sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	handle	fh
-sessions	packages/sessions/src/moxi_sessions/read.py	__slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "_header")	keep	closed	closed
+sessions	packages/sessions/src/moxi_sessions/read.py	__slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "prompt_ids",	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back	name	e	read_exc
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back	name	head	read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back.stream	name	e	exc
@@ -15842,6 +15844,8 @@ usage	packages/usage/src/moxi_usage/cli.py	return f"${price:,.2f}" if round(pric
 usage	packages/usage/src/moxi_usage/cli.py	terms.add_argument("--by", choices=("model", "day", "month", "agent"), default="model",	keep	default	default
 usage	packages/usage/src/moxi_usage/cli.py	terms.add_argument("--session", metavar="ID", help="count one session only")	keep	help	help
 usage	packages/usage/src/moxi_usage/cli.py	verb = "would remove" if args.dry_run else "removed"	keep	dry_run	dry_run
+usage	packages/usage/src/moxi_usage/cli.py	restart.add_argument("--days", type=int, metavar="N",	keep	type	type
+usage	packages/usage/src/moxi_usage/cli.py	help="with --measure, measure over the last N days, this once "	keep	help	help
 usage	packages/usage/src/moxi_usage/context.py	seen: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/context.py	sessions finds the session's records (`find`), and for an agent its own file among the	keep	find	find
 usage	packages/usage/src/moxi_usage/convert.py	extra = sorted(set(row) - _MULTIPLIER_KEYS - {"source", "as_of"})	keep	set	set
@@ -15951,6 +15955,13 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
+usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
+usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
+usage	packages/usage/src/moxi_usage/page.py	"skip": lb.Field("int", required=False),	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	"sort": lb.Field("enum", required=False, values=SESSION_SORTS),	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	"order": lb.Field("enum", required=False, values=("asc", "desc")),	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE_FLOAT = lb.Out("float", nullable=True)	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(folder), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(work_dir), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}	use	"folder":	"work_dir":
@@ -15982,6 +15993,8 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
+usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
+usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
 usage	packages/usage/src/moxi_usage/prices.py	added = sorted(set(after) - set(before))	keep	set	set
 usage	packages/usage/src/moxi_usage/prices.py	names: set[str] = set()	keep	set	set
@@ -16052,6 +16065,8 @@ usage	packages/usage/src/moxi_usage/reports.py	terms	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	total = make({}) if total is None else total	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	where, args = query.where(claimed=False)	keep	claimed	claimed
 usage	packages/usage/src/moxi_usage/reports.py	window = _window(reported, _table(table).lookup(name, provider=provider, at=ts))	keep	at	at
+usage	packages/usage/src/moxi_usage/reports.py	"""The filters set, by the report's own keys: `work_dir` goes out as `folder`,	keep	folder	folder
+usage	packages/usage/src/moxi_usage/reports.py	("folder", ", ".join(self.work_dir) or None),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/segment.py	"WARN", "ALERT", "WARN_AT", "ALERT_AT"]	keep	WARN_AT	WARN_AT
 usage	packages/usage/src/moxi_usage/settings.py	extra = sorted(set(row) - {"path", "id"})	keep	set	set
 usage	packages/usage/src/moxi_usage/settings.py	for n, row in enumerate(settings[ARCHIVE_KEY], start=1):	keep	start	start
@@ -16279,6 +16294,18 @@ usage	packages/usage/tests/test_allowlist.py	{"command": "git status --short", "
 usage	packages/usage/tests/test_allowlist.py	{"file_path": e + "/notelink/build-report.md", "limit": 50}, want=False)	keep	want	want
 usage	packages/usage/tests/test_allowlist.py	{"file_path": notes + "/dlink/../x.md"}, want=True)	keep	want	want
 usage	packages/usage/tests/test_allowlist.py	{"file_path": notes + "/uplink/../outside.md"}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed command with more words", "make handoff report --quiet", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed command with one word more", "make handoff x", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("moxi repo rules with no argument", "moxi repo rules", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("moxi repo rules in the cd shape", "cd %s && moxi repo rules" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("moxi repo rules with a key", "moxi repo rules moxi", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("moxi repo rules with a path", "moxi repo rules %s" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by one key", "make trailers my-repo.2", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word left empty", "make trailers", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word and a word more", "make trailers my-repo extra", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by an option", "make trailers --all", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by a path", "make trailers ../x", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a <key> word filled by the placeholder", "make trailers '<key>'", want=False)	keep	want	want
 usage	packages/usage/tests/test_bench.py	assert any(row.harness == "codex" and row.state == "fresh" for row in got.rows)	keep	any	any
 usage	packages/usage/tests/test_bench.py	codex = root / "harness" / ".codex" / "sessions"	keep	sessions	sessions
 usage	packages/usage/tests/test_bench.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -16330,7 +16357,7 @@ usage	packages/usage/tests/test_browser_questions.py	child.assistant("Found it."
 usage	packages/usage/tests/test_browser_questions.py	expect(section(panel, "projects" if shell.small else "folders")).to_have_count(0)	keep	folders	folders
 usage	packages/usage/tests/test_browser_questions.py	for k, (folder, days) in enumerate((("proj-b", 12), ("scratch", 20)))]	use	(folder,	(dir_name,
 usage	packages/usage/tests/test_browser_questions.py	held[name] = sorted(set(cards.evaluate_all("all => all.map((one) => one.dataset.module)")))	keep	set	set
-usage	packages/usage/tests/test_browser_questions.py	in_b = [key(spec) for spec in WEEK + [CODEX] if spec["folder"] == "proj-b"]	keep	folder	folder
+usage	packages/usage/tests/test_browser_questions.py	in_b = [key(spec) for spec in WEEK + [CODEX] + EARLIER if spec["folder"] == "proj-b"]	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	on_both.go	name	failed	exc
 usage	packages/usage/tests/test_browser_questions.py	r.request(T.token_usage(input=4000, cached=3000, output=800),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	re.compile(r"^no newer reading: .+")], timeout=15_000)	keep	timeout	timeout
@@ -16353,7 +16380,6 @@ usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b2", "folder": "proj-a", "model": SONNET, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b3", "folder": "proj-b", "model": HAIKU, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b4", "folder": "loose", "model": SONNET, "requests": 1},	keep	folder	folder
-usage	packages/usage/tests/test_browser_sessions.py	"Cost"} <= set(heads), heads	keep	set	set
 usage	packages/usage/tests/test_browser_sessions.py	EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days, "today": False,	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	WEEK = [{"session": session_id(n), "folder": "proj-a" if n % 2 == 0 else "proj-b",	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	t.assistant("Done.", usage=T.usage(input=200, output=1000),	use	input=	input_tokens=
@@ -16389,6 +16415,7 @@ usage	packages/usage/tests/test_context.py	child.assistant("found", usage=usage(
 usage	packages/usage/tests/test_context.py	r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=400_000, cache_write=12_000))	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=410_000, cache_write=2_000))	use	input=	input_tokens=
+usage	packages/usage/tests/test_convert.py	"minimax-m3.1-flash-free", "space-bunny-free"} <= set(own)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	"restart_point", "marks", "turns"} <= set(names)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.optional) == {"turns", "projects", "ui"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}	keep	set	set
@@ -16469,6 +16496,7 @@ usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read
 usage	packages/usage/tests/test_measure.py	t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read, cache_write=write,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	w = round(2.0 * 0.998 + 1.25 * 0.002, 3)	keep	round	round
 usage	packages/usage/tests/test_page.py	"/api/cost": ("read", set(), False),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/events": ("read", set(), True),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/limits": ("read", set(), False),	keep	set	set
@@ -16603,6 +16631,10 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
+usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
+usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
+usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder
+usage	packages/usage/tests/test_page.py	assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]	keep	folder	folder
 usage	packages/usage/tests/test_prices_index.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_readings.py	rollout = builders.CodexRollout(tmp_path / "sessions", start=NOW - 600)	keep	sessions	sessions
 usage	packages/usage/tests/test_reports.py	"""The `session` report's total equals its `sessions` row under the same filters."""	keep	sessions	sessions
@@ -16665,6 +16697,7 @@ usage	packages/usage/tests/test_reports.py	source(conn, "/p/s1/subagents/agent-a
 usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_reports.py	touched: set[int] = set()	keep	set	set
+usage	packages/usage/tests/test_reports.py	assert found.filters == {"project": "key-app, /w/app", "folder": "/w/app, /w/app-wt"}	keep	folder	folder
 usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize("used", [True, "42", [42], float("nan"), float("inf")])	keep	used	used
 usage	packages/usage/tests/test_segment.py	@pytest.mark.parametrize(("used", "band", "colour"), [	keep	used	used
 usage	packages/usage/tests/test_settings.py	("[limits]\ncodex_pull_after_s = -1\n", "limits.codex_pull_after_s", "stale"),	keep	stale	stale

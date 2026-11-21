@@ -33,7 +33,7 @@ DEFAULTS = {
     "ceiling.return_tools": ["StructuredOutput"],
     "ceiling.handoff_roots": [],
     "ceiling.work_roots": [],
-    "ceiling.allow_commands": [],
+    "ceiling.allow_commands": [["moxi", "repo", "rules"]],
     "ceiling.max_age_days": 7,
 }
 

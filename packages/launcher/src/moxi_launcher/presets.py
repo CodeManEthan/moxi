@@ -1002,13 +1002,14 @@ def resolve(request, *, presets: Presets | None = None,
             available: Callable[[str], bool] | None = None) -> Resolved:
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
-    holding its shipped default. A scratch launch holds `recycle_at_limit = off`, with
-    the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came from `[defaults]`; typed or
-    set by the preset, the pair is refused (`catalog.ScratchRecycle`). Reads projects when
-    a place needs it. Raises a `catalog.Refused`: `UnknownPreset`, `BadPreset`,
-    `OffPosture`, `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`,
-    `ProjectsBusy`, or the catalog's `BadValue`; a `moxi.config.ConfigError` when the
-    file can't be read."""
+    holding its shipped default, except that a seat or Codex launch that sets no
+    `warn_at` holds none (`_no_default_mark`). A scratch launch holds
+    `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch`
+    came from `[defaults]`; typed or set by the preset, the pair is refused
+    (`catalog.ScratchRecycle`). Reads projects when a place needs it. Raises a
+    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
+    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
+    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
     preset, harness, place = laid.preset, laid.harness, laid.place
@@ -1028,6 +1029,8 @@ def resolve(request, *, presets: Presets | None = None,
     if scratch and _default_relaunch(values, sources):
         values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
         warnings.append(SCRATCH_RECYCLE_OFF)
+    if _no_default_mark(harness, preset, scratch=scratch, source=sources.get(WARN_AT)):
+        values[WARN_AT] = ""
 
     _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
@@ -1060,7 +1063,7 @@ def resolve(request, *, presets: Presets | None = None,
         ("turns", turns), ("comms", identity is not None or posture.startswith(WITH)),
         ("projects", project is not None), ("slots", target == "slot"),
         ("notes", catalog.is_set(values.get("notes_dir"))),
-        ("usage", catalog.is_set(values.get("warn_at")))) if on}
+        ("usage", catalog.is_set(values.get(WARN_AT)))) if on}
     return Resolved(
         harness=harness, mode=mode, values=MappingProxyType(values),
         sources=MappingProxyType(sources), chosen=chosen,
@@ -1085,6 +1088,20 @@ def _default_relaunch(values: Mapping[str, object], sources: Mapping[str, str]) 
     default), which reach every launch, not from the preset named or a flag."""
     return (values.get(RECYCLE_AT_LIMIT) == "relaunch"
             and sources.get(RECYCLE_AT_LIMIT) in (SHIPPED, DEFAULTS))
+
+
+#: The row holding the context mark usage warns at.
+WARN_AT = "warn_at"
+
+
+def _no_default_mark(harness: str, preset, *, scratch: bool, source: str | None) -> bool:
+    """Whether the launch drops `warn_at`'s shipped default: a seat launch outside a
+    scratch folder, or a Codex launch, warns only at a mark it sets (in `[defaults]`, its
+    preset or a flag). One-off, project and scratch launches keep the default."""
+    if source not in (SHIPPED, LEFT_OUT):
+        return False
+    seat = preset is not None and preset.kind == "seat" and not scratch
+    return seat or harness == "codex"
 
 
 #: The row holding a headless launch's exit rule; each value is one `--exit` of comms'

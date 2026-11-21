@@ -54,3 +54,62 @@ id = "claude-opus-4-8"
 tiers.fast = { speed = "fast", input = 10.0, output = 50.0 }
 source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 4.8 at $10 / $50 per million tokens"
 as_of = "2026-06-24"
+
+# Models newer than the LiteLLM snapshot, each a row of its own. A row carries every price
+# the restart point's multipliers read (input, and with an input above 0 the cache-read and
+# both cache-write prices), so none is filled from the provider's default.
+
+[[model]]
+id = "claude-fable-5-2"
+provider = "anthropic"
+input = 8.0
+output = 40.0
+cache_read = 0.2
+cache_write_5m = 10.0
+cache_write_1h = 16.0
+window = 1000000
+max_output = 128000
+tiers.fast = { speed = "fast", input = 16.0, output = 80.0, cache_read = 0.4, cache_write_5m = 20.0, cache_write_1h = 32.0 }
+source = "Anthropic API pricing (platform.claude.com/docs/en/about-claude/pricing) and models overview: Claude Fable 5.2 at $8 / $40 per million tokens, cache hits $0.20 (0.025x input), 5-minute cache writes $10, 1-hour $16; fast mode $16 / $80, with the same cache multipliers over the fast input price; 1M-token window, 128K max output"
+as_of = "2026-11-20"
+
+[[model]]
+id = "claude-mythos-5-2"
+provider = "anthropic"
+input = 8.0
+output = 40.0
+cache_read = 0.2
+cache_write_5m = 10.0
+cache_write_1h = 16.0
+window = 1000000
+max_output = 128000
+tiers.fast = { speed = "fast", input = 16.0, output = 80.0, cache_read = 0.4, cache_write_5m = 20.0, cache_write_1h = 32.0 }
+source = "Anthropic API pricing (platform.claude.com/docs/en/about-claude/pricing) and models overview: Claude Mythos 5.2 (limited availability) at $8 / $40 per million tokens, cache hits $0.20 (0.025x input), 5-minute cache writes $10, 1-hour $16; fast mode $16 / $80, with the same cache multipliers over the fast input price; 1M-token window, 128K max output"
+as_of = "2026-11-20"
+
+# OpenCode's free models. A model with an input price of 0 has no write multiplier, so it
+# carries input and output only.
+
+[[model]]
+id = "big-pickle"
+provider = "opencode"
+input = 0.0
+output = 0.0
+source = "OpenCode's model list (models.dev/api.json, provider opencode): Big Pickle, free ($0 input and output)"
+as_of = "2026-11-20"
+
+[[model]]
+id = "minimax-m3.1-flash-free"
+provider = "opencode"
+input = 0.0
+output = 0.0
+source = "OpenCode's model list (models.dev/api.json, provider opencode): MiniMax M3.1 Flash Free, free ($0 input and output)"
+as_of = "2026-11-20"
+
+[[model]]
+id = "space-bunny-free"
+provider = "opencode"
+input = 0.0
+output = 0.0
+source = "OpenCode's model list (models.dev/api.json, provider opencode): Space Bunny Free, free ($0 input and output)"
+as_of = "2026-11-20"
