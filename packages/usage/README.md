@@ -468,12 +468,14 @@ sessions module. Top to bottom:
     saved, as an estimate.
   - Prices: how many of the range's models are priced, and the price table's date.
     Opened, their prices per million tokens; `Find a model`, a search over the whole
-    table; `Check against a bill`, every term of each price group with a subtotal per
-    model of several groups and the total; and `Details`, where each rate came from, its
+    table; `Check against a bill`, every term of each price group, with how it was
+    priced and any rule applied to it, a subtotal per model of several groups and the
+    total; and `Details`, where each rate came from, its
     tiers and periods, your own `[[model]]` rows and any rows skipped.
 
   Each opened section but Token kinds and Prices ends with `Table`: every figure its rows
-  carry, the harness's own cost where it reported one, and why a figure is not whole.
+  carry, the harness's own cost where it reported one, and a mark on a cost that is not
+  whole.
 - **The foot.** When the sessions were read, how many files each harness holds, and `Read
   new sessions` (`Reading new sessions…` while a pass runs). Under it, one dim line each
   while it holds: a harness the last pass could not read and why, files held back and
@@ -485,7 +487,10 @@ A session is shown by the name typed for it in its harness, else by its folder's
 segment and when it started (`proj-a · started today 09:14`, `proj-a · started Nov 3
 08:52`: the start's day is worded as the Sessions page words it), never by its id; `Copy id`
 copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
-could be priced, `no price`. A time is the hour and minute, and its day is worded against
+could be priced, `no price`. In a table such a cost carries a dim `*` in its own cell,
+why on hover and, for a screen reader, in the cell's text (`no price, not whole: nothing
+here could be priced`); no table has a column for it. The chart's table puts the mark in
+the day's (or month's) cell, as its cost is spread over the parts. A time is the hour and minute, and its day is worded against
 the page server's date: nothing for the same day, `yesterday` or `tomorrow`, the weekday
 within six days, else the date. With no request counted yet the page says so and offers
 `Read new sessions`; with no index, or one an older usage wrote, it gives the command

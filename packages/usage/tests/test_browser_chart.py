@@ -5,8 +5,9 @@ and Model filters, the folder filter on a shell without projects, the chart's ba
 sentence, today's value, dashed outline and table by cost and by tokens, its bars by
 cost stacked by token class or by model with the table following the split, the two
 charts by tokens, the 53 weeks' heat map under the place filter alone, a range that
-holds nothing, a range whose total is not whole with its line at the foot, the sections
-reading under the same range, and all of it at a phone's width.
+holds nothing, a range whose total is not whole with its line at the foot, a cost not
+whole marked in its own cell in each table, the sections reading under the same range,
+and all of it at a phone's width.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
 the shell's own environment, so they sit under the shell's home where its page servers
@@ -412,15 +413,69 @@ def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_f
     line = panel.locator("[data-part=lines] [data-line=range]")
     expect(line).to_have_text(re.compile(
         rf"^This range's total is not whole: (.+; )?[\d.]+k tokens have no price \({UNPRICED}\)$"))
-    # The table says the same of the day, the oldest, in its first row.
+    # The table marks the day, the oldest, in its first row's Day cell, with no column
+    # of its own.
     panel.locator("[data-group=chart]").get_by_role("button", name="Table").click()
     table = panel.locator("[data-group=chart]").get_by_role("table")
-    expect(table.locator("thead th").last).to_have_text("Not whole")
-    expect(table.locator("tbody tr").first.locator("td").last).to_have_text(
-        re.compile(r"nothing here could be priced$"))
+    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
+    rows = table.locator("tbody tr")
+    expect_marked(rows.first.locator("td").first, "nothing here could be priced")
+    expect(rows.locator("[data-part=not-whole]")).to_have_count(1)
     # Back on a whole range the line goes.
     pick(panel, "range", "Last 7 days")
     expect(line).to_have_count(0)
+
+
+def expect_marked(cell, why: str) -> None:
+    """A figure not whole: `*` on screen after it, `why` (its last reason, a pattern) on hover
+    and in the cell's name."""
+    mark = cell.locator("[data-part=not-whole]")
+    expect(mark.locator("[aria-hidden=true]")).to_have_text("*")
+    expect(mark).to_have_attribute("title", re.compile(rf"^Not whole: (.+; )?{why}$"))
+    expect(cell).to_have_accessible_name(re.compile(rf"^\S.*, not whole: (.+; )?{why}$"))
+    # The words are for a screen reader only: on screen they take no room.
+    box = mark.locator(".vh").bounding_box()
+    assert box is not None and box["width"] <= 1 and box["height"] <= 1, box
+
+
+def test_a_cost_not_whole_is_marked_in_its_cost_cell_in_every_table(page):
+    unpriced = rf"[\d.]+k? tokens have no price \({UNPRICED}\)"
+    panel = open_page(page, "sessions")
+    pick(panel, "range", "Last 90 days")
+    sessions = panel.locator("table[data-table=sessions]")
+    expect(sessions.locator("tbody tr[data-row]")).to_have_count(4)
+    expect(sessions.locator("thead th").last).to_have_text(re.compile(r"^Est\. cost\b"))
+    thread = sessions.locator(f'tbody tr[data-row="codex/{THREAD}"]')
+    expect_marked(thread.locator("td").last, "nothing here could be priced")
+    expect(sessions.locator("[data-part=not-whole]")).to_have_count(1)
+
+    panel = open_page(page, "projects")
+    pick(panel, "range", "Last 90 days")
+    projects = panel.locator("section[data-group=projects]")
+    projects.locator("[data-part=table-toggle]").click()
+    table = projects.locator("table[data-part=table]")
+    expect(table.locator("thead th")).to_have_text(["Project", "Folder", "Models", "Requests", "Tokens", "Est. cost"])
+    expect_marked(table.locator("tbody tr").filter(has_text="proj-b").locator("td").last, unpriced)
+    expect(table.locator("tbody tr").filter(has_text="proj-a").locator("[data-part=not-whole]")).to_have_count(0)
+
+    panel = open_page(page, "models")
+    pick(panel, "range", "Last 90 days")
+    models = panel.locator("section[data-group=models]")
+    models.locator("[data-part=table-toggle]").click()
+    table = models.locator("table[data-part=table]")
+    expect(table.locator("thead th")).to_have_text(["Model", "Priced by", "Requests", "Tokens", "Est. cost"])
+    expect_marked(table.locator("tbody tr").filter(has_text=UNPRICED).locator("td").last,
+                  "nothing here could be priced")
+    expect(table.locator("[data-part=not-whole]")).to_have_count(1)
+
+    panel = open_page(page, "prices")
+    pick(panel, "range", "Last 90 days")
+    panel.get_by_role("button", name="Check against a bill").click()
+    bill = panel.locator("table[data-part=bill-lines]")
+    expect(bill.locator("thead th").last).to_have_text("Est. cost")
+    expect_marked(bill.locator(f'tr[data-model="{UNPRICED}"] td').last, "not priced: .+")
+    expect_marked(bill.locator("tr[data-line=total] td").last, f"{unpriced}, so the cost is the priced part")
+    expect(bill.locator(f'tr[data-model="{SONNET}"] [data-part=not-whole]')).to_have_count(0)
 
 
 def test_a_range_that_holds_nothing_says_so_in_the_charts_place(page):

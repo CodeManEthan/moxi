@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
+  hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
+  that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's
+  table and `Check against a bill`) have none now; the chart's table marks the day's or
+  month's cell. `Check against a bill` names a price group's rule (`long-context`) in its
+  Priced by cell, where the `Not whole` column held it.
 - The token index moves to version 3 and keeps the prompt ids of each Claude transcript,
   a prompt that drew no request (`/exit`, `/clear`, another local command) included. The
   Sessions table's Turns counts a Claude session's prompts from them, where it counted
@@ -24,7 +30,7 @@
   subagents`; Subagent share's header has no hover.
 - The page chart's table lists its periods oldest first, where it listed them newest
   first, and has the day and a column per part of the chart, with no Total column (the
-  harness's own cost went with it). Its `Not whole` column is as before. A day reads as
+  harness's own cost went with it). A day reads as
   its date (`2026-11-08`, where it read `Nov 8`), and a part with nothing that day reads
   `$0.00`, where its cell was blank.
 - The page's chart by cost is named `Daily estimated cost — by class` or `— by model`

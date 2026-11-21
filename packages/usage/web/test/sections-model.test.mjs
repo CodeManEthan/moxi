@@ -141,18 +141,21 @@ test("the projects table keeps each row with its folder, models, requests, token
                          place(null, "/home/alice/w/loose", 1, { unknown_rows: 2, complete: false })], 4, { home: HOME });
   const { table } = placesSection(report, false);
   assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Project", "Folder", "Models", "Requests", "Tokens", "Est. cost", "Not whole"]);
+                   ["Project", "Folder", "Models", "Requests", "Tokens", "Est. cost"]);
   assert.deepEqual(table.rows[0], { key: "project:proj-a",
-    cells: ["proj-a", "", "m-a, m-b", "1,204", "1.25M", "$3.00 · harness $2.50", ""] });
-  assert.deepEqual(table.rows[1].cells, ["no project", "~/w/loose", "m-a", "1", "100", "at least $1.00",
-                                         "2 requests with a token count the harness didn't report"]);
+    cells: ["proj-a", "", "m-a, m-b", "1,204", "1.25M", "$3.00 · harness $2.50"], why: null });
+  // A cost not whole says why in a mark in its own cell, not in a column.
+  assert.equal(table.columns[table.markAt].label, "Est. cost");
+  assert.deepEqual(table.rows[1].cells, ["no project", "~/w/loose", "m-a", "1", "100", "at least $1.00"]);
+  assert.equal(table.rows[1].why, "2 requests with a token count the harness didn't report");
 });
 
-test("a table with every row whole has no column for why", () => {
+test("a table with every row whole marks no row", () => {
   const report = answer([place(null, "/w/a", 1)], 1, { by: "folder", home: null });
   const { table } = placesSection(report, true);
   assert.deepEqual(table.columns.map((column) => column.label), ["Folder", "Models", "Requests", "Tokens", "Est. cost"]);
   assert.deepEqual(table.rows[0].cells, ["/w/a", "m-a", "1", "100", "$1.00"]);
+  assert.equal(table.rows[0].why, null);
 });
 
 test("the models table says where each model's prices came from", () => {
@@ -162,8 +165,11 @@ test("the models table says where each model's prices came from", () => {
                          model("m-9", null, { unpriced_tokens: 100, unpriced_models: ["m-9"], complete: false })], 2);
   const { table } = modelsSection(report);
   assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Model", "Priced by", "Requests", "Tokens", "Est. cost", "Not whole"]);
-  assert.deepEqual(table.rows[0].cells, ["m-a", "exact · layer base · row m-a; long-context", "1", "100", "$2.00", ""]);
-  assert.deepEqual(table.rows[1].cells, ["m-9", "no price", "1", "100", "no price", "nothing here could be priced"]);
+                   ["Model", "Priced by", "Requests", "Tokens", "Est. cost"]);
+  assert.equal(table.columns[table.markAt].label, "Est. cost");
+  assert.deepEqual(table.rows.map((row) => [row.cells, row.why]), [
+    [["m-a", "exact · layer base · row m-a; long-context", "1", "100", "$2.00"], null],
+    [["m-9", "no price", "1", "100", "no price"], "nothing here could be priced"],
+  ]);
   assert.equal(pricedBy(model("m-b", 1)), "no price");
 });

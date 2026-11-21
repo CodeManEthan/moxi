@@ -164,6 +164,7 @@ export interface ReconcileLine {
   pricedBy: string;
   cells: TermCell[];
   cost: number | null;
+  /** Why the line's cost is not whole, for the mark in its cost cell; empty for a whole one. */
   flags: string[];
 }
 
@@ -205,20 +206,21 @@ export function tierPrice(tier: string): string {
   return `the ${TIER_WORDS[tier] ?? tier.replaceAll("_", " ")} price`;
 }
 
-/** How a group was priced: where its prices came from, its tier and its provider. */
+/** How a group was priced: where its prices came from, its tier and its provider, then
+ * the rule applied to it. */
 export function pricedBy(group: Group): string {
   const parts = [provenanceLine(group.provenance)];
   if (group.tier) parts.push(tierPrice(group.tier));
   if (group.above) parts.push(`above ${fmtTokens(group.above)}`);
   if (group.provider) parts.push(group.provider);
-  return parts.join(" · ");
+  return group.rule ? `${parts.join(" · ")}; ${group.rule}` : parts.join(" · ");
 }
 
+/** Why a group's cost is not whole, one line each; empty for a whole one. */
 function groupFlags(group: Group): string[] {
   const out: string[] = [];
   if (group.cost === null) out.push(group.why ? `not priced: ${group.why}` : "not priced");
   if (group.unknown_rows > 0) out.push(`${group.unknown_rows} request${group.unknown_rows === 1 ? "" : "s"} with a token count the harness didn't report`);
-  if (group.rule) out.push(group.rule);
   return out;
 }
 

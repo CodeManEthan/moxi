@@ -342,7 +342,12 @@ export function tokenCharts(report: Report<DayRow>, range: Range, today: string)
 /** A table that stands in a chart's place. */
 export interface Table {
   columns: { label: string; num: boolean }[];
-  rows: { key: string; cells: string[] }[];
+  /** `why` says why a row's figures are not whole, for the mark in its `markAt` cell;
+   * null or left out for a whole row. */
+  rows: { key: string; cells: string[]; why?: string | null }[];
+  /** The column whose cell carries a row's not-whole mark; left out in a table that
+   * marks none. */
+  markAt?: number;
 }
 
 /**
@@ -351,9 +356,9 @@ export interface Table {
  * per token class, each period's dollars from `terms` (blank until they answer, `$0.00`
  * for a class they hold nothing for); under Cost split by model a column per part of
  * `modelSeries`, `$0.00` for a part with nothing that period; under Tokens a column per
- * token class. A last column
- * says why a row is not whole, and is there only when some row is not. Requests with no
- * time are the last row, `no time`.
+ * token class. A row whose figures are not whole carries why, for the mark in its Day or
+ * Month cell: its cost is spread over its cells, so no one of them is the row's. Requests
+ * with no time are the last row, `no time`.
  */
 export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" | "month" = "day",
                            split: Split = "class", terms: Report<TermsRow> | null = null): Table {
@@ -382,14 +387,13 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
     const name = period === null ? "no time" : by === "month" ? monthWord(period) : period;
     return { key: period ?? "no time", cells: [name, ...cells], why };
   });
-  const flagged = lines.some((line) => line.why !== null);
   const heads = measure === "cost" ? (byModel ? models : COST_SERIES).map((item) => item.label)
     : TOKEN_CLASSES.map(([, label]) => label);
   return {
     columns: [{ label: by === "month" ? "Month" : "Day", num: false },
-              ...heads.map((label) => ({ label, num: true })),
-              ...(flagged ? [{ label: "Not whole", num: false }] : [])],
-    rows: lines.map(({ key, cells, why }) => ({ key, cells: flagged ? [...cells, why ?? ""] : cells })),
+              ...heads.map((label) => ({ label, num: true }))],
+    rows: lines,
+    markAt: 0,
   };
 }
 

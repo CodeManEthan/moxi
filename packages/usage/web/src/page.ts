@@ -342,6 +342,11 @@ const STYLES = css`
   .tr2.th { color: var(--moxi-text-dim); align-items: end; }
   .tr2.th span { white-space: normal; }
   .tbl .d { color: var(--moxi-text-dim); }
+  /* A cost that is not whole: a dim mark after it, its reason on hover and, for a screen
+     reader, in the cell's text. */
+  .nw { margin-left: 2px; color: var(--moxi-text-dim); cursor: help; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; border: 0; }
   .tbl td.wrap { min-width: 8em; white-space: normal; overflow-wrap: anywhere; }
   .tbl tr[data-line="subtotal"] td, .tbl tr[data-line="total"] td { font-weight: 600; }
   /* The bill and the rates keep every column and scroll inside their wrapper; the Model
@@ -1290,8 +1295,15 @@ export class UsagePage extends LitElement {
     return html`<div class="scroll"><table class="tbl" data-part="table">
       <thead><tr>${table.columns.map((column) => html`<th class=${column.num ? "n" : ""}>${column.label}</th>`)}</tr></thead>
       <tbody>${table.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
-        html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
+        html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}${i === table.markAt ? this.#notWhole(row.why) : nothing}</td>`)}</tr>`)}</tbody>
     </table></div>`;
+  }
+
+  /** The mark after a figure that is not whole: `*`, `why` on hover, and `, not whole:
+   * <why>` in the cell's text for a screen reader. Nothing for a whole figure. */
+  #notWhole(why: string | null | undefined) {
+    return why ? html`<span class="nw" data-part="not-whole" title=${`Not whole: ${why}`}><span aria-hidden="true">*</span><span
+      class="vh">, not whole: ${why}</span></span>` : nothing;
   }
 
   /** Whether the address opens this section. */
@@ -1474,7 +1486,7 @@ export class UsagePage extends LitElement {
               ? html`<svg class="sm" role="img" aria-label=${row.share.label} viewBox="0 0 56 9"><title>${row.share.label}</title>
                   <rect class="base" x="0" y="4" width="56" height="1"></rect>
                   <rect class="fill" x="0" y="3" width=${56 * Math.max(0, Math.min(1, row.share.value))} height="3"></rect></svg>`
-              : cell}</td>`)}</tr>`;
+              : board.columns[i]?.sort === "cost" ? html`${cell}${this.#notWhole(row.why)}` : cell}</td>`)}</tr>`;
       })}${pad(win.below)}</tbody>
     </table></div>
     <div class="more" data-part="more" data-more="table"><span>${board.line}</span>${board.more
@@ -1833,16 +1845,14 @@ export class UsagePage extends LitElement {
 
   #billOf(report: Report<TermsRow, TermsTotal>) {
     const lines = reconcileLines(report);
-    const flagged = lines.some((line) => line.flags.length > 0);
     return html`<div class="under" data-part="bill">
       <div class="scroll"><table class="tbl bill" data-part="bill-lines">
-        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Est. cost</th>${
-          flagged ? html`<th>Not whole</th>` : nothing}</tr></thead>
+        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Est. cost</th></tr></thead>
         <tbody>${lines.map((line) => html`<tr data-line=${line.kind} data-model=${line.model}>
           <td>${line.model}</td><td class="wrap">${line.pricedBy}</td>
           ${line.cells.map((cell) => html`<td class="n" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
-          <td class="n" data-cost=${line.cost === null ? "" : String(line.cost)}>${line.cost === null ? "no price" : fmtCost(line.cost)}</td>
-          ${flagged ? html`<td class="wrap">${line.flags.join("; ")}</td>` : nothing}
+          <td class="n" data-cost=${line.cost === null ? "" : String(line.cost)}>${line.cost === null ? "no price" : fmtCost(line.cost)}${
+            this.#notWhole(line.flags.join("; "))}</td>
         </tr>`)}</tbody>
       </table></div>
       <p>The terms on each line add up to its cost. Point at a figure for its tokens times its price.</p>

@@ -104,20 +104,18 @@ function costCell(sum: Sum): string {
   return `${costWords(sum)}${sum.harness_cost === null ? "" : ` · harness ${fmtCost(sum.harness_cost)}`}`;
 }
 
-/** A table whose rows end in their requests, tokens and cost, and a last column saying
- * why a row is not whole, there only when some row is not. */
+/** A table whose rows end in their requests, tokens and cost; a row whose cost is not
+ * whole carries why, for the mark in its cost cell. */
 export function figuresTable(heads: string[], lines: { key: string; cells: string[]; sum: Sum }[]): Table {
-  const whys = lines.map((line) => whyNotWhole(line.sum));
-  const flagged = whys.some((why) => why !== null);
   return {
     columns: [...heads.map((label) => ({ label, num: false })),
-              ...["Requests", "Tokens", "Est. cost"].map((label) => ({ label, num: true })),
-              ...(flagged ? [{ label: "Not whole", num: false }] : [])],
-    rows: lines.map((line, i) => ({
+              ...["Requests", "Tokens", "Est. cost"].map((label) => ({ label, num: true }))],
+    rows: lines.map((line) => ({
       key: line.key,
-      cells: [...line.cells, line.sum.requests.toLocaleString("en-US"), fmtTokens(line.sum.tokens), costCell(line.sum),
-              ...(flagged ? [whys[i] ?? ""] : [])],
+      cells: [...line.cells, line.sum.requests.toLocaleString("en-US"), fmtTokens(line.sum.tokens), costCell(line.sum)],
+      why: whyNotWhole(line.sum),
     })),
+    markAt: heads.length + 2,
   };
 }
 

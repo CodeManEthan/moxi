@@ -129,9 +129,10 @@ test("with projects the project column takes the project sort; a cost not whole 
   assert.deepEqual(board.columns.slice(0, 3).map((column) => [column.label, column.sort]),
                    [["Project", "project"], ["Session", null], ["Started", "started"]]);
   assert.deepEqual([board.columns[2].aria, board.columns[2].arrow], ["ascending", "↑"]);
-  assert.equal(board.columns.at(-1).label, "Not whole");
-  assert.deepEqual(board.rows.map((line) => [line.cells[0], line.cells.at(-1)]),
-                   [["proj-b", ""], ["", "9 tokens have no price"]]);
+  // The cost column is the last; a row not whole carries why, for the mark in that cell.
+  assert.equal(board.columns.at(-1).label, "Est. cost");
+  assert.deepEqual(board.rows.map((line) => [line.cells[0], line.cells.at(-1), line.why]),
+                   [["proj-b", "$2.00", null], ["", "at least $1.00", "9 tokens have no price"]]);
   assert.deepEqual([board.line, board.more], ["2 sessions · showing 2", false]);
 });
 

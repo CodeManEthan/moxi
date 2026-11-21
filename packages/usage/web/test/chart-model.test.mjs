@@ -125,22 +125,24 @@ test("the cost table split by model: Day and a column per model, dearest first, 
   ]), "cost", "day", "model");
   assert.deepEqual(table.columns, [{ label: "Day", num: false }, { label: "m-a", num: true }, { label: "m-b", num: true },
                                    { label: "unknown model", num: true }]);
-  assert.deepEqual(table.rows, [{ key: "2026-11-07", cells: ["2026-11-07", "$0.00", "$1.00", "$0.50"] },
-                                { key: TODAY, cells: [TODAY, "$17.54", "$2.00", "$0.00"] }]);
+  assert.deepEqual(table.rows, [{ key: "2026-11-07", cells: ["2026-11-07", "$0.00", "$1.00", "$0.50"], why: null },
+                                { key: TODAY, cells: [TODAY, "$17.54", "$2.00", "$0.00"], why: null }]);
 });
 
-test("the table has no total column, says why a row is not whole, and puts the rows with no time last", () => {
+test("the table has no total column, marks a row not whole in its Day cell, and puts the rows with no time last", () => {
   const table = chartTable(report([
     day(TODAY, 2, 0, { harness_cost: 1.9 }),
     day("2026-11-07", 1, 0, { complete: false, unpriced_tokens: 1200, unpriced_models: ["mystery-9"] }),
     day("2026-11-07", null, 0, { model: "mystery-9", complete: false }),
     day(null, 0.25),
   ]), "cost", "day", "model");
-  assert.deepEqual(table.columns.map((column) => column.label), ["Day", "m-a", "mystery-9", "Not whole"]);
-  assert.deepEqual(table.rows.map((row) => row.cells), [
-    ["2026-11-07", "$1.00", "no price", "1.20k tokens have no price (mystery-9)"],
-    ["2026-11-08", "$2.00", "$0.00", ""],
-    ["no time", "$0.25", "$0.00", ""],
+  // No column of its own says why: the row carries it, for the mark in its Day cell.
+  assert.deepEqual(table.columns.map((column) => column.label), ["Day", "m-a", "mystery-9"]);
+  assert.equal(table.markAt, 0);
+  assert.deepEqual(table.rows.map((row) => [row.cells, row.why]), [
+    [["2026-11-07", "$1.00", "no price"], "1.20k tokens have no price (mystery-9)"],
+    [["2026-11-08", "$2.00", "$0.00"], null],
+    [["no time", "$0.25", "$0.00"], null],
   ]);
   assert.equal(table.rows[2].key, "no time");
 });
@@ -151,10 +153,10 @@ test("the tokens table: a column per token class, by day or by month", () => {
                 day("2026-10", null, 50, { output: 50, complete: false })];
   const table = chartTable(report(rows), "tokens", "month");
   assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Month", "Input", "Cache read", "Cache create", "Output", "Not whole"]);
-  assert.deepEqual(table.rows.map((row) => row.cells), [
-    ["Oct 2026", "0", "0", "0", "50", ""],
-    ["Nov 2026", "300", "1.20k", "300", "200", "1 request with a token count the harness didn't report"],
+                   ["Month", "Input", "Cache read", "Cache create", "Output"]);
+  assert.deepEqual(table.rows.map((row) => [row.cells, row.why]), [
+    [["Oct 2026", "0", "0", "0", "50"], null],
+    [["Nov 2026", "300", "1.20k", "300", "200"], "1 request with a token count the harness didn't report"],
   ]);
   assert.deepEqual(chartTable(report([]), "tokens").rows, []);
 });

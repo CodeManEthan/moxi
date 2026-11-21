@@ -174,6 +174,17 @@ test("a model of two groups gets a subtotal equal to their sum, and one of one g
   assert.ok(Math.abs(total.cost - groupsOnly) < 1e-9);
 });
 
+test("a bill line's rule is how it was priced, not why it is not whole", () => {
+  const ruled = group("m-a", five(1000, 0, 0, 0, 100), { rule: "long-context" });
+  const unpriced = group("m-x", five(10, 0, 0, 0, 1, [null, null, null, null, null]),
+                         { cost: null, why: "no price for m-x" });
+  const rows = [termsRow("m-a", [ruled]), termsRow("m-x", [unpriced])];
+  const [a, x] = reconcileLines(report(rows, { total: sums({ cost: ruled.cost }) }));
+  assert.match(a.pricedBy, /; long-context$/);
+  assert.deepEqual(a.flags, []);
+  assert.deepEqual(x.flags, ["not priced: no price for m-x"]);
+});
+
 test("a bill by agent names each line by its agent and model, and a subtotal by its agent", () => {
   const main = { ...termsRow(null, [group("m-a", five(1000, 0, 0, 0, 100)), group("m-b", five(10, 0, 0, 0, 1))]),
                  agent: "main", kind: "main" };

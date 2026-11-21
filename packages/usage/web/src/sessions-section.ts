@@ -203,10 +203,11 @@ export interface Board {
    * is the subagent share drawn as a meter in its column, whose cell is empty; null
    * where the share is not known. `bars` stands beside `cells`: a bar after the figure
    * in each token class cell, null in the others. `badge` follows the name of a Codex
-   * session. */
+   * session. `why` says why the row's cost is not whole, for the mark in its cost cell;
+   * null for a whole one. */
   rows: {
     key: string; cells: string[]; bars: (Sparkbar | null)[]; session: { harness: string; id: string } | null;
-    share: { value: number; label: string } | null; badge: typeof CODEX_BADGE | null;
+    share: { value: number; label: string } | null; badge: typeof CODEX_BADGE | null; why: string | null;
   }[];
   /** `54 sessions · showing 30`. */
   line: string;
@@ -226,7 +227,7 @@ export function nextOrder(now: BoardOrder, sort: BoardSort): BoardOrder {
  * classes each with a bar against the column's most among the rows read, its subagent
  * share and its cost. A folder is written from `home` (`~/work/proj-a`), the account's
  * home folder that `/api/projects` answers; with no `home` read, as its last segment. A
- * last column says why a cost is not whole, and is there only when some row's is not.
+ * row whose cost is not whole carries why, for the mark in its cost cell.
  */
 export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | null, projects: boolean,
                               home: string | null, clock: Clock = LOCAL): Board {
@@ -236,8 +237,6 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
     aria: sort === null ? null : sort === by.sort ? (by.order === "asc" ? "ascending" : "descending") : "none",
     arrow: sort !== null && sort === by.sort ? (by.order === "asc" ? "↑" : "↓") : null,
   });
-  const whys = list.rows.map((row) => whyNotWhole(sumRows([row])));
-  const flagged = whys.some((why) => why !== null);
   const columns = [
     projects ? column("Project", false, "project") : column("Folder", false, "project"),
     column("Session", false, null),
@@ -245,15 +244,15 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
     column("Turns", true, "turns", TURNS_TITLE),
     ...BOARD_CLASSES.map((item) => column(item.label, true, item.sort)),
     column("Subagent share", true, "subagent_share"), column("Est. cost", true, "cost"),
-    ...(flagged ? [column("Not whole", false, null)] : []),
   ];
   const most = BOARD_CLASSES.map((item) => Math.max(1, ...list.rows.map((row) => row[item.key])));
-  const rows = list.rows.map((row, i) => ({
+  const rows = list.rows.map((row) => ({
     key: rowKey(row),
     session: row.session_id === null ? null : { harness: row.harness, id: row.session_id },
     share: row.subagent_share === null ? null
       : { value: row.subagent_share, label: `Subagent share ${Math.round(row.subagent_share * 100)}%` },
     badge: row.harness === "codex" ? CODEX_BADGE : null,
+    why: whyNotWhole(sumRows([row])),
     ...unzip([
       [projects ? row.project ?? "" : folderCell(row.folder ?? row.cwd, home), null],
       [sessionName(row, today, clock).name, null],
@@ -264,7 +263,6 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
         { fraction: Math.min(1, Math.max(0, row[item.key] / most[at])), shade: item.shade }]),
       ["", null],
       [costWords(sumRows([row])), null],
-      ...(flagged ? [[whys[i] ?? "", null] as [string, null]] : []),
     ]),
   }));
   return {
