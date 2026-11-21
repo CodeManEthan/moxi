@@ -36,10 +36,10 @@ test("the themes: plain is the default, and midnight-neon keeps calm-workbench a
 test("every token is a --moxi- property on :root, each colour the default theme's light and dark values", () => {
   const css = themeCss(tokens);
   const names = properties(css, ":root");
-  assert.equal(names.length, 41);
+  assert.equal(names.length, 45);
   assert.deepEqual(names.map(([name]) => name), Object.keys(tokens).filter((name) => !name.startsWith("$")));
   const colours = names.filter(([, value]) => value.startsWith("light-dark("));
-  assert.equal(colours.length, 34);
+  assert.equal(colours.length, 38);
   for (const [name, value] of colours) {
     const values = tokens[name].$extensions.moxi.sets;
     assert.equal(value, `light-dark(${values["plain-day"]}, ${values["plain-night"]})`, name);
@@ -56,7 +56,7 @@ test("each other theme has one block of its colours, after :root, where the root
   assert.ok(css.indexOf(':root[data-theme-name="midnight-neon"] {') > css.indexOf(":root {"));
   assert.doesNotMatch(css, /data-theme-name="plain"/);
   const block = properties(css, ':root[data-theme-name="midnight-neon"]');
-  assert.equal(block.length, 34);
+  assert.equal(block.length, 38);
   assert.deepEqual(block.map(([name]) => name),
                    Object.keys(tokens).filter((name) => tokens[name].$type === "color"));
   for (const [name, value] of block) {
@@ -103,7 +103,7 @@ test("the two added tokens: text on the accent, and danger, which is midnight-ne
                                      "midnight-neon": sets("error")["midnight-neon"] });
 });
 
-test("plain is one text colour, one accent and greys: every state token is the text colour", () => {
+test("plain is one text colour, one accent and greys besides a step's state colours", () => {
   const sets = (name) => tokens[name].$extensions.moxi.sets;
   for (const set of ["plain-day", "plain-night"]) {
     for (const name of ["error", "warn", "ok", "live", "launching", "selected", "attention", "series-1"]) {
@@ -115,8 +115,67 @@ test("plain is one text colour, one accent and greys: every state token is the t
     };
     for (const name of Object.keys(tokens)) {
       if (tokens[name].$type !== "color" || ["accent", "accent-soft", "on-accent", "danger"].includes(name)) continue;
+      if (name.startsWith("state-")) continue;
       assert.ok(grey(sets(name)[set]), `${name} in ${set} is a grey`);
     }
+  }
+});
+
+/** The hue of `#rrggbb` in degrees, 0 to 360. */
+function hue(hex) {
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const span = max - Math.min(r, g, b);
+  if (span === 0) return 0;
+  const h = max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
+  return (h * 60 + 360) % 360;
+}
+
+/** Each state token, with the hues its colour must fall in, as [from, to] degrees. */
+const STATE_HUES = {
+  "state-done": [90, 170],
+  "state-yours": [30, 55],
+  "state-yours-soft": [30, 55],
+  "state-failed": [345, 15],
+};
+
+test("the hue reading", () => {
+  assert.equal(hue("#ff0000"), 0);
+  assert.equal(hue("#00ff00"), 120);
+  assert.equal(hue("#0000ff"), 240);
+  assert.equal(Math.round(hue("#2a7049")), 147);
+  assert.equal(Math.round(hue("#b3261e")), 3);
+});
+
+test("each state colour is a token of its own, green, amber or red in every set, plain included", () => {
+  const names = Object.keys(tokens).filter((name) => name.startsWith("state-"));
+  assert.deepEqual(names, Object.keys(STATE_HUES));
+  for (const [name, [from, to]] of Object.entries(STATE_HUES)) {
+    assert.equal(tokens[name].$type, "color", name);
+    for (const set of Object.keys(tokens.$sets)) {
+      const value = tokens[name].$extensions.moxi.sets[set];
+      const h = hue(value);
+      const inside = from <= to ? h >= from && h <= to : h >= from || h <= to;
+      assert.ok(inside, `${name} in ${set} is ${value}, hue ${h.toFixed(0)}, not within ${from} to ${to}`);
+      assert.notEqual(value, tokens.text.$extensions.moxi.sets[set], `${name} in ${set} is not the text colour`);
+    }
+  }
+});
+
+test("in midnight-neon's two sets the state colours are those sets' ok, attention and error", () => {
+  const sets = (name) => tokens[name].$extensions.moxi.sets;
+  for (const set of ["calm-workbench", "midnight-neon"]) {
+    assert.equal(sets("state-done")[set], sets("ok")[set], set);
+    assert.equal(sets("state-yours")[set], sets("attention")[set], set);
+    assert.equal(sets("state-yours-soft")[set], sets("attention-soft")[set], set);
+    assert.equal(sets("state-failed")[set], sets("error")[set], set);
+  }
+});
+
+test("the plain sets say they hold the state colours, and every other state in words", () => {
+  for (const set of ["plain-day", "plain-night"]) {
+    assert.match(tokens.$sets[set].$description, /green, amber and red only for a step's state tokens/, set);
+    assert.match(tokens.$sets[set].$description, /every other state told in words/, set);
   }
 });
 
