@@ -226,8 +226,11 @@ exits 1 when no request of that agent is in range.
 Cost is worked out when the report runs, from the model table, so a new price or a
 `[[model]]` row applies to past requests too, each priced on its own time when the row has
 a price period. Tiers apply as the table gives them: a long prompt's price, a priority or
-flex service tier, fast mode (whose cache prices are the provider's multipliers over the
-fast input price). Two marks keep a total honest:
+flex service tier, fast mode (each fast tier carries its own cache prices, the model's
+caching multipliers over the fast input price as Anthropic's pricing page gives them: Opus
+5.5 reads its fast cache at $0.40 a million, 0.05x). A tier that leaves a cache price out
+gets the tier's input price times the provider's default multiplier. Two marks keep a total
+honest:
 
 - `u`, unpriced: tokens of a model the table cannot price are counted apart and left out
   of the cost, never priced at $0. Add a `[[model]]` row to price them.
