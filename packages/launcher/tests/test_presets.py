@@ -568,17 +568,13 @@ def test_a_brief_under_with_is_refused():
     assert got.posture == "with:lead"
 
 
-def test_a_handoff_under_with_is_refused_as_a_brief_is():
-    # A handoff is sent as the first turn, and under with:<agent> that agent sends it.
-    with pytest.raises(presets.PostureBrief) as caught:
-        resolve(typed={"posture": "with:lead", "handoff": "/w/handoff.md"},
-                available=only("comms"))
-    assert (caught.value.code, caught.value.row) == ("posture-brief", "handoff")
-    assert caught.value.problem == ("posture with:lead takes no handoff: lead sends the "
-                                    "first message")
-    for posture in ("operator", ""):
-        assert resolve(typed={"posture": posture, "handoff": "/w/handoff.md"}).posture \
-            == posture
+def test_a_handoff_under_with_is_sent_first_and_the_director_follows():
+    # A typed handoff is the session's first turn under any posture; under
+    # with:<agent> the director's message comes after it.
+    for posture in ("with:lead", "operator", ""):
+        got = resolve(typed={"posture": posture, "handoff": "/w/handoff.md"},
+                      available=only("comms"))
+        assert (got.posture, got.values["handoff"]) == (posture, "/w/handoff.md")
 
 
 def test_a_brief_under_operator_or_no_posture_is_sent():

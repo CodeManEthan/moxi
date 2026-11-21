@@ -25,8 +25,9 @@
   session has been idle an hour (`held`, word `shells`); only then does it exit and stop
   them at Claude's exit dialog. `--dry-run` says which.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
-  brief, brief file or handoff, and a brief or handoff under `with:<identity>`, whose
-  director sends the first message (`posture-brief`). On a launch that binds no comms
+  brief, brief file or handoff, and a brief under `with:<identity>`, whose director
+  sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent
+  as the first turn, before the director's message. On a launch that binds no comms
   identity, any words typed after `--` on the command line count as the first turn,
   flags alone included, since they go last on the harness's argv. Other flags passed on
   (unknown flags typed before `--`, a preset's or `[defaults]`' `extra_flags`, the page's

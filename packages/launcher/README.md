@@ -143,7 +143,8 @@ default, there is no line.
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
-  message, so a brief or a handoff under this posture is refused (`posture-brief`). A
+  message, so a brief under this posture is refused (`posture-brief`). A typed
+  `--handoff` is sent as the first turn, and the director's message comes after it. A
   director's relaunch starts the new session with this posture.
 - `relaunched (handoff: <file>)`: the launcher's own, never set by a preset. A session
   that relaunched itself with a handoff starts with it, and reads that file before

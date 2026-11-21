@@ -164,8 +164,7 @@ class ScratchNotes(Refused):
 
 class PostureBrief(Refused):
     """A brief that doesn't fit the start posture: a `go` launch with nothing to start on,
-    or a brief or handoff under `with:<identity>`, whose director sends the first
-    message."""
+    or a brief under `with:<identity>`, whose director sends the first message."""
 
     code = "posture-brief"
 
@@ -531,11 +530,11 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
     """The start posture's rule for the brief: a `go` launch needs a first turn to start
     on (a brief, a brief file or a handoff, or, on a launch that binds no comms identity,
     any words typed after `--` on the command line, flags included, which go last on the
-    harness's argv), and a launch under `with:<identity>` takes no brief and no handoff,
-    since its director sends the first message. `binds` says whether the launch binds a
-    comms identity, `tail` is the words typed after `--`. Flags passed on otherwise (an
-    unknown flag typed before `--`, a layer's `extra_flags`, the page's field) carry no
-    first turn. A replay (a relaunch or a resume) never comes here."""
+    harness's argv), and a launch under `with:<identity>` takes no brief, since its
+    director sends the first message; a handoff there is sent first, and the director's
+    message comes after it. `binds` says whether the launch binds a comms identity,
+    `tail` is the words typed after `--`. Flags passed on otherwise (an unknown flag typed
+    before `--`, a layer's `extra_flags`, the page's field) carry no first turn. A replay (a relaunch or a resume) never comes here."""
     brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
         values.get("brief_file"))
     first = brief or catalog.is_set(values.get("handoff")) or (not binds and bool(tail))
@@ -545,16 +544,11 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
                            "give it --brief, --brief-file or --handoff"
                            + ("" if binds else ", or its task after --")
                            + ", or pick another posture")
-    if posture.startswith(WITH):
+    if posture.startswith(WITH) and brief:
         who = posture[len(WITH):]
-        if brief:
-            raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends "
-                                        "the first message",
-                               "drop the brief, or pick go")
-        if catalog.is_set(values.get("handoff")):
-            raise PostureBrief("handoff", f"posture {posture} takes no handoff: {who} "
-                                          "sends the first message",
-                               "drop the handoff, or pick go")
+        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
+                                    "first message",
+                           "drop the brief, or pick go")
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
