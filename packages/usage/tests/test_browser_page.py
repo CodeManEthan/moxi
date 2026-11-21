@@ -467,8 +467,8 @@ SCROLLED = """(table) => {
   };
 }"""
 
-BILL_HEADERS = ["Model", "Priced by", "fresh input", "cache read", "cache write 5m",
-                "cache write 1h", "output", "Cost"]
+BILL_HEADERS = ["Model", "Priced by", "input", "cache read", "cache write 5m",
+                "cache write 1h", "output", "Est. cost"]
 RATE_HEADERS = ["Model", "Input", "Output", "Cache read", "Write 5m", "Write 1h", "Window",
                 "Tiers", "Period", "Where from"]
 
@@ -602,8 +602,8 @@ def test_the_opened_sessions_table_has_a_row_a_request_and_its_compaction(
     expect(table.locator("tbody tr")).to_have_count(7)
     expect(table.locator('tr[data-row="c:4"]')).to_contain_text("compaction (auto)")
     expect(table.locator("thead th")).to_have_text(
-        ["#", "Time", "Turn", "Model", "Context", "Fresh input", "Cache read", "Cache write 5m",
-         "Cache write 1h", "Output", "Cost"])
+        ["#", "Time", "Turn", "Model", "Context", "Input", "Cache read", "Cache write 5m",
+         "Cache write 1h", "Output", "Est. cost"])
 
 
 def test_check_against_a_bill_in_the_opened_session_lines_up_each_agents_models(
@@ -791,7 +791,7 @@ def test_token_kinds_closed_says_the_input_read_from_cache_and_opens_its_classes
     rows = kinds.locator("[data-part=rows] .tr2")
     expect(rows).to_have_count(4)
     names = rows.locator(".nm").evaluate_all("cells => cells.map((cell) => cell.textContent.split('·')[0].trim())")
-    assert sorted(names) == ["Cache reads", "Cache writes", "Fresh input", "Output"], names
+    assert sorted(names) == ["Cache create", "Cache reads", "Input", "Output"], names
     for row in rows.all():
         expect(row).to_contain_text(re.compile(r"tokens\s*(at least )?\$\d"))
     # The sixth request ran on the `[[model]]` row's fast tier.
@@ -802,6 +802,6 @@ def test_token_kinds_says_what_caching_saved_as_an_estimate(charted, charted_pag
     kinds = kinds_of(open_view(charted_page, "kinds"))
     expect(kinds.locator("[data-part=saving]")).to_have_text(re.compile(
         r"^[\d.]+[kM]? of [\d.]+[kM]? input tokens were read from cache\. With no cache, at the same prices, "
-        r"those reads would have cost \$[\d.]+ as fresh input; they cost \$[\d.]+(, and cache writes .*)?, "
+        r"those reads would have cost \$[\d.]+ as input; they cost \$[\d.]+(, and cache writes .*)?, "
         r"so caching (saved about \$[\d.]+|cost about \$[\d.]+ more than it saved)\. An estimate\.$"))
 

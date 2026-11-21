@@ -685,12 +685,12 @@ def test_token_kinds_say_how_much_input_came_from_cache_and_what_caching_saved(i
         expect(rows).to_have_count(4)
         assert sorted(rows.locator(".nm").evaluate_all(
             "all => all.map((one) => one.textContent.split('·')[0].trim())")) == [
-            "Cache reads", "Cache writes", "Fresh input", "Output"]
+            "Cache create", "Cache reads", "Input", "Output"]
         # Every request read six thousand tokens from cache at a tenth of the input price.
         expect(kinds.locator("[data-part=saving]")).to_have_text(re.compile(
             r"^[\d.]+[kM]? of [\d.]+[kM]? input tokens were read from cache\. With no cache, at the same prices, "
-            r"those reads would have cost \$[\d.,]+ as fresh input; they cost \$[\d.,]+, and cache writes cost "
-            r"\$[\d.,]+ more than fresh input, so caching saved about \$[\d.,]+\. An estimate\.$"))
+            r"those reads would have cost \$[\d.,]+ as input; they cost \$[\d.,]+, and cache writes cost "
+            r"\$[\d.,]+ more than input, so caching saved about \$[\d.,]+\. An estimate\.$"))
         return [closed, shown(kinds)]
 
     on_both(installs, walk)

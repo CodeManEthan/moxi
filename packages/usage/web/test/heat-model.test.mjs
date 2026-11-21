@@ -44,7 +44,7 @@ test("a used day says its cost, its tokens and its classes; an unused one says s
   const used = model.days.find((item) => item.day === "2026-11-03");
   assert.deepEqual(used, {
     day: "2026-11-03", step: 1, used: true, aria: "Nov 3 2026: $1.75",
-    hover: "Nov 3 2026: $1.75, 2.10k tokens\nFresh input 100\nCache write 300\nCache read 1.20k\nOutput 500",
+    hover: "Nov 3 2026: $1.75, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500",
   });
   assert.deepEqual(model.days.at(-1).aria, "Nov 8 2026: no price");
   assert.equal(model.days.at(-1).step, 0);

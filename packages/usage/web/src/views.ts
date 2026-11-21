@@ -143,7 +143,7 @@ export function provenanceLine(p: Provenance): string {
 /** The five token classes a cost's terms price, in order, with their labels. A request
  * row names the first `fresh_input`. */
 export const TERM_CLASSES = [
-  ["input", "fresh input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
+  ["input", "input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
   ["cache_write_1h", "cache write 1h"], ["output", "output"],
 ] as const;
 
@@ -345,7 +345,7 @@ export function layerLine(prices: Prices): string {
 
 /** A request row's five classes, in the order of `TERM_CLASSES`. */
 export const REQUEST_CLASSES = [
-  ["fresh_input", "fresh input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
+  ["fresh_input", "input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
   ["cache_write_1h", "cache write 1h"], ["output", "output"],
 ] as const;
 

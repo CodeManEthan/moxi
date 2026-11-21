@@ -1850,7 +1850,7 @@ export class UsagePage extends LitElement {
     const flagged = lines.some((line) => line.flags.length > 0);
     return html`<div class="under" data-part="bill">
       <div class="scroll"><table class="tbl bill" data-part="bill-lines">
-        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Cost</th>${
+        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Est. cost</th>${
           flagged ? html`<th>Not whole</th>` : nothing}</tr></thead>
         <tbody>${lines.map((line) => html`<tr data-line=${line.kind} data-model=${line.model}>
           <td>${line.model}</td><td class="wrap">${line.pricedBy}</td>

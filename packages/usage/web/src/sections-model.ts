@@ -111,7 +111,7 @@ export function figuresTable(heads: string[], lines: { key: string; cells: strin
   const flagged = whys.some((why) => why !== null);
   return {
     columns: [...heads.map((label) => ({ label, num: false })),
-              ...["Requests", "Tokens", "Cost"].map((label) => ({ label, num: true })),
+              ...["Requests", "Tokens", "Est. cost"].map((label) => ({ label, num: true })),
               ...(flagged ? [{ label: "Not whole", num: false }] : [])],
     rows: lines.map((line, i) => ({
       key: line.key,

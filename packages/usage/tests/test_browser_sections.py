@@ -215,7 +215,7 @@ def test_the_projects_table_has_every_row_with_its_dir_and_figures(page):
     expect(toggle).to_have_text("Table")
     toggle.click()
     table = section.locator("table[data-part=table]")
-    expect(table.locator("th")).to_have_text(["Project", "Folder", "Models", "Requests", "Tokens", "Cost"])
+    expect(table.locator("th")).to_have_text(["Project", "Folder", "Models", "Requests", "Tokens", "Est. cost"])
     expect(table.locator("tbody tr")).to_have_count(3)
     loose = table.locator("tbody tr").filter(has_text="no project")
     expect(loose.locator("td")).to_have_text(["no project", "~/work/loose", SONNET, "1", re.compile(r"\S"),
@@ -242,7 +242,7 @@ def test_models_closed_names_the_dearest_two_and_opened_has_plain_rows(page):
     expect(section.locator("[data-part=sentence]")).to_have_count(0)
     section.locator("[data-part=table-toggle]").click()
     expect(section.locator("table[data-part=table] th")).to_have_text(
-        ["Model", "Priced by", "Requests", "Tokens", "Cost"])
+        ["Model", "Priced by", "Requests", "Tokens", "Est. cost"])
     # One section is open at a time.
     expect(rows_of(section_of(panel, "projects"))).to_have_count(0)
 
@@ -406,4 +406,4 @@ def test_the_dirs_table_has_no_project_column(small, ui_contexts):
     section = section_of(panel, "folders")
     section.locator("[data-part=table-toggle]").click()
     expect(section.locator("table[data-part=table] th")).to_have_text(
-        ["Folder", "Models", "Requests", "Tokens", "Cost"])
+        ["Folder", "Models", "Requests", "Tokens", "Est. cost"])

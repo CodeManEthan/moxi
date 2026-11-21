@@ -285,12 +285,12 @@ def test_by_cost_each_bar_is_stacked_by_token_class_and_its_parts_add_up_to_it(p
     keys = today.locator("rect.seg").evaluate_all("parts => parts.map((part) => part.dataset.key)")
     assert keys == ["input", "cache_read", "output"], keys
     legend = panel.locator("[data-group=chart] [data-part=legend] li")
-    expect(legend).to_have_text(["Fresh input", "Cache write", "Cache read", "Output"])
+    expect(legend).to_have_text(["Input", "Cache create", "Cache read", "Output"])
     # The hover gives each class's dollars, and they add up to the day's own figure.
     lines = today.locator("title").text_content().split("\n")
     assert re.fullmatch(rf"today: {MONEY}", lines[0]), lines
     assert [line.rsplit(" ", 1)[0] for line in lines[1:]] == [
-        "Fresh input", "Cache write", "Cache read", "Output"], lines
+        "Input", "Cache create", "Cache read", "Output"], lines
 
     def dollars(text: str) -> float:
         return 0.0 if text.endswith("<$0.01") else float(text.rsplit("$", 1)[1].replace(",", ""))
@@ -315,7 +315,7 @@ def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     expect(billable).to_have_attribute("aria-label", "Billable tokens each day, last 30 days")
     expect(group.locator("[data-part=caption]")).to_have_text([
         re.compile(r"^[\d.]+% of all tokens in this range\. Shown alone because a single stack would be one shade\.$"),
-        re.compile(r"^Fresh input \+ cache writes \+ output: the [\d.]+% of tokens that is not a cache read\.$")])
+        re.compile(r"^Input \+ cache writes \+ output: the [\d.]+% of tokens that is not a cache read\.$")])
     # Ten cache-read tokens a request: today's three requests read 30.
     expect(cache.locator("g[data-period]")).to_have_count(3)
     expect(cache.locator("rect.seg")).to_have_count(0)
@@ -324,9 +324,9 @@ def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     expect(billable.locator("g[data-period]")).to_have_count(3)
     today = billable.locator("g[data-period]").last
     expect(today.locator("rect.seg")).to_have_count(2)
-    expect(today.locator("title")).to_have_text("today: 5.10k\nFresh input 600\nCache write 0\nOutput 4.50k")
+    expect(today.locator("title")).to_have_text("today: 5.10k\nInput 600\nCache create 0\nOutput 4.50k")
     expect(billable.locator("[data-part=value]")).to_have_text("5.10k")
-    expect(group.locator("[data-part=legend] li")).to_have_text(["Fresh input", "Cache write", "Output"])
+    expect(group.locator("[data-part=legend] li")).to_have_text(["Input", "Cache create", "Output"])
 
 
 def test_table_shows_every_figure_of_the_chart_in_its_place(page):
@@ -345,7 +345,7 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
 
     panel.get_by_role("button", name="Tokens", exact=True).click()
     expect(table.locator("thead th")).to_have_text(
-        ["Day", "Fresh input", "Cache read", "Cache write", "Output", "Total"])
+        ["Day", "Input", "Cache read", "Cache create", "Output", "Total"])
     # Three requests of 1000, 1500 and 2000 output tokens.
     assert table.locator("tbody tr").first.locator("td").nth(4).inner_text() == "4.50k"
 
@@ -542,7 +542,7 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     oldest = days.first
     expect(oldest).to_have_attribute("aria-label", re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}$"))
     expect(oldest.locator("title")).to_have_text(
-        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens\nFresh input 600\nCache write 0\n"
+        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens\nInput 600\nCache create 0\n"
                    r"Cache read 30\nOutput 4\.50k$"))
     date, year = oldest.get_attribute("aria-label").split(":")[0].rsplit(" ", 1)
     oldest.click()

@@ -415,10 +415,11 @@ sessions module. Top to bottom:
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
   are not whole, and `Table`, its rows as a table. By cost each bar is stacked by token
-  class (fresh input, cache write, cache read, output), each part that class's own
+  class (Input, Cache create, Cache read, Output), each part that class's own
   dollars from the cost terms, under a legend; the hover gives every class. By tokens
   there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
-  work`, fresh input, cache writes and output stacked.
+  work`, input, cache writes and output stacked. A table's column of dollars reads
+  `Est. cost`.
 - **The heat map.** Each day's estimated cost over the 53 weeks to today, whatever the
   range, under the other filters: weeks as columns, five shades on the quantiles of the
   days that cost something. A used day says its cost, tokens and classes on hover, and a

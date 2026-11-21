@@ -150,7 +150,7 @@ test("the tokens table: a column per token class, by day or by month", () => {
                 day("2026-10", null, 50, { output: 50, complete: false })];
   const table = chartTable(report(rows), "tokens", "month");
   assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Month", "Fresh input", "Cache read", "Cache write", "Output", "Total", "Not whole"]);
+                   ["Month", "Input", "Cache read", "Cache create", "Output", "Total", "Not whole"]);
   assert.deepEqual(table.rows.map((row) => row.cells), [
     ["Nov 2026", "300", "1.20k", "300", "200", "2.00k", "1 request with a token count the harness didn't report"],
     ["Oct 2026", "0", "0", "0", "50", "50", ""],
@@ -278,14 +278,14 @@ test("by cost each bar is stacked by token class from the terms, the two cache w
   assert.deepEqual(split.get("2026-10-10").map((part) => [part.key, Number(part.value.toFixed(6))]),
                    [["input", 0.1], ["cache_write", 0.3], ["cache_read", 0.3], ["output", 0.3]]);
   const chart = chartModel(DAILY, MONTH, "cost", TODAY, TERMS);
-  assert.deepEqual(chart.series.map((item) => item.label), ["Fresh input", "Cache write", "Cache read", "Output"]);
+  assert.deepEqual(chart.series.map((item) => item.label), ["Input", "Cache create", "Cache read", "Output"]);
   assert.equal(chart.series, COST_SERIES);
   const now = chart.bars[29];
   assert.deepEqual(now.segments, [{ key: "input", value: 1.54 }, { key: "cache_write", value: 4 },
                                   { key: "cache_read", value: 6 }, { key: "output", value: 8 }]);
   // The bar keeps the daily report's figure; the hover gives each class's dollars.
   assert.equal(now.value, 19.54);
-  assert.equal(now.hover, "today: $19.54\nFresh input $1.54\nCache write $4.00\nCache read $6.00\nOutput $8.00");
+  assert.equal(now.hover, "today: $19.54\nInput $1.54\nCache create $4.00\nCache read $6.00\nOutput $8.00");
   // A day the terms hold nothing for is drawn whole.
   assert.deepEqual(chart.bars[2].segments, []);
   assert.equal(chart.sentence, "The most in these 30 days was today, $19.54. 8 days had no sessions.");
@@ -322,13 +322,13 @@ test("by tokens: the cache reads alone and the billable work stacked, each with 
   assert.deepEqual([cache.bars[6].value, cache.bars[6].words, cache.bars[6].segments], [27_000, "27.0k", []]);
   assert.deepEqual(cache.top, { value: 50_000, words: "50k" });
   assert.equal(billable.name, "Billable work");
-  assert.equal(billable.caption, "Fresh input + cache writes + output: the 10% of tokens that is not a cache read.");
+  assert.equal(billable.caption, "Input + cache writes + output: the 10% of tokens that is not a cache read.");
   assert.equal(billable.aria, "Billable tokens each day, last 7 days");
   assert.equal(billable.series, BILLABLE_SERIES);
   assert.deepEqual(billable.bars[6].segments, [{ key: "fresh_input", value: 200 }, { key: "cache_write", value: 1_300 },
                                                { key: "output", value: 1_500 }]);
   assert.deepEqual([billable.bars[6].value, billable.bars[5].value], [3_000, 1_000]);
-  assert.equal(billable.bars[6].hover, "today: 3.00k\nFresh input 200\nCache write 1.30k\nOutput 1.50k");
+  assert.equal(billable.bars[6].hover, "today: 3.00k\nInput 200\nCache create 1.30k\nOutput 1.50k");
   // The group draws both under the one sentence of all tokens.
   const group = chartGroup(report(rows), { kind: "7d" }, "tokens", TODAY, false);
   assert.deepEqual(group.charts.map((chart) => chart.name), ["Cache reads", "Billable work"]);

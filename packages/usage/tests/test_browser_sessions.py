@@ -211,10 +211,10 @@ def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
     expect(section.locator("[data-more=table]").get_by_role("button", name="Show")).to_have_count(0)
     heads = table.locator("th").all_inner_texts()
     assert heads[:3] == ["Session", "Project", "Folder"], heads
-    assert {"Harness", "Models", "Started", "Active", "Requests", "Fresh input", "Cache write", "Cache read",
-            "Output", "Tokens", "Cost ↓", "Context"} <= set(heads), heads
+    assert {"Harness", "Models", "Started", "Active", "Requests", "Input", "Cache create", "Cache read",
+            "Output", "Tokens", "Est. cost ↓", "Context"} <= set(heads), heads
     column = {name: i for i, name in enumerate(head.removesuffix(" ↓") for head in heads)}
-    expect(table.locator("th[aria-sort=descending]")).to_have_text("Cost ↓")
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Est. cost ↓")
     expect(table.locator("th[aria-sort=none]")).to_have_count(11)
     first = table.locator("tbody tr").first.locator("td")
     expect(first.nth(0)).to_have_text("fix the tests")
@@ -227,7 +227,7 @@ def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
         requests.click()
     assert "order=desc" in sent.value.url, sent.value.url
     expect(table.locator("th[aria-sort=descending]")).to_have_text("Requests ↓")
-    expect(table.locator("th[aria-sort=none]").filter(has_text="Cost")).to_have_count(1)
+    expect(table.locator("th[aria-sort=none]").filter(has_text="Est. cost")).to_have_count(1)
     expect(first.nth(column["Requests"])).to_have_text("16")
     with page.expect_request(lambda request: "sort=requests&order=asc" in request.url):
         requests.click()
@@ -246,7 +246,7 @@ def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
     heads = [head.removesuffix(" ↓") for head in table.locator("th").all_inner_texts()]
     column = {name: i for i, name in enumerate(heads)}
     assert heads.index("Active") + 1 == column["Turns"] < column["Requests"], heads
-    assert column["Tokens"] + 1 == column["Subagent share"] == column["Cost"] - 1, heads
+    assert column["Tokens"] + 1 == column["Subagent share"] == column["Est. cost"] - 1, heads
     expect(table.locator("th", has_text="Turns")).to_have_attribute("title", re.compile("never summed"))
     first = table.locator("tbody tr").first.locator("td")
     # Each request of the seed is a prompt of its own, and no session has a subagent.

@@ -79,18 +79,18 @@ const UNKNOWN_MODEL = "unknown model";
 /** The token classes a bar by cost is stacked by, bottom first, from the terms' classes
  * (the two cache writes are one part). */
 export const COST_SERIES: Series[] = [
-  { key: "input", label: "Fresh input", shade: 4 }, { key: "cache_write", label: "Cache write", shade: 2 },
+  { key: "input", label: "Input", shade: 4 }, { key: "cache_write", label: "Cache create", shade: 2 },
   { key: "cache_read", label: "Cache read", shade: 3 }, { key: "output", label: "Output", shade: 1 },
 ];
 /** The billable work's classes, bottom first: every token that is not a cache read. */
 export const BILLABLE_SERIES: Series[] = [
-  { key: "fresh_input", label: "Fresh input", shade: 4 }, { key: "cache_write", label: "Cache write", shade: 2 },
+  { key: "fresh_input", label: "Input", shade: 4 }, { key: "cache_write", label: "Cache create", shade: 2 },
   { key: "output", label: "Output", shade: 1 },
 ];
 export const CACHE_READS = "Cache reads";
 export const BILLABLE_WORK = "Billable work";
 const TOKEN_CLASSES: readonly [keyof DayRow & string, string][] = [
-  ["fresh_input", "Fresh input"], ["cache_read", "Cache read"], ["cache_write", "Cache write"],
+  ["fresh_input", "Input"], ["cache_read", "Cache read"], ["cache_write", "Cache create"],
   ["output", "Output"],
 ];
 
@@ -265,7 +265,7 @@ export function chartModel(report: Report<DayRow>, range: Range, measure: Measur
 
 /**
  * The two charts by tokens: the cache reads alone, since in one stack with the rest each
- * bar would be nearly all one shade, and the billable work, fresh input, cache writes
+ * bar would be nearly all one shade, and the billable work, input, cache writes
  * and output, stacked. Each names itself and says its share of the range's tokens. Null
  * as for `chartModel`.
  */
@@ -285,7 +285,7 @@ export function tokenCharts(report: Report<DayRow>, range: Range, today: string)
     { ...cache, name: CACHE_READS,
       caption: `${fmtPercent(share * 100)} of all tokens in this range. Shown alone because a single stack would be one shade.` },
     { ...billable, name: BILLABLE_WORK,
-      caption: `Fresh input + cache writes + output: the ${fmtPercent(all > 0 ? ((all - reads) / all) * 100 : 0)} of tokens that is not a cache read.` },
+      caption: `Input + cache writes + output: the ${fmtPercent(all > 0 ? ((all - reads) / all) * 100 : 0)} of tokens that is not a cache read.` },
   ];
 }
 

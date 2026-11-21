@@ -37,8 +37,8 @@ test("token kinds lists the four classes by cost with tokens, the 1-hour writes 
   const kinds = kindsSection(TERMS);
   assert.equal(kinds.label, "Token kinds");
   assert.deepEqual(kinds.rows.map((r) => [r.name, r.tokens, r.cost]), [
-    ["Cache writes", "4.20M tokens", "$31.46"], ["Output", "900k tokens", "$14.81"],
-    ["Cache reads", "65.1M tokens", "$13.74"], ["Fresh input", "1.70M tokens", "$3.72"]]);
+    ["Cache create", "4.20M tokens", "$31.46"], ["Output", "900k tokens", "$14.81"],
+    ["Cache reads", "65.1M tokens", "$13.74"], ["Input", "1.70M tokens", "$3.72"]]);
   assert.equal(kinds.rows[0].note, "800k of them for 1 hour");
   assert.equal(kinds.rows[1].note, "$2.00 at the over-100k-token price");
   assert.equal(kinds.rows[2].note, null);
@@ -48,7 +48,7 @@ test("token kinds lists the four classes by cost with tokens, the 1-hour writes 
 test("closed token kinds says the input read from cache, rounded down, and the two dearest classes", () => {
   const kinds = kindsSection(TERMS);
   assert.equal(kinds.lead, "91% of input read from cache");
-  assert.equal(kinds.dearest, "cache writes $31.46, output $14.81");
+  assert.equal(kinds.dearest, "cache create $31.46, output $14.81");
   assert.equal(kinds.count, "71.9M tokens");
 });
 
@@ -82,20 +82,20 @@ test("no answer and an answer with no row give no section", () => {
 
 test("the saving sentence says what it stands for and ends as an estimate", () => {
   assert.equal(savingWords(SAVING), "65.1M of 71.0M input tokens were read from cache. With no cache, at the same "
-    + "prices, those reads would have cost $200.09 as fresh input; they cost $13.74, and cache writes cost $15.52 "
-    + "more than fresh input, so caching saved about $170.83. An estimate.");
+    + "prices, those reads would have cost $200.09 as input; they cost $13.74, and cache writes cost $15.52 "
+    + "more than input, so caching saved about $170.83. An estimate.");
   assert.equal(kindsSection(TERMS).saving, savingWords(SAVING));
 });
 
 test("the saving sentence has no writes clause when writes cost what input does", () => {
   const words = savingWords({ ...SAVING, write_extra: 0, saved: 186.35 });
   assert.equal(words, "65.1M of 71.0M input tokens were read from cache. With no cache, at the same prices, those "
-    + "reads would have cost $200.09 as fresh input; they cost $13.74, so caching saved about $186.35. An estimate.");
+    + "reads would have cost $200.09 as input; they cost $13.74, so caching saved about $186.35. An estimate.");
 });
 
 test("at zero or less the saving sentence says what caching cost over what it saved", () => {
   const less = savingWords({ ...SAVING, reads_at_input: 10, reads_cost: 1, write_extra: 12.5, saved: -3.5 });
-  assert.match(less, /, and cache writes cost \$12\.50 more than fresh input, so caching cost about \$3\.50 more than it saved\. An estimate\.$/);
+  assert.match(less, /, and cache writes cost \$12\.50 more than input, so caching cost about \$3\.50 more than it saved\. An estimate\.$/);
   assert.match(savingWords({ ...SAVING, saved: 0 }), /caching cost about \$0\.00 more than it saved\. An estimate\.$/);
 });
 

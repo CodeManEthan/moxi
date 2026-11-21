@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The page names the token classes Input, Cache create, Cache read and Output (legends,
+  hovers, table heads and the Token kinds rows), where it said Fresh input and Cache
+  write(s), and a table's column of dollars reads `Est. cost`, where it read `Cost`. The
+  Cost / Tokens switch, the Cost group's name and the 5-minute and 1-hour cache write
+  prices keep their words.
 - The page's Project (or Folder) button counts what is picked, one included: `1 project`
   or `1 folder`, where it used to show the one picked by name.
 - `moxi usage context` with a session or agent it cannot find, or a session more than one

@@ -43,7 +43,7 @@ export interface HeatModel {
 }
 
 const CLASSES: readonly [keyof DayRow & string, string][] = [
-  ["fresh_input", "Fresh input"], ["cache_write", "Cache write"], ["cache_read", "Cache read"], ["output", "Output"],
+  ["fresh_input", "Input"], ["cache_write", "Cache create"], ["cache_read", "Cache read"], ["output", "Output"],
 ];
 
 /** The heat map's first day: `HEAT_DAYS` days to `today`, both included. */

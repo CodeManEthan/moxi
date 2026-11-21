@@ -179,9 +179,9 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
     column("Folder", false, projects ? null : "project"), column("Harness", false, null), column("Models", false, null),
     column("Started", true, "started"), column("Active", true, "active"),
     column("Turns", true, "turns", TURNS_TITLE), column("Requests", true, "requests"),
-    column("Fresh input", true, "fresh_input"), column("Cache write", true, "cache_write"),
+    column("Input", true, "fresh_input"), column("Cache create", true, "cache_write"),
     column("Cache read", true, "cache_read"), column("Output", true, "output"), column("Tokens", true, "tokens"),
-    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Cost", true, "cost"), column("Context", true, null),
+    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Est. cost", true, "cost"), column("Context", true, null),
     ...(flagged ? [column("Not whole", false, null)] : []),
   ];
   const rows = list.rows.map((row, i) => ({

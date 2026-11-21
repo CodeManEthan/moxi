@@ -100,9 +100,9 @@ test("the table: every figure of each session, a sort on each column the server 
   const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
   assert.deepEqual(board.columns.map((column) => [column.label, column.sort]), [
     ["Session", null], ["Folder", "project"], ["Harness", null], ["Models", null], ["Started", "started"],
-    ["Active", "active"], ["Turns", "turns"], ["Requests", "requests"], ["Fresh input", "fresh_input"],
-    ["Cache write", "cache_write"], ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"],
-    ["Subagent share", "subagent_share"], ["Cost", "cost"], ["Context", null]]);
+    ["Active", "active"], ["Turns", "turns"], ["Requests", "requests"], ["Input", "fresh_input"],
+    ["Cache create", "cache_write"], ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"],
+    ["Subagent share", "subagent_share"], ["Est. cost", "cost"], ["Context", null]]);
   assert.deepEqual(board.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
                                          "1h 28m", "4", "15", "300", "400", "200", "300", "1.20k", "25%", "$5.35",
                                          "10 of 100"]);
@@ -112,7 +112,7 @@ test("the table: every figure of each session, a sort on each column the server 
   assert.equal(board.rows[0].key, "claude/s-1");
   assert.deepEqual(board.rows[0].session, { harness: "claude", id: "s-1" });
   // The column sorted by says its direction; the others say none; one with no sort says nothing.
-  const cost = board.columns.find((column) => column.label === "Cost");
+  const cost = board.columns.find((column) => column.label === "Est. cost");
   assert.deepEqual([cost.aria, cost.arrow], ["descending", "↓"]);
   assert.deepEqual([board.columns[4].aria, board.columns[4].arrow], ["none", null]);
   assert.equal(board.columns[0].aria, null);
