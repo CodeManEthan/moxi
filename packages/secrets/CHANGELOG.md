@@ -17,8 +17,24 @@
   Stripe key after `abc` and a zero-width space is found. A split token is still missed
   where such a run glues a word onto it and its rule has no keyword at its start, or,
   rarely, its split falls just before text that starts another rule's keyword.
-- `REDACT_VERSION`, now 2: which `redact` this is, for a store of redacted text to
-  record.
+- `scan` and `redact` read past the backslashes that escape a quote. A key whose rule
+  ends on gitleaks' boundary group (150 of credentials' 231 rules and broad's
+  generic-api-key) went unfound when the quote after it was escaped, as in a JSON tool
+  call holding `python -c '... {\"key\": \"sk_live_...\"}'`, so memory stored such a key
+  whole. A text holding a backslash, or a run of them, directly before a quote is now
+  also scanned as a copy without those backslashes, the same copy that leaves out the
+  invisible characters. The hit is the key alone; the backslashes and quotes stay
+  outside the placeholder. The gates now refuse a commit holding such a key. A set the
+  fallback left unscanned in the text is not scanned again in a copy.
+- Cost: on memory's ingest, the redaction of one real Claude Code transcript (1,746
+  records, 250 tool calls holding an escaped quote) took 0.30 s against 0.23 s before,
+  1.3 times, and 0.10 s against 0.08 s on another (516 records). In the cost test, RE2
+  on a megabyte of JSON lines of curl commands, with an escaped quote on every line,
+  took 0.91 s for credentials against 0.30 s (its budget is 2.40 s), since every line
+  is scanned twice and each escaped header now gives curl-auth-header's hit as well;
+  broad took 0.23 s against 0.11 s. No other shape changed.
+- `REDACT_VERSION`, now 3: which `redact` this is, for a store of redacted text to
+  record. It is 3 because `redact` reads past an escaped quote.
 - `seen_through(c)`: whether `scan` and `redact` read past a character.
 - Every setting carries page fields, which `moxi config secrets show --json` prints
   and the settings page draws: a plain label and a line, a can-hurt mark on taking a
