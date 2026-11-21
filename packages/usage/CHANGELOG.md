@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The page's filter line has By class / By model beside Cost / Tokens. By model the chart
+  by cost is stacked by model, the six that cost most in the range in four shades and two
+  line fills of the text colour and the rest as one `Other` part. The chart's table
+  follows the split: a column per token class By class, where it had a column per model,
+  and a column per model By model. Under Tokens both buttons are off.
 - The page names the token classes Input, Cache create, Cache read and Output (legends,
   hovers, table heads and the Token kinds rows), where it said Fresh input and Cache
   write(s), and a table's column of dollars reads `Est. cost`, where it read `Cost`. The

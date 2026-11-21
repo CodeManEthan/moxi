@@ -410,13 +410,16 @@ sessions module. Top to bottom:
   Folder where the projects module is not installed, which picks any number of them
   (the button counts them: `1 project`, `2 projects`) and `all` to clear them; Harness
   and Model, each drawn only when there is more than one to choose or one is set; and
-  Cost / Tokens. Everything
-  under it follows them.
+  Cost / Tokens; and By class / By model, which says what the chart by cost is stacked by
+  and is off under Tokens. Everything under it follows them.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
-  are not whole, and `Table`, its rows as a table. By cost each bar is stacked by token
-  class (Input, Cache create, Cache read, Output), each part that class's own
-  dollars from the cost terms, under a legend; the hover gives every class. By tokens
+  are not whole, and `Table`, its rows as a table. By cost and By class each bar is
+  stacked by token class (Input, Cache create, Cache read, Output), each part that class's
+  own dollars from the cost terms; By model it is stacked by model, the six that cost most
+  in the range each in a shade or a line fill of its own and the rest as one, `Other`.
+  Either way a legend names the parts, the hover gives every part, and the table has a
+  column for each. By tokens
   there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
   work`, input, cache writes and output stacked. A table's column of dollars reads
   `Est. cost`.

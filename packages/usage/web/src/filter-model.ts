@@ -1,10 +1,10 @@
-// The filter line: the range, the project (or folder), harness and model filters and the
-// Cost / Tokens switch, as one state with the reads it asks for and the menus it shows.
+// The filter line: the range, the project (or folder), harness and model filters, the
+// Cost / Tokens switch and the By class / By model split, as one state with the reads it asks for and the menus it shows.
 // No DOM here. The state is held for the document's life, so it outlives one placement
 // of the page: the page's element reads it, writes it and passes it to every piece that
 // reads under the range and the filters.
 
-import type { Measure } from "./chart-model.ts";
+import type { Measure, Split } from "./chart-model.ts";
 import { COST_DAYS, countWords, DEFAULT_RANGE, rangeBy, rangeDays, rangeLabel, rangeMenu } from "./cost-model.ts";
 import type { Range } from "./cost-model.ts";
 import { addDays, daysFrom } from "./days.ts";
@@ -24,9 +24,13 @@ export interface PageState {
   harness: string;
   model: string;
   measure: Measure;
+  /** What the chart by cost is stacked by; by tokens it is by class whatever this says. */
+  split: Split;
 }
 
-export const START: PageState = { range: DEFAULT_RANGE, projects: [], paths: [], harness: "", model: "", measure: "cost" };
+export const START: PageState = {
+  range: DEFAULT_RANGE, projects: [], paths: [], harness: "", model: "", measure: "cost", split: "class",
+};
 
 let held: PageState = { ...START };
 const watchers = new Set<(state: PageState) => void>();
@@ -192,7 +196,12 @@ export interface FilterLine {
   harness: Menu | null;
   model: Menu | null;
   measures: { key: Measure; label: string; picked: boolean }[];
+  /** `By class` and `By model`; under Tokens both are off, with `off` saying why. */
+  splits: { key: Split; label: string; picked: boolean; off: string | null }[];
 }
+
+/** Why the split is off under Tokens. */
+export const SPLIT_OFF = "Token mode always splits by class";
 
 /** What the line is worked out from. Each report is null until it has answered. */
 export interface FilterFacts {
@@ -272,7 +281,7 @@ export function customRange(since: string, until: string): Range | null {
 }
 
 /**
- * The filter line. `Range` and `Cost / Tokens` are always there. The project (or
+ * The filter line. `Range`, `Cost / Tokens` and `By class / By model` are always there. The project (or
  * folder) filter is there once its list has answered. Harness and Model are there only
  * with more than one to choose, or when one is set: the harnesses are those whose lanes
  * hold files, the models those of the range under the other filters.
@@ -320,5 +329,9 @@ export function filterLine(facts: FilterFacts): FilterLine {
     range, custom: customDays(state.range, today), place, harness, model,
     measures: [{ key: "cost", label: "Cost", picked: state.measure === "cost" },
                { key: "tokens", label: "Tokens", picked: state.measure === "tokens" }],
+    splits: (["class", "model"] as const).map((key) => ({
+      key, label: key === "class" ? "By class" : "By model", picked: state.split === key,
+      off: state.measure === "tokens" ? SPLIT_OFF : null,
+    })),
   };
 }

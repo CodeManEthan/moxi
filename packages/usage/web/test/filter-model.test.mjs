@@ -22,8 +22,9 @@ const facts = (extra = {}) => ({ state: state(), today: TODAY, figures: null, al
   folders: false, models: null, lanes: null, ...extra });
 const labels = (menu) => menu.items.map((item) => item.label);
 
-test("the page opens on the last 30 days, by cost, with no filter", () => {
-  assert.deepEqual(START, { range: { kind: "30d" }, projects: [], paths: [], harness: "", model: "", measure: "cost" });
+test("the page opens on the last 30 days, by cost split by class, with no filter", () => {
+  assert.deepEqual(START, { range: { kind: "30d" }, projects: [], paths: [], harness: "", model: "", measure: "cost",
+                           split: "class" });
   assert.equal(filtered(START), false);
   assert.equal(filtered(state({ model: "m-a" })), true);
 });
@@ -200,6 +201,14 @@ test("Cost / Tokens says which one the chart shows", () => {
   assert.deepEqual(filterLine(facts()).measures, [{ key: "cost", label: "Cost", picked: true },
                                                   { key: "tokens", label: "Tokens", picked: false }]);
   assert.deepEqual(filterLine(facts({ state: state({ measure: "tokens" }) })).measures.map((m) => m.picked), [false, true]);
+});
+
+test("By class / By model says what the chart by cost is stacked by, and is off under Tokens", () => {
+  assert.deepEqual(filterLine(facts()).splits, [{ key: "class", label: "By class", picked: true, off: null },
+                                                { key: "model", label: "By model", picked: false, off: null }]);
+  const tokens = filterLine(facts({ state: state({ measure: "tokens", split: "model" }) })).splits;
+  assert.deepEqual(tokens.map((split) => [split.picked, split.off]),
+                   [[false, "Token mode always splits by class"], [true, "Token mode always splits by class"]]);
 });
 
 test("no read and no line throws while no day is held", () => {

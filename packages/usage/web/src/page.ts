@@ -130,6 +130,13 @@ const METER = { width: 96, height: 9 };
 const SEARCH_MS = 200;
 /** The fewest characters a search of the model table takes. */
 const SEARCH_MIN = 2;
+/** The two line fills a stacked bar's fifth and sixth parts are drawn in, set in each
+ * svg that draws them. */
+const SEG_LINES = svg`<defs>
+  <pattern id="seg-lines-a" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <path d="M1 0V4"></path></pattern>
+  <pattern id="seg-lines-b" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(135)">
+    <path d="M1 0V4"></path></pattern></defs>`;
 
 // When this document last asked for a pass as a page opened, in epoch seconds.
 let askedAt = 0;
@@ -208,6 +215,9 @@ const STYLES = css`
   .filt button.set, .filt .tog button[aria-pressed="true"] { color: var(--moxi-text); }
   .filt .v { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; color: var(--moxi-text-dim); }
   .filt .tog button { margin-left: 14px; }
+  .filt .tog button:disabled { color: var(--moxi-text-dim); cursor: default; }
+  .filt .togs { display: flex; flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+  .filt .tog + .tog { margin-left: 10px; }
   .anchor { position: relative; display: inline-block; }
   .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); width: max-content; min-width: 240px;
           max-width: 400px;
@@ -235,13 +245,18 @@ const STYLES = css`
   svg.ch text.v { fill: var(--moxi-text); }
   svg.ch .bar { fill: var(--moxi-text); fill-opacity: 0.36; }
   svg.ch .bar.now { fill-opacity: 1; }
-  /* A stacked bar's parts: four shades of the text colour, today's at full weight and
-     the other periods' at about half. */
+  /* A stacked bar's parts: four shades of the text colour, then lines of it at two
+     angles, then the border's shade; today's at full weight and the other periods' at
+     about half. */
   svg .seg { fill: var(--moxi-text); }
   svg .seg.s1 { fill-opacity: 0.55; } svg .seg.s1.now { fill-opacity: 1; }
   svg .seg.s2 { fill-opacity: 0.4; } svg .seg.s2.now { fill-opacity: 0.72; }
   svg .seg.s3 { fill-opacity: 0.25; } svg .seg.s3.now { fill-opacity: 0.46; }
   svg .seg.s4 { fill-opacity: 0.13; } svg .seg.s4.now { fill-opacity: 0.24; }
+  svg .seg.s5 { fill: url(#seg-lines-a); fill-opacity: 0.55; } svg .seg.s5.now { fill-opacity: 1; }
+  svg .seg.s6 { fill: url(#seg-lines-b); fill-opacity: 0.55; } svg .seg.s6.now { fill-opacity: 1; }
+  svg .seg.s7 { fill: var(--moxi-border-strong); fill-opacity: 0.55; } svg .seg.s7.now { fill-opacity: 1; }
+  svg pattern path { stroke: var(--moxi-text); stroke-width: 1.5; }
   /* The heat map's five steps: the text colour from faint to full; an unused day is a
      border's shade. */
   svg .hc { fill: var(--moxi-text); }
@@ -353,6 +368,9 @@ const STYLES = css`
     .one > span:first-child { display: block; padding-right: 0; white-space: normal; }
     .one .t { display: block; padding-left: 64px; font-size: var(--moxi-font-size-sm); line-height: 18px; }
     .one2 { margin-top: 0; white-space: normal; }
+    .filt { flex-wrap: wrap; row-gap: 4px; }
+    .filt .togs { justify-content: flex-start; }
+    .filt .togs .tog:first-child button:first-child { margin-left: 0; }
     .filt .fl { column-gap: 18px; }
     .filt .fl .sep { display: none; }
     .filt .anchor { position: static; }
@@ -1036,7 +1054,7 @@ export class UsagePage extends LitElement {
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null);
+      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -1170,9 +1188,12 @@ export class UsagePage extends LitElement {
     }}>
       <span class="fl">${repeat(menus, (menu) => menu.key, (menu, i) => html`${i ? html`<span class="sep">·</span>` : nothing}${
         this.#filter(menu, line)}`)}</span>
-      <span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
+      <span class="togs"><span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
         data-measure=${measure.key} aria-pressed=${String(measure.picked)}
         @click=${() => { holdState({ measure: measure.key }); }}>${measure.label}</button>`)}</span>
+      <span class="tog" role="group" aria-label="Split" data-part="split">${line.splits.map((split) => html`<button
+        type="button" data-split=${split.key} aria-pressed=${String(split.picked)} ?disabled=${split.off !== null}
+        title=${split.off ?? nothing} @click=${() => { holdState({ split: split.key }); }}>${split.label}</button>`)}</span></span>
     </div>`;
   }
 
@@ -1285,18 +1306,18 @@ export class UsagePage extends LitElement {
     return html`${chart.name === null ? nothing : html`<p class="chartn" data-part="chart-name">${chart.name}</p>`}
       ${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
       ${chart.caption === null ? nothing : html`<p class="chartc" data-part="caption">${chart.caption}</p>`}
-      ${chart.series.length < 2 ? nothing : this.#legend(chart.series)}`;
+      ${chart.series.length === 0 ? nothing : this.#legend(chart.series)}`;
   }
 
   #legend(series: Series[]) {
     return html`<ul class="legend" data-part="legend">${series.map((item) => html`<li data-key=${item.key}>
-      <svg width="9" height="9" aria-hidden="true"><rect class="seg s${item.shade} now" width="9" height="9" rx="1"></rect></svg>${
-      item.label}</li>`)}</ul>`;
+      <svg width="9" height="9" aria-hidden="true">${SEG_LINES}<rect class="seg s${item.shade} now" width="9" height="9"
+        rx="1"></rect></svg>${item.label}</li>`)}</ul>`;
   }
 
   #chartSvg(draw: ChartDraw, aria: string) {
     return html`<svg class="ch" data-part="chart" role="img" aria-label=${aria} width=${draw.width} height=${draw.height}
-      viewBox="0 0 ${draw.width} ${draw.height}">${svg`
+      viewBox="0 0 ${draw.width} ${draw.height}">${svg`${SEG_LINES}
       ${draw.grid === null ? nothing : svg`<line class="gr" x1="0" x2=${draw.width} y1=${draw.grid.y} y2=${draw.grid.y}></line>
         <text data-part="top" x="0" y="4">${draw.grid.words}</text>`}
       ${draw.bars.map((bar) => svg`<g data-period=${bar.period} data-whole=${String(bar.outline === null)}>

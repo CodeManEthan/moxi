@@ -3,7 +3,8 @@ starts usage's real page server: the Range menu's entries and what each choice d
 the chart and leaves alone in Cost, the two days of a range of one's own, the Harness
 and Model filters, the folder filter on a shell without projects, the chart's bars,
 sentence, today's value, dashed outline and table by cost and by tokens, its bars by
-cost stacked by token class, the two charts by tokens, the 53 weeks' heat map, a range that
+cost stacked by token class or by model with the table following the split, the two
+charts by tokens, the 53 weeks' heat map, a range that
 holds nothing, a range whose total is not whole with its line at the foot, the sections
 reading under the same range, and all of it at a phone's width.
 
@@ -301,6 +302,41 @@ def test_by_cost_each_bar_is_stacked_by_token_class_and_its_parts_add_up_to_it(p
     assert tops[-1][0] < tops[0][0] and tops[0][0] + tops[0][1] == pytest.approx(84, abs=0.2), tops
 
 
+def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(page):
+    panel = open_page(page)
+    split = panel.locator("[data-part=split]")
+    by_class = split.get_by_role("button", name="By class")
+    by_model = split.get_by_role("button", name="By model")
+    expect(by_class).to_have_attribute("aria-pressed", "true")
+    by_model.click()
+    expect(by_model).to_have_attribute("aria-pressed", "true")
+    expect(by_class).to_have_attribute("aria-pressed", "false")
+    chart = chart_of(panel)
+    expect(chart).to_have_attribute("aria-label", "Estimated cost by model each day, last 30 days")
+    group = panel.locator("[data-group=chart]")
+    expect(group.locator("[data-part=legend] li")).to_have_text([SONNET, HAIKU])
+    # Today's session ran on Sonnet alone; the hover names every model of the range.
+    today = chart.locator("g[data-period]").last
+    expect(today.locator("rect.seg")).to_have_count(1)
+    assert today.locator("rect.seg").get_attribute("data-key") == SONNET
+    lines = today.locator("title").text_content().split("\n")
+    assert re.fullmatch(rf"today: ({MONEY})", lines[0]), lines
+    assert lines[1:] == [f"{SONNET} {lines[0].split(': ')[1]}", f"{HAIKU} $0.00"], lines
+
+    group.get_by_role("button", name="Table").click()
+    table = group.get_by_role("table")
+    expect(table.locator("thead th")).to_have_text(["Day", SONNET, HAIKU, "Total"])
+    by_class.click()
+    expect(table.locator("thead th")).to_have_text(
+        ["Day", "Input", "Cache create", "Cache read", "Output", "Total"])
+
+    # Under Tokens the split is by class, and both buttons are off.
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    for button in (by_class, by_model):
+        expect(button).to_be_disabled()
+        expect(button).to_have_attribute("title", "Token mode always splits by class")
+
+
 def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     panel = open_page(page)
     panel.get_by_role("button", name="Tokens", exact=True).click()
@@ -335,12 +371,14 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     group.get_by_role("button", name="Table").click()
     expect(chart_of(panel)).to_have_count(0)
     table = group.get_by_role("table")
-    expect(table.locator("thead th")).to_have_text(["Day", SONNET, HAIKU, "Total"])
+    expect(table.locator("thead th")).to_have_text(
+        ["Day", "Input", "Cache create", "Cache read", "Output", "Total"])
     expect(table.locator("tbody tr")).to_have_count(3)
-    # A column per model, each day's total at its end, newest first.
-    first = table.locator("tbody tr").first.locator("td").all_inner_texts()
-    assert re.fullmatch(r"\w{3} \d{1,2}", first[0]) and first[2] == "", first
-    assert first[1] == first[3] and re.fullmatch(MONEY, first[1]), first
+    # A column per token class, each day's total at its end, newest first.
+    first = table.locator("tbody tr").first.locator("td")
+    expect(first.nth(1)).to_have_text(re.compile(MONEY))
+    cells = first.all_inner_texts()
+    assert re.fullmatch(r"\w{3} \d{1,2}", cells[0]) and re.fullmatch(MONEY, cells[5]), cells
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
     panel.get_by_role("button", name="Tokens", exact=True).click()
