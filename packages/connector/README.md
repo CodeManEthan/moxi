@@ -27,7 +27,13 @@ one-time code minted at your own terminal.
 - `moxi connector log [--days N] [--json]` prints the call log.
 
 Its settings are `enabled`, `port` (the loopback port, 8452 by default), `public_url`,
-`redirect_uris` and `refresh_days`; `moxi config connector` shows them.
+`redirect_uris`, `refresh_days` and `tools.withheld`; `moxi config connector` shows them.
+
+`tools.withheld` lists tools the door serves to no sign-in, whichever module gives them:
+Claude doesn't see them in the tool list, and a call to one answers that no such tool
+exists. `moxi connector status` and the doctor name each one. The connector reads the
+list when it starts, so restart it after a change (`moxi connector disable`, then
+`moxi connector enable`).
 
 ## Setting it up
 
@@ -104,6 +110,20 @@ fields to the call's log row (names that could carry a secret or a message body 
 refused), and `after_answer(fn)`, which runs `fn(written)` once it is known whether the
 answer reached the caller. No code, token or grant ever reaches a provider. Two providers
 that declare one tool name both lose it.
+
+The connector scrubs every answer before it goes out: from the text and from every string
+of the structured value it removes control characters but newline and tab, DEL, the C1
+range and Unicode format characters (bidi controls, zero-width characters, tag
+characters, the byte order mark). A provider that redacts must hand over text its last
+redaction saw in that final form: redact the raw text, remove those characters, then
+redact again, so the scrub never changes text redaction didn't see.
+
+A provider whose tools read a lot can bound them with one `Limit` of its own, shared by
+its tools: `await LIMIT.run(work)` runs `work()`, a plain function returning a `Result`,
+in a thread. At most two calls of the provider run at once; a third waits up to 5
+seconds, then answers the refusal `busy`; a call still running 20 seconds after it began
+answers `timeout`, and its thread holds its place until it ends. It is opt-in: comms'
+tools don't use one.
 
 ## Install
 

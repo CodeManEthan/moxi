@@ -284,3 +284,42 @@ def test_a_flood_of_metadata_fetches_without_a_token_stays_bounded(logdir):
     summaries = {r["class"]: r["count"] for r in rows if r["kind"] == "summary"}
     assert summaries["prm-200"] == 290 and summaries["asm-200"] == 290
     assert sum(summaries.values()) + len(requests) == 900
+
+
+# -- the fields a read tool adds -------------------------------------------------------------
+
+#: The fields each read tool adds to its call's row: counts, switches and, for read_note, the
+#: note's path, never words searched for, text read or a session id. The host's own
+#: `dropped` marks a caller that hung up, so no tool may log a field of that name.
+READ_TOOL_FIELDS = {
+    "search_memory": {"words": 2, "hits": 5, "unscanned": 0, "redactions": 3, "cut": False,
+                      "refusal": None},
+    "list_sessions": {"rows": 12, "refusal": None},
+    "read_session": {"harness": "claude", "turns": 4, "rows": 40, "cut": True,
+                     "redactions": 1, "refusal": None},
+    "list_notes": {"entries": 30, "hidden": 2, "refusal": None},
+    "read_note": {"note": "designs/a.md", "from_line": 1, "lines": 400, "redactions": 0,
+                  "refusal": None},
+    "search_notes": {"words": 3, "hits": 4, "files_read": 90, "confirmed": 4,
+                     "unscanned": 0, "cut": False, "refusal": None},
+}
+
+
+@pytest.mark.parametrize("tool", sorted(READ_TOOL_FIELDS))
+def test_a_read_tools_fields_pass_the_log_and_land_on_its_row(front, tool):
+    fields = READ_TOOL_FIELDS[tool]
+
+    async def logs(args, ctx):
+        ctx.log(**fields)
+        return Result("fine")
+
+    async def main():
+        f = await front(providers={"demo": Provider(tools=[Tool(tool, "x", {}, logs)])})
+        got = await request(f, "POST", "/mcp", call(tool), headers=bearer())
+        assert got.json()["result"]["isError"] is False
+        row = f.host.calllog.rows[-1]
+        assert {key: row[key] for key in fields} == fields
+        assert row["tool"] == tool and row["provider"] == "demo"
+        await f.close()
+
+    asyncio.run(main())
