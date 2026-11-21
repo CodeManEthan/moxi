@@ -226,6 +226,41 @@ def test_a_call_s_summary_is_redacted_before_its_cut(transcript):
     assert row["call"].startswith("Bash(") and TOKEN not in row["call"]
 
 
+#: A made-up value of a key-named secret's shape.
+KEYED = "Xk9Lm2Qw7Rt5Zp3Vb8Nc4Hd6Jf1Gs0Ty"
+
+
+@pytest.mark.parametrize("gap", ["\u00a0", " " * 6], ids=["no-break space", "six spaces"])
+def test_a_keyed_value_the_line_s_squeeze_would_join_to_its_name_is_redacted(transcript,
+                                                                            gap):
+    """A key's name and its value apart by more than a keyed rule allows: put on one line
+    after the redaction, the value would sit one space from its name, a shape no pass
+    saw."""
+    req = transcript.request()
+    req.tool_use("Bash", {"command": f"export API_KEY={gap}{KEYED}"})
+    (row,) = rows(read(claude_source(transcript))[0])
+    assert KEYED not in row["call"] and "[REDACTED:" in row["call"]
+
+
+def test_a_summary_s_squeeze_runs_between_the_redaction_s_passes():
+    asked = []
+
+    class Spy:
+        def chat_redact(self, text, *, between=None):
+            middle = between(text) if between else text
+            asked.append((text, middle))
+            return middle
+
+        def secret_path(self, value):
+            return None
+
+    from moxi_sessions.connector.reading import Clean
+    clean = Clean(Gate(lambda: Spy()).open(), {"HOME": "/home/u"})
+    raw = "cat \n  /home/u/notes/x.md\u00a0 y "
+    assert clean.line(raw) == "cat x.md y"
+    assert asked[-1] == (raw, "cat x.md y")
+
+
 def test_a_tool_result_shows_its_size_and_failure_and_never_its_output(transcript):
     req = transcript.request()
     call = req.tool_use("Read", {"file_path": "/x/notes.md"})

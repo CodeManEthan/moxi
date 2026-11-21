@@ -705,8 +705,9 @@ with any scheme, port and path) shows as `local`. The roots are your home folder
 backtick or one of `<>|,;(){}[]`, and takes a redaction placeholder in it whole, so
 `/home/you/[REDACTED:github-pat]/x.md` shows as `x.md`. A bare root shows its own name
 (`/home/` shows `home`, `~/` shows `~`). The cut runs inside `chat_redact`, between its
-two passes, so the last redaction sees exactly the text sent; the folder's cut and every
-other change to a text run there too. A path outside the roots in a message stays whole;
+two passes, and so do the folder's cut and the squeeze that puts a tool call's argument on
+one line (before the path cut). Only a cut to length comes after, so the last redaction
+sees exactly the text sent. A path outside the roots in a message stays whole;
 the `folder` is always its last part. A refusal or `unlisted` reason that names a path
 sessions holds (a root, an archive folder, the session's file and its folder) cuts that
 path to its last part wherever it occurs, under any root or none, and a path under the

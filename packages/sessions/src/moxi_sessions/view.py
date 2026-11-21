@@ -11,8 +11,9 @@ value of a type the row does not carry.
 **Redaction.** Given `redact`, a function from text to text, `view_row` passes each
 message's whole text, each tool call's name and whole argument, and each title through it
 before any cut, so a cut never leaves part of a secret that no longer matches its pattern.
-A tool call's summary is then made again from its input (`shape.tool_summary`), redacted
-before its 160-character cut, and the row's `name` and `server` are redacted too. Without
+A tool call's summary is then made again from its input (`shape.tool_summary`): put on
+one line, then redacted, then cut at 160 characters (`shape.squeezed_first`), and the
+row's `name` and `server` are redacted too. Without
 `redact` the row is the record's own.
 
 `redactor()` is the redaction `moxi sessions read` uses: secrets' `credentials` and `broad`
@@ -43,7 +44,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .shape import CODEX, UNKNOWN, Record, tool_summary
+from .shape import CODEX, UNKNOWN, Record, squeezed_first, tool_summary
 
 #: The most of one message's text a row carries, in UTF-8 bytes.
 TEXT_MAX = 65536
@@ -164,7 +165,8 @@ def _windows(windows: Any) -> list[dict[str, Any]]:
 
 def summary(record: Record, redact: Redact | None = None) -> str:
     """A tool call's summary line: the record's own without `redact`; with it, made again
-    from the call's input with the name and the whole argument redacted before the cut."""
+    from the call's input, `redact` making the name's and the whole argument's line
+    before the cut (`shape.tool_summary` says what it must do)."""
     if redact is None:
         return record.summary
     tool_input = record.input
@@ -191,7 +193,7 @@ def view_row(record: Record, *, redact: Redact | None = None) -> dict[str, Any]:
     for name, typed in FIELDS.get(kind, ()):
         value = getattr(record, name)
         if kind == "tool_call" and name == "summary":
-            value = summary(record, redact)
+            value = summary(record, squeezed_first(redact) if redact else None)
         elif kind == "tool_call" and name in ("name", "server"):
             value = _redacted(value, redact)
         put(row, unknown, name, value, typed)

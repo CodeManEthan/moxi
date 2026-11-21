@@ -33,9 +33,13 @@ last segment by its own rule (`paths.cut_to_last_segment`), whatever root it lie
 A refusal that names a path sessions holds whole (the source's and its folder, a
 subagent's, an archive folder) cuts that path to its last segment wherever it occurs,
 before the rest is cut (`paths.cut_paths`), so a path outside the cut's roots doesn't
-leave whole either. Each cut runs inside the chat redaction, between its two passes,
-never outside it, so the last redaction sees the text sent; only the length cuts come
-after. The secret-path test reads the raw input.
+leave whole either.
+
+Every string the answer shows is the answer of one chat redaction over exactly that
+string, cut to length afterwards at most. Each change to a text runs inside that
+redaction, between its two passes: the path cuts, and the squeeze that puts a tool call's
+argument on one line before the path cut (`Clean.line`). The secret-path test reads the
+raw input.
 
 The answer holds at most `ANSWER_MAX_CHARS` characters of text: the oldest turns go
 first, then the turns after the one that holds `around`, so that turn (or the last turn)
@@ -57,7 +61,7 @@ from ..errors import Unreadable
 from ..find import UNREADABLE, subagents
 from ..locate import locate
 from ..pathcut import cut_local
-from ..shape import HARNESSES, Record
+from ..shape import HARNESSES, Record, one_line
 from ..view import HARNESS_LABELS, fits
 from ..writer import (CHANNEL, COORDINATOR, HARNESS, HOOK, MODEL, PEER, PERSON, SUMMARY,
                       TASK, UNKNOWN_WRITER, opening, opens_with_output, opens_with_tag,
@@ -227,7 +231,7 @@ def row_of(record: Record, redact: Clean, *, thoughts: bool = False) -> _Row | N
         if path is not None:
             name = record.name if isinstance(record.name, str) else "?"
             return _call_row(record, redact(f"{name}({path})"))
-        return _call_row(record, view.summary(record, redact))
+        return _call_row(record, view.summary(record, redact.line))
     if kind == "tool_result":
         output = record.output if isinstance(record.output, str) else ""
         failed = record.is_error is True
@@ -330,6 +334,12 @@ class Clean:
     def cut(self, text: str) -> str:
         """`text` with each local path cut, for the redaction's `between`."""
         return cut_local(text, self.env)
+
+    def line(self, text: str) -> str:
+        """`text` through the chat redaction on one line: between its two passes, each
+        run of whitespace becomes one space (`one_line`), then each local path is cut.
+        A tool call's summary is made with it (`shape.tool_summary`)."""
+        return self.redact(text, between=lambda middle: self.cut(one_line(middle)))
 
     def cut_known(self, text: str, known: tuple[str, ...]) -> str:
         """`text` through the chat redaction, with each of `known` (paths held whole) and
