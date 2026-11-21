@@ -693,16 +693,139 @@ def test_a_subagents_prompt_gets_no_listener_text_and_raises_no_prompt_event(
         out = ping(monkeypatch, harness, "UserPromptSubmit", {
             "session_id": "thread-1", "turn_id": "turn-2", "prompt": "fix the build"})
         assert context_of(out) == "remember the plan"
-        assert [(e.event, e.text, e.origin) for e in events] == [
-            ("prompt", "fix the build", None)]
+        assert [(e.event, e.text, e.origin, e.own) for e in events] == [
+            ("prompt", "fix the build", "composer", True)]
 
         # A guard that wants the prompts gets the main turn's, never the subagent's task.
         ping(monkeypatch, harness, "PreToolUse", pre("Bash", turn_id="turn-2"))
-        assert CALLS[-1].prompts == (Prompt(None, "fix the build"),)
+        assert CALLS[-1].prompts == (Prompt("composer", "fix the build"),)
         ping(monkeypatch, harness, "UserPromptSubmit", {
             "session_id": "thread-1", "turn_id": "turn-3", "prompt": "now ship it"})
         ping(monkeypatch, harness, "PreToolUse", pre("Bash", turn_id="turn-3"))
-        assert CALLS[-1].prompts == (Prompt(None, "now ship it"),)
+        assert CALLS[-1].prompts == (Prompt("composer", "now ship it"),)
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_prompt_the_host_handed_in_carries_no_origin_and_a_typed_one_is_composer(
+        monkeypatch, turns_env):
+    events = []
+    endpoint, harness, _ = host(turns_env, registry=prompt_registry(events))
+    try:
+        def submit(turn_id, text):
+            ping(monkeypatch, harness, "UserPromptSubmit", {
+                "session_id": "thread-1", "turn_id": turn_id, "prompt": text})
+
+        with endpoint._lock:                       # recorded, never handed on
+            digest = endpoint._new("deliver", "a digest", by="comms", senders=("ann",))
+            other = endpoint._new("steer", "other", by="comms")
+            steer = endpoint._new("steer", "steered text", by="memory")
+        harness._pending_delivery = digest.id      # the host's turn/start is out
+        submit("turn-4", "a digest")
+        harness._pending_delivery = None
+        submit("turn-4", "typed in the window")    # joins the turn; no steer handed in
+        harness._steering.update({other.id, steer.id})
+        submit("turn-4", "steered text")           # the steer whose text it is
+        submit("turn-4", "neither")                # one steer still out, no text matches
+        harness._steering.clear()
+        submit("turn-5", "a new turn")             # no delivery opened it
+        assert [(e.text, e.origin, e.own, e.delivery_by, e.delivery_senders, e.opens)
+                for e in events] == [
+            ("a digest", None, False, "comms", ("ann",), True),
+            ("typed in the window", "composer", True, None, None, False),
+            ("steered text", None, False, "memory", (), False),
+            ("neither", None, False, None, None, False),
+            ("a new turn", "composer", True, None, None, True)]
+    finally:
+        end_endpoint(endpoint)
+
+
+def prompt_facts(events):
+    return [(e.text, e.origin, e.own, e.delivery_by, e.delivery_senders, e.opens)
+            for e in events]
+
+
+def test_a_turn_start_taken_into_a_turn_already_prompted_is_the_deliverys(
+        monkeypatch, turns_env):
+    events = []
+    endpoint, harness, _ = host(turns_env, registry=prompt_registry(events))
+    try:
+        def submit(text):
+            ping(monkeypatch, harness, "UserPromptSubmit", {
+                "session_id": "thread-1", "turn_id": "turn-7", "prompt": text})
+
+        with endpoint._lock:
+            recall = endpoint._new("deliver", "a recall", by="comms",
+                                   senders=("subconscious",))
+        submit("typed first")                      # the person's turn
+        harness._pending_delivery = recall.id      # its turn/start went into that turn
+        submit("a recall")
+        submit("typed again")                      # the recall's prompt is placed already
+        harness._pending_delivery = None
+        assert prompt_facts(events) == [
+            ("typed first", "composer", True, None, None, True),
+            ("a recall", None, False, "comms", ("subconscious",), False),
+            ("typed again", "composer", True, None, None, False)]
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_prompt_landing_before_the_endpoint_opens_the_delivered_turn_is_the_deliverys(
+        monkeypatch, turns_env):
+    events = []
+    endpoint, harness, _ = host(turns_env, registry=prompt_registry(events))
+    opening = endpoint.turn_started
+
+    def late_open(turn_id, *args, **kwargs):
+        # The host has freed its waiting slot; the ledger has not opened the turn yet.
+        ping(monkeypatch, harness, "UserPromptSubmit", {
+            "session_id": "thread-1", "turn_id": turn_id, "prompt": "a recall"})
+        return opening(turn_id, *args, **kwargs)
+
+    monkeypatch.setattr(endpoint, "turn_started", late_open)
+    try:
+        with endpoint._lock:
+            recall = endpoint._new("deliver", "a recall", by="comms",
+                                   senders=("subconscious",))
+        harness._pending_delivery = recall.id
+        assert harness._report_started("turn-8", recall.id)
+        assert harness._pending_delivery is None
+        assert prompt_facts(events) == [
+            ("a recall", None, False, "comms", ("subconscious",), True)]
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_prompt_matching_no_steer_out_has_no_origin_and_no_delivery(
+        monkeypatch, turns_env):
+    events = []
+    endpoint, harness, _ = host(turns_env, registry=prompt_registry(events))
+    try:
+        def submit(text):
+            ping(monkeypatch, harness, "UserPromptSubmit", {
+                "session_id": "thread-1", "turn_id": "turn-7", "prompt": text})
+
+        with endpoint._lock:
+            one = endpoint._new("steer", "steer one", by="comms")
+            two = endpoint._new("steer", "steer two", by="comms")
+            three = endpoint._new("steer", "steer three", by="comms")
+        submit("typed first")
+        harness._steering.update({one.id})
+        submit("person mid-turn")                  # one steer out, not its text
+        harness._steering.clear()
+        harness._steering.update({two.id, three.id})
+        submit("steer two\n")                      # two out, the text arrives changed
+        submit("steer three")
+        submit("steer two")
+        submit("steer two")                        # both placed: none is out
+        harness._steering.clear()
+        assert prompt_facts(events) == [
+            ("typed first", "composer", True, None, None, True),
+            ("person mid-turn", None, False, None, None, False),
+            ("steer two\n", None, False, None, None, False),
+            ("steer three", None, False, "comms", (), False),
+            ("steer two", None, False, "comms", (), False),
+            ("steer two", "composer", True, None, None, False)]
     finally:
         end_endpoint(endpoint)
 
