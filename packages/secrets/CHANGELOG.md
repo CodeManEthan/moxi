@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `scan` and `redact` take `strict=False`. With `strict`, nothing beside a value keeps it
+  whole: no `gitleaks:allow` mark and no allowlist of any kind (line, match, secret,
+  stopword, path) is read; each rule that ends with gitleaks' end condition runs its
+  regex without it (`strictRegex` in `sets.json`, written by the generator for both
+  engines); only `high-entropy-run` and `high-entropy-slash-run` keep an entropy floor,
+  met when the value or any stretch of it from 32 to 512 characters passes, so padding
+  glued on can't pull a value under; private names drop `allowed` and the author's name
+  and email. That search does at most 2 million steps per text, and a text that needs
+  more comes back unscanned. Strict reaches every copy a scan reads past see-through
+  characters, and the fallback worker's requests for each. The defaults are unchanged.
 - `secret_path(value)`: the first path in a tool call's input that `is_secret_path`
   names, or None. Every whitespace-separated word of every string counts, split at shell
   joins, inside lists and nested objects, and inside strings that hold JSON. It is the

@@ -58,6 +58,12 @@ PIN_FIELDS = frozenset({"tag", "commit", "sha256", "fetched"})
 BROAD_FIELDS = frozenset({"requires"})
 
 
+#: gitleaks' end condition: what must follow a value for most upstream rules to match.
+#: The generator writes each rule whose regex ends with it a second regex without it,
+#: `strictRegex`, which strict mode runs.
+END_CONDITION = r"""(?:[\x60'"\s;]|\\[nr]|$)"""
+
+
 class GenerationError(Exception):
     """The rule files cannot be resolved; the message says which file and why."""
 
@@ -556,11 +562,15 @@ def _rule(table: dict, file: str, source: str) -> dict:
     keywords = _strings(table.get("keywords", []), f"rule {rid}'s keywords", file)
     tags = _strings(table.get("tags", []), f"rule {rid}'s tags", file)
     requires = _strings(table.get("requires", []), f"rule {rid}'s requires", file)
+    strict = None
+    if regex and regex.endswith(END_CONDITION) and len(regex) > len(END_CONDITION):
+        strict = _pattern(regex[:-len(END_CONDITION)], "its regex without the end condition")
     return {
         "id": rid,
         "description": table.get("description", ""),
         "source": source,
         "regex": _pattern(regex, "its regex") if regex else None,
+        "strictRegex": strict,
         "secretGroup": group,
         "entropy": float(entropy),
         "keywords": [k.lower() for k in keywords],
