@@ -447,6 +447,42 @@ def test_a_value_split_by_a_stored_cut_never_shows_in_part(db, cut):
     assert "[REDACTED:cut-edge]" in snippet
 
 
+#: A made-up base64 key holding `/`, of the shape the slash rule catches whole.
+SLASH_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzq8Lm3Vb9Rk4"
+
+
+def _stored(cut, kept):
+    """A stored text whose `cut` ("message", "tool" or "tail") split `SLASH_KEY`,
+    keeping `kept` of it next to the marker."""
+    if cut == "tail":
+        return "[... 4000 earlier characters cut] " + kept + " " + "y " * 60 + "deploy notes"
+    if cut == "message":
+        return "deploy notes " + "x " * 60 + kept + " [... 4000 more characters cut]"
+    head = "Bash(deploy the build)\nexport KEYS=" + kept
+    body = head.rjust(rows.TOOL_CHARS, "z")
+    body = "deploy notes " + body[len("deploy notes "):]
+    assert len(body) == rows.TOOL_CHARS
+    return body + " [... 4000 more characters cut]"
+
+
+@pytest.mark.parametrize("cut", ["message", "tool", "tail"])
+@pytest.mark.parametrize("split", [12, 20, 28])
+def test_a_slash_holding_key_split_by_a_stored_cut_never_shows_in_part(db, cut, split):
+    kept = SLASH_KEY[split:] if cut == "tail" else SLASH_KEY[:split]
+    text = _stored(cut, kept)
+    if cut == "tail":
+        put(db, text, table="tails")
+    else:
+        put(db, text, kind="tool" if cut == "tool" else "user",
+            writer="model" if cut == "tool" else "person")
+    result, _ = search({"words": "deploy", "results": True}, secrets=_real_secrets())
+    (snippet,) = snippets(result)
+    assert "[REDACTED:cut-edge]" in snippet
+    for n in range(len(kept) - 5):
+        assert kept[n:n + 6] not in snippet, (kept[n:n + 6], snippet)
+    assert kept[:6] not in result.text and kept[-6:] not in result.text
+
+
 def test_only_a_marker_at_the_very_end_or_start_drops_an_edge():
     mark = "[X]"
     body = "one two three " + "a" * 70 + " " + "b" * 70
