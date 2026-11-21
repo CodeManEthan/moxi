@@ -73,10 +73,11 @@ whether the digest was handled.
 (a pidfd, so a reused pid cannot stand in for it). The adapter closes its binding, which
 deregisters the name, and removes its claim socket and claim file. An adapter that dies
 first leaves its claim file (an adapter whose watch on `claude` fails keeps it too): a
-socket that answers no one under a live `claude` (`claimfile.adapter_gone`). At the
-session's next start or prompt, comms' listener sees it and starts a new adapter for the
-same session (`respawn`), which takes `claude`'s handle again, reads the claim file and
-binds the same name: no relaunch. A respawned adapter serves unbound while the daemon is
+socket that answers no one under a live `claude` (`claimfile.adapter_gone`). The daemon
+sees its connection drop and starts a new adapter for the same session at once
+(`respawn`), and the session's next start or prompt does if that one didn't bind; it
+takes `claude`'s handle again, reads the claim file and binds the same name: no
+relaunch. A respawned adapter serves unbound while the daemon is
 away and binds when it returns, and one whose bind is refused keeps the claim file, so
 the listener and `moxi comms doctor` say that mail has stopped.
 """
@@ -705,7 +706,7 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
             # The claim file stays: it is how the session and doctor learn that this
             # session's mail has stopped (`claimfile.adapter_gone`).
             log.error("this adapter is ending while claude pid %d runs: its mail stops "
-                      "until the session's next prompt starts a new one", harness_pid)
+                      "until a new one binds", harness_pid)
         adapter.stop(remove_claim_file=claude_ended)
     return 0
 

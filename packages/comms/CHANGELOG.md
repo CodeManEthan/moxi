@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The comms daemon replaces a Claude Code session's adapter that died while the session
+  runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
+  for its claim socket to stop answering, and starts a new adapter with the environment
+  `claude` started with, so mail that waited is delivered and starts a turn in an idle
+  session. At its start the daemon does the same for adapters that died while it was
+  down. Run as a systemd service, it starts the adapter in a scope of its own
+  (`systemd-run --user --scope`), outside the service's cgroup. It replaces one session's
+  adapter at most 3 times in 10 minutes. The session's next start or prompt says once
+  that its adapter had stopped, at what time, and that a new one bound it; the listener's
+  own replacement at a start or prompt stays as the fallback.
 - A Claude Code session whose comms adapter dies while the session runs gets a new one
   with no relaunch: at its next start or prompt, comms' listener starts an adapter that
   watches the same `claude`, reads the claim file and binds the same name, and says so

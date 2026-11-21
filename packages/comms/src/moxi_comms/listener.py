@@ -15,7 +15,10 @@ At either event, a session whose adapter is gone while it runs gets a new one
 (`respawn_gone_adapter`), which binds the same name again with no relaunch, and one line
 that says so, before the start's layer one and roster or the prompt's deltas, which it
 gets as any session does. When no new adapter can be started, or its bind is refused,
-the line says that mail has stopped and why.
+the line says that mail has stopped and why. The daemon replaces a gone adapter first,
+at once (`adapters.respawn`), and that adapter leaves the line in a one-shot note in the
+session's runtime directory; the next start or prompt prints it in the same place, once
+(`take_note`), unless the event started a new adapter itself and has a line of its own.
 
 **comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
 the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
@@ -62,8 +65,14 @@ MEMORY = "roster.json"
 
 def memory_path(env) -> Path | None:
     """The session's roster memory file, or None when the session has no runtime
-    directory of comms' own (a session directory the wrapper made, named for its claim
-    socket's key).
+    directory of comms' own (`session_dir_of`)."""
+    session_dir = session_dir_of(env)
+    return None if session_dir is None else session_dir / MEMORY
+
+
+def session_dir_of(env) -> Path | None:
+    """The session's runtime directory, or None when it has none of comms' own (a
+    session directory the wrapper made, named for its claim socket's key).
 
     The key is read from the socket's name, `claim-<key>.sock` in RUNTIME/comms, or,
     for a short path the core gave a socket whose path there was too long, from the
@@ -89,9 +98,29 @@ def memory_path(env) -> Path | None:
     if not key or key in (".", "..") or "/" in key:
         return None
     session_dir = sessions_dir(env) / key
-    if not session_dir.is_dir():
+    return session_dir if session_dir.is_dir() else None
+
+
+def take_note(env) -> str | None:
+    """The line a new adapter the daemon started left for this session
+    (`respawn.NOTE`), taken once: the note is renamed away before it is read, so two
+    events at once print it once, and removed. None when there is none."""
+    from .adapters.respawn import NOTE
+
+    session_dir = session_dir_of(env)
+    if session_dir is None:
         return None
-    return session_dir / MEMORY
+    taken = session_dir / f".{NOTE}.taken.{os.getpid()}"
+    try:
+        os.rename(session_dir / NOTE, taken)
+    except OSError:
+        return None
+    try:
+        return taken.read_text().strip() or None
+    except OSError:
+        return None
+    finally:
+        taken.unlink(missing_ok=True)
 
 
 def answer(event) -> str | None:
@@ -117,6 +146,9 @@ def answer(event) -> str | None:
         text, _online = shim_roster.delta(socket_path, state, env=env,
                                           timeout=QUERY_TIMEOUT)
     line = respawn_gone_adapter(env, wait_s=max(0.0, deadline - time.monotonic()))
+    note = take_note(env)
+    if line is None:
+        line = note
     if line is None:
         return text
     if text is None:
@@ -135,7 +167,6 @@ def respawn_gone_adapter(env, *, wait_s: float = QUERY_TIMEOUT) -> str | None:
     next start or prompt tries again and says the same."""
     from . import claimfile
     from .adapters import respawn
-    from .adapters.word import BOUND, OFFLINE, STARTING
     from .claimhold import CLAIM_SOCKET_ENV
 
     value = env.get(CLAIM_SOCKET_ENV)
@@ -149,19 +180,30 @@ def respawn_gone_adapter(env, *, wait_s: float = QUERY_TIMEOUT) -> str | None:
             word = respawn.respawn_adapter(env, key, record, wait_s=wait_s)
         except respawn.CannotRespawn as exc:
             return mail_stopped_line(who, f"a new one can't be started: {exc}")
-        if word is None or word[0] == STARTING:
-            return (f"comms: this session's comms adapter had stopped. A new one is "
-                    f"binding {who} again; its mail resumes once it has.")
-        code, why = word
-        if code == BOUND:
-            return (f"comms: this session's comms adapter had stopped. A new one has "
-                    f"bound {who} again, and its mail resumes.")
-        if code == OFFLINE:
-            return (f"comms: this session's comms adapter had stopped. A new one serves "
-                    f"it and binds {who} when the comms daemon is back.")
-        return mail_stopped_line(who, "a new one could not bind it: "
-                                      f"{why or 'it ended before it bound'}")
+        return respawn_line(who, word)
     return None
+
+
+def respawn_line(who: str, word, *, stopped_at: float | None = None) -> str:
+    """The line for a session whose adapter had stopped and a new one was started, by
+    the new one's word (None when it gave none in time). `stopped_at`, when the old one's
+    stop is known (the daemon's), is said as the local `HH:MM`."""
+    from .adapters.word import BOUND, OFFLINE, STARTING
+
+    stopped = "had stopped" if stopped_at is None else \
+        f"had stopped at {time.strftime('%H:%M', time.localtime(stopped_at))}"
+    if word is None or word[0] == STARTING:
+        return (f"comms: this session's comms adapter {stopped}. A new one is binding "
+                f"{who} again; its mail resumes once it has.")
+    code, why = word
+    if code == BOUND:
+        return (f"comms: this session's comms adapter {stopped}. A new one has bound "
+                f"{who} again, and its mail resumes.")
+    if code == OFFLINE:
+        return (f"comms: this session's comms adapter {stopped}. A new one serves it "
+                f"and binds {who} when the comms daemon is back.")
+    return mail_stopped_line(who, "a new one could not bind it: "
+                                  f"{why or 'it ended before it bound'}")
 
 
 def mail_stopped_line(who: str, why: str) -> str:
@@ -173,4 +215,5 @@ def mail_stopped_line(who: str, why: str) -> str:
 
 
 __all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "mail_stopped_line",
-           "memory_path", "respawn_gone_adapter"]
+           "memory_path", "respawn_gone_adapter", "respawn_line", "session_dir_of",
+           "take_note"]

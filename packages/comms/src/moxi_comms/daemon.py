@@ -360,8 +360,15 @@ class Daemon:
                  start_trim_thread: bool = True, history_path=None,
                  first_start=None, kinds=None, settings=None,
                  cache_store=cache.MISSING, serve_tools: bool = False,
-                 mcp_port: int | None = None, on_fatal=None):
+                 mcp_port: int | None = None, on_fatal=None,
+                 respawn_adapters: bool = False):
         self.record = record
+        #: What replaces a Claude session's adapter that died while `claude` runs, at
+        #: once (`adapters.respawn.Respawner`): made at `start()` when
+        #: `respawn_adapters`, which `main` passes. A daemon a test or an embedding
+        #: caller builds starts no adapter unless it asks; a test may set its own.
+        self.respawn_adapters = respawn_adapters
+        self.respawner = None
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
         self.kinds = kinds if kinds is not None else kinds_mod.load()
@@ -706,6 +713,14 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+        # boot: the daemon serves, so a Claude session whose adapter died while no daemon
+        # ran gets a new one now, with no prompt.
+        if self.respawn_adapters and self.respawner is None:
+            from .adapters.respawn import Respawner
+
+            self.respawner = Respawner(self._stop)
+        if self.respawner is not None:
+            self.respawner.sweep()
 
     def _settle_endpoint(self) -> None:
         """Serve comms' tools, or settle why not: `[mcp] enabled` and `[mcp] port`, read
@@ -1502,7 +1517,13 @@ class Daemon:
     def _deregister(self, conn) -> None:
         """A connection closed: each binding it held ends. Its handed mail not yet
         handled is queued again for the name's next binding. A peer that stopped reading
-        is dropped by `moxi.ipc` after the write deadline, and ends here the same way."""
+        is dropped by `moxi.ipc` after the write deadline, and ends here the same way.
+
+        Each ended binding whose bind named a claim goes to the respawner, outside the
+        lock and never while the daemon stops: when the claim is a Claude session's whose
+        adapter died while `claude` runs, it starts a new adapter at once, on a thread
+        of its own (`adapters.respawn.Respawner`). A bind that was refused made no
+        binding, so its connection's end comes to nothing here."""
         with self._lock:
             # The ping counters die with the connection that fed them: the next
             # process to hold this name comes in on a new connection and starts its
@@ -1541,6 +1562,10 @@ class Daemon:
             claims = {b.claim_key for b in gone if b.claim_key}
             if claims:
                 self.mcp_tokens.revoke_ended(claims)
+                with self._lock:
+                    stopping = self._stopping
+                if self.respawner is not None and not stopping:
+                    self.respawner.dropped(claims)
 
     # ------------------------------------------------------------------ the tool token
     def _mcp_token(self, conn, params: dict) -> dict:
@@ -3855,7 +3880,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
              if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
     daemon = Daemon(record, first_start=first_start, settings=settings, serve_tools=True,
-                    on_fatal=lambda why: stopping.set())
+                    on_fatal=lambda why: stopping.set(), respawn_adapters=True)
     try:
         daemon.start()
     except RuntimeError as exc:

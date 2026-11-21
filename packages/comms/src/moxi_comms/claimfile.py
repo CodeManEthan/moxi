@@ -15,8 +15,9 @@ one session, and by nothing else:
 A file is LIVE when its socket answers, or failing that when one of its `tree` roots is
 alive (the recorded pid with the recorded start time). A file whose socket answers no one
 while a `tree` root is alive is an adapter that died under a running session
-(`adapter_gone`): comms' listener starts a new adapter for that session at its next start
-or prompt (`adapters.respawn`), and `moxi comms doctor` names it until one binds. A clean shutdown deletes the file; the runtime dir is cleared at
+(`adapter_gone`): the daemon starts a new adapter for a Claude session at once, comms'
+listener at the session's next start or prompt when that one didn't bind
+(`adapters.respawn`), and `moxi comms doctor` names it until one binds. A clean shutdown deletes the file; the runtime dir is cleared at
 boot.
 """
 

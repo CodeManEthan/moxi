@@ -274,19 +274,34 @@ longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "co
 and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
 own process before it starts OpenCode's server, so it waits for no adapter's word.
 
-A Claude Code session's adapter that dies while `claude` runs is replaced with no
-relaunch. Its claim file stays, with a socket that answers no one under a live `claude`.
-At the session's next start or prompt, comms' listener sees it and starts a new adapter
-for the session. The new adapter takes a handle on the same `claude` (the claim file's
-root, its pid checked against the start time recorded there), reads the claim file, binds
-the same name and serves the same claim socket, with the tool token the session's
-environment carries. It finds the session's endpoint as any adapter does, and ends with
-`claude`. The listener waits for its word within its 1.5-second bound and gives the
-session one line, `comms: this session's comms adapter had stopped. A new one has bound
-<name> again`, before the start's layer one and roster or the prompt's roster changes,
-which the session gets as it would with its adapter alive. A daemon that is not running
-is no failure: the new adapter binds when it returns. Mail sent while the session was
-unbound waits at the daemon and is delivered once the name is bound again.
+A Claude Code session's adapter that dies while `claude` runs is replaced at once, with
+no relaunch and no prompt. Its claim file stays, with a socket that answers no one under a
+live `claude`. The daemon sees the adapter's connection drop, reads its claim socket for
+up to 10 seconds until nothing answers it (a live adapter that only lost its connection
+binds again by itself), and starts a new adapter for the session, with the environment
+`claude` started with. The new adapter takes a handle on the same `claude` (the claim
+file's root, its pid checked against the start time recorded there), reads the claim
+file, binds the same name and serves the same claim socket, with the tool token the
+session's environment carries. It finds the session's endpoint as any adapter does, and
+ends with `claude`. Its bind releases the mail that waited, and its first look at an idle
+session is a release point, so the mail starts a turn with nobody typing. A daemon that
+was not running when an adapter died does the same for it once it starts. A daemon that
+runs as a systemd service starts the new adapter in a scope of its own
+(`moxi-comms-adapter-<session id>.scope`, through `systemd-run --user --scope`), so a
+restart of the daemon's service doesn't kill it. The daemon replaces one session's adapter
+at most 3 times in 10 minutes; past that it logs once and leaves the session to its next
+prompt.
+
+The session is told at its next start or prompt, in one line before the start's layer one
+and roster or the prompt's roster changes, which it gets as it would with its adapter
+alive: `comms: this session's comms adapter had stopped at <HH:MM>. A new one has bound
+<name> again, and its mail resumes.` The new adapter leaves the line in the session's
+runtime directory and the line is printed once. When no adapter serves the session at a
+start or prompt (the daemon's cap was reached, or its new adapter couldn't bind), comms'
+listener starts one itself, waits for its word within its 1.5-second bound and says the
+same line without the time. A daemon that is not running is no failure: the new adapter
+binds when it returns. Mail sent while the session was unbound waits at the daemon and is
+delivered once the name is bound again.
 
 When no new adapter can be started (the claim file's `claude` can't be found, or the
 system has no process handle to watch it with) or the new one's bind is refused (another

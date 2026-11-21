@@ -750,11 +750,12 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
 
 
 def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
-                     ready_fd: int, *,
-                     respawned: bool = False) -> int:      # pragma: no cover - forked
+                     ready_fd: int, *, respawned: bool = False,
+                     on_word=None) -> int:                 # pragma: no cover - forked
     """The forked adapter: the session's environment, standard streams to its log, then
     `claude_adapter.serve` until `claude` has ended. `respawned` is a new adapter for a
-    session whose adapter is gone (`respawn`).
+    session whose adapter is gone (`respawn`). `on_word(code, reason)` is called with
+    every word before it is told (a respawn's `note_writer`).
 
     At its end the adapter removes the session's directory (the roster memory's) and
     sweeps its claim socket. A respawned one does so only once `claude` has ended: one
@@ -779,7 +780,17 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     from . import claude_adapter
-    say = teller(ready_fd)
+    tell = teller(ready_fd)
+
+    def say(code: str, reason: str = "") -> bool:
+        if on_word is not None:
+            try:
+                on_word(code, reason)
+            except Exception:                              # noqa: BLE001
+                logging.getLogger("comms.claude.respawn").exception(
+                    "the session's note could not be written")
+        return tell(code, reason)
+
     try:
         shim = adapter_shim(session, harness_pid)
         return claude_adapter.serve(shim, harness_pid, handle, say=say,

@@ -801,6 +801,49 @@ def test_a_killed_adapter_is_replaced_at_the_next_prompt_with_no_relaunch(
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_the_daemon_replaces_a_killed_adapter_at_once_with_no_prompt(
+        rig, fake_claude, turns_plugins):
+    """The daemon sees the dropped connection and starts a new adapter itself: it binds
+    the same name for the same `claude` before any prompt, and the session's next prompt
+    says so once, with the time the old one stopped."""
+    import signal
+    import threading
+
+    from moxi_comms import claimfile as cf
+    from moxi_comms.adapters import respawn
+
+    rig.daemon.respawner = respawn.Respawner(rig.daemon._stop, systemd_run=None)
+    script, out, release = fake_claude
+    sid = "5e55a1d0-0000-4000-8000-0000000000b6"
+    proc, adapter = start_wrapper(sid, script)
+    try:
+        assert wait_until(lambda: out.exists() and "args" in out.read_text(), timeout=15)
+        env = claude_env(proc.pid)
+        first = binding(rig)
+        os.kill(adapter, signal.SIGKILL)
+        assert wait_until(lambda: binding(rig) not in (None, first), timeout=15), \
+            "bound again with no prompt"
+        assert binding(rig).session_id == sid
+        record = cf.read(sid)
+        assert [r["pid"] for r in record["roots"]] == [proc.pid], "the same claude"
+        log = session.log_dir() / f"claude-{sid}.log"
+        assert wait_until(lambda: "respawned adapter for claude pid" in log.read_text(),
+                          timeout=10)
+        assert wait_until(lambda: not any(t.name == "comms-respawn"
+                                          for t in threading.enumerate()), timeout=15)
+        said = prompt(env)
+        assert said.startswith("comms: this session's comms adapter had stopped at "), said
+        assert f"A new one has bound {NAME} again, and its mail resumes." in said
+        said = prompt(env)
+        assert "adapter had stopped" not in said and "mail has stopped" not in said
+    finally:
+        release.touch()
+    proc.wait(timeout=15)
+    assert wait_until(lambda: binding(rig) is None, timeout=10), "it ends with claude"
+    assert wait_until(lambda: cf.read(sid) is None, timeout=10)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
 def test_a_new_adapter_whose_bind_is_refused_says_mail_has_stopped_and_why(
         rig, fake_claude, turns_plugins):
     """A new adapter that can't bind (another session took the name meanwhile) keeps

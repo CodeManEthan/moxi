@@ -49,9 +49,10 @@ def doctor_rows(env=None) -> list:
 
 def adapter_rows(*, env=None, proc=None) -> list:
     """An `adapter: <identity>` fail row for each session whose comms adapter is gone
-    while the session runs (`claimfile.gone_records`): its mail has stopped until the
-    session's next start or prompt starts a new adapter (`listener.respawn_gone_adapter`),
-    or, when none can bind, until it is relaunched."""
+    while the session runs (`claimfile.gone_records`): its mail has stopped until a new
+    adapter binds it, one the daemon starts at once (`adapters.respawn.Respawner`) or the
+    session's next start or prompt starts (`listener.respawn_gone_adapter`), or, when
+    none can bind, until it is relaunched."""
     from moxi.doctor import Row
 
     from . import claimfile

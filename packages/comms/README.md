@@ -555,7 +555,7 @@ How messages are routed, delivered and attributed is in
 - **A session got nothing.** `moxi comms explain <name>` says whether the name is bound, what
   was delivered, and whether the turn that read it completed.
 - **A session says `comms: mail has stopped`.** Its comms adapter died while the session
-  ran, and the new adapter comms started at its prompt could not bind it; the line says
+  ran, and the new adapter comms started could not bind it; the line says
   why. The next prompt tries again; relaunch the session if the cause stays. `moxi comms
   doctor` lists every session whose adapter is gone on an `adapter` line.
 - **`moxi comms doctor` says the daemon isn't answering.** `moxi doctor` shows its unit's
