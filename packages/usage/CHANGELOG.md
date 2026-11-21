@@ -16,7 +16,7 @@
   start, about as long as `--rebuild` takes over them; Codex and OpenCode are not read
   again. A transcript that pass can't read, such as one on an offline archive drive,
   keeps its old count until it is read. An older usage can't open a version 3 index.
-  usage needs the moxi-sessions that has `Batch.prompt_ids`.
+  usage now requires moxi-sessions 0.2.10, the first with `Batch.prompt_ids`.
 - The page's opened Sessions section is its table of every session of the range, read at
   once; the two lists of two-line rows (the last seven days' ten dearest with `Show`, and
   `Earlier`) and the section's `Table` toggle are gone. A session opens first in the
