@@ -391,15 +391,15 @@ def test_a_switch_that_fails_the_core_check_fails_listed_or_not(turns_env, regis
     assert [r.state for r in doctor.check() if r.name == "guard mod.sw"] == ["fail"]
 
 
-def test_a_guard_by_its_sessions_function_reads_in_the_doctors_environment(
+def test_a_guard_by_its_sessions_function_reads_in_the_doctors_env(
         turns_env, registry, guard_group):
     guard_group["entries"] = [GuardEntry("mod", [
         a_guard("yes", sessions="pkg.mod:yes", switch="mod.sw",
                 judge="nowhere_at_all.mod:judge"),
         a_guard("no", sessions="pkg.mod:no", doc="Idle guard."),
-        a_guard("bad", sessions="pkg.mod:bad")])]
+        a_guard("faulty", sessions="pkg.mod:faulty")])]
     guard_group["sessions"].update({"pkg.mod:yes": (True, None),
-                                    "pkg.mod:bad": (False, "RuntimeError: gone")})
+                                    "pkg.mod:faulty": (False, "RuntimeError: gone")})
     rows = guard_rows()
     assert "mod.yes (call step, on by its sessions function)" in rows["guards"].detail
     # On by its function alone, its switch off: no config command turns it off.
@@ -408,9 +408,9 @@ def test_a_guard_by_its_sessions_function_reads_in_the_doctors_environment(
     no = rows["guard mod.no"]
     assert (no.state, no.detail) == ("off", "Idle guard; it also runs in each session "
                                             "pkg.mod:no picks")
-    bad = rows["guard mod.bad"]
-    assert bad.state == "fail" and "sessions pkg.mod:bad reads off: RuntimeError: gone" \
-        in bad.detail
+    faulty = rows["guard mod.faulty"]
+    assert faulty.state == "fail"
+    assert "sessions pkg.mod:faulty reads off: RuntimeError: gone" in faulty.detail
 
 
 def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registry,

@@ -329,7 +329,7 @@ def test_a_sessions_function_that_reads_off_is_a_problem_listed_or_not():
     assert "reader gone" in loaded.problems[0].reason
 
 
-def test_the_default_reader_calls_the_function_with_the_sessions_environment():
+def test_the_default_reader_calls_the_function_with_the_sessions_env():
     SEEN_ENVS.clear()
     entry = Entry("mod", [data_only("g", sessions="test_guards:subconscious_on")])
     on = load([], entry, env={"TEST_GUARD_STAMP": "1"})
