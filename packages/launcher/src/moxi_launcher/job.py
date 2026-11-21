@@ -70,8 +70,9 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
 8. `relaunched`, with the new request id on the run. A director's relaunch the launch
    flagged ends `relaunched` with the finding as its word, and tells the directors. The
    `ended` event of a run that launched records what came back: the new session id, the
-   identity, the posture, the model and how it was chosen, and one read of comms' state
-   of the identity (`held` once the new session has bound it).
+   identity, the posture, the model and how it was chosen, and comms' state of the
+   identity, read every 2 s for up to 60 s until the new session has bound it (`held`)
+   or a read fails (`unreadable: <why>`, comms offline included).
 
 **A stop signal before step 3 ends the run `stopped`; from step 3 on it is recorded and
 deferred until step 6 has been tried.** **A job acts only while its run is open**: right
@@ -178,6 +179,9 @@ NOT_SETTLED = "not-settled"
 HOLD_TRIES, HOLD_RETRY_S = 5, 1.0
 #: How often the name wait asks comms again, in seconds.
 NAME_POLL_S = 0.5
+#: How long a relaunch waits for its new session to bind the comms name, and how often it
+#: asks, in seconds.
+BIND_WAIT_S, BIND_POLL_S = 60.0, 2.0
 #: How long a compact waits after a refusal of turns' before it reads the session again.
 RETRY_S = 5.0
 #: How often, and how many times, a job tries its run's first read.
@@ -983,16 +987,10 @@ class RelaunchJob:
 
     def came_back(self, result: Any, request: Any) -> dict[str, Any]:
         """What the relaunch came back as, for the `ended` event: the new session id, the
-        identity, the posture, the model pin, and comms' one read of the identity after
-        the respawn (`held` once the new session has bound it; None without comms or a
-        name)."""
-        row, comms = self.row, self.comms
-        state = None
-        if row.identity and comms is not None:
-            try:
-                state = comms.identity_state(row.identity, scope=row.scope or None).state
-            except Exception as exc:  # noqa: BLE001  (an unread state is said so)
-                state = f"unreadable: {_words(exc)}"
+        identity, the posture, the model pin, and comms' state of the identity after the
+        respawn (`wait_for_bind`; None without comms or a name)."""
+        row = self.row
+        state = self.wait_for_bind() if row.identity and self.comms is not None else None
         found = self.pin
         return {"session_id": getattr(result, "session_id", None),
                 "identity": row.identity or None,
@@ -1000,6 +998,25 @@ class RelaunchJob:
                 "model": found.model if found is not None else None,
                 "model_how": found.how if found is not None else None,
                 "identity_state": state}
+
+    def wait_for_bind(self) -> str:
+        """comms' state of the row's identity once the new session has bound it (`held`),
+        asked every `BIND_POLL_S` for up to `BIND_WAIT_S`: the last state read when the
+        bound passes, or `unreadable: <why>` as soon as a read fails or comms is offline.
+        "Not bound" and "could not be read" stay two answers."""
+        row, comms = self.row, self.comms
+        deadline = self.clock() + BIND_WAIT_S
+        while True:
+            try:
+                read = comms.identity_state(row.identity, scope=row.scope or None)
+            except Exception as exc:  # noqa: BLE001  (an unread state is said so)
+                return f"unreadable: {_words(exc)}"
+            state = read.state
+            if state == "offline":
+                return f"unreadable: {getattr(read, 'reason', None) or 'comms is offline'}"
+            if state == "held" or self.clock() >= deadline:
+                return state
+            self.sleep(BIND_POLL_S)
 
     # -- the end ------------------------------------------------------------------------
 

@@ -1343,6 +1343,62 @@ def test_a_relaunch_records_what_came_back(conn, state):
         "model": "opus", "model_how": "row", "identity_state": state}
 
 
+class SlowBind(FakeComms):
+    """comms whose name is free at the name step, then binds on the `bind_at`th read
+    after the launch ran, or whose reads after it fail with `error`."""
+
+    def __init__(self, bind_at=None, error=None, *, offline=False):
+        super().__init__()
+        self.bind_at, self.error, self.offline = bind_at, error, offline
+        self.launched, self.reads = False, 0
+
+    def identity_state(self, name, scope=None):
+        if not self.launched:
+            return SimpleNamespace(state="free")
+        self.reads += 1
+        if self.error is not None:
+            raise self.error
+        if self.offline:
+            return SimpleNamespace(state="offline", reason="the daemon is not running")
+        bound = self.bind_at is not None and self.reads >= self.bind_at
+        return SimpleNamespace(state="held" if bound else "free")
+
+
+def came_back_with(conn, comms):
+    run = arm(conn, mode="director")
+
+    def launch(request):
+        comms.launched = True
+        return launched_result(session_id="new-sid")
+
+    got = go(conn, run, comms=comms, launch=launch)
+    assert got.outcome == "relaunched"
+    return got, ended_detail(conn, run)["identity_state"]
+
+
+def test_a_relaunch_waits_for_the_new_session_to_bind_its_name(conn):
+    comms = SlowBind(bind_at=3)
+    got, state = came_back_with(conn, comms)
+    assert state == "held" and comms.reads == 3
+    assert got.job.sleep.__self__.slept.count(job.BIND_POLL_S) == 2
+
+
+def test_a_relaunch_stops_waiting_for_the_bind_at_its_bound(conn):
+    comms = SlowBind()
+    got, state = came_back_with(conn, comms)
+    assert state == "free" and comms.reads > 1
+    waited = got.job.sleep.__self__.slept.count(job.BIND_POLL_S) * job.BIND_POLL_S
+    assert 0 < waited <= job.BIND_WAIT_S
+
+
+@pytest.mark.parametrize("comms, said", [
+    (SlowBind(error=RuntimeError("socket closed")), "unreadable: socket closed"),
+    (SlowBind(offline=True), "unreadable: the daemon is not running")])
+def test_a_bind_read_that_fails_is_unreadable_not_unbound(conn, comms, said):
+    _, state = came_back_with(conn, comms)
+    assert state == said and comms.reads == 1
+
+
 def test_a_relaunch_without_comms_records_no_identity_state(conn):
     run = arm(conn)
     got = go(conn, run)

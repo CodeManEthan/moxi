@@ -342,25 +342,27 @@ An agent making the call gives Bash a timeout of at least `relaunch.follow_s` pl
 since Bash's own default is shorter. The job reads the session's cache again just before
 the exit, so a session that warmed up since the call is left alone (`held`, `warm`). A
 relaunch that came back names its identity, slot, new session, posture and model, and
-whether comms has bound the name. A director named without a scope is read in the
-launch's own scope.
+whether comms has bound the name, waiting up to 60 s for the bind, or that comms could
+not be read. A director named without a scope is read in the launch's own scope.
 
     moxi launcher relaunch --status RUN
     moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
 
-`--status` shows a run and its events, what it waits on first, and exits as the run
-ended: 0 relaunched, 75 held or still running, 1 any other end. `--stop` stops an armed run:
-before the exit the run ends `stopped` and a self run's session is told; from the exit
-on, the run ends once the relaunch has been tried. A repair's session is down already,
-so a stop of a repair is recorded and the run ends once its launch has been tried. A
-relaunch that exited the session and failed to start the new one tells the session's
-directors (or the comms identity in `relaunch.fallback`) through comms, naming the
-command that repairs it: `--from-record` starts the session again from the run's record,
-in its slot, or the lowest free one when someone outside the session's own line of
-launches has taken it. It refuses when the slot already runs the relaunched session, and when the session itself is
-still live. A run left at the exit dialog (`exit-pending`) can be repaired too, once a
-person has answered the dialog and the session has exited.
+`--status` shows a run and its events, what it waits on first, and exits as the run ended:
+0 relaunched, 75 held or still running, 1 any other end. A run still open whose job is
+gone will get no end: `--status` says so and exits 1, naming `--from-record` when its
+record shows an exit, as it does for a run left at the exit dialog. `--stop` stops an
+armed run: before the exit the run ends `stopped` and a self run's session is told; from
+the exit on, the run ends once the relaunch has been tried. A repair's session is down
+already, so a stop of a repair is recorded and the run ends once its launch has been
+tried. A relaunch that exited the session and failed to start the new one tells the
+session's directors (or the comms identity in `relaunch.fallback`) through comms, naming
+the command that repairs it: `--from-record` starts the session again from the run's
+record, in its slot, or the lowest free one when someone outside the session's own line of
+launches has taken it. It refuses when the slot already runs the relaunched session, and
+when the session itself is still live. A run left at the exit dialog (`exit-pending`) can
+be repaired too, once a person has answered the dialog and the session has exited.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
 exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,

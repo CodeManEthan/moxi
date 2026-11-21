@@ -57,9 +57,15 @@
   a person has answered the dialog and the session has exited; its notice names the
   command.
 - `relaunch --status RUN` exits as the run ended: 0 relaunched, 75 held or still running,
-  1 any other end. Its lines go to stdout whatever the code.
+  1 any other end. Its lines go to stdout whatever the code. A run still open whose job is
+  gone says it has no end coming and exits 1, and it, like a run left at the exit dialog,
+  names the `--from-record` command when a repair would take it.
 - A director's relaunch that came back names the identity, slot, new session, posture,
   model and whether comms has bound the name, in its line and in the run's `ended` event.
+  The job waits up to 60 s for the bind, and a comms read that fails says `unreadable`,
+  not "not yet bound".
+- The armed text, the dry run and the came-back line say how the model was chosen in
+  words: "pinned from your transcript", "the row's", or "default:" and the reason.
 - The armed text names the model the session comes back on and ends "End your turn now
   and make no further tool call."
 - A self relaunch's handoff must be UTF-8 text and not blank, and when the session's

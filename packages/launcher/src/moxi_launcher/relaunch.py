@@ -51,9 +51,11 @@ cache installed, a session whose cache is warm or fresh is refused `warm` (it ca
 mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
 written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
 past that it exits 75 naming `--status`. A relaunch that came back says the identity, the
-slot, the new session, the posture, the model and whether comms has bound the name. An
+slot, the new session, the posture, the model and whether comms has bound the name
+within 60 s, or could not be read. An
 agent runs the call with a Bash timeout of at least `relaunch.follow_s` plus 30 s.
-`--status` exits as the call would: by the run's end, 75 while it runs.
+`--status` exits as the call would: by the run's end, 75 while it runs, and 1 for an
+open run whose job is gone, which no end will come to.
 
 **A stop** (`--stop`) sends the job of an open relaunch or repair run SIGTERM: before the
 exit the run ends `stopped` and a self run's session is told by a note; from the exit on,
@@ -106,6 +108,10 @@ ARMED = ("armed {run}: this session exits once its turn has ended and nobody has
          "pane or\nsent it a message for {person}; then it comes back in slot {slot} with "
          "your handoff,\non {model} ({how}). `moxi launcher relaunch --status {run}` shows "
          "what it is waiting on.\nEnd your turn now and make no further tool call.")
+
+#: What the job records as comms' state of the identity when its read failed, before
+#: the reason.
+UNREADABLE = "unreadable:"
 
 #: Stands for a seam the verb looks up itself.
 LOOK: Any = object()
@@ -164,7 +170,7 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             if dry_run:
                 return Result(exits.OK, (f"would arm a relaunch of session {sid} in slot "
                                          f"{row.slot}, handoff {path}",
-                                         _would(chosen)),
+                                         _would(chosen, whose="your")),
                               data={**data, "outcome": "dry-run", "launch_check": "passes"})
             run_id = store.new_run_id()
             run = store.insert_run(
@@ -176,10 +182,10 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             failed = start_job(c, run, "relaunch", api, env)
             if failed is not None:
                 return failed
+            model, how = model_words(chosen.model, chosen.how, whose="your")
             text = ARMED.format(run=run.run_id, slot=row.slot,
                                 person=_span(float(current["relaunch.person_s"])),
-                                model=chosen.model or "the harness's default model",
-                                how=chosen.how)
+                                model=model, how=how)
             return Result(exits.OK, tuple(text.splitlines()), run,
                           {**data, "run_id": run.run_id, "outcome": "armed"})
         finally:
@@ -333,7 +339,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                           env=env)
             if dry_run:
                 return Result(exits.OK, (f"would relaunch session {sid} in slot {row.slot} "
-                                         f"for {caller}", _would(chosen)),
+                                         f"for {caller}", _would(chosen, whose="its")),
                               data={**data, "outcome": "dry-run", "launch_check": "passes"})
             run_id = store.new_run_id()
             run = store.insert_run(
@@ -444,26 +450,44 @@ def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
 # -- status ------------------------------------------------------------------------------
 
 
-def status(run_id: str, *, conn: sqlite3.Connection | None = None) -> Result:
+def status(run_id: str, *, conn: sqlite3.Connection | None = None,
+           slots_api: Any | None = None) -> Result:
     """The run and its events, the latest `wait` first. It exits as a director's call
     that followed the run would: an ended run by its outcome (`outcome_result`), an open
-    one 75."""
+    one 75. An open run whose job is gone (`store.run_stale`) has no end coming: it says
+    so and exits 1. That run, and one ended `exit-pending`, also names the `--from-record`
+    command when a repair would take it."""
     with _store(conn) as c:
         run = store.get_run(c, run_id)
         if run is None:
             raise Refused("no-run", f"there is no run {run_id}", "check the run id")
         events = store.run_events(c, run_id)
+    stale = store.run_stale(run, lambda j: job.gone(j, slots_api=slots_api))
     waits = [e for e in events if e.kind == "wait"]
     latest = waits[-1] if waits else None
     lines = [run_line(run, _ended(events))]
-    if latest is not None:
+    repair = f"moxi launcher relaunch --from-record {run_id}"
+    if stale:
+        lines.append(f"the run has no end and its job {run.job or '(none)'} is not running")
+        outcome, word = store.JOB_GONE
+        if job.repairable(replace(run, state="ended", outcome=outcome, word=word), events):
+            lines.append(f"its session was already down: {repair} tries the repair again"
+                         if run.mode == "repair" else
+                         f"its record shows an exit: {repair} launches the session again "
+                         "once it has exited")
+    elif run.outcome == "exit-pending":
+        lines.append(f"the session was left at its exit dialog: {repair} launches it again "
+                     "once a person has answered the dialog and the session has exited")
+    if latest is not None and not stale:
         lines.append(f"waiting on: {latest.detail.get('word')}: "
                      f"{latest.detail.get('detail')} (since {latest.at})")
     lines += [f"{e.at} {e.kind}{_detail(e.detail)}" for e in events]
     data = {"run": run.as_json(), "outcome": run.outcome or run.state,
             "wait": None if latest is None else {"at": latest.at, **latest.detail},
-            "events": [{"at": e.at, "kind": e.kind, "detail": e.detail} for e in events]}
-    code = exits.TEMPFAIL if run.open else outcome_result(run).exit_code
+            "events": [{"at": e.at, "kind": e.kind, "detail": e.detail} for e in events],
+            "job_gone": stale}
+    code = (exits.ERROR if stale else exits.TEMPFAIL if run.open
+            else outcome_result(run).exit_code)
     return Result(code, tuple(lines), run, data)
 
 
@@ -522,7 +546,7 @@ def run_line(run: store.Run, ended: Mapping[str, Any] | None = None) -> str:
     """One line for a run: what it is, and where it stands or how it ended. A director's
     run that relaunched its session, with its `ended` event's detail, says what came
     back: the identity, the slot, the new session, the posture, the model and whether
-    comms has bound the name."""
+    comms has bound the name or could not be read."""
     if run.mode == "director" and run.outcome == "relaunched" and ended:
         return _came_back_line(run, ended)
     what = f"run {run.run_id}: {run.kind} ({run.mode}) of session {run.session_id}"
@@ -544,13 +568,16 @@ def _came_back_line(run: store.Run, ended: Mapping[str, Any]) -> str:
     who = ended.get("identity") or f"session {run.session_id}"
     slot = f" in slot {run.slot}" if run.slot else ""
     session = ended.get("session_id") or "not known yet"
-    model = ended.get("model") or "the harness's default model"
+    model, how = model_words(ended.get("model"), ended.get("model_how"), whose="its")
     said = (f"run {run.run_id}: relaunched {who}{slot} as session {session}, posture "
-            f"{ended.get('posture') or 'with:' + run.actor}, model {model} "
-            f"({ended.get('model_how') or 'not read'})")
+            f"{ended.get('posture') or 'with:' + run.actor}, model {model} ({how})")
     state = ended.get("identity_state")
-    if state:
-        said += "; comms bound" if state == "held" else "; comms not yet bound"
+    if state == "held":
+        said += "; comms bound"
+    elif isinstance(state, str) and state.startswith(UNREADABLE):
+        said += f"; comms unreadable ({state[len(UNREADABLE):].strip() or 'no detail'})"
+    elif state:
+        said += "; comms not yet bound"
     if run.word:
         said += f"; flagged {run.word}"
         if run.detail:
@@ -781,10 +808,24 @@ def _launch_check(row: store.LaunchRow, session_id: str, chosen: pin.Pin,
                       str(refused.hint or "fix that, then try again"))
 
 
-def _would(chosen: pin.Pin) -> str:
+def _would(chosen: pin.Pin, *, whose: str) -> str:
     """A dry run's line on the model and the launch check."""
-    model = chosen.model or "the harness's default model"
-    return f"it would come back on {model} ({chosen.how}); its launch check passes"
+    model, how = model_words(chosen.model, chosen.how, whose=whose)
+    return f"it would come back on {model} ({how}); its launch check passes"
+
+
+def model_words(model: str | None, how: str | None, *, whose: str) -> tuple[str, str]:
+    """The model a relaunch comes back on and how it was chosen, in words: `pinned` is
+    "pinned from <whose> transcript", `row` "the row's", `default:<reason>` "default:
+    <reason>" with the harness's default model, and no `how` "not read"."""
+    if how == pin.PINNED:
+        return str(model), f"pinned from {whose} transcript"
+    if how == pin.ROW:
+        return str(model or "the row's model"), "the row's"
+    if not how:
+        return model or "the harness's default model", "not read"
+    reason = how.partition(":")[2] if how.startswith(f"{pin.DEFAULT}:") else how
+    return model or "the harness's default model", f"{pin.DEFAULT}: {reason}"
 
 
 def _no_open_run(conn: sqlite3.Connection, row: store.LaunchRow, api: Any) -> None:
