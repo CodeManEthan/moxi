@@ -282,6 +282,18 @@ def test_an_unlisted_root_outside_the_cut_s_roots_shows_no_full_path():
     assert not shows_a_piece_of_the_token(result.text)
 
 
+def test_an_unlisted_reason_cuts_the_home_folder_start_was_given(monkeypatch):
+    monkeypatch.setenv("HOME", "/elsewhere/me")
+    roots = [{"harness": "codex", "root": "/srv/codex/sessions",
+              "reason": "/data/me/.cache/codex/lock cannot be read", "parts": None}]
+    newest, _ = fake_newest([], roots)
+    sessions, provider = built(newest=newest)
+    asyncio.run(sessions.start({"HOME": "/data/me"}))
+    result, _ = call(provider, "list_sessions", {})
+    assert result.structured["unlisted"][0]["reason"] == "lock cannot be read"
+    assert "/data/me" not in result.text
+
+
 @pytest.mark.parametrize("since", ["yesterday", "2026", "12x"])
 def test_a_since_that_is_no_time_refuses(since):
     newest, _ = fake_newest([])
