@@ -537,9 +537,11 @@ value does; it is always at the global scope: a project scope is never carried. 
 there is no such name, and for any harness but Codex, a seat named for one of its
 project's agents that sets no identity is filled with its own name, else a project of
 kind `agent` with its own key, any other with its `lead`, or with `<key>-lead` when
-comms lists that name; `Default` on the line names it. Under the box, `Run again` lists
-up to three earlier launches there; pointing at one shows what a click runs today, and
-one click runs it again where the button places a launch.
+comms lists that name; `Default` on the line names it. A filled identity comms refuses a
+launch under (held by a live session, reserved or retired) shows comms' refusal beside
+it, in the item's list and under its row, as the launch would meet it. Under the box,
+`Run again` lists up to three earlier launches there; pointing at one shows what a click
+runs today, and one click runs it again where the button places a launch.
 
 **The Sessions row on Home.** Under the box, the row `Sessions` says how many launched
 sessions are running (`3 running`), and shows nothing when none is. Click it to open the

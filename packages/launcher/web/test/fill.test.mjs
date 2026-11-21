@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BY_DEFAULT, CHIP_ROWS, filledAt, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
-  harnessStep, keptFill, lastKey, lastValue, lastWhen, parseLast, WHOSE, withoutFill,
+  BY_DEFAULT, CHIP_ROWS, filledAt, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
+  harnessStep, keptFill, lastKey, lastValue, lastWhen, parseLast, refusalNote, WHOSE, withoutFill,
 } from "../src/fill-model.ts";
 import { changes, offRows, turnedOn, valueNow, withOption } from "../src/options-model.ts";
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
@@ -70,7 +70,8 @@ test("an answer of the last launch is read, and one that is not one is not", () 
     values: [{ name: "model", value: "opus", items: null }, { name: "add_dir", value: null, items: ["/work/a"] }],
     identities: [],
   });
-  const identities = [{ harness: "claude", identity: "scout", at: AT }, { harness: "codex", identity: "cdx", at: null }];
+  const identities = [{ harness: "claude", identity: "scout", at: AT, refused: null },
+                       { harness: "codex", identity: "cdx", at: null, refused: null }];
   assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], identities }),
                    { state: "up", detail: null, at: null, harness: null, values: [], identities });
   assert.equal(parseLast({ state: "up" }), null);
@@ -103,7 +104,7 @@ test("the harness of the last launch fills only where the form leaves the harnes
 /** `/api/last`'s answer with no launch: the default identity `name`, for `harnesses`. */
 const defaultOf = (name, harnesses = ["claude"]) => parseLast({
   state: "up", detail: null, at: null, harness: null, values: [],
-  identities: harnesses.map((harness) => ({ harness, identity: name, at: null })),
+  identities: harnesses.map((harness) => ({ harness, identity: name, at: null, refused: null })),
 });
 const IDENTITY = field("identity", { group: "seat", sub: "Comms", label: "Comms identity" });
 const SCOPE = field("scope", { group: "seat", sub: "Comms", label: "Comms scope" });
@@ -132,8 +133,8 @@ test("the identity filled is the one for the form's harness, whatever harness th
     values: [{ name: "model", value: "gpt-5", items: null }, { name: "identity", value: "stale", items: null }],
     identities,
   });
-  const last = answer([{ harness: "claude", identity: "scout", at: "2026-11-09T08:00:00Z" },
-                       { harness: "codex", identity: "cdx", at: AT }]);
+  const last = answer([{ harness: "claude", identity: "scout", at: "2026-11-09T08:00:00Z", refused: null },
+                       { harness: "codex", identity: "cdx", at: AT, refused: null }]);
   // `[defaults]` sets Claude: the Codex launch's values don't fill, Claude's identity does.
   const pinned = formOf("claude", ["harness", "claude", "defaults"], ["model", null], ["identity", null], ["scope", null]);
   assert.equal(harnessStep(last, pinned), "none");
@@ -141,7 +142,7 @@ test("the identity filled is the one for the form's harness, whatever harness th
   assert.deepEqual(fill, { identity: "scout" });
   // It says when the Claude launch that bound it was made, or that it is the default.
   assert.equal(filledAt(last, fill, "claude"), "2026-11-09T08:00:00Z");
-  const fallback = answer([{ harness: "claude", identity: "boss", at: null }]);
+  const fallback = answer([{ harness: "claude", identity: "boss", at: null, refused: null }]);
   assert.deepEqual(fillOf(fallback, filledFields(catalog, pinned, NO_PRESET), pinned), { identity: "boss" });
   assert.equal(filledAt(fallback, { identity: "boss" }, "claude"), null);
   // A form drawn for Codex fills Codex's, never an identity from the values.
@@ -150,6 +151,21 @@ test("the identity filled is the one for the form's harness, whatever harness th
   assert.deepEqual(both, { model: "gpt-5", identity: "cdx" });
   assert.equal(filledAt(last, both, "codex"), AT);
   assert.deepEqual(fillOf(fallback, filledFields(catalog, codex, NO_PRESET), codex), { model: "gpt-5" });
+});
+
+test("comms' refusal of the identity filled is shown beside it while it stays filled", () => {
+  const held = { code: "identity-taken", row: "identity", problem: "identity boss is held by slot 1",
+                 hint: "pick another identity, or wait until that session ends" };
+  const given = parseLast({ state: "up", detail: null, at: null, harness: null, values: [],
+                            identities: [{ harness: "claude", identity: "boss", at: null, refused: held },
+                                         { harness: "codex", identity: "cdx", at: null, refused: { code: "x" } }] });
+  assert.deepEqual(given.identities.map((row) => row.refused), [held, null]);
+  assert.deepEqual(filledRefusal(given, { identity: "boss" }, "claude"), held);
+  assert.equal(refusalNote(held), "identity boss is held by slot 1. pick another identity, or wait until that session ends.");
+  // Cleared, edited, or for another harness: nothing to show.
+  assert.equal(filledRefusal(given, {}, "claude"), null);
+  assert.equal(filledRefusal(given, { identity: "mine" }, "claude"), null);
+  assert.equal(filledRefusal(given, { identity: "boss" }, "codex"), null);
 });
 
 test("a value fills only a row the form has, shows here and leaves at its shipped default", () => {

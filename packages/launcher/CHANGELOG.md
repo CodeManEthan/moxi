@@ -10,7 +10,9 @@
   fills a default: a seat named for one of its project's agents that sets no identity
   gets its own name, else a project of kind `agent` its own key, else the project's
   `lead`, else `<key>-lead` when comms lists that name. `/api/last` answers the identity
-  apart from the values, once for each harness, in `identities`.
+  apart from the values, once for each harness, in `identities`. A filled identity comms
+  refuses a launch under shows comms' refusal beside it, as Core's desk showed why a
+  default couldn't launch; each identity in `/api/last` carries it as `refused`.
 - `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
   --session ID [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs
   did; they run the same ask cache's timer starts. `clear-expired --session ID` asks only

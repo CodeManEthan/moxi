@@ -29,7 +29,8 @@
 
 import type { FieldDescriptor, FormValue } from "/m/ui/client.js";
 
-import { isListField, same, shownValue } from "./panel.ts";
+import type { Refusal } from "./feed.ts";
+import { isListField, refusalOf, same, shownValue } from "./panel.ts";
 import type { Form } from "./panel.ts";
 import { dangerNames, panelFields, rowLabel } from "./options-model.ts";
 import type { Mode, PanelField } from "./options-model.ts";
@@ -72,11 +73,13 @@ export interface LastValue {
 }
 
 /** The comms identity a form drawn for `harness` fills with: the name the newest launch of that
- * harness bound, made `at`, else the default, with a null `at`. */
+ * harness bound, made `at`, else the default, with a null `at`; `refused` is comms' refusal of a
+ * launch under it, null when comms lets one through. */
 export interface LastIdentity {
   harness: string;
   identity: string;
   at: string | null;
+  refused: Refusal | null;
 }
 
 /** `/api/last`'s answer: when the launch was made and its harness, both null with no launch,
@@ -102,7 +105,8 @@ export function parseLast(data: unknown): Last | null {
                        : null }));
   const identities = (Array.isArray(data.identities) ? data.identities : [])
     .filter((row): row is Fields => isTable(row) && typeof row.harness === "string" && typeof row.identity === "string")
-    .map((row) => ({ harness: row.harness as string, identity: row.identity as string, at: text(row.at) }));
+    .map((row) => ({ harness: row.harness as string, identity: row.identity as string, at: text(row.at),
+                     refused: refusalOf(row.refused) }));
   return { state: data.state, detail: text(data.detail), at: text(data.at), harness: text(data.harness), values,
            identities };
 }
@@ -251,6 +255,20 @@ export function fillFace(rows: readonly FillRow[]): { text: string; danger: bool
 export function filledAt(last: Last, filled: Readonly<Record<string, FormValue>>, harness: string): string | null {
   if (Object.keys(filled).some((name) => !IDENTITY_ROWS.includes(name))) return last.at;
   return identityFor(last, harness)?.at ?? null;
+}
+
+/** comms' refusal of a launch under the identity filled, for a form drawn for `harness`: shown
+ * beside the name, as the launch would meet it; null when none is filled, or comms lets it
+ * through. */
+export function filledRefusal(last: Last, filled: Readonly<Record<string, FormValue>>,
+                              harness: string): Refusal | null {
+  const found = identityFor(last, harness);
+  return found !== null && filled.identity === found.identity ? found.refused : null;
+}
+
+/** A refusal in a sentence: what is wrong, then what to do. */
+export function refusalNote(found: Refusal): string {
+  return found.hint ? `${found.problem}. ${found.hint}.` : `${found.problem}.`;
 }
 
 /** Whose last launch the line names, as the item's sentence says it. */

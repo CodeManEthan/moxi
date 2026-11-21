@@ -48,6 +48,11 @@ function refusal(value: Refusal): Refusal {
   return { code: value.code, row: text(value.row), problem: value.problem, hint: text(value.hint) ?? "" };
 }
 
+/** `value` read as a refusal; null when it is not one. */
+export function refusalOf(value: unknown): Refusal | null {
+  return isRefusal(value) ? refusal(value) : null;
+}
+
 // --- the catalog and the presets -------------------------------------------------------
 
 /** One harness's form: the launcher's rows, then the harness's own. */

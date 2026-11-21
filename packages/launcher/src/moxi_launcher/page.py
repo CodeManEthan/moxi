@@ -166,8 +166,10 @@ HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
                 items=Out("list", items=Out("string", mark="redact"), nullable=True))
 #: The comms identity a form drawn for `harness` fills with: the name the newest launch of
 #: that harness bound, made `at`, unless comms reports it retired; else the default, with
-#: a null `at`.
-LAST_IDENTITY = _table(harness=_text(), identity=_text(), at=_text(nullable=True))
+#: a null `at`. `refused` is comms' refusal of a launch under that name, null when it
+#: lets one through.
+LAST_IDENTITY = _table(harness=_text(), identity=_text(), at=_text(nullable=True),
+                       refused=Out("table", items=REFUSAL.items, nullable=True))
 #: The newest launch of the key asked for: when it was made, its harness, and each value
 #: its own request gave for a row that may be filled from an earlier launch but the comms
 #: identity and scope, which `identities` gives for each harness that has one. `at` and

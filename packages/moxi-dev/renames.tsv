@@ -3625,11 +3625,13 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
-launcher	packages/launcher/src/moxi_launcher/page.py	"harnesses": Out("list", items=Out("string"), nullable=True)}	keep	nullable	nullable
+launcher	packages/launcher/src/moxi_launcher/page.py	#: a null `at`. `refused` is comms' refusal of a launch under that name, null when it	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/page.py	refused=Out("table", items=REFUSAL.items, nullable=True))	keep	nullable	nullable
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"folder": os.path.basename(os.path.normpath(found.cwd))},	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"refused": None if refused is None else _refused(refused)}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"refused": None, "save": None, **answer}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	(`made_again`), and a request the launcher refuses now, is answered `refused`."""	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	**The stream** carries two topics, `sessions` (every live launch's state) and `launches`	keep	sessions	sessions
@@ -4459,12 +4461,16 @@ launcher	packages/launcher/tests/test_page_keep_warm.py	return body["refused"]	k
 launcher	packages/launcher/tests/test_page_keep_warm.py	session_id=sid, actor="launcher", state="acting",	use	actor=	by=
 launcher	packages/launcher/tests/test_page_keep_warm.py	session_id=sid, actor="launcher", state="armed",	use	actor=	by=
 launcher	packages/launcher/tests/test_page_keep_warm.py	super().__init__(deadline=joiner.JOIN_BUDGET_S, clock=lambda: self.now,	keep	deadline	deadline
+launcher	packages/launcher/tests/test_page_last.py	"refused": None}]	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	-	name	test_recents_are_the_seats_else_the_projects_else_the_folders	test_recents_are_the_seats_else_the_projects_else_the_dirs
 launcher	packages/launcher/tests/test_page_last.py	-	name	test_the_last_launch_is_the_seats_else_the_projects_else_the_folders	test_the_last_launch_is_the_seats_else_the_projects_else_the_dirs
+launcher	packages/launcher/tests/test_page_last.py	assert [entry["refused"] for entry in last(project="proj-a")["identities"]] == [None, None]	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	assert not never & set(values)	keep	set	set
 launcher	packages/launcher/tests/test_page_last.py	assert not set(FIRST_TURN) & {v["name"] for v in asked["values"]}	keep	set	set
 launcher	packages/launcher/tests/test_page_last.py	assert not {"name", "sources", "filled"} & set(row.values)	keep	set	set
 launcher	packages/launcher/tests/test_page_last.py	assert not {"target", "slot"} & set(handed["values"])	keep	set	set
+launcher	packages/launcher/tests/test_page_last.py	assert said["claude"]["refused"] == {	keep	refused	refused
+launcher	packages/launcher/tests/test_page_last.py	assert said["codex"]["refused"] is None	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	assert said["refused"] is None	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	assert said["refused"] is None and said["shows"]["model"] == "opus"	keep	refused	refused
 launcher	packages/launcher/tests/test_page_last.py	assert said["refused"] is None, said["refused"]	keep	refused	refused

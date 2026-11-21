@@ -76,15 +76,17 @@
 // it. A launch whose permission rows are not all at the user's usual values says so in its
 // request, and each such row is one of those the lines under and above the box name.
 //
-// The piece reads `/api/last` when it connects and whenever what the line above the box names
-// changes (a place picked, a seat applied or taken off), never on a launch, so nothing fills
-// under the user's hands; an answer for a key the line no longer names fills nothing. The
-// values that launch gave fill the rows the form leaves at their shipped defaults, the
-// harness first, and `From last launch` on the line above the box names them, with `Clear`
-// for each in its list and under its row in the panel. A filled value is not a change; one
-// the user edits becomes his, and leaves the item. A filled value that can do harm asks
-// nothing and stays after a launch. The button is off until the fill is read and made, and
-// the request names each filled row.
+// The piece reads `/api/last` when it connects and whenever what the line above the box
+// names changes (a place picked, a seat applied or taken off), never on a launch, so
+// nothing fills under the user's hands; an answer for a key the line no longer names fills
+// nothing. The values that launch gave fill the rows the form leaves at their shipped
+// defaults, the harness first, and `From last launch` on the line above the box names them,
+// with `Clear` for each in its list and under its row in the panel. A filled value is not a
+// change; one the user edits becomes his, and leaves the item. A filled value that can do
+// harm asks nothing and stays after a launch. A filled comms identity comms refuses a
+// launch under (held, reserved, retired) shows comms' refusal beside it, in the list and
+// under its row. The button is off until the fill is read and made, and the request names
+// each filled row.
 //
 // `Run again` under the box lists the recent launches of what the line names, read when the
 // piece connects, when what the line names changes, and on every event of the topic
@@ -144,8 +146,8 @@ import type {
 } from "./options-model.ts";
 
 import {
-  BY_DEFAULT, CLEAR, filledAt, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast, HARNESS_ROW,
-  harnessStep, keptFill, lastKey, lastWhen, parseLast, withoutFill,
+  BY_DEFAULT, CLEAR, filledAt, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
+  HARNESS_ROW, harnessStep, keptFill, lastKey, lastWhen, parseLast, refusalNote, withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -317,6 +319,7 @@ const STYLES = css`
   .fr .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
   .fr.dg .d, .fr.dg > span { color: var(--moxi-danger); }
   .fr button, .came button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .fr .nref { grid-column: 1 / -1; margin: 2px 0 0; }
   .fnote { margin: 6px 0 0; padding: 9px 14px 10px; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim);
            font-size: 13px; line-height: 18px; }
   .came { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--moxi-text-dim);
@@ -1099,6 +1102,14 @@ export class LauncherPrompt extends LitElement {
         this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
   }
 
+  /** comms' refusal of the filled identity, under the row `name` names when it is the identity;
+   * nothing when comms lets it through. */
+  #refusedBeside(name: string) {
+    const found = name === "identity" && this.last !== null
+      ? filledRefusal(this.last, this.#fill, this.#form?.harness ?? "") : null;
+    return found === null ? nothing : html`<p class="nref" data-refused=${found.code}>${refusalNote(found)}</p>`;
+  }
+
   /** When the launch the fill came from was made; null for a default identity. */
   get #fillAt(): string | null {
     return this.last === null ? null : filledAt(this.last, this.#fill, this.#form?.harness ?? "");
@@ -1125,7 +1136,7 @@ export class LauncherPrompt extends LitElement {
         class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu fill" data-menu="fill">
         ${rows.map((row) => html`<div class=${row.danger ? "fr dg" : "fr"} data-fill=${row.name}><span>${row.label}</span><span
           class="d">${row.text}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-          @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`)}
+          @click=${() => this.#clear(row.name)}>${CLEAR}</button>${this.#refusedBeside(row.name)}</div>`)}
         <p class="fnote">${fillNote(this.last.key, this.#lastWhen, rows.length)}</p></div>` : nothing}</span>`;
   }
 
@@ -1578,13 +1589,14 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Under a value filled from the last launch: when that launch was made, and `Clear`; in
-   * the warning colour for a value that can do harm. */
+   * the warning colour for a value that can do harm. Under a filled identity comms refuses a
+   * launch under, comms' refusal. */
   #fromLast(row: PanelRow) {
     const fill = this.#fill;
     if (!Object.hasOwn(fill, row.name) || this.last === null) return nothing;
     return html`<div class=${isDanger(row.field, fill[row.name]) ? "came dg" : "came"} data-from=${row.name}><span>${
       fromLast(this.#lastWhen)}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`;
+      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>${this.#refusedBeside(row.name)}`;
   }
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.

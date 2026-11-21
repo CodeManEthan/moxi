@@ -75,7 +75,8 @@ the one for the harness it is drawn for, whatever harness the newest launch ran.
 harness it is the name of the newest launch of that harness that bound one, skipping one
 still spawning, where a project's launches include those made through its seats, unless
 comms reports that name retired, and its scope is always the empty one, which comms
-reads as global: a project scope is never carried. With no such name, and for any
+reads as global: a project scope is never carried. Each carries comms' refusal of a
+launch under it, if any, so the page shows the name with why it can't launch. With no such name, and for any
 harness but Codex, it is the default (`default_identity`): on a seat named for one of
 its project's agents that sets no identity, the seat's own name; else a project of kind
 `agent`'s own key; else the project's `lead`; else `<key>-lead`, only when comms lists
@@ -1523,23 +1524,40 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
     `found` (newest first) of what `query` asks for (`key`): the name the newest launch of
     that harness bound (`binding_launch`) and when that launch was made, unless comms
     reports that name retired; else, for a harness in `DEFAULT_HARNESSES`,
-    `default_identity` with no time. A harness whose identity row is not carried, or that
-    has neither, is left out; the scope is the empty one, which comms reads as global."""
+    `default_identity` with no time. Each carries comms' refusal of a launch under that
+    name (`comms_refusal`), null when comms lets it through. A harness whose identity row
+    is not carried, or that has neither, is left out; the scope is the empty one, which
+    comms reads as global."""
     out: list[dict[str, Any]] = []
     unbound: list[str] = []
+    said: dict[str, catalog.Refused | None] = {}
+
+    def refusal_of(name: str) -> catalog.Refused | None:
+        if name not in said:
+            said[name] = comms_refusal(name)
+        return said[name]
+
     for harness in catalog.HARNESSES:
         if not getattr(catalog.row(harness, "identity"), "carry", False):
             continue
         row = binding_launch(found, harness)
         name = _bare(row.identity) if row is not None else ""
-        if row is not None and name and not _retired(name):
-            out.append({"harness": harness, "identity": name, "at": row.created_at})
+        refused = refusal_of(name) if name else None
+        if row is not None and name and getattr(refused, "state", None) != "retired":
+            out.append(_identity(harness, name, row.created_at, refused))
         elif harness in DEFAULT_HARNESSES:
             unbound.append(harness)
     default = default_identity(query, *key) if unbound else None
     if default is not None:
-        out += [{"harness": harness, "identity": default, "at": None} for harness in unbound]
+        refused = refusal_of(default)
+        out += [_identity(harness, default, None, refused) for harness in unbound]
     return out
+
+
+def _identity(harness: str, name: str, at: str | None,
+              refused: catalog.Refused | None) -> dict[str, Any]:
+    return {"harness": harness, "identity": name, "at": at,
+            "refused": None if refused is None else _refused(refused)}
 
 
 def _bare(identity: str | None) -> str:
@@ -1547,14 +1565,15 @@ def _bare(identity: str | None) -> str:
     return (identity or "").split("@", 1)[0]
 
 
-def _retired(name: str) -> bool:
-    """Whether comms' `identity_state` reports `name`, at the global scope, retired; False
-    when comms is not installed, has no such check, or can't say."""
+def comms_refusal(name: str) -> catalog.Refused | None:
+    """comms' refusal of a launch under `name` at the global scope (`identity.check`), as
+    a launch meets it: held, reserved, retired, not a name a launch can claim, or comms
+    not answering; None when comms lets it through, is not installed, or can't be
+    asked at all."""
     try:
-        state = identity.ask(name, None, joiner.comms_api())
-    except Exception:  # noqa: BLE001  (comms can't say: the name stands)
-        return False
-    return getattr(state, "state", None) == "retired"
+        return identity.check(name, None, joiner.comms_api())
+    except Exception:  # noqa: BLE001  (comms can't say: nothing to show)
+        return None
 
 
 def binding_launch(found: list[store.LaunchRow], harness: str) -> store.LaunchRow | None:

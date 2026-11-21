@@ -529,15 +529,17 @@ def comms_listing(monkeypatch, *names: str) -> None:
                         lambda: SimpleNamespace(roster=lambda: roster))
 
 
-def comms_retiring(monkeypatch, *retired: str, listed: tuple[str, ...] = ()) -> list:
-    """comms installed, its `identity_state` reporting `retired` names retired and every
-    other name free, its roster listing `listed`; the names asked about, with their
-    scopes."""
+def comms_saying(monkeypatch, states: dict[str, str] | None = None, *,
+                 listed: tuple[str, ...] = ()) -> list:
+    """comms installed, its `identity_state` reporting each name in `states` in its state
+    there and every other name free, its roster listing `listed`; the names asked about,
+    with their scopes."""
     asked = []
 
     def identity_state(name, scope=None):
         asked.append((name, scope))
-        return SimpleNamespace(state="retired" if name in retired else "free")
+        return SimpleNamespace(state=(states or {}).get(name, "free"), qualified=name,
+                               holder="slot 1", reason=None)
 
     roster = SimpleNamespace(bound=(), standing=tuple(SimpleNamespace(name=n) for n in listed))
     monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: SimpleNamespace(
@@ -600,7 +602,7 @@ def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monke
     bound("older", "scout")
     bound("newer", "ghost@proj-a", "proj-a")
     bound("codex", "ghost")
-    asked = comms_retiring(monkeypatch, "ghost", listed=("proj-a-lead",))
+    asked = comms_saying(monkeypatch, {"ghost": "retired"}, listed=("proj-a-lead",))
     said = last(project="proj-a")
     # Asked at the global scope the form fills; the older launch's name is not reached.
     assert ("ghost", None) in asked
@@ -608,7 +610,7 @@ def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monke
     # Codex has no default to fall to.
     assert identity_of(said, "codex") is None
     # A name comms doesn't report retired stands, and so does one it can't say about.
-    comms_retiring(monkeypatch)
+    comms_saying(monkeypatch)
     assert identity_of(last(project="proj-a")) == "ghost"
 
     def down(name, scope=None):
@@ -619,6 +621,24 @@ def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monke
     assert identity_of(last(project="proj-a"), "codex") == "ghost"
 
 
+def test_each_identity_carries_comms_refusal_of_a_launch_under_it(world, monkeypatch):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    comms_saying(monkeypatch, {"boss": "held"})
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # The name stays, with comms' words beside it, as a launch under it would meet them.
+    assert said["claude"]["identity"] == "boss"
+    assert said["claude"]["refused"] == {
+        "code": "identity-taken", "row": "identity", "problem": "identity boss is held by slot 1",
+        "hint": "pick another identity, or wait until that session ends"}
+    assert said["codex"]["refused"] is None
+    # Without comms there is nothing to say.
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: None)
+    assert [entry["refused"] for entry in last(project="proj-a")["identities"]] == [None, None]
+
+
 def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
                                                                         monkeypatch):
     assert last(project="proj-a")["values"] == []
@@ -627,7 +647,8 @@ def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
     comms_listing(monkeypatch, "proj-a-lead")
     said = last(project="proj-a")
     assert (said["at"], said["harness"], said["values"]) == (None, None, [])
-    assert said["identities"] == [{"harness": "claude", "identity": "proj-a-lead", "at": None}]
+    assert said["identities"] == [{"harness": "claude", "identity": "proj-a-lead", "at": None,
+                                   "refused": None}]
     world.projects["proj-a"].lead = "boss"
     assert identity_of(last(project="proj-a")) == "boss"
     # A folder has no default.
