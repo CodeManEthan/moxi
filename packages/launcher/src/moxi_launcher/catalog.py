@@ -49,6 +49,12 @@ the catalog's own:
     offered_with
              another launcher row: this row is offered only when that one is set off its
              default
+    fork     what a fork of a session (`moxi launcher fork`) does with the row, which
+             every row names, so a row added later is classed before it ships: `copy`,
+             the value as the parent ran it, for a row that shapes the request the
+             harness sends; `drop`, the row unset, for a row about who the session is,
+             what its first turn says, or how it lives and ends; `own`, the row composed
+             again for the fork, for a row the launcher composes for each launch itself
 
 The modes are Claude's `interactive` (`claude`) and `print` (`claude -p`), and Codex's
 `interactive` (`codex`), `exec` (`codex exec`) and `host` (turns' Codex host, and comms'
@@ -170,7 +176,7 @@ TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
 OWN_FIELDS = ("flag", "aliases", "repeatable", "optional_value", "variadic", "modes",
               "items", "owned", "posture", "since", "hidden", "requires", "condition",
-              "when", "offered_with")
+              "when", "offered_with", "fork")
 #: What the browser's launch options read of a row: where it is drawn, what it is called,
 #: which of its values can hurt, and what it needs to be drawn or typed.
 PANEL_FIELDS = ("group", "sub", "label", "danger", "carry", "shown_with", "typed_with")
@@ -178,6 +184,8 @@ FIELDS = KEY_FIELDS + OWN_FIELDS + PANEL_FIELDS
 #: The groups a row is drawn in, in the order they are drawn. A `model` row is drawn with
 #: the harness and the model, not among the options.
 GROUPS = ("model", "access", "tools", "seat", "runs-in", "lifecycle", "config")
+#: What a fork does with a row (the `fork` field): copy it, drop it, or compose it again.
+FORK_CLASSES = ("copy", "drop", "own")
 #: The fields of one value's table under `when`.
 WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
 #: The harnesses whose sessions cache's timer asks about: it keeps clock records for
@@ -451,6 +459,7 @@ class Row:
     carry: bool = True
     shown_with: tuple[str, ...] = ()
     typed_with: str | None = None
+    fork: str = "own"
 
     @property
     def required(self) -> tuple[str, ...]:
@@ -823,14 +832,15 @@ def _row(name, spec, harness, source) -> Row:
             raise bad("is offered_with itself")
     if flags["owned"] and flags["posture"]:
         raise bad("is both owned and a posture row")
+    fork = spec.get("fork")
     panel = _panel(spec, kind, values, bad)
 
     built = Row(name=name, harness=None if harness == LAUNCHER else harness, type=kind,
                 default=default, doc=doc, values=values, env=env, retired=retired,
                 flag=flag, aliases=tuple(aliases), modes=modes, items=items,
                 since=since, requires=requires, condition=condition,
-                when=MappingProxyType(when), offered_with=offered_with, **panel,
-                **flags)
+                when=MappingProxyType(when), offered_with=offered_with, fork=fork,
+                **panel, **flags)
     if retired is None:
         try:
             checked = (built.check(default) if not (kind == "path" and default == "")
@@ -839,6 +849,9 @@ def _row(name, spec, harness, source) -> Row:
             raise bad(f"has a default that does not fit: {exc.problem}") from None
         if kind == "enum" and default != "" and checked not in values:
             raise bad("has a default outside its values")
+    if fork not in FORK_CLASSES:
+        raise bad(f"has no fork class; class it {', '.join(FORK_CLASSES)}" if fork is None
+                  else f"has fork {fork!r}; class it {', '.join(FORK_CLASSES)}")
     return built
 
 
