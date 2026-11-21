@@ -822,7 +822,7 @@ def test_a_repair_flagged_by_its_launch_tells_the_directors(conn):
 
 
 class PinSessions:
-    """sessions' `find` and `last_request`, the newest request naming each model of
+    """sessions' `find` and `records_back`, the newest request naming each model of
     `models` in turn, the last one from then on."""
 
     def __init__(self, *models):
@@ -831,11 +831,10 @@ class PinSessions:
     def find(self, harness, session_id, *, root=None):
         return SimpleNamespace(hits=(SimpleNamespace(source="s0", compressed=False),))
 
-    def last_request(self, source):
+    def records_back(self, source, *, kinds=None):
         self.reads += 1
         model = self.models[0] if len(self.models) == 1 else self.models.pop(0)
-        return SimpleNamespace(request=SimpleNamespace(model=model, response_model=None,
-                                                       time=1.0))
+        return iter([SimpleNamespace(model=model, response_model=None, time=1.0)])
 
 
 def no_model(conn):

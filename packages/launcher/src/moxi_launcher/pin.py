@@ -5,17 +5,19 @@
 A launch whose values name a `model` keeps it (`how` `row`), and nothing is read. Any
 other launch is pinned to the model its session last used: sessions' reader finds the
 session's transcript under the root the launch writes to (`joiner.transcripts_root`),
-reads the newest request of each source it finds (a synthetic request passed over), and
-takes the newest of those by its time, a request whose time is unknown ranking below any
-with one and the later source winning a tie. The model is the request's `model`, else its
-`response_model`, as written, date suffix and all (`how` `pinned`).
+reads each source it finds back from its newest request, within sessions' own back limit,
+and stops at the first request that names a model: a request naming neither `model` nor
+`response_model`, one off the source's own chain, and a synthetic one are passed over.
+Of those, one per source, it takes the newest by its time, a request whose time is unknown
+ranking below any with one and the later source winning a tie. The model is the request's
+`model`, else its `response_model`, as written, date suffix and all (`how` `pinned`).
 
 The id is pinned only when it is one token of a model id's shape (`ID_SHAPE`); no list of
 models is asked. Otherwise, and when nothing can be read, the launch runs the harness's
 default model, and `how` is `default:` with the reason: `no-sessions` (sessions is not
 installed or does not load), `transcript-unreadable` (the session was not found, every
-source found is compressed, or none could be read), `no-model-line` (the newest request
-names no model) or `bad-id` (the id read is not of a model id's shape).
+source found is compressed, or none could be read), `no-model-line` (no request read
+names a model) or `bad-id` (the id read is not of a model id's shape).
 
 The pin goes to the relaunch alone: `api.ReplayRequest.model_pin` sets the new launch's
 model only when the stored values name none, and the new row's values keep the stored
@@ -111,8 +113,8 @@ def choose(row: store.LaunchRow, session_id: str | None, *, sessions: Any = LOOK
 
 def read_model(sessions: Any, row: store.LaunchRow, session_id: str | None,
                env: Mapping[str, str]) -> str | Pin:
-    """The model the session's newest request names, or the default pin saying why there
-    is none."""
+    """The model the session's newest request naming one names, or the default pin saying
+    why there is none."""
     from . import joiner
 
     if not session_id:
@@ -122,29 +124,54 @@ def read_model(sessions: Any, row: store.LaunchRow, session_id: str | None,
         found = sessions.find(row.harness, session_id, root=root)
     except Exception:  # noqa: BLE001  (a find that fails is a transcript not read)
         return default(TRANSCRIPT_UNREADABLE)
-    newest: tuple[tuple[int, float], Any] | None = None
+    read_any = False
+    newest: tuple[tuple[int, float], str] | None = None
     for hit in found.hits:
         if hit.compressed:
             continue
         try:
-            request = sessions.last_request(hit.source).request
+            named = _newest_named(sessions, hit.source)
         except Exception:  # noqa: BLE001  (a source that can't be read is passed over)
             continue
-        if request is None:
-            newest = newest or ((-1, 0.0), None)
+        read_any = True
+        if named is None:
             continue
-        rank = _rank(request)
+        rank = _rank(named[0])
         if newest is None or rank >= newest[0]:
-            newest = (rank, request)
-    if newest is None:
-        return default(TRANSCRIPT_UNREADABLE)
-    request = newest[1]
-    if request is None:
-        return default(NO_MODEL_LINE)
+            newest = (rank, named[1])
+    if newest is not None:
+        return newest[1]
+    return default(NO_MODEL_LINE if read_any else TRANSCRIPT_UNREADABLE)
+
+
+def _newest_named(sessions: Any, source: Any) -> tuple[Any, str] | None:
+    """The source's newest request on its own chain that names a model, and that model;
+    None when none does. A synthetic request is passed over. Raises what the read
+    raises."""
+    own_chain_only = getattr(source, "agent_id", None) is None
+    back = sessions.records_back(source, kinds=("request",))
+    try:
+        for request in back:
+            if own_chain_only and getattr(request, "sidechain", None) is True:
+                continue
+            if getattr(request, "synthetic", None) is True:
+                continue
+            model = _named(request)
+            if model is not None:
+                return request, model
+        return None
+    finally:
+        close = getattr(back, "close", None)
+        if close is not None:
+            close()
+
+
+def _named(request: Any) -> str | None:
+    """The request's `model`, else its `response_model`; None when neither names one."""
     for value in (getattr(request, "model", None), getattr(request, "response_model", None)):
         if isinstance(value, str) and value and value != SYNTHETIC:
             return value
-    return default(NO_MODEL_LINE)
+    return None
 
 
 def _rank(request: Any) -> tuple[int, float]:

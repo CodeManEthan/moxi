@@ -378,7 +378,7 @@ def test_a_directors_call_needs_no_self_recycle(conn):
 
 
 class PinSessions:
-    """sessions' `find` and `last_request`, the newest request naming `model`."""
+    """sessions' `find` and `records_back`, the newest request naming `model`."""
 
     def __init__(self, model):
         self.model, self.asked = model, []
@@ -387,9 +387,8 @@ class PinSessions:
         self.asked.append(session_id)
         return SimpleNamespace(hits=(SimpleNamespace(source="s0", compressed=False),))
 
-    def last_request(self, source):
-        return SimpleNamespace(request=SimpleNamespace(model=self.model, response_model=None,
-                                                       time=1.0))
+    def records_back(self, source, *, kinds=None):
+        return iter([SimpleNamespace(model=self.model, response_model=None, time=1.0)])
 
 
 def drop_model(conn):

@@ -44,7 +44,8 @@ def claude_transcript(tmp_path) -> ClaudeTranscript:
 
 
 class Sessions:
-    """sessions' `find` and `last_request` over hits and requests made up here."""
+    """sessions' `find` and `records_back` over hits and requests made up here: one entry
+    of `requests` per hit, a request or a list of them, newest first."""
 
     def __init__(self, hits=(), requests=(), *, find_error=None, read_error=None):
         self.hits = [SimpleNamespace(source=f"s{n}", compressed=compressed)
@@ -59,14 +60,17 @@ class Sessions:
             raise self.find_error
         return SimpleNamespace(hits=tuple(self.hits))
 
-    def last_request(self, source):
+    def records_back(self, source, *, kinds=None):
+        assert kinds == ("request",)
         if self.read_error is not None:
             raise self.read_error
-        return SimpleNamespace(request=self.requests[int(source[1:])])
+        held = self.requests[int(source[1:])]
+        return iter(held if isinstance(held, list) else [held])
 
 
-def request(model=None, response_model=None, time=None):
-    return SimpleNamespace(model=model, response_model=response_model, time=time)
+def request(model=None, response_model=None, time=None, *, synthetic=None, sidechain=None):
+    return SimpleNamespace(model=model, response_model=response_model, time=time,
+                           synthetic=synthetic, sidechain=sidechain)
 
 
 def test_a_row_that_names_a_model_keeps_it_and_reads_nothing(conn, tmp_path):
@@ -127,6 +131,40 @@ def test_a_request_with_a_time_outranks_one_without_and_a_tie_goes_to_the_later_
 def test_the_response_model_stands_in_for_a_request_naming_none(conn, tmp_path):
     seen = Sessions(hits=(False,), requests=(request(response_model="claude-x-1"),))
     assert pin.choose(row_of(conn, tmp_path), SID, sessions=seen).model == "claude-x-1"
+
+
+def test_a_newest_request_naming_no_model_gives_way_to_an_older_one_that_does(
+        conn, tmp_path):
+    seen = Sessions(hits=(False,), requests=([request(time=9.0), request(time=8.0,
+                                                                         synthetic=True),
+                                              request("claude-x-1", time=7.0)],))
+    got = pin.choose(row_of(conn, tmp_path), SID, sessions=seen)
+    assert got == pin.Pin("claude-x-1", "pinned", "claude-x-1")
+
+
+def test_a_sidechain_request_on_a_main_transcript_is_passed_over(conn, tmp_path):
+    seen = Sessions(hits=(False,), requests=([request("side", time=9.0, sidechain=True),
+                                              request("main", time=7.0)],))
+    assert pin.choose(row_of(conn, tmp_path), SID, sessions=seen).model == "main"
+
+
+def test_the_newest_named_request_of_each_source_is_ranked_by_its_time(conn, tmp_path):
+    seen = Sessions(hits=(False, False), requests=(
+        [request(time=20.0), request("old-source", time=10.0)],
+        [request("new-source", time=15.0)]))
+    assert pin.choose(row_of(conn, tmp_path), SID, sessions=seen).model == "new-source"
+
+
+def test_a_real_claude_transcript_passes_back_over_a_request_naming_no_model(
+        conn, tmp_path, sessions):
+    t = claude_transcript(tmp_path)
+    t.user("go")
+    t.assistant("working", model="claude-opus-5-5")
+    t.user("again")
+    t.assistant("still working", model="")
+    t.write()
+    got = pin.choose(row_of(conn, tmp_path), SID, sessions=sessions, env={})
+    assert got.model == "claude-opus-5-5"
 
 
 def test_no_sessions_runs_the_default(conn, tmp_path):
