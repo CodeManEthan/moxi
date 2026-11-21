@@ -3302,6 +3302,7 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	handoff_dir, launch = read.f
 launcher	packages/launcher/src/moxi_launcher/cli.py	handoffs = verbs.add_parser("handoffs", help="list a key's handoffs",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	handoffs.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="allow a permission row that differs from your default")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="resume with no first turn, a go launch too; takes no brief")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="arm a relaunch of the session this runs in")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="launch again the session the run RUN exited")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="leave the catalog row ROW out of this launch, whatever "	keep	help	help
@@ -4187,6 +4188,8 @@ launcher	packages/launcher/tests/test_cli_acts.py	assert json.loads(out)["outcom
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((None,), {"dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((SID,), {"dry_run": False}), ((None,), {"dry_run": True})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": False})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert any("Build it." in word for word in execs[-1])	keep	any	any
+launcher	packages/launcher/tests/test_cli_acts.py	assert not any("Build it." in word or word.startswith("Brief from launcher")	keep	any	any
 launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME
@@ -4603,7 +4606,8 @@ launcher	packages/launcher/tests/test_page_resume.py	store.insert(conn, request_
 launcher	packages/launcher/tests/test_page_resume.py	assert said == {"refused": None, "command": f"moxi launcher resume {SID} --brief "	keep	refused	refused
 launcher	packages/launcher/tests/test_page_resume.py	refused = resumed({"session": SID})["refused"]	keep	refused	refused
 launcher	packages/launcher/tests/test_page_resume.py	assert requested("r9")["refused"]["code"] == "posture-brief"	keep	refused	refused
-launcher	packages/launcher/tests/test_page_resume.py	"refused": None, "command": f"moxi launcher resume {OTHER}"}	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	"refused": None, "command": f"moxi launcher resume {OTHER} --plain"}	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	"refused": None, "command": f"moxi launcher resume {SID} --plain"}	keep	refused	refused
 launcher	packages/launcher/tests/test_page_resume.py	assert any("Build it." in word for word in rig.calls("start")[-1]["argv"])	keep	any	any
 launcher	packages/launcher/tests/test_page_resume.py	assert not any("Build it." in word or word.startswith("Brief from launcher")	keep	any	any
 launcher	packages/launcher/tests/test_page_running.py	"folder": "proj-a"}	keep	folder	folder

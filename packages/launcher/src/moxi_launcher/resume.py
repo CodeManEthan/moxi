@@ -3,7 +3,7 @@ again where it left off.
 
     sessions()                     # sessions: one entry per launch, newest first
     resume(session_id)             # resume SESSION_ID [--slot N] [--brief TEXT | --brief-file
-                                   #   FILE]: launch it again, resumed
+                                   #   FILE | --plain]: launch it again, resumed
 
 **The list** is the launch log's, one entry per launch, newest first, each with the id the
 launch was last known by (after a clear or a compaction it is not the one it started
@@ -21,9 +21,9 @@ is not sent again. A brief given to the resume (`--brief` or `--brief-file`, one
 its first turn, sent as a launch sends its own (`first`). The start posture rules it as it
 rules a launch's (`presets.check_resume_brief`): a resume of a `go` launch needs one, since
 a resumed session does not wake itself either, and a resume under `with:<identity>` takes
-none. A caller that asks for a plain resume (`plain`, which Home's `Continue the last
-session` sends with an empty box; the command line has no flag for it) resumes a `go`
-launch with no brief too, and with no first turn. It keeps the session id it resumes,
+none. A caller that asks for a plain resume (`plain`: the command line's `--plain`, which
+takes no brief, and what Home's `Continue the last session` sends with an empty box)
+resumes a `go` launch with no brief too, and with no first turn. It keeps the session id it resumes,
 and that id then belongs to the new launch, so every later act on the id finds the new
 launch. A Codex launch with a comms name resumes like any other: its replay runs
 comms' Codex wrapper with the wrapper's own flags and then `--resume <thread id>`, and the

@@ -18,8 +18,9 @@ from moxi import exit as codes
 from moxi import modules
 
 import launcher_fake_turns as fake_turns
-from moxi_launcher import (cli, exits, keepwarm, relaunch, resume, slots, state, store, target,
-                           targets)
+from launcher_fake_harness import Harness
+from moxi_launcher import (api, cli, exits, keepwarm, relaunch, resume, slots, state, store,
+                           target, targets)
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -117,7 +118,8 @@ PARSES = [
     (["sessions"], {"verb": "sessions", "limit": None, "before": None, "json": False}),
     (["sessions", "--limit", "2", "--json"], {"limit": 2, "json": True}),
     (["resume", SID], {"verb": "resume", "session_id": SID, "slot": None, "brief": None,
-                       "brief_file": None}),
+                       "brief_file": None, "plain": False}),
+    (["resume", SID, "--plain"], {"plain": True, "brief": None, "brief_file": None}),
     (["resume", SID, "--slot", "4"], {"slot": "4"}),
     (["resume", SID, "--brief", "Carry on."], {"brief": "Carry on.", "brief_file": None}),
     (["resume", SID, "--brief-file", "b.md"], {"brief": None, "brief_file": "b.md"}),
@@ -608,9 +610,11 @@ def test_resume_hands_the_slot_and_the_warn_printer_over(monkeypatch, capsys):
     status, out, _ = run(["resume", SID, "--slot", "4"], capsys)
     assert (status, out) == (codes.OK, "launch r9 started in slot 4\n")
     assert seen == [((SID,), {"slot": "4", "brief": None, "brief_file": None,
-                              "warn": cli._warn})]
+                              "plain": False, "warn": cli._warn})]
     run(["resume", SID], capsys)
     assert seen[-1][1]["slot"] is None
+    run(["resume", SID, "--plain"], capsys)
+    assert (seen[-1][1]["plain"], seen[-1][1]["brief"]) == (True, None)
 
 
 def test_resume_hands_its_brief_over_and_reads_a_brief_file_from_where_it_runs(
@@ -664,6 +668,46 @@ def test_resume_of_a_go_launch_with_no_brief_is_refused_and_writes_nothing(conn,
     assert "give the resume --brief or --brief-file" in err
     status, _, err = run(["resume", SID, "--brief", "Go.", "--brief-file", "/b.md"], capsys)
     assert status == codes.USAGE and "both brief and brief_file are given" in err
+    assert [r.request_id for r in store.log(conn)] == ["r1"]
+
+
+def test_a_plain_resume_of_a_go_launch_starts_with_no_first_turn(conn, capsys, tmp_path,
+                                                                 monkeypatch):
+    """Through the real verb into this terminal: `--plain` resumes a `go` launch with no
+    brief, and the resumed session gets no first turn, its launch's own brief included."""
+    Harness.on_path(tmp_path, monkeypatch)
+    execs = []
+    monkeypatch.setattr(targets, "_execve",
+                        lambda command, argv, env: execs.append(argv))
+    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    api.launch(api.LaunchRequest(typed={"posture": "go", "brief": "Build it."},
+                                 cwd=str(work), request_id="r1", session_id=SID,
+                                 actor="ann"))
+    # The launch's session has ended: its recorded process is not running.
+    conn.execute("UPDATE launches SET pid_started = 1.0 WHERE request_id = 'r1'")
+    assert any("Build it." in word for word in execs[-1])
+    status, _, err = run(["resume", SID], capsys)
+    assert status == codes.REFUSED and "[posture-brief]" in err.splitlines()[0]
+    assert len(execs) == 1
+    status, _, err = run(["resume", SID, "--plain"], capsys)
+    assert status == codes.OK, err
+    argv = execs[-1]
+    assert argv[1:3] == ["--resume", SID]
+    assert not any("Build it." in word or word.startswith("Brief from launcher")
+                   for word in argv), argv
+    new = store.resolve(conn, SID)
+    assert (new.resume_of, new.brief) == ("r1", None)
+
+
+@pytest.mark.parametrize("given", [["--brief", "Go."], ["--brief-file", "/b.md"]])
+def test_a_plain_resume_with_a_brief_is_refused_and_writes_nothing(given, conn, capsys):
+    """A plain resume sends nothing, so a brief beside `--plain` is refused."""
+    launched(conn, values={"posture": "go"})
+    status, out, err = run(["resume", SID, "--plain", *given], capsys)
+    assert status == codes.USAGE and out == ""
+    assert err.splitlines()[0].endswith("[bad-value]") and "--plain" in err
     assert [r.request_id for r in store.log(conn)] == ["r1"]
 
 

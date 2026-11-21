@@ -142,9 +142,9 @@ default, there is no line.
   not wake itself either, so a resume of a `go` launch needs a brief (`--brief` or
   `--brief-file`), and is refused without one (`posture-brief`). That holds for the
   session a `go` launch was relaunched into too: a resume reads the posture the launch was
-  configured with, not the `relaunched` or `with:` one its relaunch started on. Home's
-  `Continue the last session` with an empty box is the one resume that takes none: it
-  resumes the session with no first turn.
+  configured with, not the `relaunched` or `with:` one its relaunch started on. A plain
+  resume takes none: `moxi launcher resume --plain`, and Home's `Continue the last
+  session` with an empty box, resume the session with no first turn.
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
@@ -387,11 +387,13 @@ where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 `TERM_PROGRAM_VERSION`) and nothing else of your shell's. The launch's own brief is not
 sent again. `--brief TEXT` or `--brief-file FILE` (one of them, the file read as a launch's
 is) is sent as the resumed session's first turn, the way a launch sends its brief. The
-start posture rules it as it rules a launch's: a resume of a `go` launch with neither is
-refused before anything starts (`posture-brief`), and so is a brief under
+start posture rules it as it rules a launch's: a resume of a `go` launch with neither, and
+without `--plain`, is refused before anything starts (`posture-brief`), and so is a brief under
 `with:<identity>`. The posture is the one the launch was configured with, so a `go`
 launch's relaunch resumes as `go`, and the resumed launch shows `go` as its posture, not
-the `relaunched` or `with:` one its relaunch started on. Under any other posture the brief is optional. Liveness is checked again
+the `relaunched` or `with:` one its relaunch started on. Under any other posture the brief is optional.
+`--plain` resumes with no first turn under any posture, a `go` launch's too, and takes no
+brief: with `--brief` or `--brief-file` it is refused (`bad-value`, exit 2). Liveness is checked again
 as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the
@@ -545,9 +547,9 @@ handoff from a file, and offers to continue your last session in the place on th
 with `Scratch` on the line there is none to continue. A continue sends the box's text as
 the resume's brief, or the brief file while one is set, and the box empties once the
 resume starts, as after a launch. An empty box sends no brief and resumes the session
-with no first turn, a `go` session too: the page and the command line refuse that for a
-`go` session, Home's continue does not. A session that ran in a terminal gives its resume
-command to copy as the page does, and the command line keeps its rule when you run it. A
+with no first turn, a `go` session too, where the page refuses that for a `go` session. A
+session that ran in a terminal gives its resume command to copy as the page does; from an
+empty box the command carries `--plain`, so it resumes the same way when you run it. A
 slot or headless launch is
 previewed and handed to a detached job as on the page, and a line under the box says
 where it started, or why it failed or was refused. A terminal launch is not run: its
@@ -665,7 +667,7 @@ nothing has used it for a while.
 | `moxi launcher exit-session SESSION_ID [--dry-run] [--json]` | exit a launched session |
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
-| `moxi launcher resume SESSION_ID [--slot N] [--brief TEXT \| --brief-file FILE]` | launch a past session again, resumed, the brief its first turn |
+| `moxi launcher resume SESSION_ID [--slot N] [--brief TEXT \| --brief-file FILE \| --plain]` | launch a past session again, resumed, the brief its first turn; with `--plain`, none |
 | `moxi launcher clear-expired [--session ID] [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, or of the one whose current session is ID, now |
 | `moxi launcher keep-warm --session ID [--dry-run] [--json]`, `keep-warm --dry-run [--json]` | the keep-warm ask of one session now; with `--dry-run` alone, of every live launch keep-warm is on for |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |

@@ -127,8 +127,8 @@ its liveness can't be read, the brief doesn't fit (both given, none for a `go` l
 is not `plain`, one under `with:<identity>`), or a relaunch, exit or recycle under way owns it (an open run
 whose job still runs). A launch that ran in a terminal is not resumed here: the
 answer is the `moxi launcher resume <id>` command to copy, with its `--brief` or
-`--brief-file`, since run here it would take the
-server's place. A slot launch is resumed by the same detached job as a launch: a request
+`--brief-file`, or `--plain` for a `plain` resume with neither, since run here it would
+take the server's place. A slot launch is resumed by the same detached job as a launch: a request
 file whose act is `resume`, under a new request id that becomes the new launch's, and a 202
 with the status path holding that id. What the resume meets later (a run opened since, a
 slot slots won't give, another resume of the session starting first) the job records as it
@@ -2050,7 +2050,7 @@ def resumed(body: Mapping[str, Any]) -> Any:
     """What `/api/resume` answers for the page's `body`: a refusal, the command to copy
     for a launch that ran in a terminal, or, for a slot launch, 202 with the status path
     once the job that resumes it is started. `plain` in `body` goes to the job's request
-    as it goes to the brief's check."""
+    as it goes to the brief's check, and to the command as `--plain` when no brief goes."""
     session = str(body.get("session") or "").strip()
     slot = str(body.get("slot") or "").strip() or None
     plain = body.get("plain") is True
@@ -2073,6 +2073,8 @@ def resumed(body: Mapping[str, Any]) -> Any:
             words += ["--brief", brief]
         if brief_file is not None:
             words += ["--brief-file", brief_file]
+        if plain and brief is None and brief_file is None:
+            words.append("--plain")
         return {"refused": None, "command": _command(words)}
     request_id = _new_request_id()
     given = {"brief": brief, "brief_file": brief_file, "plain": True if plain else None}

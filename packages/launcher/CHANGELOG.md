@@ -31,9 +31,12 @@
   wake itself either, and a brief under `with:<identity>` is refused as on a launch. The
   posture is the one the launch was configured with, so a `go` launch's relaunch needs a
   brief to resume too, and the resumed launch shows that posture, where the relaunch
-  shows its own. Home's `Continue the last session` with an empty box asks for a
-  plain resume (`plain` on `/api/resume`), which a `go` launch takes with no brief and no
-  first turn; the command line and the page's resume keep the refusal.
+  shows its own. A plain resume, `moxi launcher resume --plain` or Home's `Continue the
+  last session` with an empty box (`plain` on `/api/resume`), takes no brief and sends no
+  first turn, a `go` launch's too; `--plain` with `--brief` or `--brief-file` is refused
+  (`bad-value`). Without `--plain` the command line keeps the refusal, and so does the
+  page's resume. Home's continue of a session that ran in a terminal copies the resume
+  command with `--plain` when the box is empty.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
   brief, brief file or handoff, and a brief under `with:<identity>`, whose director
   sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent

@@ -558,7 +558,8 @@ def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "",
     """The start posture's rule for the brief a resume is given, as a launch's: one of
     `brief` and `brief_file`, not both; a resume of a `go` launch needs one, since a
     resumed session does not wake itself either, unless `plain` asks for a resume with no
-    first turn whatever the posture (Home's `Continue the last session` with an empty box);
+    first turn whatever the posture (`moxi launcher resume --plain`, and Home's `Continue the
+    last session` with an empty box);
     and a resume under `with:<identity>` takes none, since its director sends the first
     message. `posture` is the one the resumed launch was configured with, not the one a
     relaunch shows. Raises `BadValue` or `PostureBrief`."""

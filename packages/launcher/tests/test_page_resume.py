@@ -248,8 +248,8 @@ def test_a_go_resumes_refusal_says_it_needs_a_brief():
 
 def test_a_plain_resume_of_a_go_launch_goes_ahead_with_no_brief(monkeypatch):
     """`plain`, which Home's continue sends with an empty box, lets a `go` launch resume
-    with no brief: the job's request carries it, and a terminal launch's command is the
-    bare resume."""
+    with no brief: the job's request carries it, and a terminal launch's command to copy
+    carries `--plain`."""
     monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
     monkeypatch.setattr(pagehandlers, "_new_request_id", lambda: "r9")
     seed(posture="go")
@@ -259,7 +259,23 @@ def test_a_plain_resume_of_a_go_launch_goes_ahead_with_no_brief(monkeypatch):
         "act": "resume", "request_id": "r9", "session": SID, "slot": None, "plain": True}
     seed("r2", target_name="terminal", session_id=OTHER, posture="go")
     assert resumed({"session": OTHER, "plain": True}) == {
-        "refused": None, "command": f"moxi launcher resume {OTHER}"}
+        "refused": None, "command": f"moxi launcher resume {OTHER} --plain"}
+
+
+@pytest.mark.parametrize("posture", ["operator", "with:lead"])
+def test_a_plain_resume_of_a_terminal_launch_copies_plain_under_any_posture(posture):
+    seed(target_name="terminal", posture=posture)
+    assert resumed({"session": SID, "plain": True}) == {
+        "refused": None, "command": f"moxi launcher resume {SID} --plain"}
+
+
+def test_a_terminal_launchs_command_with_a_brief_has_no_plain():
+    """A brief goes on the command as it is, `plain` or not: `--plain` takes none."""
+    seed(target_name="terminal", posture="go")
+    said = resumed({"session": SID, "brief": "Go.", "plain": True})
+    assert said["command"] == f"moxi launcher resume {SID} --brief Go."
+    said = resumed({"session": SID, "brief_file": "/w/brief.md", "plain": True})
+    assert said["command"] == f"moxi launcher resume {SID} --brief-file /w/brief.md"
 
 
 def test_a_slot_named_for_a_terminal_launch_is_refused():
