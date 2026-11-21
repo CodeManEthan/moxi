@@ -486,3 +486,16 @@ def test_a_preview_shows_the_limit_mark_it_stamps(tmp_path, monkeypatch):
     got = api.preview(req)
     assert got.env["MOXI_USAGE_CROSSING_AT"] == "1.5x"
     assert got.values["limit_at"] == ""
+
+
+def test_a_preview_refuses_a_scratch_launch_set_to_recycle_itself(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    req = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "relaunch"},
+                            request_id="r1", session_id=SID, actor="ann")
+    with pytest.raises(api.ScratchRecycle) as caught:
+        api.preview(req)
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+    assert caught.value.problem == "a scratch launch can't recycle itself"
+    compact = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "compact"},
+                                request_id="r2", session_id=SID, actor="ann")
+    assert api.preview(compact).values["recycle_at_limit"] == "compact"

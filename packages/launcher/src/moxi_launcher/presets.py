@@ -344,11 +344,17 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     warnings, in file order; none means the file is good. Types and values come from the
     catalog; a row whose module is absent fails with "needs <module>"; a project key must
     be known to projects; an `instructions_file` must be readable; an `agent` role must be
-    found among the harness's role files. A `moxi.config.ConfigError` (the file is not
-    TOML, or holds a table it should not) is raised, not returned."""
+    found among the harness's role files; a preset, or `[defaults]` alone, must not set
+    `scratch` with `recycle_at_limit = relaunch`. A `moxi.config.ConfigError` (the file
+    is not TOML, or holds a table it should not) is raised, not returned."""
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
+    try:
+        # `[defaults]` reaches every launch: a pair it sets alone refuses each one.
+        catalog.refuse_scratch_recycle(defaults)
+    except Refused as exc:
+        problems.append(Problem.of("defaults", exc.row, exc))
     # An empty harness is unset, as `resolve` reads it: the shipped default.
     base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
     for preset in found.all():

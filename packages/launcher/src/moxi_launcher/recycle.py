@@ -105,11 +105,11 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
 
 #: Why a scratch launch may not recycle itself, and what to do instead. A scratch folder
 #: has no notes directory to keep a handoff in, so a launch that works in one is refused
-#: `recycle_at_limit = relaunch` (`api.check`), an older such row is refused the self arm
-#: and gets no line at its mark, and a replay of one recycles `off`. `compact` stays open
-#: to a scratch.
-SCRATCH_RECYCLE = ("a scratch launch can't recycle itself",
-                   "recycle with compact, or launch in a directory")
+#: `recycle_at_limit = relaunch` wherever its values are checked
+#: (`catalog.refuse_scratch_recycle`), an older such row is refused the self arm and gets
+#: no line at its mark, and a replay of one recycles `off`. `compact` stays open to a
+#: scratch.
+SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 
 #: Stands for a seam looked up here.
 LOOK: Any = object()

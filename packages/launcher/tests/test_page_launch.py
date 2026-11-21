@@ -377,6 +377,13 @@ def test_limit_at_at_its_shipped_default_is_not_refused_for_its_companion(work, 
         job.placed(dataclasses.replace(request, typed={"limit_at": "1x"}))
 
 
+def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
+    write_presets('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n')
+    said = previewed(filled({"seat": "scratchy"}))
+    assert codes(said) == ["scratch-recycle"] and said["ticket"] is None
+
+
 def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
         work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))

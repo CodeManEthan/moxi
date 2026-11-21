@@ -400,7 +400,9 @@ own reads:
   `relaunch` is what lets a session recycle itself (it also needs slots and a slot
   launch); its line opens "This launch lets you recycle yourself". A scratch launch has
   no notes directory to keep a handoff in, so it can't take `relaunch`
-  (`scratch-recycle`, exit 3); `compact` is open to it. With `--limit-at` unset the mark
+  (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
+  page, refuse the pair, and `presets check` flags a preset or `[defaults]` that sets
+  both. `compact` is open to it. With `--limit-at` unset the mark
   is the launch's `warn_at`, or `1x` when it warns at none.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before

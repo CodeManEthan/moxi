@@ -152,11 +152,8 @@ class ScratchRoot(Refusal):
     code = "scratch-root"
 
 
-class ScratchRecycle(Refusal):
-    """A scratch launch set to recycle itself (`recycle_at_limit = relaunch`): a scratch
-    folder has no notes directory to keep its handoff in."""
-
-    code = "scratch-recycle"
+#: A scratch launch set to recycle itself, refused where its values are checked.
+ScratchRecycle = catalog.ScratchRecycle
 
 
 @dataclass(frozen=True)
@@ -368,11 +365,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
 def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
-    busy, a posture off its default), a directory that does not exist, a scratch folder's
-    parent this user can't trust (a link, another user's, or open to others), a scratch
-    launch set to recycle itself (`recycle_at_limit = relaunch`; `compact` is open to
-    one), a slot
-    named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
+    busy, a posture off its default, a scratch launch set to recycle itself:
+    `recycle_at_limit = relaunch`, `compact` being open to one), a directory that does
+    not exist, a scratch folder's parent this user can't trust (a link, another user's,
+    or open to others), a slot named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
     named slot that is held, occupied or missing)."""
@@ -680,8 +676,10 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
             found.append(ScratchRoot(
                 "scratch", f"a scratch launch can't use its folder: {problem}",
                 "move that folder away, or launch in a directory of your own"))
-        if recycle.scratch_relaunch(getattr(resolved, "values", {}) or {}):
-            found.append(ScratchRecycle("recycle_at_limit", *recycle.SCRATCH_RECYCLE))
+        try:
+            catalog.refuse_scratch_recycle(getattr(resolved, "values", {}) or {})
+        except ScratchRecycle as exc:
+            found.append(exc)
     named = targets.named_slot(getattr(resolved, "values", {}) or {})
     if named is not None and resolved.target != "slot":
         found.append(catalog.BadValue(

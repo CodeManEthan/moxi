@@ -1259,3 +1259,43 @@ def test_a_word_enum_left_out_ends_a_seats_recycling():
                   left_out=("limit_at",))
     assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == ""
     assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
+
+
+# -- a scratch launch can't recycle itself --------------------------------------------------
+
+RECYCLES = only("turns", "usage")
+
+
+def test_a_preset_that_sets_scratch_and_relaunch_is_flagged():
+    found = errors('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                   RECYCLES)
+    assert [(p.where, p.key, p.code) for p in found] == [
+        ("seat.scratchy", "recycle_at_limit", "scratch-recycle")]
+    assert found[0].problem == "a scratch launch can't recycle itself"
+    assert found[0].hint == "recycle with compact, or launch in a directory"
+
+
+def test_defaults_that_set_scratch_and_relaunch_are_flagged_alone():
+    found = errors('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n', RECYCLES)
+    assert [(p.where, p.code) for p in found] == [("defaults", "scratch-recycle")]
+
+
+def test_a_preset_meeting_the_defaults_in_the_pair_is_flagged():
+    text = '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'
+    assert [(p.where, p.code) for p in errors(text, RECYCLES)] == [
+        ("seat.s", "scratch-recycle")]
+
+
+@pytest.mark.parametrize("text", [
+    '[seat.s]\nscratch = true\nrecycle_at_limit = "compact"\n',
+    '[seat.s]\nrecycle_at_limit = "relaunch"\n',
+    '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = false\n'])
+def test_compact_on_a_scratch_and_relaunch_elsewhere_are_not_flagged(text):
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_resolve_refuses_a_scratch_set_to_relaunch():
+    with pytest.raises(catalog.ScratchRecycle) as caught:
+        resolve('[seat.s]\nscratch = true\n', RECYCLES, seat="s",
+                typed={"recycle_at_limit": "relaunch"})
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
