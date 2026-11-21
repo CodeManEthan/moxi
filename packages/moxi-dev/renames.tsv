@@ -6256,6 +6256,7 @@ moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/proc.py	status	name	at	position
+moxi	packages/moxi/src/moxi/proc.py	out, err = proc.communicate(timeout=grace_s)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
 moxi	packages/moxi/src/moxi/run.py	"seconds": round(max(seconds, 0.0), 3), "result": result, "exit": code,	keep	round	round
 moxi	packages/moxi/src/moxi/run.py	Args.__init__	name	runtime	is_runtime
@@ -8551,7 +8552,7 @@ repo	packages/repo/src/moxi_repo/commit_proof.py	return any(os.path.lexists(os.p
 repo	packages/repo/src/moxi_repo/commit_proof.py	shape = _Shape(separators or ":", set())	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	"fail": "closed",	keep	closed	closed
 repo	packages/repo/src/moxi_repo/commit_rules.py	block_keys: set[str] = set()	keep	set	set
-repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines, which no tag check reads	keep	set	set
+repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines; tag-checked if tag_check_trailers	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	return any(name.startswith(token) for name in self.configured)	keep	any	any
 repo	packages/repo/src/moxi_repo/committer.py	"""Hold the committer's lock for the block, waiting up to `wait` seconds (None: as	keep	wait	wait
 repo	packages/repo/src/moxi_repo/committer.py	"min_interval": spec.min_interval, "message": spec.message,	use	"min_interval"	"min_interval_s"
@@ -9904,6 +9905,7 @@ rounds	packages/rounds/src/moxi_rounds/tracing.py	now = {one.id: one for one in 
 rounds	packages/rounds/src/moxi_rounds/tracing.py	open_now = set(asked) | {	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/tracing.py	return repo is not None and any(part.get("repo") == repo for part in one.scope)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/tracing.py	seen: set[str] = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/tracing.py	"stale", "stale_data", "recorded", "PASSES", "FAILS", "NOT_RUN", "outcome",	keep	stale	stale
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	"""The report as the verb read it under the lock: its `block`, or the `error`	keep	error	error
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	__all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "lists", "path", "record"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	__all__ = ["VERIFIES", "Recorded", "applies", "record"]	keep	record	record
@@ -9967,6 +9969,8 @@ rounds	packages/rounds/tests/conftest.py	notes_root.mkdir(parents=True, exist_ok
 rounds	packages/rounds/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/conftest.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/conftest.py	return {"PATH": os.environ.get("PATH", ""), "HOME": str(self.root.parent),	keep	HOME	HOME
+rounds	packages/rounds/tests/conftest.py	if not proc.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/tests/conftest.py	proc.wait(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_api.py	"a round that has ended": ["show", D],	keep	show	show
 rounds	packages/rounds/tests/test_api.py	"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_api.py	"one round": ["show", A],	keep	show	show
@@ -9995,6 +9999,7 @@ rounds	packages/rounds/tests/test_api.py	one = api.round(A)	use	api.round	api.ro
 rounds	packages/rounds/tests/test_api.py	refused()	keep	refused	refused
 rounds	packages/rounds/tests/test_api.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_api.py	spoil	name	file	fh
+rounds	packages/rounds/tests/test_api.py	assert set(declared["project"]["entry-points"]) == expected	keep	set	set
 rounds	packages/rounds/tests/test_ask.py	"record": "comms:1234567"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ask.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_ask.py	actor="planner", flow="fix")	use	actor=	by=
@@ -10139,6 +10144,8 @@ rounds	packages/rounds/tests/test_build_drop.py	assert cli.main(["projects", "se
 rounds	packages/rounds/tests/test_build_drop.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_build_drop.py	assert {key: dropped.event[key] for key in ("stage", "by", "record", "tips")} == {	keep	record	record
 rounds	packages/rounds/tests/test_build_drop.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_build_drop.py	proc.communicate(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_build_drop.py	@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])	keep	round	round
 rounds	packages/rounds/tests/test_build_step.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_build_step.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_build_step.py	log.append(planned, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")	use	actor=	by=
@@ -10499,6 +10506,7 @@ rounds	packages/rounds/tests/test_finish.py	exclude.parent.mkdir(parents=True, e
 rounds	packages/rounds/tests/test_finish.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_finish.py	script.parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_finish.py	test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep.stop	name	_folder	_target_dir
+rounds	packages/rounds/tests/test_finish.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_finish_actions.py	-	name	test_with_no_merge_the_cleanup_removes_only_the_scratch_folder	test_with_no_merge_the_cleanup_removes_only_the_scratch_dir
 rounds	packages/rounds/tests/test_finish_actions.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_finish_actions.py	assert any("worktree, which is gone" in one.reason for one in refused.value.unmet)	keep	any	any
@@ -10987,6 +10995,8 @@ rounds	packages/rounds/tests/test_removal.py	exclude.parent.mkdir(parents=True, 
 rounds	packages/rounds/tests/test_removal.py	make(tree, repo, monkeypatch, tmp_path)	keep	auto	auto
 rounds	packages/rounds/tests/test_removal.py	make(tree, repo, monkeypatch, tmp_path)	keep	start	start
 rounds	packages/rounds/tests/test_removal.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_removal.py	@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])	keep	round	round
+rounds	packages/rounds/tests/test_removal.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_rendering.py	"round.dropped", {"by": "operator", "record": "comms:30", "questions": {}}))	keep	record	record
 rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_folder_with_no_log_is_never_written_into	test_a_dir_with_no_log_is_never_written_into
 rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_note_names_no_folder_of_the_machine_it_was_written_on	test_a_note_names_no_dir_of_the_machine_it_was_written_on
@@ -16819,6 +16829,7 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stal
 rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="refuse at once when another check on this machine holds "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
