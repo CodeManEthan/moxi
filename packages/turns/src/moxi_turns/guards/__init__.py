@@ -32,10 +32,15 @@ Guards come from two places:
   `file:<stem>.<name>`.
 
 A guard runs only when its id or its file is on `guards.run`, or its `switch` passes the
-core's switch check and reads true. A switch is a setting of the offering module: a bool
-read at use, with no `env` and default false, or an entry of a switch table. One that
-fails the check reads off and is a problem, listed or not. A custom file has no module, so
-a `switch` there is refused.
+core's switch check and reads true, or its `sessions` function says yes for the session.
+A switch is a setting of the offering module: a bool read at use, with no `env` and
+default false, or an entry of a switch table. One that fails the check reads off and is a
+problem, listed or not. A `sessions` function, `"package.module:function"`, is called with
+the session's environment and answers True or False; an endpoint calls it once at the
+session's start and keeps the answer for the session's life. One that does not import,
+raises or answers something other than a bool reads off and is a problem, listed or not.
+A custom file has no module and is on the list already, so a `switch` or `sessions` there
+is refused.
 
 Codex's hook matcher also selects by alias (`Agent` for `spawn_agent`, `Write` and `Edit`
 for `apply_patch`), but turns matches the canonical tool name the hook input carries, so a
@@ -200,6 +205,9 @@ class Guard:
     deadline_ms: int = DEADLINE_MS
     #: A setting of the offering module that turns the guard on when it reads true.
     switch: str | None = None
+    #: `"package.module:function"`, called with a session's environment: True turns the
+    #: guard on in that session. Decided once, at the session's start.
+    sessions: str | None = None
     #: One line for the doctor and the install text.
     doc: str = ""
     #: `call` (before a tool call runs) or `ask` (when the harness puts a call to the person
@@ -274,6 +282,13 @@ def _problems(g: Guard, source: str) -> list[str]:
         elif not isinstance(g.switch, str) or not _SWITCH.fullmatch(g.switch):
             out.append(f"switch {g.switch!r} must name a setting of the module "
                        "(a dotted key such as guards.removal)")
+    if g.sessions is not None:
+        if source != "module":
+            out.append("a custom guard file has no module, so it can name no sessions "
+                       "function; its guards run in every session while the file is on "
+                       "guards.run")
+        elif not isinstance(g.sessions, str) or not _TARGET.fullmatch(g.sessions):
+            out.append(f'sessions {g.sessions!r} must be "package.module:function"')
     if not isinstance(g.doc, str) or "\n" in g.doc:
         out.append("doc must be one line")
     if g.step not in STEPS:
@@ -392,8 +407,8 @@ class Found:
 
 @dataclass(frozen=True)
 class On:
-    """A guard that runs, and what turned it on: `list` (`guards.run`), `switch`, or
-    both."""
+    """A guard that runs, and what turned it on: any of `list` (`guards.run`), `switch`
+    and `sessions` (its `sessions` function said yes)."""
 
     found: Found
     by: tuple[str, ...]
@@ -412,10 +427,11 @@ class Problem:
     """Why a guard, a list entry or a module's guards could not be read.
 
     `kind` is `shape` (a field is wrong), `switch` (the switch fails the core's check or
-    its module's config does not load), `load` (the module's guards or the custom file do
-    not load), or `missing` (a list entry naming a module that offers no guards). `on` is
-    whether the guard was listed or its switch read true; a `switch` problem counts
-    whether or not it was. `id` is the guard's id, or the list entry, or the module's
+    its module's config does not load), `sessions` (the `sessions` function does not
+    import, raises or answers something other than a bool), `load` (the module's guards
+    or the custom file do not load), or `missing` (a list entry naming a module that
+    offers no guards). `on` is whether something else turned the guard on; a `switch` or
+    `sessions` problem counts whether or not it did. `id` is the guard's id, or the list entry, or the module's
     name for a module whose guards do not load.
     """
 
@@ -446,6 +462,9 @@ class Loaded:
 #: `(module, key) -> (value, problem)`: a switch's reading, with why it reads off when it
 #: can't be read.
 SwitchReader = Callable[[str, str], "tuple[bool, str | None]"]
+#: `(target) -> (value, problem)`: a `sessions` function's answer for the session, with
+#: why it reads off when it can't be had.
+SessionsReader = Callable[[str], "tuple[bool, str | None]"]
 
 
 def is_file_entry(entry: str) -> bool:
@@ -455,13 +474,15 @@ def is_file_entry(entry: str) -> bool:
 
 
 def load(on: Iterable[str] | None = None, *, entries: Iterable | None = None,
-         switches: SwitchReader | None = None, env: Mapping[str, str] | None = None
-         ) -> Loaded:
+         switches: SwitchReader | None = None, sessions: SessionsReader | None = None,
+         env: Mapping[str, str] | None = None) -> Loaded:
     """Read every module's guards and the custom files on the list, and say which run.
 
     `on` is `guards.run`, read from turns' config when None. `entries`, each with `.name`
     and `.load()`, stand in for the group (tests); `switches` reads a module's switch
-    (`read_switch` by default, in `env`). Never raises."""
+    (`read_switch` by default, in `env`); `sessions` answers a guard's `sessions`
+    function (`read_sessions` by default, with `env`, else this process's environment).
+    Never raises."""
     if on is None:
         on = _list_setting(env)
     listed = list(dict.fromkeys(e for e in on if isinstance(e, str)))
@@ -472,6 +493,9 @@ def load(on: Iterable[str] | None = None, *, entries: Iterable | None = None,
     if switches is None:
         def switches(module: str, key: str) -> tuple[bool, str | None]:
             return read_switch(module, key, env=env)
+    if sessions is None:
+        def sessions(target: str) -> tuple[bool, str | None]:
+            return read_sessions(target, env=env)
 
     problems: list[Problem] = []
     found: list[tuple[Found, list[str]]] = []
@@ -518,7 +542,7 @@ def load(on: Iterable[str] | None = None, *, entries: Iterable | None = None,
         elif entry not in known and not any(p.id == entry for p in problems):
             problems.append(Problem(entry, "load", f"guards.run names {entry}, but module "
                                     f"{module} declares no such guard", on=True))
-    return _select(found, listed, switches, problems, import_ms)
+    return _select(found, listed, switches, sessions, problems, import_ms)
 
 
 def _list_setting(env) -> list[str]:
@@ -641,7 +665,7 @@ def _exec_file(path: Path) -> object:
 
 
 def _select(found: list[tuple[Found, list[str]]], listed: list[str],
-            switches: SwitchReader, problems: list[Problem],
+            switches: SwitchReader, sessions: SessionsReader, problems: list[Problem],
             import_ms: dict[str, float]) -> Loaded:
     on: list[On] = []
     off: list[Found] = []
@@ -662,6 +686,17 @@ def _select(found: list[tuple[Found, list[str]]], listed: list[str],
                                         f"reads off: {why}", on=bool(by)))
             elif value:
                 by.append("switch")
+        if (f.source == "module" and isinstance(g.sessions, str)
+                and _TARGET.fullmatch(g.sessions)):
+            try:
+                value, why = sessions(g.sessions)
+            except Exception as exc:  # noqa: BLE001 - a sessions read never breaks the load
+                value, why = False, f"{type(exc).__name__}: {exc}"
+            if why is not None:
+                problems.append(Problem(f.id, "sessions", f"sessions {g.sessions} reads "
+                                        f"off: {why}", on=bool(by)))
+            elif value:
+                by.append("sessions")
         shape = before + g.problems(f.source)
         if f.id in seen:
             shape.insert(0, f"its id is taken by {seen[f.id]}")
@@ -698,6 +733,22 @@ def read_switch(module: str, key: str, *, env: Mapping[str, str] | None = None,
         return bool(moxi_config.load(module, schema, env=env)[key]), None
     except (moxi_config.ConfigError, KeyError) as exc:
         return False, f"its config does not load: {exc}"
+
+
+def read_sessions(target: str, *, env: Mapping[str, str] | None = None
+                  ) -> tuple[bool, str | None]:
+    """A `sessions` function's answer for the session whose environment is `env` (this
+    process's when None): `(value, None)`, or `(False, why)` when it does not import,
+    raises, or answers something other than a bool. Never raises."""
+    module_name, _, attr = target.partition(":")
+    try:
+        fn = getattr(importlib.import_module(module_name), attr)
+        value = fn(dict(os.environ) if env is None else env)
+    except Exception as exc:  # noqa: BLE001 - the function's own fault reads off
+        return False, f"{type(exc).__name__}: {exc}"
+    if not isinstance(value, bool):
+        return False, f"it answered {type(value).__name__}, not True or False"
+    return value, None
 
 
 def _schema_of(module: str):
@@ -786,5 +837,6 @@ __all__ = ["GROUP", "ON_KEY", "MAX_WAIT_KEY", "HARNESSES", "WHO", "WANTS", "ON_E
            "MATCH_FLAGS", "DEADLINE_MS", "MAX_WAIT_MS", "CODEX_ALIASES",
            "CODEX_ALIASES_VERSION", "FILE_SUFFIXES", "SOURCES", "Prompt", "ToolCall",
            "Allow", "Deny", "Guard", "Found", "On", "Problem", "Loaded", "SwitchReader",
-           "regex_problem", "compile_match", "is_file_entry", "load", "read_switch",
+           "SessionsReader", "regex_problem", "compile_match", "is_file_entry", "load",
+           "read_switch", "read_sessions",
            "judge_of", "REMOVAL_MATCH", "NO_NESTED_AGENTS_DENY", "GUARDS", "LISTENERS"]
