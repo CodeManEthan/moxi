@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Each row records its writer (schema 2): who the record's harness says wrote it, from
+  sessions' `writer` at interface 7, which memory now reads sessions at. A generation
+  still at schema 1 gains the column when memory next writes to it; its rows, like every
+  row stored before, have no writer until `moxi memory reindex` reads them again, and a
+  rebuild's copy keeps the writer a row was stored with. The doctor's `index` row says
+  how many rows have none.
 - Each index records which secrets `redact` stored its rows (`redact_version` in its
   meta; an index without it counts as 1). A typed `moxi memory reindex` over an index
   below the installed secrets' `REDACT_VERSION` is a version rebuild: it reads every

@@ -85,6 +85,12 @@ under the new `redact` and leaves the stored ones as they are. It records the ve
 replaced (`REPLACED_KEY`), and the new generation records today's, so the next rebuild
 is an ordinary one, which drops what a rebuild drops.
 
+**Writers.** sessions is read at interface 7 (`SESSIONS_INTERFACE`), whose `writer`
+names each row's writer as the row is written. A row read again whose writer differs
+is replaced. A rebuild's copy keeps the writer a row was stored with, and a row copied
+from a generation from before the column has none, as every row stored before it has
+until a rebuild reads its source again.
+
 **The session table.** For each main session it reads, a child writes the label when the
 row has none, the newest record's time, and the launch kind. It asks the launcher for the
 kind of a session whose row has none or isn't settled. The kind is settled once the index
@@ -202,10 +208,20 @@ class Role:
     agent: str | None = None
 
 
-def _api():
-    from moxi_sessions import api
+#: The sessions interface memory reads at: the records and the writer of each.
+SESSIONS_INTERFACE = 7
 
-    return api
+
+def _api():
+    """sessions' API at `SESSIONS_INTERFACE`. Raises `RuntimeError` when the sessions
+    installed doesn't offer it."""
+    from moxi import modules
+
+    found = modules.load("sessions", interface=SESSIONS_INTERFACE)
+    if found.api is None:
+        raise RuntimeError(f"memory reads sessions at interface {SESSIONS_INTERFACE}: "
+                           f"{found.reason or found.state}")
+    return found.api
 
 
 def source_key(src) -> str:
@@ -474,7 +490,7 @@ class Ingest:
             read_any = True
             got = rows.convert(batch.records, source_key=skey, main_id=role.main,
                                agent_id=role.agent, label=label, policy=self.policy,
-                               secret_calls=secret)
+                               writer=api.writer, secret_calls=secret)
             secret |= got.secret_calls
             with store.transaction(self.conn):
                 self._write(src, skey, role, got, batch.cursor, reuse)
@@ -495,14 +511,15 @@ class Ingest:
         if got.rows:
             cur = c.executemany(
                 "INSERT INTO rows (key, harness, session_id, agent_id, label, time, "
-                "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (key) DO UPDATE SET harness = excluded.harness, "
                 "session_id = excluded.session_id, agent_id = excluded.agent_id, "
                 "label = excluded.label, time = excluded.time, turn_id = excluded.turn_id, "
-                "kind = excluded.kind, text = excluded.text "
-                "WHERE rows.text IS NOT excluded.text OR rows.kind IS NOT excluded.kind",
+                "kind = excluded.kind, text = excluded.text, writer = excluded.writer "
+                "WHERE rows.text IS NOT excluded.text OR rows.kind IS NOT excluded.kind "
+                "OR rows.writer IS NOT excluded.writer",
                 [(r.key, r.harness, r.session_id, r.agent_id, r.label, r.time, r.turn_id,
-                  r.kind, r.text) for r in got.rows])
+                  r.kind, r.text, r.writer) for r in got.rows])
             self.report.rows += max(cur.rowcount, 0)
         if got.tails:
             cur = c.executemany(
@@ -883,7 +900,7 @@ class Ingest:
         calls, under the rules a stored row allows: no row of a harness config
         `harnesses` leaves out, no subagent row with `index.include_subagents` off, each
         text redacted with today's `redact.sets` and cut to today's sizes, and each row
-        given the session table's label."""
+        given the session table's label. Each row keeps the writer it was stored with."""
         from moxi import store
 
         old = self.prior
@@ -911,17 +928,18 @@ class Ingest:
         label = row.label if row is not None and row.label else None
         sets = self.policy.sets
         rows_out = []
-        for key, agent, label_was, when, turn, kind, text in old.execute(
-                "SELECT key, agent_id, label, time, turn_id, kind, text FROM rows "
+        for key, agent, label_was, when, turn, kind, text, wrote in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text, "
+                f"{_writer_column(old)} FROM rows "
                 "WHERE harness = ? AND session_id = ?", (harness, session_id)):
             if agent is not None and not self.subagents:
                 continue
             limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
             rows_out.append((key, harness, session_id, agent, label or label_was, when,
-                             turn, kind, rows.recut_head(text, limit, sets)))
+                             turn, kind, rows.recut_head(text, limit, sets), wrote))
         self.conn.executemany(
             "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
-            "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+            "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
         tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
                       rows.recut_tail(text, self.policy.tail_chars, sets))
                      for key, label_was, when, turn, failed, text in old.execute(
@@ -968,7 +986,7 @@ class Ingest:
         `index.include_subagents` is on. A copy never replaces what this run wrote. Each
         copied text loses its stored cut edge (`rows.EDGE_CHARS`), is redacted again with
         today's `redact.sets` and cut to today's sizes, and each row takes the session
-        table's label."""
+        table's label and keeps the writer it was stored with."""
         from moxi import store
 
         old = self.prior
@@ -1012,18 +1030,20 @@ class Ingest:
         label = row.label if row is not None and row.label else None
         sets = self.policy.sets
         rows_out = []
-        for key, agent, label_was, when, turn, kind, text in old.execute(
-                "SELECT key, agent_id, label, time, turn_id, kind, text FROM rows "
+        for key, agent, label_was, when, turn, kind, text, wrote in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text, "
+                f"{_writer_column(old)} FROM rows "
                 "WHERE harness = ? AND session_id = ?", (harness, session_id)):
             if not kept(key, agent):
                 continue
             limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
             rows_out.append((key, harness, session_id, agent, label or label_was, when,
                              turn, kind, rows.recut_head(text, limit, sets,
-                                                         edge_chars=rows.EDGE_CHARS)))
+                                                         edge_chars=rows.EDGE_CHARS),
+                             wrote))
         self.conn.executemany(
             "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
-            "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+            "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
         tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
                       rows.recut_tail(text, self.policy.tail_chars, sets,
                                       edge_chars=rows.EDGE_CHARS))
@@ -1052,6 +1072,12 @@ class Ingest:
             "VALUES (?, ?, ?)", old.execute(
                 "SELECT harness, source, call_id FROM secret_calls "
                 "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
+
+
+def _writer_column(conn) -> str:
+    """What a copy selects for a row's writer from the generation it replaces: the
+    column, or NULL from a generation at a schema before it."""
+    return "writer" if index.has_writer(conn) else "NULL"
 
 
 def _named_source(key: str) -> str | None:
