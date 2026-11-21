@@ -74,8 +74,8 @@ def local(epoch: Any) -> str:
         return "(no time)"
 
 
-def cut_work_dir(cwd: Any, redact: Redactor) -> str | None:
-    """A session's folder as it goes out: its last part, redacted."""
+def cut_work_dir(cwd: Any, redact: Callable[[str], str]) -> str | None:
+    """A session's folder as it goes out: its last part, through `redact`."""
     cut = last_segment(cwd if isinstance(cwd, str) else None)
     return None if cut is None else redact(cut)
 
@@ -199,7 +199,7 @@ class Lister:
                       if isinstance(parts, int) else None)
         return {"harness": root.get("harness"),
                 "root": cut_work_dir(where, redact),
-                "reason": (redact(cut_paths(reason, (where,)))
+                "reason": (redact(reason, between=lambda text: cut_paths(text, (where,)))
                            if isinstance(reason, str) else None)}
 
 

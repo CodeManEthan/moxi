@@ -117,7 +117,7 @@ def test_paths_in_a_text_are_cut_to_their_last_part():
     spaced = "/home/some one/a b.jsonl cannot be read (no such file)"
     assert paths.cut_paths(spaced, ("/home/some one/a b.jsonl",)) == \
         "a b.jsonl cannot be read (no such file)"
-    assert paths.cut_paths("(/srv/x/y) and /a/") == "(y) and a"
+    assert paths.cut_paths("(/srv/x/y) and /a/") == "(y) and /a/"
     assert paths.cut_paths("a/b is relative") == "a/b is relative"
 
 

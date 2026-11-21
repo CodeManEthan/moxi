@@ -66,6 +66,7 @@ class Sessions:
 
     async def start(self, env: Mapping[str, str]) -> None:
         self.env = dict(env)
+        self.reader.env = self.env
 
     async def stop(self) -> None:
         return None

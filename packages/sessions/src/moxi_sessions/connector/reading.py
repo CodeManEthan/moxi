@@ -25,6 +25,13 @@ Each record becomes at most one row:
 
 Records of other kinds (markers, requests, limits) make no row.
 
+Every string the answer shows (message text, tool-call lines, a secret-path call's
+`Tool(path)`, the title, the folder, refusal texts) has each local path cut to its last
+segment and each loopback origin made `local` (sessions' one cut, `pathcut.cut_local`,
+with the home folder of the environment the provider started with). The cut runs inside
+the chat redaction, between its two passes, never outside it, so the last redaction sees
+the text sent; only the length cuts come after. The secret-path test reads the raw input.
+
 The answer holds at most `ANSWER_MAX_CHARS` characters of text: the oldest turns go
 first, then the turns after the one that holds `around`, so that turn (or the last turn)
 always stays; inside that one turn, the rows farthest from the one nearest `around` (or
@@ -43,6 +50,7 @@ from ..claude import SAFE_ID_RE
 from ..errors import Unreadable
 from ..find import UNREADABLE, subagents
 from ..locate import locate
+from ..pathcut import cut_local
 from ..shape import HARNESSES, Record
 from ..view import HARNESS_LABELS, fits
 from ..writer import (CHANNEL, COORDINATOR, HARNESS, HOOK, MODEL, PEER, PERSON, SUMMARY,
@@ -165,7 +173,7 @@ def _stamp(record: Record) -> str:
 
 
 def _shown(record: Record, text: str, kind: str, who: str, label: str,
-           redact: Redactor) -> _Row:
+           redact: Clean) -> _Row:
     shown, is_cut = _cut(redact(text))
     data = {"at": utc(record.time), "kind": kind, "writer": who, "text": shown,
             "chars": len(text), "cut": is_cut}
@@ -183,7 +191,7 @@ def _call_row(record: Record, call: str) -> _Row:
                 f"{_stamp(record)} Call: {call}")
 
 
-def _message(record: Record, redact: Redactor, *, thoughts: bool) -> _Row | None:
+def _message(record: Record, redact: Clean, *, thoughts: bool) -> _Row | None:
     text = record.text if isinstance(record.text, str) else ""
     who = writer(record)
     if record.reasoning:
@@ -203,7 +211,7 @@ def _message(record: Record, redact: Redactor, *, thoughts: bool) -> _Row | None
     return _hidden(record, HIDDEN_KINDS.get(who, HIDDEN_KINDS[HARNESS]), len(text))
 
 
-def row_of(record: Record, redact: Redactor, *, thoughts: bool = False) -> _Row | None:
+def row_of(record: Record, redact: Clean, *, thoughts: bool = False) -> _Row | None:
     """The row `record` shows as, or None for a record that shows as none."""
     kind = record.kind
     if kind == "message":
@@ -300,8 +308,27 @@ def _mark_nearest(rows: list[_Row], times: list[Any], at: float) -> None:
         rows[best].data["_nearest"] = True
 
 
-def _refused_paths(reason: str, known: tuple[Any, ...], redact: Redactor) -> str:
-    return redact(cut_paths(reason, tuple(str(p) for p in known if p)))
+class Clean:
+    """One call's way out for a string: the chat redaction, with each local path cut
+    (`cut_local`) between its two passes. `secret_path` and `redactions` are the
+    redaction's own."""
+
+    def __init__(self, redact: Redactor, env: Mapping[str, str] | None = None):
+        self.redact = redact
+        self.env = env
+        self.secret_path = redact.secret_path
+
+    def __call__(self, text: str) -> str:
+        return self.redact(text, between=lambda middle: cut_local(middle, self.env))
+
+    @property
+    def redactions(self) -> int:
+        return self.redact.redactions
+
+
+def _refused_paths(reason: str, known: tuple[Any, ...], redact: Clean) -> str:
+    paths = tuple(str(p) for p in known if p)
+    return redact.redact(reason, between=lambda middle: cut_paths(middle, paths, redact.env))
 
 
 @dataclass
@@ -315,11 +342,12 @@ class Reader:
     subagents: Callable[[Any], Any] = subagents
     turns_last: Callable[..., Any] = view.turns_last
     turns_around: Callable[..., Any] = view.turns_around
+    env: Mapping[str, str] | None = None
 
     def __call__(self, args: Mapping[str, Any], log: dict[str, Any]) -> Any:
         refused = self.result.refused
         try:
-            redact = self.gate.open()
+            redact = Clean(self.gate.open(), self.env)
         except Off:
             return refused("redaction-off", OFF_TEXT)
         session = args.get("session")
@@ -358,8 +386,8 @@ class Reader:
                 target = next((entry for entry in listing if entry.agent_id == agent),
                               None)
                 if target is None:
-                    return refused("unknown-agent", "The session has no subagent "
-                                                    f"{agent}.")
+                    return refused("unknown-agent",
+                                   redact(f"The session has no subagent {agent}."))
                 known += (target.source.path,)
             read = (self.turns_around(target, at, turns) if at is not None
                     else self.turns_last(target, turns))
@@ -371,7 +399,7 @@ class Reader:
                             thoughts=thoughts)
 
     def _not_found(self, session: str, harness: str | None, found: Any,
-                   redact: Redactor) -> Any:
+                   redact: Clean) -> Any:
         if len(found.held) > 1:
             names = " and ".join(found.held)
             return self.result.refused(
@@ -387,7 +415,7 @@ class Reader:
         return self.result.refused("unknown-session", text)
 
     def _answer(self, session: str, harness: str, agent: str | None, header: Any,
-                read: Any, at: float | None, redact: Redactor, log: dict[str, Any], *,
+                read: Any, at: float | None, redact: Clean, log: dict[str, Any], *,
                 thoughts: bool) -> Any:
         from ..catalog import by_program
 

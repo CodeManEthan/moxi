@@ -7,7 +7,10 @@ fails (secrets missing or broken, a chat set that can't run, the fallback worker
 it raises `Off` with the reason, and the tool refuses `redaction-off`. Otherwise it gives
 a `Redactor`, which redacts through `chat_redact` alone and counts the placeholders it
 added, for the call log, and carries secrets' `secret_path`, which names the secret path
-a tool call's input holds. A secrets module that offers no `secret_path` is off too.
+a tool call's input holds. A caller's own change to a text (the path cut) goes in as
+`between`, which `chat_redact` runs between its two passes, so the last redaction sees
+the text sent. A secrets module whose `chat_redact` takes no `between`, or that offers no
+`secret_path`, is off too.
 """
 
 from __future__ import annotations
@@ -43,8 +46,9 @@ class Redactor:
         self.secret_path = secret_path
         self.redactions = 0
 
-    def __call__(self, text: str) -> str:
-        out = self._chat_redact(text)
+    def __call__(self, text: str, *, between: Callable[[str], str] | None = None) -> str:
+        out = (self._chat_redact(text) if between is None
+               else self._chat_redact(text, between=between))
         self.redactions += max(0, out.count(PLACEHOLDER) - text.count(PLACEHOLDER))
         return out
 
@@ -78,6 +82,12 @@ class Gate:
             raise Off(f"the chat sets can't run: {exc}") from exc
         if empty != "":
             raise Off("the chat sets came back unscanned on an empty text")
+        try:
+            chat_redact("", between=str)
+        except TypeError:
+            raise Off("the secrets module's chat_redact takes no between") from None
+        except Exception as exc:  # noqa: BLE001 - any failure means no redaction
+            raise Off(f"the chat sets can't run: {exc}") from exc
         secret_path = getattr(secrets, "secret_path", None)
         if not callable(secret_path):
             raise Off("the secrets module offers no secret_path")

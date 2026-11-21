@@ -213,7 +213,7 @@ def test_a_call_naming_a_secret_path_shows_its_tool_and_that_path_only(transcrip
     result, _ = read(claude_source(transcript))
     call_row, result_row = rows(result)
     assert call_row == {"turn": 1, "at": call_row["at"], "kind": "tool call",
-                        "call": "Bash(~/.env)"}
+                        "call": "Bash(.env)"}
     assert result_row["kind"] == "tool result" and result_row["failed"] is False
     assert set(result_row) == {"turn", "at", "kind", "chars", "failed"}
     assert "grep" not in result.text and "hunter2" not in result.text
@@ -239,7 +239,7 @@ def test_a_tool_result_shows_its_size_and_failure_and_never_its_output(transcrip
 
 def test_a_bash_mode_command_naming_a_secret_path_shows_as_its_path_only(transcript):
     row = one_message(transcript, "<bash-input>cat ~/.env</bash-input>", origin="human")
-    assert row["kind"] == "tool call" and row["call"] == "Bash(~/.env)"
+    assert row["kind"] == "tool call" and row["call"] == "Bash(.env)"
 
 
 # --- Codex and OpenCode --------------------------------------------------------------------
@@ -488,3 +488,59 @@ def test_opencode_snapshot_is_what_the_tool_reads(db):
         assert any(r.kind == "message" for r in snap.records(s.id))
     (row,) = rows(read(Source("opencode", str(path), s.id))[0])
     assert row["text"] == "hello"
+
+
+# --- local paths ---------------------------------------------------------------------------
+
+def test_every_local_path_shown_is_cut_to_its_last_segment(projects):
+    t = ClaudeTranscript(projects, cwd="/home/someone/work/app")
+    t.title("notes in /home/someone/notes/home/moxi")
+    t.user("look at /home/someone/notes/home/moxi/x.md and http://localhost:8080/api",
+           origin="human")
+    req = t.request()
+    req.tool_use("Read", {"file_path": "/home/someone/notes/home/moxi/x.md"})
+    req.tool_use("Bash", {"command": "cat /srv/app/.env"})
+    result, _ = read(claude_source(t))
+    typed, call, secret = rows(result)
+    assert typed["text"] == "look at x.md and local"
+    assert call["call"] == "Read(x.md)" and secret["call"] == "Bash(.env)"
+    assert result.structured["title"] == "notes in moxi"
+    assert result.structured["folder"] == "app"
+    assert "/home/" not in result.text and "localhost" not in result.text
+
+
+def test_the_cut_runs_between_the_redaction_s_passes():
+    """A cut that glues a word onto a token can't keep it from the last pass."""
+    asked = []
+
+    class Spy:
+        def chat_redact(self, text, *, between=None):
+            middle = between(text) if between else text
+            asked.append((text, middle))
+            return middle
+
+        def secret_path(self, value):
+            return None
+
+    from moxi_sessions.connector.reading import Clean
+    clean = Clean(Gate(lambda: Spy()).open(), {"HOME": "/home/u"})
+    assert clean("ghp_x/home/u/file") == "ghp_xfile"
+    assert asked[-1] == ("ghp_x/home/u/file", "ghp_xfile")
+
+
+def test_a_token_glued_by_the_cut_comes_back_redacted(transcript):
+    transcript.user(f"{TOKEN}/home/u/file", origin="human")
+    (row,) = rows(read(claude_source(transcript))[0])
+    assert "ghp_" not in row["text"] and "[REDACTED:" in row["text"]
+
+
+def test_a_secrets_without_between_is_off():
+    class Old:
+        def chat_redact(self, text):
+            return text
+
+        def secret_path(self, value):
+            return None
+
+    with pytest.raises(Off):
+        Gate(lambda: Old()).open()

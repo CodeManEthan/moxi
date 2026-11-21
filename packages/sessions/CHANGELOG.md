@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `read_session` cuts every local path it shows to its last segment and every loopback
+  origin to `local`: message text, tool-call lines (`Read(/home/you/x.md)` shows as
+  `Read(x.md)`), the title, the folder and refusal texts. The cut runs inside secrets'
+  `chat_redact`, between its two passes, so the last redaction sees the text sent; the
+  secret-path test still reads the raw input. Interface 7 gains `cut_local`, the one
+  cut, which `list_sessions`' refusal reasons use too, the same way. A path outside the
+  cut's roots in a refusal reason now stays whole; the folder keeps its own last-part
+  cut. The gate refuses `redaction-off` when secrets' `chat_redact` takes no `between`.
 - `read_session` on the connector: part of one session's transcript, the last turns or
   the turns around a time, a subagent's own transcript with `agent`. A message's text
   shows only where its record names the person at the prompt, the model's own turn or

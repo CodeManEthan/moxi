@@ -684,7 +684,7 @@ records, since only a record says who wrote a message (`writer`, under Interface
   `command output`.
 - The model's thoughts show only with `thoughts`.
 - A tool call is its one-line summary, redacted before its cut. A call whose input names
-  a secret path shows as its tool and that path only, `Bash(~/.env)`.
+  a secret path shows as its tool and that path only: `cat ~/.env` shows `Bash(.env)`.
 - A tool result is its size and whether it failed. No tool output shows.
 
 The header gives `session`, `harness`, `kind`, `title` and `folder` (its last part), and
@@ -694,6 +694,17 @@ most 40,000 characters of text: the oldest turns go first, so the turn around `a
 farthest from that point go first. Refusals: `bad-session`, `unknown-session` (naming an
 archive folder that didn't answer, by its last part), `ambiguous`, `unknown-agent`,
 `unreadable`, `bad-around`, `redaction-off`, `busy` and `timeout`.
+
+**Local paths.** No full local path leaves through `read_session`. In every string it
+shows (message text, tool-call lines, the title, the folder, refusal texts), each path
+under a root is cut to its last segment, so `Read(/home/you/notes/x.md)` shows as
+`Read(x.md)`, and each loopback origin (`localhost`, `127.0.0.1`, `[::1]` and the like,
+with any scheme, port and path) shows as `local`. The roots are your home folder, `~/`,
+`$HOME/`, `/home/`, `/tmp/`, `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`, `/mnt/`,
+`/media/`, `/run/` and `/srv/`, in any case; a path runs to the first space, quote,
+backtick or one of `<>|,;(){}[]`. The cut runs inside `chat_redact`, between its two
+passes, so the last redaction sees exactly the text sent. A path outside the roots in a
+message stays whole; the `folder` is always its last part.
 
 **Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
 redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
@@ -759,8 +770,8 @@ is interface 5 plus the archive folders: `corpus`, `find`'s `include_archives`,
 `archive_dirs`, `archive_answers`, `ArchiveAnswer`, and `Retention`'s `archive_dirs`; a
 module that calls them loads sessions with `interface=6`. Interface 7 is interface 6
 plus who wrote a message and what it opens with: `writer`, `WRITERS`, `OPENING`,
-`opening`, `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`; a module that
-calls them loads sessions with `interface=7`. Every call of interface 6 behaves as it
+`opening`, `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`, and the local-path
+cut `cut_local`; a module that calls them loads sessions with `interface=7`. Every call of interface 6 behaves as it
 did.
 
 `writer(record)` names who a message or tool call's harness says wrote it, from the
@@ -774,6 +785,11 @@ U+007F to U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+30
 every Cf character), and `opening(text)` drops them from a text's front. Claude Code's
 and Codex's wrapper tests skip exactly that set, so a wrapper after a zero-width space or
 a no-break space still marks a message injected.
+
+`cut_local(text, env=None)` makes each loopback origin in a text `local` and cuts each
+local path under a root (the home folder `env` names, `~/`, `$HOME/` and the system roots
+above) to its last segment. It changes text, so a caller that redacts runs it as
+`chat_redact`'s `between`, never before or after the redaction.
 
 ## License
 
