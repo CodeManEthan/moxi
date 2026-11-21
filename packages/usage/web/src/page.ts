@@ -59,10 +59,13 @@
 //
 // One piece is open at a time, a limit row or a section, and the address names it
 // (`address-model.ts`). The page is placed with the route the address gave. When the
-// person opens or closes a piece the page adds a history entry at its address, so Back
-// returns to the piece that was open before; the page itself is not placed again until
-// Back or Forward places it. Where the page closes a piece itself, it rewrites the entry
-// it is on. A reload or a new placement opens the piece the address names.
+// person opens or closes a piece and so moves to another view of the page (the page
+// itself, Sessions, one session, its subagents, Projects or Folders, Prices), the page
+// adds a history entry at its address, so Back returns to the view that was open before;
+// the page itself is not placed again until Back or Forward places it. A limit row,
+// Models and Kinds are the page itself and add no entry: opening or closing one, or
+// closing a piece the page closes itself, rewrites the entry it is on. A reload or a
+// new placement opens the piece the address names.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
@@ -71,7 +74,8 @@ import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import {
-  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
+  addressPath, addressWrite, addsHistoryEntry, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress,
+  SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
@@ -642,8 +646,9 @@ export class UsagePage extends LitElement {
     return this.#at;
   }
 
-  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. A new
-   * history entry names it, so Back returns to the piece that was open. */
+  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. A move
+   * to another view adds a history entry (`addsHistoryEntry`), so Back returns to the view
+   * that was open; a move within one rewrites the entry the page is on. */
   open(address: Address): void {
     const next = settled(address, this.#folders());
     if (sameAddress(next, this.#at)) return;
@@ -660,7 +665,7 @@ export class UsagePage extends LitElement {
     this.agentPart = null;
     if (next.piece !== "sessions") this.#placed = null;
     this.#closePart();
-    this.#setAt(next, { push: true });
+    this.#setAt(next, { push: addsHistoryEntry(was, next) });
     this.requestUpdate();
   }
 
