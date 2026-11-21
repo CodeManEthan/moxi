@@ -1565,7 +1565,7 @@ class Daemon:
                 with self._lock:
                     stopping = self._stopping
                 if self.respawner is not None and not stopping:
-                    self.respawner.dropped(claims)
+                    self.respawner.on_drop(claims)
 
     # ------------------------------------------------------------------ the tool token
     def _mcp_token(self, conn, params: dict) -> dict:

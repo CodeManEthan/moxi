@@ -488,7 +488,7 @@ class Drops:
     def __init__(self):
         self.keys: list = []
 
-    def dropped(self, keys):
+    def on_drop(self, keys):
         self.keys.append(set(keys))
 
     def sweep(self):

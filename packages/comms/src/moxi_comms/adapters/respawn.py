@@ -333,9 +333,10 @@ class Respawner:
         #: The keys a thread handles now.
         self._busy: set[str] = set()
 
-    def dropped(self, keys) -> list[threading.Thread]:
-        """The daemon's bindings whose bind named these claim keys ended: one thread
-        each that replaces a gone Claude adapter (`after_drop`). Answers the threads."""
+    def on_drop(self, keys) -> list[threading.Thread]:
+        """On the drop of the daemon's bindings whose bind named these claim keys: start
+        one thread each that replaces a gone Claude adapter (`after_drop`). Answers the
+        threads."""
         stopped_at = f"{time.time():.0f}"
         return [self._thread(self.after_drop, key, stopped_at) for key in sorted(keys)]
 
@@ -413,7 +414,7 @@ class Respawner:
     def replace(self, key: str, record: dict, stopped_at: str) -> object:
         """Start a new adapter for the gone one keyed `key`, inside the cap. Answers its
         word, or None when none was started or it gave none in time."""
-        if self.stopping.is_set() or not self.allowed(key):
+        if self.stopping.is_set() or not self.take_slot(key):
             return None
         who = (record.get("claim") or {}).get("qualified") or key
         try:
@@ -429,10 +430,10 @@ class Respawner:
                  f"{word[1]}".rstrip())
         return word
 
-    def allowed(self, key: str) -> bool:
-        """Whether the cap lets this daemon start one more adapter for `key` now, and if
-        so counts it. Past the cap the key is logged once until the window lets it in
-        again."""
+    def take_slot(self, key: str) -> bool:
+        """Take one of `key`'s slots in the cap for a respawn starting now: True when one
+        was free, and it is counted; False past the cap, where the key is logged once
+        until the window lets it in again."""
         now = self.clock()
         with self._lock:
             for k in [k for k, times in self._recent.items()
