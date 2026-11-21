@@ -1,7 +1,7 @@
 """What a relaunch run tells, and whom, when it ends without relaunching its session, or
 relaunches it flagged.
 
-    note(conn, run, session, wait_s=)          # a self run that never touched its session
+    note(conn, run, session, wait_s=)          # a self run that left its session in place
     notify(conn, run, row, comms=, ...)         # the directors, then the fallback
 
 | outcome | session | told |
@@ -9,7 +9,12 @@ relaunches it flagged.
 | `relaunched`, not flagged | new | nobody |
 | `relaunched`, flagged (its word the finding) | new, held on a screen or not ready | directors, then fallback |
 | `expired`, `held`, `not-held`, `stopped` | untouched | a self run's session, one note |
-| `not-exited`, `exit-pending` | still up, maybe at its exit dialog | directors, then fallback |
+| `changed` | untouched: a `/clear` since, the conversation that armed the run is gone | a self run's session, one note |
+| `refused` | untouched: its launch would have been refused | a self run's session, one note; a director's directors, then fallback |
+| `refused`, a repair | down: the repair's launch would have been refused | directors, then fallback, with the `--from-record` command to repeat it |
+| `not-exited` | still up, maybe at its exit dialog | a self run's session, one note; a director's directors, then fallback |
+| `exit-pending` | still up, at its exit dialog | directors, then fallback |
+| `error`, before the exit | still up | a self run's session, one note; a director's or repair's directors, then fallback |
 | `relaunch-failed`, `first-turn-not-sent`, `gone`, `error` | down, or up without its handoff | directors, then fallback |
 | `note-not-taken` | the note was refused or lost | directors, then fallback |
 
@@ -47,10 +52,14 @@ from . import store
 log = logging.getLogger("moxi.launcher.notices")
 
 #: The outcomes after which a self run's session is told, by a note: it was not touched.
-NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped")
-#: The outcomes told past the session, to the directors and then the fallback.
+NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped", "refused", "changed")
+#: The outcomes after which a self run's session is still up though the run tried to act
+#: on it, also told by a note; `error` only when the run wrote no `exit` event.
+LEFT_IN_PLACE = ("not-exited", "error")
+#: The outcomes told past the session, to the directors and then the fallback; `refused`
+#: is told so only for a director's run or a repair, a self run's session by its note.
 NOTICE_OUTCOMES = ("not-exited", "exit-pending", "relaunch-failed", "first-turn-not-sent",
-                   "gone", "error")
+                   "gone", "error", "refused")
 #: The outcome of a relaunch whose new session runs; told past the session only when the
 #: launch flagged it (`is_flagged`).
 RELAUNCHED = "relaunched"
@@ -68,6 +77,19 @@ OFFLINE_RETRY_S = 60.0
 NOTE = ("Relaunch note from launcher: run {run} did not run ({word}: {detail}). Nothing "
         "was exited. Carry on, and arm it again at your next pause point if you still "
         "need it.")
+#: The note for an end that left the session in place by another way, by outcome. Its
+#: why field is the run's word in brackets and its said field the word and the detail,
+#: each without the word when the word repeats the outcome the note names.
+NOTES = {
+    "not-exited": ("Relaunch note from launcher: run {run} ended not-exited ({detail}). The "
+                   "relaunch did not exit this session{why}: carry on with your work, and "
+                   "arm it again at your next pause point if you still need it."),
+    "error": ("Relaunch note from launcher: run {run} ended error ({said}). The relaunch "
+              "stopped with an error before the exit: carry on with your work."),
+    "changed": ("Relaunch note from launcher: run {run} did not run ({detail}). Nothing was "
+                "exited: carry on, and arm a run of this conversation's own if you need "
+                "one."),
+}
 
 _SESSION = {
     "not-exited": "The session is still up, and may be at its exit dialog.",
@@ -77,10 +99,14 @@ _SESSION = {
     "first-turn-not-sent": "The session was launched again, without its handoff.",
     "gone": "The session is down.",
     "error": "The session may be down.",
+    "refused": "Nothing was exited or launched: the launch would have been refused.",
     NOTE_NOT_TAKEN: "The session was not touched, and did not take the note saying so.",
     RELAUNCHED: "The session was launched again and is running, but it may be held on a "
                 "screen or not yet ready: attach to its slot to see it.",
 }
+#: What a repair that ended `refused` says of its session, which it found down.
+_REPAIR_REFUSED = ("The session is down and nothing was launched: the repair's launch would "
+                   "have been refused.")
 
 
 def is_flagged(run: store.Run) -> bool:
@@ -89,10 +115,42 @@ def is_flagged(run: store.Run) -> bool:
     return run.outcome == RELAUNCHED and bool(run.word)
 
 
+def owes_note(run: store.Run, outcome: str | None,
+              events: Sequence[store.RunEvent] = ()) -> bool:
+    """Whether a self run that ended `outcome` tells its session by a note: the session
+    was left in place, untouched (`NOTE_OUTCOMES`), not exited (`not-exited`), or past an
+    error before the run's `exit` event."""
+    if run.mode != "self" or outcome is None:
+        return False
+    if outcome in NOTE_OUTCOMES:
+        return True
+    if outcome not in LEFT_IN_PLACE:
+        return False
+    return outcome != "error" or not any(event.kind == "exit" for event in events)
+
+
 def note_text(run: store.Run) -> str:
-    """The note a self run's untouched session is sent."""
-    return NOTE.format(run=run.run_id, word=run.word or run.outcome or "ended",
-                       detail=run.detail or "no detail")
+    """The note a self run's session left in place is sent."""
+    word = _own_word(run)
+    detail = run.detail or "no detail"
+    return NOTES.get(run.outcome or "", NOTE).format(
+        run=run.run_id, word=run.word or run.outcome or "ended", detail=detail,
+        why=f" ({word})" if word else "", said=f"{word}: {detail}" if word else detail)
+
+
+def _own_word(run: store.Run) -> str:
+    """The run's word, or nothing when it only repeats the run's outcome (gone, gone)."""
+    return "" if not run.word or run.word == run.outcome else run.word
+
+
+def _sentence(words: str) -> str:
+    """`words` as a sentence of its own: its first letter capitalised, and a full stop
+    added when it ends without closing punctuation."""
+    words = words.strip()
+    if not words:
+        return words
+    words = words[0].upper() + words[1:]
+    return words if words.endswith((".", "!", "?")) else f"{words}."
 
 
 def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: float) -> bool:
@@ -118,21 +176,30 @@ def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: floa
 def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
          repairable: bool = False) -> str:
     """A notice's text: the session, the slot, the run, the outcome, and the repair
-    command when the outcome allows one."""
+    command when the outcome allows one (for `exit-pending`, once the session has
+    exited). A repair that ended `refused` left its session down: its text says so and
+    names the command that repeats the repair, of the run it repaired. The run's word is
+    left out when it repeats the outcome, and its detail is a sentence of its own."""
     session = run.session_id
     slot = f" in slot {run.slot}" if run.slot else ""
-    said = outcome
+    said, word = outcome, _own_word(run)
     if outcome == NOTE_NOT_TAKEN:
-        said += f" (the run ended {run.outcome}" + (f": {run.word}" if run.word else "") + ")"
-    elif run.word:
-        said += f": {run.word}"
+        said += f" (the run ended {run.outcome}" + (f": {word}" if word else "") + ")"
+    elif word and word != outcome:
+        said += f": {word}"
     lines = [f"Relaunch notice from launcher: run {run.run_id} for session {session}{slot} "
              f"ended {said}."]
     if run.detail and outcome != NOTE_NOT_TAKEN:
-        lines.append(run.detail)
-    lines.append(_SESSION.get(outcome, ""))
-    if repairable:
-        lines.append(f"To launch it again from the run's record: moxi launcher relaunch "
+        lines.append(_sentence(run.detail))
+    refused_repair = outcome == "refused" and run.mode == "repair"
+    lines.append(_REPAIR_REFUSED if refused_repair else _SESSION.get(outcome, ""))
+    if refused_repair:
+        lines.append("Once the launch's problem is fixed, to try the repair again: moxi "
+                     f"launcher relaunch --from-record {run.repair_of or run.run_id}")
+    elif repairable:
+        when = ("Once a person has answered the dialog and the session has exited, to "
+                "launch it again" if run.outcome == "exit-pending" else "To launch it again")
+        lines.append(f"{when} from the run's record: moxi launcher relaunch "
                      f"--from-record {run.run_id}")
     return " ".join(line for line in lines if line)
 
@@ -227,11 +294,14 @@ def _words(error: BaseException) -> str:
 
 
 def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
-    """The settings a notice reads: the fallback and the reserved-name retry bound."""
-    return {"fallback": str(current.get("relaunch.fallback") or ""),
-            "retry_s": float(current.get("relaunch.notice_retry_s", 30))}
+    """The settings a notice reads: the fallback and the reserved-name retry bound.
+    `current` is the launcher's `moxi.config.Settings`, which reads by key and has no
+    `get`, or a mapping that holds the keys."""
+    return {"fallback": str(current["relaunch.fallback"] or ""),
+            "retry_s": float(current["relaunch.notice_retry_s"])}
 
 
-__all__ = ["MODULE", "NAME_RESERVED", "NOTE", "NOTE_NOT_TAKEN", "NOTE_OUTCOMES",
-           "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED", "RESERVED_RETRY_S", "SENDER",
-           "directors", "is_flagged", "note", "note_text", "notify", "settings_of", "text"]
+__all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",
+           "NOTE_OUTCOMES", "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED",
+           "RESERVED_RETRY_S", "SENDER", "directors", "is_flagged", "note", "note_text",
+           "notify", "owes_note", "settings_of", "text"]
