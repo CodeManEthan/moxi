@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
+  `list_sessions` to the Claude apps. Each row gives the session, harness, kind (`main`
+  or `program`), start and last change in UTC, the name, and the last part of its folder
+  only; names and folders go through secrets' `chat_redact`, and roots that couldn't be
+  listed are named by their last part with every path in their reason cut the same way.
+  Every tool refuses `redaction-off` when secrets or a chat set can't run, and runs
+  under the host's shared limit. The `secrets` extra now brings personal-data's
+  validators too. `moxi sessions read` finds a session through the new `locate` and
+  reads turns through `view.turns_last` and `view.turns_around`, unchanged in what it
+  prints.
 - Interface 7: `writer(record)`, who a message's harness says wrote it, and `OPENING`
   with `opening(text)`, the characters every test of what a message opens with skips
   first, with `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`. A message

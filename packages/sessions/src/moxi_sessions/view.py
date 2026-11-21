@@ -20,7 +20,9 @@ sets (`SETS`), fixed, through the secrets module when it loads, reached through
 `moxi.modules.load` because secrets is an optional link of sessions. When it doesn't load,
 `redactor()` says why and the read prints its text as written.
 
-**The reads.** `last` is sessions' `window`: the last turns. `around` reads the records
+**The reads.** `turns_last` and `turns_around` give turns of records, which a reader
+that needs more than the rows (who wrote each message) works from; `last` and `around`
+make rows of them. `last` is sessions' `window`: the last turns. `around` reads the records
 forward and keeps the turns around a time: the turn that holds it (the newest turn that
 started at or before it, else the first), up to half the rest before it and the others
 after, with more before when the session ends first. `whole` is every record. Each gives a
@@ -337,9 +339,30 @@ def _groups(records: Iterator[Record]) -> Iterator[_Group]:
         yield group
 
 
-def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
-    """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
-    chosen are made rows, so the turns passed over on the way cost no redaction."""
+@dataclass
+class Turns:
+    """Turns of records, oldest first, each a list of records: what `turns_last` and
+    `turns_around` read. `header_of`, `earlier`, `later` and `ended` are as `Shown`
+    says."""
+
+    groups: list[list[Record]]
+    header_of: Callable[[], Any]
+    earlier: bool = False
+    later: bool = False
+    ended: str | None = None
+
+
+def turns_last(source: Any, turns: int) -> Turns:
+    """The last `turns` turns as records, through sessions' `window`."""
+    from .read import window
+
+    read = window(source, turns=turns)
+    groups = [group.records for group in _groups(iter(read.records))]
+    return Turns(groups, lambda: read.header, earlier=read.has_earlier, ended=read.ended)
+
+
+def turns_around(source: Any, at: float, turns: int) -> Turns:
+    """`turns` turns around the time `at` (epoch seconds) as records, read forward."""
     from .read import records
 
     before = (turns - 1) // 2
@@ -363,13 +386,20 @@ def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> 
                 later = True
                 break
             after.append(group)
-        take = min(len(kept) - 1, turns - 1 - len(after))
-        first = len(kept) - 1 - take
-        chosen = list(kept)[first:] + after
-        rows = [view_row(record, redact=redact) for group in chosen
-                for record in group.records]
-    return Shown("around", rows, lambda: header, turns=turns, around=at,
+    take = min(len(kept) - 1, turns - 1 - len(after))
+    first = len(kept) - 1 - take
+    chosen = list(kept)[first:] + after
+    return Turns([group.records for group in chosen], lambda: header,
                  earlier=dropped or first > 0, later=later)
+
+
+def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
+    """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
+    chosen are made rows, so the turns passed over on the way cost no redaction."""
+    read = turns_around(source, at, turns)
+    rows = [view_row(record, redact=redact) for group in read.groups for record in group]
+    return Shown("around", rows, read.header_of, turns=turns, around=at,
+                 earlier=read.earlier, later=read.later)
 
 
 def whole(source: Any, redact: Redact | None = None) -> Shown:
@@ -526,7 +556,8 @@ def lines(row: Mapping[str, Any]) -> list[str]:
     return [f"{when}  {said} {row.get('raw_kind', '')}"]
 
 
-__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "around", "cut_message",
+__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "Turns", "around",
+           "cut_message",
            "cut_text",
-           "header_row", "last", "lines", "redactor", "stamp", "summary", "view_row",
-           "whole"]
+           "header_row", "last", "lines", "redactor", "stamp", "summary", "turns_around",
+           "turns_last", "view_row", "whole"]

@@ -12,7 +12,8 @@ session's last turns, and a block other pages may place for that view. With the
 enforces sessions' transcript-read guard, off until the install's question or its switch
 turns it on. With the `projects` extra and the `ui` one, the page server folds the
 sessions into projects, and the `project-facts` component reports them on the Projects
-page.
+page. With the `connector` extra, the public MCP host serves `list_sessions` and
+`read_session` to the Claude apps, every text through secrets' chat redaction.
 """
 
 INTERFACES = frozenset({2, 3, 4, 5, 6, 7})
@@ -30,6 +31,10 @@ OPTIONAL = {
     "turns": "The transcript-read guard: turns refuses an agent's Read, Grep, Glob or shell "
              "read of a harness transcript and points it to `moxi sessions read`, once "
              "guard.transcript_read is on.",
+    "connector": "The session list and transcript reads in the Claude apps, text chat and "
+                 "voice mode, through the public MCP host: list_sessions and "
+                 "read_session, every text through secrets' chat redaction, which the "
+                 "secrets extra installs; without it each tool refuses.",
     "projects": "Sessions by project on the Projects page: each project's sessions active "
                 "recently and this week, its last activity, and the folders worked in "
                 "this week that are no project. Needs projects' read API at interface 2.",
