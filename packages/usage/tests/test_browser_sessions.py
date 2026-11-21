@@ -224,7 +224,11 @@ def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
     column = {name: i for i, name in enumerate(heads)}
     assert heads.index("Active") + 1 == column["Turns"] == column["Input"] - 1, heads
     assert column["Output"] + 1 == column["Subagent share"] == column["Est. cost"] - 1, heads
-    expect(table.locator("th", has_text="Turns")).to_have_attribute("title", re.compile("never summed"))
+    expect(table.locator("th", has_text="Active")).to_have_attribute(
+        "title", "First → last request (not the file's mtime)")
+    expect(table.locator("th", has_text="Turns")).to_have_attribute(
+        "title", "Prompts in the main session file; never summed with subagents")
+    expect(table.locator("th", has_text="Subagent share")).not_to_have_attribute("title", re.compile(""))
     first = table.locator("tbody tr").first.locator("td")
     # Each request of the seed is a prompt of its own, and no session has a subagent.
     expect(first.nth(column["Turns"])).to_have_text("16")

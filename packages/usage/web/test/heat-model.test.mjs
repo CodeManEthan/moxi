@@ -44,10 +44,11 @@ test("five steps on the quantiles of the days that cost something", () => {
   assert.equal(heatStep(0.5, [0, 0, 0, 0]), 5);
 });
 
-test("a used day says its cost, its tokens and its classes; an unused one says so", () => {
+test("each day says its cost, its tokens and its classes, an unused one at 0", () => {
   const model = heatModel(report([
     day("2026-11-03", 1.25, { tokens: 2_100, fresh_input: 100, cache_write: 300, cache_read: 1_200, output: 500 }),
     day("2026-11-03", 0.5, { model: "m-b", tokens: 0 }),
+    day("2026-11-05", 0, { tokens: 40, output: 40 }),
     day(TODAY, null, { complete: false, tokens: 10 }),
   ]), TODAY);
   const used = model.days.find((item) => item.day === "2026-11-03");
@@ -57,20 +58,26 @@ test("a used day says its cost, its tokens and its classes; an unused one says s
   });
   assert.deepEqual(model.days.at(-1).aria, "2026-11-08: no price");
   assert.equal(model.days.at(-1).step, 0);
-  assert.deepEqual(model.days.at(-2), { day: "2026-11-07", step: 0, used: false, aria: "2026-11-07: 0.00 USD",
-                                       hover: "2026-11-07: 0.00 USD" });
-  // The table holds the used days, oldest first.
+  assert.deepEqual(model.days.at(-2), {
+    day: "2026-11-07", step: 0, used: false, aria: "2026-11-07: 0.00 USD",
+    hover: "2026-11-07: 0.00 USD, 0 tokens\nInput 0\nCache create 0\nCache read 0\nOutput 0",
+  });
+  // The table holds the days that cost something, oldest first, and a used day whose
+  // cost is not whole; a day used at no cost is left out.
   assert.deepEqual(model.table.columns.map((column) => column.label), ["Day", "Est. cost", "Tokens"]);
   assert.deepEqual(model.table.rows.map((row) => row.cells),
                    [["2026-11-03", "$1.75", "2.10k"], ["2026-11-08", "no price", "10"]]);
 });
 
-test("a used day names its classes only when it is in the page's range", () => {
+test("a day names its classes only when it is in the page's range", () => {
   const rows = [day("2026-11-03", 1.25, { tokens: 2_100, fresh_input: 100, cache_write: 300, cache_read: 1_200, output: 500 })];
   const hover = (range) => heatModel(report(rows), TODAY, range).days.find((item) => item.day === "2026-11-03").hover;
   assert.equal(hover({ kind: "7d" }), "2026-11-03: 1.25 USD, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500");
   assert.equal(hover({ kind: "today" }), "2026-11-03: 1.25 USD, 2.10k tokens");
   assert.equal(hover({ kind: "all" }), hover({ kind: "7d" }));
+  // An unused day out of the range says its cost and tokens only.
+  const unused = heatModel(report(rows), TODAY, { kind: "today" }).days.find((item) => item.day === "2026-11-04");
+  assert.equal(unused.hover, "2026-11-04: 0.00 USD, 0 tokens");
 });
 
 test("laid out: weeks as columns, Sunday on top, 13 px a week whatever the width", () => {

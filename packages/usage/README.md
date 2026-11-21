@@ -419,25 +419,30 @@ sessions module. Top to bottom:
   own dollars from the cost terms; By model it is stacked by model, the six that cost most
   in the range each in a shade or a line fill of its own and the rest as one, `Other`.
   Either way a legend names the parts, the hover gives every part, and the table, oldest
-  first, has the day and a column for each part. By tokens
-  there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
-  work`, input, cache writes and output stacked. A table's column of dollars reads
-  `Est. cost`.
+  first, has the day (`2026-11-08`) and a column for each part, `$0.00` where a part had
+  nothing that day. The chart is named `Daily estimated cost — by class` or `— by model`
+  (`Monthly` where its bars are months), and By model the line under it says `Per-model
+  dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
+  with its share of all tokens, and `Billable work`, input, cache writes and output
+  stacked. A table's column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
   narrow page its box scrolls), each month is named over its first column, and the five
   shades sit on the quantiles of the days that cost something. Every day is a button: a
   click or Enter sets the range to it. A day is named by its date (`2026-11-03: 1.75
-  USD`); a used day says its cost and tokens on hover, and its token classes when it is
-  in the range. `Table` lists the used days by date, oldest first.
+  USD`); each day says its cost and tokens on hover, and its token classes (at 0 on a day
+  nothing was used) when it is in the range. `Table` lists the days that cost something,
+  and a used day whose cost is not whole, by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, a table of every session of the range, dearest first, read 500 at
     a time, the next 500 read as the rows drawn near the end or on `Load more` (a next
     page that failed is read again only on a scroll that moves the rows drawn, or on
     `Load more`). Its columns are the project (or the folder, without the projects
-    module), the session's name (with a `codex` badge on a Codex session), its start, how long it was active,
-    its turns (0 where none is recorded), its Input, Cache create, Cache read and Output
+    module), the session's name (with a `codex` badge on a Codex session), its start, how
+    long it was active (its first to its last request; the header's hover says so), its
+    turns (0 where none is recorded; the header's hover: `Prompts in the main session
+    file; never summed with subagents`), its Input, Cache create, Cache read and Output
     tokens, each with a bar against the most of its column among the rows read, its
     subagents' share of its cost as a meter, and its estimated cost. A click on a header
     sorts by it, highest first, and again the other way, rows of one value by session id

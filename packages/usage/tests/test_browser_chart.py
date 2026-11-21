@@ -316,6 +316,8 @@ def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(p
     expect(chart).to_have_attribute("aria-label", "Estimated cost by model each day, last 30 days")
     group = panel.locator("[data-group=chart]")
     expect(group.locator("[data-part=legend] li")).to_have_text([SONNET, HAIKU])
+    expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by model")
+    expect(group.locator("[data-part=caption]")).to_have_text("Per-model dollars, straight from the index.")
     # Today's session ran on Sonnet alone; the hover names every model of the range.
     today = chart.locator("g[data-period]").last
     expect(today.locator("rect.seg")).to_have_count(1)
@@ -327,6 +329,9 @@ def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(p
     group.get_by_role("button", name="Table").click()
     table = group.get_by_role("table")
     expect(table.locator("thead th")).to_have_text(["Day", SONNET, HAIKU])
+    # Today ran on Sonnet alone: its Haiku cell reads $0.00.
+    expect(table.locator("tbody tr").last.locator("td")).to_have_text(
+        [re.compile(r"^\d{4}-\d{2}-\d{2}$"), re.compile(rf"^{MONEY}$"), "$0.00"])
     by_class.click()
     expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
 
@@ -368,6 +373,8 @@ def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
 def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     panel = open_page(page)
     group = panel.locator("[data-group=chart]")
+    expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by class")
+    expect(group.locator("[data-part=caption]")).to_have_count(0)
     group.get_by_role("button", name="Table").click()
     expect(chart_of(panel)).to_have_count(0)
     table = group.get_by_role("table")
@@ -378,7 +385,7 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     assert keys == sorted(keys), keys
     last = table.locator("tbody tr").last.locator("td")
     expect(last).to_have_count(5)
-    expect(last.first).to_have_text(re.compile(r"^\w{3} \d{1,2}$"))
+    expect(last.first).to_have_text(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
     expect(last.nth(1)).to_have_text(re.compile(MONEY))
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
@@ -587,6 +594,11 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(oldest).to_have_attribute("aria-label", re.compile(rf"^{day}: \d+\.\d{{2}} USD$"))
     expect(oldest.locator("title")).to_have_text(re.compile(rf"^{day}: \d+\.\d{{2}} USD, [\d.]+k tokens$"))
     expect(days.first).to_have_attribute("aria-label", f"{days.first.get_attribute('data-day')}: 0.00 USD")
+    # A day nothing was used on says its cost and tokens, and in the range its classes at 0.
+    expect(days.first.locator("title")).to_have_text(f"{days.first.get_attribute('data-day')}: 0.00 USD, 0 tokens")
+    idle = grid.locator("rect[data-used=false]").last
+    expect(idle.locator("title")).to_have_text(
+        f"{idle.get_attribute('data-day')}: 0.00 USD, 0 tokens\nInput 0\nCache create 0\nCache read 0\nOutput 0")
     # Picking a day sets the range to it.
     when = datetime.date.fromisoformat(day)
     date, year = f"{when:%b} {when.day}", when.year

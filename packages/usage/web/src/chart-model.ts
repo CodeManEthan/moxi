@@ -69,8 +69,9 @@ export interface ChartModel {
   bars: ChartBar[];
   /** The line above the chart; null where there is nothing to compare. */
   sentence: string | null;
-  /** The chart's own name and the line under it, where the group holds more than one
-   * chart: `Cache reads`. */
+  /** The chart's own name and the line under it: the cost chart's `costName` (with
+   * `MODEL_CAPTION` split by model), and by tokens each of the two charts' own, `Cache
+   * reads`. */
   name: string | null;
   caption: string | null;
   /** What the bars are stacked by, bottom first, for the legend; empty when they are not. */
@@ -98,6 +99,14 @@ export const BILLABLE_SERIES: Series[] = [
 ];
 export const CACHE_READS = "Cache reads";
 export const BILLABLE_WORK = "Billable work";
+/** The cost chart's caption split by model. */
+export const MODEL_CAPTION = "Per-model dollars, straight from the index.";
+
+/** The cost chart's name: `Daily estimated cost — by class`, or `— by model`; `Monthly`
+ * where the bars are months. */
+export function costName(by: "day" | "month", split: Split): string {
+  return `${by === "day" ? "Daily" : "Monthly"} estimated cost — ${split === "model" ? "by model" : "by class"}`;
+}
 const TOKEN_CLASSES: readonly [keyof DayRow & string, string][] = [
   ["fresh_input", "Input"], ["cache_read", "Cache read"], ["cache_write", "Cache create"],
   ["output", "Output"],
@@ -255,7 +264,8 @@ function gaugeChart(dated: DayRow[], range: Range, today: string, measure: Measu
  * The sentence, by cost: `The most in these 30 days was today, $19.54. 8 days had no
  * sessions.` By tokens: `71.9M tokens in these 30 days. The most was today, 22.0M.`, or
  * `At least 71.9M tokens …` when a count is not whole.
- * A range of one period has none, since its one bar says its value.
+ * A range of one period has none, since its one bar says its value. By cost the chart is
+ * named by `costName`, with `MODEL_CAPTION` under it split by model.
  */
 export function chartModel(report: Report<DayRow>, range: Range, measure: Measure, today: string,
                            terms: Report<TermsRow> | null = null, split: Split = "class"): ChartModel | null {
@@ -296,7 +306,9 @@ export function chartModel(report: Report<DayRow>, range: Range, measure: Measur
       if (none > 0) parts.push(`${countWords(none, unit)} had no sessions.`);
     }
   }
-  return { ...chart, sentence: parts.length ? parts.join(" ") : null };
+  const named = measure === "cost" ? { name: costName(by, byModel ? "model" : "class"), caption: byModel ? MODEL_CAPTION : null }
+    : {};
+  return { ...chart, ...named, sentence: parts.length ? parts.join(" ") : null };
 }
 
 /**
@@ -334,10 +346,12 @@ export interface Table {
 }
 
 /**
- * The chart's rows as a table, oldest first, a Day (or Month) column then a column per
- * part the chart stacks: under Cost split by class a column per token class, each
- * period's dollars from `terms` (blank until they answer); under Cost split by model a
- * column per part of `modelSeries`; under Tokens a column per token class. A last column
+ * The chart's rows as a table, oldest first, a Day column (the ISO date) or a Month
+ * column, then a column per part the chart stacks: under Cost split by class a column
+ * per token class, each period's dollars from `terms` (blank until they answer, `$0.00`
+ * for a class they hold nothing for); under Cost split by model a column per part of
+ * `modelSeries`, `$0.00` for a part with nothing that period; under Tokens a column per
+ * token class. A last column
  * says why a row is not whole, and is there only when some row is not. Requests with no
  * time are the last row, `no time`.
  */
@@ -356,16 +370,16 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
     const cells = measure === "cost" && byModel
       ? models.map((item) => {
         const rows = mine.filter((row) => part(row) === item.key);
-        return rows.length ? costWords({ cost: sumRows(rows).cost, complete: true }) : "";
+        return costWords({ cost: rows.length ? sumRows(rows).cost : 0, complete: true });
       })
       : measure === "cost"
         ? COST_SERIES.map((item) => {
-          const found = dollars?.find((one) => one.key === item.key);
-          return found === undefined ? "" : fmtCost(found.value);
+          if (terms === null || period === null) return "";
+          return fmtCost(dollars?.find((one) => one.key === item.key)?.value ?? 0);
         })
         : TOKEN_CLASSES.map(([key]) => fmtTokens(mine.reduce((total, row) => total + (Number(row[key]) || 0), 0)));
     const why = whyNotWhole(sum, measure);
-    const name = period === null ? "no time" : by === "month" ? monthWord(period) : dateWord(period);
+    const name = period === null ? "no time" : by === "month" ? monthWord(period) : period;
     return { key: period ?? "no time", cells: [name, ...cells], why };
   });
   const flagged = lines.some((line) => line.why !== null);

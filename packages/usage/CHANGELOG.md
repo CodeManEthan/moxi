@@ -10,26 +10,35 @@
   Cache read, Output, Subagent share and Est. cost; Harness, Models, Requests, Tokens,
   Context and the Folder column beside Project are gone. Each token class cell has a bar
   against its column's most among the rows read, in the class's shade, and a Codex
-  session's name a `codex` badge.
+  session's name a `codex` badge. The Active header's hover says `First → last request
+  (not the file's mtime)` and Turns' `Prompts in the main session file; never summed with
+  subagents`; Subagent share's header has no hover.
 - The page chart's table lists its periods oldest first, where it listed them newest
   first, and has the day and a column per part of the chart, with no Total column (the
-  harness's own cost went with it). Its `Not whole` column is as before.
+  harness's own cost went with it). Its `Not whole` column is as before. A day reads as
+  its date (`2026-11-08`, where it read `Nov 8`), and a part with nothing that day reads
+  `$0.00`, where its cell was blank.
+- The page's chart by cost is named `Daily estimated cost — by class` or `— by model`
+  (`Monthly` where its bars are months), and By model the line under it says `Per-model
+  dollars, straight from the index.`
 - The heat map names a day by its date: `2026-11-03: 1.75 USD` for a reader that cannot
   see its shade, `0.00 USD` for a day nothing was used, and `2026-11-03` in its hover and
   its table, where it wrote `Nov 3 2026` and `nothing used`.
 - The Sessions table reads 500 sessions at a time (`/api/sessions` takes `top` up to
   500) and reads the next 500 as the rows drawn near the end, or on `Load more`, where it
   read 200 on `Show`. A next page that failed is read again only on a scroll that moves
-  the rows drawn or on `Load more`. Its rows sit in a box of their own, 40 px each, only those in view
-  drawn, and the arrow keys move a row cursor; Enter on a row opens its session. Rows of
+  the rows drawn or on `Load more`. Its rows sit in a box of their own, 40 px each, only
+  those in view drawn, and the arrow keys move a row cursor; Enter on a row opens its session. Rows of
   one value sort by session id then harness in either direction, where they kept the
   order by cost (then tokens). A session with no turn id counts 0 turns, where its cell
   was empty, and the subagent share is drawn as a meter.
 - The page's heat map follows only the project (or folder) filter, no longer Harness and
   Model, and is drawn even when no day of the 53 weeks was used. Every day is a button,
   not only the used ones; weeks are a fixed 13 px apart, where the pitch shrank to fit;
-  every month is named; a used day's hover gives its token classes only when the day is in
-  the range; its table lists the used days oldest first. It is named `Daily estimated
+  every month is named; each day's hover gives its cost and tokens, and its token classes
+  (at 0 on a day nothing was used) only when the day is in the range, where a day nothing
+  was used gave its cost alone; its table lists the days that cost something, and a used
+  day whose cost is not whole, oldest first, where it listed every used day. It is named `Daily estimated
   cost — trailing 53 weeks`, and its line names the time zone of its days.
 - The page's filter line has By class / By model beside Cost / Tokens. By model the chart
   by cost is stacked by model, the six that cost most in the range in four shades and two

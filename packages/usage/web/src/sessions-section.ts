@@ -115,10 +115,10 @@ export interface BoardOrder {
   order: "asc" | "desc";
 }
 
+/** The Active column's hover. */
+export const ACTIVE_TITLE = "First → last request (not the file's mtime)";
 /** The Turns column's hover. */
-export const TURNS_TITLE = "Turns in the main session's file, whatever the range; never summed with subagents";
-/** The Subagent share column's hover. */
-export const SHARE_TITLE = "The part of the session's cost in the range its subagents ran up";
+export const TURNS_TITLE = "Prompts in the main session file; never summed with subagents";
 /** The badge after a Codex session's name, and its hover. */
 export const CODEX_BADGE = { text: "codex", title: "A Codex session, priced at OpenAI list rates" };
 /** A token class cell's bar is this many px wide at the column's most. */
@@ -241,10 +241,10 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
   const columns = [
     projects ? column("Project", false, "project") : column("Folder", false, "project"),
     column("Session", false, null),
-    column("Started", true, "started"), column("Active", true, "active"),
+    column("Started", true, "started"), column("Active", true, "active", ACTIVE_TITLE),
     column("Turns", true, "turns", TURNS_TITLE),
     ...BOARD_CLASSES.map((item) => column(item.label, true, item.sort)),
-    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Est. cost", true, "cost"),
+    column("Subagent share", true, "subagent_share"), column("Est. cost", true, "cost"),
     ...(flagged ? [column("Not whole", false, null)] : []),
   ];
   const most = BOARD_CLASSES.map((item) => Math.max(1, ...list.rows.map((row) => row[item.key])));

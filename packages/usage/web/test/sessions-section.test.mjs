@@ -108,9 +108,10 @@ test("the table: project or folder, session, start, active, turns, the four clas
   assert.equal(board.rows[0].badge, null);
   // The subagent share is a meter in its column, named for a reader that cannot see it.
   assert.deepEqual(board.rows[0].share, { value: 0.25, label: "Subagent share 25%" });
-  // Turns and Subagent share say what they count on hover.
-  assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => column.label),
-                   ["Turns", "Subagent share"]);
+  // Active and Turns say what they count on hover; no other column has a hover.
+  assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => [column.label, column.title]),
+                   [["Active", "First → last request (not the file's mtime)"],
+                    ["Turns", "Prompts in the main session file; never summed with subagents"]]);
   assert.equal(board.rows[0].key, "claude/s-1");
   assert.deepEqual(board.rows[0].session, { harness: "claude", id: "s-1" });
   // The column sorted by says its direction; the others say none; one with no sort says nothing.

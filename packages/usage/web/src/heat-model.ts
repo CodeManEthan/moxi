@@ -85,8 +85,10 @@ export function heatStep(value: number, thresholds: number[]): number {
 
 /**
  * The heat map of a daily report by day over the 53 weeks to `today`, drawn whether or
- * not any day of them was used. A used day's hover names its token classes only when it
- * is in `range`, the page's range.
+ * not any day of them was used. Each day's hover says its cost and tokens, and names its
+ * token classes (at 0 for a day nothing was used) only when it is in `range`, the page's
+ * range. The table lists the days that cost something, and a used day whose cost is not
+ * whole.
  */
 export function heatModel(report: Report<DayRow>, today: string, range: Range = { kind: "all" }): HeatModel {
   const since = heatSince(today);
@@ -103,7 +105,7 @@ export function heatModel(report: Report<DayRow>, today: string, range: Range = 
     const used = sum.rows > 0;
     const aria = `${day}: ${usdWords(used ? sum : { cost: 0, complete: true })}`;
     const count = (key: keyof DayRow & string): number => mine.reduce((total, row) => total + (Number(row[key]) || 0), 0);
-    const hover = !used ? aria : [`${aria}, ${fmtTokens(sum.tokens)} tokens`,
+    const hover = [`${aria}, ${fmtTokens(sum.tokens)} tokens`,
                                   ...(inRange(day) ? CLASSES.map(([key, label]) => `${label} ${fmtTokens(count(key))}`) : [])]
       .join("\n");
     return { day, step: heatStep(sum.cost ?? 0, thresholds), used, aria, hover };
@@ -114,7 +116,7 @@ export function heatModel(report: Report<DayRow>, today: string, range: Range = 
     days, offset: Number.isNaN(first) ? 0 : first, sentence: heatSentence(report.tz),
     table: {
       columns: [{ label: "Day", num: false }, { label: "Est. cost", num: true }, { label: "Tokens", num: true }],
-      rows: sums.filter((item) => item.sum.rows > 0)
+      rows: sums.filter((item) => (item.sum.cost ?? 0) > 0 || (item.sum.rows > 0 && !item.sum.complete))
         .map(({ day, sum }) => ({ key: day, cells: [day, costWords(sum), fmtTokens(sum.tokens)] })),
     },
   };
