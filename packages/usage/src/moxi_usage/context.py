@@ -33,7 +33,10 @@ class Context:
     `percent` the share of the window used (0-100); each is `UNKNOWN` when it cannot be
     said, and `reason` then says why. `model`, `request_time` (epoch seconds) and `path`
     (the source read) describe what was read, and `harness` is the harness that held
-    the session (None when none did)."""
+    the session (None when none did, or more than one did). `found` is false when the
+    session is in no harness asked or in more than one, or the agent is not among its
+    subagents; `reason` then says which, naming the harnesses asked or, for a session in
+    more than one, each harness and the path of each record it holds."""
 
     session_id: str
     harness: str | None
@@ -45,6 +48,7 @@ class Context:
     request_time: Any = UNKNOWN
     path: str | None = None
     reason: str | None = None
+    found: bool = True
 
     @property
     def known(self) -> bool:
@@ -62,7 +66,8 @@ class Context:
     def as_dict(self) -> dict[str, Any]:
         """JSON-ready: an `UNKNOWN` fact is left out and named in `"unknown"`."""
         out: dict[str, Any] = {"session_id": self.session_id, "harness": self.harness,
-                               "agent_id": self.agent_id, "path": self.path}
+                               "agent_id": self.agent_id, "path": self.path,
+                               "found": self.found}
         unknown = []
         for name in ("tokens", "window", "percent", "model", "request_time"):
             value = getattr(self, name)
@@ -83,20 +88,34 @@ def _known_text(value: Any) -> str | None:
 
 
 def _source(sessions: Any, session_id: str, harness: str | None) -> tuple[Any, str | None, str]:
-    """The session's source, the harness that held it, and why there is none."""
+    """The session's source, the harness that held it, and why there is none. With no
+    `harness` every harness is asked, and an id more than one holds is refused, naming
+    each harness and the path of each record it holds, rather than guessed at."""
     asked = HARNESSES if harness is None else (harness,)
     reasons = []
+    readable: list[tuple[str, Any]] = []
+    holders = []
     for name in asked:
         found = sessions.find(name, session_id)
+        if found.hits:
+            paths = ", ".join(str(hit.source.path) for hit in found.hits)
+            holders.append(f"{name} at {paths}")
         hits = [hit for hit in found.hits if not hit.compressed]
         if hits:
-            return hits[0].source, name, ""
+            readable.append((name, hits[0].source))
+            continue
         if found.hits:
             reasons.append(f"{name} holds it only compressed, which sessions does not read")
             continue
         said = sorted({probe.outcome for probe in found.probes if probe.outcome != "miss"})
         if said:
             reasons.append(f"{name}: {'; '.join(said)}")
+    if len(holders) > 1:
+        return None, None, (f"session {session_id} is in more than one harness "
+                            f"({'; '.join(holders)}); give --harness")
+    if readable:
+        name, source = readable[0]
+        return source, name, ""
     where = harness or ", ".join(HARNESSES)
     why = f"no session {session_id} found in {where}"
     if reasons:
@@ -135,9 +154,10 @@ def context(session_id: str, *, harness: str | None = None, agent_id: str | None
             env: Mapping[str, str] | None = None) -> Context:
     """The context of `session_id` (or of its agent `agent_id`), from its newest request.
 
-    `harness` is `claude`, `codex` or `opencode`; None asks each in that order. A session
-    or agent that cannot be found or read, or a source with no request yet, gives a
-    `Context` whose `tokens` is `UNKNOWN`, with the reason. Raises
+    `harness` is `claude`, `codex` or `opencode`; None asks each, and a session more than
+    one holds is not found. A session or agent that cannot be found or read, or a source
+    with no request yet, gives a `Context` whose `tokens` is `UNKNOWN`, with the reason;
+    one not found, or held by more than one harness, has `found` false. Raises
     `moxi.config.ConfigError` when sessions' or usage's config cannot be read."""
     from moxi_sessions import api as sessions
 
@@ -147,11 +167,11 @@ def context(session_id: str, *, harness: str | None = None, agent_id: str | None
         raise ValueError(f"{harness!r} is not a harness ({', '.join(HARNESSES)})")
     source, held_by, why = _source(sessions, session_id, harness)
     if source is None:
-        return Context(session_id, None, agent_id, reason=why)
+        return Context(session_id, None, agent_id, reason=why, found=False)
     if agent_id is not None:
         source, why = _agent(sessions, source, agent_id)
         if source is None:
-            return Context(session_id, held_by, agent_id, reason=why)
+            return Context(session_id, held_by, agent_id, reason=why, found=False)
     path = getattr(getattr(source, "source", source), "path", None)
     try:
         last = sessions.last_request(source)

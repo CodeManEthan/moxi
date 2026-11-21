@@ -271,14 +271,20 @@ class Batch:
       for a file.
     * `header`: the session's header, read when first asked for; None when nothing was
       read (the caller keeps the one it has).
+    * `prompt_ids`: Claude only, the `promptId`s this batch's lines moved the turn to, in
+      order, whatever `kinds` keeps (`claude.Mapper.started`). The batches of a file from
+      no cursor name every prompt id it wrote, a prompt that drew no request included.
+      Empty for Codex and OpenCode.
     """
 
-    __slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "_header")
+    __slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "prompt_ids",
+                 "_header")
 
     def __init__(self, *, records: tuple[Record, ...], cursor: str, reset: bool,
                  complete: bool, closed: tuple[str, ...], gone: int | None,
-                 header: _Once | None):
+                 header: _Once | None, prompt_ids: tuple[str, ...] = ()):
         self.records = records
+        self.prompt_ids = prompt_ids
         self.cursor = cursor
         self.reset = reset
         self.complete = complete
@@ -1002,14 +1008,17 @@ def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
         "size": end, "offset": offset, "line": number, "complete": complete,
         "fp_len": len(head), "fp": hashlib.sha256(head).hexdigest(),
     }
+    prompt_ids: tuple[str, ...] = ()
     if src.harness == CLAUDE:
         new["prompt_id"] = mapper.prompt_id
         new["open_key"] = mapper.open_key
+        prompt_ids = tuple(mapper.started)
     else:
         new["state"] = mapper.state.to_json()
     return Batch(records=tuple(out), cursor=_encode(new), reset=reset, complete=complete,
                  closed=closed, gone=None,
-                 header=_Once(_lazy_header(src, st.st_dev, st.st_ino, end)))
+                 header=_Once(_lazy_header(src, st.st_dev, st.st_ino, end)),
+                 prompt_ids=prompt_ids)
 
 
 def _opencode_since(src: Source, obj: dict | None, *, reset: bool,

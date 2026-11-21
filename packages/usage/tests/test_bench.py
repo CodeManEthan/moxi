@@ -579,10 +579,13 @@ def test_a_rebuild_on_4_workers_takes_under_two_over_the_cores_of_one_workers(be
 
 
 def to_version_1() -> None:
-    """Take the test's index back to version 1, as usage 0.1.0 left it: no marks table,
-    no `files.marks_read`, no `requests.context_window`."""
+    """Take the test's index back to version 1, as usage 0.1.0 left it: no marks or
+    prompts table, no `files.marks_read` or `files.prompts_read`, no
+    `requests.context_window`."""
     conn = store.connect(create=False)
     try:
+        conn.execute("DROP TABLE prompts")
+        conn.execute("ALTER TABLE files DROP COLUMN prompts_read")
         conn.execute("DROP TABLE marks")
         conn.execute("ALTER TABLE files DROP COLUMN marks_read")
         conn.execute("ALTER TABLE requests DROP COLUMN context_window")
@@ -615,7 +618,7 @@ def test_the_first_pass_after_the_upgrade_takes_under_1_2_times_a_rebuild(bench,
     start = time.perf_counter()
     upgraded = _pass(bench)
     upgrade = time.perf_counter() - start
-    assert upgraded.migrated == (1, 2) and upgraded.rebuild
+    assert upgraded.migrated == (1, store.INDEX_VERSION) and upgraded.rebuild
     assert upgraded.read == FILES - IMPORTED
     assert _marks() == LONG_PARTS - 1
     print(f"\nrebuild ({rebuilt.workers} workers) {rebuild:.1f} s; the first pass after "

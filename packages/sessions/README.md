@@ -93,7 +93,9 @@ records with the session's header, all from one snapshot of the source:
   a subagent's. Its input tokens are the size of the session's current prompt.
 - `records_since` reads what was written since a cursor it handed back last time.
   sessions stores nothing; the caller keeps the cursor. A cursor it cannot trust starts
-  the read over, and says so.
+  the read over, and says so. A Claude batch also names the prompt ids its lines moved
+  the turn to (`prompt_ids`), a prompt that drew no request included, whatever kinds it
+  keeps.
 - `window` reads the last few turns, and pages back from there.
 
 A read that cannot open or read its source raises `Unreadable`, never an empty read. A
@@ -685,4 +687,4 @@ behaves as it did.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/sessions/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.10/packages/sessions/LICENSE).

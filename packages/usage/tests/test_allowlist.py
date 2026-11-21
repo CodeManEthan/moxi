@@ -12,7 +12,8 @@ import os
 
 from moxi_usage.allowlist import allowed, patch_files
 
-COMMANDS = (("make", "handoff"),)
+COMMANDS = (("make", "handoff"), ("moxi", "repo", "rules"),
+            ("make", "trailers", "<key>"))
 
 
 def build_tree(t):
@@ -134,9 +135,20 @@ def table(p):
     expect_bash("escaped quote inside double quotes", "git -C %s commit -m \"say \\\"hi\\\"\"" % repo, want=True)
     expect_bash("message that looks like an option", "git -C %s commit -m '--amend'" % repo, want=True)
 
-    # The user's command prefixes (ceiling.allow_commands) ----------------------------------------
+    # The user's commands (ceiling.allow_commands), each allowed only whole ------------
     expect_bash("a listed prefix, bare", "make handoff", want=True)
-    expect_bash("a listed prefix with more words", "make handoff report --quiet", want=True)
+    expect_bash("a listed command with more words", "make handoff report --quiet", want=False)
+    expect_bash("a listed command with one word more", "make handoff x", want=False)
+    expect_bash("moxi repo rules with no argument", "moxi repo rules", want=True)
+    expect_bash("moxi repo rules in the cd shape", "cd %s && moxi repo rules" % repo, want=True)
+    expect_bash("moxi repo rules with a key", "moxi repo rules moxi", want=False)
+    expect_bash("moxi repo rules with a path", "moxi repo rules %s" % repo, want=False)
+    expect_bash("a <key> word filled by one key", "make trailers my-repo.2", want=True)
+    expect_bash("a <key> word left empty", "make trailers", want=False)
+    expect_bash("a <key> word and a word more", "make trailers my-repo extra", want=False)
+    expect_bash("a <key> word filled by an option", "make trailers --all", want=False)
+    expect_bash("a <key> word filled by a path", "make trailers ../x", want=False)
+    expect_bash("a <key> word filled by the placeholder", "make trailers '<key>'", want=False)
     expect_bash("a listed prefix in the cd shape", "cd %s && make handoff" % repo, want=True)
     expect_bash("a listed prefix in the cd shape, ~/", "cd %s && make handoff" % repo_tilde, want=True)
     expect_bash("a quoted word that equals the prefix", "'make' handoff", want=True)
