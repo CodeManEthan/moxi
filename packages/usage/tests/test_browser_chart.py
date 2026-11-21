@@ -391,7 +391,8 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
     panel.get_by_role("button", name="Tokens", exact=True).click()
-    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache read", "Cache create", "Output"])
+    # The token classes in the same order as under Cost.
+    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
     # Today's three requests of 1000, 1500 and 2000 output tokens, in the last row.
     assert table.locator("tbody tr").last.locator("td").nth(4).inner_text() == "4.50k"
 

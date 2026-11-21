@@ -107,8 +107,9 @@ export const MODEL_CAPTION = "Per-model dollars, straight from the index.";
 export function costName(by: "day" | "month", split: Split): string {
   return `${by === "day" ? "Daily" : "Monthly"} estimated cost — ${split === "model" ? "by model" : "by class"}`;
 }
+/** The tokens table's classes, in the order the cost chart stacks them. */
 const TOKEN_CLASSES: readonly [keyof DayRow & string, string][] = [
-  ["fresh_input", "Input"], ["cache_read", "Cache read"], ["cache_write", "Cache create"],
+  ["fresh_input", "Input"], ["cache_write", "Cache create"], ["cache_read", "Cache read"],
   ["output", "Output"],
 ];
 
