@@ -288,9 +288,11 @@ session is a release point, so the mail starts a turn with nobody typing. A daem
 was not running when an adapter died does the same for it once it starts. A daemon that
 runs as a systemd service starts the new adapter in a scope of its own
 (`moxi-comms-adapter-<session id>.scope`, through `systemd-run --user --scope`), so a
-restart of the daemon's service doesn't kill it. The daemon replaces one session's adapter
-at most 3 times in 10 minutes; past that it logs once and leaves the session to its next
-prompt.
+restart of the daemon's service doesn't kill it. When `systemd-run` fails, the daemon logs
+why and starts the adapter in its own cgroup instead: a restart of the daemon then ends
+that adapter, and the restarted daemon replaces it. The daemon replaces one session's
+adapter at most 3 times in 10 minutes; past that it logs once and leaves the session to
+its next prompt.
 
 The session is told at its next start or prompt, in one line before the start's layer one
 and roster or the prompt's roster changes, which it gets as it would with its adapter

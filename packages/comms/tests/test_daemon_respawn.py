@@ -282,6 +282,83 @@ def test_a_scoped_respawn_runs_the_starter_under_systemd_run_with_the_session_en
     assert seen["cwd"] == tmp_path
 
 
+def stand_in_popen(monkeypatch, tmp_path, scope_argv):
+    """Popen with the scope's run replaced by `scope_argv` (or an OSError when None) and
+    the plain starter by one that says `BOUND` on its ready fd: the argvs it was given."""
+    from types import SimpleNamespace
+
+    seen = []
+    real = subprocess.Popen
+
+    def popen(argv, **kwargs):
+        seen.append(argv)
+        if argv[0] == "/x/systemd-run":
+            if scope_argv is None:
+                raise FileNotFoundError(2, "No such file or directory")
+            return real(scope_argv, **kwargs)
+        fd = argv[7]
+        return real([sys.executable, "-c",
+                     f"import os; os.write({fd}, b'B'); os.close({fd})"], **kwargs)
+
+    monkeypatch.setattr(respawn, "claude_root",
+                        lambda record: SimpleNamespace(pid=os.getpid(), start="0"))
+    monkeypatch.setattr(respawn, "session_dir", lambda key, env: tmp_path)
+    monkeypatch.setattr(respawn.subprocess, "Popen", popen)
+    return seen
+
+
+def test_a_failed_systemd_run_is_logged_with_its_reason_and_the_starter_is_forked(
+        monkeypatch, tmp_path, caplog):
+    seen = stand_in_popen(monkeypatch, tmp_path, [
+        "sh", "-c", "echo 'Failed to connect to user scope bus via local transport:' >&2;"
+                    " echo '  No such file or directory' >&2; exit 1"])
+    caplog.set_level(logging.INFO, logger="comms.claude.respawn")
+    said = respawn.respawn_adapter({"S": "secret-token-value"}, "k",
+                                   {"kind": respawn.CLAUDE_KIND}, wait_s=5.0,
+                                   stopped_at="-", systemd_run="/x/systemd-run")
+    assert said == (word.BOUND, ""), "the forked starter's word"
+    assert [argv[0] for argv in seen] == ["/x/systemd-run", sys.executable]
+    assert "-" == seen[1][-1], "the fork still asks for the note"
+    assert ("(exit 1: Failed to connect to user scope bus via local transport: No such "
+            "file or directory)") in caplog.text
+    assert "forking it in this daemon's cgroup instead" in caplog.text
+    assert "the sweep at the daemon's next start replaces it" in caplog.text
+    assert "secret-token-value" not in caplog.text
+
+
+def test_a_systemd_runs_long_stderr_is_cut(monkeypatch, tmp_path, caplog):
+    stand_in_popen(monkeypatch, tmp_path, [
+        "sh", "-c", "head -c 5000 /dev/zero | tr '\\0' x >&2; exit 3"])
+    caplog.set_level(logging.INFO, logger="comms.claude.respawn")
+    respawn.respawn_adapter({}, "k", {"kind": respawn.CLAUDE_KIND}, wait_s=5.0,
+                            systemd_run="/x/systemd-run")
+    (line,) = [r.getMessage() for r in caplog.records if "systemd-run" in r.getMessage()]
+    assert "exit 3: " + "x" * (respawn.SYSTEMD_RUN_STDERR_CHARS - 3) + "...)" in line
+    assert "x" * respawn.SYSTEMD_RUN_STDERR_CHARS not in line
+
+
+def test_a_systemd_run_that_cannot_be_run_falls_back_to_a_fork(
+        monkeypatch, tmp_path, caplog):
+    seen = stand_in_popen(monkeypatch, tmp_path, None)
+    caplog.set_level(logging.INFO, logger="comms.claude.respawn")
+    said = respawn.respawn_adapter({}, "k", {"kind": respawn.CLAUDE_KIND}, wait_s=5.0,
+                                   systemd_run="/x/systemd-run")
+    assert said == (word.BOUND, "")
+    assert len(seen) == 2
+    assert "(it could not be run: No such file or directory)" in caplog.text
+
+
+def test_a_scoped_starter_that_ran_is_not_forked_again(monkeypatch, tmp_path, caplog):
+    """A starter that ran under the scope and said its word, or ended with a word
+    unsaid but exit 0, is not a failed systemd-run."""
+    seen = stand_in_popen(monkeypatch, tmp_path, ["sh", "-c", "exit 0"])
+    caplog.set_level(logging.INFO, logger="comms.claude.respawn")
+    said = respawn.respawn_adapter({}, "k", {"kind": respawn.CLAUDE_KIND}, wait_s=5.0,
+                                   systemd_run="/x/systemd-run")
+    assert said == (word.FAILED, "") and len(seen) == 1
+    assert "systemd-run" not in caplog.text
+
+
 # ------------------------------------------------------------------ the cap
 
 def test_at_most_three_respawns_per_claim_in_ten_minutes_and_one_line_past_it(

@@ -49,8 +49,12 @@ process a service starts, wherever it runs now, and the cgroup is what a stop ki
 --collect` in a scope of its own named for the claim key (`unit_name`). A scope's command
 is run by `systemd-run` itself, so it keeps the session's environment, the working
 directory and the word's pipe; `with_user_manager` fills in the variables that reach the
-user manager when the session's environment lacks them. The listener's starter is
-already in the session's cgroup and runs as it is.
+user manager when the session's environment lacks them. When `systemd-run` fails before
+the starter runs (no user manager reached, say), its stderr, cut to
+`SYSTEMD_RUN_STDERR_CHARS`, is logged as the reason, and the starter is forked as on a
+box without systemd. That adapter is in the daemon's cgroup, so a restart of the daemon's
+service ends it, and the sweep at the daemon's next start replaces it; the log line says
+so. The listener's starter is already in the session's cgroup and runs as it is.
 
 **The session is told.** An adapter the daemon started leaves a one-shot note in the
 session's runtime directory (`NOTE`) with the line its word makes
@@ -73,6 +77,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -99,6 +104,8 @@ RESPAWN_WINDOW_S = 600.0
 UNIT_PREFIX = "moxi-comms-adapter-"
 #: The variables `systemd-run --user` reaches the user manager with.
 USER_MANAGER_ENV = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+#: The most of `systemd-run`'s stderr a failed scope's log line carries.
+SYSTEMD_RUN_STDERR_CHARS = 300
 #: `Respawner`'s default: find `systemd-run` when this process runs in a service.
 FIND = object()
 
@@ -134,7 +141,9 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float,
 
     `stopped_at` (the daemon's) asks the adapter for the session's note (`NOTE`): the
     old one's stop as epoch seconds, or `-` when it isn't known. `systemd_run`, the
-    path of `systemd-run`, starts it in a scope of its own (`starter_argv`).
+    path of `systemd-run`, starts it in a scope of its own (`starter_argv`); when
+    `systemd-run` fails before the starter runs, the reason is logged and the starter is
+    forked instead, in what is left of `wait_s`.
 
     Answers the word, `(code, reason)`, `word.STARTING` among them when a new adapter
     already serves the session; None when it didn't come in time (the adapter goes on
@@ -151,30 +160,67 @@ def respawn_adapter(env: dict, key: str, record: dict, *, wait_s: float,
         raise CannotRespawn(f"its claim file's key {key!r} names no session directory")
     deadline = time.monotonic() + wait_s
     if systemd_run is not None:
-        env = with_user_manager(env)
+        word, failed = _start(with_user_manager(env), key, root, deadline,
+                              stopped_at=stopped_at, systemd_run=systemd_run)
+        if failed is None:
+            return word
+        log.warning("systemd-run could not start the new comms adapter of claim %s in a "
+                    "scope of its own (%s); forking it in this daemon's cgroup instead, "
+                    "where a restart of this daemon's service ends it and the sweep at "
+                    "the daemon's next start replaces it", key, failed)
+    word, _failed = _start(env, key, root, deadline, stopped_at=stopped_at)
+    return word
+
+
+def _start(env: dict, key: str, root, deadline: float, *, stopped_at: str | None,
+           systemd_run: str | None = None):
+    """Run the starter once and wait until `deadline` for it to leave and for the word:
+    `(word, None)`, or, under `systemd_run`, `(None, why)` when `systemd-run` failed
+    before the starter ran (it could not be run, or it ended nonzero with no word),
+    `why` being its exit and the start of its stderr."""
+    from .word import FAILED, await_word
+
     r, w = os.pipe()
+    err = tempfile.TemporaryFile() if systemd_run is not None else None
     try:
         argv = starter_argv(key, root, w, stopped_at=stopped_at, systemd_run=systemd_run)
         try:
             starter = subprocess.Popen(
                 argv, env=env, cwd=session_dir(key, env), pass_fds=(w,),
                 start_new_session=True, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL if err is None else err)
         except OSError as exc:
+            if systemd_run is not None:
+                return None, f"it could not be run: {exc.strerror or exc}"
             raise CannotRespawn(f"a new adapter could not be started: {exc}") from exc
         os.close(w)
         w = None
         try:
             starter.wait(max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            return None
-        from .word import await_word
-
-        return await_word(r, max(0.0, deadline - time.monotonic()))
+            return None, None
+        word = await_word(r, max(0.0, deadline - time.monotonic()))
+        if err is not None and starter.returncode != 0 and word == (FAILED, ""):
+            return None, _stderr_of(err, starter.returncode)
+        return word, None
     finally:
         if w is not None:
             os.close(w)
         os.close(r)
+        if err is not None:
+            err.close()
+
+
+def _stderr_of(err, code: int) -> str:
+    """`exit <code>: <stderr>` from the file `err`, on one line, cut to
+    `SYSTEMD_RUN_STDERR_CHARS`."""
+    err.seek(0)
+    text = " ".join(err.read(4 * SYSTEMD_RUN_STDERR_CHARS).decode(
+        "utf-8", "replace").split())
+    if len(text) > SYSTEMD_RUN_STDERR_CHARS:
+        text = text[:SYSTEMD_RUN_STDERR_CHARS - 3] + "..."
+    return f"exit {code}: {text or 'nothing on stderr'}"
 
 
 def starter_argv(key: str, root, ready_fd: int, *, stopped_at: str | None = None,
@@ -515,7 +561,7 @@ def session_of(key: str, env: dict):
 
 __all__ = ["CLAUDE_KIND", "CannotRespawn", "FIND", "GONE_POLL_S", "GONE_WAIT_S",
            "LOCK_PREFIX", "NOTE", "RESPAWN_CAP", "RESPAWN_WINDOW_S", "Respawner",
-           "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S", "claude_root", "in_service",
+           "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S", "claude_root", "in_service",
            "lock_path", "main", "note_writer", "respawn_adapter", "session_dir",
            "session_env", "session_of", "starter_argv", "unit_name", "with_user_manager",
            "write_note"]
