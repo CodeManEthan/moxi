@@ -675,8 +675,12 @@ An endpoint of this version offers none of them:
 
 This is version 2. A client offers the range it speaks in `rpc.hello`; an endpoint with no
 version in that range refuses it with -32001, naming both ranges. A change to any message's
-shape raises the version. Offering a reserved capability or method (see "Reserved names")
-does not: the hello carries it.
+shape raises the version, except an added optional param or result or notification field
+that a peer of this version which does not know it can ignore: an endpoint ignores params it
+does not know, and a client ignores fields it does not know, so neither raises it. A param
+or field that changes what an older peer must do, or that an older peer would misread, does.
+Offering a reserved capability or method (see "Reserved names") does not raise it either:
+the hello carries it.
 
 A version 2 endpoint serves only at version 2 addresses and keeps its files under
 `RUNTIME/turns/v2/`. A version 1 library reads only the directories directly under
