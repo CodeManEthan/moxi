@@ -222,3 +222,71 @@ def test_a_fork_is_pointed_to_no_handoff_and_marks_none_picked(work, harness, no
     monkeypatch.setattr(listeners, "claim", lambda event, conn: row("r2"))
     monkeypatch.setattr(handoffs, "waiting", lambda *a, **k: pytest.fail("looked"))
     assert listen_handoff._launched(object(), None) == []
+
+
+# -- stamps and interface 3 ----------------------------------------------------------------
+
+FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
+
+
+@pytest.fixture
+def memory_lists(monkeypatch):
+    """A present memory module whose `SESSION_ENV` lists `FORK_ENV`, beside what is
+    installed here."""
+    from types import SimpleNamespace
+
+    from moxi import modules
+
+    real_installed, real_load = modules.installed, modules.load
+    fake = SimpleNamespace(ok=True, state=modules.PRESENT,
+                           session_env={FORK_ENV: "a subconscious fork"})
+    monkeypatch.setattr(modules, "installed", lambda: [
+        *(e for e in real_installed() if e.name != "memory"),
+        SimpleNamespace(name="memory")])
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        fake if name == "memory" else real_load(name, **kw)))
+
+
+def test_a_forks_stamps_land_after_the_scrub(work, harness, no_exec, memory_lists,
+                                             monkeypatch):
+    parent(work)
+    monkeypatch.setenv(FORK_ENV, "the asker's")
+    fork.fork(SID, request_id="r2", stamps={FORK_ENV: "recall-1"})
+    assert no_exec[-1]["env"][FORK_ENV] == "recall-1"
+
+
+def test_the_api_forks_with_stamps(work, harness, no_exec, memory_lists):
+    parent(work)
+    got = api.fork(SID, stamps={FORK_ENV: "recall-1"}, request_id="r2")
+    assert got.session_id not in (None, SID)
+    assert no_exec[-1]["env"][FORK_ENV] == "recall-1"
+    assert (row("r2").fork_of, row("r2").kind) == (SID, "fork")
+
+
+@pytest.mark.parametrize("name, said", [
+    ("MOXI_LAUNCHER_REQUEST", "the launch stamps itself"),
+    ("MOXI_TURNS_COMMANDS", "the launch stamps itself"),
+    ("OTHER_NAME", "no module's variable"),
+    ("MOXI_MEMORY_SOMETHING_ELSE", "not in memory's SESSION_ENV"),
+])
+def test_a_stamp_no_module_lists_is_refused_with_nothing_written(
+        work, harness, no_exec, memory_lists, name, said):
+    parent(work)
+    with pytest.raises(catalog.BadValue, match=said) as raised:
+        api.fork(SID, stamps={name: "1"}, request_id="r2")
+    assert raised.value.row == "stamps"
+    conn = store.connect()
+    try:
+        assert store.get(conn, "r2") is None
+    finally:
+        conn.close()
+
+
+def test_the_api_exits_a_session_through_the_exit_verb(monkeypatch):
+    from moxi_launcher import exits
+
+    calls = []
+    monkeypatch.setattr(exits, "exit_session",
+                        lambda *args, **kw: calls.append((args, kw)) or "done")
+    assert api.exit_session(SID, dry_run=True, env={"A": "1"}) == "done"
+    assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]

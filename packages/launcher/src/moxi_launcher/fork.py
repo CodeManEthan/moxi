@@ -19,7 +19,10 @@ kind `fork`.
 **Its environment** is built as a replay's, from the parent row's recorded base and the
 launcher's settings, never from the process that asked for the fork, so the comms name
 and claim socket of the session it copies never reach it. A caller of `api.fork` may add
-`stamps` (see there).
+`stamps`, variables set on the fork after the scrub. Each must be one a module owns and
+lists in its `SESSION_ENV`; its own prefix (`MOXI_<MODULE>_`) says which module owns it.
+The launcher's and turns' are refused, since the launch stamps those itself
+(`stamp_refusal`).
 
 **Where it runs** is the verb's own choice, `target`: this terminal (the default) or a
 slot, `slot` naming one (the lowest free one when unset). On Linux and macOS a fork into
@@ -31,7 +34,10 @@ It is refused, with nothing written, when:
 - the launch has no session id (`no-session-id`): a Codex launch made without turns'
   host never learned its thread id;
 - its harness is no longer one the launcher launches (`not-catalogued`);
-- it is a Codex session and turns' Codex host can't start here (`not-yet`).
+- it is a Codex session and turns' Codex host can't start here (`not-yet`), or the host
+  found has no `--fork` (`not-yet`, naming the turns version it needs);
+- a stamp is not one a module owns and lists, or is the launcher's or turns'
+  (`bad-value`).
 
 The new session's id is printed once the launch knows it: at once for Claude Code, whose
 id is minted, and for a Codex fork into a slot once its host is ready.
@@ -46,6 +52,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from moxi import exit as codes
+from moxi import modules as moxi_modules
+from moxi import names as moxi_names
 
 from . import catalog, first, relaunch, store
 from .target import NotLaunched
@@ -54,6 +62,9 @@ Refused = relaunch.Refused
 Result = relaunch.Result
 #: The targets a fork runs in.
 TARGETS = ("terminal", "slot")
+#: The modules whose variables a fork's caller may not stamp: the launch stamps them
+#: itself.
+UNSTAMPED = ("launcher", "turns")
 
 
 def fork(session_id: str, *, target: str = "terminal", slot: int | str | None = None,
@@ -132,6 +143,43 @@ def refusal(row: store.LaunchRow, session_id: str | None) -> Refused | None:
     return None
 
 
+def stamp_refusal(stamps: Mapping[str, str]) -> catalog.BadValue | None:
+    """The refusal the fork's `stamps` meet, or None. Each name must be listed in the
+    `SESSION_ENV` of the module its prefix names (a key ending in `_` lists every name
+    under it), that module must be present, and it must not be the launcher or turns."""
+    for name in sorted(stamps):
+        stamper = next((module for module in UNSTAMPED
+                        if name.startswith(moxi_names.env_prefix(module))), None)
+        if stamper is not None:
+            return catalog.BadValue("stamps", f"{name} is {stamper}'s, which the launch "
+                                              "stamps itself",
+                                    "leave it out of the stamps")
+        owner = _owner(name)
+        if owner is None:
+            return catalog.BadValue("stamps", f"{name} is no module's variable",
+                                    "stamp only a variable your module lists in its "
+                                    "SESSION_ENV")
+        listed = moxi_modules.load(owner)
+        if not listed.ok or not _lists(listed.session_env, name):
+            return catalog.BadValue("stamps", f"{name} is not in {owner}'s SESSION_ENV",
+                                    f"list it in {owner}'s SESSION_ENV, or leave it out "
+                                    "of the stamps")
+    return None
+
+
+def _owner(name: str) -> str | None:
+    """The installed module whose prefix `name` carries, the longest one when two do."""
+    owners = [entry.name for entry in moxi_modules.installed()
+              if moxi_names.is_module_name(entry.name)
+              and name.startswith(moxi_names.env_prefix(entry.name))]
+    return max(owners, key=len) if owners else None
+
+
+def _lists(session_env: Mapping[str, str], name: str) -> bool:
+    return any(key == name or (key.endswith("_") and name.startswith(key))
+               for key in session_env)
+
+
 def _learned(result: Any, conn: sqlite3.Connection | None) -> Any:
     """`result` with the session id its launch has learned since it started (a Codex
     thread's, once its host is ready), when the launch log holds one."""
@@ -147,4 +195,5 @@ def _learned(result: Any, conn: sqlite3.Connection | None) -> Any:
     return dataclasses.replace(result, session_id=row.session_id)
 
 
-__all__ = ["Refused", "Result", "TARGETS", "fork", "refusal", "start"]
+__all__ = ["Refused", "Result", "TARGETS", "UNSTAMPED", "fork", "refusal", "stamp_refusal",
+           "start"]

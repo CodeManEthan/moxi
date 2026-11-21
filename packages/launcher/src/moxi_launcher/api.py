@@ -8,6 +8,8 @@
     launch_kind(session_id) -> str | None   # interface 1: how a session was launched
     launch_kinds(session_ids) -> dict       # the same for many ids, in one read
     running() -> tuple[Running, ...]        # interface 2: the launches running now
+    fork(session_id) -> LaunchResult        # interface 3: fork a session, live or not
+    exit_session(session_id) -> Result      # interface 3: exit a quiet launched session
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch, a resume or a fork, its values the stored
@@ -512,6 +514,11 @@ def _forked(request: ReplayRequest) -> Replayed:
     row = request.row
     if request.relaunch_of or request.resume_of:
         raise ValueError("a fork is not a relaunch or a resume")
+    from . import fork
+
+    bad = fork.stamp_refusal(request.stamps)
+    if bad is not None:
+        raise bad
     target = request.target or "terminal"
     if target not in ("terminal", "slot"):
         raise catalog.BadValue("target", f"a fork runs in this terminal or a slot, not "
@@ -809,6 +816,42 @@ def launch_kinds(session_ids: Iterable[str], *,
     return store.kinds(session_ids, timeout=timeout_s)
 
 
+def fork(session_id: str, *, target: str = "terminal", slot: int | str | None = None,
+         stamps: Mapping[str, str] | None = None, request_id: str | None = None,
+         env: Mapping[str, str] | None = None,
+         warn: Callable[[str], None] | None = None) -> LaunchResult:
+    """Interface 3: fork the session `session_id` (`moxi launcher fork`), which may be
+    live, into this terminal or a slot (`target`; `slot` names one, else the lowest free
+    one). Returns the launch's result, whose `session_id` is the fork's: at once for
+    Claude Code, and for a Codex fork once its host is ready (a slot launch waits for
+    that). Raises a refusal with nothing written: `not-launched`, `no-session-id`,
+    `not-catalogued`, `not-yet`, or `bad-value` for a target, slot or stamp it can't take.
+
+    `stamps` are variables set on the fork's environment after the scrub. Each must be
+    one a present module lists in its `SESSION_ENV` under its own prefix
+    (`MOXI_<MODULE>_`): the prefix says which module owns it. The launcher's and turns'
+    are refused, since the launch stamps those itself. On Linux and macOS a fork into this
+    terminal does not return: the process becomes the harness."""
+    from . import fork as forks
+
+    result, _ = forks.start(session_id, target=target, slot=slot, stamps=stamps,
+                            request_id=request_id, caller_env=env, warn=warn)
+    return result
+
+
+def exit_session(session_id: str, *, dry_run: bool = False,
+                 env: Mapping[str, str] | None = None):
+    """Interface 3: exit the launched session `session_id` once it is quiet (`moxi
+    launcher exit-session`), through turns' `exit`, which only a session that offers it
+    takes (Claude Code's). Returns the verdict (`relaunch.Result`, its
+    `data["outcome"]` `exited`, `held`, `at-dialog` or `not-exited`, its `exit_code` the
+    verb's); raises a refusal (`catalog.Refused`, `target.NotLaunched` for a session no
+    launch holds). A dry run takes the checks and the quiet read and writes nothing."""
+    from .exits import exit_session as exit_one
+
+    return exit_one(session_id, dry_run=dry_run, caller_env=env)
+
+
 @dataclass(frozen=True)
 class Running:
     """A launch that may be running, as `running` gives it: plain values only.
@@ -888,5 +931,5 @@ __all__ = ["KINDS", "LAST", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "
            "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",
-           "launch", "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold",
+           "exit_session", "fork", "launch", "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold",
            "running"]

@@ -244,10 +244,10 @@ def test_the_launcher_offers_interface_1_with_the_kind_read(conn):
     try:
         found = modules.load("launcher", interface=1)
         assert found.state == modules.PRESENT, found.reason
-        assert found.interfaces == frozenset({1, 2})
+        assert found.interfaces == frozenset({1, 2, 3})
         assert found.api.launch_kind(CLAUDE_ID) == "scratch"
         assert found.api.launch_kinds([CLAUDE_ID]) == {CLAUDE_ID: "scratch"}
-        assert modules.load("launcher", interface=3).state == modules.BROKEN
+        assert modules.load("launcher", interface=4).state == modules.BROKEN
     finally:
         modules.reset()
 

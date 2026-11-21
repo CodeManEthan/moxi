@@ -4926,6 +4926,8 @@ launcher	packages/launcher/tests/test_target.py	self.closed = 0	keep	closed	clos
 launcher	packages/launcher/tests/test_waits.py	assert coder.closed == 1	keep	closed	closed
 launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logged", set())	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/fork.py	result = (launch or api.launch)(request, env=caller_env, warn=warn)	keep	env	env
+launcher	packages/launcher/src/moxi_launcher/fork.py	return any(key == name or (key.endswith("_") and name.startswith(key))	keep	any	any
+launcher	packages/launcher/tests/test_fork.py	assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]	keep	dry_run	dry_run
 loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
