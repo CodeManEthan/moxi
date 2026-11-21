@@ -525,6 +525,27 @@ def test_a_go_launch_with_a_first_turn_resolves(first):
     assert resolve(typed={"posture": "go", **first}).posture == "go"
 
 
+def test_a_go_launch_with_no_identity_starts_on_words_passed_on_to_the_harness():
+    # Core's posture table: on a launch that binds no comms identity, a tail carries the
+    # task, as the harness reads a bare word last on its argv as its opening prompt.
+    assert resolve(typed={"posture": "go"}, extra=["Carry on."]).posture == "go"
+    assert resolve(typed={"posture": "go"},
+                   extra=["--verbose", "Carry on."]).posture == "go"
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"}, extra=["--verbose"])
+    assert "or its task after --" in caught.value.hint
+    # comms not installed: the identity is ignored, so the launch binds none.
+    assert resolve(typed={"posture": "go", "identity": "builder"},
+                   extra=["Carry on."]).posture == "go"
+
+
+def test_a_go_launch_that_binds_an_identity_does_not_start_on_words_passed_on():
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go", "identity": "builder"}, extra=["Carry on."],
+                available=only("comms"))
+    assert "after --" not in caught.value.hint
+
+
 def test_a_brief_under_with_is_refused():
     # Core's posture table: under with:<agent> that agent sends the first message.
     for first in ({"brief": "Build it."}, {"brief_file": "/w/brief.md"}):

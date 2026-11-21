@@ -19,7 +19,9 @@
   exit and stop them at Claude's exit dialog. `--dry-run` says which.
 - The start posture checks the brief, as Core's did: `preview` and `run` refuse a `go`
   launch with no brief, brief file or handoff, and a brief under `with:<identity>`, whose
-  director sends the first message (`posture-brief`). A brief under `operator` is sent.
+  director sends the first message (`posture-brief`). On a launch that binds no comms
+  identity, a word after `--` that is not a flag counts as the first turn, since the
+  harness reads it as its opening prompt. A brief under `operator` is sent.
 - A scratch launch keeps no notes, as Core's did: a `notes_dir` typed or set by its preset
   is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
   folder notes would keep notes for (a temporary folder under a notes place) is refused at

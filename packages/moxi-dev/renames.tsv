@@ -3726,6 +3726,7 @@ launcher	packages/launcher/src/moxi_launcher/presets.py	found: set[str] = set()	
 launcher	packages/launcher/src/moxi_launcher/presets.py	if name not in catalog.launcher() and not any(	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	if not any(p.level == ERROR for p in more):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	return _unset_as_default(row, row.check(value))	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/presets.py	return any(str(word).strip() and not str(word).startswith("-") for word in extra)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	folder	agents_dir

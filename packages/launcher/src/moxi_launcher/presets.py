@@ -525,23 +525,36 @@ def _check_place(where: str, values: Mapping[str, object], *, allow_home: bool
     return []
 
 
-def _check_posture_brief(posture: str, values: Mapping[str, object]) -> None:
+def _check_posture_brief(posture: str, values: Mapping[str, object], *,
+                         binds: bool) -> None:
     """The start posture's rule for the brief, as Core's launcher had it: a `go` launch
-    needs a first turn to start on (a brief, a brief file or a handoff), and a launch under
-    `with:<identity>` takes no brief, since its director sends the first message. A
-    replay (a relaunch or a resume) never comes here."""
+    needs a first turn to start on (a brief, a brief file or a handoff, or, on a launch
+    that binds no comms identity, a word passed on to the harness that is not a flag,
+    which the harness reads as its opening prompt), and a launch under `with:<identity>`
+    takes no brief, since its director sends the first message. `binds` says whether the
+    launch binds a comms identity. A replay (a relaunch or a resume) never comes here."""
     brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
         values.get("brief_file"))
-    if posture == "go" and not brief and not catalog.is_set(values.get("handoff")):
+    first = brief or catalog.is_set(values.get("handoff")) or (
+        not binds and _carries_words(values.get(catalog.EXTRA)))
+    if posture == "go" and not first:
         raise PostureBrief("brief", "posture go needs a brief: nobody is at this session "
                                     "to direct it, so with no first turn it sits idle",
-                           "give it --brief, --brief-file or --handoff, or pick another "
-                           "posture")
+                           "give it --brief, --brief-file or --handoff"
+                           + ("" if binds else ", or its task after --")
+                           + ", or pick another posture")
     if posture.startswith(WITH) and brief:
         who = posture[len(WITH):]
         raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
                                     "first message",
                            "drop the brief, or pick go")
+
+
+def _carries_words(extra: object) -> bool:
+    """Whether the flags passed on to the harness hold a word that is not a flag."""
+    if not isinstance(extra, (list, tuple)):
+        return False
+    return any(str(word).strip() and not str(word).startswith("-") for word in extra)
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
@@ -1056,7 +1069,8 @@ def resolve(request, *, presets: Presets | None = None,
         problem = _posture_problem("the launch", posture, avail)
         if problem is not None:
             raise BadPreset(problem)
-        _check_posture_brief(posture, values)
+        binds = bool(values.get("identity")) and avail("comms")
+        _check_posture_brief(posture, values, binds=binds)
 
     identity = values.get("identity") or None
     scope = values.get("scope") or None
