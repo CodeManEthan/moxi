@@ -33,10 +33,11 @@ They read past the characters secrets sees through (`moxi_secrets.seen_through`)
 the text still holds them: those count nothing toward `edge_chars`, and none ends the span,
 so a control character Python reads as whitespace can't stop it inside a token it splits.
 
-**The secret-path rule.** A tool call is a secret-path call when any whitespace-separated
-word of any string in its input is a path `moxi_secrets.is_secret_path` names; strings
-inside lists and nested objects count, and so does a string that holds a JSON object or
-list. Such a call keeps one line, the tool's name and the path, and loses its input; its
+**The secret-path rule.** A tool call is a secret-path call when
+`moxi_secrets.secret_path` finds a path in its input: any whitespace-separated word of
+any string in it that `moxi_secrets.is_secret_path` names, strings inside lists and
+nested objects counted, and a string that holds a JSON object or list read into. Such a
+call keeps one line, the tool's name and the path, and loses its input; its
 result gives no tail. The path shown is the matched word alone, never a run of text with
 whitespace in it, so a heredoc or a patch into a secret file doesn't reach the index.
 
@@ -55,7 +56,6 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any
 
 #: The record kinds a read asks sessions for. A record's place among its line's records
@@ -80,13 +80,6 @@ EDGE_CHARS = 64
 TOOL = "tool"
 #: The placeholder secrets writes for a text it could not scan.
 UNSCANNED = "[REDACTED:unscanned]"
-
-#: The characters stripped from each end of a word before it is tested as a path.
-_PUNCTUATION = "\"'`()[]{}<>,;:|&"
-#: The characters a word is split at, so that a path joined to an assignment, a shell
-#: redirection or other text (`--env-file=.env`, `cat<.env`, `x>/a/.env`,
-#: `{"path":"/a/.env","content":"A=1"}`) is tested, and shown, alone.
-_JOINS = re.compile(r"[=<>|;&,:\"'`()\[\]{}\x00]+")
 
 
 @dataclass(frozen=True)
@@ -276,64 +269,6 @@ def recut_tail(text: str, limit: int, sets: Iterable[str], *, edge_chars: int = 
     return f"[... {gone} earlier characters cut] {clean[-limit:]}" if gone else clean
 
 
-# -- the secret-path rule --------------------------------------------------------------
-
-@lru_cache(maxsize=65536)
-def _is_secret(word: str) -> bool:
-    import moxi_secrets
-
-    return moxi_secrets.is_secret_path(word)
-
-
-def _candidates(text: str) -> Iterable[str]:
-    """The words of `text` to test as paths, narrowest first: for each
-    whitespace-separated word, the pieces between the characters of `_JOINS`, then
-    the word with quotes and brackets taken off its ends, then the word itself. None of
-    them holds whitespace, so the path a call is shown with is never more than one word."""
-    for word in text.split():
-        bare = word.strip(_PUNCTUATION)
-        pieces = [p.strip(_PUNCTUATION) for p in _JOINS.split(bare)]
-        if len(pieces) > 1:
-            yield from (p for p in pieces if p)
-        if bare != word:
-            yield bare
-        yield word
-
-
-def secret_path(value: Any, _depth: int = 0) -> str | None:
-    """The first path in a tool's input that secrets says must not be read, or None.
-
-    Each whitespace-separated word of every string counts, inside lists and nested
-    objects too; a string that holds a JSON object or list is read into and searched the
-    same way. What comes back is one word, never a string with whitespace in it."""
-    if _depth > 32:
-        return None
-    if isinstance(value, str):
-        for word in _candidates(value):
-            if word and _is_secret(word):
-                return word
-        head = value.lstrip()[:1]
-        if head in ("{", "["):
-            try:
-                inner = json.loads(value)
-            except ValueError:
-                return None
-            if isinstance(inner, (dict, list)):
-                return secret_path(inner, _depth + 1)
-        return None
-    if isinstance(value, Mapping):
-        values: Iterable[Any] = value.values()
-    elif isinstance(value, (list, tuple)):
-        values = value
-    else:
-        return None
-    for item in values:
-        found = secret_path(item, _depth + 1)
-        if found is not None:
-            return found
-    return None
-
-
 # -- the key ---------------------------------------------------------------------------
 
 def line_id(record: Any, source_key: str) -> str:
@@ -422,6 +357,8 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
     subagent's own id for a subagent's records, else None. `secret_calls` holds the call
     ids already known to be secret-path calls of this source, whose results give no
     tail. A subagent's records give tier 1 rows only."""
+    from moxi_secrets import secret_path
+
     records = list(records)
     out = Converted()
     known_secret = set(secret_calls)
@@ -469,6 +406,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
-           "keep_head", "keep_tail", "recut_head",
-           "recut_tail", "secret_path",
+           "keep_head", "keep_tail", "recut_head", "recut_tail",
            "line_id", "keys", "tier_one_message", "model_answer", "convert"]

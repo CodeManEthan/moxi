@@ -16,10 +16,10 @@ Standard library only at import.
 
 from .allow import Allowlist, AllowlistError
 from .names import PrivateNames, private_names
-from .paths import is_secret_path
+from .paths import is_secret_path, secret_path
 from .scan import (REDACT_VERSION, SETS, Hit, LineHit, SetInfo, SetUnavailable, describe,
                    redact, scan, scan_lines, seen_through)
 
 __all__ = ["REDACT_VERSION", "SETS", "Allowlist", "AllowlistError", "Hit", "LineHit",
            "PrivateNames", "SetInfo", "SetUnavailable", "describe", "is_secret_path",
-           "private_names", "redact", "scan", "scan_lines", "seen_through"]
+           "private_names", "redact", "scan", "scan_lines", "secret_path", "seen_through"]
