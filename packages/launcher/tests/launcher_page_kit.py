@@ -117,7 +117,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     slot = "3" if target == "slot" else None
     # The values a resume replays: where the session ran, and how.
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
-              **({"slot": slot} if slot else {}), **(values or {})}
+              "posture": posture, **({"slot": slot} if slot else {}), **(values or {})}
     with launch_log(shell) as conn:
         store.insert(conn, request_id=request_id, by=by, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},

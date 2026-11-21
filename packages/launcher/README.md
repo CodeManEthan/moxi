@@ -140,7 +140,9 @@ default, there is no line.
   page's extra flags, so a `go` launch from the page needs a brief, a brief file or a
   handoff. A relaunch launches its row again and is not checked. A resumed session does
   not wake itself either, so a resume of a `go` launch needs a brief (`--brief` or
-  `--brief-file`), and is refused without one (`posture-brief`).
+  `--brief-file`), and is refused without one (`posture-brief`). That holds for the
+  session a `go` launch was relaunched into too: a resume reads the posture the launch was
+  configured with, not the `relaunched` or `with:` one its relaunch started on.
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
@@ -385,7 +387,8 @@ sent again. `--brief TEXT` or `--brief-file FILE` (one of them, the file read as
 is) is sent as the resumed session's first turn, the way a launch sends its brief. The
 start posture rules it as it rules a launch's: a resume of a `go` launch with neither is
 refused before anything starts (`posture-brief`), and so is a brief under
-`with:<identity>`. Under any other posture the brief is optional. Liveness is checked again
+`with:<identity>`. The posture is the one the launch was configured with, so a `go`
+launch's relaunch resumes as `go`. Under any other posture the brief is optional. Liveness is checked again
 as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the

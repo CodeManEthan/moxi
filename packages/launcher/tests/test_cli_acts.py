@@ -656,7 +656,7 @@ def test_resume_of_a_headless_launch_is_refused_and_writes_nothing(conn, capsys)
 
 def test_resume_of_a_go_launch_with_no_brief_is_refused_and_writes_nothing(conn, capsys):
     """Through the real verb: a resumed go session does not wake itself either."""
-    launched(conn)
+    launched(conn, values={"posture": "go"})
     conn.execute("UPDATE launches SET posture = 'go'")
     status, _, err = run(["resume", SID], capsys)
     assert status == codes.REFUSED and "[posture-brief]" in err.splitlines()[0]

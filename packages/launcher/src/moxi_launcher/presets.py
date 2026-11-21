@@ -557,8 +557,9 @@ def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "") -
     """The start posture's rule for the brief a resume is given, as a launch's: one of
     `brief` and `brief_file`, not both; a resume of a `go` launch needs one, since a
     resumed session does not wake itself either; and a resume under `with:<identity>`
-    takes none, since its director sends the first message. `posture` is the resumed
-    launch's. Raises `BadValue` or `PostureBrief`."""
+    takes none, since its director sends the first message. `posture` is the one the
+    resumed launch was configured with, not the one a relaunch shows. Raises `BadValue` or
+    `PostureBrief`."""
     if brief and catalog.is_set(brief_file):
         raise BadValue("brief", "both brief and brief_file are given", "give one of them")
     given = bool(brief.strip()) or catalog.is_set(brief_file)

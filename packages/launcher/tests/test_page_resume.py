@@ -83,7 +83,8 @@ def seed(request_id="r1", *, target_name="slot", harness="claude", session_id=SI
     """A launch in the log, its process ended unless `live`; with no `pid`, none recorded."""
     def insert(conn):
         store.insert(conn, request_id=request_id, by="ann", harness=harness,
-                     target=target_name, cwd="/work", values={"model": "opus"},
+                     target=target_name, cwd="/work",
+                     values={"model": "opus", "posture": posture},
                      argv=[harness], env={}, posture=posture,
                      session_id=session_id if harness == "claude" else None,
                      slot=slot if target_name == "slot" else None, identity=identity,

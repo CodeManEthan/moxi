@@ -28,7 +28,9 @@
   resume a brief or a brief file beside each past session; the brief is sent as the
   resumed session's first turn, as a launch's is. A resume of a `go` launch with no brief
   is refused before anything starts (`posture-brief`), since a resumed session does not
-  wake itself either, and a brief under `with:<identity>` is refused as on a launch.
+  wake itself either, and a brief under `with:<identity>` is refused as on a launch. The
+  posture is the one the launch was configured with, so a `go` launch's relaunch needs a
+  brief to resume too.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
   brief, brief file or handoff, and a brief under `with:<identity>`, whose director
   sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent

@@ -40,8 +40,8 @@ It is refused, with nothing written, when:
   call, whatever the list said;
 - its liveness can't be read (`liveness-unread`, exit 1);
 - the brief doesn't fit: both `--brief` and `--brief-file` given, a brief file's path not
-  absolute, no brief for a `go` launch, or a brief under `with:<identity>`
-  (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
+  absolute, no brief for a `go` launch (a `go` launch that relaunched itself too), or a
+  brief under `with:<identity>` (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
   the resume composes.
 
 The check that the session is not live is made again as the new launch's row is written,
@@ -308,13 +308,16 @@ def checked_brief(row: store.LaunchRow, brief: str | None,
                   brief_file: str | None) -> tuple[str | None, str | None]:
     """The brief and brief file a resume of `row` sends, checked: a brief file's path as a
     launch's is (absolute, `~` expanded), and the start posture's rule for the brief
-    (`presets.check_resume_brief`). Raises the refusal they meet; each one not given is
-    None."""
+    (`presets.check_resume_brief`). The posture is the one the launch was configured with,
+    which its values keep: a relaunch's row shows its own in the `posture` column
+    (`relaunched (handoff: ...)`, `with:<director>`), and a `go` launch that relaunched
+    itself still needs a brief to resume. Raises the refusal they meet; each one not given
+    is None."""
     brief = brief or None
     if catalog.is_set(brief_file):
         brief_file = catalog.row(row.harness, "brief_file").check(brief_file)
     brief_file = brief_file or None
-    presets.check_resume_brief(row.posture or "", brief=brief or "",
+    presets.check_resume_brief(str(row.values.get("posture") or ""), brief=brief or "",
                                brief_file=brief_file or "")
     return brief, brief_file
 

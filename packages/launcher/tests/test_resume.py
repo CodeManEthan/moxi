@@ -19,6 +19,7 @@ import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import (api, catalog, first, presets, resume, slots, store, target,
                            targets)
+from moxi_launcher.compose import common
 
 TESTS = Path(__file__).resolve().parent
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -48,7 +49,8 @@ def launched(conn, *, request_id="r1", harness="claude", target_name="slot", ses
              slot="3", identity=None, live=False, pid=None, at=None, values=None,
              posture="operator"):
     store.insert(conn, request_id=request_id, by="ann", harness=harness,
-                 target=target_name, cwd="/work", values=values or {"model": "opus"},
+                 target=target_name, cwd="/work",
+                 values=values or {"model": "opus", "posture": posture},
                  argv=[harness], env={}, posture=posture,
                  session_id=session_id if harness == "claude" else None,
                  slot=slot if target_name == "slot" else None, identity=identity, at=at)
@@ -490,6 +492,20 @@ def test_a_resume_hands_its_brief_or_brief_file_to_the_replay(conn):
     assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None, None)
 
 
+@pytest.mark.parametrize("shown", ["relaunched (handoff: /h.md)", "with:lead"])
+def test_a_resume_of_a_relaunched_go_launch_is_ruled_by_go_not_the_shown_posture(conn,
+                                                                                  shown):
+    # A relaunch shows its own posture in the row's column; its values keep the one it
+    # was launched with, and that is the one a resume is ruled by.
+    launched(conn, posture=shown, values={"model": "opus", "posture": "go"})
+    with pytest.raises(presets.PostureBrief) as caught:
+        go(conn)
+    assert "posture go needs a brief on a resume" in caught.value.problem
+    assert launches(conn) == 1
+    _, launch = go(conn, brief="Carry on.")
+    assert launch.requests[0].brief == "Carry on."
+
+
 @pytest.mark.parametrize("posture, given, code, row", [
     ("with:lead", {"brief": "Go."}, "posture-brief", "brief"),
     ("with:lead", {"brief_file": "/w/brief.md"}, "posture-brief", "brief"),
@@ -759,6 +775,27 @@ def test_a_resumes_brief_is_its_first_turn_and_a_go_resume_without_one_is_refuse
     resume.resume(SID, request_id="r3", brief_file=str(brief), turns=None, slots_api=None)
     [turn] = [w for w in no_exec[-1]["argv"] if w.startswith("Brief from launcher")]
     assert turn.rstrip().endswith("Read the file.")
+
+
+def test_the_session_a_go_launch_relaunched_itself_into_resumes_only_with_a_brief(
+        work, harness, no_exec, tmp_path):
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("where the work stands\n")
+    first_launch(work, posture="go", brief="Build it.")
+    relaunched = with_store(lambda c: store.get(c, "r1"))
+    api.launch(api.ReplayRequest(relaunched, relaunch_of="r1", request_id="r2",
+                                 actor="ann", posture=common.RELAUNCHED.format(path=handoff),
+                                 handoff=str(handoff)))
+    ended("r2")
+    row = with_store(lambda c: store.get(c, "r2"))
+    assert row.posture.startswith("relaunched") and row.values["posture"] == "go"
+    with pytest.raises(presets.PostureBrief):
+        resume.resume(row.session_id, request_id="r3", turns=None, slots_api=None)
+    assert with_store(lambda c: store.get(c, "r3")) is None
+    resume.resume(row.session_id, request_id="r3", brief="Carry on.", turns=None,
+                  slots_api=None)
+    [turn] = [w for w in no_exec[-1]["argv"] if w.startswith("Brief from launcher")]
+    assert turn.endswith("\n\nCarry on.")
 
 
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):

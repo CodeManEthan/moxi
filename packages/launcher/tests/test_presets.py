@@ -597,7 +597,7 @@ def test_a_resume_takes_the_brief_as_a_launch_does_under_each_posture():
         assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
                                         "first message")
     presets.check_resume_brief("with:lead")
-    for posture in ("operator", "", "relaunched (handoff: /h.md)"):
+    for posture in ("operator", ""):
         presets.check_resume_brief(posture)
         presets.check_resume_brief(posture, brief="Read the design.")
     with pytest.raises(presets.BadValue) as caught:
