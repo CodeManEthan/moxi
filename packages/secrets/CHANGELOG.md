@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- `redact` no longer lets text beside a secret keep it: a `gitleaks:allow` mark, or a
+  line a rule's line allowlist names, leaves the secret on that line redacted. `scan`
+  still honours both.
+- `scan` and `redact` read past invisible characters (controls other than tab and
+  newline, format characters, and Unicode's default-ignorable code points), so a token
+  split by a zero-width space or a soft hyphen is found. `redact` replaces it in place
+  and leaves every other character as it was. A text holding such a character is
+  scanned twice; on the fallback engine that is a second worker request. One that also
+  holds a vertical tab, form feed, lone carriage return, U+001C to U+001F or NEL is
+  scanned a third time, with each of those as a space, so a token that one of them
+  sets apart from the word before it is found when split. So is one where a run of the
+  others stands just before a rule's keyword, with the run as one space, so a split
+  Stripe key after `abc` and a zero-width space is found. A split token is still missed
+  where such a run glues a word onto it and its rule has no keyword at its start, or,
+  rarely, its split falls just before text that starts another rule's keyword.
+- `REDACT_VERSION`, now 2: which `redact` this is, for a store of redacted text to
+  record.
+- `seen_through(c)`: whether `scan` and `redact` read past a character.
 - Every setting carries page fields, which `moxi config secrets show --json` prints
   and the settings page draws: a plain label and a line, a can-hurt mark on taking a
   name away from the three lists of private names, and one on adding text to the list
