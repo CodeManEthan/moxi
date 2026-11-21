@@ -1,6 +1,7 @@
 """`moxi rounds`: the rounds command.
 
-    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
+    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--lead NAME]
+                     [--as NAME]
     moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds commission ROUND STAGE --builder NAME [--record PTR] [--existing]
@@ -23,6 +24,7 @@
     moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
+    moxi rounds mark ROUND --lead NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND B<n> --brief FILE [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
@@ -48,7 +50,8 @@
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
-`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
+`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL, `file:<path>#<anchor>` or
+`page:<page>/<act id>@<UTC time>`, his act on a page.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
@@ -254,7 +257,6 @@ the second calls.
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import shlex
 import sys
@@ -276,14 +278,17 @@ def _writes(parser: argparse.ArgumentParser) -> None:
 
 
 def _actor(args) -> str:
-    """Who the verb is done by: the name given with `--as`, else the OS user."""
+    """Who the verb is done by: the name given with `--as`, else the OS user, as
+    `actors.default` gives it."""
+    from . import actors
+
     if args.actor is not None:
         if not args.actor.strip():
             raise BadArgument("--as names nobody", "give a name: --as NAME")
         return args.actor
     try:
-        return getpass.getuser()
-    except (KeyError, OSError):
+        return actors.default()
+    except BadArgument:
         raise BadArgument("the user this command runs as has no name",
                           "say who is doing this with --as NAME") from None
 
@@ -327,6 +332,10 @@ def _declare_open(verbs) -> None:
                         help="the standing rulings of the project the round starts "
                              "from, as S1,S2: each one that says what is built and "
                              "still stands")
+    parser.add_argument("--lead", metavar="NAME",
+                        help="the agent who leads the round: letters, digits, . _ -, "
+                             "and at most one @scope (default: none of its own, so the "
+                             "round reads its project's lead)")
     _writes(parser)
 
 
@@ -335,10 +344,12 @@ def _open(args, out) -> int:
 
     opened = opening.open_round(args.round, description=args.description,
                                 by=_actor(args), flow=args.flow, record=args.record,
-                                inherits=_listed(args.inherits))
+                                inherits=_listed(args.inherits), lead=args.lead)
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.round_dir}", file=out)
+    if args.lead is not None:
+        print(f"lead: {args.lead}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
     for line in _left(opened):
@@ -428,9 +439,10 @@ def _declare_rule(verbs) -> None:
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a ruling "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "ruling without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
     parser.add_argument("--chose", metavar="K",
@@ -544,10 +556,11 @@ def _declare_ask(verbs) -> None:
                              "left out with --adopt and --move")
     parser.add_argument("--from", dest="origin", metavar="PTR",
                         help="a pointer to where the question came from, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>, as "
-                             "file:design.md#<anchor> for a section of the design; a "
-                             "question with no origin is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>, or file:<path in the "
+                             "round's folder>#<anchor>, as file:design.md#<anchor> for "
+                             "a section of the design; a question with no origin is "
+                             "refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
                              "operator's own: a pointer to where he asked it; with "
@@ -707,7 +720,7 @@ def _declare_mark(verbs) -> None:
                              "several separated by commas; with --resync, a stage, "
                              "B<n>; with --brief, the stage the brief is of, B<n>; "
                              "with --reread, a recorded report's file; left "
-                             "out with --flow, which marks the round")
+                             "out with --flow and --lead, which mark the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -742,6 +755,10 @@ def _declare_mark(verbs) -> None:
                            "own flow, to take the steps the config has for it now "
                            "when they have every step it follows; any other move "
                            "is the operator's (rule flow:NAME)")
+    form.add_argument("--lead", metavar="NAME",
+                      help="the agent who leads the round from now on: letters, "
+                           "digits, . _ -, and at most one @scope; anyone may name "
+                           "it, and it carries no pointer")
     form.add_argument("--close", action="store_true",
                       help="the lead's decision that the thread thread:NAME is "
                            "closed: no further pass is run on it; only after the "
@@ -778,13 +795,16 @@ def _declare_mark(verbs) -> None:
                              "message that shows the waiting item done; "
                              "with --close or --accept-risk, a pointer to where the "
                              "lead wrote why, one token: comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL, or file:<path "
-                             "in the round's folder>#<anchor>; "
+                             "<session>@<UTC time>, an https:// URL, file:<path "
+                             "in the round's folder>#<anchor>, or page:<page>/<act "
+                             "id>@<UTC time>; "
                              "with --shown, a pointer to where he was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
-                             "time>, or the https:// URL of a page that listed them; "
-                             "never a file, the pointer of one of the rulings, or a "
-                             "message from before one of them was said")
+                             "time>, the https:// URL of a page that listed them, or "
+                             "page:<page>/<act id>@<UTC time> for his act on a page "
+                             "that showed them; never a file, the pointer of one of "
+                             "the rulings, a message from before one of them was "
+                             "said, or a page's act from before one was recorded")
     _writes(parser)
 
 
@@ -793,6 +813,8 @@ def _mark(args, out) -> int:
 
     if args.flow is not None:
         return _mark_flow(args, out)
+    if args.lead is not None:
+        return _mark_lead(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
@@ -953,6 +975,26 @@ def _mark_flow(args, out) -> int:
     return codes.OK
 
 
+def _mark_lead(args, out) -> int:
+    """`mark --lead`: name the agent who leads the round, which anyone may do."""
+    from . import leads
+
+    again = f"{args.prog} mark ROUND --lead NAME"
+    if args.id is not None:
+        raise BadArgument("--lead marks the round, and takes no ID", again)
+    if args.record is not None:
+        raise BadArgument("--record is a pointer to the operator's word, and a round's "
+                          "lead is the leads' record and carries none",
+                          "leave --record out")
+    led = leads.mark(args.target, args.lead, by=_actor(args))
+    if led.found:
+        print(f"{led.lead} leads {led.name} already; nothing was written", file=out)
+    else:
+        print(f"{led.name}   lead: {led.lead}   was: {led.was or 'none'}", file=out)
+    _warn_of(led.failed, args.prog, args.verb)
+    return codes.OK
+
+
 def _mark_shown(args, out) -> int:
     """`mark --shown`: say that rulings were shown to the operator, and where."""
     from . import shown
@@ -991,7 +1033,8 @@ def _declare_fold(verbs) -> None:
                         help="with --records-only, a pointer to the record of the "
                              "change, one token: file:<path in the round's "
                              "folder>#<anchor> as a rule, or comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL")
+                             "<session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>")
     _writes(parser)
 
 
@@ -1444,9 +1487,10 @@ def _declare_drop(verbs) -> None:
     parser.add_argument("--record", metavar="PTR",
                         help="with --by operator, a pointer to where he dropped it; "
                              "with --by lead, a pointer to why; one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a drop "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "drop without one is refused")
     parser.add_argument("--withdraw-questions", action="store_true",
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "

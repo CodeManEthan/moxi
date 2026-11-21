@@ -5,8 +5,9 @@ the round's row of the index up to its log when it can, unless it is told to lea
 the index as it is. What it gives is printed as
 lines (`as_text`) or as data (`as_json`), both from the same reading.
 
-A round is shown with what it is for, its status, the name of the flow it follows now
-and the steps recorded for it, the skips that stand, the newest frozen version of its
+A round is shown with what it is for, its status, its lead (its own, else its
+project's, `leads.of`), the name of the flow it follows now and the steps recorded for
+it, the skips that stand, the newest frozen version of its
 design with what that version took away, and its stages; then its records, a section
 for each kind: its questions by state, each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
@@ -54,7 +55,7 @@ from moxi import store
 
 from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
                folders,
-               index, log, numbers,
+               index, leads, log, numbers,
                open_builds, questions, shown, sizing, skips, steps, tracing, versions,
                waits)
 from . import settings as own
@@ -77,7 +78,9 @@ class Shown:
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
     `register_unreadable`. `on_closed` answers whether a round, by name, is closed, and
-    `settings` are rounds' settings, read when a build's state is (None: read then)."""
+    `settings` are rounds' settings, read when a build's state is (None: read then).
+    `project_lead` is the lead the project's record names, which a round with no lead
+    of its own reads."""
 
     name: str
     project: str
@@ -90,6 +93,7 @@ class Shown:
     register_unreadable: Unreadable | None = None
     on_closed: Callable[[str], bool] | None = None
     settings: object = None
+    project_lead: str | None = None
 
 
 def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
@@ -135,7 +139,7 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
                  on_closed=lambda round_name: questions.is_closed(round_name, settings),
-                 settings=settings)
+                 settings=settings, project_lead=home.lead)
 
 
 def _refreshed(home: folders.Home, slug: str) -> index.Summary:
@@ -283,11 +287,14 @@ def _history(found: Shown) -> list:
 
 def history_of(event: dict) -> str | None:
     """What an event of the history is of, in a word or a few: the id it gave or
-    names, its stage, for a change of flow the flow left and the one taken up, or
-    for a change to a stage what changed."""
+    names, its stage, for a change of flow the flow left and the one taken up, for a
+    change of lead the lead before and the new one, or for a change to a stage what
+    changed."""
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
+    if event.get("type") == leads.CHANGED:
+        of = f"{event.get('was') or 'none'} to {event.get('lead')}"
     if event.get("type") == "stage.changed" and isinstance(of, str):
         more = event.get("after")
         if isinstance(more, list) and more:
@@ -761,6 +768,7 @@ def _head(found: Shown) -> dict:
                        register=found.register, seen=seen)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
+            "lead": leads.of(state, found.project_lead),
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
@@ -935,6 +943,18 @@ def ended_line(ended: dict) -> str:
             f"{ended['record']}{f'; questions: {went}' if went else ''}")
 
 
+def lead_line(lead: dict | None, name: str) -> str:
+    """A round's lead, as `leads.of` gives it, in a line: `lead: NAME`; for a round
+    that reads its project's lead, `lead: NAME (the project's; ...)` with the command
+    that records the round's own; `lead: none` with neither."""
+    if lead is None:
+        return "lead: none"
+    if lead["from"] == leads.PROJECT:
+        return (f"lead: {lead['name']} (the project's; moxi rounds mark {name} --lead "
+                "NAME records the round's own)")
+    return f"lead: {lead['name']}"
+
+
 def data(found: Shown) -> dict:
     """The round as data: what `as_text` writes, for a program to read."""
     if found.unreadable is not None:
@@ -961,7 +981,8 @@ def as_text(found: Shown) -> str:
     steps = ", ".join(str(step.get("step")) for step in shown_as["steps"]) or "no steps"
     lines = [f"round {found.name}   {shown_as['status']}   flow {shown_as['flow']} "
              f"({steps})",
-             f"description: {shown_as['description']}", f"folder: {found.round_dir}"]
+             f"description: {shown_as['description']}",
+             lead_line(shown_as["lead"], found.name), f"folder: {found.round_dir}"]
     lines += step_lines(shown_as["step"])
     if shown_as["close"] is not None:
         lines.append(closing.said(shown_as["close"]["waits"]))
@@ -989,6 +1010,6 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
+           "ended_line", "lead_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
            "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
            "verdict_lines", "history_of", "repair_of", "repair_line"]

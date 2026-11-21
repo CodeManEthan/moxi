@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 (2026-11-21)
+
+- A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
+  ROUND --lead NAME` names a new one, written as `lead.changed` with the one before. A
+  name is checked for its shape only. A round with no lead of its own reads its
+  project's. `show` gives it in a line and in its `--json` head, each row of `list
+  --json` and of the read API's `rounds()` carries it, and the round note has a line for
+  it. The index gains a column for it, so rows written before read as stale and are
+  answered from the logs.
+- A page's act as a pointer: `page:<page>/<act id>@<UTC time>`, taken wherever a pointer
+  is. `mark --shown` refuses a page's act from before a ruling it marks was recorded.
+- `moxi_rounds.actors.default()`: the OS user an act is recorded as done by when no
+  name is given, one answer for the command line and for a page that calls the verbs'
+  functions in process.
+
 ## 0.1.0 (unreleased)
 
 The first version. It keeps the record of a round and takes it from its design through

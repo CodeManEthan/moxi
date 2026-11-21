@@ -9,9 +9,11 @@ A ruling is shown when one of two records covers it:
 - **a mark**: a `ruling.shown` event in the log that holds the ruling, which names its
   id and carries a pointer to where he was shown the sentence. `mark(...)` writes it.
   The mark is the claim of whoever recorded it, not the operator's word, so its pointer
-  must be able to be a showing: a message, a moment in a session or a page, never a
-  file, never the pointer of a ruling the call names (that is where he said it), and
-  never a message that came before one of those rulings was said;
+  must be able to be a showing: a message, a moment in a session, or a page (its
+  `https://` URL, or the pointer a page gives one act of his on it), never a file,
+  never the pointer of a ruling the call names (that is where he said it), never a
+  message that came before one of those rulings was said, and never a page's act
+  from before one of them was recorded: a page can only show a ruling on record;
 - **a read-back**: a ruling of the project's own, `readback=TIME`, his word with his
   pointer that he read the list through `TIME`. It covers every ruling of the project,
   in its register and in its rounds, recorded at or before `TIME`. Each read-back is a
@@ -249,7 +251,8 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
     """Mark rulings as shown to the operator: `ids` of the round `target`,
     `<project>/<slug>`, as `C12,C13`, or of the project `target`'s register, as
     `S4,S5`. `record` points to where he was shown them: the message, the moment in a
-    session or the page that put the sentences in front of him.
+    session or the page that put the sentences in front of him, or his act on a page
+    that showed them (`page:<page>/<act>@<time>`).
 
     One `ruling.shown` event is appended to the log that holds the rulings, naming the
     ids that were not shown yet. When every one was shown already nothing is written.
@@ -259,8 +262,9 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
     with no ruling of the call marked, when: an id is of the other log (`C<n>` on a
     project, `S<n>` on a round); the log holds no such ruling; one is a read-back;
     there is no pointer, or one of no known shape; the pointer is a file; it is the
-    pointer of a ruling the call names; or it is a message numbered lower than the
-    message one of those rulings was said in.
+    pointer of a ruling the call names; it is a message numbered lower than the
+    message one of those rulings was said in; or it is a page's act whose time is
+    before one of those rulings was recorded.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says whose rulings were shown",
@@ -332,6 +336,10 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
                     f"{record} came before {ruling.record}, where he said "
                     f"{ruling.id}: a message from before a ruling can't have shown "
                     "it to him", again))
+            elif shape == pointers.PAGE and pointers.page_at(record) < ruling.at:
+                unmet.append(Unmet(
+                    f"{record} is before {ruling.id} was recorded at {ruling.at}: a "
+                    "page can only show a ruling on record", again))
         return unmet
 
     marked: list[str] = []
@@ -362,8 +370,9 @@ def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None =
 
 #: The shapes a pointer to a showing has, in words, for a refusal.
 _SHOWINGS = ("comms:<digits> for a message, <8 or more hex digits>@<UTC time> "
-             "(2026-01-02T03:04Z) for a moment in a session, or the https:// URL of a "
-             "page that listed it")
+             "(2026-01-02T03:04Z) for a moment in a session, the https:// URL of a "
+             "page that listed it, or page:<page>/<act id>@<UTC time to the second> "
+             "(2026-01-02T03:04:05Z) for his act on a page that showed it")
 
 
 __all__ = ["READBACK", "TIME", "Row", "ReadBack", "Marked", "read_back", "through",

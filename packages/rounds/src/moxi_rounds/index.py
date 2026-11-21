@@ -9,7 +9,7 @@ loses no record, and `rebuild` makes the same rows from the logs again. Four tab
             here and when that was, whether it could be read, and since when it has been
             known to have changed outside this machine
     rounds  one row per round: its folder, its status, the name of the flow it
-            follows now, and how it ended once it has
+            follows now, its own lead, and how it ended once it has
     items   what each log holds open, one row per item, by kind: its open questions
             and builds among them
     landings  each merge a finish recorded in a round's log, with its build's repo
@@ -105,11 +105,13 @@ STEPS = ("""
         PRIMARY KEY (project, slug, position)
     );
     CREATE INDEX landings_by_target ON landings (repo, target);
+""", """
+    ALTER TABLE rounds ADD COLUMN lead TEXT;
 """)
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 25
+DERIVED = 26
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -203,6 +205,9 @@ class Summary:
     items: tuple[Item, ...] = ()
     changed_since: str | None = None
     unreadable: Unreadable | None = None
+    #: The round's own lead, as its log names it; None when it names none, and for a
+    #: project. `leads.of` gives the lead to use, which falls back to the project's.
+    lead: str | None = None
     #: How a round that is open no longer ended: `{"how", "by", "record", "at",
     #: "numbers"}`, the status it has since, whose act it was, the pointer it carried,
     #: when, and the round's numbers as its ending event holds them; a round that
@@ -388,6 +393,7 @@ class _Row:
     items: tuple[Item, ...] = ()
     ended: Mapping | None = None
     landings: tuple[builds.Landing, ...] = ()
+    lead: str | None = None
 
 
 @dataclass(frozen=True)
@@ -420,7 +426,8 @@ def _derive(project: str, slug: str, path: Path,
     return _Row(project, slug, str(path), len(data), digest, readable=True,
                 status=folded.status, flow=folded.flow, items=items,
                 ended=_ended(folded),
-                landings=builds.landings(folded) if slug != _PROJECT else ()), None
+                landings=builds.landings(folded) if slug != _PROJECT else (),
+                lead=folded.lead), None
 
 
 def _ended(folded: state.State) -> dict | None:
@@ -467,7 +474,7 @@ def _summary(row: _Row, error: Unreadable | None, rounds_dir: Path,
                    log_dir=rounds_dir if project_own else rounds_dir / row.slug,
                    status=row.status, flow=row.flow, items=row.items,
                    changed_since=changed_since, unreadable=error, ended=row.ended,
-                   landings=row.landings)
+                   landings=row.landings, lead=row.lead)
 
 
 def _read(conn, project: str, slug: str, rounds_dir: Path) -> Summary:
@@ -542,7 +549,7 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
         found = conn.execute(
             "SELECT logs.path, logs.length, logs.sha256, logs.readable, logs.derived, "
             "logs.seen_at, logs.changed_since, rounds.status, rounds.flow, "
-            "rounds.ended "
+            "rounds.ended, rounds.lead "
             "FROM logs LEFT JOIN rounds USING (project, slug) "
             "WHERE logs.project = ? AND logs.slug = ?", (project, slug)).fetchone()
         if found is None:
@@ -557,13 +564,13 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
     except (sqlite3.Error, ValueError):
         return None
     (path, length, digest, readable, derived, seen_at, changed_since, status, flow,
-     ended) = found
+     ended, lead) = found
     try:
         ended = None if ended is None else json.loads(ended)
     except ValueError:
         return None
     return _Stored(_Row(project, slug, path, length, digest, bool(readable), status, flow,
-                        items, ended, landed), derived, seen_at, changed_since)
+                        items, ended, landed, lead), derived, seen_at, changed_since)
 
 
 def _refresh(conn, project: str, slug: str, rounds_dir: Path, *, wrote: bool) -> Summary | None:
@@ -593,11 +600,11 @@ def _put(conn, row: _Row, rounds_dir: Path, *, seen_at: str, changed_since: str 
                  (row.project, row.slug, row.path, row.length, row.sha256,
                   int(row.readable), DERIVED, seen_at, changed_since))
     if row.slug != _PROJECT:
-        conn.execute("INSERT INTO rounds (project, slug, folder, status, flow, ended) "
-                     "VALUES (?, ?, ?, ?, ?, ?)",
+        conn.execute("INSERT INTO rounds (project, slug, folder, status, flow, ended, "
+                     "lead) VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (row.project, row.slug, str(rounds_dir / row.slug), row.status, row.flow,
                       None if row.ended is None
-                      else json.dumps(row.ended, sort_keys=True)))
+                      else json.dumps(row.ended, sort_keys=True), row.lead))
     conn.executemany(
         "INSERT INTO items (project, slug, kind, id, position, body) "
         "VALUES (?, ?, ?, ?, ?, ?)",
