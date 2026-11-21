@@ -16,32 +16,16 @@ from urllib.parse import urlencode
 
 import pytest
 
+import page_kit
 from moxi import modules
-from moxi_rounds import (asking, board, freezing, log, opening, ruling, verdicts)
+from moxi_rounds import board
+from page_kit import BROKEN, BUSY, FRESH, SHUT
 
 ph = pytest.importorskip("moxi_rounds.pagehandlers")
 page = pytest.importorskip("moxi_rounds.page")
-
-BUSY = "kestrel/billing-export"
-FRESH = "kestrel/ledger"
-SHUT = "kestrel/archive"
-BROKEN = "kestrel/broken"
-PTR = "comms:1234567"
-BASE, TIP = "0" * 40, "1" * 40
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
-
-FLOWS = """\
-[flows.staged]
-steps = [ { step = "design", by = "lead" },
-          { step = "verify-design", by = "checker" },
-          { step = "build", by = "builder" },
-          { step = "staging", does = "command", before = "finish", by = "builder", argv = ["true"] },
-          { step = "verify-build", by = "checker" },
-          { step = "finish", by = "builder" },
-          { step = "retro", by = "worker" } ]
-"""
 
 
 def loopback():
@@ -62,77 +46,10 @@ def fresh(monkeypatch):
     ph._cards.clear()
 
 
-def append(round_dir, event_type: str, **fields) -> None:
-    log.append(log.round_log(round_dir), event_type, fields, by="lead")
-
-
-def design(round_dir, name: str, entries: str) -> None:
-    (round_dir / "design.md").write_text(
-        f"# A design\n\nQ1 is asked here: which name does the export keep?\n\n"
-        f"```toml rounds\n{entries}\n```\n", encoding="utf-8")
-    freezing.freeze(name, by="lead")
-    report = round_dir / "report-1.md"
-    report.write_text('# Report\n\n```toml rounds\nverdict = "publishable"\npass = "full"\n'
-                      'by = "checker"\nmodel = "m"\nkind = "design"\ndesign = 1\n```\n',
-                      encoding="utf-8")
-    verdicts.record(name, report, by="checker")
-
-
-def stage(id_: str) -> str:
-    return (f'[[stage]]\nid = "{id_}"\nrepo = "kestrel"\nbranch = "branch-{id_.lower()}"\n'
-            "after = []\n")
-
-
 @pytest.fixture
-def kit(tmp_path, add_project, write_config, capsys):
-    """The board the shapes are read on, in the project `kestrel`:
-
-    - `billing-export` on the `staged` flow (a step of the user's own): stages B1 to B6,
-      so its other stages fold; a question with options and a huge one, a ruling not yet
-      shown, B1 commissioned with its check failed, CI red, a verdict sent back with an
-      open finding, a major decision that forecloses and a job for him; B2 commissioned
-      and dropped.
-    - `ledger`, fresh: no stage in its plan.
-    - `archive`, closed.
-    - `broken`, whose log can't be read.
-    - a question for the project itself.
-    """
-    add_project("kestrel", notes_root=tmp_path / "notes")
-    write_config(FLOWS)
-    rounds_dir = tmp_path / "notes" / "rounds"
-    opening.open_round(BUSY, description="billing export", by="planner", flow="staged")
-    for name in (FRESH, SHUT, BROKEN):
-        opening.open_round(name, description="a placeholder round", by="planner")
-    busy = rounds_dir / "billing-export"
-    design(busy, BUSY, "\n".join(stage(f"B{n}") for n in range(1, 7)))
-    asking.ask(BUSY, "Which name does the export keep?", by="scout",
-               origin="file:design.md#which-name",
-               options=("old=the old name", "new=the new name"))
-    asking.ask(BUSY, "Why? " * 900, by="scout", origin=PTR)
-    asking.ask("kestrel", "Which repo keeps the ledgers?", by="scout", origin=PTR)
-    ruling.rule(BUSY, text="Exports keep a header row.", record=PTR, by="lead",
-                at="2026-01-02T00:00:00Z")
-    for one in ("B1", "B2"):
-        append(busy, "build.commissioned", stage=one, repo="kestrel",
-               branch=f"branch-{one.lower()}", base=BASE, target="main",
-               builder="builder-1", build="0123456789abcdef", worktree="/w/" + one)
-    append(busy, "build.dropped", stage="B2")
-    append(busy, "check.ran", stage="B1", step="check", commit=TIP, argv=["false"],
-           exit_code=1, duration_s=2.5, output="/scratch/check-1.log")
-    append(busy, "ci.read", stage="B1", commit=TIP, reading="red", workflows=[
-        {"path": ".github/workflows/ci.yml", "reading": "red", "url": "https://ci/1",
-         "jobs": [{"name": "linux", "reading": "red", "url": "https://ci/1/1"},
-                  {"name": "macos", "reading": "green", "url": "https://ci/1/2"}]}])
-    append(busy, "verdict.recorded", kind="build", verdict="fold-first", stage="B1",
-           head=TIP, by="checker", model="m", report="report-2.md",
-           findings=[{"id": "F1", "severity": "major", "state": "open",
-                     "text": "The header is lost."}],
-           decisions=[{"id": "M1", "text": "Exports drop the old format.",
-                       "weight": "major", "forecloses": True}],
-           waits=[{"id": "W1", "text": "Say whether the old format may go."}])
-    append(rounds_dir / "archive", "round.closed")
-    with log.round_log(rounds_dir / "broken").open("ab") as fh:
-        fh.write(b"not an event\n")
+def kit(tmp_path, capsys):
+    """The board the shapes are read on: `page_kit`'s rounds."""
+    rounds_dir = page_kit.seed(tmp_path / "notes")
     capsys.readouterr()
     return rounds_dir
 
