@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import itertools
+import json
 import os
 from importlib import metadata
 from pathlib import Path
@@ -15,7 +16,7 @@ import pytest
 from moxi import modules
 from moxi_sessions import api as sessions_api
 
-from moxi_memory import connector, index, rows, state
+from moxi_memory import connector, index, ingest, rows, state
 from moxi_memory.connector import tool, walk
 from moxi_memory.connector.redaction import Gate
 
@@ -259,6 +260,55 @@ def test_the_search_row_says_the_generation_and_warns_for_rows_with_no_writer(db
     put(db, "older", writer=None)
     row = {r.name: r for r in memory.status()}["search"]
     assert row.level == "warn" and "1 rows stored with no writer" in row.text
+
+
+def _compressed(conn, session):
+    """Mark `session` as found only as a compressed Codex rollout."""
+    with conn:
+        conn.execute("INSERT INTO sources (harness, source, session_id, cursor, reuse, read) "
+                     "VALUES ('codex', ?, ?, NULL, ?, 0)",
+                     (f"/r/{session}.jsonl.zst", session, json.dumps(ingest.COMPRESSED)))
+
+
+def _waits(session):
+    """Record a source of `session` as waiting on a folder that didn't answer."""
+    sc = state.connect()
+    try:
+        state.write_waiting(sc, [state.Waiting("claude", f"/a/{session}.jsonl", session,
+                                               session, "/a", "offline", 1.0)], ())
+    finally:
+        sc.close()
+
+
+def _search_row():
+    memory, _ = provider()
+    return {r.name: r for r in memory.status()}["search"]
+
+
+@pytest.mark.parametrize("states", [("fixable",), ("compressed",), ("waiting",),
+                                    ("fixable", "compressed", "waiting")])
+def test_the_search_row_tells_rows_a_reindex_fixes_from_compressed_and_waiting_ones(
+        db, states):
+    put(db, "deploy")
+    if "fixable" in states:
+        put(db, "deploy from before the column", writer=None, session="s-old")
+    if "compressed" in states:
+        put(db, "deploy in a rollout", writer=None, session="s-zst", harness="codex")
+        put(db, "more of the rollout", writer=None, session="s-zst", harness="codex")
+        _compressed(db, "s-zst")
+    if "waiting" in states:
+        put(db, "deploy in an archive", writer=None, session="s-arc")
+        _waits("s-arc")
+    row = _search_row()
+    fixes = "1 rows stored with no writer; run moxi memory reindex to search them"
+    assert (fixes in row.text) is ("fixable" in states)
+    assert ("reindex" in row.text) is ("fixable" in states)   # only where one helps
+    assert ("2 rows of compressed Codex rollouts record no writer and are never searched"
+            in row.text) is ("compressed" in states)
+    assert ("1 sessions wait on a folder that didn't answer" in row.text) is (
+        "waiting" in states)
+    # compressed rows can't be helped, so they alone warn of nothing
+    assert row.level == ("ok" if states == ("compressed",) else "warn")
 
 
 # --- whose text --------------------------------------------------------------------------

@@ -95,12 +95,15 @@ class Memory:
 def search_row(env: Mapping[str, str] | None, *,
                sessions: Callable[[], Any] = tool_mod._sessions) -> tuple[str, str, str]:
     """The `search` status row: the index's generation and rows; `warn` before `start`
-    has given `env`, with no index yet, while the first read fills it, at schema 1, or
-    with rows that record no writer;
+    has given `env`, with no index yet, while the first read fills it, at schema 1, with
+    rows with no writer that `moxi memory reindex` would give one, or with sessions
+    waiting on a folder that didn't answer, which each walk reads again; the rows of
+    compressed Codex rollouts, which no reindex can read, are said apart and warn of
+    nothing;
     `fail` when the index or the state store can't be read, `redact.sets` lacks a set
     the stored cuts rely on, or `sessions` (sessions' API at the interface memory reads
     it at) raises `RuntimeError`, the installed sessions not offering it."""
-    from .. import index, search
+    from .. import index, ingest, search, state
     from .tool import _sets
 
     if env is None:
@@ -124,10 +127,12 @@ def search_row(env: Mapping[str, str] | None, *,
         return ("search", "fail", f"memory's index can't be read: {exc}")
     with reader as r:
         try:
-            if r.attach_state(search.STATE):
+            alias = search.STATE if r.attach_state(search.STATE) else None
+            if alias:
                 search._has_sessions(r.conn)
             total = r.conn.execute("SELECT count(*) FROM rows").fetchone()[0]
-            unwritten = index.rows_without_writer(r.conn)
+            unwritten = ingest.writerless(r.conn, alias)
+            waiting = state.waiting_sessions(r.conn, alias) if alias else 0
             schema = index.schema_version(r.conn)
             filling = search.filling(r.conn)
         except Exception as exc:  # noqa: BLE001 - the row reports it
@@ -138,9 +143,17 @@ def search_row(env: Mapping[str, str] | None, *,
     if unwritten is None:
         warns.append(f"the index is at schema {schema}; it is updated when memory next "
                      "writes")
-    elif unwritten:
-        warns.append(f"{unwritten} rows stored with no writer; run moxi memory reindex to "
-                     "search them from the chat")
+    elif unwritten.fixable:
+        warns.append(f"{unwritten.fixable} rows stored with no writer; run moxi memory "
+                     "reindex to search them from the chat")
+    if waiting:
+        warns.append(f"{waiting} sessions wait on a folder that didn't answer; memory "
+                     "reads them again at each walk until they read cleanly, and moxi "
+                     "doctor memory names the folder")
+    if unwritten is not None and unwritten.compressed:
+        said += (f"; {unwritten.compressed} rows of compressed Codex rollouts record no "
+                 "writer and are never searched from the chat, since sessions can't "
+                 "read them")
     if filling is not None:
         warns.append("the first read is still filling it")
     if warns:

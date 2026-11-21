@@ -200,7 +200,9 @@ output wrapper (`<bash-stdout>`, `<task-notification>`, `<system-reminder>` and 
 hook and channel messages, harness-made messages and compaction summaries show as one
 line of kind and size. `search_memory` returns only what `read_session` would show, and no
 mail from other sessions, which memory doesn't store; a row memory stored before it
-recorded writers is never returned until `moxi memory reindex` writes it again.
+recorded writers is never returned until `moxi memory reindex` writes it again, and the
+rows of a Codex rollout that Codex compressed, which sessions can't read, are never
+returned at all.
 
 No full local path leaves through the transcript tools' session fields: `list_sessions`
 and `read_session` give a session's folder as its last segment only. `read_session` also
