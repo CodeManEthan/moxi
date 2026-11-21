@@ -290,3 +290,53 @@ def test_the_api_exits_a_session_through_the_exit_verb(monkeypatch):
                         lambda *args, **kw: calls.append((args, kw)) or "done")
     assert api.exit_session(SID, dry_run=True, env={"A": "1"}) == "done"
     assert calls == [((SID,), {"dry_run": True, "caller_env": {"A": "1"}})]
+
+
+@pytest.mark.parametrize("harness, version, refused", [
+    ("codex", "0.2.4", True),
+    ("codex", "0.2.5", False),
+    ("codex", "0.3.0.dev1", False),
+    ("claude", "0.2.4", False),
+])
+def test_a_codex_fork_needs_a_turns_whose_host_forks(monkeypatch, harness, version, refused):
+    from types import SimpleNamespace
+
+    from moxi import modules
+
+    monkeypatch.setattr(modules, "load",
+                        lambda name, **kw: SimpleNamespace(ok=True, version=version))
+    got = fork.host_refusal(harness)
+    assert (got is not None) == refused
+    if refused:
+        assert got.code == "not-yet" and "moxi-turns 0.2.5 or newer" in str(got)
+
+
+def test_a_codex_fork_with_an_older_turns_is_refused_with_nothing_written(
+        work, harness, no_exec, monkeypatch):
+    from types import SimpleNamespace
+
+    from moxi import modules
+
+    conn = store.connect()
+    try:
+        store.insert(conn, request_id="r1", by="ann", harness="codex", target="terminal",
+                     cwd=str(work), values={"harness": "codex", "cwd": str(work),
+                                            "mode": "host"},
+                     argv=["host"], env={}, posture="", session_id=None)
+        store.learn_session(conn, "r1", "thread-7", "startup")
+    finally:
+        conn.close()
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=True, version="0.2.4") if name == "turns" else real(name, **kw)))
+    with pytest.raises(catalog.Refused, match="needs moxi-turns 0.2.5") as raised:
+        fork.fork("thread-7", request_id="r2")
+    assert raised.value.code == "not-yet" and row_absent("r2")
+
+
+def row_absent(rid: str) -> bool:
+    conn = store.connect()
+    try:
+        return store.get(conn, rid) is None
+    finally:
+        conn.close()

@@ -46,6 +46,7 @@ id is minted, and for a Codex fork into a slot once its host is ready.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import uuid
 from collections.abc import Callable, Mapping
@@ -62,6 +63,8 @@ Refused = relaunch.Refused
 Result = relaunch.Result
 #: The targets a fork runs in.
 TARGETS = ("terminal", "slot")
+#: The first turns whose Codex host takes `--fork`.
+CODEX_FORK_TURNS = "0.2.5"
 #: The modules whose variables a fork's caller may not stamp: the launch stamps them
 #: itself.
 UNSTAMPED = ("launcher", "turns")
@@ -167,6 +170,31 @@ def stamp_refusal(stamps: Mapping[str, str]) -> catalog.BadValue | None:
     return None
 
 
+def host_refusal(harness: str) -> catalog.Refused | None:
+    """The refusal a fork of a `harness` session meets for the turns installed here, or
+    None: a Codex fork needs turns' Codex host to take `--fork`, which turns
+    `CODEX_FORK_TURNS` added. Without turns the composer refuses the fork itself."""
+    from .compose import NotYet
+
+    if harness != "codex":
+        return None
+    found = moxi_modules.load("turns")
+    if not found.ok or not found.version:
+        return None
+    if _release(found.version) >= _release(CODEX_FORK_TURNS):
+        return None
+    return NotYet("fork", f"turns' Codex host here is moxi-turns {found.version}, which "
+                          f"has no --fork; a Codex fork needs moxi-turns "
+                          f"{CODEX_FORK_TURNS} or newer",
+                  f"upgrade moxi-turns to {CODEX_FORK_TURNS} or newer")
+
+
+def _release(version: str) -> tuple[int, ...]:
+    """The release numbers `version` starts with: (0, 2, 5) for `0.2.5.dev1`."""
+    found = re.match(r"\d+(?:\.\d+)*", version)
+    return tuple(int(part) for part in found.group().split(".")) if found else ()
+
+
 def _owner(name: str) -> str | None:
     """The installed module whose prefix `name` carries, the longest one when two do."""
     owners = [entry.name for entry in moxi_modules.installed()
@@ -195,5 +223,5 @@ def _learned(result: Any, conn: sqlite3.Connection | None) -> Any:
     return dataclasses.replace(result, session_id=row.session_id)
 
 
-__all__ = ["Refused", "Result", "TARGETS", "UNSTAMPED", "fork", "refusal", "stamp_refusal",
-           "start"]
+__all__ = ["CODEX_FORK_TURNS", "Refused", "Result", "TARGETS", "UNSTAMPED", "fork",
+           "host_refusal", "refusal", "stamp_refusal", "start"]

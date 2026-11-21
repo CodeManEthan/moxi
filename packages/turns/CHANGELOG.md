@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (unreleased)
 
+- The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never
+  with `--resume`: its first load forks that thread with `thread/fork`, live or not, into a
+  new thread that holds a copy of its conversation, and hosts the new one. The new thread
+  is loaded as a resumed one, with no item injected, and its id names the session from
+  the fork on, so a later load resumes it and the thread is never forked twice. Ready is
+  `resume`, or `startup` when the forked thread has had no turn.
 - `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
   `prompt` event carries `own`, true when its origin is on that list, and question mode's

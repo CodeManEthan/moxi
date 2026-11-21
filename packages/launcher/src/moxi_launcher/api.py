@@ -516,7 +516,7 @@ def _forked(request: ReplayRequest) -> Replayed:
         raise ValueError("a fork is not a relaunch or a resume")
     from . import fork
 
-    bad = fork.stamp_refusal(request.stamps)
+    bad = fork.stamp_refusal(request.stamps) or fork.host_refusal(row.harness)
     if bad is not None:
         raise bad
     target = request.target or "terminal"
@@ -842,8 +842,8 @@ def fork(session_id: str, *, target: str = "terminal", slot: int | str | None = 
 def exit_session(session_id: str, *, dry_run: bool = False,
                  env: Mapping[str, str] | None = None):
     """Interface 3: exit the launched session `session_id` once it is quiet (`moxi
-    launcher exit-session`), through turns' `exit`, which only a session that offers it
-    takes (Claude Code's). Returns the verdict (`relaunch.Result`, its
+    launcher exit-session`): Claude Code through turns' `exit`, Codex under turns' Codex
+    host by stopping its host. Returns the verdict (`relaunch.Result`, its
     `data["outcome"]` `exited`, `held`, `at-dialog` or `not-exited`, its `exit_code` the
     verb's); raises a refusal (`catalog.Refused`, `target.NotLaunched` for a session no
     launch holds). A dry run takes the checks and the quiet read and writes nothing."""

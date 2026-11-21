@@ -403,6 +403,94 @@ def test_a_harness_that_offers_no_exit_is_refused(conn):
     assert logged(conn)[0].word == "no-exit"
 
 
+# -- Codex under the host ---------------------------------------------------------------
+
+
+def _host(tmp_path, *, ignores_term=False):
+    """A process standing in for turns' Codex host, a launch log whose Codex launch its
+    turns claim names, and a session it serves."""
+    import subprocess
+    import sys
+
+    code = ("import signal, sys, time\n"
+            + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignores_term else "")
+            + "print('ready', flush=True)\ntime.sleep(60)\n")
+    child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
+    assert child.stdout.readline() == b"ready\n"
+    ident = proc.identity(child.pid)
+    conn = store.connect(tmp_path / "launcher.db")
+    store.insert(conn, request_id="r1", by="ann", harness="codex", target="slot",
+                 cwd="/work", values={"model": "gpt", "mode": "host"}, argv=["host"],
+                 env={}, posture="operator", session_id=None, slot="3")
+    store.learn_session(conn, "r1", SID, "startup")
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                 (f"{ident.pid}@{ident.started:.6f}",))
+    session = FakeSession(capabilities=("compact",))
+    session.endpoint_pid = session.pid = child.pid
+    return child, conn, session
+
+
+def test_a_quiet_codex_session_exits_by_its_host_stopping(tmp_path):
+    child, conn, session = _host(tmp_path)
+    slots_api = FakeSlots()
+    try:
+        result = exits.exit_session(
+            SID, conn=conn, turns=FakeTurns(session), slots_api=slots_api,
+            settings=SETTINGS, caller_env=dict(os.environ))
+        assert result.exit_code == 0 and result.data["outcome"] == "exited"
+        assert child.wait(5) is not None and session.commands == []
+        assert slots_api.calls == []                  # no dialog: the pane ends with it
+        [row] = logged(conn)
+        assert row.verdict == "exited" and "Codex host was stopped" in row.detail
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_host_still_running_at_the_bound_is_not_exited(tmp_path):
+    child, conn, session = _host(tmp_path, ignores_term=True)
+    try:
+        result = go(conn, session=session)
+        assert result.data["outcome"] == "not-exited" and child.poll() is None
+        assert logged(conn)[0].word == "still-running"
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_session_not_quiet_is_held_and_its_host_left(tmp_path):
+    child, conn, session = _host(tmp_path)
+    session.facts_seq = [facts(turn_open=True)]
+    try:
+        assert go(conn, session=session).data["outcome"] == "held"
+        assert child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_dry_run_says_it_would_stop_the_codex_host(tmp_path):
+    child, conn, session = _host(tmp_path)
+    try:
+        result = go(conn, session=session, dry_run=True)
+        assert result.lines == (f"would exit session {SID} by stopping its Codex host",)
+        assert child.poll() is None and logged(conn) == []
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_launch_without_the_host_offers_no_exit():
+    row = store.LaunchRow(**{**dict.fromkeys(store.COLUMNS), "request_id": "r1",
+                             "harness": "codex", "values_json": '{"mode": "interactive"}',
+                             "endpoint": me()})
+    assert exits.codex_host(row) is None
+
+
 def test_an_exit_loses_at_insert_to_an_open_run_whose_job_lives(conn):
     other = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
                              session_id=SID, by="cache", job=f"proc:{me()}")

@@ -13628,6 +13628,7 @@ turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--cwd", r
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--model", help="the model the thread runs")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",	keep	default	default
 turns	packages/turns/src/moxi_turns/codex_host.py	state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/src/moxi_turns/codex_host.py	help="fork this thread into a new one instead of starting one")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_mcp.py	McpSettle	name	notified	on_notified
 turns	packages/turns/src/moxi_turns/codex_mcp.py	`CodexError` for an error answer); `thread_id()` is the session's thread. `record` and	keep	record	record
 turns	packages/turns/src/moxi_turns/codex_mcp.py	run.done.set()	keep	set	set
@@ -13938,6 +13939,7 @@ turns	packages/turns/tests/fake_codex.py	install	name	folder	bin_dir
 turns	packages/turns/tests/fake_codex.py	signal.signal(signal.SIGTERM, lambda *_: stop.set())	keep	set	set
 turns	packages/turns/tests/fake_codex.py	thread["injected"] = thread.get("injected", 0) + len(params["items"])	keep	injected	injected
 turns	packages/turns/tests/fake_codex.py	ws.send(json.dumps(frame))	keep	fail	fail
+turns	packages/turns/tests/fake_codex.py	"injected": parent.get("injected", 0) or 1,	keep	injected	injected
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, new_session_id=new_id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	self.endpoint.refused(delivery.id, "idle")	use	refused	on_refused
@@ -14141,6 +14143,9 @@ turns	packages/turns/tests/test_codex_host_entry.py	host = rig.spawn("--no-windo
 turns	packages/turns/tests/test_codex_host_entry.py	monkeypatch.setattr(turns_client, "find", find)	keep	find	find
 turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/tests/test_codex_host_entry.py	parent = rig.spawn("--no-window", stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	fork = rig.spawn("--no-window", "--fork", thread, stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	again = rig.spawn("--no-window", "--resume", new, stdin=subprocess.DEVNULL)	keep	stdin	stdin
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
 turns	packages/turns/tests/test_codex_limits.py	client.call("usage.codex_limits", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_mcp.py	app.note("comms", "failed")	keep	note	note
