@@ -240,10 +240,11 @@ A shell left over does not make the command a failure: the command ran.
 
 - `outcome` is one of `answer`, `aborted` (Esc), `error`, `refusal`.
 - `answer` on `ended` is the final text of the turn that took the delivery: on Claude
-  Code the assistant's final visible text, "" when it had none; on a Codex host the
-  turn's last agent message on the main thread; null where the harness gave none (a
-  Codex turn with no agent message, an OpenCode host). Every delivery the turn took,
-  steers included, ends with the same `answer`.
+  Code the assistant's final visible text; on a Codex host the turn's last agent message
+  on the main thread. It is null, never "", when the turn had no text, on both harnesses
+  (a Claude Code turn with no visible text, a Codex turn with no agent message or an
+  empty one), and where the harness gives none (an OpenCode host). Every delivery the
+  turn took, steers included, ends with the same `answer`.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 

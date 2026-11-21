@@ -28,8 +28,8 @@ out of the harness. This package is turns' whole public API, the announcement's
     d.id, d.ref              # id None until a hand-in whose answer never came is found
     d.wait_started(timeout_s)  # Started | Refused | Lost
     d.wait_ended(timeout_s)    # Ended(turn_id, outcome, delivery, ref, answer) | Refused
-                               # | Lost; answer: the turn's final text, None where the
-                               # harness gave none
+                               # | Lost; answer: the turn's final text, None when the
+                               # turn had none or the harness gave none
 
     r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout_s=None,
                   stop_shells=False)              # Ran(new_session_id, shells) | Refused | Failed

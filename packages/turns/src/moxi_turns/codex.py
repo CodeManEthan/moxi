@@ -1565,7 +1565,8 @@ class CodexHarness(Harness):
                 self._ending = None
             self.thread_active = False
             said, text = self._last_message
-            answer = text if said == actual else None
+            # An empty agent message is no answer (None), as on Claude Code.
+            answer = text if said == actual and text else None
         self.endpoint.turn_ended(actual, outcome, answer=answer)
 
     def stop_facts(self, frame: dict) -> StopFacts:

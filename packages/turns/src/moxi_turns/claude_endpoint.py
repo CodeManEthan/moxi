@@ -427,9 +427,10 @@ class ClaudeHarness(Harness):
             ep.turn_started(turn_id, held=True)
             w.held, w.held_set = turn_id, True
         elif kind == leg.R_TURN_COMPLETE:
+            # A turn with no final text ends with no answer (None), as on Codex.
             answer = body.get("answer")
             ep.turn_ended(_opt_str(body, "turn_id"), _outcome(body),
-                          answer=answer if isinstance(answer, str) else None)
+                          answer=answer if isinstance(answer, str) and answer else None)
         elif kind == leg.R_SUBMIT_CLOSE:
             delivery, end = body.get("delivery"), body.get("end")
             if end not in leg.ENDS:

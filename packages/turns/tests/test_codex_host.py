@@ -201,6 +201,11 @@ def test_a_deliverys_end_carries_its_turns_last_agent_message(turns_env):
         second.wait_started(2)
         app.complete()                        # no agent message in this turn
         assert second.wait_ended(2).answer is None
+        third = session.deliver("once more", only_if_idle=True)
+        third.wait_started(2)
+        message(third.wait_started(2).turn_id, "")
+        app.complete()                        # an empty one is no answer either
+        assert third.wait_ended(2).answer is None
     finally:
         end_endpoint(endpoint)
 

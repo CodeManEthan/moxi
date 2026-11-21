@@ -19,8 +19,8 @@
   the prompt, both None for a prompt turns did not hand in, and `opens`, false when the
   prompt joins a main-loop turn already running.
 - A delivery's `ended` value carries `answer`, the final text of the turn that took it:
-  on Claude Code the assistant's final visible text ("" when there was none), on Codex
-  the turn's last agent message, null where the harness gave none.
+  on Claude Code the assistant's final visible text, on Codex the turn's last agent
+  message; null when the turn had no text, on both, and where the harness gave none.
 - A listener row takes the option `wait_ms`, a function of the session's environment that
   returns the row's own bound on `prompt` for that session, in milliseconds. The session's
   prompt bound, decided at its start, is the longest of `listen.wait_ms` and those: the

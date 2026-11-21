@@ -478,9 +478,9 @@ class Lost(_Value):
 @dataclass(frozen=True)
 class Ended(_Value):
     """The turn that took a delivery ended, with its outcome (one of `OUTCOMES`) and
-    `answer`, the turn's final text: on Claude Code the assistant's final visible text
-    ("" when it had none), on Codex the turn's last agent message; None where the harness
-    gave none."""
+    `answer`, the turn's final text: on Claude Code the assistant's final visible text,
+    on Codex the turn's last agent message; None when the turn had no text, on either
+    harness, and where the harness gave none."""
 
     KIND = "ended"
     turn_id: str | None

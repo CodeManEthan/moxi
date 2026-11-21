@@ -155,6 +155,17 @@ def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claud
         ("TurnStarted", d.id), ("TurnEnded", d.id)]
 
 
+def test_a_turn_with_no_final_text_ends_its_delivery_with_no_answer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("quiet")
+    runner.next_line()
+    runner.turn_start("T1")
+    runner.turn_complete("T1", answer="")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert d.wait_ended(2).answer is None
+
+
 def test_a_person_turn_in_the_window_is_released_by_the_later_turn_start(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
