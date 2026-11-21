@@ -71,6 +71,8 @@ WRITER_LOCK = "writer.lock"
 REBUILD_LOCK = "rebuild.lock"
 #: The tokenizer every generation's text tables use, and so every query.
 TOKENIZER = "porter unicode61 remove_diacritics 2"
+#: The `meta` key that says which secrets `redact` stored a generation's rows.
+REDACT_VERSION_KEY = "redact_version"
 #: How long a reader waits for a generation's shared lock. Only a child removing that
 #: generation holds it exclusively, for the moment the removal takes.
 READ_LOCK_WAIT = 2.0
@@ -98,8 +100,10 @@ _DB_SUFFIXES = ("", "-wal", "-shm", "-journal")
 #:
 #: `sources` holds each source's read cursor and reuse keys, so a cursor goes when the
 #: index goes. `secret_calls` holds the call ids of each source's secret-path calls, whose
-#: results give no tail. `meta` holds the schema version, the tokenizer and whether the first full
-#: read has finished (`first_read`, "0" or "1"), and whatever else a writer records.
+#: results give no tail. `meta` holds the schema version, the tokenizer, whether the first full
+#: read has finished (`first_read`, "0" or "1"), which secrets `redact` stored the rows
+#: (`redact_version`, written when the generation is made; one without it counts as 1),
+#: and whatever else a writer records.
 SCHEMA = (
     f"""
     CREATE TABLE rows (
@@ -288,6 +292,16 @@ def meta_set(conn: sqlite3.Connection, key: str, value: object) -> None:
     """Set a generation's meta value (stored as text)."""
     conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) "
                  "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+
+def stored_redact_version(conn: sqlite3.Connection) -> int:
+    """Which secrets `redact` stored a generation's rows: its `redact_version`, or 1 for
+    a generation without one (made before memory recorded it)."""
+    value = meta_get(conn, REDACT_VERSION_KEY)
+    try:
+        return int(value) if value is not None else 1
+    except ValueError:
+        return 1
 
 
 # -- readers --------------------------------------------------------------------------
@@ -600,6 +614,10 @@ class Writer:
         conn = store.connect(db_path(n, self.env), create=create, timeout_s=timeout)
         try:
             store.migrate(conn, SCHEMA)
+            if create and meta_get(conn, REDACT_VERSION_KEY) is None:
+                from .rows import redact_version
+
+                meta_set(conn, REDACT_VERSION_KEY, redact_version())
         except BaseException:
             conn.close()
             raise
@@ -653,5 +671,6 @@ __all__ = ["INDEX_DIR", "POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "
            "IndexUnreadable", "StateUnreadable", "WriterBusy", "Rebuilding", "Reader",
            "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",
-           "current", "generations", "meta_get", "meta_set", "open_read",
+           "current", "generations", "meta_get", "meta_set", "stored_redact_version",
+           "REDACT_VERSION_KEY", "open_read",
            "rebuild_running", "writer"]

@@ -63,7 +63,9 @@ class Status:
       the table, can't be read, or None; the index's own state is apart from it.
     - `dropped`: how many sessions the last rebuild dropped; `kept`: how many it kept
       without reading them, from a folder that didn't answer it or a compressed
-      rollout; `rebuilt`: when it started.
+      rollout, or, after a version rebuild (`moxi_memory.ingest`), how many it kept
+      anything of from a source it couldn't read to its end; `rebuilt`: when it
+      started.
     - `roots`: per harness, each folder's record as the last run left it
       (`moxi_memory.roots.Root.to_json`), `in_config` as sessions' config is now.
 
