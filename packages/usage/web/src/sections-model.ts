@@ -104,20 +104,18 @@ function costCell(sum: Sum): string {
   return `${costWords(sum)}${sum.harness_cost === null ? "" : ` · harness ${fmtCost(sum.harness_cost)}`}`;
 }
 
-/** A table whose rows end in their requests, tokens and cost, and a last column saying
- * why a row is not whole, there only when some row is not. */
+/** A table whose rows end in their requests, tokens and cost; a row whose cost is not
+ * whole carries why, for the mark in its cost cell. */
 export function figuresTable(heads: string[], lines: { key: string; cells: string[]; sum: Sum }[]): Table {
-  const whys = lines.map((line) => whyNotWhole(line.sum));
-  const flagged = whys.some((why) => why !== null);
   return {
     columns: [...heads.map((label) => ({ label, num: false })),
-              ...["Requests", "Tokens", "Cost"].map((label) => ({ label, num: true })),
-              ...(flagged ? [{ label: "Not whole", num: false }] : [])],
-    rows: lines.map((line, i) => ({
+              ...["Requests", "Tokens", "Est. cost"].map((label) => ({ label, num: true }))],
+    rows: lines.map((line) => ({
       key: line.key,
-      cells: [...line.cells, line.sum.requests.toLocaleString("en-US"), fmtTokens(line.sum.tokens), costCell(line.sum),
-              ...(flagged ? [whys[i] ?? ""] : [])],
+      cells: [...line.cells, line.sum.requests.toLocaleString("en-US"), fmtTokens(line.sum.tokens), costCell(line.sum)],
+      why: whyNotWhole(line.sum),
     })),
+    markAt: heads.length + 2,
   };
 }
 
@@ -145,17 +143,17 @@ export function placesSection(report: Report<ProjectRow> | null, folders: boolea
   let sentence: SentencePart[] | null;
   if (folders) {
     rows = sorted.map((row) => costRow(row.cwd ?? "", named(row), sumOf(row), whole,
-                                       row.cwd === null ? null : { folder: row.cwd, project: "" }));
+                                       row.cwd === null ? null : { paths: [row.cwd], projects: [] }));
     sentence = [{ text: "A folder row opens the Sessions section above, filtered to it.", patch: null }];
   } else {
     const loose = sorted.filter((row) => row.project === null);
     const own = sorted.filter((row) => row.project !== null).map((row) =>
-      costRow(`project:${row.project}`, row.project as string, sumOf(row), whole, { project: row.project as string, folder: "" }));
+      costRow(`project:${row.project}`, row.project as string, sumOf(row), whole, { projects: [row.project as string], paths: [] }));
     const fold = loose.length === 0 ? [] : [costRow("no-project", NO_PROJECT, sumRows(loose), whole, null)];
     rows = byCost([...own, ...fold], (row) => row.sum, (row) => row.name);
     const paths = loose.map((row) => row.cwd).filter((path): path is string => path !== null);
     const parts: SentencePart[] = paths.slice(0, LOOSE_NAMED)
-      .map((path) => ({ text: folder(path), patch: { folder: path, project: "" } }));
+      .map((path) => ({ text: folder(path), patch: { paths: [path], projects: [] } }));
     const unnamed = paths.length - LOOSE_NAMED;
     if (unnamed > 0) parts.push({ text: `${unnamed.toLocaleString("en-US")} more`, patch: null, table: true });
     if (loose.some((row) => row.cwd === null)) parts.push({ text: "files with no folder", patch: null });
