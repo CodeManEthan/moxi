@@ -708,6 +708,57 @@ def test_a_step_given_a_row_and_its_lines_is_printed_like_the_others(
         "waits: nothing"]
 
 
+# -- the groups from steps read once ------------------------------------------------------
+
+def test_the_step_a_round_is_at_is_taken_from_the_steps_read_once(
+        opened, capsys, monkeypatch):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"), stage("B2"))
+    before = next_step.read(ROUND)
+    monkeypatch.setattr(steps, "current",
+                        lambda *_a, **_k: pytest.fail("the steps were read again"))
+
+    assert next_step.read(ROUND) == before
+    assert before["groups"][0]["step"] == "verify-design"
+
+
+def test_the_groups_from_the_steps_given_are_the_reading_s_groups(opened, capsys):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"), stage("B2"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"), stage("B2"))
+    found = showing.show(ROUND, refresh=False)
+    every = steps.of(found.state, name=ROUND, on_closed=found.on_closed,
+                     register=found.register)
+    models = {"second": {"claude": "model-two"}, "third": {"claude": "model-three"}}
+
+    assert (next_step.groups(found, every, models)
+            == next_step.read(ROUND)["groups"])
+
+
+def test_groups_left_unfilled_read_no_step_s_lines_and_keep_the_rest(
+        opened, capsys, monkeypatch):
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"))
+    found = showing.show(ROUND, refresh=False)
+    every = steps.of(found.state, name=ROUND, on_closed=found.on_closed,
+                     register=found.register)
+    filled = next_step.groups(found, every, {})
+    for name in list(next_step.LINES):
+        monkeypatch.setitem(next_step.LINES, name,
+                            lambda *_a: pytest.fail("a step's lines were read"))
+
+    bare = next_step.groups(found, every, {}, fill=False)
+
+    assert [(one["step"], one["stage"], one["state"]) for one in bare] == [
+        (one["step"], one["stage"], one["state"]) for one in filled]
+    assert all(one["then"] == [] and one["reads"] == [] and one["write"] is None
+               for one in bare)
+    assert [one["waits"] for one in bare] == [one["waits"] for one in filled]
+
+
 # -- nothing is written ------------------------------------------------------------------
 
 def test_no_file_changes_whatever_is_printed(opened, tmp_path, capsys):

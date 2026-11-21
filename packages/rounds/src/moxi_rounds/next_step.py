@@ -58,7 +58,7 @@ tier a re-check is held to.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
                model_tiers, rendering, report_block, showing, sizing, stages, steps,
@@ -238,10 +238,16 @@ def _retro(found: showing.Shown, step: steps.Step) -> dict:
     """The round's retrospective: the numbers as they stand, which the round's ending
     will hold, the note and the reports, the report's block, and the verdict."""
     settings = own.load() if found.settings is None else found.settings
+    return {**_retro_uncounted(found, step),
+            "numbers": counted.of(found.state,
+                                  ratify=closing.ratify_of(settings, found.name))}
+
+
+def _retro_uncounted(found: showing.Shown, step: steps.Step) -> dict:
+    """The retrospective's lines without its numbers, which take a count of the whole
+    log."""
     return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
                       f"the reports in {found.round_dir}", *_named(step)],
-            "numbers": counted.of(found.state,
-                                  ratify=closing.ratify_of(settings, found.name)),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.RETRO}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
@@ -292,7 +298,14 @@ def _drift_pass(group: dict, step: steps.Step, seen) -> None:
                       *group["reads"]]
 
 
-def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
+def group(found: showing.Shown, step: steps.Step, models, seen=None, *,
+          fill: bool = True, count_numbers: bool = True) -> dict:
+    """The group of `step`: its head, its waits and, with `fill`, the step's own lines
+    (`LINES`, or a step of the user's own), which `then` and `reads` are made of. With
+    `fill` false the lines are left empty and nothing of them is read: a reader that
+    wants one step's lines asks for that step alone. With `count_numbers` false the
+    retrospective's lines leave out its `numbers`, a count of the whole log. `models`
+    is the `models` setting and `seen` what `checking.seen_of` read."""
     entry = step.entry or {}
     group = {"step": step.step, "stage": step.stage, "state": step.state,
              "built": step.state != steps.NOT_BUILT,
@@ -305,7 +318,9 @@ def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     if lines is None and step.entry is not None and flows.is_user_step(step.entry):
         lines = {flows.COMMAND: _command, flows.REPORT: _report}.get(
             step.entry.get("does"))
-    if group["built"] and lines is not None:
+    if lines is _retro and not count_numbers:
+        lines = _retro_uncounted
+    if fill and group["built"] and lines is not None:
         group.update(lines(found, step))
         if step.step == steps.VERIFY_BUILD or lines is _report:
             _drift_pass(group, step, seen)
@@ -317,26 +332,37 @@ def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     return group
 
 
-def _groups(found: showing.Shown, models, seen) -> list[dict]:
-    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
-                     register=found.register, seen=seen)
-    at = steps.current(found.state, name=found.name, on_closed=found.on_closed,
-                       register=found.register, seen=seen)
+def groups(found: showing.Shown, every: Sequence[steps.Step], models, seen=None, *,
+           fill: bool = True) -> list[dict]:
+    """The groups of the round `found`, from `every`, its steps as `steps.of` read them
+    with `seen`: one for the step it is at, then one for each stage of the plan whose
+    own first step not settled is another step, then one for each other step of the
+    round's own that is ready. With `fill` false no step's lines are read (see
+    `group`), so `then` and `reads` are empty."""
+    at = None
+    if found.state.status == states.OPEN:
+        at = next((step for step in every if not step.settled), None)
     if at is None:
         return []
-    groups = [_group(found, at, models, seen)]
+    found_groups = [group(found, at, models, seen, fill=fill)]
     for stage in stages.in_plan(found.state):
         first = next((step for step in every
                       if step.stage == stage.id and not step.settled), None)
         if first is not None and (first.step, first.stage) != (at.step, at.stage):
-            groups.append(_group(found, first, models, seen))
+            found_groups.append(group(found, first, models, seen, fill=fill))
     # A step of the round's own that is ready gets its group too, though a stage's
     # step comes before it in the flow: ratifying can go on while a stage builds.
     for step in every:
         if (step.stage is None and step.state == steps.READY
                 and (step.step, step.stage) != (at.step, at.stage)):
-            groups.append(_group(found, step, models, seen))
-    return groups
+            found_groups.append(group(found, step, models, seen, fill=fill))
+    return found_groups
+
+
+def _groups(found: showing.Shown, models, seen) -> list[dict]:
+    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
+                     register=found.register, seen=seen)
+    return groups(found, every, models, seen)
 
 
 # -- the warnings ------------------------------------------------------------------------
@@ -547,6 +573,7 @@ def as_json(said: dict) -> str:
     return json.dumps(said, indent=2, ensure_ascii=False) + "\n"
 
 
-__all__ = ["ANSWER", "SCHEMAS", "LINES", "OPERATOR", "schema", "model_of", "read",
+__all__ = ["ANSWER", "SCHEMAS", "LINES", "OPERATOR", "schema", "model_of", "group",
+           "groups", "read",
            "as_text", "as_json", "DESIGN_MOVED", "BELOW_TIER", "NOT_SHOWN", "STALE_ROW",
            "HOLDS_STAGE", "READ_BACK_UNKNOWN"]
