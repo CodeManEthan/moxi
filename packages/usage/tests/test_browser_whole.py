@@ -34,7 +34,7 @@ from playwright.sync_api import expect
 
 from test_browser_questions import (AGENTS, CODEX, PANEL, READINGS, SONNET, THREAD, WEEK, filter_of,
                                     installs, key, limit, on_both, open_page, opened, pick, place_words,
-                                    rows_of, run, section, session_id, settle, write)
+                                    run, section, session_id, settle, write)
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -128,7 +128,7 @@ def addresses_of(shell) -> list[tuple[str, str, str]]:
         ("", "", "[data-group=chart] svg[data-part=chart]"),
         ("limit/claude/plan/300", "limit/claude/plan/300", "[data-part=opened] [data-opened=window]"),
         ("limit/codex/codex/300", "limit/codex/codex/300", "[data-part=opened] [data-opened=window]"),
-        ("sessions", "sessions", f'section[data-group=sessions] [data-list=first] moxi-ui-row[data-key="{key(WEEK[0])}"]'),
+        ("sessions", "sessions", f'section[data-group=sessions] table[data-table=sessions] tr[data-row="{key(WEEK[0])}"]'),
         (f"sessions/codex/{THREAD}", f"sessions/codex/{THREAD}",
          f'[data-list=placed] moxi-ui-row[open][data-key="{key(CODEX)}"] [data-part=session]'),
         (f"sessions/claude/{TYPED_ID}/{AGENTS[1]}", f"sessions/claude/{TYPED_ID}/{AGENTS[1]}",
@@ -192,13 +192,9 @@ def open_every_piece(page, shell):
         yield f"the limit {which}"
     panel = open_page(page, "sessions")
     sessions = section(panel, "sessions")
-    expect(rows_of(sessions)).to_have_count(10)
-    sessions.locator("[data-more=first]").get_by_role("button", name="Show").click()
-    sessions.locator("[data-more=earlier]").get_by_role("button", name="Show").click()
-    expect(rows_of(sessions, "earlier")).to_have_count(2)
-    sessions.get_by_role("button", name="Table").last.click()
-    expect(sessions.locator("table[data-part=table]")).to_be_visible()
-    yield "Sessions shown whole with its Table"
+    # Every session of the 30 days: the week's, the Codex thread and the two before them.
+    expect(sessions.locator("table[data-table=sessions] tbody tr[data-row]")).to_have_count(16)
+    yield "Sessions with its table"
     panel = open_page(page, f"sessions/claude/{TYPED_ID}")
     body = panel.locator("[data-part=session]")
     acts = body.locator("[data-part=session-acts]")
@@ -252,8 +248,8 @@ def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_bo
         settle(panel, "model", SONNET)
         panel.locator("[data-part=measure]").get_by_role("button", name="Tokens").click()
         sessions = section(panel, "sessions")
-        row = sessions.locator(f'moxi-ui-row[data-key="{key(WEEK[0])}"]')
-        row.get_by_role("link", name="Open").click()
+        sessions.locator(f'tr[data-row="{key(WEEK[0])}"]').get_by_role("link").click()
+        row = sessions.locator(f'[data-list=placed] moxi-ui-row[data-key="{key(WEEK[0])}"]')
         body = row.locator("[data-part=session]")
         body.get_by_role("link", name="Open in Sessions").click()
         expect(page).to_have_url(re.compile(rf"/m/sessions/claude/{TYPED_ID}$"))

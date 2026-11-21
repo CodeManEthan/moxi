@@ -432,16 +432,18 @@ sessions module. Top to bottom:
   USD`); a used day says its cost and tokens on hover, and its token classes when it is
   in the range. `Table` lists the used days by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
-  - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
-    `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every
-    session of the range, read 500 at a time, the next 500 read as the rows drawn near
-    the end or on `Load more`, with each session's turns (0 where none is recorded) and
-    its subagents' share of its cost as a meter, sorted by a column: a click on a header
+  - Sessions. Opened, a table of every session of the range, dearest first, read 500 at
+    a time, the next 500 read as the rows drawn near the end or on `Load more`. Its
+    columns are the project (or the folder, without the projects module), the session's
+    name (with a `codex` badge on a Codex session), its start, how long it was active,
+    its turns (0 where none is recorded), its Input, Cache create, Cache read and Output
+    tokens, each with a bar against the most of its column among the rows read, its
+    subagents' share of its cost as a meter, and its estimated cost. A click on a header
     sorts by it, highest first, and again the other way, rows of one value by session id
     then harness. Its rows sit in a box of their own, 40 px each, only those in view
-    drawn; the arrow keys move a row cursor. A press on a table row, or Enter on it, opens
-    its session first in the section, as its address does, and hides the table. A session
-    opens in its row: its requests, its context, a chart of its requests with its turns and
+    drawn; the arrow keys move a row cursor. A press on a row, or Enter on it, opens its
+    session first in the section, over the table, as its address does. A session opens in
+    its row: its requests, its context, a chart of its requests with its turns and
     compactions, where its cost went, its subagents (a map, a row each, and one opened
     with its own requests), its harness, model and start, the restart point when one is
     measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.

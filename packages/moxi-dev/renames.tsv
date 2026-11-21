@@ -16256,7 +16256,7 @@ usage	packages/usage/tests/test_browser_questions.py	child.assistant("Found it."
 usage	packages/usage/tests/test_browser_questions.py	expect(section(panel, "projects" if shell.small else "folders")).to_have_count(0)	keep	folders	folders
 usage	packages/usage/tests/test_browser_questions.py	for k, (folder, days) in enumerate((("proj-b", 12), ("scratch", 20)))]	use	(folder,	(dir_name,
 usage	packages/usage/tests/test_browser_questions.py	held[name] = sorted(set(cards.evaluate_all("all => all.map((one) => one.dataset.module)")))	keep	set	set
-usage	packages/usage/tests/test_browser_questions.py	in_b = [key(spec) for spec in WEEK + [CODEX] if spec["folder"] == "proj-b"]	keep	folder	folder
+usage	packages/usage/tests/test_browser_questions.py	in_b = [key(spec) for spec in WEEK + [CODEX] + EARLIER if spec["folder"] == "proj-b"]	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	on_both.go	name	failed	exc
 usage	packages/usage/tests/test_browser_questions.py	r.request(T.token_usage(input=4000, cached=3000, output=800),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	re.compile(r"^no newer reading: .+")], timeout=15_000)	keep	timeout	timeout

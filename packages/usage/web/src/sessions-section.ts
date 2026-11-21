@@ -1,9 +1,10 @@
-// The Sessions section as the page draws it, with no DOM: the closed row, one row of a
-// list in the words its two lines carry, the section's table of every session in the
-// order picked, and a list read a page at a time. The lists' days, headings and remainders are `sessions-model.ts`'.
+// The Sessions section as the page draws it, with no DOM: the closed row, the row of the
+// session the address names in the words its two lines carry, the section's table of
+// every session in the order picked, and a list read a page at a time.
 
 import type { ApiResult } from "/m/ui/client.js";
 
+import { COST_SERIES } from "./chart-model.ts";
 import { costWords, countWords, sumRows, whyNotWhole } from "./cost-model.ts";
 import { LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
@@ -43,7 +44,7 @@ export function sessionsClosed(answer: Report<SessionRow> | null, today: string 
   return { closed, count: countWords(count, "session") };
 }
 
-/** One session's row: line one its name, `where` and cost; line two its requests, the
+/** The two-line row of one session: line one its name, `where` and cost; line two its requests, the
  * times of its first and last, its models and how full its context was. A part whose
  * fact the row does not carry is null and is not drawn. */
 export interface SessionLine {
@@ -84,8 +85,8 @@ export function contextWords(context: SessionRow["context"]): string | null {
   return `context ${percentWords((context.tokens / context.window) * 100)} full`;
 }
 
-/** A list's row. `projects` says whether projects is installed, so a row's project is its
- * `where`. */
+/** The two-line row of the session the address names. `projects` says whether projects
+ * is installed, so a row's project is its `where`. */
 export function sessionLine(row: SessionRow, today: string | null, projects: boolean,
                             clock: Clock = LOCAL): SessionLine {
   const sum = sumRows([row]);
@@ -118,9 +119,23 @@ export interface BoardOrder {
 export const TURNS_TITLE = "Turns in the main session's file, whatever the range; never summed with subagents";
 /** The Subagent share column's hover. */
 export const SHARE_TITLE = "The part of the session's cost in the range its subagents ran up";
+/** The badge after a Codex session's name, and its hover. */
+export const CODEX_BADGE = { text: "codex", title: "A Codex session, priced at OpenAI list rates" };
+/** A token class cell's bar is this many px wide at the column's most. */
+export const SPARKBAR_WIDTH = 44;
 
 /** The table's first order: dearest first. */
 export const BOARD_START: BoardOrder = { sort: "cost", order: "desc" };
+
+/** The table's token class columns, each with its sort and the shade the chart draws the
+ * class in. */
+export const BOARD_CLASSES: readonly { key: "fresh_input" | "cache_write" | "cache_read" | "output"; label: string;
+                                       sort: BoardSort; shade: number }[] = ([
+  ["fresh_input", "input"], ["cache_write", "cache_write"], ["cache_read", "cache_read"], ["output", "output"],
+] as const).map(([key, series]) => {
+  const found = COST_SERIES.find((item) => item.key === series);
+  return { key, label: found?.label ?? key, sort: key, shade: found?.shade ?? 1 };
+});
 
 /** How many rows a read of the table asks for: the first, and each `Load more`. */
 export const BOARD_PAGE = TOP_MAX;
@@ -171,16 +186,27 @@ export interface BoardColumn {
   arrow: string | null;
 }
 
+/** A token class cell's bar: its value over the most of its column among the rows read,
+ * 0 to 1, drawn in the class's `shade` of the chart. */
+export interface Sparkbar {
+  fraction: number;
+  shade: number;
+}
+
 /** The Sessions section's table: every session of the range in the order picked, read a
  * page at a time. */
 export interface Board {
   columns: BoardColumn[];
+  /** The column that holds each row's name, a link to its session. */
+  nameAt: number;
   /** `session` is the session the row opens; null for a row with no session id. `share`
    * is the subagent share drawn as a meter in its column, whose cell is empty; null
-   * where the share is not known. */
+   * where the share is not known. `bars` stands beside `cells`: a bar after the figure
+   * in each token class cell, null in the others. `badge` follows the name of a Codex
+   * session. */
   rows: {
-    key: string; cells: string[]; session: { harness: string; id: string } | null;
-    share: { value: number; label: string } | null;
+    key: string; cells: string[]; bars: (Sparkbar | null)[]; session: { harness: string; id: string } | null;
+    share: { value: number; label: string } | null; badge: typeof CODEX_BADGE | null;
   }[];
   /** `54 sessions · showing 30`. */
   line: string;
@@ -195,12 +221,12 @@ export function nextOrder(now: BoardOrder, sort: BoardSort): BoardOrder {
 }
 
 /**
- * The table over a list read in one order: a row per session with every figure
- * `/api/sessions` gives. The project column is there with projects; without them the
- * folder column takes the project sort, which falls back to the folder. A folder is
- * written from `home` (`~/work/proj-a`), the account's home folder that `/api/projects`
- * answers; with no `home` read, as its last segment. A last column says why a cost is
- * not whole, and is there only when some row's is not.
+ * The table over a list read in one order: a row per session, its project (or, without
+ * projects, its folder), name, start, how long it was active, its turns, its four token
+ * classes each with a bar against the column's most among the rows read, its subagent
+ * share and its cost. A folder is written from `home` (`~/work/proj-a`), the account's
+ * home folder that `/api/projects` answers; with no `home` read, as its last segment. A
+ * last column says why a cost is not whole, and is there only when some row's is not.
  */
 export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | null, projects: boolean,
                               home: string | null, clock: Clock = LOCAL): Board {
@@ -213,42 +239,43 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
   const whys = list.rows.map((row) => whyNotWhole(sumRows([row])));
   const flagged = whys.some((why) => why !== null);
   const columns = [
-    column("Session", false, null), ...(projects ? [column("Project", false, "project")] : []),
-    column("Folder", false, projects ? null : "project"), column("Harness", false, null), column("Models", false, null),
+    projects ? column("Project", false, "project") : column("Folder", false, "project"),
+    column("Session", false, null),
     column("Started", true, "started"), column("Active", true, "active"),
-    column("Turns", true, "turns", TURNS_TITLE), column("Requests", true, "requests"),
-    column("Input", true, "fresh_input"), column("Cache create", true, "cache_write"),
-    column("Cache read", true, "cache_read"), column("Output", true, "output"), column("Tokens", true, "tokens"),
-    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Est. cost", true, "cost"), column("Context", true, null),
+    column("Turns", true, "turns", TURNS_TITLE),
+    ...BOARD_CLASSES.map((item) => column(item.label, true, item.sort)),
+    column("Subagent share", true, "subagent_share", SHARE_TITLE), column("Est. cost", true, "cost"),
     ...(flagged ? [column("Not whole", false, null)] : []),
   ];
+  const most = BOARD_CLASSES.map((item) => Math.max(1, ...list.rows.map((row) => row[item.key])));
   const rows = list.rows.map((row, i) => ({
     key: rowKey(row),
     session: row.session_id === null ? null : { harness: row.harness, id: row.session_id },
     share: row.subagent_share === null ? null
       : { value: row.subagent_share, label: `Subagent share ${Math.round(row.subagent_share * 100)}%` },
-    cells: [
-      sessionName(row, today, clock).name,
-      ...(projects ? [row.project ?? ""] : []),
-      folderCell(row.folder ?? row.cwd, home),
-      row.harness,
-      row.models.join(", "),
-      when(row.first_ts),
-      row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)),
-      (row.turns ?? 0).toLocaleString("en-US"),
-      row.requests.toLocaleString("en-US"),
-      fmtTokens(row.fresh_input), fmtTokens(row.cache_write), fmtTokens(row.cache_read), fmtTokens(row.output),
-      fmtTokens(row.tokens),
-      "",
-      costWords(sumRows([row])),
-      row.context === null ? "" : contextCell(row.context),
-      ...(flagged ? [whys[i] ?? ""] : []),
-    ],
+    badge: row.harness === "codex" ? CODEX_BADGE : null,
+    ...unzip([
+      [projects ? row.project ?? "" : folderCell(row.folder ?? row.cwd, home), null],
+      [sessionName(row, today, clock).name, null],
+      [when(row.first_ts), null],
+      [row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)), null],
+      [(row.turns ?? 0).toLocaleString("en-US"), null],
+      ...BOARD_CLASSES.map((item, at): [string, Sparkbar] => [fmtTokens(row[item.key]),
+        { fraction: Math.min(1, Math.max(0, row[item.key] / most[at])), shade: item.shade }]),
+      ["", null],
+      [costWords(sumRows([row])), null],
+      ...(flagged ? [[whys[i] ?? "", null] as [string, null]] : []),
+    ]),
   }));
   return {
-    columns, rows, line: `${countWords(list.count, "session")} · showing ${list.rows.length.toLocaleString("en-US")}`,
+    columns, nameAt: 1, rows, line: `${countWords(list.count, "session")} · showing ${list.rows.length.toLocaleString("en-US")}`,
     more: list.more > 0,
   };
+}
+
+/** A row's cells and the bars beside them, from pairs. */
+function unzip(pairs: [string, Sparkbar | null][]): { cells: string[]; bars: (Sparkbar | null)[] } {
+  return { cells: pairs.map(([cell]) => cell), bars: pairs.map(([, bar]) => bar) };
 }
 
 /** A folder as the table writes it: whole from `home`, else its last segment. */
@@ -257,16 +284,12 @@ function folderCell(folder: string | null, home: string | null): string {
   return home ? tilde(folder, home) : lastSegment(folder);
 }
 
-function contextCell(context: NonNullable<SessionRow["context"]>): string {
-  const tokens = context.tokens.toLocaleString("en-US");
-  return context.window === null ? tokens : `${tokens} of ${context.window.toLocaleString("en-US")}`;
-}
 
 /** How a list asks for its rows: the path of `/api/sessions` for `top` rows after `skip`. */
 export type ListPath = (top: number, skip: number) => string;
 
 /**
- * One list of the section, read as a `Feed`. Its first read asks for `first` rows; `show`
+ * A list of sessions read as a `Feed`, as the table reads it. Its first read asks for `first` rows; `show`
  * reads `page` more (thirty unless given) from where it stopped and puts them below the
  * rows shown; `refresh` reads the list again to the depth it was read to, as after a pass.
  * A read that fails keeps the rows shown.

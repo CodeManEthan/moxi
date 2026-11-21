@@ -129,12 +129,19 @@ def strip_of(panel):
 
 
 def session_rows(panel):
-    return panel.locator("section[data-group=sessions] moxi-ui-row")
+    """The Sessions table's rows."""
+    return panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")
 
 
 def session_row(panel, session: str):
-    """A row of the Sessions section, by the harness and session it opens."""
-    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
+    """The row of the session opened in the Sessions section, first in it."""
+    return panel.locator(f'section[data-group=sessions] [data-list=placed] moxi-ui-row[data-key="claude/{session}"]')
+
+
+def open_session(panel, session: str) -> None:
+    """Opens a session by its name in the Sessions table."""
+    panel.locator(f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{session}"]'
+                  ).get_by_role("link").click()
 
 
 def show_subagents(opened):
@@ -172,7 +179,7 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
 #: Each address and what shows once its reads have drawn.
 VIEWS = {
     "": "[data-group=chart] svg g[data-period]",
-    "sessions": f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]',
+    "sessions": f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{FIRST}"]',
     f"sessions/claude/{FIRST}": "[data-part=session] [data-line=subagents]",
     f"sessions/claude/{FIRST}/{AGENT}": "[data-part=agent] svg[data-part=session-chart] rect.bar",
 }
@@ -190,7 +197,7 @@ def test_each_address_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_widt
 def test_an_opened_session_shows_its_subagents_as_rows_under_a_map_of_its_agents(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
-    session_row(panel, FIRST).get_by_role("link", name="Open").click()
+    open_session(panel, FIRST)
     expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
     opened = session_row(panel, FIRST).locator("[data-part=session]")
     rows = show_subagents(opened)
@@ -219,16 +226,16 @@ def test_an_opened_session_shows_its_subagents_as_rows_under_a_map_of_its_agents
 def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     harness = panel.locator("[data-part=filters] [data-filter=harness] button.pick")
+    with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
+        open_session(panel, FIRST)
+    # Read over its whole life with its row's harness, so it adds up to its row: the main
+    # agent's requests and the subagent's, and the subagent's cost a part of the row's.
+    assert "harness=claude" in sent.value.url and "since=" not in sent.value.url, sent.value.url
     row = session_row(panel, FIRST)
     expect(row).to_have_attribute("lead", re.compile(r"^\d+ requests?$"))
     requests = row.get_attribute("lead").split()[0]
     expect(row).to_have_attribute("fact", re.compile(r"^\$\d+\.\d\d$"))
     cost = row.get_attribute("fact")
-    with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
-        row.get_by_role("link", name="Open").click()
-    # Read with its list's days and its row's harness, so it adds up to the row: the main
-    # agent's requests and the subagent's, and the subagent's cost a part of the row's.
-    assert "harness=claude" in sent.value.url and "since=" in sent.value.url, sent.value.url
     opened = row.locator("[data-part=session]")
     expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests by the main agent (at|from) "))
     expect(opened.locator("[data-line=subagents]")).to_have_text(
@@ -295,7 +302,7 @@ def test_read_new_sessions_moves_the_last_pass_and_brings_them_in(own_shell):
     expect(last).not_to_have_attribute("data-last-pass", before)
     expect(strip).to_have_attribute("data-state", "up")
     expect(session_rows(panel)).to_have_count(2)
-    expect(session_row(panel, LATER)).to_have_count(1)
+    expect(session_rows(panel).and_(panel.locator(f'tr[data-row="claude/{LATER}"]'))).to_have_count(1)
 
 
 # --- a session's requests, its cost terms and the rates ------------------------------------
@@ -581,7 +588,7 @@ def test_an_addressed_session_is_first_in_the_section_read_over_its_whole_life(
     placed = section.locator("[data-list=placed] moxi-ui-row")
     expect(placed).to_have_attribute("data-key", f"claude/{CHARTED}")
     expect(placed).to_have_attribute("open", "")
-    expect(section.locator("[data-list=first] moxi-ui-row")).to_have_count(0)
+    expect(section.locator("table[data-table=sessions]")).to_be_visible()
     # Closed, its row stays first and the address goes back to the section.
     placed.get_by_role("link", name="Close").click()
     expect(placed).not_to_have_attribute("open", "")

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The page's opened Sessions section is its table of every session of the range, read at
+  once; the two lists of two-line rows (the last seven days' ten dearest with `Show`, and
+  `Earlier`) and the section's `Table` toggle are gone. A session opens first in the
+  section, over the table, which stays. The table's columns are Project (or Folder
+  without the projects module), Session, Started, Active, Turns, Input, Cache create,
+  Cache read, Output, Subagent share and Est. cost; Harness, Models, Requests, Tokens,
+  Context and the Folder column beside Project are gone. Each token class cell has a bar
+  against its column's most among the rows read, in the class's shade, and a Codex
+  session's name a `codex` badge.
 - The page chart's table lists its periods oldest first, where it listed them newest
   first, and has the day and a column per part of the chart, with no Total column (the
   harness's own cost went with it). Its `Not whole` column is as before.

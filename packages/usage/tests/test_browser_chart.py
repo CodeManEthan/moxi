@@ -418,7 +418,7 @@ def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_f
 
 def test_a_range_that_holds_nothing_says_so_in_the_charts_place(page):
     panel = open_page(page, "sessions")
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(2)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(3)
     box = filter_of(panel, "range")
     box.locator("button.pick").click()
     box.get_by_role("menuitemradio", name="From … to …").click()
@@ -534,13 +534,10 @@ def test_the_place_filter_picks_several_and_reads_them_one_to_a_line(small, ui_c
 
 def test_the_sections_read_under_the_pages_range_and_filters(page):
     panel = open_page(page, "sessions")
-    rows = panel.locator("section[data-group=sessions] moxi-ui-row")
-    earlier = panel.locator("section[data-group=sessions] [data-more=earlier]")
-    # Over 30 days the week's two are listed and the one before them is counted.
-    expect(rows).to_have_count(2)
-    expect(earlier).to_have_text(re.compile(r"^Earlier · 1 session, "))
+    rows = panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")
+    # Over 30 days the table holds all three; over 7, the week's two.
+    expect(rows).to_have_count(3)
     pick(panel, "range", "Last 7 days")
-    expect(earlier).to_have_count(0)
     expect(rows).to_have_count(2)
     pick(panel, "model", HAIKU)
     expect(rows).to_have_count(1)
