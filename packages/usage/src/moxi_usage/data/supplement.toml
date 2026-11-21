@@ -34,26 +34,27 @@ source = "Claude Code's [1m] model suffix names the 1M-token long-context varian
 as_of = "2026-08-14"
 
 # Fast mode: the same model at a higher output speed, at premium prices. A request
-# carries `speed = "fast"`. Cache prices take the provider's multipliers over the fast
-# input price.
+# carries `speed = "fast"`. Each fast tier carries its own cache prices, the model's own
+# caching multipliers over the fast input price, so none is filled from the provider's
+# default (Opus 5.5 reads its cache at 0.05x input, not the default 0.1x).
 
 [[model]]
 id = "claude-opus-5-5"
-tiers.fast = { speed = "fast", input = 8.0, output = 40.0 }
-source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 5.5 at $8 / $40 per million tokens, 2x standard"
-as_of = "2026-09-25"
+tiers.fast = { speed = "fast", input = 8.0, output = 40.0, cache_read = 0.4, cache_write_5m = 10.0, cache_write_1h = 16.0 }
+source = "Anthropic API pricing (platform.claude.com/docs/en/about-claude/pricing), fast mode: Claude Opus 5.5 at $8 / $40 per million tokens; prompt caching multipliers apply on top of fast mode pricing, and Opus 5.5 cache hits are 0.05x input, so cache hits $0.40, 5-minute cache writes $10 (1.25x), 1-hour $16 (2x)"
+as_of = "2026-11-21"
 
 [[model]]
 id = "claude-opus-5"
-tiers.fast = { speed = "fast", input = 10.0, output = 50.0 }
-source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 5 at $10 / $50 per million tokens"
-as_of = "2026-09-25"
+tiers.fast = { speed = "fast", input = 10.0, output = 50.0, cache_read = 1.0, cache_write_5m = 12.5, cache_write_1h = 20.0 }
+source = "Anthropic API pricing (platform.claude.com/docs/en/about-claude/pricing), fast mode (research preview): Claude Opus 5 at $10 / $50 per million tokens; prompt caching multipliers apply on top of fast mode pricing, and Opus 5 cache hits are the standard 0.1x input, so cache hits $1, 5-minute cache writes $12.50 (1.25x), 1-hour $20 (2x)"
+as_of = "2026-11-21"
 
 [[model]]
 id = "claude-opus-4-8"
-tiers.fast = { speed = "fast", input = 10.0, output = 50.0 }
-source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 4.8 at $10 / $50 per million tokens"
-as_of = "2026-06-24"
+tiers.fast = { speed = "fast", input = 10.0, output = 50.0, cache_read = 1.0, cache_write_5m = 12.5, cache_write_1h = 20.0 }
+source = "Anthropic API pricing (platform.claude.com/docs/en/about-claude/pricing), fast mode (deprecated): Claude Opus 4.8 at $10 / $50 per million tokens; prompt caching multipliers apply on top of fast mode pricing, and Opus 4.8 cache hits are the standard 0.1x input, so cache hits $1, 5-minute cache writes $12.50 (1.25x), 1-hour $20 (2x)"
+as_of = "2026-11-21"
 
 # Models newer than the LiteLLM snapshot, each a row of its own. A row carries every price
 # the restart point's multipliers read (input, and with an input above 0 the cache-read and

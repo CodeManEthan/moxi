@@ -25,8 +25,9 @@ cost by class adds terms up and never shares a figure out by rates.
 `service_tier`, `speed`) and its own prices. A group takes the tier whose conditions all
 hold, the one with the most conditions first and then the highest `above_tokens`; no tier
 holds, the row's own prices. A price the tier leaves out is, for a cache price, the tier's
-input price times the provider's default multiplier when the table has one (so fast mode's
-cache prices ride on the fast input price), else the row's own price for it.
+input price times the provider's default multiplier when the table has one, else the row's
+own price for it. The shipped table's fast tiers carry their own cache prices, since a
+model's caching multiplier can differ from its provider's default.
 
 **Unknown is never $0.** A model the table does not know, or a term with tokens whose
 price is unknown, leaves the group unpriced: its tokens go to `unpriced_tokens` and its

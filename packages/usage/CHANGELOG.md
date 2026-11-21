@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Every fast tier in the shipped model table carries its own cache prices, read from
+  Anthropic's pricing page (platform.claude.com/docs/en/about-claude/pricing) on
+  2026-11-21: Opus 5.5 fast cache reads $0.40, 5-minute writes $10, 1-hour $16; Opus 5 and
+  Opus 4.8 fast $1, $12.50 and $20. Opus 5.5's fast cache reads were filled at 0.1x the
+  fast input price ($0.80), where Anthropic charges 0.05x; it is the only price that
+  moves. Fable and Mythos 5.2 already carried theirs.
 - While the reads under the filter line are out, after a day is picked on the heat map, a
   filter or the range is changed, or a pass finishes, everything under the line (the
   chart, the heat map and the sections) stays drawn as it was, faded, and each part is
