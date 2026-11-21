@@ -10,6 +10,9 @@ module only decides which of them count and what text each row holds.
   is not a compaction summary. A message sessions marks `injected` as unknown is kept;
 - each tool call, as its summary line and its input.
 
+Each tier 1 row records its writer, from sessions' `writer(record)`: `person`, `model`
+(a tool call's too), `unknown`, or the kind of a message sessions doesn't mark injected.
+
 **Tier 2** (`Tail`, the `tails` table) holds the end of each main-session tool result,
 `tail_chars` characters long, with whether the tool failed. A subagent's results give no
 tail.
@@ -54,7 +57,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -94,7 +97,8 @@ class Policy:
 @dataclass(frozen=True)
 class Row:
     """One tier 1 row. `session_id` is the main session's id; `agent_id` the subagent's
-    own id, None on a main session's row. `kind` is the message's role or `tool`."""
+    own id, None on a main session's row. `kind` is the message's role or `tool`.
+    `writer` is who the record's harness says wrote it (sessions' `writer`)."""
 
     key: str
     harness: str
@@ -105,6 +109,7 @@ class Row:
     turn_id: str | None
     kind: str
     text: str
+    writer: str | None
 
 
 @dataclass(frozen=True)
@@ -269,6 +274,27 @@ def recut_tail(text: str, limit: int, sets: Iterable[str], *, edge_chars: int = 
     return f"[... {gone} earlier characters cut] {clean[-limit:]}" if gone else clean
 
 
+def hide_cut_edges(text: str, mark: str, *, edge_chars: int = EDGE_CHARS) -> str:
+    """A stored text with the text near each stored cut replaced by `mark`.
+
+    A text is head-cut when its whole text ends with the marker `keep_head` writes, and
+    tail-cut when it opens with the one `keep_tail` writes; a marker anywhere else is
+    plain text. From a head marker back to the first whitespace with at least
+    `edge_chars` counted characters after it, the marker included, is replaced; from a
+    tail marker forward to the first whitespace with at least that many before it, the
+    same. With no such whitespace the span runs to the text's other end. Characters
+    secrets sees through count nothing, as in `recut_head`."""
+    if match := _HEAD_CUT.fullmatch(text):
+        body = match.group(1)
+        end = _edge_head(body, edge_chars)
+        text = f"{body[:end + 1]}{mark}" if end else mark
+    if match := _TAIL_CUT.fullmatch(text):
+        body = match.group(2)
+        start = _edge_tail(body, edge_chars)
+        text = f"{mark}{body[start - 1:]}" if start < len(body) else mark
+    return text
+
+
 # -- the key ---------------------------------------------------------------------------
 
 def line_id(record: Any, source_key: str) -> str:
@@ -350,11 +376,13 @@ def _tool_name(record: Any) -> str:
 
 def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             agent_id: str | None, label: str | None, policy: Policy,
+            writer: Callable[[Any], str | None],
             secret_calls: set[str] | frozenset[str] = frozenset()) -> Converted:
     """The rows and tails one batch of records gives.
 
     `main_id` is the main session's id, which every row carries; `agent_id` is the
-    subagent's own id for a subagent's records, else None. `secret_calls` holds the call
+    subagent's own id for a subagent's records, else None. `writer` is sessions'
+    `writer`, which names each row's writer. `secret_calls` holds the call
     ids already known to be secret-path calls of this source, whose results give no
     tail. A subagent's records give tier 1 rows only."""
     from moxi_secrets import secret_path
@@ -374,7 +402,8 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             if not tier_one_message(record):
                 continue
             text = keep_head(record.text, MESSAGE_CHARS, policy.sets)
-            out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text))
+            out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text,
+                                writer=writer(record)))
         elif record.kind == "tool_call":
             name = _tool_name(record)
             path = secret_path(record.input)
@@ -389,7 +418,8 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
                 body = _input_text(record.input)
                 text = keep_head(f"{summary}\n{body}" if body else summary, TOOL_CHARS,
                                  policy.sets)
-            out.rows.append(Row(**common, agent_id=agent_id, kind=TOOL, text=text))
+            out.rows.append(Row(**common, agent_id=agent_id, kind=TOOL, text=text,
+                                writer=writer(record)))
         elif record.kind == "tool_result":
             if agent_id is not None:
                 continue
@@ -406,5 +436,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
-           "keep_head", "keep_tail", "recut_head", "recut_tail",
+           "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
            "line_id", "keys", "tier_one_message", "model_answer", "convert"]

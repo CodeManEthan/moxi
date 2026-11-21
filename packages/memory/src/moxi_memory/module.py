@@ -19,6 +19,10 @@ OPTIONAL = {
              "its own recent sessions and name the agent behind each project session.",
     "launcher": "Each session's launch kind, so scratch launches stay out of default "
                 "search and out of the start lists.",
+    "connector": "search_memory in the Claude apps, through the connector's MCP host, "
+                 "each hit redacted for a chat.",
+    "secrets": "The chat redaction's personal-data set, without which search_memory "
+               "refuses to answer.",
 }
 GATED = {}
 INTERNAL_ENV = {}

@@ -40,6 +40,7 @@ from typing import Any
 from .shape import (BAD_STRUCTURE, CLAUDE, NOT_OBJECT, UNDECODABLE, UNKNOWN, Malformed,
                     Marker, Message, Other, Record, Request, ToolCall, ToolResult,
                     tool_summary)
+from .writer import opening
 
 #: The `type` of an entry for a line that would not decode. It carries `lineno` and `raw`.
 MALFORMED = "<malformed>"
@@ -598,13 +599,23 @@ def _origin(entry: dict) -> Any:
     return _text(entry, "userType")
 
 
+def _origin_kind(entry: dict) -> str | None:
+    """The kind the line's own `origin` object names; None when it has no such object or
+    names no kind."""
+    origin = entry.get("origin")
+    if isinstance(origin, dict) and isinstance(origin.get("kind"), str):
+        return origin["kind"]
+    return None
+
+
 def _injected(entry: dict, role: str, text: str, *, synthetic: bool) -> Any:
     """Whether something other than the person at the prompt submitted a line's message.
 
     A composed flag (`COMPOSED_FLAGS`) makes it true. The model's own message is false,
     and one Claude Code made up itself (`SYNTHETIC_MODEL`) true. A user message with an
     `origin` takes its kind's value (`ORIGIN_KINDS`), unknown for a kind not listed. With
-    no origin, a fixed wrapper or interrupt line makes it true; anything else is unknown,
+    no origin, a fixed wrapper (after the opening characters, `writer.opening`) or an
+    interrupt line makes it true; anything else is unknown,
     a typed command line and a prompt sent through Claude Code's SDK among them."""
     if any(entry.get(flag) is True for flag in COMPOSED_FLAGS):
         return True
@@ -616,7 +627,7 @@ def _injected(entry: dict, role: str, text: str, *, synthetic: bool) -> Any:
         origin = entry["origin"]
         kind = origin.get("kind") if isinstance(origin, dict) else None
         return ORIGIN_KINDS.get(kind, UNKNOWN) if isinstance(kind, str) else UNKNOWN
-    if text.lstrip().startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
+    if opening(text).startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
         return True
     return UNKNOWN
 
@@ -647,6 +658,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
     flags = {key: value for key, value in entry.items()
              if isinstance(value, bool) and key != "isSidechain"}
     origin = _origin(entry)
+    origin_kind = _origin_kind(entry)
     out: list[Record] = []
     texts: list[str] = []
     kinds: list[str] = []
@@ -678,6 +690,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
                 out.append(Message(**common, role=role, reasoning=True,
                                    text=thought if isinstance(thought, str) else "",
                                    content_kinds=(btype,), flags=flags, origin=origin,
+                                   origin_kind=origin_kind,
                                    synthetic=synthetic,
                                    injected=_injected(entry, role, "", synthetic=synthetic)))
             else:
@@ -690,6 +703,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
         text = "\n".join(texts)
         out.insert(slot, Message(**common, role=role, text=text,
                                  content_kinds=tuple(kinds), flags=flags, origin=origin,
+                                 origin_kind=origin_kind,
                                  synthetic=synthetic,
                                  injected=_injected(entry, role, text, synthetic=synthetic)))
     return out

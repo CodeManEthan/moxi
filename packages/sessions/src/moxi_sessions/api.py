@@ -1,4 +1,4 @@
-"""sessions' interfaces 2 to 6, the module other Moxi modules import
+"""sessions' interfaces 2 to 7, the module other Moxi modules import
 (`moxi_sessions.api`).
 
 Interface 3 is interface 2 plus `retention()` and `Retention`; interface 4 is interface 3
@@ -7,7 +7,9 @@ plus the list's reads (`sessions_list`, `sessions_more`, `sessions_newest`,
 interface 6 is interface 5 plus the archive folders: `corpus`, `find`'s
 `include_archives`, `Found.unknown`, a listing's `is_archive`, `absent`, `empty` and
 `shadowed`, `archive_dirs`, `archive_answers` and `ArchiveAnswer`, and `Retention`'s
-`archive_dirs`. Every call of interface 5 behaves as it did.
+`archive_dirs`; interface 7 is interface 6 plus who wrote a message and what it opens
+with (`writer`, `WRITERS`, `OPENING`, `opening`, `OUTPUT_WRAPPERS`, `opens_with_output`,
+`opens_with_tag`). Every call of interface 6 behaves as it did.
 A caller loads sessions with the newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
@@ -100,6 +102,20 @@ Writing records for tests:
   block (see `moxi_sessions.testing`). A test reaches them through this module, as it
   reaches every other name sessions offers.
 
+Who wrote a message (interface 7; `moxi_sessions.writer` says each value):
+
+* `writer(record)`: who a message or tool call's harness says wrote it, from its role,
+  `injected`, `origin_kind` and flags, never its text: `person`, `model`, `peer`,
+  `coordinator`, `unknown`, `channel`, `hook`, `task`, `harness` or `summary` (`WRITERS`);
+  None for any other record.
+* `OPENING`: the characters every test of what a message opens with skips first, as one
+  string (U+0000 to U+0020, U+007F to U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029,
+  U+202F, U+205F, U+3000 and every Cf character), and `opening(text)`, the text without
+  them at its front. Claude Code's and Codex's wrapper tests skip exactly these.
+* `OUTPUT_WRAPPERS`: the tags a harness or a fleet tool puts around output in a user
+  message; `opens_with_output(text)` and `opens_with_tag(text)` (`<` and an ASCII letter),
+  each after the opening characters.
+
 Each harness's mapping, and the line reads under the records:
 
 * `claude`: `parse_line`, `iter_entries`, `stream_entries`, `parse_timestamp` and
@@ -138,6 +154,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("sessions_list", "sessions_more", "sessions_newest",
                      "session_dirs", "session_opened", "session_facts"), "lists"),
     **dict.fromkeys(("read_back",), "reader"),
+    **dict.fromkeys(("writer", "WRITERS", "OPENING", "opening", "OUTPUT_WRAPPERS",
+                     "opens_with_output", "opens_with_tag"), "writer"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),
     **dict.fromkeys(("archive_dirs", "archive_answers", "ArchiveAnswer"), "archives"),

@@ -80,7 +80,7 @@ def test_after_an_ingest_the_index_and_ingest_rows_say_what_is_there():
     rows = by_name()
     index_row = rows["index"]
     assert index_row.state == "ok"
-    assert "generation 1" in index_row.detail and "schema 1" in index_row.detail
+    assert "generation 1" in index_row.detail and "schema 2" in index_row.detail
     assert "2 messages and calls" in index_row.detail
     assert "still filling" not in index_row.detail
     assert "claude: last walk " in rows["ingest"].detail
@@ -246,7 +246,7 @@ def test_the_announcement_names_every_part():
     assert module.SETUP == "moxi_memory.setup:setup"
     assert module.TEARDOWN == "moxi_memory.setup:teardown"
     assert module.DOCTOR == "moxi_memory.doctor:rows"
-    assert set(module.OPTIONAL) == {"comms", "launcher"}
+    assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
         "switch": "ingest.timer.enabled",

@@ -6,7 +6,10 @@
   last rebuild dropped and kept. `warn` with no index yet, when a rebuild was killed
   before it finished and none has finished since, and while the redact version is below
   the installed secrets' (rows stored before may hold secrets today's `redact` catches,
-  until `moxi memory reindex` redacts them again).
+  until `moxi memory reindex` redacts them again). It says how many rows record no
+  writer (stored before rows recorded one, or a generation at schema 1 that memory's
+  next write brings up to date); the chat's `search_memory` leaves those out until
+  `moxi memory reindex` reads them again.
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
   same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
   can't read, and a request waiting for the writer lock. A request queued behind a
@@ -100,6 +103,7 @@ def _index() -> Row:
         kept = index.meta_get(conn, "kept")
         replaced = index.meta_get(conn, REPLACED_KEY)
         stored = index.stored_redact_version(conn)
+        unwritten = index.rows_without_writer(conn)
         generation = r.generation
     parts = [f"generation {generation}", f"schema {schema}", f"tokenizer {tokenizer}",
              f"redact version {stored}", f"{tiers} messages and calls",
@@ -113,6 +117,11 @@ def _index() -> Row:
                      f"secrets' redact version {now} catches; run `{REINDEX}` once to "
                      "redact them again")
         state = "warn"
+    if unwritten is None:
+        parts.append("its rows record no writer until memory next writes to the index")
+    elif unwritten:
+        parts.append(f"{_plural(unwritten, 'row')} stored before rows recorded their "
+                     f"writer, left out of the chat's search until `{REINDEX}`")
     if filling:
         parts.append("still filling: the first full read hasn't finished")
     running = index.rebuild_running()
