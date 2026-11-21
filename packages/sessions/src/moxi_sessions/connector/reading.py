@@ -28,9 +28,14 @@ Records of other kinds (markers, requests, limits) make no row.
 Every string the answer shows (message text, tool-call lines, a secret-path call's
 `Tool(path)`, the title, the folder, refusal texts) has each local path cut to its last
 segment and each loopback origin made `local` (sessions' one cut, `pathcut.cut_local`,
-with the home folder of the environment the provider started with). The cut runs inside
-the chat redaction, between its two passes, never outside it, so the last redaction sees
-the text sent; only the length cuts come after. The secret-path test reads the raw input.
+with the home folder of the environment the provider started with). The folder is its
+last segment by its own rule (`paths.cut_to_last_segment`), whatever root it lies under.
+A refusal that names a path sessions holds whole (the source's and its folder, a
+subagent's, an archive folder) cuts that path to its last segment wherever it occurs,
+before the rest is cut (`paths.cut_paths`), so a path outside the cut's roots doesn't
+leave whole either. Each cut runs inside the chat redaction, between its two passes,
+never outside it, so the last redaction sees the text sent; only the length cuts come
+after. The secret-path test reads the raw input.
 
 The answer holds at most `ANSWER_MAX_CHARS` characters of text: the oldest turns go
 first, then the turns after the one that holds `around`, so that turn (or the last turn)
@@ -41,6 +46,7 @@ either side.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -56,7 +62,7 @@ from ..view import HARNESS_LABELS, fits
 from ..writer import (CHANNEL, COORDINATOR, HARNESS, HOOK, MODEL, PEER, PERSON, SUMMARY,
                       TASK, UNKNOWN_WRITER, opening, opens_with_output, opens_with_tag,
                       writer)
-from .paths import cut_paths, last_segment
+from .paths import cut_paths
 from .redaction import OFF_TEXT, Gate, Off, Redactor
 from .tools import UNTRUSTED, cut_work_dir, local, utc
 
@@ -310,25 +316,38 @@ def _mark_nearest(rows: list[_Row], times: list[Any], at: float) -> None:
 
 class Clean:
     """One call's way out for a string: the chat redaction, with each local path cut
-    (`cut_local`) between its two passes. `secret_path` and `redactions` are the
-    redaction's own."""
+    (`cut_local`) between its two passes, or the caller's own cut there (`between`), as
+    the folder's. `secret_path` and `redactions` are the redaction's own."""
 
     def __init__(self, redact: Redactor, env: Mapping[str, str] | None = None):
         self.redact = redact
         self.env = env
         self.secret_path = redact.secret_path
 
-    def __call__(self, text: str) -> str:
-        return self.redact(text, between=lambda middle: cut_local(middle, self.env))
+    def __call__(self, text: str, *, between: Callable[[str], str] | None = None) -> str:
+        return self.redact(text, between=between or self.cut)
+
+    def cut(self, text: str) -> str:
+        """`text` with each local path cut, for the redaction's `between`."""
+        return cut_local(text, self.env)
+
+    def cut_known(self, text: str, known: tuple[str, ...]) -> str:
+        """`text` through the chat redaction, with each of `known` (paths held whole) and
+        then each local path cut between its two passes."""
+        return self.redact(text, between=lambda middle: cut_paths(middle, known, self.env))
 
     @property
     def redactions(self) -> int:
         return self.redact.redactions
 
 
-def _refused_paths(reason: str, known: tuple[Any, ...], redact: Clean) -> str:
-    paths = tuple(str(p) for p in known if p)
-    return redact.redact(reason, between=lambda middle: cut_paths(middle, paths, redact.env))
+def _held(path: Any) -> tuple[str, ...]:
+    """A path sessions holds whole, and its folder too when that has a segment, since a
+    refusal may name a place under it (a session's `subagents` folder)."""
+    if not isinstance(path, str) or not path:
+        return ()
+    parent_dir = os.path.dirname(path)
+    return (path, parent_dir) if parent_dir.strip("/") else (path,)
 
 
 @dataclass
@@ -375,26 +394,25 @@ class Reader:
         log["harness"] = harness
         source = found.source
         target: Any = source
-        known: tuple[Any, ...] = (source.path,)
+        known = _held(source.path)
         try:
             if agent is not None:
                 listing = self.subagents(source)
                 if listing.state == UNREADABLE:
                     return refused("unreadable", "The session's subagents can't be "
-                                   "listed: " + _refused_paths(listing.reason or "", known,
-                                                               redact))
+                                   "listed: " + redact.cut_known(listing.reason or "", known))
                 target = next((entry for entry in listing if entry.agent_id == agent),
                               None)
                 if target is None:
                     return refused("unknown-agent",
                                    redact(f"The session has no subagent {agent}."))
-                known += (target.source.path,)
+                known += _held(target.source.path)
             read = (self.turns_around(target, at, turns) if at is not None
                     else self.turns_last(target, turns))
             header = read.header_of()
         except Unreadable as exc:
             return refused("unreadable", "The session can't be read: "
-                           + _refused_paths(exc.reason, known, redact))
+                           + redact.cut_known(exc.reason, known))
         return self._answer(session, harness, agent, header, read, at, redact, log,
                             thoughts=thoughts)
 
@@ -407,11 +425,13 @@ class Reader:
                              "which to read.", held=list(found.held))
         where = f"No {harness} session" if harness else "No session"
         text = f"{where} {session} was found."
-        offline = [last_segment(archive_dir) or "" for archive_dir, _ in found.offline]
+        offline = tuple(archive_dir for archive_dir, _ in found.offline
+                        if isinstance(archive_dir, str) and archive_dir)
         if offline:
             text += (" The archive folder " if len(offline) == 1
-                     else " The archive folders ") + redact(", ".join(offline)) + \
-                    " didn't answer, so it may be there."
+                     else " The archive folders ") + \
+                redact.cut_known(", ".join(offline), offline) + \
+                " didn't answer, so it may be there."
         return self.result.refused("unknown-session", text)
 
     def _answer(self, session: str, harness: str, agent: str | None, header: Any,

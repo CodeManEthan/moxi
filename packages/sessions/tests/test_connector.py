@@ -118,6 +118,11 @@ def test_paths_in_a_text_are_cut_to_their_last_part():
     assert paths.cut_paths(spaced, ("/home/some one/a b.jsonl",)) == \
         "a b.jsonl cannot be read (no such file)"
     assert paths.cut_paths("(/srv/x/y) and /a/") == "(y) and /a/"
+    known = ("/data/sessions",)
+    assert paths.cut_paths("/data/sessions/a/b.jsonl and /data/sessions", known) == \
+        "b.jsonl and sessions"
+    assert paths.cut_paths("/data/[REDACTED:x]/b and /data/other/c", known) == "b and c"
+    assert paths.cut_paths("/elsewhere/d", known) == "/elsewhere/d"
     assert paths.cut_paths("a/b is relative") == "a/b is relative"
 
 
@@ -198,11 +203,28 @@ def test_a_row_carries_its_kind_times_redacted_name_and_last_path_part():
     assert fields == {"refusal": None, "rows": 2}
 
 
-def test_the_work_dir_is_cut_before_it_is_redacted():
-    newest, _ = fake_newest([{**ROW, "folder": f"/srv/{TOKEN}/x"}])
+#: A made-up base64 secret that holds `/`, so a folder can end inside it.
+SLASHED = "Qx7Lm2Vb9Rk4Tz8Wp3Nd6Hs1Fj5Gc0Ya/tmp/Ke8U/i2Ow4"
+
+
+def test_the_work_dir_is_cut_between_the_redaction_s_passes():
+    work_dirs = [f"/srv/{TOKEN}/x", f"/data/{SLASHED}", "/data/\u200bwork\u200b/app\u200b"]
+    newest, _ = fake_newest([{**ROW, "session": f"s{n}", "folder": work_dir}
+                             for n, work_dir in enumerate(work_dirs)])
     _, provider = built(newest=newest)
     result, _ = call(provider, "list_sessions", {})
-    assert result.structured["sessions"][0]["folder"] == "x"
+    token, slashed, scrubbed = (row["folder"] for row in result.structured["sessions"])
+    assert token == "x"
+    # Cut first, the folder would be the secret's last part, `i2Ow4`.
+    assert slashed == "[REDACTED:high-entropy-slash-run]"
+    assert scrubbed == "app"
+
+
+def test_a_work_dir_the_scrub_leaves_empty_is_none():
+    newest, _ = fake_newest([{**ROW, "folder": "\u200b"}])
+    _, provider = built(newest=newest)
+    result, _ = call(provider, "list_sessions", {})
+    assert result.structured["sessions"][0]["folder"] is None
 
 
 def test_an_unlisted_root_names_its_last_part_and_its_reason_without_a_path():
@@ -219,6 +241,26 @@ def test_an_unlisted_root_names_its_last_part_and_its_reason_without_a_path():
                      "reason": "the OpenCode database db cannot be read"}
     assert second["root"] == "projects" and "3 of its folders" in second["reason"]
     assert "/home/someone" not in result.text
+
+
+def test_an_unlisted_root_outside_the_cut_s_roots_shows_no_full_path():
+    roots = [{"harness": "codex", "root": "/data/sessions",
+              "reason": "/data/sessions/2026/x cannot be listed: permission denied; "
+                        "/data/sessions holds 2 more", "parts": None},
+             {"harness": "claude", "root": f"/data/{TOKEN}/projects",
+              "reason": f"/data/{TOKEN}/projects/a cannot be listed", "parts": None}]
+    newest, _ = fake_newest([], roots)
+    _, provider = built(newest=newest)
+    result, _ = call(provider, "list_sessions", {})
+    first, second = result.structured["unlisted"]
+    assert first == {"harness": "codex", "root": "sessions",
+                     "reason": "x cannot be listed: permission denied; sessions holds 2 "
+                               "more"}
+    # The first pass takes the rest of the path into the token's hit, so the known root
+    # no longer matches; its top folder, `/data/`, still cuts what's left.
+    assert second == {"harness": "claude", "root": "[REDACTED:github-pat]",
+                      "reason": "[REDACTED:github-pat] cannot be listed"}
+    assert "/data" not in result.text and TOKEN not in result.text
 
 
 @pytest.mark.parametrize("since", ["yesterday", "2026", "12x"])

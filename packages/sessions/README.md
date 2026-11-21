@@ -702,9 +702,15 @@ under a root is cut to its last segment, so `Read(/home/you/notes/x.md)` shows a
 with any scheme, port and path) shows as `local`. The roots are your home folder, `~/`,
 `$HOME/`, `/home/`, `/tmp/`, `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`, `/mnt/`,
 `/media/`, `/run/` and `/srv/`, in any case; a path runs to the first space, quote,
-backtick or one of `<>|,;(){}[]`. The cut runs inside `chat_redact`, between its two
-passes, so the last redaction sees exactly the text sent. A path outside the roots in a
-message stays whole; the `folder` is always its last part.
+backtick or one of `<>|,;(){}[]`, and takes a redaction placeholder in it whole, so
+`/home/you/[REDACTED:github-pat]/x.md` shows as `x.md`. A bare root shows its own name
+(`/home/` shows `home`, `~/` shows `~`). The cut runs inside `chat_redact`, between its
+two passes, so the last redaction sees exactly the text sent; the folder's cut and every
+other change to a text run there too. A path outside the roots in a message stays whole;
+the `folder` is always its last part. A refusal or `unlisted` reason that names a path
+sessions holds (a root, an archive folder, the session's file and its folder) cuts that
+path to its last part wherever it occurs, under any root or none, and a path under the
+same top folder (`/data/` for `/data/sessions`) too.
 
 **Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
 redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
@@ -788,7 +794,8 @@ a no-break space still marks a message injected.
 
 `cut_local(text, env=None)` makes each loopback origin in a text `local` and cuts each
 local path under a root (the home folder `env` names, `~/`, `$HOME/` and the system roots
-above) to its last segment. It changes text, so a caller that redacts runs it as
+above) to its last segment; a redaction placeholder (`[REDACTED:<rule>]`) inside a path
+counts as part of it. It changes text, so a caller that redacts runs it as
 `chat_redact`'s `between`, never before or after the redaction.
 
 ## License

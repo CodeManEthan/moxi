@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The folder's last-part cut runs inside `chat_redact` between its two passes too, so a
+  secret that holds `/` can't be split by it; a folder the first pass ends inside a
+  placeholder shows the placeholder. In the path cut, a redaction placeholder counts as
+  part of the path, so `/home/you/[REDACTED:x]/dir/name` shows `name`. A refusal, an
+  `unlisted` root or its reason, and `unknown-session`'s archive folders cut each path
+  sessions holds (the root, the archive folder, the session's file and its folder) to its
+  last part wherever it occurs, and a path under its top folder, so a path outside the
+  cut's roots (`/data/sessions`) no longer leaves whole.
 - `read_session` cuts every local path it shows to its last segment and every loopback
   origin to `local`: message text, tool-call lines (`Read(/home/you/x.md)` shows as
   `Read(x.md)`), the title, the folder and refusal texts. The cut runs inside secrets'

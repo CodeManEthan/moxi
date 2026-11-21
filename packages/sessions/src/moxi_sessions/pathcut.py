@@ -10,8 +10,11 @@ Local paths go second, cut by root wherever a root occurs, whatever precedes it,
 without regard to case. The roots are the home folder `env` names (`HOME`; the process
 environment when `env` is None), `~/`, `$HOME/` and `SYSTEM_ROOTS`. A path runs to the
 first whitespace, quote, backtick or one of `<>|,;(){}[]`, or the text's end, and is
-replaced by its last non-empty segment cut to `SEGMENT_MAX_BYTES`, or `note` when it has
-none.
+replaced by its last non-empty segment cut to `SEGMENT_MAX_BYTES`. Every root holds a
+segment of its own, so a bare root shows its own name (`/home/` shows `home`, `~/` shows
+`~`). A redaction placeholder (`[REDACTED:<rule>]`) counts as part of the path, so a
+path holding a secret in a middle segment is still cut to its last segment, and shows
+the placeholder when the placeholder is that segment.
 
 `cut_local` changes text, so a reader that redacts runs it inside secrets' `chat_redact`,
 as its `between`, never before or after it: a cut can glue a word onto a secret and take
@@ -34,8 +37,6 @@ from collections.abc import Mapping
 
 #: What a loopback origin becomes.
 LOOPBACK = "local"
-#: What a path in a text with no segment becomes.
-NO_SEGMENT = "note"
 #: What a folder with no segment becomes.
 ROOT_SEGMENT = "/"
 #: The most of a path's last segment that goes out, in UTF-8 bytes.
@@ -44,7 +45,10 @@ SEGMENT_MAX_BYTES = 255
 SYSTEM_ROOTS = ("/home/", "/tmp/", "/root/", "/etc/", "/var/", "/usr/", "/opt/", "/mnt/",
                 "/media/", "/run/", "/srv/")
 
-_RUN = r"""[^\s"'`<>|,;(){}\[\]]*"""
+#: A redaction placeholder, which a path's run takes in whole.
+_PLACEHOLDER = r"\[REDACTED:[^\[\]\s]*\]"
+#: The characters a path runs over after its root.
+RUN = r"(?:" + _PLACEHOLDER + r"""|[^\s"'`<>|,;(){}\[\]])*"""
 _LOOPBACK = re.compile(
     r"(?<![A-Za-z0-9.\-])"
     r"(?:[A-Za-z][A-Za-z0-9+.\-]*://)?"
@@ -52,7 +56,7 @@ _LOOPBACK = re.compile(
     r"|\[(?:::1|0:0:0:0:0:0:0:1)\]|::1|0:0:0:0:0:0:0:1)"
     r"(?![A-Za-z0-9\-])"
     r"(?::\d++)?"
-    r"(?:[/?#]" + _RUN + r")?",
+    r"(?:[/?#]" + RUN + r")?",
     re.IGNORECASE)
 
 
@@ -85,12 +89,12 @@ def _roots(home: str | None) -> tuple[str, ...]:
 @functools.lru_cache(maxsize=8)
 def _paths(home: str | None) -> re.Pattern:
     return re.compile("(?:" + "|".join(re.escape(root) for root in _roots(home)) + ")"
-                      + _RUN, re.IGNORECASE)
+                      + RUN, re.IGNORECASE)
 
 
 def _display(match: re.Match) -> str:
     parts = [part for part in match.group(0).split("/") if part]
-    return (_bounded(parts[-1]) if parts else "") or NO_SEGMENT
+    return _bounded(parts[-1])
 
 
 def cut_local(text: str, env: Mapping[str, str] | None = None) -> str:
@@ -101,5 +105,5 @@ def cut_local(text: str, env: Mapping[str, str] | None = None) -> str:
     return _paths(home).sub(_display, _LOOPBACK.sub(LOOPBACK, text))
 
 
-__all__ = ["LOOPBACK", "NO_SEGMENT", "ROOT_SEGMENT", "SEGMENT_MAX_BYTES", "SYSTEM_ROOTS",
+__all__ = ["LOOPBACK", "ROOT_SEGMENT", "RUN", "SEGMENT_MAX_BYTES", "SYSTEM_ROOTS",
            "cut_local", "last_segment"]

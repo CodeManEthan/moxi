@@ -66,11 +66,32 @@ def test_a_long_segment_is_cut_to_255_bytes_on_a_character_boundary():
     assert len(shown.encode()) <= 255 and name.startswith(shown)
 
 
-def test_a_bare_root_shows_its_own_name_and_a_cwd_with_no_part_is_slash():
-    assert cut("/tmp//") == "tmp"
+@pytest.mark.parametrize("text, shown", [("/home/", "home"), ("~/", "~"),
+                                         ("$HOME/", "$HOME")])
+def test_a_bare_root_shows_its_own_name(text, shown):
+    assert cut(text) == shown
+
+
+def test_a_cwd_with_no_part_is_slash_and_an_empty_one_is_none():
     assert last_segment("/") == "/"
     assert last_segment("") is None and last_segment(None) is None
     assert last_segment("/data/x/") == "x"
+
+
+def test_a_placeholder_in_a_middle_segment_is_part_of_the_path():
+    assert cut("/home/someone/[REDACTED:x]/dir/name") == "name"
+    assert cut("see /srv/[REDACTED:github-pat]/app/x.py now") == "see x.py now"
+
+
+def test_a_placeholder_as_the_last_segment_is_what_shows():
+    assert cut("/home/someone/[REDACTED:x]") == "[REDACTED:x]"
+    assert cut("(/home/someone/[REDACTED:x])") == "([REDACTED:x])"
+
+
+def test_only_a_placeholder_joins_the_run_and_other_brackets_still_end_it():
+    assert cut("/srv/app/[note]/x") == "app[note]/x"
+    assert cut("/srv/app/[REDACTED:x y]/z") == "app[REDACTED:x y]/z"
+    assert cut("/srv/app/[REDACTED:x") == "app[REDACTED:x"
 
 
 @pytest.mark.parametrize("text", [
