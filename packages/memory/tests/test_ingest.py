@@ -9,6 +9,7 @@ import time
 
 import pytest
 from moxi_dev.testing import wait_for
+from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import index, ingest, links, rows, start, state, table
@@ -848,7 +849,7 @@ def redacted_again(report, before, words):
 
     assert report.dropped == 0
     with index.open_read() as rd:
-        assert index.stored_redact_version(rd.conn) == rows.redact_version() == 2
+        assert index.stored_redact_version(rd.conn) == rows.redact_version() == REDACT_VERSION
         assert index.meta_get(rd.conn, ingest.REPLACED_KEY) == "1"
     assert before <= sources()
     stored = texts() + texts("tails")
@@ -1110,4 +1111,4 @@ def test_the_version_rebuild_runs_once_and_a_failed_one_leaves_the_old_generatio
     assert row_of("pelican") == read_once
     with index.open_read() as rd:
         assert index.meta_get(rd.conn, ingest.REPLACED_KEY) is None
-        assert index.stored_redact_version(rd.conn) == 2
+        assert index.stored_redact_version(rd.conn) == REDACT_VERSION
