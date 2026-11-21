@@ -20,6 +20,8 @@ import sys
 import textwrap
 import threading
 import time
+import tomllib
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -254,7 +256,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_one_is_the_gateways()
         "/api/limits": ("read", set(), False),
         "/api/window": ("read", {"harness", "limit_id", "minutes"}, False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
-        "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
+        "/api/sessions": ("read", {"top", "skip", "sort", "order", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
         "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
@@ -454,9 +456,12 @@ def test_a_bad_argument_is_refused_with_the_reports_words(seeded):
                                        until="2026-10-01")
     assert "1 or more" in refused("/api/sessions", top="0")
     assert "0 or more" in refused("/api/sessions", skip="-1")
-    for top in ("201", "1001"):
+    for top in ("501", "1001"):
         status, body = asyncio.run(ask(served(), "/api/sessions", {"top": top}))
         assert status == 400
+    # a page reads up to 500 sessions
+    status, _body = asyncio.run(ask(served(), "/api/sessions", {"top": "500"}))
+    assert status == 200
 
 
 def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
@@ -466,8 +471,8 @@ def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
     assert costs == sorted(costs, reverse=True) and len(costs) == 3
     first = body["rows"][0]
     assert set(first) == {"harness", "session_id", "name", "folder", "started", "known",
-                          "cwd", "project", "models", "first_ts", "last_ts", "context",
-                          *ROW_KEYS}
+                          "cwd", "project", "models", "first_ts", "last_ts", "turns",
+                          "subagent_share", "context", *ROW_KEYS}
     s1 = next(row for row in body["rows"] if row["session_id"] == "s1")
     assert (s1["cwd"], s1["harness"]) == ("/w/app", "claude")
     assert s1["models"] == ["m-a", "m-b", "mystery-9"]
@@ -510,12 +515,12 @@ def keys_of(body):
     return [(row["harness"], row["session_id"] or row["cwd"]) for row in body["rows"]]
 
 
-ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("claude", "tie-b"),
-         ("claude", "/w/loose-a"), ("claude", "/w/loose-b"), ("codex", "tie-a"),
+ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("codex", "tie-a"),
+         ("claude", "tie-b"), ("claude", "/w/loose-a"), ("claude", "/w/loose-b"),
          ("claude", "unpriced")]
 
 
-def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
+def test_sessions_come_by_cost_then_session_id_then_harness(many):
     body = get("/api/sessions", utc="true")
     assert keys_of(body) == ORDER
     assert (body["count"], body["more"], body["skip"]) == (8, 0, 0)
@@ -524,9 +529,11 @@ def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
     assert costs[0] > costs[1] > costs[2]
     # an unpriced session is last however many tokens it holds
     assert body["rows"][-1]["tokens"] > body["rows"][0]["tokens"]
+    # no request carries a turn id: each session counts 0 turns
+    assert [row["turns"] for row in body["rows"]] == [0] * 8
 
 
-def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
+def test_sessions_of_one_cost_come_by_session_id_whatever_their_tokens(monkeypatch):
     monkeypatch.setattr(models, "table", lambda *a, **k: table())
     t = at("2026-10-01T12:00")
     conn = store.open_index()
@@ -539,7 +546,7 @@ def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
         conn.close()
     body = get("/api/sessions", utc="true")
     assert [row["cost"] for row in body["rows"]] == [pytest.approx(0.0045)] * 2
-    assert [row["session_id"] for row in body["rows"]] == ["z-more", "a-few"]
+    assert [row["session_id"] for row in body["rows"]] == ["a-few", "z-more"]
 
 
 def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
@@ -558,6 +565,47 @@ def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
     # the total is the range's whichever rows are sent
     assert past["total"] == get("/api/sessions", utc="true")["total"]
     assert get("/api/sessions", folder="/w/tool", top="1", skip="1")["count"] == 3
+
+
+def test_sessions_sort_by_a_column_either_way_and_page_in_that_order(many):
+    assert keys_of(get("/api/sessions", sort="cost", order="desc", utc="true")) == ORDER
+    # least first, ties by session id then harness either way, and an unpriced row last
+    # either way
+    assert keys_of(get("/api/sessions", sort="cost", order="asc", utc="true")) == [
+        ("claude", "tie-a"), ("codex", "tie-a"), ("claude", "tie-b"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("claude", "mid"), ("claude", "dear"), ("claude", "unpriced")]
+    started = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-b"), ("claude", "tie-a"),
+               ("codex", "tie-a"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+               ("claude", "/w/loose-b")]
+    assert keys_of(get("/api/sessions", sort="started", order="asc", utc="true")) == started
+    assert keys_of(get("/api/sessions", sort="started", utc="true")) == started[::-1]
+    assert keys_of(get("/api/sessions", sort="active", utc="true"))[0] == ("claude", "dear")
+    assert keys_of(get("/api/sessions", sort="project", order="asc", utc="true")) == [
+        ("claude", "dear"), ("claude", "mid"), ("claude", "unpriced"), ("claude", "/w/loose-a"),
+        ("claude", "/w/loose-b"), ("claude", "tie-a"), ("codex", "tie-a"), ("claude", "tie-b")]
+    tokens = [row["tokens"] for row in get("/api/sessions", sort="tokens", order="asc")["rows"]]
+    assert tokens == sorted(tokens)
+    seen = []
+    for skip in (0, 3, 6):
+        body = get("/api/sessions", sort="started", order="asc", top="3", skip=str(skip), utc="true")
+        assert body["count"] == 8
+        seen += keys_of(body)
+    assert seen == started
+    for bad in ({"sort": "title"}, {"order": "up"}):
+        status, _ = asyncio.run(ask(served(), "/api/sessions", bad))
+        assert status == 400
+
+
+def test_the_place_filters_take_several_one_to_a_line(many):
+    def count(**query):
+        return get("/api/sessions", utc="true", **query)["count"]
+
+    assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1
+    assert count(folder="/w/tool\n/w/loose-a") == 4
+    assert count(project="/w/tool\n/w/loose-a\n") == 4
+    assert count(folder="\n") == count() == 8
+    body = get("/api/daily", folder="/w/tool\n/w/app", utc="true")
+    assert body["filters"] == [{"name": "folder", "value": "/w/tool, /w/app"}]
 
 
 def test_a_file_with_no_session_id_is_a_row_with_a_null_id_and_no_context(many):
@@ -949,6 +997,25 @@ def test_requests_send_one_row_per_request_with_the_marks_between_them(requests_
     assert sub["total"]["turns"] is None and sub["total"]["marks"] == []
     resumed = get("/api/requests", session="s2", harness="claude", utc="true")
     assert resumed["total"]["claimed_elsewhere"] == 3 and resumed["total"]["copied_marks"] == 1
+
+
+def test_sessions_carry_their_turns_and_subagent_share_and_sort_by_both(requests_seeded):
+    rows = {row["session_id"]: row for row in get("/api/sessions", utc="true")["rows"]}
+    assert rows["s1"].keys() == page.SESSION_ROW.keys()
+    assert (rows["s1"]["turns"], rows["s2"]["turns"]) == (2, 3)
+    agent = [row for row in get("/api/session", session="s1", harness="claude", utc="true")["rows"]
+             if row["agent"] == "a"]
+    share = sum(row["cost"] for row in agent) / rows["s1"]["cost"]
+    assert rows["s1"]["subagent_share"] == pytest.approx(share) and 0 < share < 1
+    assert rows["s2"]["subagent_share"] == 0.0
+
+    def order(**query):
+        return [row["session_id"] for row in get("/api/sessions", utc="true", **query)["rows"]]
+
+    assert order(sort="turns") == ["s2", "s1"]
+    assert order(sort="turns", order="asc") == ["s1", "s2"]
+    assert order(sort="subagent_share") == ["s1", "s2"]
+    assert order(sort="subagent_share", order="asc") == ["s2", "s1"]
 
 
 def test_requests_need_a_session_and_answer_empty_for_an_unknown_one(requests_seeded):
@@ -1729,8 +1796,15 @@ def test_the_page_asks_for_sessions_names_through_interface_5():
     found = modules.load("sessions", interface=5)
     assert found.ok, found.reason
     assert callable(found.api.session_facts)
-    declared = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"moxi-sessions>=0.2.8,<0.3"' in declared
+    # usage never admits a sessions older than 0.2.8, the first with interface 5, and
+    # admits the one installed.
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    [needed] = [line for line in project["dependencies"] if line.startswith("moxi-sessions")]
+    floor = re.fullmatch(r"moxi-sessions>=(\d+)\.(\d+)\.(\d+),<0\.3", needed)
+    assert floor is not None, needed
+    least = tuple(int(part) for part in floor.groups())
+    assert least >= (0, 2, 8)
+    assert tuple(int(part) for part in metadata.version("moxi-sessions").split(".")[:3]) >= least
 
 
 def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names):

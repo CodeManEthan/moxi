@@ -65,7 +65,7 @@ import json
 import statistics
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -385,10 +385,11 @@ class MeasureError(Exception):
     """The measure could not run; nothing was written."""
 
 
-def run(*, now: float | None = None, fresh: bool = True,
+def run(*, now: float | None = None, fresh: bool = True, days: int | None = None,
         env: Mapping[str, str] | None = None) -> Run:
     """Run the index's pass (unless `fresh` is false), measure over the index and write
-    `STATE/usage/restart-point.json`. When another pass holds the index past the wait,
+    `STATE/usage/restart-point.json`. `days`, when given, is this measure's window in
+    place of `restart_point.days`. When another pass holds the index past the wait,
     the measure reads the index as it is and says so in `Run.note`. Raises
     `moxi.config.ConfigError` for a config it cannot read, `moxi.store.StoreTooNew` for an
     index newer than this code, and `MeasureError`, writing nothing, when there is no
@@ -401,6 +402,8 @@ def run(*, now: float | None = None, fresh: bool = True,
     from . import reports, settings, store
 
     rules = Rules.from_settings(settings.current(env))
+    if days is not None:
+        rules = replace(rules, days=days)
     when = time.time() if now is None else now
     note = None
     if fresh:

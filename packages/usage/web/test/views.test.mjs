@@ -168,10 +168,21 @@ test("a model of two groups gets a subtotal equal to their sum, and one of one g
     ["group", "m-a"], ["group", "m-a"], ["subtotal", "m-a total"], ["group", "m-b"], ["total", "Total"]]);
   const [a, b, subtotal, , total] = lines;
   assert.ok(Math.abs(subtotal.cost - (a.cost + b.cost)) < 1e-9);
-  assert.equal(subtotal.cells[0].title, "fresh input: 3,000 tokens over 2 groups = $0.01");
+  assert.equal(subtotal.cells[0].title, "input: 3,000 tokens over 2 groups = $0.01");
   assert.ok(b.pricedBy.includes("the fast price"));
   const groupsOnly = lines.filter((line) => line.kind === "group").reduce((sum_, line) => sum_ + line.cost, 0);
   assert.ok(Math.abs(total.cost - groupsOnly) < 1e-9);
+});
+
+test("a bill line's rule is how it was priced, not why it is not whole", () => {
+  const ruled = group("m-a", five(1000, 0, 0, 0, 100), { rule: "long-context" });
+  const unpriced = group("m-x", five(10, 0, 0, 0, 1, [null, null, null, null, null]),
+                         { cost: null, why: "no price for m-x" });
+  const rows = [termsRow("m-a", [ruled]), termsRow("m-x", [unpriced])];
+  const [a, x] = reconcileLines(report(rows, { total: sums({ cost: ruled.cost }) }));
+  assert.match(a.pricedBy, /; long-context$/);
+  assert.deepEqual(a.flags, []);
+  assert.deepEqual(x.flags, ["not priced: no price for m-x"]);
 });
 
 test("a bill by agent names each line by its agent and model, and a subtotal by its agent", () => {
@@ -228,7 +239,7 @@ const total = (extra = {}) => ({ ...sums(), marks: [], turns: 1, claimed_elsewhe
 
 test("a request's readout and the notes under its chart", () => {
   const line = readout(req(5, { turn: 2, unknown: ["output"] }));
-  assert.match(line, /^#5 · .* · turn 2 · m-a · context 5.00k · 2.5% of 200,000 · fresh input 100, .*output \? · \$0\.01$/);
+  assert.match(line, /^#5 · .* · turn 2 · m-a · context 5.00k · 2.5% of 200,000 · input 100, .*output \? · \$0\.01$/);
   assert.deepEqual(requestNotes([req(1)], total({ turns: null, claimed_elsewhere: 2, copied_marks: 1, marks_known: false })), [
     "2 requests of this agent are counted under another file",
     "1 compaction copied from another file isn't drawn",

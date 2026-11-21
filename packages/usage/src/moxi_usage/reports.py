@@ -47,7 +47,9 @@ exclusive); None leaves that end open.
 row the `projects` report shows under a `cwd` can be asked for by that `cwd`. `work_dir` is
 a folder's whole path and matches the files whose `cwd` it is, whatever key they carry:
 the pass stores a key only while projects is installed, and a file read before it was
-removed keeps its key, so a caller that groups by folder asks by `work_dir`.
+removed keeps its key, so a caller that groups by folder asks by `work_dir`. Each of
+`project` and `work_dir` is one key or a sequence of them, and keeps the files any of
+them matches; an empty sequence sets no filter.
 
 **Rows.** Every row carries `requests`, the token sums by class (`input`, the whole prompt;
 `fresh_input`; `cache_read`; `cache_write`, with `cache_write_1h` the 1-hour part of it;
@@ -65,7 +67,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +91,8 @@ MODEL_SQL = "COALESCE(r.model, r.response_model)"
 #: own; a file with no session id is a session of its own. The `sessions` report groups
 #: by it and the `session` report filters on it, so the two count the same files.
 _SESSION_SQL = "COALESCE(f.parent_session, f.session_id, 'file:' || f.id)"
+#: Whether a file is a session's main file, not a subagent's, a workflow's or a child's.
+_MAIN_FILE_SQL = "(f.kind = 'main' AND f.parent_session IS NULL)"
 #: Requests whose `unknown` names input, cache read or output; or a cache-write column.
 _CORE_UNKNOWN = ("input", "cache_read", "output")
 _WRITE_UNKNOWN = ("cache_write", "cache_write_1h")
@@ -284,17 +288,22 @@ def offset_sql(zone: Zone, lo: float | None, hi: float | None) -> str:
 
 # --- the grouped query ----------------------------------------------------------------
 
+#: A `project` or `work_dir` filter as a caller gives it: one key, several, or None.
+Keys = str | Sequence[str] | None
+
+
 @dataclass(frozen=True)
 class _Query:
     since: float | None
     until: float | None
     zone: Zone
     harness: str | None
-    project: str | None
+    #: The project keys and folders the rows match any of; empty sets no filter.
+    project: tuple[str, ...]
     model: str | None
     session: str | None = None
     agent: str | None = None
-    work_dir: str | None = None
+    work_dir: tuple[str, ...] = ()
 
     def where(self, *, claimed: bool = True) -> tuple[str, list[Any]]:
         """The `WHERE` text over `r` and `f` and its arguments: the claimed requests (every
@@ -314,12 +323,10 @@ class _Query:
         if self.harness is not None:
             clauses.append("f.harness = ?")
             args.append(self.harness)
-        if self.project is not None:
-            clauses.append("(f.project = ? OR (f.project IS NULL AND f.cwd = ?))")
-            args.extend([self.project, self.project])
-        if self.work_dir is not None:
-            clauses.append("f.cwd = ?")
-            args.append(self.work_dir)
+        self.project_clause(clauses, args)
+        if self.work_dir:
+            clauses.append(f"f.cwd IN ({','.join('?' * len(self.work_dir))})")
+            args.extend(self.work_dir)
         if self.model is not None:
             clauses.append(f"{MODEL_SQL} = ?")
             args.append(self.model)
@@ -332,11 +339,22 @@ class _Query:
                 args.append(self.agent)
         return " AND ".join(clauses) or "1", args
 
+    def project_clause(self, clauses: list[str], args: list[Any]) -> None:
+        """Adds the `project` filter's clause over `f` to `clauses`, and its arguments,
+        when it is set."""
+        if self.project:
+            marks = ",".join("?" * len(self.project))
+            clauses.append(f"(f.project IN ({marks}) OR (f.project IS NULL AND f.cwd IN ({marks})))")
+            args.extend([*self.project, *self.project])
+
     def filters(self) -> dict[str, Any]:
-        """The filters set, by the report's own keys: `work_dir` goes out as `folder`."""
+        """The filters set, by the report's own keys: `work_dir` goes out as `folder`,
+        and several project keys or folders as one text, joined by `, `."""
         return {key: value
-                for key, value in (("harness", self.harness), ("project", self.project),
-                                   ("folder", self.work_dir), ("model", self.model),
+                for key, value in (("harness", self.harness),
+                                   ("project", ", ".join(self.project) or None),
+                                   ("folder", ", ".join(self.work_dir) or None),
+                                   ("model", self.model),
                                    ("session", self.session), ("agent", self.agent))
                 if value is not None}
 
@@ -587,9 +605,9 @@ def _report(kind: str, query: _Query, rows: list[dict[str, Any]], total: _Row) -
                   unpriced_models=sorted(total.unpriced), rules=sorted(total.rules))
 
 
-def _query(since: Any, until: Any, harness: str | None, project: str | None,
+def _query(since: Any, until: Any, harness: str | None, project: Keys,
            model: str | None, tz: Any, session: str | None = None,
-           agent: str | None = None, *, work_dir: str | None = None) -> _Query:
+           agent: str | None = None, *, work_dir: Keys = None) -> _Query:
     zone = Zone(tz)
     work_dir = _work_dir(work_dir)
     if harness is not None and harness not in HARNESSES:
@@ -597,17 +615,30 @@ def _query(since: Any, until: Any, harness: str | None, project: str | None,
     start, end = bound(since, zone, end=False), bound(until, zone, end=True)
     if start is not None and end is not None and end <= start:
         raise ReportError("--until is before --since")
-    return _Query(start, end, zone, harness, project or None, model or None, session,
+    return _Query(start, end, zone, harness, _keys(project), model or None, session,
                   agent, work_dir)
 
 
-def _work_dir(work_dir: str | None) -> str | None:
-    """The `work_dir` filter as files hold a `cwd`: a whole path, with no slash after it."""
-    if not work_dir:
-        return None
-    if not isinstance(work_dir, str) or not os.path.isabs(work_dir):
-        raise ReportError(f"{work_dir!r} is not a folder's whole path")
-    return work_dir.rstrip("/") or "/"
+def _keys(given: Keys) -> tuple[str, ...]:
+    """A `project` filter as a tuple of keys, each once, in the order given; an empty
+    key sets nothing."""
+    if given is None:
+        return ()
+    if isinstance(given, str):
+        given = (given,)
+    if not all(isinstance(key, str) for key in given):
+        raise ReportError(f"{given!r} is not a project key or a sequence of them")
+    return tuple(dict.fromkeys(key for key in given if key))
+
+
+def _work_dir(work_dir: Keys) -> tuple[str, ...]:
+    """The `work_dir` filter as files hold a `cwd`: whole paths, with no slash after
+    them."""
+    paths = _keys(work_dir)
+    for path in paths:
+        if not os.path.isabs(path):
+            raise ReportError(f"{path!r} is not a folder's whole path")
+    return tuple(dict.fromkeys(path.rstrip("/") or "/" for path in paths))
 
 
 def _table(table: Table | None) -> Table:
@@ -621,8 +652,8 @@ def _table(table: Table | None) -> Table:
 # --- the reports ----------------------------------------------------------------------
 
 def _by_time(kind: str, fmt: str, conn: sqlite3.Connection, *, since: Any, until: Any,
-             harness: str | None, project: str | None, model: str | None, tz: Any,
-             table: Table | None, work_dir: str | None) -> Report:
+             harness: str | None, project: Keys, model: str | None, tz: Any,
+             table: Table | None, work_dir: Keys) -> Report:
     query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
     current = _table(table)
     span = _span(conn, query)
@@ -637,35 +668,43 @@ def _by_time(kind: str, fmt: str, conn: sqlite3.Connection, *, since: Any, until
 
 
 def daily(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-          harness: str | None = None, project: str | None = None, model: str | None = None,
-          tz: Any = None, table: Table | None = None, work_dir: str | None = None) -> Report:
+          harness: str | None = None, project: Keys = None, model: str | None = None,
+          tz: Any = None, table: Table | None = None, work_dir: Keys = None) -> Report:
     """Tokens and cost by day and model, oldest day first."""
     return _by_time("daily", "%Y-%m-%d", conn, since=since, until=until, harness=harness,
                     project=project, model=model, tz=tz, table=table, work_dir=work_dir)
 
 
 def monthly(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-            harness: str | None = None, project: str | None = None, model: str | None = None,
+            harness: str | None = None, project: Keys = None, model: str | None = None,
             tz: Any = None, table: Table | None = None,
-            work_dir: str | None = None) -> Report:
+            work_dir: Keys = None) -> Report:
     """Tokens and cost by month (`YYYY-MM`) and model, oldest month first."""
     return _by_time("monthly", "%Y-%m", conn, since=since, until=until, harness=harness,
                     project=project, model=model, tz=tz, table=table, work_dir=work_dir)
 
 
 def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-             harness: str | None = None, project: str | None = None,
+             harness: str | None = None, project: Keys = None,
              model: str | None = None, tz: Any = None, table: Table | None = None,
-             work_dir: str | None = None) -> Report:
+             work_dir: Keys = None) -> Report:
     """Tokens and cost by session, a main session and its subagents together, with the
     session's title, `cwd` and project from its main file, its models and its first and
-    last request in range; the earliest session first."""
+    last request in range; the earliest session first.
+
+    `subagent_cost` is the part of `cost` its subagent, workflow and child-session files
+    ran up in range: 0 with none, `UNKNOWN` when none of theirs could be priced. `turns`
+    is how many turns the session's main file holds (`_session_turns`: a Claude
+    transcript's prompts, a prompt that drew no request included; another harness's turn
+    ids), over the whole file whatever the range, as its title is; None with none."""
     query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
-    groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL},
-                     _table(table))
-    rows, total = _fold(groups, lambda k, e: (k["harness"], k["session"]),
-                        lambda k, e: {"harness": k["harness"], "session_id": k["session"]})
+    groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL,
+                                   "main": _MAIN_FILE_SQL}, _table(table))
+    rows, total = _fold(groups, _session_key, _session_values)
+    subs, _ = _fold([group for group in groups if not group[0]["main"]], _session_key,
+                    _session_values)
     facts = _session_facts(conn, list(rows))
+    turns = _session_turns(conn, list(rows))
     out = []
     for k, row in rows.items():
         done = row.done(times=True, models=True)
@@ -674,9 +713,19 @@ def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
             done["session_id"] = None
         for name in ("title", "cwd", "project"):
             done[name] = found.get(name)
+        done["subagent_cost"] = subs[k].done()["cost"] if k in subs else 0.0
+        done["turns"] = turns.get(k)
         out.append(done)
     out.sort(key=lambda r: (r["first_ts"] is None, r["first_ts"] or 0.0, r["harness"]))
     return _report("sessions", query, out, total)
+
+
+def _session_key(found: Mapping[str, Any], extra: Mapping[str, Any]) -> tuple:
+    return (found["harness"], found["session"])
+
+
+def _session_values(found: Mapping[str, Any], extra: Mapping[str, Any]) -> dict[str, Any]:
+    return {"harness": found["harness"], "session_id": found["session"]}
 
 
 def _session_facts(conn: sqlite3.Connection,
@@ -705,6 +754,42 @@ def _session_facts(conn: sqlite3.Connection,
         for name in ("title", "cwd", "project"):
             if slot.get(name) is None and row[name] is not None:
                 slot[name] = row[name]
+    return found
+
+
+def _session_turns(conn: sqlite3.Connection,
+                   keys: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """How many turns each session's main file holds: for a Claude transcript the
+    distinct prompt ids it wrote, a prompt that drew no request included; for a Codex
+    rollout, an OpenCode session, and a Claude transcript not read since the index kept
+    prompts (`prompts_read` 0), the distinct turn ids its requests carry. A session with
+    none is left out."""
+    ids = sorted({sid for _, sid in keys if not sid.startswith("file:")})
+    file_ids = sorted({int(sid[5:]) for _, sid in keys if sid.startswith("file:")})
+    found: dict[tuple[str, str], int] = {}
+    main = "f.kind = 'main' AND f.parent_session IS NULL"
+    prompted = "f.harness = 'claude' AND f.prompts_read = 1"
+    turns = (f"SELECT f.id, p.turn_id FROM files f JOIN prompts p ON p.file_id = f.id"
+             f" WHERE {{where}} AND {main} AND {prompted}"
+             f" UNION ALL SELECT f.id, r.turn_id FROM files f"
+             f" JOIN requests r ON r.file_id = f.id WHERE {{where}} AND {main}"
+             f" AND NOT ({prompted}) AND r.turn_id IS NOT NULL")
+    for n in range(0, len(ids), _CHUNK):
+        chunk = ids[n:n + _CHUNK]
+        where = f"f.session_id IN ({','.join('?' * len(chunk))})"
+        for row in conn.execute(
+                "SELECT f.harness, f.session_id AS session, COUNT(DISTINCT t.turn_id) AS n"
+                f" FROM ({turns.format(where=where)}) t JOIN files f ON f.id = t.id"
+                " GROUP BY f.harness, f.session_id", [*chunk, *chunk]):
+            found[(row["harness"], row["session"])] = row["n"]
+    for n in range(0, len(file_ids), _CHUNK):
+        chunk = file_ids[n:n + _CHUNK]
+        where = f"f.id IN ({','.join('?' * len(chunk))})"
+        for row in conn.execute(
+                "SELECT f.harness, 'file:' || f.id AS session, COUNT(DISTINCT t.turn_id) AS n"
+                f" FROM ({turns.format(where=where)}) t JOIN files f ON f.id = t.id"
+                " GROUP BY f.id", [*chunk, *chunk]):
+            found[(row["harness"], row["session"])] = row["n"]
     return found
 
 
@@ -867,9 +952,9 @@ _AGENT_SQL = ("CASE WHEN f.kind = 'main' AND f.parent_session IS NULL THEN 'main
 
 
 def session(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-            harness: str | None = None, project: str | None = None,
+            harness: str | None = None, project: Keys = None,
             model: str | None = None, tz: Any = None, table: Table | None = None,
-            work_dir: str | None = None, session: str | None = None) -> Report:
+            work_dir: Keys = None, session: str | None = None) -> Report:
     """One session by agent and model: the main file's requests as agent `main`, each
     subagent or workflow file's under its agent id, with the file's `kind` and title (for
     an agent of several titled files, the title of the one whose request in range comes
@@ -913,9 +998,9 @@ def session(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
 
 
 def models_report(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-                  harness: str | None = None, project: str | None = None,
+                  harness: str | None = None, project: Keys = None,
                   model: str | None = None, tz: Any = None,
-                  table: Table | None = None, work_dir: str | None = None) -> Report:
+                  table: Table | None = None, work_dir: Keys = None) -> Report:
     """Tokens and cost by model, with where each price came from (`provenance`, one
     entry per distinct answer of the model table); the most tokens first."""
     query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
@@ -928,9 +1013,9 @@ def models_report(conn: sqlite3.Connection, *, since: Any = None, until: Any = N
 
 
 def projects(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-             harness: str | None = None, project: str | None = None,
+             harness: str | None = None, project: Keys = None,
              model: str | None = None, tz: Any = None, table: Table | None = None,
-             work_dir: str | None = None, by: str | None = "project") -> Report:
+             work_dir: Keys = None, by: str | None = "project") -> Report:
     """Tokens and cost by the project key the pass stored, and by `cwd` for files with
     none: a row has `project` set, or `project` None and its `cwd`. With `by="folder"`
     (`PROJECTS_BY`) it is by `cwd` alone, whatever key a file carries: every row has
@@ -1085,8 +1170,8 @@ def _terms_total() -> _TermsRow:
 
 
 def terms(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-          harness: str | None = None, project: str | None = None, model: str | None = None,
-          tz: Any = None, table: Table | None = None, work_dir: str | None = None,
+          harness: str | None = None, project: Keys = None, model: str | None = None,
+          tz: Any = None, table: Table | None = None, work_dir: Keys = None,
           by: str | None = "model", session: str | None = None) -> Report:
     """Every term of a cost: one row per key `by` names (`TERMS_BY`), a model, a day, a
     month, or an agent of the one session `session` names (it needs `session`; `session`
@@ -1162,9 +1247,9 @@ class _RequestsTotal(_Row):
 
 
 def requests(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-             harness: str | None = None, project: str | None = None,
+             harness: str | None = None, project: Keys = None,
              model: str | None = None, tz: Any = None, table: Table | None = None,
-             work_dir: str | None = None, session: str | None = None,
+             work_dir: Keys = None, session: str | None = None,
              agent: str | None = "main") -> Report:
     """One row per request of one session's agent: `agent` is `main` (the default) or an
     agent id the `session` report gives, and its files are that report's files for that
@@ -1284,9 +1369,7 @@ def _agent_files(conn: sqlite3.Connection, query: _Query) -> dict[int, Any]:
     if query.harness is not None:
         clauses.append("f.harness = ?")
         args.append(query.harness)
-    if query.project is not None:
-        clauses.append("(f.project = ? OR (f.project IS NULL AND f.cwd = ?))")
-        args.extend([query.project, query.project])
+    query.project_clause(clauses, args)
     return {row["id"]: row for row in conn.execute(
         f"SELECT f.id, f.first_ts, f.marks_read FROM files f WHERE {' AND '.join(clauses)}",
         args)}
@@ -1366,9 +1449,9 @@ _STATUS_SUMS = ("files", "excluded", "held", "requests", "duplicates")
 
 
 def status(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
-           harness: str | None = None, project: str | None = None,
+           harness: str | None = None, project: Keys = None,
            model: str | None = None, tz: Any = None, table: Table | None = None,
-           work_dir: str | None = None) -> Report:
+           work_dir: Keys = None) -> Report:
     """The index itself: one row per lane, the lanes in the order a pass runs them.
 
     A row holds what the last pass learnt of the lane (`state`, `reason`, `listed`,
@@ -1443,8 +1526,8 @@ def status(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
                   filters={} if harness is None else {"harness": harness})
 
 
-def _status_args(since: Any, until: Any, harness: str | None, project: str | None,
-                 model: str | None, work_dir: str | None = None) -> None:
+def _status_args(since: Any, until: Any, harness: str | None, project: Keys,
+                 model: str | None, work_dir: Keys = None) -> None:
     given = [name for name, value in (("since", since), ("until", until),
                                       ("project", project), ("folder", work_dir),
                                       ("model", model))
@@ -1520,10 +1603,10 @@ def run_pass(*, env: Mapping[str, str] | None = None) -> None:
 
 
 def report(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
-           project: str | None = None, model: str | None = None, tz: Any = None,
+           project: Keys = None, model: str | None = None, tz: Any = None,
            fresh: bool = True, env: Mapping[str, str] | None = None,
            table: Table | None = None, session: str | None = None, by: str | None = None,
-           agent: str | None = None, work_dir: str | None = None) -> Report:
+           agent: str | None = None, work_dir: Keys = None) -> Report:
     """One report by `kind` (`KINDS`). With `fresh`, the pass runs first, and when
     another pass holds the index past the wait the report reads the index as it is and
     says so in `Report.index["note"]`. With no index yet, the report is empty and says so.
@@ -1555,11 +1638,11 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
 
 
 def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
-         project: str | None = None, model: str | None = None, tz: Any = None,
+         project: Keys = None, model: str | None = None, tz: Any = None,
          passed: bool = False, note: str | None = None,
          env: Mapping[str, str] | None = None, table: Table | None = None,
          session: str | None = None, by: str | None = None,
-         agent: str | None = None, work_dir: str | None = None) -> Report:
+         agent: str | None = None, work_dir: Keys = None) -> Report:
     """One report by `kind` from the index as it is, running no pass: what `report`
     does after its pass. `passed` and `note` go into `Report.index` as given, for a
     caller that ran the pass itself (`moxi usage index`)."""
@@ -1600,9 +1683,9 @@ def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None
                                   "note": note})
 
 
-def _empty(kind: str, since: Any, until: Any, harness: str | None, project: str | None,
+def _empty(kind: str, since: Any, until: Any, harness: str | None, project: Keys,
            model: str | None, tz: Any, *, version: int = 0, session: str | None = None,
-           agent: str | None = None, work_dir: str | None = None) -> Report:
+           agent: str | None = None, work_dir: Keys = None) -> Report:
     if kind == "status":
         _status_args(since, until, harness, project, model, work_dir)
         return Report(kind="status", rows=[],

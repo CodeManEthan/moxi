@@ -145,8 +145,13 @@ def lines_of(panel):
 
 
 def session_row(panel, session: str):
-    """A row of the Sessions section, by the harness and session it opens."""
-    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
+    """The Sessions table's row of a session, by the harness and session it opens."""
+    return panel.locator(f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{session}"]')
+
+
+def placed_row(panel, session: str):
+    """The row of the session opened in the Sessions section, first in it."""
+    return panel.locator(f'section[data-group=sessions] [data-list=placed] moxi-ui-row[data-key="claude/{session}"]')
 
 
 def price_table(panel):
@@ -170,7 +175,7 @@ def test_the_page_alone_has_nothing_opened(seeded, page):
 
 #: Each section's address, the address the page keeps for it, and what it shows.
 SECTIONS = {
-    "sessions": ("sessions", f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]'),
+    "sessions": ("sessions", f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{FIRST}"]'),
     f"sessions/claude/{FIRST}": (f"sessions/claude/{FIRST}", "[data-part=session] [data-line=subagents]"),
     f"sessions/claude/{FIRST}/{AGENT}": (f"sessions/claude/{FIRST}/{AGENT}",
                                          "[data-part=agent] svg[data-part=session-chart] rect.bar"),
@@ -306,7 +311,7 @@ def test_a_reload_lands_on_the_piece_that_was_open(seeded, page):
 def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     panel = open_page(page, "sessions")
     entries = page.evaluate("history.length")
-    session_row(panel, FIRST).get_by_role("link", name="Open").click()
+    session_row(panel, FIRST).get_by_role("link").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
     panel.locator("[data-line=subagents]").get_by_role("button", name="Show").click()
     row = panel.locator(f'[data-part=agents] moxi-ui-row[data-agent="{AGENT}"]')
@@ -316,7 +321,7 @@ def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     # The agent's act closes it back to the session, and the session's to the section.
     row.get_by_role("link", name="Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
-    session_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
+    placed_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     assert page.evaluate("history.length") == entries
 
@@ -371,7 +376,7 @@ def test_the_range_and_filters_are_kept_across_a_new_placement_and_stay_out_of_t
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     panel = panel_of(page)
     expect_filters_set(panel)
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(1)
     # Another address of the page keeps them too.
     page.evaluate("async () => (await import('/m/ui/client.js')).navigate('usage', 'models')")
     panel = panel_of(page)
@@ -385,7 +390,7 @@ def test_a_new_document_opens_on_the_last_thirty_days_with_no_filter(seeded, pag
     set_filters(panel)
     page.reload()
     panel = panel_of(page)
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(2)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(2)
     expect(range_button(panel)).to_have_text("last 30 days▾")
     expect(panel.locator("[data-part=filters] [data-filter=model] button.pick")).to_have_text("all▾")
     expect(panel.locator("[data-part=measure]").get_by_role("button", name="Cost")).to_have_attribute(
