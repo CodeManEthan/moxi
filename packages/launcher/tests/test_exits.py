@@ -227,6 +227,15 @@ def test_copy_mode_or_a_client_at_the_dialog_still_holds(conn, then):
     assert ("answer", 0) not in slots_api.calls
 
 
+def test_output_before_the_exit_is_not_a_person_at_the_dialog(conn):
+    # The job's wall reads 1e9 throughout: the status line drew 5 s before the exit.
+    pane = SimpleNamespace(pane_id="%9", pane_in_mode=False, client_activity=None,
+                           pane_activity=1e9 - 5)
+    slots_api = FakeSlots(pane=pane)
+    result = go(conn, slots_api=slots_api)
+    assert result.data["outcome"] == "exited" and ("answer", 0) in slots_api.calls
+
+
 @pytest.mark.parametrize("answer", ["ended-without-screen"])
 def test_an_answer_that_ended_the_pane_is_an_exit(conn, answer):
     assert go(conn, slots_api=FakeSlots(answer=answer)).data["outcome"] == "exited"

@@ -141,7 +141,7 @@ line = "composer is a prompt typed at this terminal, bridge one sent from the Cl
 [question_mode.prose_words]
 type = "list"
 items = "str"
-default = ["prose"]
+default = ["prose", "pros"]
 doc = "Words that ask for prose: a prompt holding one gets no question-mode reminder."
 read = "use"
 label = "Words that ask for prose"
