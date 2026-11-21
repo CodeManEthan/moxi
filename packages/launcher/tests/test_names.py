@@ -90,7 +90,7 @@ def test_a_scope_is_rendered_only_beside_an_identity():
 
 
 def test_the_shipped_template_is_date_time_project_agent():
-    # The order and pieces Core's launcher named a session by when nothing was set.
+    # The order and pieces a session is named by when nothing is set.
     assert names.DEFAULT == "<date>-<time>-<project>-<agent>"
     assert names.render(names.DEFAULT, Pieces(project="proj-a", agent="planner", model="opus"),
                         now=at(8, 9, 5)) == "20261108-0905-proj-a-planner"

@@ -510,7 +510,7 @@ def test_a_seat_is_pointed_to_its_newest_waiting_handoff_once(conn, endpoint):
 
 
 def test_with_notes_and_no_notes_dir_a_seat_is_pointed_to_nothing(conn, endpoint, monkeypatch):
-    # Core read a handoff only from the launch's notes directory; a handoff in the
+    # A handoff is read only from the launch's notes directory; a handoff in the
     # launcher's own folder is not offered while notes is installed.
     launch_claude(conn)
     handoff("lead")

@@ -506,8 +506,8 @@ def test_the_newest_id_after_a_clear_is_the_one_exited(conn):
 
 
 # -- background shells ------------------------------------------------------------------------
-# Core's exit-session held while a background shell or Monitor ran, unless the session had
-# been idle an hour; only then did it answer the exit dialog with "Exit and stop tasks".
+# Exit-session holds while a background shell or Monitor runs, unless the session has
+# been idle an hour; only then does it answer the exit dialog with "Exit and stop tasks".
 
 
 def idle(age_s):

@@ -414,8 +414,8 @@ def test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir(conn, tmp_p
 
 def test_with_notes_installed_a_launch_with_no_notes_dir_is_refused(conn, tmp_path,
                                                                     monkeypatch):
-    # Core's launcher refused a self relaunch with no notes directory for the launch, and
-    # read no handoff from anywhere else.
+    # A self relaunch with no notes directory for the launch is refused, and no handoff is
+    # read from anywhere else.
     available, load = relaunch.modules.available, relaunch.modules.load
     homeless = SimpleNamespace(state=relaunch.modules.PRESENT, ok=True, reason="",
                                api=SimpleNamespace(handoffs_dir=lambda path, *, create=False,

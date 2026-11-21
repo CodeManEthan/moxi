@@ -879,7 +879,7 @@ def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
 
 
 def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path):
-    # Core's scratch launch had no notes home, and refused a notes_dir by name.
+    # A scratch launch has no notes home, and refuses a notes_dir by name.
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF, "notes_dir": str(tmp_path / "notes")},
                         cwd=str(tmp_path), request_id="r9")
@@ -896,7 +896,7 @@ def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path
 
 def test_a_go_launch_with_no_brief_is_refused_before_anything_is_written(harness,
                                                                           tmp_path):
-    # Core refused a go launch with no brief on preview and launch, before any row.
+    # A go launch with no brief is refused on preview and launch, before any row.
     req = LaunchRequest(typed={"harness": "codex", "posture": "go", "target": "headless"},
                         cwd=str(tmp_path), request_id="r9")
     with pytest.raises(presets.PostureBrief) as caught:
@@ -917,7 +917,7 @@ def test_a_notes_dir_from_the_defaults_is_left_out_of_a_scratch_launch(harness, 
 
 
 def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, monkeypatch):
-    # Core put the scratch folder to the notes resolver and refused one that got a home.
+    # The scratch folder is put to the notes resolver, and one that gets a home is refused.
     from moxi import modules
 
     homes = []

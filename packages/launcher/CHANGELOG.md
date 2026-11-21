@@ -2,30 +2,28 @@
 
 ## Unreleased
 
-- Home fills the comms identity as Core's desk did: the name the newest launch of the
-  seat, project or folder of the harness the form is drawn for bound (a project's
-  include those made through its seats), even one comms now reports retired,
-  whatever harness the last launch ran, always at the global scope, so a project scope
-  is no longer carried. Where there is no such name, and for any harness but Codex, it
-  fills a default: a seat named for one of its project's agents that sets no identity
-  gets its own name, else a project of kind `agent` its own key, else the project's
-  `lead`, else `<key>-lead` when comms lists that name. `/api/last` answers the identity
-  apart from the values, once for each harness, in `identities`. A filled identity comms
-  refuses a launch under shows comms' refusal beside it, as Core's desk showed why a
-  default couldn't launch; each identity in `/api/last` carries it as `refused`. One
-  whose name a live session holds in a project scope shows a note naming that binding
-  (`note`). A
-  harness picked by hand fills the comms identity for that harness, unless the identity
-  was set by hand.
+- Home fills the comms identity with the name the newest launch of the seat, project or
+  folder of the harness the form is drawn for bound (a project's include those made
+  through its seats), even one comms now reports retired, whatever harness the last launch
+  ran, always at the global scope, so a project scope is no longer carried. Where there is
+  no such name, and for any harness but Codex, it fills a default: a seat named for one of
+  its project's agents that sets no identity gets its own name, else a project of kind
+  `agent` its own key, else the project's `lead`, else `<key>-lead` when comms lists that
+  name. `/api/last` answers the identity apart from the values, once for each harness, in
+  `identities`. A filled identity comms refuses a launch under shows comms' refusal beside
+  it, so the page says why that name can't launch; each identity in `/api/last` carries it
+  as `refused`. One whose name a live session holds in a project scope shows a note naming
+  that binding (`note`). A harness picked by hand fills the comms identity for that
+  harness, unless the identity was set by hand.
 - `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
-  --session ID [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs
-  did; they run the same ask cache's timer starts. `clear-expired --session ID` asks only
-  of the launch whose current session is ID, and says so and exits 0 when none is. `--dry-run` writes nothing and prints each
-  session's verdict and what a run would do, and `keep-warm --dry-run` with no session
-  reads every live launch keep-warm is on for.
-- Exit-session holds while the session runs a background shell or Monitor, as Core's
-  did, until the session has been idle an hour (`held`, word `shells`); only then does it
-  exit and stop them at Claude's exit dialog. `--dry-run` says which.
+  --session ID [--dry-run]` make the expiry and keep-warm asks by hand; they run the same
+  ask cache's timer starts. `clear-expired --session ID` asks only of the launch whose
+  current session is ID, and says so and exits 0 when none is. `--dry-run` writes nothing
+  and prints each session's verdict and what a run would do, and `keep-warm --dry-run`
+  with no session reads every live launch keep-warm is on for.
+- Exit-session holds while the session runs a background shell or Monitor, until the
+  session has been idle an hour (`held`, word `shells`); only then does it exit and stop
+  them at Claude's exit dialog. `--dry-run` says which.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
   brief, brief file or handoff, and a brief or handoff under `with:<identity>`, whose
   director sends the first message (`posture-brief`). On a launch that binds no comms
@@ -33,7 +31,7 @@
   flags alone included, since they go last on the harness's argv. Other flags passed on
   (unknown flags typed before `--`, a preset's or `[defaults]`' `extra_flags`, the page's
   field) don't count. A brief under `operator` is sent.
-- A scratch launch keeps no notes, as Core's did: a `notes_dir` typed or set by its preset
+- A scratch launch keeps no notes: a `notes_dir` typed or set by its preset
   is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
   folder notes would keep notes for (a temporary folder under a notes place) is refused at
   preview and launch.

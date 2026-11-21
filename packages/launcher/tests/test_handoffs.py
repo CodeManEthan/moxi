@@ -247,8 +247,8 @@ def test_with_notes_a_launch_without_notes_dir_passes_no_override(notes):
 
 
 def test_notes_with_no_dir_for_the_launch_gives_no_handoff_dir(notes):
-    # Core's launcher: a launch with no notes directory has no handoffs/ to read from, and
-    # the launcher's own folder is not used in its place while notes is installed.
+    # A launch with no notes directory has no handoffs/ to read from, and the launcher's
+    # own folder is not used in its place while notes is installed.
     notes.answer["folder"] = None
     with pytest.raises(handoffs.NoNotesDir) as caught:
         handoffs.handoff_dir("/work")

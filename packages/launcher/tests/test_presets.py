@@ -510,7 +510,7 @@ def test_the_with_posture_needs_comms():
 
 
 def test_a_go_launch_with_nothing_to_start_on_is_refused():
-    # Core's posture table: go with no brief is refused, since nobody directs the session.
+    # Go with no brief is refused, since nobody directs the session.
     with pytest.raises(presets.PostureBrief) as caught:
         resolve(typed={"posture": "go"})
     assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
@@ -557,7 +557,7 @@ def test_a_go_launch_that_binds_an_identity_does_not_start_on_words_passed_on():
 
 
 def test_a_brief_under_with_is_refused():
-    # Core's posture table: under with:<agent> that agent sends the first message.
+    # Under with:<agent> that agent sends the first message.
     for first in ({"brief": "Build it."}, {"brief_file": "/w/brief.md"}):
         with pytest.raises(presets.PostureBrief) as caught:
             resolve(typed={"posture": "with:lead", **first}, available=only("comms"))
