@@ -274,6 +274,27 @@ def recut_tail(text: str, limit: int, sets: Iterable[str], *, edge_chars: int = 
     return f"[... {gone} earlier characters cut] {clean[-limit:]}" if gone else clean
 
 
+def hide_cut_edges(text: str, mark: str, *, edge_chars: int = EDGE_CHARS) -> str:
+    """A stored text with the text near each stored cut replaced by `mark`.
+
+    A text is head-cut when its whole text ends with the marker `keep_head` writes, and
+    tail-cut when it opens with the one `keep_tail` writes; a marker anywhere else is
+    plain text. From a head marker back to the first whitespace with at least
+    `edge_chars` counted characters after it, the marker included, is replaced; from a
+    tail marker forward to the first whitespace with at least that many before it, the
+    same. With no such whitespace the span runs to the text's other end. Characters
+    secrets sees through count nothing, as in `recut_head`."""
+    if match := _HEAD_CUT.fullmatch(text):
+        body = match.group(1)
+        end = _edge_head(body, edge_chars)
+        text = f"{body[:end + 1]}{mark}" if end else mark
+    if match := _TAIL_CUT.fullmatch(text):
+        body = match.group(2)
+        start = _edge_tail(body, edge_chars)
+        text = f"{mark}{body[start - 1:]}" if start < len(body) else mark
+    return text
+
+
 # -- the key ---------------------------------------------------------------------------
 
 def line_id(record: Any, source_key: str) -> str:
@@ -415,5 +436,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
-           "keep_head", "keep_tail", "recut_head", "recut_tail",
+           "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
            "line_id", "keys", "tier_one_message", "model_answer", "convert"]

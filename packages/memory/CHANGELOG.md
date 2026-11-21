@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
+  `search_memory` to the Claude apps. It searches in one reader of the index and returns
+  only rows whose writer is the person, the model, or unknown with no tag at the start
+  (after the opening characters sessions publishes), never a row with no writer and no
+  mail from other sessions. The rows it ranks are the newest 500 holding every word and
+  the newest 500 holding any, each still matching once secrets' `chat_redact` has run
+  over the whole row, with the text within 64 characters of a stored cut dropped first;
+  they are ranked by bm25 over the redacted text, and each snippet is cut from it, at
+  most 300 characters, with no marks. `results`, `subagents` and `scratch` are off by
+  default. The walk stops 16 seconds after the call began, and the host's shared limit
+  runs two calls at once. It refuses `redaction-off` when secrets or a chat set can't
+  run or `redact.sets` lacks `credentials` or `broad`, `no-index`, `index-unreadable`
+  (a generation still at schema 1 among them) and `bad-since`. The provider's status
+  gives the `search` and `redaction` rows. The `secrets` extra brings personal-data's
+  validators for the chat redaction.
 - Each row records its writer (schema 2): who the record's harness says wrote it, from
   sessions' `writer` at interface 7, which memory now reads sessions at. A generation
   still at schema 1 gains the column when memory next writes to it; its rows, like every

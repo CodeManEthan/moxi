@@ -35,6 +35,13 @@ comms = ["moxi-comms>=0.3,<0.4"]
 # Each session's launch kind, which keeps scratch launches out of default search and the
 # start lists. memory reaches the launcher only through moxi.modules.load("launcher").
 launcher = ["moxi-launcher>=0.1.1,<0.2"]
+# search_memory in the Claude apps, through the public MCP host: the host's provider
+# interface, and personal-data's validators for the chat redaction. memory reaches the
+# host only through moxi.modules.load("connector", interface=1).
+connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
+# The chat redaction's personal-data set, which search_memory needs beside the sets
+# memory stores with; without it the tool refuses.
+secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -53,6 +60,10 @@ memory = "moxi_memory.listeners"
 # The two commands the start line names run without an approval prompt in a launch.
 [project.entry-points."moxi.turns.additions"]
 memory = "moxi_memory.additions:additions"
+
+# search_memory, served by the connector (the `connector` extra).
+[project.entry-points."moxi.connector.providers"]
+memory = "moxi_memory.connector:PROVIDER"
 
 # The ingest child, which every trigger starts detached (`moxi_memory.start`).
 [project.scripts]
