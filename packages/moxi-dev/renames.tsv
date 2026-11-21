@@ -3948,6 +3948,7 @@ launcher	packages/launcher/tests/test_browser_home_beside_usage.py	kit.published
 launcher	packages/launcher/tests/test_browser_home_beside_usage.py	kit.published(steady.shell, "running", lambda data: any(	keep	any	any
 launcher	packages/launcher/tests/test_browser_home_beside_usage.py	re.compile(f"^reviewer goes cold at {HOUR}$"), timeout=PASS_MS)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_home_beside_usage.py	self.turns.script(sessions={sid: kit.waiting()})	keep	sessions	sessions
+launcher	packages/launcher/tests/test_browser_home_fill.py	"identities": [{"harness": "claude", "identity": "scout", "at": at, "refused": None, "note": None},	keep	refused	refused
 launcher	packages/launcher/tests/test_browser_home_fill.py	-	name	add_folder	add_dir
 launcher	packages/launcher/tests/test_browser_home_fill.py	-	name	folder	work_dir_fixture
 launcher	packages/launcher/tests/test_browser_home_fill.py	extra = str(Path(shell.env["HOME"]) / "work" / "proj-a")	keep	HOME	HOME
@@ -3957,6 +3958,7 @@ launcher	packages/launcher/tests/test_browser_home_fill.py	note	kwonly	them	them
 launcher	packages/launcher/tests/test_browser_home_fill.py	page	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_fill.py	where = Path(shell.env["HOME"]) / "work" / key	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_fill.py	where.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_home_fill.py	{"harness": "codex", "identity": "cdx", "at": at, "refused": held, "note": namesake}]}	keep	refused	refused
 launcher	packages/launcher/tests/test_browser_home_keep_warm.py	expect(press).to_be_enabled(timeout=PRESS_WAIT_MS)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_home_keep_warm.py	launches.script(sid, draft=False)	keep	draft	draft
 launcher	packages/launcher/tests/test_browser_home_keep_warm.py	launches.script(sid, draft=True)	keep	draft	draft
