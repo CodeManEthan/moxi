@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-- `question_mode.origins` is renamed `prompt.own_origins`, default still
+- `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
   `prompt` event carries `own`, true when its origin is on that list, and question mode's
-  reminder reads it. A config file that still sets the old key is told to set the new one.
+  reminder reads it. The old key is not read as an alias: while a turns config file still
+  sets `question_mode.origins`, every turns endpoint refuses to start (a session then has
+  no guards and takes no deliveries) and names the key to set. Move the value to
+  `prompt.own_origins`, or, when it is the default `["composer", "bridge"]`, delete the
+  old key.
   On Codex a prompt typed in the window now carries the origin `composer`, and one the
   host handed in for a delivery carries none. The host places a prompt by its text: one
   that matches no hand-in of its own while any is still out carries no origin either.
