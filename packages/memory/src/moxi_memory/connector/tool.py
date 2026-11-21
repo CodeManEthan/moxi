@@ -43,6 +43,7 @@ UNREADABLE = "memory's index can't be read right now; moxi doctor memory says wh
 TOO_OLD = ("memory's index is from before this version; it is updated when memory next "
            "writes to it.")
 BAD_SINCE = "since is an age such as 7d or 12h, or an ISO 8601 time."
+NOT_STARTED = "memory's tool hasn't started yet, so nothing was searched."
 NO_SESSIONS = ("memory reads sessions at interface 7, which the sessions installed here "
                "doesn't offer, so nothing was searched. moxi doctor connector says why.")
 #: The text part's first line.
@@ -155,10 +156,12 @@ def _sessions() -> Any:
 
 class Searcher:
     """`search_memory`'s work, called as `(args, started)` with the call's start on
-    `clock`'s scale. Gives `(Result, log fields)`. `env` is read at each call;
+    `clock`'s scale. Gives `(Result, log fields)`. `env` is read at each call, and is
+    None until the provider has started;
     `sessions` gives sessions' API at interface 7 (a test hands in its own)."""
 
-    def __init__(self, result: Any, gate: Gate, env: Callable[[], Mapping[str, str]], *,
+    def __init__(self, result: Any, gate: Gate,
+                 env: Callable[[], Mapping[str, str] | None], *,
                  sessions: Callable[[], Any] = _sessions,
                  clock: Callable[[], float] = time.monotonic):
         self.result = result
@@ -175,11 +178,13 @@ class Searcher:
         def refuse(code: str, text: str):
             return self.result.refused(code, text), logged
 
+        env = self.env()
+        if env is None:
+            return refuse("not-started", NOT_STARTED)
         try:
             redact = self.gate.open()
         except Off:
             return refuse("redaction-off", OFF_TEXT)
-        env = self.env()
         sets = _sets(env)
         if sets is None or sets_missing(sets):
             return refuse("redaction-off", OFF_TEXT)
@@ -250,4 +255,4 @@ class Searcher:
 
 
 __all__ = ["ANNOTATIONS", "DESCRIPTION", "INPUT", "LIMIT_DEFAULT", "LIMIT_MAX", "NO_SESSIONS",
-           "OUTPUT", "Searcher", "UNTRUSTED", "WALK_S", "local", "utc"]
+           "NOT_STARTED", "OUTPUT", "Searcher", "UNTRUSTED", "WALK_S", "local", "utc"]

@@ -590,11 +590,13 @@ limit.
 `writer`: `person` (typed at the prompt), `model` (the model's own turn or tool call),
 `unknown` (a user message whose harness doesn't say who submitted it), or the kind of
 message something else wrote, such as `summary`. A row stored before memory recorded
-writers has none, and the tool never returns it. One `moxi memory reindex` writes every
-row again with its writer, but for a session the rebuild keeps without reading it (one in
-a folder that didn't answer, or a compressed Codex rollout); until then the `memory search` row of `moxi doctor connector`
-warns and counts the rows with none. An index from before the writer column is migrated
-the next time memory writes to it, and the tool refuses `index-unreadable` until then.
+writers has none, and the tool never returns it; while any row has none, the `memory
+search` row of `moxi doctor connector` warns and counts them. One `moxi memory reindex`
+writes every row again with its writer, except the rows of a session the rebuild keeps
+without reading it: those keep no writer, so the chat doesn't find them. For a session
+in a folder that didn't answer, a reindex run while the folder answers gives them one;
+memory never reads a compressed Codex rollout, so its rows never get one. An index from
+before the writer column is migrated the next time memory writes to it, and the tool refuses `index-unreadable` until then.
 
 **What it returns.** Only what `read_session` would show as text: a row whose writer is
 the person or the model, or `unknown` with a text that opens neither with `<` and a
@@ -648,7 +650,8 @@ seconds and then refuses `busy`, and a call still running at 20 seconds refuses
 `timeout`. Refusals: `no-index` (run `moxi memory reindex` at the machine),
 `index-unreadable`, `bad-since`, `redaction-off`, `no-sessions` (the sessions installed
 is missing, broken or too old to say who wrote each message; the `memory search` row
-says which), `busy` and `timeout`.
+says which), `busy`, `timeout`, and `not-started` for a call before the host has
+started the provider, which the host never makes.
 
 **Status.** `moxi connector status` and `moxi doctor connector` show a `memory search`
 row (the index's generation and rows, with a warning while it fills, at an old schema or

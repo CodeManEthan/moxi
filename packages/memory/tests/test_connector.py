@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import itertools
+import os
 from importlib import metadata
 from pathlib import Path
 
@@ -64,9 +65,15 @@ class Ctx:
         return self.real._fields
 
 
+def started(memory_prov):
+    """`(memory, provider)` once the provider has started with the test's environment."""
+    asyncio.run(memory_prov[0].start(dict(os.environ)))
+    return memory_prov
+
+
 def provider(secrets=None, **kw):
     gate = Gate(load=lambda: secrets or Secrets())
-    return connector.build(gate=gate, **kw)
+    return started(connector.build(gate=gate, **kw))
 
 
 def search(args, *, secrets=None, **kw):
@@ -195,7 +202,7 @@ class NoBetween:
                                   lambda: Unscanned(), lambda: NoBetween()])
 def test_every_call_refuses_redaction_off_with_no_text_and_the_row_fails(db, load):
     put(db, "deploy the widgets")
-    memory, prov = connector.build(gate=Gate(load=load))
+    memory, prov = started(connector.build(gate=Gate(load=load)))
     ctx = Ctx()
     result = asyncio.run(prov.tools[0].call({"words": "deploy"}, ctx))
     assert result.refusal == "redaction-off" and "deploy" not in result.text
@@ -590,6 +597,17 @@ def test_a_sessions_without_interface_seven_refuses_and_the_search_row_says_why(
     row = {r.name: r for r in memory.status()}["search"]
     assert row.level == "fail"
     assert "interface 7: sessions offers 1-6" in row.text and "no-sessions" in row.text
+
+
+def test_before_start_the_tool_refuses_and_the_search_row_reads_nothing(db):
+    put(db, "deploy the widgets")
+    memory, prov = connector.build(gate=Gate(load=Secrets))
+    assert memory.env is None and connector.MEMORY.env is None
+    ctx = Ctx()
+    result = asyncio.run(prov.tools[0].call({"words": "deploy"}, ctx))
+    assert result.refusal == "not-started" and result.text == tool.NOT_STARTED
+    row = {r.name: r for r in memory.status()}["search"]
+    assert (row.level, row.text) == ("warn", "not checked yet: the provider hasn't started")
 
 
 def test_the_real_search_needs_sessions_at_interface_seven():
