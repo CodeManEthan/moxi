@@ -69,6 +69,22 @@ didn't answer, or one config `harnesses` leaves out), records the counts dropped
 kept, frees its locks and starts one child: the waiting request's when one waits, else one
 walk.
 
+**The version rebuild.** Each generation records which secrets `redact` stored its rows
+(`index.stored_redact_version`). A rebuild that replaces one below the installed secrets'
+`REDACT_VERSION` redacts every row again: it reads every source from its start as any
+rebuild does, and then, per source, keeps everything of each source it didn't read to its
+end (a gone file, a folder that didn't answer, a compressed rollout, a harness config
+`harnesses` leaves out, a subagent's with `index.include_subagents` off, an imported
+thread, a read that failed): its rows and tails, its `sources` row and its secret-path
+calls, each kept text trimmed at its stored cut (`rows.EDGE_CHARS`), redacted again and
+cut to today's sizes. It removes no session from the session table. A row of a source it
+read to its end that the source no longer gives leaves, as in any rebuild, unless its
+session also has a source it didn't read to its end. Nothing an ingest does starts it:
+only a typed `moxi memory reindex` does, and until then an ingest stores its new rows
+under the new `redact` and leaves the stored ones as they are. It records the version it
+replaced (`REPLACED_KEY`), and the new generation records today's, so the next rebuild
+is an ordinary one, which drops what a rebuild drops.
+
 **The session table.** For each main session it reads, a child writes the label when the
 row has none, the newest record's time, and the launch kind. It asks the launcher for the
 kind of a session whose row has none or isn't settled. The kind is settled once the index
@@ -103,6 +119,9 @@ KIND_WAIT = 1.0
 RECORD = "ingest"
 #: A `sources` row's reuse value for a compressed rollout.
 COMPRESSED = "compressed"
+#: The `meta` key a version rebuild writes: the `redact_version` of the generation it
+#: replaced.
+REPLACED_KEY = "replaced_redact_version"
 #: How far up a chain of subagents a child looks for the main session.
 MAX_DEPTH = 16
 #: How a probe of sessions' `find` that couldn't read its root begins.
@@ -253,6 +272,7 @@ class Ingest:
         self.find_roots: dict[str, list[str]] = {}
         self.begun: set[tuple[str, str]] = set()
         self.broken: set[tuple[str, str]] = set()
+        self.read_whole: dict[tuple[str, str], str] = {}
         self.compressed: set[tuple[str, str]] = set()
         self._reading: Seen | None = None
         self.sc = sc
@@ -462,6 +482,7 @@ class Ingest:
                 newest = got.newest if newest is None else max(newest, got.newest)
             cursor = batch.cursor
             if batch.complete:
+                self.read_whole[(src.harness, skey)] = role.main
                 break
         if read_any:
             self.report.sources += 1
@@ -923,6 +944,126 @@ class Ingest:
                     "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
         return bool(rows_out or tails_out or srcs)
 
+    # -- the version rebuild's keep rule -----------------------------------------------
+
+    def read_to_end(self) -> set[tuple[str, str]]:
+        """The `(harness, source key)` of each source this run read to its end: its read
+        stopped at a batch sessions marked complete, and its session isn't one the run
+        began and couldn't read to its end."""
+        return {key for key, main in self.read_whole.items()
+                if (key[0], main) not in self.broken}
+
+    def copy_unread(self) -> int:
+        """Copy from the generation a version rebuild replaces everything of a source
+        this run didn't read to its end, decided per source. Returns how many sessions it
+        copied anything of.
+
+        A row or tail is counted against every source that may have given it: each source
+        the old `sources` lists under its harness and session, the source its key names
+        (`<source>@line:N` or `@offset:N`), and for an OpenCode subagent's row its own
+        session's source. It is copied when one of those is unread, or when none is
+        known. Every unread `sources` row is copied with its cursor and reuse, and the
+        secret-path calls of each. Nothing the config leaves out is skipped: every harness
+        the old generation holds, and subagents' rows whether or not
+        `index.include_subagents` is on. A copy never replaces what this run wrote. Each
+        copied text loses its stored cut edge (`rows.EDGE_CHARS`), is redacted again with
+        today's `redact.sets` and cut to today's sizes, and each row takes the session
+        table's label."""
+        from moxi import store
+
+        old = self.prior
+        if old is None:
+            return 0
+        whole = self.read_to_end()
+        listed: dict[tuple[str, str], set[str]] = {}
+        for harness, source, session_id in old.execute(
+                "SELECT harness, source, session_id FROM sources"):
+            if session_id is not None:
+                listed.setdefault((harness, session_id), set()).add(source)
+        sessions = sorted(set(old.execute(
+            "SELECT harness, session_id FROM rows UNION "
+            "SELECT harness, session_id FROM tails UNION "
+            "SELECT harness, session_id FROM sources WHERE session_id IS NOT NULL")))
+        copied = 0
+        for harness, session_id in sessions:
+            own = listed.get((harness, session_id), set())
+            with store.transaction(self.conn):
+                if self._copy_unread_one(old, harness, session_id, own, whole):
+                    copied += 1
+        for harness, source in old.execute(
+                "SELECT harness, source FROM sources WHERE session_id IS NULL").fetchall():
+            if (harness, source) not in whole:
+                with store.transaction(self.conn):
+                    self._copy_source(old, harness, source)
+        return copied
+
+    def _copy_unread_one(self, old, harness: str, session_id: str, own: set[str],
+                         whole: set[tuple[str, str]]) -> bool:
+        def kept(key: str, agent: str | None) -> bool:
+            counted = set(own)
+            named = _named_source(key)
+            if named is not None:
+                counted.add(named)
+            if harness == "opencode" and agent is not None:
+                counted.update(f"{s.rpartition('#')[0]}#{agent}" for s in own if "#" in s)
+            return not counted or any((harness, s) not in whole for s in counted)
+
+        row = table.row(self.sc, harness, session_id)
+        label = row.label if row is not None and row.label else None
+        sets = self.policy.sets
+        rows_out = []
+        for key, agent, label_was, when, turn, kind, text in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text FROM rows "
+                "WHERE harness = ? AND session_id = ?", (harness, session_id)):
+            if not kept(key, agent):
+                continue
+            limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
+            rows_out.append((key, harness, session_id, agent, label or label_was, when,
+                             turn, kind, rows.recut_head(text, limit, sets,
+                                                         edge_chars=rows.EDGE_CHARS)))
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
+            "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+        tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
+                      rows.recut_tail(text, self.policy.tail_chars, sets,
+                                      edge_chars=rows.EDGE_CHARS))
+                     for key, label_was, when, turn, failed, text in old.execute(
+                         "SELECT key, label, time, turn_id, failed, text FROM tails "
+                         "WHERE harness = ? AND session_id = ?", (harness, session_id))
+                     if kept(key, None)]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO tails (key, harness, session_id, label, time, turn_id, "
+            "failed, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tails_out)
+        unread = [s for s in sorted(own) if (harness, s) not in whole]
+        for source in unread:
+            self._copy_source(old, harness, source)
+        return bool(rows_out or tails_out or unread)
+
+    def _copy_source(self, old, harness: str, source: str) -> None:
+        """Copy one `sources` row, with its cursor and reuse, and its secret-path calls."""
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO sources (harness, source, session_id, cursor, reuse, "
+            "read) VALUES (?, ?, ?, ?, ?, ?)",
+            old.execute("SELECT harness, source, session_id, cursor, reuse, read "
+                        "FROM sources WHERE harness = ? AND source = ?",
+                        (harness, source)).fetchall())
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO secret_calls (harness, source, call_id) "
+            "VALUES (?, ?, ?)", old.execute(
+                "SELECT harness, source, call_id FROM secret_calls "
+                "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
+
+
+def _named_source(key: str) -> str | None:
+    """The source a row's key names (`<harness>|<source>@line:N|<place>`, or
+    `@offset:N`), or None for a key that names the line by the harness's own id."""
+    _, _, rest = key.partition("|")
+    line, _, _ = rest.rpartition("|")
+    source, sep, place = line.rpartition("@")
+    if sep and source and (place.startswith("line:") or place.startswith("offset:")):
+        return source
+    return None
+
 
 def _lists_nothing(n: int, held_at: float | None) -> str | None:
     """Why a folder that lists nothing didn't answer, naming each fact that holds: `n`
@@ -992,6 +1133,13 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
     held writer lock `w`; keep what can't be known gone; switch to it; and drop from the
     session table each session it found no source for.
 
+    A rebuild that replaces a generation whose `redact_version` is below the installed
+    secrets' (a version rebuild) keeps more and drops nothing from the table: in place of
+    `Ingest.copy_kept` it copies, per source, everything of each source it didn't read to
+    its end (`Ingest.copy_unread`), and it removes no session. It runs only when someone
+    types `moxi memory reindex`, as any rebuild does; an ingest into such a generation
+    leaves its stored rows as they are.
+
     Its steps, in order: it reads every folder `corpus` lists; it tests the folders again
     and decides which answered (`Ingest.walk`); it takes out of the new generation what it
     wrote for each session it couldn't read to its end; it copies the sessions it keeps
@@ -1005,6 +1153,9 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
             old = index.open_read(env)
         except (index.IndexMissing, index.IndexUnreadable):
             old = None
+        versioned = (old is not None and index.stored_redact_version(old.conn)
+                     < rows.redact_version())
+        replaced = index.stored_redact_version(old.conn) if versioned else None
         try:
             n, conn = w.new_generation()
             sc = state.connect(env)
@@ -1016,19 +1167,22 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
                                  started=started)
                     job.walk(full=True)
                     job.take_out_broken()
-                    kept = job.copy_kept()
+                    kept = job.copy_unread() if versioned else job.copy_kept()
                 finally:
                     conn.close()
                 if old is not None:
                     old.close()
                     old = None
                 w.switch(n)
-                seen = set(job.seen)
-                keep = job.keeping()
-                seen.update((h, s) for h, s in sc.execute(
-                    "SELECT harness, session_id FROM sessions")
-                    if h in keep or h not in job.harnesses)
-                dropped = table.remove_unseen(sc, seen, started)
+                if versioned:
+                    dropped = 0
+                else:
+                    seen = set(job.seen)
+                    keep = job.keeping()
+                    seen.update((h, s) for h, s in sc.execute(
+                        "SELECT harness, session_id FROM sessions")
+                        if h in keep or h not in job.harnesses)
+                    dropped = table.remove_unseen(sc, seen, started)
                 state.clear_unfinished(sc)
             finally:
                 sc.close()
@@ -1040,6 +1194,8 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
             index.meta_set(conn, "dropped", dropped)
             index.meta_set(conn, "kept", kept)
             index.meta_set(conn, "rebuilt", started)
+            if replaced is not None:
+                index.meta_set(conn, REPLACED_KEY, replaced)
         finally:
             conn.close()
         job.report.dropped = dropped
@@ -1196,5 +1352,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["MAX_BYTES", "RECORD", "TRIGGERS", "WAITING", "Report", "Role", "Ingest",
+__all__ = ["MAX_BYTES", "RECORD", "REPLACED_KEY", "TRIGGERS", "WAITING", "Report", "Role", "Ingest",
            "source_key", "imported", "not_read", "rebuild", "run", "main"]
