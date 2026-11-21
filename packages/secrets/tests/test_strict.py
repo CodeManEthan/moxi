@@ -155,6 +155,44 @@ def test_every_worker_request_of_a_strict_scan_is_strict(fallback_engine, monkey
     assert seen and not any(seen)
 
 
+#: A text holding both kinds the copies remove, see-through characters (a vertical tab
+#: among them) and escaped quotes, with a split value in each part that only strict
+#: redacts: one before a comma, one before an ampersand inside escaped JSON.
+BOTH_KINDS = (f"a\x0bb api_key={SPLIT}, "
+              + '{\\"url\\":\\"https://x.test/v1?api_key=' + SPLIT + '&page=2\\"}')
+
+
+def test_every_copy_of_a_text_holding_both_kinds_is_scanned_strict(engine_name,
+                                                                   monkeypatch):
+    # The copies: one without both kinds, the spaced one, and one without the
+    # see-through characters alone, its escapes kept. Each scan of them, and each
+    # worker request for them, is strict and reads no mark.
+    copies, requests = [], []
+    real_copy, real_request = scan_mod._copy_hits, fallback.scan
+
+    def copy_spy(base, rx, *args, keep_marked, strict):
+        copies.append((base == BOTH_KINDS, rx.search('\\"') is not None, keep_marked,
+                       strict))
+        return real_copy(base, rx, *args, keep_marked=keep_marked, strict=strict)
+
+    def request_spy(t, names, path, *, keep_marked=True, strict=False):
+        requests.append((keep_marked, strict))
+        return real_request(t, names, path, keep_marked=keep_marked, strict=strict)
+
+    monkeypatch.setattr(scan_mod, "_copy_hits", copy_spy)
+    monkeypatch.setattr(fallback, "scan", request_spy)
+    assert redact(BOTH_KINDS, GITLEAKS).count(SPLIT) == 2
+    copies.clear()
+    requests.clear()
+    scan(BOTH_KINDS, GITLEAKS, strict=True)
+    assert sorted(c[:2] for c in copies) == [(False, True), (True, False), (True, True)]
+    assert all(c[2:] == (False, True) for c in copies)
+    if engine_name == "fallback":
+        assert len(requests) == 4 and all(r == (False, True) for r in requests)
+    out = redact(BOTH_KINDS, GITLEAKS, strict=True)
+    assert SPLIT not in out and VALUE[:10] not in out
+
+
 # -- the end-condition regexes -----------------------------------------------------------------
 
 def test_each_strict_regex_is_its_regex_without_the_end_condition():

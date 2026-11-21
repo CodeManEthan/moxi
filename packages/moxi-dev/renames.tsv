@@ -11707,6 +11707,8 @@ secrets	packages/secrets/tests/test_strict.py	assert seen and not any(seen)	keep
 secrets	packages/secrets/tests/test_strict.py	assert {"allowlisted-name", "false", "padding-a", "comma", "ampersand"} <= set(kept)	keep	set	set
 secrets	packages/secrets/tests/test_strict.py	b = scan_mod.run_gitleaks(t, GITLEAKS, None, py_engine, strict=True)	keep	strict	strict
 secrets	packages/secrets/tests/test_strict.py	return real(t, names, path, keep_marked=keep_marked, strict=strict)	keep	strict	strict
+secrets	packages/secrets/tests/test_strict.py	return real_copy(base, rx, *args, keep_marked=keep_marked, strict=strict)	keep	strict	strict
+secrets	packages/secrets/tests/test_strict.py	return real_request(t, names, path, keep_marked=keep_marked, strict=strict)	keep	strict	strict
 secrets	packages/secrets/tests/test_tools.py	"added": ["c"], "removed": ["a"], "changed": ["b"]}	keep	changed	changed
 secrets	packages/secrets/tests/test_tools.py	assert any(s.startswith("PyPy ") for s in found["unsafe"])	keep	any	any
 secrets	packages/secrets/tests/test_tools.py	assert set(c.failures["some-rule"]) == {"fallback allow plain"}	keep	set	set
