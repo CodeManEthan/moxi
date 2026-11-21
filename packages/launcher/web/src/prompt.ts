@@ -149,7 +149,8 @@ import type {
 
 import {
   BY_DEFAULT, CLEAR, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
-  HARNESS_ROW, harnessStep, keptFill, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote, withoutFill,
+  HARNESS_ROW, harnessStep, keptFill, keptForPick, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote,
+  withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -519,7 +520,8 @@ export class LauncherPrompt extends LitElement {
   /** The values filled from the last launch and left as they were, by row; `harness` when the
    * harness was filled too. */
   filled: Record<string, FormValue> = {};
-  /** The last launch the fill was made from, with the key it was read for; null with none. */
+  /** The last launch the fill was made from, with the key it was read for; with nothing
+   * filled, the answer whose comms identities a harness picked by hand fills; null with none. */
   last: (Last & { key: LastKey }) | null = null;
   /** The earlier launches `Run again` lists, newest first; empty until read. */
   recents: Recent[] = [];
@@ -916,8 +918,10 @@ export class LauncherPrompt extends LitElement {
     return new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
   }
 
-  /** The last launch waiting fills nothing. */
+  /** The last launch waiting fills nothing; its comms identities stay for a harness picked
+   * by hand. */
   #filledNothing(): void {
+    this.last = keptForPick(this.#waiting);
     this.#waiting = null;
     this.#fillHarness = "";
     this.requestUpdate();

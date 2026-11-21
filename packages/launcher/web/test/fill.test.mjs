@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   BY_DEFAULT, CHIP_ROWS, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
-  harnessStep, keptFill, lastKey, lastValue, lastWhen, parseLast, pickedHarnessFill, refusalNote, WHOSE, withoutFill,
+  harnessStep, keptFill, keptForPick, lastKey, lastValue, lastWhen, parseLast, pickedHarnessFill, refusalNote, WHOSE, withoutFill,
 } from "../src/fill-model.ts";
 import { changes, offRows, turnedOn, valueNow, withOption } from "../src/options-model.ts";
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
@@ -174,6 +174,28 @@ test("a harness picked by hand fills that harness's identity, unless the identit
   const none = parseLast({ state: "up", detail: null, at: AT, harness: "claude", values: [],
                            identities: [{ harness: "claude", identity: "scout", at: AT, refused: null }] });
   assert.deepEqual(pickedHarnessFill(none, fields, codex), {});
+});
+
+test("an answer that fills nothing for the form Home opened on still fills a harness picked by hand", () => {
+  const catalog = [...CATALOG, IDENTITY, SCOPE];
+  // A Codex launch that bound a name, and no identity for Claude.
+  const last = parseLast({
+    state: "up", detail: null, at: AT, harness: "codex",
+    values: [{ name: "model", value: "gpt-5", items: null }],
+    identities: [{ harness: "codex", identity: "cdx", at: AT, refused: null }],
+  });
+  // The preset sets Claude: nothing fills for the form Home opened on.
+  const claude = formOf("claude", ["harness", "claude", "preset"], ["model", null], ["identity", null], ["scope", null]);
+  assert.equal(harnessStep(last, claude), "none");
+  assert.deepEqual(fillOf(last, filledFields(catalog, claude, NO_PRESET), claude), {});
+  // The answer is kept, and Codex picked by hand fills its identity.
+  assert.equal(keptForPick(last), last);
+  const codex = formOf("codex", ["harness", "codex"], ["model", null], ["identity", null], ["scope", null]);
+  assert.deepEqual(pickedHarnessFill(keptForPick(last), filledFields(catalog, codex, NO_PRESET), codex),
+                   { identity: "cdx" });
+  // An answer that gives no harness an identity has nothing for a pick to fill.
+  assert.equal(keptForPick(lastOf("codex", ["model", "gpt-5"])), null);
+  assert.equal(keptForPick(null), null);
 });
 
 test("comms' refusal of the identity filled is shown beside it while it stays filled", () => {

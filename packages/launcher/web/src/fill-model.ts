@@ -205,6 +205,13 @@ export function pickedHarnessFill(last: Last, fields: readonly PanelField[], for
   return fillOf({ ...last, values: [] }, fields, form, held);
 }
 
+/** The answer a harness picked by hand fills from, when it filled nothing for the form Home
+ * opened on: `last` itself while it gives some harness a comms identity, else null. Whatever
+ * the opening form filled, a later pick of a harness the answer has an identity for fills it. */
+export function keptForPick<T extends Last>(last: T | null): T | null {
+  return last !== null && last.identities.length > 0 ? last : null;
+}
+
 /** The filled values the form still leaves at their shipped default, as after it is read
  * again for another preset: a row it fills now with another value is no longer filled. */
 export function keptFill(filled: Readonly<Record<string, FormValue>>, fields: readonly PanelField[],

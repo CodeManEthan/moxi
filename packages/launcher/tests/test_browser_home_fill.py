@@ -1,14 +1,16 @@
 """The fill from the last launch on Home in a browser, through a real shell that starts the
 launcher's real page server: each last launch is a launch made from Home itself, then Home
-is opened again, but for the one test that answers `/api/last` itself (below). A value it typed fills the row, is named on `From last launch` on the line
-above the box with `Clear`, and under its row in the panel; it is no change, and the request
-names it in `filled`. An edit makes it the user's change, `Clear` puts the form's value
+is opened again, but for the two tests that answer `/api/last` themselves (below). A value
+it typed fills the row, is named on `From last launch` on the line above the box with
+`Clear`, and under its row in the panel; it is no change, and the request names it in
+`filled`. An edit makes it the user's change, `Clear` puts the form's value
 back. Two seats with one home fill nothing from each other. A value that can do harm is
 filled in the warning colour, asks nothing and launches with its flag. Another harness fills
 first, and the form is read again for it. A harness picked by hand in the chip lets go of the
 launch's values and fills that harness's comms identity, with comms' refusal and a live
-namesake's note beside it; the shell runs no comms, so that test answers `/api/last` itself
-and shows the identity rows `/api/catalog` hides without comms.
+namesake's note beside it, and does so too when the answer filled nothing for the form Home
+opened on; the shell runs no comms, so those tests answer `/api/last` themselves and show the
+identity rows `/api/catalog` hides without comms.
 
 The shell runs the fake slots in slots' place and fake `claude` and `codex` first on its
 `PATH`, so no launch starts a real session.
@@ -412,3 +414,22 @@ def test_a_harness_picked_by_hand_fills_its_comms_identity_with_comms_refusal_an
     expect(control(panel, "identity")).to_have_value("mine")
     expect(item(piece)).to_have_count(0)
     expect(panel.locator("[data-refused], [data-namesake]")).to_have_count(0)
+
+
+def test_a_harness_picked_by_hand_fills_its_comms_identity_when_the_opening_form_filled_nothing(page):
+    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    last = {"state": "up", "detail": None, "at": at, "harness": "codex",
+            "values": [{"name": "native_name", "value": "helper-1", "items": None}],
+            "identities": [{"harness": "codex", "identity": "cdx", "at": at, "refused": None, "note": None}]}
+    page.route("**" + CATALOG, comms_shown)
+    page.route(re.compile(re.escape(LAST) + r"\?seat=planner"), lambda route: route.fulfill(json=last))
+    piece = kit.open_home(page)
+    # The seat sets Claude, which the Codex launch gives no identity: nothing fills.
+    pick_seat(piece, "planner")
+    expect(piece.locator(".go")).to_be_enabled()
+    expect(item(piece)).to_have_count(0)
+    # Codex picked by hand: its identity fills all the same.
+    pick_harness(piece, "Codex")
+    expect(item(piece)).to_have_text("Comms identity▾")
+    listed = open_list(piece)
+    expect(listed.locator("[data-fill]")).to_have_text(["Comms identitycdxClear"])
