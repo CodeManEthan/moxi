@@ -176,8 +176,11 @@ lead: alpha-lead (the project's; moxi rounds mark alpha/search --lead NAME recor
 lead: none
 ```
 
-The round note has the same as `- lead: NAME` or `- lead: NAME (the project's)` under its
-status. In `show --json` and each row of `list --json`, `lead` is `{"name": NAME,
+The round note has the same under its status, one of `- lead: NAME`, `- lead: NAME (the
+project's)`, `- lead: none`, or `- lead: not known (REASON)` when the project's record
+can't be read. The note gives the project's lead as it was when the note was last
+written: after `moxi projects set PROJECT --lead NAME`, `show` and `list` give the new
+lead at once, and the note gives it at the round's next write. In `show --json` and each row of `list --json`, `lead` is `{"name": NAME,
 "from": "round"}` or `"from": "project"`, or null when neither names one. `list` prints
 no lead in its text.
 
