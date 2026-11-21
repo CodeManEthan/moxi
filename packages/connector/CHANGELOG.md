@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `docs/security.md`, "What crosses the door", covers the read tools memory, sessions and
+  notes give: what each reaches, what is redacted and with which sets, what isn't,
+  hostile text and the advice to keep "always allow" off for tools that send or share,
+  memory's stored cuts, chat history in the cloud, and what one sign-in now reaches.
 - `tools.withheld` lists tools the door serves to no grant: they are left out of
   `tools/list`, a call to one answers as an unknown tool, and `moxi connector status` and
   the doctor's providers row name each one. Read at the connector's start.
