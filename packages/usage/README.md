@@ -418,8 +418,8 @@ sessions module. Top to bottom:
   stacked by token class (Input, Cache create, Cache read, Output), each part that class's
   own dollars from the cost terms; By model it is stacked by model, the six that cost most
   in the range each in a shade or a line fill of its own and the rest as one, `Other`.
-  Either way a legend names the parts, the hover gives every part, and the table has a
-  column for each. By tokens
+  Either way a legend names the parts, the hover gives every part, and the table, oldest
+  first, has the day and a column for each part. By tokens
   there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
   work`, input, cache writes and output stacked. A table's column of dollars reads
   `Est. cost`.
@@ -428,8 +428,9 @@ sessions module. Top to bottom:
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
   narrow page its box scrolls), each month is named over its first column, and the five
   shades sit on the quantiles of the days that cost something. Every day is a button: a
-  click or Enter sets the range to it. A used day says its cost and tokens on hover, and
-  its token classes when it is in the range. `Table` lists the used days, oldest first.
+  click or Enter sets the range to it. A day is named by its date (`2026-11-03: 1.75
+  USD`); a used day says its cost and tokens on hover, and its token classes when it is
+  in the range. `Table` lists the used days by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
     `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every

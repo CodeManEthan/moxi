@@ -16,6 +16,7 @@ any order.
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import subprocess
@@ -325,10 +326,9 @@ def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(p
 
     group.get_by_role("button", name="Table").click()
     table = group.get_by_role("table")
-    expect(table.locator("thead th")).to_have_text(["Day", SONNET, HAIKU, "Total"])
+    expect(table.locator("thead th")).to_have_text(["Day", SONNET, HAIKU])
     by_class.click()
-    expect(table.locator("thead th")).to_have_text(
-        ["Day", "Input", "Cache create", "Cache read", "Output", "Total"])
+    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
 
     # Under Tokens the split is by class, and both buttons are off.
     panel.get_by_role("button", name="Tokens", exact=True).click()
@@ -371,21 +371,21 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     group.get_by_role("button", name="Table").click()
     expect(chart_of(panel)).to_have_count(0)
     table = group.get_by_role("table")
-    expect(table.locator("thead th")).to_have_text(
-        ["Day", "Input", "Cache create", "Cache read", "Output", "Total"])
+    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
     expect(table.locator("tbody tr")).to_have_count(3)
-    # A column per token class, each day's total at its end, newest first.
-    first = table.locator("tbody tr").first.locator("td")
-    expect(first.nth(1)).to_have_text(re.compile(MONEY))
-    cells = first.all_inner_texts()
-    assert re.fullmatch(r"\w{3} \d{1,2}", cells[0]) and re.fullmatch(MONEY, cells[5]), cells
+    # The day, then a column per token class, and no total; oldest first.
+    keys = [row.get_attribute("data-row") for row in table.locator("tbody tr").all()]
+    assert keys == sorted(keys), keys
+    last = table.locator("tbody tr").last.locator("td")
+    expect(last).to_have_count(5)
+    expect(last.first).to_have_text(re.compile(r"^\w{3} \d{1,2}$"))
+    expect(last.nth(1)).to_have_text(re.compile(MONEY))
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
     panel.get_by_role("button", name="Tokens", exact=True).click()
-    expect(table.locator("thead th")).to_have_text(
-        ["Day", "Input", "Cache read", "Cache create", "Output", "Total"])
-    # Three requests of 1000, 1500 and 2000 output tokens.
-    assert table.locator("tbody tr").first.locator("td").nth(4).inner_text() == "4.50k"
+    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache read", "Cache create", "Output"])
+    # Today's three requests of 1000, 1500 and 2000 output tokens, in the last row.
+    assert table.locator("tbody tr").last.locator("td").nth(4).inner_text() == "4.50k"
 
     group.get_by_role("button", name="Chart").click()
     expect(group.get_by_role("table")).to_have_count(0)
@@ -405,11 +405,11 @@ def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_f
     line = panel.locator("[data-part=lines] [data-line=range]")
     expect(line).to_have_text(re.compile(
         rf"^This range's total is not whole: (.+; )?[\d.]+k tokens have no price \({UNPRICED}\)$"))
-    # The table says the same of the day.
+    # The table says the same of the day, the oldest, in its first row.
     panel.locator("[data-group=chart]").get_by_role("button", name="Table").click()
     table = panel.locator("[data-group=chart]").get_by_role("table")
     expect(table.locator("thead th").last).to_have_text("Not whole")
-    expect(table.locator("tbody tr").last.locator("td").last).to_have_text(
+    expect(table.locator("tbody tr").first.locator("td").last).to_have_text(
         re.compile(r"nothing here could be priced$"))
     # Back on a whole range the line goes.
     pick(panel, "range", "Last 7 days")
@@ -583,14 +583,16 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(used).to_have_count(5)
     # A day in the range names its classes on hover; one outside it, its cost and tokens.
     expect(used.last.locator("title")).to_have_text(
-        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens\nInput 600\nCache create 0\n"
+        re.compile(r"^\d{4}-\d{2}-\d{2}: \d+\.\d{2} USD, [\d.]+k tokens\nInput 600\nCache create 0\n"
                    r"Cache read 30\nOutput 4\.50k$"))
     oldest = used.first
-    expect(oldest).to_have_attribute("aria-label", re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}$"))
-    expect(oldest.locator("title")).to_have_text(
-        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens$"))
+    day = oldest.get_attribute("data-day")
+    expect(oldest).to_have_attribute("aria-label", re.compile(rf"^{day}: \d+\.\d{{2}} USD$"))
+    expect(oldest.locator("title")).to_have_text(re.compile(rf"^{day}: \d+\.\d{{2}} USD, [\d.]+k tokens$"))
+    expect(days.first).to_have_attribute("aria-label", f"{days.first.get_attribute('data-day')}: 0.00 USD")
     # Picking a day sets the range to it.
-    date, year = oldest.get_attribute("aria-label").split(":")[0].rsplit(" ", 1)
+    when = datetime.date.fromisoformat(day)
+    date, year = f"{when:%b} {when.day}", when.year
     oldest.click()
     # The range names the day's year only when it is not this year.
     expect(filter_of(panel, "range").locator("button.pick")).to_have_text(
@@ -633,6 +635,8 @@ def test_the_heat_map_follows_only_the_place_filter_and_its_table_lists_the_used
     expect(table.locator("thead th")).to_have_text(["Day", "Est. cost", "Tokens"])
     expect(table.locator("tbody tr")).to_have_count(2)
     # Oldest first: the Codex thread, whose model has no price, then the Haiku session.
+    expect(table.locator("tbody tr").locator("td:first-child")).to_have_text(
+        [re.compile(r"^\d{4}-\d{2}-\d{2}$")] * 2)
     expect(table.locator("tbody tr").first.locator("td").nth(1)).to_have_text("no price")
     expect(table.locator("tbody tr").last.locator("td").nth(1)).to_have_text(re.compile(rf"^{MONEY}$"))
     heat.get_by_role("button", name="Chart").click()

@@ -7,8 +7,8 @@
 
 import type { Table } from "./chart-model.ts";
 import { costWords, rangeDays, sumRows } from "./cost-model.ts";
-import type { Range } from "./cost-model.ts";
-import { addDays, dateWord, daysOf } from "./days.ts";
+import type { Range, Sum } from "./cost-model.ts";
+import { addDays, daysOf } from "./days.ts";
 import type { DayRow, Report } from "./feed.ts";
 import { fmtTokens } from "./views.ts";
 
@@ -33,7 +33,8 @@ export interface HeatDay {
   step: number;
   /** Something was used this day. Used or not, the day is a button that filters to it. */
   used: boolean;
-  /** `Nov 3 2026: $5.35`, for a reader that cannot see the shade. */
+  /** `2026-11-03: 5.35 USD`, `2026-11-04: 0.00 USD` for a day nothing was used, for a
+   * reader that cannot see the shade. */
   aria: string;
   /** The aria words, the day's tokens after them, then, for a day in the range, a line
    * per token class. */
@@ -60,9 +61,11 @@ export function heatSince(today: string): string {
   return addDays(today, 1 - HEAT_DAYS) ?? today;
 }
 
-/** A day with its year: `Nov 3 2026`. */
-function yearDay(day: string): string {
-  return `${dateWord(day)} ${day.slice(0, 4)}`;
+/** A day's cost in US dollars to the cent, `5.35 USD`; `at least` before a cost that is
+ * not whole, `no price` for one with no price. */
+function usdWords(sum: Pick<Sum, "cost" | "complete">): string {
+  if (sum.cost === null) return "no price";
+  return `${sum.complete ? "" : "at least "}${sum.cost.toFixed(2)} USD`;
 }
 
 /** The four steps' lower bounds: the 20th, 40th, 60th and 80th percentiles of the days
@@ -98,7 +101,7 @@ export function heatModel(report: Report<DayRow>, today: string, range: Range = 
   const thresholds = heatThresholds(sums.map((item) => item.sum.cost ?? 0));
   const days = sums.map(({ day, rows: mine, sum }): HeatDay => {
     const used = sum.rows > 0;
-    const aria = `${yearDay(day)}: ${used ? costWords(sum) : "nothing used"}`;
+    const aria = `${day}: ${usdWords(used ? sum : { cost: 0, complete: true })}`;
     const count = (key: keyof DayRow & string): number => mine.reduce((total, row) => total + (Number(row[key]) || 0), 0);
     const hover = !used ? aria : [`${aria}, ${fmtTokens(sum.tokens)} tokens`,
                                   ...(inRange(day) ? CLASSES.map(([key, label]) => `${label} ${fmtTokens(count(key))}`) : [])]
@@ -112,7 +115,7 @@ export function heatModel(report: Report<DayRow>, today: string, range: Range = 
     table: {
       columns: [{ label: "Day", num: false }, { label: "Est. cost", num: true }, { label: "Tokens", num: true }],
       rows: sums.filter((item) => item.sum.rows > 0)
-        .map(({ day, sum }) => ({ key: day, cells: [yearDay(day), costWords(sum), fmtTokens(sum.tokens)] })),
+        .map(({ day, sum }) => ({ key: day, cells: [day, costWords(sum), fmtTokens(sum.tokens)] })),
     },
   };
 }

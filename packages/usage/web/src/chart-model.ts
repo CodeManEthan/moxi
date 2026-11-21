@@ -334,13 +334,12 @@ export interface Table {
 }
 
 /**
- * The chart's rows as a table, newest first, its columns following the chart: under Cost
- * split by class a column per token class, each period's dollars from `terms` (blank
- * until they answer); under Cost split by model a column per part of `modelSeries`;
- * under Tokens a column per token class. The total's cell carries the harness's own
- * figure after it where the rows have one. A last column says why a row is not whole,
- * and is there only when some row is not. Requests with no time are the last row,
- * `no time`.
+ * The chart's rows as a table, oldest first, a Day (or Month) column then a column per
+ * part the chart stacks: under Cost split by class a column per token class, each
+ * period's dollars from `terms` (blank until they answer); under Cost split by model a
+ * column per part of `modelSeries`; under Tokens a column per token class. A last column
+ * says why a row is not whole, and is there only when some row is not. Requests with no
+ * time are the last row, `no time`.
  */
 export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" | "month" = "day",
                            split: Split = "class", terms: Report<TermsRow> | null = null): Table {
@@ -349,7 +348,7 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
   const classes = classCosts(terms);
   const byModel = split === "model";
   const keys = [...new Set(report.rows.map((row) => row.period))]
-    .sort((a, b) => (a === null ? 1 : b === null ? -1 : a < b ? 1 : -1));
+    .sort((a, b) => (a === null ? 1 : b === null ? -1 : a < b ? -1 : 1));
   const lines = keys.map((period) => {
     const mine = report.rows.filter((row) => row.period === period);
     const sum = sumRows(mine);
@@ -365,18 +364,16 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
           return found === undefined ? "" : fmtCost(found.value);
         })
         : TOKEN_CLASSES.map(([key]) => fmtTokens(mine.reduce((total, row) => total + (Number(row[key]) || 0), 0)));
-    const total = measure === "tokens" ? fmtTokens(sum.tokens)
-      : `${costWords(sum)}${sum.harness_cost === null ? "" : ` · harness ${fmtCost(sum.harness_cost)}`}`;
     const why = whyNotWhole(sum, measure);
     const name = period === null ? "no time" : by === "month" ? monthWord(period) : dateWord(period);
-    return { key: period ?? "no time", cells: [name, ...cells, total], why };
+    return { key: period ?? "no time", cells: [name, ...cells], why };
   });
   const flagged = lines.some((line) => line.why !== null);
   const heads = measure === "cost" ? (byModel ? models : COST_SERIES).map((item) => item.label)
     : TOKEN_CLASSES.map(([, label]) => label);
   return {
     columns: [{ label: by === "month" ? "Month" : "Day", num: false },
-              ...heads.map((label) => ({ label, num: true })), { label: "Total", num: true },
+              ...heads.map((label) => ({ label, num: true })),
               ...(flagged ? [{ label: "Not whole", num: false }] : [])],
     rows: lines.map(({ key, cells, why }) => ({ key, cells: flagged ? [...cells, why ?? ""] : cells })),
   };

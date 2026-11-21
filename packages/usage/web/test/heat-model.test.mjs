@@ -52,24 +52,24 @@ test("a used day says its cost, its tokens and its classes; an unused one says s
   ]), TODAY);
   const used = model.days.find((item) => item.day === "2026-11-03");
   assert.deepEqual(used, {
-    day: "2026-11-03", step: 1, used: true, aria: "Nov 3 2026: $1.75",
-    hover: "Nov 3 2026: $1.75, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500",
+    day: "2026-11-03", step: 1, used: true, aria: "2026-11-03: 1.75 USD",
+    hover: "2026-11-03: 1.75 USD, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500",
   });
-  assert.deepEqual(model.days.at(-1).aria, "Nov 8 2026: no price");
+  assert.deepEqual(model.days.at(-1).aria, "2026-11-08: no price");
   assert.equal(model.days.at(-1).step, 0);
-  assert.deepEqual(model.days.at(-2), { day: "2026-11-07", step: 0, used: false, aria: "Nov 7 2026: nothing used",
-                                       hover: "Nov 7 2026: nothing used" });
+  assert.deepEqual(model.days.at(-2), { day: "2026-11-07", step: 0, used: false, aria: "2026-11-07: 0.00 USD",
+                                       hover: "2026-11-07: 0.00 USD" });
   // The table holds the used days, oldest first.
   assert.deepEqual(model.table.columns.map((column) => column.label), ["Day", "Est. cost", "Tokens"]);
   assert.deepEqual(model.table.rows.map((row) => row.cells),
-                   [["Nov 3 2026", "$1.75", "2.10k"], ["Nov 8 2026", "no price", "10"]]);
+                   [["2026-11-03", "$1.75", "2.10k"], ["2026-11-08", "no price", "10"]]);
 });
 
 test("a used day names its classes only when it is in the page's range", () => {
   const rows = [day("2026-11-03", 1.25, { tokens: 2_100, fresh_input: 100, cache_write: 300, cache_read: 1_200, output: 500 })];
   const hover = (range) => heatModel(report(rows), TODAY, range).days.find((item) => item.day === "2026-11-03").hover;
-  assert.equal(hover({ kind: "7d" }), "Nov 3 2026: $1.25, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500");
-  assert.equal(hover({ kind: "today" }), "Nov 3 2026: $1.25, 2.10k tokens");
+  assert.equal(hover({ kind: "7d" }), "2026-11-03: 1.25 USD, 2.10k tokens\nInput 100\nCache create 300\nCache read 1.20k\nOutput 500");
+  assert.equal(hover({ kind: "today" }), "2026-11-03: 1.25 USD, 2.10k tokens");
   assert.equal(hover({ kind: "all" }), hover({ kind: "7d" }));
 });
 

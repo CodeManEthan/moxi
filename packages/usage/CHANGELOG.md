@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The page chart's table lists its periods oldest first, where it listed them newest
+  first, and has the day and a column per part of the chart, with no Total column (the
+  harness's own cost went with it). Its `Not whole` column is as before.
+- The heat map names a day by its date: `2026-11-03: 1.75 USD` for a reader that cannot
+  see its shade, `0.00 USD` for a day nothing was used, and `2026-11-03` in its hover and
+  its table, where it wrote `Nov 3 2026` and `nothing used`.
 - The Sessions table reads 500 sessions at a time (`/api/sessions` takes `top` up to
   500) and reads the next 500 as the rows drawn near the end, or on `Load more`, where it
   read 200 on `Show`. Its rows sit in a box of their own, 40 px each, only those in view
