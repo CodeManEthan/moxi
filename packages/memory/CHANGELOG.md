@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `search_memory` cuts every local path in what it shows to its last segment and every
+  loopback address to `local`, as `read_session` does: sessions' `cut_local` runs inside
+  `chat_redact`, after the whitespace squeeze, for snippets, project labels, notes and
+  the text part. The words must match the text after the cut, so a row whose only match
+  was inside a path is no hit and counts in `hits_dropped`.
+- A source a rebuild or a walk couldn't read because its folder raised (an archive folder
+  offline, a permission or read error) waits on that folder, in a new `waiting` table of
+  the state store (its schema step 3). Every later walk reads it again from its start,
+  whatever its time, until a read reaches its end or the file is gone, so a session a
+  reindex kept without reading gets its rows' writers. A rebuild with a folder that
+  didn't answer lists and reads that harness once more before it decides. The doctor's
+  `index` row and the connector's `search` row count the sessions waiting.
+- The rows with no writer are told apart in the doctor's `index` row and the `search`
+  row: those a `moxi memory reindex` writes again, which alone get that advice, and those
+  of compressed Codex rollouts, which sessions can't read, so no reindex gives them a
+  writer and `search_memory` never finds them.
 - A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
   `search_memory` to the Claude apps. It searches in one reader of the index and returns
   only rows whose writer is the person, the model, or unknown with no tag at the start

@@ -161,8 +161,8 @@ the same for all its tools.
 Every string a read tool returns goes through one chat redaction in moxi-secrets, the
 same call for all six tools. It redacts the raw text with the `credentials`, `broad` and
 `personal-data` sets in a strict mode, removes the control and format characters the
-connector removes, applies the tool's own change to the text (`read_session`'s path cut,
-below), and redacts again, so the last redaction sees exactly the text that goes out. The
+connector removes, applies the tool's own change to the text (the path cut of
+`read_session` and `search_memory`, below), and redacts again, so the last redaction sees exactly the text that goes out. The
 first pass sees the raw text, so an invisible character between a word and a token still
 gives the token its boundary; the second sees the text as sent, so a token that removing a
 character or cutting a path makes whole is judged too. In strict mode no allow mark on
@@ -200,17 +200,23 @@ output wrapper (`<bash-stdout>`, `<task-notification>`, `<system-reminder>` and 
 hook and channel messages, harness-made messages and compaction summaries show as one
 line of kind and size. `search_memory` returns only what `read_session` would show, and no
 mail from other sessions, which memory doesn't store; a row memory stored before it
-recorded writers is never returned until `moxi memory reindex` writes it again.
+recorded writers is never returned until `moxi memory reindex` writes it again, and the
+rows of a Codex rollout that Codex compressed, which sessions can't read, are never
+returned at all.
 
 No full local path leaves through the transcript tools' session fields: `list_sessions`
 and `read_session` give a session's folder as its last segment only. `read_session` also
 cuts every local path in every string it shows (message text, tool-call lines, the title,
 refusal texts) to its last segment, `Read(/home/you/notes/x.md)` showing as `Read(x.md)`,
-and shows each loopback address (`localhost`, `127.0.0.1`, `[::1]`, with any scheme, port
+and `search_memory` cuts the same way every string it shows (snippets, project labels,
+notes), `/home/you/notes/x.md` in a snippet showing as `x.md`. Both show each loopback
+address (`localhost`, `127.0.0.1`, `[::1]`, with any scheme, port
 and path) as `local`. A path counts when it starts at your home folder, `~/`, `$HOME/` or
 one of the system roots (`/home/`, `/tmp/`, `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`,
 `/mnt/`, `/media/`, `/run/`, `/srv/`); sessions' README gives the rule. The cut runs
 between the chat redaction's two passes, like every change a tool makes to a text.
+`search_memory` matches the words against the text after the cut, so a row whose only
+match was inside a path is no hit.
 
 ### What isn't redacted
 
@@ -256,8 +262,8 @@ What the transcript tools leave visible:
 - with `search_memory`'s `results` switch, the stored ends of tool results: file
   contents, command output and fetched pages, redacted, and the largest source of
   hostile text in a session;
-- local paths in `search_memory`'s snippets, as memory stored them, and in `read_session`
-  a path that starts outside the roots above (`/data/x`, a relative path).
+- in `read_session` and `search_memory`, a local path that starts outside the roots
+  above (`/data/x`, a relative path), which neither tool cuts.
 
 memory cuts long rows when it stores them, after redacting them with its own
 `redact.sets`. `search_memory` redacts each row again with the chat sets when it answers,

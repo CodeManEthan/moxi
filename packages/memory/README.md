@@ -137,7 +137,9 @@ it ends it switches to the new index, removes the dropped sessions from the sess
 records how many it dropped and how many it kept, and starts one catch-up walk for what
 was written meanwhile, or the waiting request, which reads everything anyway.
 
-**What a rebuild keeps.** A harness with a folder that didn't answer the rebuild keeps
+**What a rebuild keeps.** A rebuild that finds a folder not answering (an archive folder
+offline, a permission or read error) lists and reads that harness once more before it
+decides. A harness with a folder that still didn't answer keeps
 every session it read no file for: the rebuild copies the session from the index it
 replaces (rows, tails, read positions and secret-path calls), with today's `harnesses`,
 `index.include_subagents`, `redact.sets` and tier sizes applied to what is copied and the
@@ -147,7 +149,18 @@ Codex session found only as compressed rollouts, which sessions lists and doesn'
 counts as found and is copied too. What needs the transcript itself (a larger size, a set
 taken away, a new tier rule) reaches a kept session only at a rebuild that reads it. A
 harness config `harnesses` leaves out keeps its session table rows, and its rows leave the
-index. `--relabel` also derives each session's project
+index.
+
+**Sessions waiting on a folder.** Each source a rebuild or a walk couldn't read because
+its folder raised waits on that folder, recorded in memory's state store. Every later
+walk reads it again from its start, whether or not the file changed, once the folder
+lists again, so a session a rebuild kept without reading it gets its rows written again
+with their writer. A source stops waiting when a read reaches its end, or when its
+folder answers and the file is gone. One that exists and keeps failing waits on, and
+`moxi doctor memory`'s `index` row counts the sessions waiting. A compressed Codex
+rollout never waits: sessions can't read it, at a walk or at a rebuild.
+
+`--relabel` also derives each session's project
 label again from its folder where that folder still exists; a session whose folder is gone
 keeps its label.
 
@@ -522,7 +535,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 
 | row | ok | otherwise |
 |---|---|---|
-| `index` | the generation, schema, tokenizer, `redact version N` (which secrets `redact` stored its rows) and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions, or redacted the index again | `warn` with no index yet, when a rebuild was killed before it finished and none has finished since, or while the redact version is below the installed secrets' (rows stored before may hold secrets today's `redact` catches); `fail` when it can't be read (fix for each: `moxi memory reindex`) |
+| `index` | the generation, schema, tokenizer, `redact version N` (which secrets `redact` stored its rows) and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions, or redacted the index again; and, told apart, the rows with no writer that `moxi memory reindex` writes again, the rows of compressed Codex rollouts, which no reindex gives a writer, and how many sessions wait on a folder that didn't answer, which each walk reads again | `warn` with no index yet, when a rebuild was killed before it finished and none has finished since, or while the redact version is below the installed secrets' (rows stored before may hold secrets today's `redact` catches); `fail` when it can't be read (fix for each: `moxi memory reindex`) |
 | `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet (fix: `moxi memory reindex`), for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
 | `folders` | each folder of each harness as the last run found it, from the index; it tests none itself | `off` with no index; `warn` for a folder that didn't answer the last run (since when and why: offline, failed during the run with its first error's path, or lists nothing, with which of the two facts holds: the sources memory read from it, or when a listing last showed it holding an entry), an archive folder never listed whole, or one the last rebuild didn't read (fix: make it answer, or take it off sessions' config; its sessions then leave at the next `moxi memory reindex`; for an archive folder that lists nothing, take it off sessions' config if you emptied it on purpose), and for a folder walked before that sessions' config no longer names, whose sessions leave at the next rebuild unless another folder holds them (fix: put it back in sessions' config, or let them go) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
@@ -590,13 +603,21 @@ limit.
 `writer`: `person` (typed at the prompt), `model` (the model's own turn or tool call),
 `unknown` (a user message whose harness doesn't say who submitted it), or the kind of
 message something else wrote, such as `summary`. A row stored before memory recorded
-writers has none, and the tool never returns it; while any row has none, the `memory
-search` row of `moxi doctor connector` warns and counts them. One `moxi memory reindex`
-writes every row again with its writer, except the rows of a session the rebuild keeps
-without reading it: those keep no writer, so the chat doesn't find them. For a session
-in a folder that didn't answer, a reindex run while the folder answers gives them one;
-memory never reads a compressed Codex rollout, so its rows never get one. An index from
-before the writer column is migrated the next time memory writes to it, and the tool refuses `index-unreadable` until then.
+writers has none, and the tool never returns it. One `moxi memory reindex` writes every
+row again with its writer, except the rows of a session the rebuild keeps without reading
+it. A session in a folder that didn't answer the reindex (an archive folder offline, a
+read error) waits on that folder: the reindex tries the folder once more before it ends,
+and every later ingest walk reads the session again until it reads cleanly, which gives
+its rows their writer. Until then the chat doesn't find them.
+
+**A compressed Codex rollout is never found.** Codex can compress a rollout to
+`.jsonl.zst`, and sessions can't read that. memory keeps the rows it read before the
+rollout was compressed, but they record no writer, and no reindex or walk can give them
+one, so `search_memory` never finds that session. `moxi memory search` at the machine
+still does.
+
+An index from before the writer column is migrated the next time memory writes to it,
+and the tool refuses `index-unreadable` until then.
 
 **What it returns.** Only what `read_session` would show as text: a row whose writer is
 the person or the model, or `unknown` with a text that opens neither with `<` and a
@@ -626,16 +647,22 @@ past the newest 500 that do, isn't found; `moxi memory search` at the machine fi
 texts cut, redacted only with its own `redact.sets`, so the text within 64 characters of
 a stored cut, widened to the next whitespace, shows as `[REDACTED:cut-edge]`: a secret
 the cut split could leave a part no rule matches. Then the whole text goes through the
-chat redaction, which makes each run of spaces, tabs and newlines one space between its
-two passes, so its last pass sees the text as the snippet shows it: a key and a value
-blank lines apart, which one space would join, are redacted. Then the snippet is taken
-from the redacted text around the words, at most 64 tokens and 300 characters, cut at a
-space, with `…` where it leaves text out and no marks around the words. Nothing else
-changes it.
+chat redaction. Between its two passes it makes each run of spaces, tabs and newlines one
+space, then cuts each local path to its last segment and shows each loopback address as
+`local`, as `read_session` does (sessions' `cut_local`): `/home/you/notes/x.md` shows as
+`x.md`, `http://localhost:8080/api` as `local`. So its last pass sees the text as the
+snippet shows it: a key and a value blank lines apart, which one space would join, are
+redacted. Then the snippet is taken from the redacted text around the words, at most 64
+tokens and 300 characters, cut at a space, with `…` where it leaves text out and no marks
+around the words. Nothing else changes it. The words must match the text after the cut,
+so a row whose only match for a word was inside a path (`zircon` in
+`/home/you/zircon/run.sh`) is dropped, as a row whose word sat only in a redacted value
+is.
 
 **Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
-redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
-snippets, project labels, notes, and an id that isn't in a session id's shape. Session
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode,
+with the path cut between its two passes: snippets, project labels, notes, and an id
+that isn't in a session id's shape. Session
 ids, harness names, kinds, writers, times, counts and flags go as they are. The text part
 joins a hit's project label and snippet into a line, so it goes through `chat_redact`
 again whole: a label such as `keycloak` before `user: <value>` makes a keyed shape that
@@ -654,12 +681,16 @@ says which), `busy`, `timeout`, and `not-started` for a call before the host has
 started the provider, which the host never makes.
 
 **Status.** `moxi connector status` and `moxi doctor connector` show a `memory search`
-row (the index's generation and rows, with a warning while it fills, at an old schema or
-with rows that record no writer, and a failure when it or memory's sets can't be used)
+row (the index's generation and rows, with a warning while it fills, at an old schema,
+with rows that record no writer that `moxi memory reindex` would give one, which it
+advises, or with sessions waiting on a folder that didn't answer, which it says each
+walk reads again; the rows of compressed Codex rollouts are counted on a line of their
+own that warns of nothing and advises no reindex, since none would help; and a failure
+when the index or memory's sets can't be used)
 and a `memory redaction` row (whether the chat sets load, and secrets' engine).
 
 **The call log** records `words` (how many), `hits`, `hits_dropped` (rows whose words
-matched only text the redaction hid), `unscanned`, `redactions`, `cut` and `refusal`. It
+matched only text the redaction hid or a path the cut shortened), `unscanned`, `redactions`, `cut` and `refusal`. It
 never holds the words searched for, text read or a session id.
 
 What a chat that reads this tool can do with what it read, and what redaction doesn't

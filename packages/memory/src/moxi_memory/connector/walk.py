@@ -25,14 +25,17 @@ full or `deadline` passes, when the walk stops, ranks what it kept and says `cut
 
 1. The text within `rows.EDGE_CHARS` of a stored cut, widened to whitespace, becomes
    `CUT_EDGE` (`rows.hide_cut_edges`).
-2. The chat redaction runs over the whole result, with each whitespace run made one
-   space between its two passes (`squeeze`), so its last pass sees the text exactly as
-   a snippet shows it. A text it couldn't scan drops the row.
+2. The chat redaction runs over the whole result, with its step between the two passes
+   (`snippet_between`) making each whitespace run one space and then cutting each local
+   path to its last segment and each loopback origin to `local` (sessions' `cut_local`),
+   so its last pass sees the text exactly as a snippet shows it. A text it couldn't scan
+   drops the row.
 3. The redacted text goes into an in-memory FTS5 table with memory's tokenizer, and the
    snippet is FTS5's `snippet()` of it for the words, with no match marks, `…` at a cut
    edge and at most `SNIPPET_TOKENS` tokens, then cut to `SNIPPET_CHARS` at a space.
    Nothing but those cuts changes the redacted text.
-4. A row whose redacted text doesn't match as its window needs is dropped. The count of
+4. A row whose redacted text doesn't match as its window needs is dropped, so a row
+   whose words matched only inside a hidden span or a cut path is dropped. The count of
    dropped rows goes to the call log only.
 
 The rows kept are ranked by bm25 over their redacted text, in a table holding only them,
@@ -149,6 +152,20 @@ def match_every(tokens: tuple[str, ...]) -> str:
 def squeeze(text: str) -> str:
     """`text` with each whitespace run made one space and none at either end."""
     return " ".join(text.split())
+
+
+def path_cut(sessions: Any, env: Mapping[str, str] | None) -> Callable[[str], str]:
+    """sessions' `cut_local` with the home folder `env` names: each loopback origin made
+    `local` and each local path cut to its last segment. Every string `search_memory`
+    shows passes it as the chat redaction's step between its two passes."""
+    return lambda text: sessions.cut_local(text, env)
+
+
+def snippet_between(sessions: Any, env: Mapping[str, str] | None) -> Callable[[str], str]:
+    """The chat redaction's step between its passes for a row: `squeeze`, then
+    `path_cut`."""
+    cut = path_cut(sessions, env)
+    return lambda text: cut(squeeze(text))
 
 
 def cut_snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
@@ -289,9 +306,10 @@ class _Probe:
 
 class _Walk:
     def __init__(self, query: Query, redact: Callable[..., str], deadline: float,
-                 clock: Callable[[], float]):
+                 clock: Callable[[], float], between: Callable[[str], str]):
         self.query = query
         self.redact = redact
+        self.between = between
         self.deadline = deadline
         self.clock = clock
         self.read: dict[tuple[str, int], _Read | None] = {}
@@ -304,7 +322,7 @@ class _Walk:
         if key in self.read:
             return self.read[key]
         text = rows.hide_cut_edges(cand.text, CUT_EDGE)
-        clean = self.redact(text, between=squeeze)
+        clean = self.redact(text, between=self.between)
         if clean == UNSCANNED and text != UNSCANNED:
             self.unscanned += 1
             got = None
@@ -372,7 +390,8 @@ def walk(query: Query, *, redact: Callable[[str], str], deadline: float, session
          env: Mapping[str, str] | None = None,
          clock: Callable[[], float] = time.monotonic) -> Walked:
     """Search memory's index for `query`, in one reader, redacting with `redact`;
-    `deadline` is on `clock`'s scale. `sessions` is sessions' API at interface 7.
+    `deadline` is on `clock`'s scale. `sessions` is sessions' API at interface 7, and
+    `env` names the home folder its path cut reads.
 
     Raises `IndexMissing` with no index, `IndexUnreadable` for one that can't be read,
     `SchemaTooOld` (an `IndexUnreadable`) for a generation whose rows record no writer,
@@ -401,7 +420,8 @@ def walk(query: Query, *, redact: Callable[[str], str], deadline: float, session
                 every, any_word = match_every(query.tokens), search.match(query.tokens)
                 probe = _Probe(every, any_word)
                 try:
-                    job = _Walk(query, redact, deadline, clock)
+                    job = _Walk(query, redact, deadline, clock,
+                                snippet_between(sessions, env))
                     job.window(conn, every, filters, hidden, probe, every=True)
                     if len(query.tokens) > 1 and not job.cut:
                         job.window(conn, any_word, filters, hidden, probe, every=False)
@@ -418,4 +438,5 @@ def walk(query: Query, *, redact: Callable[[str], str], deadline: float, session
 
 
 __all__ = ["CUT_EDGE", "SHOWN_WRITERS", "WINDOW", "Found", "Query", "SchemaTooOld",
-           "Walked", "cut_snippet", "match_every", "walk"]
+           "Walked", "cut_snippet", "match_every", "path_cut", "snippet_between",
+           "squeeze", "walk"]

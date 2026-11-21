@@ -7,9 +7,11 @@
   before it finished and none has finished since, and while the redact version is below
   the installed secrets' (rows stored before may hold secrets today's `redact` catches,
   until `moxi memory reindex` redacts them again). It says how many rows record no
-  writer (stored before rows recorded one, or a generation at schema 1 that memory's
-  next write brings up to date); the chat's `search_memory` leaves those out until
-  `moxi memory reindex` reads them again.
+  writer, told apart: those stored before rows recorded one, which `moxi memory
+  reindex` reads again (or a generation at schema 1 that memory's next write brings up
+  to date); those of compressed Codex rollouts, which no reindex reads; and how many
+  sessions wait on a folder that didn't answer, which each walk reads again. The chat's
+  `search_memory` leaves out every row with no writer.
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
   same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
   can't read, and a request waiting for the writer lock. A request queued behind a
@@ -82,7 +84,10 @@ def _plural(n: int, word: str) -> str:
 # -- index ------------------------------------------------------------------------------
 
 def _index() -> Row:
-    from . import index
+    import sqlite3
+
+    from . import index, ingest
+    from . import state as state_mod
     from .ingest import REPLACED_KEY
 
     try:
@@ -103,7 +108,13 @@ def _index() -> Row:
         kept = index.meta_get(conn, "kept")
         replaced = index.meta_get(conn, REPLACED_KEY)
         stored = index.stored_redact_version(conn)
-        unwritten = index.rows_without_writer(conn)
+        try:     # a state store that can't be read is the sessions row's to say
+            alias = ("st" if r.attach_state("st") and state_mod.has_waiting(conn, "st")
+                     else None)
+        except sqlite3.DatabaseError:
+            alias = None
+        unwritten = ingest.writerless(conn, alias)
+        waiting = state_mod.waiting_sessions(conn, alias) if alias else 0
         generation = r.generation
     parts = [f"generation {generation}", f"schema {schema}", f"tokenizer {tokenizer}",
              f"redact version {stored}", f"{tiers} messages and calls",
@@ -119,9 +130,18 @@ def _index() -> Row:
         state = "warn"
     if unwritten is None:
         parts.append("its rows record no writer until memory next writes to the index")
-    elif unwritten:
-        parts.append(f"{_plural(unwritten, 'row')} stored before rows recorded their "
-                     f"writer, left out of the chat's search until `{REINDEX}`")
+    else:
+        if unwritten.fixable:
+            parts.append(f"{_plural(unwritten.fixable, 'row')} stored before rows "
+                         "recorded their writer, left out of the chat's search until "
+                         f"`{REINDEX}`")
+        if unwritten.compressed:
+            parts.append(f"{_plural(unwritten.compressed, 'row')} of compressed Codex "
+                         "rollouts, which sessions can't read: no reindex gives them a "
+                         "writer, so the chat's search never finds them")
+    if waiting:
+        parts.append(f"{_plural(waiting, 'session')} waiting on a folder that didn't "
+                     "answer: each walk reads them again until they read cleanly")
     if filling:
         parts.append("still filling: the first full read hasn't finished")
     running = index.rebuild_running()

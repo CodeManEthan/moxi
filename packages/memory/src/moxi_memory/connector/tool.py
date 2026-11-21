@@ -4,7 +4,9 @@ The work runs off the event loop under the provider's `Limit`. It opens a redact
 first (`redaction.Gate`), refuses `redaction-off` when memory's `redact.sets` lacks a
 set its stored cuts rely on, and searches with `walk.walk`. Every string the answer holds
 goes through the chat redaction but session and agent ids that pass sessions'
-`SAFE_ID_RE`, harness names, kinds, writers, times, counts and flags. The text part
+`SAFE_ID_RE`, harness names, kinds, writers, times, counts and flags, and each such
+redaction cuts every local path to its last segment and every loopback origin to `local`
+between its two passes (`walk.path_cut`). The text part
 opens with a line naming its source as data, not instructions. It joins pieces redacted
 apart (a project label, a snippet) into lines, so the whole text part is redacted again
 as it is sent: a label and a snippet joined can make a keyed shape neither held.
@@ -215,8 +217,9 @@ class Searcher:
             return refuse("index-unreadable", TOO_OLD)
         except index.IndexUnreadable:
             return refuse("index-unreadable", UNREADABLE)
-        hits = [self._hit(found, redact, sessions) for found in walked.hits]
-        notes = [redact(note) for note in walked.notes]
+        path_cut = walk.path_cut(sessions, env)
+        hits = [self._hit(found, redact, sessions, path_cut) for found in walked.hits]
+        notes = [redact(note, between=path_cut) for note in walked.notes]
         logged.update(hits=len(hits), hits_dropped=walked.dropped,
                       unscanned=walked.unscanned, redactions=redact.redactions,
                       cut=walked.cut)
@@ -231,7 +234,7 @@ class Searcher:
         if walked.cut:
             lines.append("The search stopped at its time limit; there may be more.")
         lines.extend(notes)
-        text = redact("\n".join(lines))
+        text = redact("\n".join(lines), between=path_cut)
         if text == UNSCANNED:
             text = f"{SOURCE_LINE}\n{UNSCANNED_TEXT}"
         return self.result(text=text,
@@ -239,17 +242,19 @@ class Searcher:
                                        "cut": walked.cut}), logged
 
     @staticmethod
-    def _hit(found: walk.Found, redact: Redactor, sessions: Any) -> dict[str, Any]:
+    def _hit(found: walk.Found, redact: Redactor, sessions: Any,
+             path_cut: Callable[[str], str]) -> dict[str, Any]:
         safe = sessions.claude.SAFE_ID_RE
 
         def ident(value: str | None) -> str | None:
             if value is None:
                 return None
-            return value if safe.match(value) else redact(value)
+            return value if safe.match(value) else redact(value, between=path_cut)
 
         return {"session": ident(found.session_id), "agent": ident(found.agent_id),
                 "harness": found.harness, "at": utc(found.time),
-                "project": None if found.label is None else redact(found.label),
+                "project": None if found.label is None else redact(found.label,
+                                                                     between=path_cut),
                 "kind": found.kind, "writer": found.writer, "failed": found.failed,
                 "snippet": found.snippet, "_time": found.time}
 
