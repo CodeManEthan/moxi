@@ -671,7 +671,7 @@ offer it reads as absent.
 
 ## Interfaces
 
-`moxi_sessions.api` offers interfaces 2 to 6. Interface 3 is interface 2 plus
+`moxi_sessions.api` offers interfaces 2 to 7. Interface 3 is interface 2 plus
 `retention()` and `Retention`; a module that calls them loads sessions with
 `interface=3`. Interface 4 is interface 3 plus the list's reads: `sessions_list`,
 `sessions_more`, `sessions_newest`, `session_dirs` and `session_opened`; a module
@@ -680,8 +680,23 @@ that calls them loads sessions with `interface=4`. Interface 5 is interface 4 pl
 is interface 5 plus the archive folders: `corpus`, `find`'s `include_archives`,
 `Found.unknown`, a listing's `is_archive`, `absent`, `empty` and `shadowed`,
 `archive_dirs`, `archive_answers`, `ArchiveAnswer`, and `Retention`'s `archive_dirs`; a
-module that calls them loads sessions with `interface=6`. Every call of interface 5
-behaves as it did.
+module that calls them loads sessions with `interface=6`. Interface 7 is interface 6
+plus who wrote a message and what it opens with: `writer`, `WRITERS`, `OPENING`,
+`opening`, `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`; a module that
+calls them loads sessions with `interface=7`. Every call of interface 6 behaves as it
+did.
+
+`writer(record)` names who a message or tool call's harness says wrote it, from the
+record's role, `injected`, `origin_kind` and flags, never its text: `person` (typed at
+the prompt), `model` (the model's own turn or call), `peer` and `coordinator` (mail
+another agent's session sent, named only by the line's own `origin` object), `unknown`
+(a user message whose submitter the harness doesn't say), or the kind of a message
+something else wrote: `channel`, `hook`, `task`, `harness` or `summary`. `OPENING` is the
+characters every test of what a message opens with skips first (U+0000 to U+0020,
+U+007F to U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and
+every Cf character), and `opening(text)` drops them from a text's front. Claude Code's
+and Codex's wrapper tests skip exactly that set, so a wrapper after a zero-width space or
+a no-break space still marks a message injected.
 
 ## License
 

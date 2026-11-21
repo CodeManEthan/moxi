@@ -176,6 +176,9 @@ class Message(Record):
     requested model where the harness writes one. `flags` holds the harness's own
     booleans on the line, verbatim (`isMeta`, `isCompactSummary`, `isApiErrorMessage`,
     OpenCode's `summary`). `origin` is where the harness says the message came from.
+`origin_kind` is the kind the line's own `origin` object names, None when the line holds
+no such object; unknown on a harness that writes none (Codex, OpenCode). Unlike `origin`,
+it never falls back to another field.
 
     `injected` says whether something other than the person at the session's prompt
     submitted the message: the harness, a plugin, a channel, a peer session or a
@@ -198,6 +201,7 @@ class Message(Record):
     model: Any = UNKNOWN
     flags: Mapping[str, Any] = field(default_factory=dict)
     origin: Any = UNKNOWN
+    origin_kind: Any = UNKNOWN
     synthetic: Any = UNKNOWN
     injected: Any = UNKNOWN
 

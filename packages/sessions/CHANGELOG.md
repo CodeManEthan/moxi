@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Interface 7: `writer(record)`, who a message's harness says wrote it, and `OPENING`
+  with `opening(text)`, the characters every test of what a message opens with skips
+  first, with `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`. A message
+  record gains `origin_kind`, the kind its line's own `origin` object names (None when it
+  has none), which never falls back to `userType`. Claude Code's and Codex's wrapper tests
+  skip the opening set rather than `str.lstrip()`'s, so a wrapper after a zero-width or
+  other format character now marks the message injected too.
 - `read` and `list --text` redact a secret beside a `gitleaks:allow` mark or on a line a
   rule's allowlist names, and a token an invisible character splits, through secrets'
   `redact`, which no longer keeps either. sessions' code is unchanged; tests pin it.

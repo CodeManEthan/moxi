@@ -1,9 +1,10 @@
 """The announcement of Moxi's sessions module, which moxi.modules reads.
 
-It offers interfaces 2 to 6, the read API in `moxi_sessions.api` (interface 3 is 2
+It offers interfaces 2 to 7, the read API in `moxi_sessions.api` (interface 3 is 2
 plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`;
 interface 5 is 4 plus `session_facts`, which names sessions asked for by key; interface 6
-is 5 plus the archive folders, `corpus` and `find`'s `include_archives`), the verb
+is 5 plus the archive folders, `corpus` and `find`'s `include_archives`; interface 7 is 6
+plus `writer`, who wrote a message, and `opening`, what it opens with), the verb
 `moxi sessions`, a setup that prints how long each harness keeps its transcripts, and,
 with the `ui` extra, a page in the browser UI shell that lists the sessions and shows one
 session's last turns, and a block other pages may place for that view. With the
@@ -14,7 +15,7 @@ sessions into projects, and the `project-facts` component reports them on the Pr
 page.
 """
 
-INTERFACES = frozenset({2, 3, 4, 5, 6})
+INTERFACES = frozenset({2, 3, 4, 5, 6, 7})
 API = "moxi_sessions.api"
 CLI = "moxi_sessions.cli:main"
 SUMMARY = ("Read each harness's own session records in one shape: find a session and its "
