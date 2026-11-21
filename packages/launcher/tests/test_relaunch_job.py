@@ -439,6 +439,49 @@ def test_copy_mode_or_a_client_at_the_dialog_still_holds(conn, then):
     assert "answer" not in slots_api.names()
 
 
+class RedrawingSlots(FakeSlots):
+    """Slots whose pane shows output at every read, as tmux's window activity does while
+    Claude Code redraws its spinner and status line; `client_activity` is the attached
+    client's, None when no client is attached."""
+
+    def __init__(self, client_activity=None, **kw):
+        super().__init__(**kw)
+        self.client_activity = client_activity
+        self.uses = 0
+
+    def pane_use(self, slot):
+        self.uses += 1
+        return SimpleNamespace(pane_id="%9", pane_in_mode=False,
+                               client_activity=self.client_activity,
+                               pane_activity=time.time())
+
+
+def test_a_self_run_fires_while_the_pane_redraws(conn, monkeypatch):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    slots_api = RedrawingSlots(ended=True)
+    got = go(conn, arm(conn), slots_api=slots_api, settings={"relaunch.wait_s": 2})
+    assert got.outcome == "relaunched" and got.session.commands == [("exit", 4)]
+    assert "wait" not in got.events and "exit" in got.events
+    assert slots_api.uses >= 1
+
+
+def test_output_before_the_exit_is_not_a_person_at_the_dialog(conn):
+    pane = SimpleNamespace(pane_id="%9", pane_in_mode=False, client_activity=None,
+                           pane_activity=time.time() - 5)
+    slots_api = FakeSlots(ended=False, pane=pane)
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "relaunched"
+    assert ("answer", "3", 0) in slots_api.calls
+
+
+def test_a_client_at_a_redrawing_dialog_holds(conn):
+    slots_api = RedrawingSlots(client_activity=time.time() + 3600, ended=False)
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "exit-pending" and got.run.word == "person"
+    assert "a client was active" in got.run.detail
+    assert "answer" not in slots_api.names()
+
+
 def test_turns_gone_at_the_dialog_leaves_the_pane_check(conn):
     session = FakeSession(facts_seq=[RuntimeError("gone")])
     got = go(conn, arm(conn, mode="director"), session=session,
