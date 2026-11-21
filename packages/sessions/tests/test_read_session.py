@@ -444,6 +444,41 @@ def test_an_agent_id_beside_the_title_is_redacted_as_the_header_line(transcript,
     assert PLAIN_TITLE not in header and "[REDACTED:" in header
 
 
+def test_an_opencode_subagent_s_subagent_opens_from_the_main_session(db):
+    """search_memory names a nested subagent's hit by its main session and its own id;
+    OpenCode lists a session's direct children only, so the read looks down the tree."""
+    main = db.session()
+    main.user("start")
+    child = main.child(title="the child")
+    child.user("dig")
+    grandchild = child.child(title="the grandchild")
+    grandchild.user("deep words")
+    result, _ = read(Source("opencode", str(db.write()), main.id), agent=grandchild.id)
+    assert result.structured["agent"] == grandchild.id
+    assert [row["text"] for row in messages_shown(result)] == ["deep words"]
+
+
+CHILD_THREAD = "0190a000-0000-7000-8000-000000000002"
+GRANDCHILD_THREAD = "0190a000-0000-7000-8000-000000000003"
+
+
+def test_a_codex_subagent_s_subagent_opens_from_the_main_session(rollout):
+    rollout.turn()
+    rollout.user("start")
+    child = rollout.spawn(CHILD_THREAD, "explore")
+    child.turn()
+    grandchild = child.spawn(GRANDCHILD_THREAD, "look")
+    grandchild.turn()
+    grandchild.user("deep words")
+    child.write()
+    grandchild.write()
+    result, _ = read(codex_source(rollout), agent=GRANDCHILD_THREAD)
+    assert result.structured["agent"] == GRANDCHILD_THREAD
+    assert [row["text"] for row in messages_shown(result)] == ["deep words"]
+    missing, _ = read(codex_source(rollout), agent="0190a000-0000-7000-8000-000000000009")
+    assert missing.refusal == "unknown-agent"
+
+
 def test_an_agent_the_listing_doesnt_hold_is_refused(transcript):
     transcript.user("go", origin="human")
     transcript.subagent("a0190b0000000001").user("hi")
@@ -689,6 +724,52 @@ def test_an_unreadable_subagent_listing_outside_the_roots_shows_no_full_path():
     assert result.refusal == "unreadable"
     assert result.text.endswith("listed: subagents cannot be listed: permission denied")
     assert "/data" not in result.text
+
+
+def test_a_nested_listing_that_cant_be_read_refuses_unreadable_when_the_agent_isnt_found():
+    """A subagent's own listing that can't be read may hold the agent asked for, so a
+    search that finds it nowhere else says so rather than that there's no such agent."""
+    from moxi_sessions.find import LISTED, UNREADABLE, Subagent, SubagentListing
+
+    source = Source("opencode", f"{DATA}/opencode.db", "ses_main")
+    child = Subagent("ses_child", Source("opencode", f"{DATA}/opencode.db", "ses_child"))
+    asked = []
+
+    def listing(place):
+        asked.append(place)
+        if place is source:
+            return SubagentListing(place, LISTED, entries=(child,))
+        return SubagentListing(child.source, UNREADABLE,
+                               f"{DATA}/opencode.db cannot be read: database is locked")
+
+    _, provider = connector.build(locate=located(source), subagents=listing)
+    tool = next(t for t in provider.tools if t.name == "read_session")
+    result = asyncio.run(tool.call({"session": "ses_main", "agent": "ses_grandchild"},
+                                   Ctx()))
+    assert asked == [source, child]
+    assert result.refusal == "unreadable"
+    assert result.text == ("A subagent's own subagents can't be listed: opencode.db "
+                           "cannot be read: database is locked")
+
+
+def test_a_search_for_an_agent_reads_a_bounded_number_of_listings():
+    from moxi_sessions.find import LISTED, Subagent, SubagentListing
+
+    source = Source("opencode", f"{DATA}/opencode.db", "ses_main")
+    asked = []
+
+    def listing(place):
+        """Each session has one child of a new id: a tree with no end."""
+        asked.append(place)
+        n = len(asked)
+        entry = Subagent(f"ses_{n}", Source("opencode", f"{DATA}/opencode.db", f"ses_{n}"))
+        return SubagentListing(source, LISTED, entries=(entry,))
+
+    _, provider = connector.build(locate=located(source), subagents=listing)
+    tool = next(t for t in provider.tools if t.name == "read_session")
+    result = asyncio.run(tool.call({"session": "ses_main", "agent": "ses_none"}, Ctx()))
+    assert result.refusal == "unknown-agent"
+    assert len(asked) == reading.LISTINGS_MAX
 
 
 def test_an_archive_dir_outside_the_roots_shows_no_full_path():

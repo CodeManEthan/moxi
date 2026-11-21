@@ -668,8 +668,10 @@ path. Roots that couldn't be listed are named in `unlisted`, by their last part 
 
 **`read_session`** reads part of one session's transcript. Inputs: `session` (required),
 `harness` (needed only when more than one harness holds the id), `agent` (a subagent's
-id, to read that subagent's own transcript), `around` (an ISO 8601 time or epoch seconds;
-left out, the last turns), `turns` (1 to 10, default 3) and `thoughts` (default false).
+id at any depth, as `search_memory` gives it, to read that subagent's own transcript; a
+Codex or OpenCode subagent's subagent is found down the session's tree), `around` (an
+ISO 8601 time or epoch seconds; left out, the last turns), `turns` (1 to 10, default 3)
+and `thoughts` (default false).
 It finds a session as `moxi sessions read` does, archive folders included, and reads the
 records, since only a record says who wrote a message (`writer`, under Interfaces):
 
