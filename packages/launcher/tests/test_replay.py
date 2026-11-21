@@ -744,3 +744,17 @@ def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
                                    hold="run1", respawn=True))
     assert (got.state, got.reason) == ("failed", "live-pane")
     assert row("r2").state == "failed"
+
+
+def test_a_relaunched_row_keeps_recycle_at_limit_relaunch(work, harness, no_exec,
+                                                          monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(request(work))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    replayed = api._replayed(ReplayRequest(
+        dataclasses.replace(old, target="slot", values_json=json.dumps(stored)),
+        relaunch_of="r1", request_id="r2", actor="ann"))
+    assert replayed.values["recycle_at_limit"] == "relaunch"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)

@@ -551,7 +551,7 @@ def limit(conn, value):
 def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(), pid=os.getpid())
-    assert line == recycle.RELAUNCH_LINE and "relaunch --self --handoff" in line
+    assert line == recycle.relaunch_line("1x") and "relaunch --self --handoff" in line
     [told] = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
     assert told.detail["crossing_key"] == f"{SID}|1x|2026-10-31T10:00:00Z"
     assert store.runs(conn, request_id="r1") == []
@@ -632,10 +632,25 @@ def through_usage(group, at):
     return group.mark.run_handlers(crossing, wait=5.0)
 
 
+def test_the_relaunch_line_says_the_launch_lets_the_agent_recycle_at_the_mark(conn):
+    limit(conn, "relaunch")
+    line = recycle.crossing_line(conn, crossing(mark="1.5x"), pid=os.getpid())
+    assert line.startswith("This launch lets you recycle yourself, now that its context "
+                           "has passed the 1.5x mark.")
+    assert "start nothing new" in line and "as your last act" in line
+    assert "don't recycle at the end of a task" in line
+    assert "background shells" not in line
+
+
+def test_a_crossing_with_no_mark_gets_the_line_without_its_clause():
+    assert recycle.relaunch_line(None).startswith(
+        "This launch lets you recycle yourself. Only if you are mid-work")
+
+
 def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
     limit(usage_group.conn, "relaunch")
-    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
-    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    assert recycle.relaunch_line("1x") in through_usage(usage_group, 1761904800.0)
+    assert recycle.relaunch_line("1x") not in through_usage(usage_group, 1761904800.0)
     told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
     assert len(told) == 1
 
@@ -824,7 +839,7 @@ def test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked(conn, tmp_p
     lock_conn = store.connect(tmp_path / "launcher.db")
     lock_conn.execute("BEGIN IMMEDIATE")
     try:
-        assert recycle.on_crossing(crossing()) == recycle.RELAUNCH_LINE
+        assert recycle.on_crossing(crossing()) == recycle.relaunch_line("1x")
     finally:
         lock_conn.execute("ROLLBACK")
         lock_conn.close()

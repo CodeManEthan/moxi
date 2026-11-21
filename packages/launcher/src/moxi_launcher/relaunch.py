@@ -8,7 +8,9 @@
 Relaunch is offered with turns and slots installed and slots running here; the session
 must be a slot launch, claimed, live, on a harness whose turns session offers `exit`.
 comms is optional: without it there is no director mode, no name to wait for and no
-notices. No launch option gates the verb.
+notices. A self arm needs a launch made with `--recycle-at-limit relaunch`: a launch that
+recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too. A
+director's call and a repair need no such launch.
 
 Each verb refuses (exit 3) with nothing written until its last step, which writes the run
 (`runs`, one open run per launch, so a second arm or call loses at insert, naming the
@@ -120,6 +122,7 @@ def arm_self(handoff: str, *, dry_run: bool = False,
         try:
             api = offered(found, slots_api)
             row, sid = found.row, found.session_id
+            may_recycle(row)
             _no_open_run(c, row, api)
             path = check_handoff(handoff, c, row, sid)
             number = _no_live_agents(found.session)
@@ -145,6 +148,22 @@ def arm_self(handoff: str, *, dry_run: bool = False,
                           {**data, "run_id": run.run_id, "outcome": "armed"})
         finally:
             found.close()
+
+
+def may_recycle(row: store.LaunchRow) -> None:
+    """Refuse `no-self-recycle` unless the launch was made with `--recycle-at-limit
+    relaunch`, the option that lets its session recycle itself."""
+    value = row.values.get("recycle_at_limit")
+    if value == "relaunch":
+        return
+    hint = ("finish the work and stop; a launch with --recycle-at-limit relaunch can "
+            "recycle itself")
+    if value == "compact":
+        raise Refused("no-self-recycle", f"launch {row.request_id} recycles at its limit by "
+                                         "compacting, so it can't relaunch itself", hint)
+    raise Refused("no-self-recycle", f"launch {row.request_id} was started without "
+                                     "--recycle-at-limit relaunch, so it can't recycle "
+                                     "itself", hint)
 
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
@@ -657,5 +676,5 @@ def _span(seconds: float) -> str:
 
 __all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "Refused", "Result",
            "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
-           "is_director", "job_argv", "offered", "outcome_result", "run_line", "start_job",
-           "status"]
+           "is_director", "job_argv", "may_recycle", "offered", "outcome_result", "run_line",
+           "start_job", "status"]

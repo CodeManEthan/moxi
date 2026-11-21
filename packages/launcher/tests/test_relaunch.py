@@ -4,6 +4,7 @@ does not start, the director's held call, following a run, status, and repair.""
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -182,11 +183,14 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope=None,
-             directors=("boss",), relaunch_of=None, base_env=None):
+             directors=("boss",), relaunch_of=None, base_env=None, recycle="relaunch"):
+    values = {"model": "opus", "director": list(directors)}
+    if recycle is not None:
+        values["recycle_at_limit"] = recycle
     store.insert(conn, request_id=request_id, by="ann", harness="claude",
                  base_env=base_env,
                  target=target_name, cwd="/work",
-                 values={"model": "opus", "director": list(directors)}, argv=["claude"],
+                 values=values, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
                  slot="3" if target_name == "slot" else None, identity="planner",
                  scope=scope, relaunch_of=relaunch_of)
@@ -301,6 +305,52 @@ def test_a_dry_run_arm_writes_nothing(conn, tmp_path):
     assert result.exit_code == 0 and result.data["outcome"] == "dry-run"
     assert "would arm a relaunch of session" in result.lines[0]
     nothing_written(conn, slots_api)
+
+
+# -- the self-recycle gate ----------------------------------------------------------------
+
+
+def unset_recycle(conn, value):
+    row = store.get(conn, "r1")
+    values = {k: v for k, v in row.values.items() if k != "recycle_at_limit"}
+    if value is not None:
+        values["recycle_at_limit"] = value
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+
+
+@pytest.mark.parametrize("value, words", [
+    (None, "launch r1 was started without --recycle-at-limit relaunch, so it can't recycle "
+           "itself"),
+    ("off", "launch r1 was started without --recycle-at-limit relaunch, so it can't recycle "
+            "itself"),
+    ("compact", "launch r1 recycles at its limit by compacting, so it can't relaunch "
+                "itself")])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_launch_without_recycle_at_limit_relaunch_refuses_the_self_arm(
+        conn, tmp_path, value, words, dry_run):
+    unset_recycle(conn, value)
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as refused:
+        arm(conn, handoff(tmp_path), slots_api=slots_api, dry_run=dry_run)
+    assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
+    assert refused.value.problem == words
+    assert "--recycle-at-limit relaunch can recycle itself" in refused.value.hint
+    nothing_written(conn, slots_api)
+
+
+def test_a_slot_check_comes_before_the_self_recycle_gate(tmp_path):
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, target_name="terminal", recycle=None)
+    with pytest.raises(relaunch.Refused) as refused:
+        arm(conn, handoff(tmp_path))
+    assert refused.value.code == "not-slot"
+
+
+def test_a_directors_call_needs_no_self_recycle(conn):
+    unset_recycle(conn, None)
+    result = call(conn, follow=False)
+    assert result.data["outcome"] == "started"
 
 
 # -- the handoff --------------------------------------------------------------------------
