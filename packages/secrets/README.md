@@ -98,12 +98,14 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   in text that holds a string inside a string, as a JSON tool call holds a command's
   quoted argument, the backslash of `\"` stands where the rule wants the quote and the
   key goes unfound. A text holding a run of backslashes directly before a quote (`\"`,
-  `\\\"` a level deeper, `\'`) is also scanned as a copy without those runs: the same
-  copy that leaves out the invisible characters, so a text holding both gets one copy,
-  not one for each. A hit maps back to the key alone, and `redact` leaves the
-  backslashes and quotes around its placeholder. A backslash before anything else
-  (`\n`, `\\`) is read as it stands. `seen_through` doesn't name the backslash, since
-  whether the scan reads past one depends on what follows it.
+  `\\\"` a level deeper, `\'`) is also scanned as a copy without those runs, the same
+  copy that leaves out the invisible characters. A text holding both is scanned once
+  more, as a copy without the invisible characters alone, so no hit that copy finds is
+  lost to a rule that needs a boundary character the removed backslash gave. A hit maps
+  back to the key alone, and `redact` leaves the backslashes and quotes around its
+  placeholder. A backslash before anything else (`\n`, `\\`) is read as it stands.
+  `seen_through` doesn't name the backslash, since whether the scan reads past one
+  depends on what follows it.
 - `redact(text, sets, ...)` replaces each hit with `[REDACTED:<rule id>]`, a split token
   with the characters inside it; a split token at the very start or end of the text
   takes in the invisible characters before or after it. Its result scans clean with the
@@ -111,14 +113,14 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   changes nothing. Text outside hits comes back character for character,
   `surrogateescape` bytes and invisible characters included.
 - `REDACT_VERSION` says which `redact` this is: 3, which reads past an escaped quote, as
-  2 before it read past invisible characters and let no mark keep a secret. It rises with a release in which
-  `redact`, with its default keywords, redacts in some text a span the release before
-  returned whole because of how it reads text: a suppression it stops applying,
-  characters it newly reads past. A change of rule data alone (a rule, regex, keyword,
-  allowlist or stopword, a gitleaks bump among them) leaves it as it is. A store of
-  redacted text can record it: moxi memory does, and its doctor asks for a `moxi memory
-  reindex` once the version rises. Text stored earlier meets a rise, or a new rule, only
-  when someone runs that reindex.
+  2 before it read past invisible characters and let no mark keep a secret. It rises with
+  a release in which `redact`, with its default keywords, redacts in some text a span the
+  release before returned whole because of how it reads text: a suppression it stops
+  applying, characters it newly reads past. A change of rule data alone (a rule, regex,
+  keyword, allowlist or stopword, a gitleaks bump among them) leaves it as it is. A store
+  of redacted text can record it: moxi memory does, and its doctor asks for a `moxi
+  memory reindex` once the version rises. Text stored earlier meets a rise, or a new
+  rule, only when someone runs that reindex.
 - `seen_through(c)` says whether `scan` and `redact` read past the character `c`: the
   invisible characters above. A store that trims stored text by counting characters can
   count past the same ones.

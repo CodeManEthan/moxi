@@ -733,7 +733,10 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     """The hits of `text` and of a copy of it without its see-through characters and
     without each run of backslashes directly before a quote (`_ESCAPE`), the copy's
     mapped back to `text`, sorted by start. One copy removes both kinds; there is none
-    when `text` holds neither. When `text` holds a see-through character a rule may read
+    when `text` holds neither. A text holding both is also scanned as a copy without
+    its see-through characters alone, so the copy finds every hit it found before
+    escapes were removed: a rule that takes a boundary character on each side can lose
+    a run to the run before it once a backslash between them is gone. When `text` holds a see-through character a rule may read
     as whitespace (`_SPACED_RX`), or a run of see-through characters just before a
     rule's keyword, a third copy (`_spaced_copy`) holds a space for each of those and
     none of the others, so a boundary one gave, or the boundary a word needs from the
@@ -769,19 +772,24 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     if escaped:
         parts.append(_ESCAPE)
     rx = re.compile("|".join(parts))
-    bases = [text]
+    bases = [(text, rx)]
     if chars:
         spaced = _spaced_copy(text, rx, names)
         if spaced is not None:
-            bases.append(spaced)
+            bases.append((spaced, rx))
+        if escaped:
+            # The see-through characters alone: a rule that takes a boundary character
+            # on each side can find in it a run the escape's removal joins to another.
+            bases.append((text, re.compile(parts[0])))
     spans = {(h.set, h.rule, h.start, h.end) for h in hits}
     by_secret: dict = {}
     for h in hits:
         by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))
     out = list(hits)
-    for base in bases:
+    for base, removed in bases:
         taken = []
-        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked):
+        for h in _copy_hits(base, removed, names, path, allow, known,
+                            keep_marked=keep_marked):
             inner_start, inner_end = h.start, h.end
             while inner_start < inner_end and seen_through(text[inner_start]):
                 inner_start += 1

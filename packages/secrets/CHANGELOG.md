@@ -23,9 +23,11 @@
   call holding `python -c '... {\"key\": \"sk_live_...\"}'`, so memory stored such a key
   whole. A text holding a backslash, or a run of them, directly before a quote is now
   also scanned as a copy without those backslashes, the same copy that leaves out the
-  invisible characters. The hit is the key alone; the backslashes and quotes stay
-  outside the placeholder. The gates now refuse a commit holding such a key. A set the
-  fallback left unscanned in the text is not scanned again in a copy.
+  invisible characters; a text holding both is also scanned without the invisible
+  characters alone, so no hit found before is lost. The hit is the key alone; the
+  backslashes and quotes stay outside the placeholder. The gates now refuse a commit
+  holding such a key. A set the fallback left unscanned in the text is not scanned again
+  in a copy.
 - Cost: on memory's ingest, the redaction of one real Claude Code transcript (1,746
   records, 250 tool calls holding an escaped quote) took 0.30 s against 0.23 s before,
   1.3 times, and 0.10 s against 0.08 s on another (516 records). In the cost test, RE2

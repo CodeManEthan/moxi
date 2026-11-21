@@ -625,8 +625,9 @@ def test_the_allow_mark_keeps_an_escaped_key_out_of_scan_and_not_out_of_redact(
             text.replace(value, ph("stripe-access-token")), text
 
 
-def test_a_split_token_and_an_escaped_key_are_found_in_one_copy(engine_name,
-                                                                count_copies):
+def test_a_split_token_and_an_escaped_key_are_found_in_one_copy_and_the_split_alone(
+        engine_name, count_copies):
+    # One copy removes both kinds; a second removes the see-through characters alone.
     r = corpus.rng(63)
     token, value = corpus.github(r), corpus.stripe(r)
     text = "a " + corpus.split(token, "​") + " " + json_escaped(
@@ -634,10 +635,23 @@ def test_a_split_token_and_an_escaped_key_are_found_in_one_copy(engine_name,
     count_copies()
     assert [h.rule for h in scan(text, ("credentials",))] == [
         "github-pat", "stripe-access-token"]
-    assert count_copies() == 1
+    assert count_copies() == 2
     out = redact(text, ("credentials",))
     assert out == "a " + ph("github-pat") + " " + json_escaped(
         '{"key":"' + ph("stripe-access-token") + '"}')
+
+
+@pytest.mark.parametrize("sep", ["\\'", '\\"'])
+def test_a_split_run_after_an_escaped_quote_keeps_its_own_boundary(engine_name, sep):
+    # high-entropy-run takes a boundary character on each side. With the backslash
+    # removed, the one quote between the runs is the first match's, and the second run,
+    # whole only once the zero-width space is removed, needs the copy without the
+    # see-through characters alone.
+    r = corpus.rng(65)
+    one, two = corpus.chars(r, 44), corpus.chars(r, 44)
+    text = "x " + one + sep + corpus.split(two, "​", 20) + " y"
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("broad",))] == [
+        ("high-entropy-run", 2, 46), ("high-entropy-run", 48, 93)]
 
 
 @pytest.mark.parametrize("before", ["\\n", "\\\\x", '"', "\\ "])
