@@ -430,13 +430,13 @@ def _builds(found: Shown) -> list:
                "ended": one.ended, "state": one.ended, "by": None, "why": None,
                "head": None, "idle": False, "shares": [], "problem": None,
                "drop_by": None, "drop": None, "credit": None,
-               "check": _check_run(found.state, one),
+               "check": check_run(found.state, one),
                "step_runs": [run for run in (
-                   _check_run(found.state, one, step)
-                   for step in [*_command_steps(found.state), ci.LOCAL])
+                   check_run(found.state, one, step)
+                   for step in [*command_steps(found.state), ci.LOCAL])
                    if run is not None],
-               "ci": _ci_read(found.state, one),
-               "verdict": _build_verdict(found.state, one),
+               "ci": ci_read(found.state, one),
+               "verdict": build_verdict(found.state, one),
                "findings": [finding.data()
                             for finding in findings.of_build(found.state, one)],
                "slices": sizing.slices_of(found.state, one),
@@ -453,7 +453,7 @@ def _builds(found: Shown) -> list:
                 row["credit"] = (f"moxi rounds rule {found.name} {builds.CREDIT}"
                                  f"{one.stage} --record PTR")
             row["drift"] = _drift(found, one, now.status)
-            row["finish"] = _finish_actions(found.state, one, data["head"])
+            row["finish"] = finish_actions_of(found.state, one, data["head"])
         elif one.ended is None:
             row["problem"] = {"reason": f"the repo {one.repo} could not be read",
                               "fix": "moxi projects list"}
@@ -461,7 +461,7 @@ def _builds(found: Shown) -> list:
     return listed
 
 
-def _finish_actions(state: states.State, build: builds.Build,
+def finish_actions_of(state: states.State, build: builds.Build,
                     head: str | None) -> list[dict]:
     """For a build not finished, the newest record of each of its finish actions at
     its head, as `{"id", "kind", "state", "landing", "n", "at"}`: what a finish did so
@@ -502,7 +502,7 @@ def drift_line(stage: str, one: dict) -> str:
     return drift.line(stage, one)
 
 
-def _build_verdict(state: states.State, build: builds.Build) -> dict | None:
+def build_verdict(state: states.State, build: builds.Build) -> dict | None:
     """The newest verdict recorded for `build`, as data: its word, the pass, the head
     it read and that head's merge-base with the target, who wrote the report with
     which model, the report's file and digest, what is noted of it, and when it was
@@ -529,7 +529,7 @@ def finding_line(one: dict) -> str:
     return f"finding {one['id']}: {one['severity']}, {one['state']}: {one['text']}"
 
 
-def _ci_read(state: states.State, build: builds.Build) -> dict | None:
+def ci_read(state: states.State, build: builds.Build) -> dict | None:
     """The newest read of CI recorded for `build`, as data: its commit, the whole
     reading, each workflow with its reading and url, and when it was recorded; None
     with no read."""
@@ -551,13 +551,13 @@ def ci_line(read: dict) -> str:
     return f"ci {read['reading']} at {str(read['commit'])[:7]}"
 
 
-def _command_steps(state: states.State) -> list[str]:
+def command_steps(state: states.State) -> list[str]:
     """The command steps of the user's own the round's flow lists, in its order."""
     return [str(entry.get("step")) for entry in state.steps
             if checking.step_entry(state, str(entry.get("step"))) is not None]
 
 
-def _check_run(state: states.State, build: builds.Build,
+def check_run(state: states.State, build: builds.Build,
                step: str = checking.CHECK) -> dict | None:
     """The newest run of `step` (the repo's check unless named) recorded for `build`, as
     data: the step, its commit, exit code, duration, output file and when it was
@@ -991,4 +991,5 @@ def as_text(found: Shown) -> str:
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
            "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
            "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
-           "verdict_lines", "history_of", "repair_of", "repair_line"]
+           "verdict_lines", "history_of", "repair_of", "repair_line", "check_run",
+           "ci_read", "build_verdict", "command_steps", "finish_actions_of"]
