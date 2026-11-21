@@ -1,6 +1,7 @@
 """`moxi rounds`: the rounds command.
 
-    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
+    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--lead NAME]
+                     [--as NAME]
     moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds commission ROUND STAGE --builder NAME [--record PTR] [--existing]
@@ -22,6 +23,7 @@
     moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
+    moxi rounds mark ROUND --lead NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND B<n> --brief FILE [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
@@ -324,6 +326,10 @@ def _declare_open(verbs) -> None:
                         help="the standing rulings of the project the round starts "
                              "from, as S1,S2: each one that says what is built and "
                              "still stands")
+    parser.add_argument("--lead", metavar="NAME",
+                        help="the agent who leads the round: letters, digits, . _ -, "
+                             "and at most one @scope (default: none of its own, so the "
+                             "round reads its project's lead)")
     _writes(parser)
 
 
@@ -332,10 +338,12 @@ def _open(args, out) -> int:
 
     opened = opening.open_round(args.round, description=args.description,
                                 by=_actor(args), flow=args.flow, record=args.record,
-                                inherits=_listed(args.inherits))
+                                inherits=_listed(args.inherits), lead=args.lead)
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.round_dir}", file=out)
+    if args.lead is not None:
+        print(f"lead: {args.lead}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
     for line in _left(opened):
@@ -704,7 +712,7 @@ def _declare_mark(verbs) -> None:
                              "several separated by commas; with --resync, a stage, "
                              "B<n>; with --brief, the stage the brief is of, B<n>; "
                              "with --reread, a recorded report's file; left "
-                             "out with --flow, which marks the round")
+                             "out with --flow and --lead, which mark the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -739,6 +747,10 @@ def _declare_mark(verbs) -> None:
                            "own flow, to take the steps the config has for it now "
                            "when they have every step it follows; any other move "
                            "is the operator's (rule flow:NAME)")
+    form.add_argument("--lead", metavar="NAME",
+                      help="the agent who leads the round from now on: letters, "
+                           "digits, . _ -, and at most one @scope; anyone may name "
+                           "it, and it carries no pointer")
     form.add_argument("--close", action="store_true",
                       help="the lead's decision that the thread thread:NAME is "
                            "closed: no further pass is run on it; only after the "
@@ -790,6 +802,8 @@ def _mark(args, out) -> int:
 
     if args.flow is not None:
         return _mark_flow(args, out)
+    if args.lead is not None:
+        return _mark_lead(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
@@ -947,6 +961,26 @@ def _mark_flow(args, out) -> int:
     print(f"{stepped.name}   flow {stepped.flow} ({steps})   was: {stepped.was}",
           file=out)
     _warn_of(stepped.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_lead(args, out) -> int:
+    """`mark --lead`: name the agent who leads the round, which anyone may do."""
+    from . import leads
+
+    again = f"{args.prog} mark ROUND --lead NAME"
+    if args.id is not None:
+        raise BadArgument("--lead marks the round, and takes no ID", again)
+    if args.record is not None:
+        raise BadArgument("--record is a pointer to the operator's word, and a round's "
+                          "lead is the leads' record and carries none",
+                          "leave --record out")
+    led = leads.mark(args.target, args.lead, by=_actor(args))
+    if led.found:
+        print(f"{led.lead} leads {led.name} already; nothing was written", file=out)
+    else:
+        print(f"{led.name}   lead: {led.lead}   was: {led.was or 'none'}", file=out)
+    _warn_of(led.failed, args.prog, args.verb)
     return codes.OK
 
 

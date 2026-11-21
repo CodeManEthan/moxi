@@ -3,7 +3,8 @@
 `open_round("<project>/<slug>", description=..., by=...)` makes the round's folder in
 the project's rounds folder and appends `round.opened` through the write path. The event
 holds the description, the name of the round's flow and that flow's steps as the config
-has them at that moment, and the pointer to the operator's go when one is given.
+has them at that moment, the pointer to the operator's go when one is given, and the
+round's lead when one is named.
 
 The flow is the one named, else the project's `flow` setting. Its steps are copied into
 the log because the round follows what it was opened with: a flow edited in the config
@@ -35,7 +36,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import corrections, dropping, flows, folders, log, pointers, ruling, write
+from . import corrections, dropping, flows, folders, leads, log, pointers, ruling, write
 from .rendering import NOTE_FILE
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
@@ -62,7 +63,7 @@ class Opened:
 
 def open_round(name: str, *, description: str, by: str, flow: str | None = None,
                record: str | None = None, inherits: Iterable[str] | None = None,
-               settings=None, wait_s: float = write.WAIT_S,
+               lead: str | None = None, settings=None, wait_s: float = write.WAIT_S,
                at: str | None = None) -> Opened:
     """Open the round `name`, `<project>/<slug>`, and return it as opened.
 
@@ -73,14 +74,17 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
       shape is one a pointer has.
     - `inherits`: the ids of the project's standing rulings the round starts from;
       one named twice is kept once.
+    - `lead`: the agent who leads the round, checked for a lead's name's shape before
+      anything is locked or made (`leads.check`); when left out the round reads its
+      project's lead until one is marked.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
 
-    Raises `BadName` or `BadArgument` for a name or description that can't be used,
-    `UnknownProject` or `NoFolder` for a project with no rounds folder to open it in, and
-    `Refused` when the folder already holds a log, or another tool's note of a round
-    and no log, the flow is not one the config has, the pointer has no shape a
+    Raises `BadName` or `BadArgument` for a name, description or lead that can't be
+    used, `UnknownProject` or `NoFolder` for a project with no rounds folder to open it
+    in, and `Refused` when the folder already holds a log, or another tool's note of a
+    round and no log, the flow is not one the config has, the pointer has no shape a
     pointer has, or an inherited id is not a standing ruling of the project that says
     what is built and still stands.
     A refusal leaves no folder and no event behind.
@@ -89,6 +93,8 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
     if not isinstance(description, str) or not description.strip():
         raise BadArgument("a round needs a description",
                           "say what the round is for with --description TEXT")
+    if lead is not None:
+        leads.check(lead, f"moxi rounds open {name} --description TEXT --lead NAME")
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
@@ -160,6 +166,8 @@ def open_round(name: str, *, description: str, by: str, flow: str | None = None,
             fields["inherits"] = list(inherited)
         if record is not None:
             fields["record"] = record
+        if lead is not None:
+            fields["lead"] = lead
         return write.Entry("round.opened", fields)
 
     written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
