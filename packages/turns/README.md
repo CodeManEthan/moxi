@@ -9,10 +9,13 @@ Other modules call it to put input into a session (a new turn, a delivery held u
 running turn ends, a steer into the running turn, `/clear`, `/compact` and `/exit`,
 optionally stopping the session's background shells) and to take session events out: the
 session ready, a turn started, steered or ended, naming each delivery it took by the
-caller's `ref`, and the session gone. A caller can also read the session's subagents,
-teammates and Codex background terminals; the list says `complete` false when turns could
-not read it whole. A holder can be asked at each Stop before the turn ends, and a
-registered module can add context at a session's start or at a prompt.
+caller's `ref`, and the session gone. A delivery can name the module that asked and the
+names its text speaks for, and its end carries the turn's final text. A caller can also
+read the session's subagents, teammates and Codex background terminals; the list says
+`complete` false when turns could not read it whole. A holder can be asked at each Stop
+before the turn ends, and a registered module can add context at a session's start or at
+a prompt. A prompt says whether the person typed it, which delivery it is when turns
+handed it in, and whether it opens a turn or joins one already running.
 
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the
