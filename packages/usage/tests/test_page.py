@@ -27,7 +27,6 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
-from packaging.requirements import Requirement
 
 import moxi.store
 from moxi import modules
@@ -1785,12 +1784,15 @@ def test_the_page_asks_for_sessions_names_through_interface_5():
     found = modules.load("sessions", interface=5)
     assert found.ok, found.reason
     assert callable(found.api.session_facts)
-    # usage never admits a sessions older than 0.2.8, the first with interface 5.
+    # usage never admits a sessions older than 0.2.8, the first with interface 5, and
+    # admits the one installed.
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    wanted = [Requirement(line) for line in project["dependencies"]]
-    [needed] = [req for req in wanted if req.name == "moxi-sessions"]
-    assert not needed.specifier.contains("0.2.7")
-    assert needed.specifier.contains(metadata.version("moxi-sessions"))
+    [needed] = [line for line in project["dependencies"] if line.startswith("moxi-sessions")]
+    floor = re.fullmatch(r"moxi-sessions>=(\d+)\.(\d+)\.(\d+),<0\.3", needed)
+    assert floor is not None, needed
+    least = tuple(int(part) for part in floor.groups())
+    assert least >= (0, 2, 8)
+    assert tuple(int(part) for part in metadata.version("moxi-sessions").split(".")[:3]) >= least
 
 
 def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names):
