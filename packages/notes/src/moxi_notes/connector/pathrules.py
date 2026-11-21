@@ -70,12 +70,15 @@ TEXTS = {
 
 
 class Refused(Exception):
-    """A path a rule refuses: `code` and `text`, the refusal's code word and its text."""
+    """A path a rule refuses: `code` and `text`, the refusal's code word and its text.
+    `rel` is the path as given once rule 2 has let it through (so it names no secret),
+    else None."""
 
-    def __init__(self, code: str, text: str | None = None):
+    def __init__(self, code: str, text: str | None = None, *, rel: str | None = None):
         super().__init__(code)
         self.code = code
         self.text = text if text is not None else TEXTS[code]
+        self.rel = rel
 
 
 class RedactionOff(Exception):
@@ -216,10 +219,15 @@ def judge_file(root_dir: str, path: str, *, cap_bytes: int) -> Judged:
     """Rules 1 to 5 (but the bytes) for the file `path` under `root_dir`."""
     parts = parts_of(path, allow_empty=False)
     _check(parts)
-    resolved = resolve(root_dir, parts)
-    st = _stat(resolved)
-    _plain(st, cap_bytes)
-    return Judged("/".join(parts), resolved, st)
+    rel = "/".join(parts)
+    try:
+        resolved = resolve(root_dir, parts)
+        st = _stat(resolved)
+        _plain(st, cap_bytes)
+    except Refused as exc:
+        exc.rel = rel
+        raise
+    return Judged(rel, resolved, st)
 
 
 def not_text(head: bytes) -> bool:

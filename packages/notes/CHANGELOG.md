@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Two tools in the Claude apps, with the `connector` extra: `list_notes` lists one folder
+  of the notes root (folders by name, then files newest first, 200 a page, and a count of
+  what it hides), and `read_note` reads a text file a page at a time (400 lines and 40,000
+  characters, a line cut at 4,000). A note is read whole, at most 2 MiB, and put through
+  secrets' chat redaction whole before it is split or cut; line numbers count the
+  redacted text. Each tool refuses `redaction-off` when a chat set can't run, never
+  returns a text secrets couldn't scan, runs at most two calls at once, and ends a call
+  at 20 seconds.
 - A `connector` extra and a provider for the connector, the public MCP host, so notes can
   give tools to the Claude apps. The extra brings the host and secrets with its
   personal-data set. The provider reads only the notes root, judges every path by one

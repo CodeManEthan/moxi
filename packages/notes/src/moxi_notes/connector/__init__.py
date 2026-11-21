@@ -14,6 +14,7 @@ notes names the host's package. When that load fails, importing this package rai
 The tools read only the notes root, notes' own `root` setting, under the path rules of
 `pathrules`, and every text they return goes through `moxi_secrets.chat_redact` first.
 
+* `list_notes` and `read_note` (`tools`), run under the host's `Limit`.
 * `start(env)` checks the root and the chat redaction, and never raises: a tool refuses
   per call, and the status rows say why.
 * `status()` gives two rows: `root`, the notes root or why it can't be read, and
@@ -22,11 +23,14 @@ The tools read only the notes root, notes' own `root` setting, under the path ru
 
 from __future__ import annotations
 
+import functools
+import time
 from collections.abc import Mapping
 
 from moxi import modules
 
 from . import pathrules
+from . import tools as tools_mod
 
 #: The host's module name and the interface this provider is written against.
 MODULE = "connector"
@@ -73,6 +77,10 @@ class Notes:
         self.api = api
         self.redaction: str | None = None
         self.started = False
+        #: At most two calls at once, a third refused `busy` after 5 s, each ended at 20 s.
+        self.limit = api.Limit()
+        self.tools = tools_mod.Tools(result=api.Result,
+                                     check_redaction=self.check_redaction)
 
     def check_redaction(self) -> str | None:
         """Run the chat redaction's check now and keep its verdict for `status`."""
@@ -110,9 +118,34 @@ class Notes:
             rows.append(row("redaction", "ok", f"the chat sets load, on {_engine()}"))
         return rows
 
+    def tool(self, name: str):
+        """The coroutine the host calls for the tool `name`: its work under the limit,
+        then its call-log fields."""
+        work = getattr(self.tools, name)
+
+        async def call(args, ctx):
+            started, fields = time.monotonic(), {}
+            result = await self.limit.run(functools.partial(work, dict(args), fields,
+                                                            started))
+            if result.refusal in ("busy", "timeout"):
+                ctx.log(refusal=result.refusal)     # the work may still be filling fields
+            else:
+                ctx.log(**fields, refusal=result.refusal)
+            return result
+
+        call.__name__ = name
+        return call
+
     def provider(self):
-        return self.api.Provider(tools=(), start=self.start, stop=self.stop,
-                                 status=self.status)
+        api = self.api
+        schemas = tools_mod.inputs()
+        return api.Provider(
+            tools=tuple(api.Tool(name, tools_mod.DESCRIPTIONS[name], schemas[name],
+                                 self.tool(name), output_schema=tools_mod.OUTPUTS[name],
+                                 annotations=tools_mod.ANNOTATIONS[name],
+                                 title=tools_mod.TITLES[name])
+                        for name in tools_mod.NAMES),
+            start=self.start, stop=self.stop, status=self.status)
 
 
 def _root_shown() -> str:
