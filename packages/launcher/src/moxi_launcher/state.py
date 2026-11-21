@@ -39,6 +39,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from moxi import exit as codes
+from moxi import modules
 
 from . import keepwarm, relaunch, slots, store, target
 from .recycle import LOOK, cache_read
@@ -292,9 +293,25 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
     at_limit = str(values.get("recycle_at_limit") or "off")
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
-        limit_at=str(values["limit_at"]) if values.get("limit_at") else None, last=last,
+        limit_at=_limit_mark(row, at_limit=at_limit), last=last,
         pending_compact=pending[1] if pending else None, told_at=told[-1] if told else None,
         pending_dropped_at=dropped[-1] if dropped else None)
+
+
+def _limit_mark(row: store.LaunchRow, *, at_limit: str) -> str | None:
+    """The mark a launch recycles at: its `limit_at` when set; else, when it recycles at
+    its limit, the crossing mark stamped on it at launch (usage's `CROSSING_AT_ENV`, so
+    an unset `limit_at` shows the mark it followed); else None. None too when usage
+    can't be loaded here to name the stamp."""
+    limit_at = row.values.get("limit_at")
+    if limit_at:
+        return str(limit_at)
+    if at_limit == "off":
+        return None
+    found = modules.load("usage", interface=1)
+    name = getattr(found.api, "CROSSING_AT_ENV", None) if found.ok else None
+    stamped = row.env.get(name) if name else None
+    return str(stamped) if stamped else None
 
 
 def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store.Run],
