@@ -85,6 +85,7 @@ claude-shim = "moxi_comms.kinds:CLAUDE_SHIM"
 codex = "moxi_comms.kinds:CODEX"
 opencode = "moxi_comms.kinds:OPENCODE"
 connector = "moxi_comms.kinds:CONNECTOR"
+speech = "moxi_comms.kinds:SPEECH"
 
 # comms' tools in the Claude apps: the public MCP host loads this provider, and nothing in
 # comms imports it.
