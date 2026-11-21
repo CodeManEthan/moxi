@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import modules
+from moxi.paths import Layout
 
 from moxi_launcher import compose, store
 from moxi_launcher.compose import Additions, Context, claude, codex, common
@@ -229,3 +230,54 @@ def test_on_windows_the_whole_line_is_limited():
     codex.compose(values, ctx(session_id=None, brief=brief[:20_000], windows=True))
     with pytest.raises(common.TooLong, match="the command line"):
         codex.compose(values, ctx(session_id=None, brief=brief + "w" * 400, windows=True))
+
+
+# -- the limit mark -------------------------------------------------------------------------
+
+
+@pytest.fixture
+def usage_default(monkeypatch):
+    """usage's config `marks.default` as the launcher reads it, set per test."""
+    def set_to(mark):
+        monkeypatch.setattr(common, "usage_default_mark", lambda: mark)
+    return set_to
+
+
+@pytest.mark.parametrize("values, default, mark", [
+    # limit_at set to a mark wins over everything.
+    ({"limit_at": "1.5x", "warn_at": "2x"}, "2x", "1.5x"),
+    # Unset, it follows the launch's warn_at.
+    ({"limit_at": "", "warn_at": "2x"}, "1x", "2x"),
+    ({"warn_at": "1.5x"}, None, "1.5x"),
+    # No warn_at: usage warns at its config default, so the line comes with it.
+    ({"limit_at": "", "warn_at": ""}, "1.5x", "1.5x"),
+    ({}, "2x", "2x"),
+    # warn_at off, or usage warns at none: 1x.
+    ({"warn_at": "off"}, "2x", "1x"),
+    ({"warn_at": ""}, None, "1x"),
+    ({}, "off", "1x"),
+])
+def test_the_limit_mark_follows_limit_at_then_warn_at_then_usage(usage_default, values,
+                                                                  default, mark):
+    usage_default(default)
+    assert common.limit_mark(values) == mark
+    for recycle in ("relaunch", "compact"):
+        stamped = common.option_stamps({"recycle_at_limit": recycle, **values})
+        assert stamped == {"MOXI_USAGE_CROSSING_AT": mark}
+    assert common.option_stamps({"recycle_at_limit": "off", **values}) == {}
+
+
+def test_usage_s_default_mark_is_read_from_its_config():
+    path = Layout("usage").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
+    assert common.usage_default_mark() == "1.5x"
+    assert common.limit_mark({"warn_at": ""}) == "1.5x"
+    path.write_text('[marks]\ndefault = "off"\n', encoding="utf-8")
+    assert common.limit_mark({"warn_at": ""}) == "1x"
+
+
+def test_without_usage_there_is_no_default_mark(monkeypatch):
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "usage" and real(name))
+    assert common.usage_default_mark() is None

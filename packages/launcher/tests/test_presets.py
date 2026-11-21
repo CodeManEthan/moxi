@@ -1257,5 +1257,5 @@ def test_a_word_enum_left_out_ends_a_seats_recycling():
         resolve(text, available, seat="s", typed={"recycle_at_limit": "off"})
     got = resolve(text, available, seat="s", typed={"recycle_at_limit": "off"},
                   left_out=("limit_at",))
-    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == "1x"
+    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == ""
     assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
