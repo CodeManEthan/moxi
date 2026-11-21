@@ -19,9 +19,14 @@ Lines (endpoint to runner)
 The first line, always first, before the runner sends anything:
 
     {"op": "hello", "leg": 4, "mod_sock": "<absolute path>", "stop_wait_ms": n,
-     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
-     "stop_after_clear": bool, "guards": [<entry>, ...], "after_tool_wait_ms": n,
-     "floors": {"<row id>": n, ...}}
+     "listen_wait_ms": n, "prompt_wait_ms": n, "endpoint_version": "…",
+     "pid": <endpoint pid>, "stop_after_clear": bool, "guards": [<entry>, ...],
+     "after_tool_wait_ms": n, "floors": {"<row id>": n, ...}}
+
+`prompt_wait_ms` is the session's prompt bound, decided at the endpoint's start: the
+longest of `listen_wait_ms` and the `prompt` rows' own waits for this session. The runner
+waits that plus its margin for a prompt's context; a runner that finds no
+`prompt_wait_ms` waits `listen_wait_ms`.
 
 `stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
 after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
@@ -150,7 +155,8 @@ input's); a `prompt` carries `text`, the prompt as the hook got it, `origin`, it
 origin's kind as the runner's `prompt.submit` hook recorded it, or null when the runner
 can't tie the two, and `opens`, true when no main-loop turn was open in the runner as the
 hook ran. Answer `{"ok": true, "context": "<text>" | null}`, the event's
-`additionalContext`. The endpoint answers within `listen.wait_ms`.
+`additionalContext`. The endpoint answers a `ready` within `listen.wait_ms`, a `prompt` within
+`prompt_wait_ms`.
 
 `/ask/after-tool` — `{call: {tool, tool_use_id, agentId, is_error}, rows: [id, ...]}` after
 a tool call ran (`next(e)` resolved with a result or an error, not a deny), naming the

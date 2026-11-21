@@ -249,11 +249,17 @@ def _toml_key(key: str) -> str:
 
 def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIMEOUT - 1,
                   listen_wait_s: float = PING_TIMEOUT - 1,
+                  prompt_wait_s: float | None = None,
                   pre_matcher: str | None = None, guard_wait_s: float = PING_TIMEOUT - 1,
                   refuse: str | None = None,
                   after_tool: bool = False, after_wait_s: float = PING_TIMEOUT - 1) \
         -> tuple[list[str], dict[str, str]]:
     """The launch's `-c` hook flags and the trust key and hash of each hook.
+
+    Each ping waits its event's bound plus a second: Stop `hold_wait_s`,
+    UserPromptSubmit the session's prompt bound `prompt_wait_s` (`listen_wait_s` when
+    None), the other session hooks `listen_wait_s`. The waits are in the commands, so a
+    session's prompt bound is baked into its flags and their trust hashes.
 
     `PreToolUse` is added only with a `pre_matcher` (`matcher`), its ping waiting
     `guard_wait_s` plus a margin, and carrying `refuse` (`refuse_table`) when given;
@@ -266,6 +272,8 @@ def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIM
             event_wait_s = hold_wait_s + 1
         elif event.event == "Interrupt":
             event_wait_s = PING_TIMEOUT
+        elif event.event == "UserPromptSubmit" and prompt_wait_s is not None:
+            event_wait_s = prompt_wait_s + 1
         else:
             event_wait_s = listen_wait_s + 1
         one = handler(command(ping, socket_path, event, event_wait_s), event.timeout)

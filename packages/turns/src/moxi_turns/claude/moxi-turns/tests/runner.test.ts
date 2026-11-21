@@ -419,7 +419,7 @@ describe('the report queue', () => {
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.2.1' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.2.2' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
     expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
@@ -517,6 +517,31 @@ describe('the context asks', () => {
     expect(done).toBe(false)
     await w.clock.advance(1)
     expect((await r).additionalContext ?? []).toEqual([])
+  })
+
+  test('a prompt ask waits the session\'s prompt bound + 1 s, a ready\'s listen_wait_ms + 1 s', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello({ prompt_wait_ms: 9000 })
+    w.answers['/ask/context'] = 'hang'
+    const r = $.classic.UserPromptSubmit({ prompt: 'hi' })
+    let done = false
+    void r.then(() => { done = true })
+    await w.clock.advance(9999)
+    await w.clock.settle()
+    expect(done).toBe(false)
+    await w.clock.advance(1)
+    expect((await r).additionalContext ?? []).toEqual([])
+    const ready = sessionStart($)
+    let readyDone = false
+    void ready.then(() => { readyDone = true })
+    await w.clock.advance(2999)
+    await w.clock.settle()
+    expect(readies(w).length).toBe(1)
+    expect(readyDone).toBe(false)
+    await w.clock.advance(1)
+    await w.clock.settle()
+    expect(readyDone).toBe(true)
   })
 
   test('a prompt ask says whether it opens a turn or joins the running one', async ($: E, on) => {

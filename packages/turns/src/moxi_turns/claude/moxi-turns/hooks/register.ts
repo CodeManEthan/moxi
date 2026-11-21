@@ -3,8 +3,8 @@
 // It spawns the session's endpoint, reports the session's main-loop turns to it, puts in
 // what it hands over (a submit, a steer, a /clear, /exit or /compact), and asks it at
 // SessionStart, UserPromptSubmit and Stop. The runner reads no setting: its bounds are the
-// constants below, and the endpoint's first line carries `stop_wait_ms` and
-// `listen_wait_ms`.
+// constants below, and the endpoint's first line carries `stop_wait_ms`, `listen_wait_ms`
+// and `prompt_wait_ms`.
 //
 // The endpoint command: `MOXI_TURNS_ENDPOINT` in the session's environment, which a launch
 // through turns' launch additions sets; else the one `endpoint.json` beside this plugin
@@ -16,8 +16,8 @@
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
-//   hello    {op, leg: 4, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
-//            stop_after_clear, guards, after_tool_wait_ms, floors}
+//   hello    {op, leg: 4, mod_sock, stop_wait_ms, listen_wait_ms, prompt_wait_ms,
+//            endpoint_version, pid, stop_after_clear, guards, after_tool_wait_ms, floors}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
 //            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
 //            the runner stops no shell (each listed one is left, `not-stopped-after-clear`).
@@ -81,8 +81,9 @@
 //
 // The internal leg rule: no hook waits on the endpoint longer than a bound this plugin's
 // own timer keeps, and a request that misses its bound counts as unanswered. A reporting
-// hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a context ask
-// listen_wait_ms + 1 s; a ready waits at most 2 s for the first line.
+// hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a ready's context
+// ask listen_wait_ms + 1 s; a prompt's prompt_wait_ms + 1 s (the session's prompt bound,
+// listen_wait_ms when the line names none); a ready waits at most 2 s for the first line.
 //
 // The queue: a report made before the first line waits in the queue and is sent after the
 // session report once the line comes; one whose hook stopped waiting (the 1 s) stays queued
@@ -272,7 +273,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.2.1'
+const MOD_VERSION = '0.2.2'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
@@ -317,7 +318,7 @@ const HOOK_TIMES_MAX = 1000
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 
-type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
+type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; promptWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
 type Json = Record<string, unknown>
 type Report = { kind: string; fields: Json; seq: number; landed: Promise<void>; land: () => void }
 /** One entry of the guard table, ready to match. */
@@ -856,7 +857,7 @@ async function onLine($: Dollar, line: string): Promise<void> {
     let land: () => void = () => {}
     const landed = new Promise<void>(resolve => { land = resolve })
     queue.unshift({ kind: 'session', fields: { session_id: sessionId, mod_version: MOD_VERSION }, seq: 0, landed, land })
-    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
+    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), promptWaitMs: num(m.prompt_wait_ms, num(m.listen_wait_ms, 2000)), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
     if (m.guards !== undefined) takeTable($, m.guards)
     if (m.floors !== undefined) takeFloors($, m.floors)
     helloSeen()
@@ -1449,8 +1450,8 @@ export const register: Register = on => {
       if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return behind(hook, performance.now(), await next(e))
       const w = win
       // turns' own entry hook: the bound is raised by this ask's bound while it runs.
-      if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt), opens: turnOpen === null }, hello.listenWaitMs + MARGIN_MS)
+      if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.promptWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt), opens: turnOpen === null }, hello.promptWaitMs + MARGIN_MS)
       if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {

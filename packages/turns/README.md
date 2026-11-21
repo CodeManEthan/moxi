@@ -100,7 +100,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `stop_handler.wait_ms`: how long a Stop waits for the session's stop handler, in
   milliseconds. Default 2000.
 - `listen.wait_ms`: how long an event waits for the registered listeners, in
-  milliseconds. Default 2000.
+  milliseconds. Default 2000. A module's prompt listener can ask for a longer wait on a
+  prompt in the sessions it serves; that session's prompt then waits the longer bound,
+  on Claude Code and Codex alike.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
   compacted, in order: module names, file paths and run entries. A module not installed
   is skipped. A run entry, `run:<path>`, runs that program at each start, with the

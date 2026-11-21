@@ -75,6 +75,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     first = runner.first
     assert first["op"] == "hello" and first["leg"] == leg.LEG
     assert first["stop_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["prompt_wait_ms"] == 2000
     assert first["stop_after_clear"] is leg.STOP_AFTER_CLEAR
     assert first["mod_sock"] == str(ep.dir / protocol.MOD_SOCK)
     assert turns.sessions() == []                # no socket until the id comes

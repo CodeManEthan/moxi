@@ -303,6 +303,11 @@ class Endpoint:
         self.pending_ttl_s = PENDING_TTL_S
         self.registry = registry if registry is not None \
             else turns_listeners.load(env=self.env)
+        #: The session's prompt bound: `listen.wait_ms`, or a longer bound a `prompt` row
+        #: asks for this session (its `wait_ms` option). Decided once, from the
+        #: session's environment, so the harness's hook waits it too.
+        self.prompt_wait_s = turns_listeners.prompt_wait_ms(
+            self.registry, self.env, int(self.listen_wait_s * 1000)) / 1000
         rows = turns_listeners.after_rows(self.registry)
         #: Each after-tool row's floor, by row id.
         self.floors = turns_listeners.Floors(rows, self.after_tool_wait_s,
@@ -642,9 +647,10 @@ class Endpoint:
             if opens is None:
                 opens = self.ledger.open is None
         by, senders = (None, None) if d is None else (d.spec.by, d.spec.senders)
-        return self._ask(self._event("prompt", text=text, origin=origin,
-                                     own=self._own(origin), delivery_by=by,
-                                     delivery_senders=senders, opens=opens))
+        event = self._event("prompt", text=text, origin=origin, own=self._own(origin),
+                            delivery_by=by, delivery_senders=senders, opens=opens)
+        return turns_listeners.ask(self.registry, event, self.prompt_wait_s,
+                                   after=self.floors.after_call)
 
     def _own(self, origin: str | None) -> bool:
         """Whether a prompt of `origin` is the person's own: the origin is on

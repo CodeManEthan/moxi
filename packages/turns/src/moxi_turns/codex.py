@@ -374,7 +374,7 @@ class CodexHarness(Harness):
             p for e in self.guards.entries for p in e.calls)
         flags, self.hook_keys = codex_hooks.session_flags(
             list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
-            listen_wait_s=endpoint.listen_wait_s,
+            listen_wait_s=endpoint.listen_wait_s, prompt_wait_s=endpoint.prompt_wait_s,
             pre_matcher=pre_matcher, guard_wait_s=self._guard_wait_ms / 1000,
             refuse=codex_hooks.refuse_table(self.guards.entries),
             after_tool=bool(endpoint.floors.rows), after_wait_s=endpoint.after_tool_wait_s,

@@ -16,6 +16,13 @@
 - A delivery's `ended` value carries `answer`, the final text of the turn that took it:
   on Claude Code the assistant's final visible text ("" when there was none), on Codex
   the turn's last agent message, null where the harness gave none.
+- A listener row takes the option `wait_ms`, a function of the session's environment that
+  returns the row's own bound on `prompt` for that session, in milliseconds. The session's
+  prompt bound, decided at its start, is the longest of `listen.wait_ms` and those: the
+  endpoint asks the prompt listeners within it, the Claude runner waits it plus its margin
+  (the endpoint's first line carries `prompt_wait_ms`), and a Codex launch bakes it into
+  its UserPromptSubmit hook command. The runner plugin is version 0.2.2, so `moxi install
+  turns` updates an install at user scope.
 - Question mode's prompt reminder leaves the agent to judge whether the questions are
   wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
   end of its output once they are answered. "pros", as voice input spells "prose", now

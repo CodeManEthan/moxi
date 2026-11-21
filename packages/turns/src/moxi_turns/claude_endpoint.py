@@ -207,6 +207,7 @@ class ClaudeHarness(Harness):
             "op": leg.LINE_HELLO, "leg": leg.LEG, "mod_sock": str(self.server.path),
             "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
+            "prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),
             "endpoint_version": ep.version, "pid": os.getpid(),
             "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload(),
             "after_tool_wait_ms": int(ep.after_tool_wait_s * 1000),
