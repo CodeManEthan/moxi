@@ -470,7 +470,8 @@ def test_the_import_pulls_in_no_engine_config_or_stdnum():
 #: The import's cost is these modules; one more here is a cost someone chose. hashlib,
 #: pathlib, datetime and typing load at first use instead.
 IMPORT_LOADS = frozenset({
-    "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.engine",
+    "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.chat",
+    "moxi_secrets.engine",
     "moxi_secrets.names", "moxi_secrets.paths", "moxi_secrets.scan",
     "__future__", "bisect", "_bisect", "copyreg", "enum", "fnmatch", "json",
     "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",

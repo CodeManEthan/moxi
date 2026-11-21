@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `chat_redact(text)` and `CHAT_SETS` (`credentials`, `broad`, `personal-data`, fixed in
+  code): the one redaction for text bound for a reader outside the machine. It redacts
+  with the chat sets in strict mode, removes C0 controls other than newline and tab, DEL,
+  C1 controls and format characters, and redacts again; it returns that last text, or
+  `[REDACTED:unscanned]` alone when either pass could not scan the text. It raises
+  `SetUnavailable` when a chat set can't run, so a caller without python-stdnum refuses
+  rather than reads.
 - `scan` and `redact` take `strict=False`. With `strict`, nothing beside a value keeps it
   whole: no `gitleaks:allow` mark and no allowlist of any kind (line, match, secret,
   stopword, path) is read; each rule that ends with gitleaks' end condition runs its
