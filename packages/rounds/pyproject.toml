@@ -38,6 +38,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 rounds = "moxi_rounds.module"
 
+# projects asks this before it removes a project: no project goes while a build names it.
+[project.entry-points."moxi.projects"]
+rounds = "moxi_rounds.projects_link"
+
 # The sweep at a session's start, called by turns in a session's endpoint process.
 [project.entry-points."moxi.turns.listeners"]
 rounds = "moxi_rounds.listeners"
