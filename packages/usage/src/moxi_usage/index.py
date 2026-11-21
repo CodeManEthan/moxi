@@ -53,6 +53,11 @@ at its line, as a request does. An OpenCode marker sits at the `seq` of the last
 of its own message, else at the message's time in milliseconds: a message's records come
 whole in every read, so a read from the cursor places a marker where a whole read does.
 
+**Prompts follow marks.** A Claude transcript's prompt ids (`prompts`, sessions' batch
+`prompt_ids`) are kept the same way, `prompts_read` standing to them as `marks_read` to
+the markers: a prompt that drew no request (`/exit`, a local command) is kept too, and one
+that two reads both meet is stored once. Codex and OpenCode reads give none.
+
 **Rebuild.** `rebuild=True` reads every listed source again from no cursor, keeps held
 rows as they are and every row's `project`, and ends with one claim over every key. A
 rebuild, or a pass with more than `POOL_ABOVE` sources to read from no cursor, reads them
@@ -214,12 +219,13 @@ class Task(NamedTuple):
 @dataclass
 class Got:
     """What reading one source gave: the request rows by key (a request that came twice
-    is here once, as its last copy), the compaction marks by `(seq, kind)`, the limits
-    records, the last title, the header facts, the new cursor, whether sessions said to
-    drop what the index holds, and the reason it could not be read."""
+    is here once, as its last copy), the compaction marks by `(seq, kind)`, the prompt
+    ids, the limits records, the last title, the header facts, the new cursor, whether
+    sessions said to drop what the index holds, and the reason it could not be read."""
 
     rows: dict[int, store.RequestRow] = field(default_factory=dict)
     marks: dict[tuple[int, str], store.MarkRow] = field(default_factory=dict)
+    prompts: set[str] = field(default_factory=set)
     limits: list[Any] = field(default_factory=list)
     title: str | None = None
     facts: dict[str, Any] = field(default_factory=dict)
@@ -243,9 +249,11 @@ def read_source(task: Task) -> Got:
                 got.reset = True
                 got.rows.clear()
                 got.marks.clear()
+                got.prompts.clear()
                 got.limits.clear()
                 got.title = None
             _take(got, batch.records, lane=task.lane, path=task.path)
+            got.prompts.update(batch.prompt_ids)
             header = batch.header
             if header is not None:
                 got.facts = header_facts(header)
@@ -660,7 +668,7 @@ def _file_lane(run: _Pass, lane: Lane, listing: Any) -> None:
             continue
         cursor = None
         if (row is not None and not run.rebuild and row["excluded"] is None
-                and row["marks_read"]):
+                and row["marks_read"] and row["prompts_read"]):
             cursor = row["cursor"]
         run.tasks.append((lane, entry, row, cursor))
 
@@ -695,10 +703,12 @@ def _file_lane(run: _Pass, lane: Lane, listing: Any) -> None:
 
 def _reusable(lane: Lane, row: dict, entry: Any, excluded: str | None) -> bool:
     """The row stands for the file as it is now: its reuse keys match, it was read (or
-    skipped as imported), its import mark has not flipped and it holds its markers."""
+    skipped as imported), its import mark has not flipped and it holds its markers and its
+    prompts."""
     if row["excluded"] != excluded:
         return False
-    if excluded is None and (row["cursor"] is None or not row["marks_read"]):
+    if excluded is None and (row["cursor"] is None or not row["marks_read"]
+                             or not row["prompts_read"]):
         return False
     names = ("size", "mtime_ns") if lane.archive else ("dev", "ino", "size", "mtime_ns")
     return all(row[name] == getattr(entry, name) for name in names)
@@ -714,16 +724,17 @@ def _entry_fields(lane: Lane, entry: Any) -> dict[str, Any]:
 
 def _write_excluded(run: _Pass, lane: Lane, entry: Any, row: dict | None,
                     touched: set[int]) -> None:
-    """A rollout an import mark says was imported: its row, with no requests and no
-    marks, which holds every marker it could."""
+    """A rollout an import mark says was imported: its row, with no requests, marks or
+    prompts, which holds every marker and prompt it could."""
     fields = _entry_fields(lane, entry)
     fields.update(header_facts(entry.header))
     fields.update(excluded=IMPORTED, held=None, cursor=None, read_at=run.now,
-                  first_ts=None, last_ts=None, marks_read=1)
+                  first_ts=None, last_ts=None, marks_read=1, prompts_read=1)
     file_id = store.upsert_file(run.conn, lane=lane.id, path=str(entry.source.path),
                                 touched=touched, **fields)
     store.delete_requests(run.conn, [file_id], touched=touched)
     store.delete_marks(run.conn, [file_id])
+    store.delete_prompts(run.conn, [file_id])
 
 
 # --- reads ------------------------------------------------------------------------------
@@ -843,15 +854,18 @@ def _write_read(run: _Pass, lane: Lane, entry: Any, row: dict | None, cursor: st
     if got.title is not None or whole:
         fields["title"] = got.title
     if whole:
-        # a read from the start holds every marker; one from a cursor keeps the 1 it has,
-        # since a row at 0 is never read from its cursor
+        # a read from the start holds every marker and prompt; one from a cursor keeps
+        # the 1s it has, since a row at 0 is never read from its cursor
         fields["marks_read"] = 1
+        fields["prompts_read"] = 1
     file_id = store.upsert_file(conn, lane=lane.id, path=path, touched=touched, **fields)
     if row is not None and whole:
         store.delete_requests(conn, [file_id], touched=touched)
         store.delete_marks(conn, [file_id])
+        store.delete_prompts(conn, [file_id])
     store.upsert_requests(conn, file_id, got.rows.values(), touched=touched)
     store.upsert_marks(conn, file_id, got.marks.values())
+    store.add_prompts(conn, file_id, got.prompts)
     _settle_times(conn, [file_id], touched)
     _send_limits(run, got.limits)
 
@@ -939,7 +953,8 @@ def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
             if rows.get(part) is None or change:
                 ids[part] = store.upsert_file(conn, lane=lane.id, path=db, part=part,
                                               touched=touched, read_at=run.now,
-                                              marks_read=1, **_session_fields(lane, entry))
+                                              marks_read=1, prompts_read=1,
+                                              **_session_fields(lane, entry))
             else:
                 ids[part] = rows[part]["id"]
         for part in sorted(found):
@@ -947,7 +962,7 @@ def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
                 ids[part] = (rows[part]["id"] if part in rows else store.upsert_file(
                     conn, lane=lane.id, path=db, part=part, touched=touched,
                     harness=OPENCODE, rank=lane.rank, kind="main", session_id=part,
-                    read_at=run.now, marks_read=1))
+                    read_at=run.now, marks_read=1, prompts_read=1))
         if whole:
             held = [row["id"] for row in rows.values()]
             store.delete_requests(conn, held, touched=touched)

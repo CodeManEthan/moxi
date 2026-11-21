@@ -1,10 +1,11 @@
 """The Sessions section of usage's page in a browser, through a real shell that starts
 usage's real page server: the closed row naming the range's dearest session with the
-count that opens it; opened, the week's ten dearest as two-line rows, the line for the
-rest of the week and its `Show`, the earlier days' line and its `Show`, the table, a
-row's `Open` and the address it writes; a range of seven days or fewer with no earlier
-line; Cost's `most to` naming today's two dearest; and the section at a phone's width.
-
+count that opens it; opened, the table of every session of the range at once, dearest
+first, sorted by a column, with its turns, its token classes each with a bar, its
+subagent share and its cost, its rows in a box with a row cursor on the arrow keys, a
+next page that failed read again only on `Load more`; a table row opening its session
+first in the section, and the opened row's `Close` and the address it writes; a range of seven days or one holding only its own sessions; Cost's
+`most to` naming today's two dearest; and the section at a phone's width.
 The transcripts are written and the index built in the shell's own environment. No test
 changes what the index holds, so the tests hold under pytest-xdist in any order.
 """
@@ -102,12 +103,26 @@ def sessions_of(panel):
     return panel.locator("[data-part=below] section[data-group=sessions]")
 
 
-def rows_of(section, which: str = "first"):
-    return section.locator(f"[data-list={which}] moxi-ui-row")
+def rows_of(section):
+    """The Sessions table's rows."""
+    return section.locator("table[data-table=sessions] tbody tr[data-row]")
 
 
 def keys_of(rows) -> list[str]:
-    return rows.evaluate_all("nodes => nodes.map((node) => node.dataset.key)")
+    return rows.evaluate_all("nodes => nodes.map((node) => node.dataset.row)")
+
+
+def placed_of(section, session: str):
+    """The row of the session opened in the section, first in it."""
+    return section.locator(f'[data-list=placed] moxi-ui-row[data-key="claude/{session}"]')
+
+
+def opened_sessions(page):
+    """Opens the Sessions section by its address, waiting for the table's first read."""
+    with page.expect_request(lambda request: "sort=cost" in request.url) as sent:
+        panel = open_page(page, "sessions")
+    assert "order=desc" in sent.value.url and "top=500" in sent.value.url, sent.value.url
+    return panel
 
 
 def path_of(page) -> str:
@@ -133,94 +148,210 @@ def test_closed_it_names_the_dearest_session_and_its_count_opens_it(page):
     assert session_id(0) not in section.inner_text()
 
 
-def test_opened_it_lists_the_weeks_ten_dearest_as_two_line_rows(page):
-    section = sessions_of(open_page(page, "sessions"))
-    expect(section.locator("[data-part=heading]")).to_have_text("This week, dearest first")
+def test_opened_it_shows_the_table_of_every_session_at_once_dearest_first(page):
+    section = sessions_of(opened_sessions(page))
     rows = rows_of(section)
-    expect(rows).to_have_count(10)
-    assert keys_of(rows) == [f"claude/{session_id(n)}" for n in range(10)]
-    typed = rows.first
-    expect(typed).to_have_attribute("name", "fix the tests")
-    expect(typed).to_have_attribute("where", "proj-a")
-    expect(typed).to_have_attribute("fact", re.compile(rf"^{MONEY}$"))
-    expect(typed).to_have_attribute("lead", "16 requests")
-    expect(typed).to_have_attribute("lead-more", re.compile(rf"^(today|yesterday) {TIME}( to .*{TIME})?$"))
-    expect(typed).to_have_attribute("rest", MODEL)
-    expect(typed).to_have_attribute("tail", re.compile(r"^context (under 1|\d+)% full$"))
-    # With no typed name a row is named by its folder and start, and has no `where`.
-    other = rows.nth(1)
-    expect(other).to_have_attribute("name", re.compile(rf"^proj-b · started (today|yesterday) {TIME}$"))
-    expect(other).to_have_attribute("where", "")
-    expect(typed.get_by_role("link", name="Open")).to_be_visible()
+    expect(rows).to_have_count(16)
+    expected = [f"claude/{session_id(n)}" for n in range(14)] + [f"claude/{session_id(20)}", f"claude/{session_id(21)}"]
+    assert keys_of(rows) == expected
+    # A row is named as the session was typed, or by its folder and start.
+    expect(rows.first.get_by_role("link")).to_have_text("fix the tests")
+    expect(rows.nth(1).get_by_role("link")).to_have_text(re.compile(rf"^proj-b · started (today|yesterday) {TIME}$"))
+    # The table is the section's view: no toggle hides it and no list stands above it.
+    expect(section.locator("[data-part=table-toggle]")).to_have_count(0)
+    expect(section.locator("moxi-ui-row")).to_have_count(0)
 
 
-def test_show_adds_the_rest_of_the_week_below_the_rows_shown(page):
-    section = sessions_of(open_page(page, "sessions"))
-    more = section.locator("[data-more=first]")
-    expect(more).to_have_text(re.compile(rf"^4 more this week, {MONEY} between them\s*Show$"))
-    before = keys_of(rows_of(section))
-    more.get_by_role("button", name="Show").click()
-    rows = rows_of(section)
-    expect(rows).to_have_count(14)
-    assert keys_of(rows)[:10] == before
-    assert keys_of(rows)[10:] == [f"claude/{session_id(n)}" for n in range(10, 14)]
-    expect(more).to_have_count(0)
-
-
-def test_earlier_says_the_days_before_the_week_and_shows_their_rows(page):
-    section = sessions_of(open_page(page, "sessions"))
-    earlier = section.locator("[data-more=earlier]")
-    expect(earlier).to_have_text(re.compile(rf"^Earlier · 2 sessions, \w+ \d+ to \w+ \d+, {MONEY}\s*Show$"))
-    expect(rows_of(section, "earlier")).to_have_count(0)
-    earlier.get_by_role("button", name="Show").click()
-    expect(rows_of(section, "earlier")).to_have_count(2)
-    assert keys_of(rows_of(section, "earlier")) == [f"claude/{session_id(20)}", f"claude/{session_id(21)}"]
-    # Once shown, the line stands over its rows with no act.
-    expect(earlier.get_by_role("button", name="Show")).to_have_count(0)
-    expect(section.locator("[data-more=earlier-more]")).to_have_count(0)
-
-
-def test_a_range_of_seven_days_or_fewer_has_no_earlier_line(page):
-    panel = open_page(page, "sessions")
+def test_a_range_of_seven_days_or_one_holds_only_its_own_sessions(page):
+    panel = opened_sessions(page)
     section = sessions_of(panel)
-    expect(section.locator("[data-more=earlier]")).to_be_visible()
+    expect(rows_of(section)).to_have_count(16)
     set_range(panel, "Last 7 days")
     expect(section.get_by_role("link", name="Close")).to_be_visible()
-    expect(section.locator("[data-part=heading]")).to_have_text("This week, dearest first")
-    expect(rows_of(section)).to_have_count(10)
-    expect(section.locator("[data-more=earlier]")).to_have_count(0)
+    expect(rows_of(section)).to_have_count(14)
     set_range(panel, "Today")
-    expect(section.locator("[data-part=heading]")).to_have_text("Today, dearest first")
-    expect(section.locator("[data-more=earlier]")).to_have_count(0)
-    expect(section.locator("[data-more=first]")).to_have_count(0)
+    # Today's two, and none of the days before; a session of earlier this morning may be
+    # today's too, by the hour the run starts.
+    for n in (0, 1):
+        expect(section.locator(f'tr[data-row="claude/{session_id(n)}"]')).to_have_count(1)
+    expect(section.locator(f'tr[data-row="claude/{session_id(13)}"]')).to_have_count(0)
     set_range(panel, "Last 30 days")
 
 
-def test_the_table_holds_every_figure_of_the_rows_shown(page):
-    section = sessions_of(open_page(page, "sessions"))
-    expect(rows_of(section)).to_have_count(10)
-    section.locator("[data-more=earlier]").get_by_role("button", name="Show").click()
-    expect(rows_of(section, "earlier")).to_have_count(2)
-    section.get_by_role("button", name="Table").click()
+def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
+    section = sessions_of(opened_sessions(page))
     table = section.locator("table[data-part=table]")
+    # Every session of the 30 days.
+    expect(table.locator("tbody tr")).to_have_count(16)
+    expect(section.locator("[data-more=table]")).to_have_text("16 sessions · showing 16")
+    expect(section.locator("[data-more=table]").get_by_role("button", name="Load more")).to_have_count(0)
     heads = table.locator("th").all_inner_texts()
-    assert heads[:3] == ["List", "Session", "Project"], heads
-    assert {"Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens",
-            "Cost"} <= set(heads), heads
-    expect(table.locator("tbody tr")).to_have_count(12)
-    expect(table.locator("tbody tr").first.locator("td").nth(1)).to_have_text("fix the tests")
-    # A folder outside the account's home is written whole once `/api/projects` gave the home.
-    expect(table.locator("tbody tr").first.locator("td").nth(3)).to_have_text("/work/proj-a")
-    section.get_by_role("button", name="Hide table").click()
-    expect(table).to_have_count(0)
+    assert heads == ["Project", "Session", "Started", "Active", "Turns", "Input", "Cache create", "Cache read",
+                     "Output", "Subagent share", "Est. cost ↓"], heads
+    column = {name: i for i, name in enumerate(head.removesuffix(" ↓") for head in heads)}
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Est. cost ↓")
+    expect(table.locator("th[aria-sort=none]")).to_have_count(9)
+    first = table.locator("tbody tr").first.locator("td")
+    expect(first.nth(column["Session"])).to_have_text("fix the tests")
+    # Each token class cell has a bar against its column's most: the dearest session's
+    # output is the most, so its bar is whole.
+    expect(table.locator("tbody tr").first.locator("svg.sb [data-part=sparkbar]")).to_have_count(4)
+    output_bar = first.nth(column["Output"]).locator("[data-part=sparkbar]")
+    assert float(output_bar.get_attribute("width")) == pytest.approx(44, abs=0.5)
+    last_bar = table.locator("tbody tr").last.locator("td").nth(column["Output"]).locator("[data-part=sparkbar]")
+    assert float(last_bar.get_attribute("width")) < 44
+
+    # A new column starts highest first; a second click turns it around.
+    output = table.get_by_role("button", name="Output")
+    with page.expect_request(lambda request: "sort=output" in request.url) as sent:
+        output.click()
+    assert "order=desc" in sent.value.url, sent.value.url
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Output ↓")
+    expect(table.locator("th[aria-sort=none]").filter(has_text="Est. cost")).to_have_count(1)
+    expect(table.locator("tbody tr").first).to_have_attribute("data-row", f"claude/{session_id(0)}")
+    with page.expect_request(lambda request: "sort=output&order=asc" in request.url):
+        output.click()
+    expect(table.locator("th[aria-sort=ascending]")).to_have_text("Output ↑")
+    expect(table.locator("tbody tr").first).to_have_attribute("data-row", f"claude/{session_id(21)}")
+    expect(table.locator("tbody tr").last).to_have_attribute("data-row", f"claude/{session_id(0)}")
+
+
+def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
+    section = sessions_of(opened_sessions(page))
+    table = section.locator("table[data-part=table]")
+    expect(table.locator("tbody tr")).to_have_count(16)
+    heads = [head.removesuffix(" ↓") for head in table.locator("th").all_inner_texts()]
+    column = {name: i for i, name in enumerate(heads)}
+    assert heads.index("Active") + 1 == column["Turns"] == column["Input"] - 1, heads
+    assert column["Output"] + 1 == column["Subagent share"] == column["Est. cost"] - 1, heads
+    expect(table.locator("th", has_text="Active")).to_have_attribute(
+        "title", "First → last request (not the file's mtime)")
+    expect(table.locator("th", has_text="Turns")).to_have_attribute(
+        "title", "Prompts in the main session file; never summed with subagents")
+    expect(table.locator("th", has_text="Subagent share")).not_to_have_attribute("title", re.compile(""))
+    first = table.locator("tbody tr").first.locator("td")
+    # Each request of the seed is a prompt of its own, and no session has a subagent.
+    expect(first.nth(column["Turns"])).to_have_text("16")
+    # The share is a meter, named for a reader that cannot see it.
+    expect(first.nth(column["Subagent share"]).get_by_role("img")).to_have_attribute(
+        "aria-label", "Subagent share 0%")
+
+    turns = table.get_by_role("button", name="Turns")
+    with page.expect_request(lambda request: "sort=turns&order=desc" in request.url):
+        turns.click()
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Turns ↓")
+    with page.expect_request(lambda request: "sort=turns&order=asc" in request.url):
+        turns.click()
+    expect(table.locator("th[aria-sort=ascending]")).to_have_text("Turns ↑")
+    expect(first.nth(column["Turns"])).to_have_text("2")
+    with page.expect_request(lambda request: "sort=subagent_share&order=desc" in request.url):
+        table.get_by_role("button", name="Subagent share").click()
+    expect(table.locator("th[aria-sort=descending]")).to_have_text("Subagent share ↓")
+    expect(table.locator("tbody tr")).to_have_count(16)
+
+
+def test_a_table_row_opens_its_session_first_in_the_section(page):
+    section = sessions_of(opened_sessions(page))
+    table = section.locator("table[data-part=table]")
+    with page.expect_request(lambda request: "sort=turns&order=desc" in request.url):
+        table.get_by_role("button", name="Turns").click()
+    with page.expect_request(lambda request: "sort=turns&order=asc" in request.url):
+        table.get_by_role("button", name="Turns").click()
+    # The fewest turns: a session of twenty days ago.
+    earliest = table.locator(f'tr[data-row="claude/{session_id(21)}"]')
+    expect(table.locator("tbody tr").first).to_have_attribute("data-row", f"claude/{session_id(21)}")
+    with page.expect_request(lambda request: "/m/usage/api/session?" in request.url
+                             and session_id(21) in request.url):
+        earliest.locator("td").last.click()
+    assert path_of(page) == f"/m/usage/sessions/claude/{session_id(21)}"
+    placed = placed_of(section, session_id(21))
+    expect(placed).to_have_attribute("open", "")
+    expect(placed.get_by_role("link", name="Close")).to_have_attribute("aria-expanded", "true")
+    # The table stays under it.
+    expect(table.locator("tbody tr")).to_have_count(16)
+
+    # By the keyboard: the session's name is a link to its address, and Enter opens it.
+    name = table.locator(f'tr[data-row="claude/{session_id(1)}"]').get_by_role("link")
+    expect(name).to_have_attribute("href", f"/m/usage/sessions/claude/{session_id(1)}")
+    name.focus()
+    page.keyboard.press("Enter")
+    expect(placed_of(section, session_id(1))).to_have_attribute("open", "")
+    assert path_of(page) == f"/m/usage/sessions/claude/{session_id(1)}"
+    expect(table).to_be_visible()
+
+
+
+def test_the_tables_rows_sit_in_a_box_and_the_arrow_keys_move_a_row_cursor_enter_opens(page):
+    section = sessions_of(opened_sessions(page))
+    table = section.locator("table[data-part=table]")
+    rows = table.locator("tbody tr")
+    expect(rows).to_have_count(16)
+    expect(table).to_have_attribute("aria-rowcount", "17")
+    # Each row is 40 px tall, in a box of its own that scrolls under the head.
+    assert rows.first.bounding_box()["height"] == pytest.approx(40, abs=0.5)
+    box = section.locator("[data-part=board]").bounding_box()
+    assert box["height"] <= 480.5, box
+    # One row at a time takes the focus: the cursor starts on the first.
+    expect(table.locator("tbody tr[tabindex='0']")).to_have_count(1)
+    rows.first.focus()
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("ArrowDown")
+    third = rows.nth(2)
+    expect(third).to_be_focused()
+    expect(third).to_have_attribute("tabindex", "0")
+    key = third.get_attribute("data-row")
+    # Enter on the row opens its session first in the section.
+    with page.expect_request(lambda request: "/m/usage/api/session?" in request.url):
+        page.keyboard.press("Enter")
+    assert path_of(page) == f"/m/usage/sessions/{key}"
+    expect(section.locator(f'[data-list=placed] moxi-ui-row[data-key="{key}"]')).to_have_attribute("open", "")
+    expect(table).to_be_visible()
+
+
+#: Twenty frames of the page, long enough for a read asked on every draw to go out many times.
+FRAMES = """new Promise((done) => {
+  let n = 0;
+  const step = () => (++n < 20 ? requestAnimationFrame(step) : done());
+  requestAnimationFrame(step);
+})"""
+
+
+def test_a_next_page_that_failed_is_read_again_only_on_load_more(page):
+    failed = []
+
+    def answer(route):
+        if "skip=" in route.request.url:
+            failed.append(route.request.url)
+            route.fulfill(status=500, json={"error": "down"})
+            return
+        # The first page says 600 more sessions wait, so the rows drawn are near the end.
+        response = route.fetch()
+        body = response.json()
+        body.update(count=body["count"] + 600, more=600)
+        route.fulfill(response=response, json=body)
+
+    page.route("**/m/usage/api/sessions?*", answer)
+    with page.expect_request(lambda request: "skip=16" in request.url):
+        section = sessions_of(opened_sessions(page))
+    more = section.locator("[data-more=table]")
+    expect(more).to_contain_text("616 sessions · showing 16")
+    page.evaluate(FRAMES)
+    assert len(failed) == 1, failed
+    # A press reads the page again; once the server answers, the line counts what it holds.
+    page.unroute("**/m/usage/api/sessions?*")
+    with page.expect_request(lambda request: "skip=16" in request.url):
+        more.get_by_role("button", name="Load more").click()
+    expect(more).to_have_text("16 sessions · showing 16")
+    expect(rows_of(section)).to_have_count(16)
 
 
 def test_a_rows_open_writes_its_address_and_reads_as_close(page):
-    panel = open_page(page, "sessions")
-    section = sessions_of(panel)
-    row = section.locator(f'moxi-ui-row[data-key="claude/{session_id(1)}"]')
+    section = sessions_of(opened_sessions(page))
+    row = placed_of(section, session_id(1))
     with page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
-        row.get_by_role("link", name="Open").click()
+        section.locator(f'tr[data-row="claude/{session_id(1)}"]').get_by_role("link").click()
     assert "harness=claude" in sent.value.url, sent.value.url
     assert path_of(page) == f"/m/usage/sessions/claude/{session_id(1)}"
     expect(row).to_have_attribute("open", "")
@@ -240,5 +371,6 @@ def test_cost_names_todays_two_dearest_sessions(page):
 def test_the_opened_section_fits_a_phone(page, ui_width_check):
     ui_width_check(page, module="usage", route="sessions")
     section = sessions_of(page.locator("#moxi-panel > moxi-usage-page"))
-    expect(rows_of(section)).to_have_count(10)
+    # The table scrolls inside its box.
+    expect(rows_of(section)).to_have_count(16)
     ui_width_check(page)

@@ -49,6 +49,14 @@
   has none), which never falls back to `userType`. Claude Code's and Codex's wrapper tests
   skip the opening set rather than `str.lstrip()`'s, so a wrapper after a zero-width or
   other format character now marks the message injected too.
+
+## 0.2.10 (2026-11-20)
+
+- `records_since`'s batch names the Claude prompt ids its lines moved the turn to,
+  in order (`Batch.prompt_ids`), a prompt that drew no request included, whatever kinds
+  the read keeps and with no line decoded beyond those a filtered read decodes now. The
+  batches of a transcript from no cursor name every prompt id it wrote. A Codex or
+  OpenCode batch's is empty.
 - `read` and `list --text` redact a secret beside a `gitleaks:allow` mark or on a line a
   rule's allowlist names, and a token an invisible character splits, through secrets'
   `redact`, which no longer keeps either. sessions' code is unchanged; tests pin it.

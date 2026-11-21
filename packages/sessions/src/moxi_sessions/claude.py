@@ -912,7 +912,12 @@ class Mapper:
     kept, builds no marker or other record unless one is kept, works out a request's
     common fields only for the line it is handed on from, and `skip` passes by the lines
     that can give no kept record. The kept records,
-    `final`, `closed` and `open_key` are the same as without it.
+    `final`, `closed`, `open_key` and `started` are the same as without it.
+
+    `started` lists the `promptId`s the lines moved the turn to, in order: one comes
+    again only when another came between, and the turn handed in as `prompt_id` is not
+    listed. Fed every line of a file from the start, it names every prompt id the file
+    wrote, a prompt that drew no request included, with no decode beyond the turn's.
     """
 
     def __init__(self, *, session_id: str | None = None, agent_id: str | None = None,
@@ -925,6 +930,7 @@ class Mapper:
         self.prompt_id = prompt_id
         self.open_key = open_key
         self.closed: list[str] = []
+        self.started: list[str] = []
         self._held: tuple | None = None
         self.kinds = frozenset(kinds) if kinds is not None else None
         self._content = self.kinds is None or not self.kinds.isdisjoint(CONTENT_KINDS)
@@ -986,16 +992,22 @@ class Mapper:
         if b'"turn_duration"' in raw:
             return False
         if b'"promptId"' in raw:
-            self.prompt_id = turn_after(raw, self.prompt_id)
+            self._turn(turn_after(raw, self.prompt_id))
         return True
+
+    def _turn(self, prompt_id: str | None) -> None:
+        if prompt_id is not None and prompt_id != self.prompt_id:
+            self.started.append(prompt_id)
+        self.prompt_id = prompt_id
 
     def feed(self, raw: bytes | str, *, line: int, offset: int,
              unterminated: bool = False) -> list[Record]:
         """One line, `line` its 1-based number and `offset` the byte offset of its start.
         Returns the records ready to hand on, in order."""
-        pending, records, self.prompt_id, ends = _map_line(
+        pending, records, prompt_id, ends = _map_line(
             raw, {"line": line, "offset": offset}, self.session_id, self.agent_id,
             self.prompt_id, keep_raw=self.keep_raw, unterminated=unterminated, content=self._content, others=self._others)
+        self._turn(prompt_id)
         out: list[Record] = []
         if pending is not None:
             key = pending[4]

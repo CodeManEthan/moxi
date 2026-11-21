@@ -516,7 +516,7 @@ def notice_line(tokens: int, mark: str, threshold: int, model: str | None) -> st
 
 
 def agent_label(agent_id: str) -> str:
-    short = agent_id[:AGENT_SHOWN] + "..." if len(agent_id) > AGENT_SHOWN + 1 else agent_id
+    short = agent_id[:AGENT_SHOWN] + "…" if len(agent_id) > AGENT_SHOWN + 1 else agent_id
     return f"agent-{short}"
 
 
