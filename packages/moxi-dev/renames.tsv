@@ -11549,6 +11549,7 @@ secrets	packages/secrets/src/moxi_secrets/scan.py	self.by_id = {(r.set, r.id): r
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.set = set_name	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	spans = {(h.set, h.rule, h.start, h.end) for h in hits}	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	spans.add((h.set, h.rule, h.start, h.end))	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	unscanned = {h.set for h in hits if h.rule == UNSCANNED}	keep	set	set
 secrets	packages/secrets/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/corpus.py	codes |= set(range(first, last + 1))	keep	set	set
 secrets	packages/secrets/tests/corpus.py	if any(h.rule == "generic-api-key" for h in scan(value, ("broad",))):	keep	any	any
@@ -11588,6 +11589,8 @@ secrets	packages/secrets/tests/test_redact.py	assert [(h.set, h.rule) for h in s
 secrets	packages/secrets/tests/test_redact.py	assert not survived & set(range(h.start, h.end)), (t, kw, h)	keep	set	set
 secrets	packages/secrets/tests/test_redact.py	if any(scan_mod._path_only(h) for h in hits):	keep	any	any
 secrets	packages/secrets/tests/test_redact.py	text = form.format(value=value)	keep	value	value
+secrets	packages/secrets/tests/test_redact.py	value = make(corpus.rng(60))	keep	auto	auto
+secrets	packages/secrets/tests/test_redact.py	value = make(corpus.rng(60))	keep	start	start
 secrets	packages/secrets/tests/test_redact.py	value = make(r)	keep	start	start
 secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "generic-api-key" for h in scan(	keep	any	any
 secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "github-pat" for h in scan(f"t = {token}\n# gitleaks:allow",	keep	any	any

@@ -359,7 +359,9 @@ secrets' `redact` keeps no secret whole for text beside it: a secret on a line m
 reads past the characters a renderer may show as nothing (controls, format characters
 such as the zero-width space and the soft hyphen, and the rest Unicode names
 default-ignorable), so a token one of them splits is redacted too, the characters inside
-it included, and every character outside a secret is stored as it was.
+it included, and every character outside a secret is stored as it was. It reads past the
+backslashes that escape a quote as well, so a key quoted inside a command in a tool
+call's input (`{\"key\": \"...\"}`) is redacted, the backslashes left in place.
 
 **Rows stored under an older `redact`.** Rows already in the index were redacted by the
 `redact` installed when they were stored. The rebuild a typed `moxi memory reindex` runs
