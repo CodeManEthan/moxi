@@ -8831,7 +8831,7 @@ rounds	packages/rounds/src/moxi_rounds/api.py	"own_commits", "hand_merge", "idle
 rounds	packages/rounds/src/moxi_rounds/api.py	-	name	round	round_data
 rounds	packages/rounds/src/moxi_rounds/api.py	_CLOSED = "closed"	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/api.py	__all__ = ["rounds", "round", "waiting", "questions", "builds"]	use	"round"	"round_data"
-rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `ended`, `description`, `lead`, `parent`,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/api.py	`own_commits` is true for an `empty` build that holds commits of its own. `idle`	use	`own_commits`	`has_own_commits`
 rounds	packages/rounds/src/moxi_rounds/api.py	and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/api.py	read, and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
@@ -8912,6 +8912,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	for flag, given in (("--from", arg
 rounds	packages/rounds/src/moxi_rounds/cli.py	for given, minutes in zip(args.slices, args.minutes, strict=True):	keep	strict	strict
 rounds	packages/rounds/src/moxi_rounds/cli.py	form = parser.add_mutually_exclusive_group(required=True)	keep	required	required
 rounds	packages/rounds/src/moxi_rounds/cli.py	form.add_argument("--flow", metavar="NAME",	keep	NAME	NAME
+rounds	packages/rounds/src/moxi_rounds/cli.py	form.add_argument("--lead", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/cli.py	form.add_argument("--step", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/cli.py	found = listing.rounds(args.name, ended=args.closed)	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/cli.py	found = next_step.read(args.round)	keep	round	round
@@ -8951,6 +8952,8 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="run the command step NAME of
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="size a worker's brief for the stage B<n> before the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="sum the numbers of the closed rounds: passes, folds, "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="sweep the worktrees and scratch folders that ended builds "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the agent who leads the round from now on: letters, "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the agent who leads the round: letters, digits, . _ -, "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the earlier ruling of the same thing that this one "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's call that this version changes records "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="the lead's decision that the thread thread:NAME is "	keep	help	help
@@ -9197,7 +9200,7 @@ rounds	packages/rounds/src/moxi_rounds/errors.py	self.problem = (f"it is {self.f
 rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record", "host", "build")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	# who asked it and when, which outlive a move to another log. `record` is the	keep	record	record
-rounds	packages/rounds/src/moxi_rounds/events.py	("description", "flow", "steps", "parent", "inherits", "record"),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	("description", "flow", "steps", "parent", "inherits", "record", "lead"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	("id", "repo", "branch", "round", "after", "slices", "why")),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/events.py	("id", "state", "blocks", "until", "by", "record", "options",	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",	keep	record	record
@@ -9873,13 +9876,16 @@ rounds	packages/rounds/tests/test_api.py	"name": A, "project": "proj-a", "folder
 rounds	packages/rounds/tests/test_api.py	"one round": ["show", A],	keep	show	show
 rounds	packages/rounds/tests/test_api.py	"the ended rounds": lambda: api.rounds(status="closed"),	keep	closed	closed
 rounds	packages/rounds/tests/test_api.py	@pytest.mark.parametrize("index", ["fresh", "stale", "none"])	keep	stale	stale
+rounds	packages/rounds/tests/test_api.py	A: {"name": "atlas-lead", "from": "round"},	keep	round	round
 rounds	packages/rounds/tests/test_api.py	[ended] = api.rounds(status="closed")["rounds"]	keep	closed	closed
 rounds	packages/rounds/tests/test_api.py	assert any(path.endswith(".jsonl") for path in before)	keep	any	any
 rounds	packages/rounds/tests/test_api.py	assert any(str(file) in line for line in api.questions("proj-a")["unreadable"])	keep	any	any
 rounds	packages/rounds/tests/test_api.py	assert any(str(file) in line for line in api.waiting()["unreadable"])	keep	any	any
 rounds	packages/rounds/tests/test_api.py	assert api.__all__ == ["rounds", "round", "waiting", "questions", "builds"]	use	"round"	"round_data"
 rounds	packages/rounds/tests/test_api.py	assert api.__all__ == ["rounds", "round", "waiting", "questions"]	use	"round"	"round_data"
+rounds	packages/rounds/tests/test_api.py	assert api.round_data(A)["lead"] == {"name": "atlas-lead", "from": "round"}	keep	round	round
 rounds	packages/rounds/tests/test_api.py	assert api.rounds(status="closed")["rounds"][0]["step"] is None	keep	closed	closed
+rounds	packages/rounds/tests/test_api.py	assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0	keep	set	set
 rounds	packages/rounds/tests/test_api.py	assert not imported(text) & set(APART), path.name	keep	set	set
 rounds	packages/rounds/tests/test_api.py	assert one == printed(capsys, ["show", A])	keep	show	show
 rounds	packages/rounds/tests/test_api.py	assert set(declared["project"]["entry-points"]) == {"moxi.modules", "moxi.turns.listeners"}	keep	set	set
@@ -10670,6 +10676,8 @@ rounds	packages/rounds/tests/test_list.py	ask	name	actor	by
 rounds	packages/rounds/tests/test_list.py	assert BARE <= set(one)	keep	set	set
 rounds	packages/rounds/tests/test_list.py	assert any(str(file) in line	keep	any	any
 rounds	packages/rounds/tests/test_list.py	assert any(str(file) in line for line in data(capsys, "--waiting")["unreadable"])	keep	any	any
+rounds	packages/rounds/tests/test_list.py	assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0	keep	set	set
+rounds	packages/rounds/tests/test_list.py	assert found == {A: {"name": "atlas-lead", "from": "round"},	keep	round	round
 rounds	packages/rounds/tests/test_list.py	assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",	keep	record	record
 rounds	packages/rounds/tests/test_list.py	assert found["unreadable"] == [] and found["no_folder"] == []	keep	no_folder	no_folder
 rounds	packages/rounds/tests/test_list.py	assert set(first) == {"name", "project", "folder", "unreadable"}	keep	folder	folder
@@ -10896,6 +10904,7 @@ rounds	packages/rounds/tests/test_rendering.py	-	name	test_someones_own_file_in_
 rounds	packages/rounds/tests/test_rendering.py	-	name	test_the_same_events_in_another_folder_give_the_same_note	test_the_same_events_in_another_dir_give_the_same_note
 rounds	packages/rounds/tests/test_rendering.py	ask	name	actor	by
 rounds	packages/rounds/tests/test_rendering.py	ask(text=OTHER, actor="helper", origin="https://example.com/thread/4", at=T3)	use	actor=	by=
+rounds	packages/rounds/tests/test_rendering.py	assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0	keep	set	set
 rounds	packages/rounds/tests/test_rendering.py	assert main(["show", A]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_rendering.py	shown.mark(A, "C1", actor="planner", record="comms:21", at=T7)	use	actor=	by=
 rounds	packages/rounds/tests/test_rendering.py	strict=True):	keep	strict	strict
@@ -10973,6 +10982,7 @@ rounds	packages/rounds/tests/test_rule.py	"state": "parked", "record": "comms:12
 rounds	packages/rounds/tests/test_rule.py	"state": "withdrawn", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	-	name	test_a_project_with_no_rounds_folder_yet_gets_its_register	test_a_project_with_no_rounds_dir_yet_gets_its_register
 rounds	packages/rounds/tests/test_rule.py	@pytest.mark.parametrize("record", [None, "he said so"])	keep	record	record
+rounds	packages/rounds/tests/test_rule.py	assert (made["rules"], made["chose"], made["record"]) == ("Q1", "b", pointer)	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [(change.state, change.ruling, change.record) for change in found.changes] == [	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [event["record"] for event in rulings(round_log(rounds))] == ["comms:13"]	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert rulings(log.project_log(rounds))[0]["record"] == pointer	keep	record	record
@@ -11001,7 +11011,9 @@ rounds	packages/rounds/tests/test_show.py	"folder": str(rounds / "b-round"), "no
 rounds	packages/rounds/tests/test_show.py	"id": "C1", "text": RULED, "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_show.py	ask	name	actor	by
 rounds	packages/rounds/tests/test_show.py	assert [(one["id"], one["record"], one["shown"], one["shown_record"],	keep	record	record
+rounds	packages/rounds/tests/test_show.py	assert cli.main(["projects", "set", "proj-a", "--lead", name]) == 0	keep	set	set
 rounds	packages/rounds/tests/test_show.py	assert cli.main(["rounds", "show", A, "--json"]) == 0	keep	show	show
+rounds	packages/rounds/tests/test_show.py	assert data(capsys)["lead"] == {"name": "atlas-lead", "from": "round"}	keep	round	round
 rounds	packages/rounds/tests/test_show.py	assert list(found) == ["name", "project", "slug", "folder", "notice", "status",	keep	folder	folder
 rounds	packages/rounds/tests/test_show.py	assert main(["show", "--help"]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_show.py	assert main(["show", "proj-a"]) == 3	keep	show	show
@@ -11021,6 +11033,7 @@ rounds	packages/rounds/tests/test_shown.py	"record": "https://example.com/page"}
 rounds	packages/rounds/tests/test_shown.py	"text": SAID, "rules": None, "record": "https://example.test/said",	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	@pytest.mark.parametrize("how", ["closed", "dropped"])	keep	closed	closed
 rounds	packages/rounds/tests/test_shown.py	assert (event["type"], event["ids"], event["record"]) == (	keep	record	record
+rounds	packages/rounds/tests/test_shown.py	assert last(round_log(rounds))["record"] == page("readback0001", at)	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	test_the_rulings_of_a_round_that_cant_be_read_are_left_out_and_the_round_named	name	file	fh
 rounds	packages/rounds/tests/test_shown.py	{"id": "C2", "text": SAID, "record": "comms:13", "kind": "substance",	keep	record	record
 rounds	packages/rounds/tests/test_skill.py	-	name	skills_folder	skills_dir
@@ -11418,6 +11431,7 @@ rounds	packages/rounds/tests/test_waits.py	assert again.wait.record == DONE_AT	k
 rounds	packages/rounds/tests/test_waits.py	assert api.round(ROUND)["waits"] == shown_as["waits"]	use	api.round	api.round_data
 rounds	packages/rounds/tests/test_waits.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_waits.py	assert event["record"] == commit	keep	record	record
+rounds	packages/rounds/tests/test_waits.py	assert log.read(log.round_log(round_dir))[-1]["record"] == pointer	keep	record	record
 rounds	packages/rounds/tests/test_waits.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_waits.py	assert marked.wait.record == commit	keep	record	record
 rounds	packages/rounds/tests/test_waits.py	assert not any("W1" in line for line in finish)	keep	any	any
@@ -16678,11 +16692,39 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stal
 rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --leftovers, also give the account of CI's own refs "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--lead", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, the build's folders the removal	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/leads.py	ROUND = "round"	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/leads.py	__all__ = ["NAME", "ROUND", "PROJECT", "CHANGED", "is_name", "check", "of", "chosen",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/settings.py	if len(set(jobs)) != len(jobs):	keep	set	set
 rounds	packages/rounds/tests/test_ci.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_ci_refs.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_ci_refs.py	hooks.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_leads.py	"name": "kestrel", "from": "round"}	keep	round	round
+rounds	packages/rounds/tests/test_leads.py	argv = (["projects", "set", "atlas", "--no-lead"] if name is None	keep	set	set
+rounds	packages/rounds/tests/test_leads.py	else ["projects", "set", "atlas", "--lead", name])	keep	set	set
+rounds	packages/rounds/tests/test_page_acts.py	"by": "operator", "record": pointer,	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	"id": "B1.W1", "state": "done", "record": pointer}	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	"ids": ["C1"], "record": pointer}	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	"text": "export on each close", "record": pointer, "kind": "substance",	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert (event["id"], event["rules"], event["chose"], event["record"]) == (	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["chose"], event["record"]) == (	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["question"], event["state"], event["record"]) == (	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["record"]) == (f"readback={listed.through}", pointer)	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert again.found and again.event is None and again.wait.record == pointer	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert any("Q1 is already ruled" in one.reason for one in refused(pick, item="park:Q1"))	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any("Q3 is already withdrawn" in one.reason for one in refused(pick, item="park:Q3"))	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any("retired" in one.reason for one in unmet)	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any("stays as it ended" in one.reason	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any("stays as it ended" in one.reason for one in ended)	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any("stays as it ended" in one.reason for one in refused(drop, ENDED))	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any(EARLY in one.reason for one in unmet)	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any(f"{ENDED} was dropped and stays as it ended" in one.reason	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert any(says in one.reason for one in unmet)	keep	any	any
+rounds	packages/rounds/tests/test_page_acts.py	assert cli.main(["projects", "set", PROJECT, "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_page_acts.py	exclude.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_page_acts.py	if one["type"] == "build.dropped" and one["record"] == pointer] == ["B1"]	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	return [one for one in folded(round_dir).rulings if one.record == pointer]	keep	record	record
 turns	packages/turns/tests/panel_kit.py	"identity": None, "where": {"target": target, "slot": slot, "project_key": project, "folder": segment},	keep	folder	folder
 turns	packages/turns/tests/panel_kit.py	shell = ui_shells(home=home, env=env, leave_out=others() if small else [])	keep	env	env
 turns	packages/turns/tests/panel_kit.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
