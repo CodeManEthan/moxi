@@ -361,6 +361,23 @@ def test_a_launch_without_recycle_at_limit_relaunch_refuses_the_self_arm(
     nothing_written(conn, slots_api)
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_an_older_scratch_row_set_to_relaunch_refuses_the_self_arm(conn, tmp_path,
+                                                                    dry_run):
+    # Recorded before a scratch launch was refused recycle_at_limit = relaunch.
+    row = store.get(conn, "r1")
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({**row.values, "scratch": True}),))
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as refused:
+        arm(conn, handoff(tmp_path), slots_api=slots_api, dry_run=dry_run)
+    assert refused.value.code == "no-self-recycle" and refused.value.exit_code == 3
+    assert refused.value.problem == ("launch r1 works in a scratch folder, and a scratch "
+                                     "launch can't recycle itself")
+    assert refused.value.hint == "recycle with compact, or launch in a directory"
+    nothing_written(conn, slots_api)
+
+
 def test_a_slot_check_comes_before_the_self_recycle_gate(tmp_path):
     conn = store.connect(tmp_path / "launcher.db")
     launched(conn, target_name="terminal", recycle=None)

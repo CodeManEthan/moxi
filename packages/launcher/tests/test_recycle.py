@@ -573,6 +573,20 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     assert recycle.crossing_line(conn, crossing(), pid=os.getppid()) is None
 
 
+def test_an_older_scratch_row_set_to_relaunch_gets_no_line(conn, script):
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"scratch": true, "recycle_at_limit": "relaunch", "limit_at": "1x"}',))
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
+    assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []
+    # A scratch that compacts still compacts.
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"scratch": true, "recycle_at_limit": "compact", "limit_at": "1x"}',))
+    spawn = Spawned()
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    assert len(spawn.calls) == 1
+
+
 def test_a_compact_crossing_writes_its_run_and_spawns_its_job(conn, script, monkeypatch):
     # The handler runs in the session's endpoint, whose environment carries its stamps.
     monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")

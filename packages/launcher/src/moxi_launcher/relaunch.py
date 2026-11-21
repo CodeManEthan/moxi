@@ -10,7 +10,8 @@ Relaunch is offered with turns and slots installed and slots running here; the s
 must be a slot launch, claimed, live, on a harness whose turns session offers `exit`.
 comms is optional: without it there is no director mode, no name to wait for and no
 notices. A self arm needs a launch made with `--recycle-at-limit relaunch`: a launch that
-recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too. A
+recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too, and
+so is a scratch launch recorded with the option before a scratch was refused it. A
 director's call and a repair need no such launch.
 
 A launch that names no model comes back on the model its session last used (`pin`): the
@@ -187,8 +188,14 @@ def arm_self(handoff: str, *, dry_run: bool = False,
 
 def may_recycle(row: store.LaunchRow) -> None:
     """Refuse `no-self-recycle` unless the launch was made with `--recycle-at-limit
-    relaunch`, the option that lets its session recycle itself."""
+    relaunch`, the option that lets its session recycle itself, and not in a scratch
+    folder (`recycle.SCRATCH_RECYCLE`: a row recorded before a scratch launch was refused
+    the option)."""
     value = row.values.get("recycle_at_limit")
+    if recycle.scratch_relaunch(row.values):
+        problem, hint = recycle.SCRATCH_RECYCLE
+        raise Refused("no-self-recycle", f"launch {row.request_id} works in a scratch "
+                                         f"folder, and {problem}", hint)
     if value == "relaunch":
         return
     hint = ("finish the work and stop; a launch with --recycle-at-limit relaunch can "

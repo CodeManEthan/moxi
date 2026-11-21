@@ -953,6 +953,45 @@ def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
     assert harness.runs() == []
 
 
+def recycling_scratch(monkeypatch, tmp_path, recycle: str) -> LaunchRequest:
+    """A scratch slot launch set to recycle at its limit, on an install that offers it."""
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    return LaunchRequest(typed={"scratch": True, "target": "slot",
+                                "recycle_at_limit": recycle},
+                         cwd=str(tmp_path), request_id="r9", session_id=SID)
+
+
+@POSIX
+def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
+        harness, tmp_path, monkeypatch):
+    req = recycling_scratch(monkeypatch, tmp_path, "relaunch")
+    [refused] = [r for r in api.check(req) if r.code == "scratch-recycle"]
+    assert isinstance(refused, api.ScratchRecycle) and refused.exit_code == exits.REFUSED
+    assert refused.row == "recycle_at_limit"
+    assert refused.problem == "a scratch launch can't recycle itself"
+    assert refused.hint == "recycle with compact, or launch in a directory"
+    # Ahead of the target's own checks, so the launch raises it.
+    with pytest.raises(api.ScratchRecycle):
+        api.launch(req)
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_launch_may_compact_at_its_limit(harness, tmp_path, monkeypatch):
+    for recycle in ("compact", "off"):
+        req = recycling_scratch(monkeypatch, tmp_path, recycle)
+        assert "scratch-recycle" not in {r.code for r in api.check(req)}
+
+
+@POSIX
+def test_a_launch_outside_a_scratch_may_recycle_itself(harness, work, monkeypatch):
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    req = request(work, target="slot", recycle_at_limit="relaunch")
+    assert "scratch-recycle" not in {r.code for r in api.check(req)}
+
+
 # -- the run-log sweep ---------------------------------------------------------------------
 
 

@@ -57,7 +57,8 @@ builds.
 preset read, and its own request id (and, but for a resume, its own Claude session id). It
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
-default with a warning, as a comms name does without comms. A relaunch's model pin
+default with a warning, as a comms name does without comms; so does a scratch row's
+`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A relaunch's model pin
 (`pin.choose`) is its model only when the stored values name none; the new row records the
 stored model and a `model-pin` event, never the pin as a value. It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
@@ -114,8 +115,8 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import (catalog, compose, first, handoffs, identity, live, names, presets, slots, store,
-               targets)
+from . import (catalog, compose, first, handoffs, identity, live, names, presets, recycle, slots,
+               store, targets)
 from .compose import Composition, common
 from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
@@ -149,6 +150,13 @@ class ScratchRoot(Refusal):
     not a folder, another user's, or open to other users."""
 
     code = "scratch-root"
+
+
+class ScratchRecycle(Refusal):
+    """A scratch launch set to recycle itself (`recycle_at_limit = relaunch`): a scratch
+    folder has no notes directory to keep its handoff in."""
+
+    code = "scratch-recycle"
 
 
 @dataclass(frozen=True)
@@ -361,7 +369,9 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default), a directory that does not exist, a scratch folder's
-    parent this user can't trust (a link, another user's, or open to others), a slot
+    parent this user can't trust (a link, another user's, or open to others), a scratch
+    launch set to recycle itself (`recycle_at_limit = relaunch`; `compact` is open to
+    one), a slot
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
@@ -556,6 +566,10 @@ def _replayed(request: ReplayRequest) -> Replayed:
         dropped = _unoffered_option(harness, target, values, name)
         if dropped is not None:
             warnings.append(dropped)
+    if recycle.scratch_relaunch(values):
+        values["recycle_at_limit"] = "off"
+        warnings.append(f"recycle_at_limit relaunch is not applied: "
+                        f"{recycle.SCRATCH_RECYCLE[0]}")
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
     posture = row.posture if request.posture is None else request.posture
@@ -666,6 +680,8 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
             found.append(ScratchRoot(
                 "scratch", f"a scratch launch can't use its folder: {problem}",
                 "move that folder away, or launch in a directory of your own"))
+        if recycle.scratch_relaunch(getattr(resolved, "values", {}) or {}):
+            found.append(ScratchRecycle("recycle_at_limit", *recycle.SCRATCH_RECYCLE))
     named = targets.named_slot(getattr(resolved, "values", {}) or {})
     if named is not None and resolved.target != "slot":
         found.append(catalog.BadValue(

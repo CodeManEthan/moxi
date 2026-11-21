@@ -760,6 +760,33 @@ def test_a_relaunched_row_keeps_recycle_at_limit_relaunch(work, harness, no_exec
     assert not any("recycle_at_limit" in said for said in replayed.warnings)
 
 
+def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
+        harness, tmp_path, no_exec, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
+                             session_id=SID, actor="ann"))
+    old = row("r1")
+    # Recorded before a scratch launch was refused recycle_at_limit = relaunch.
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    old = dataclasses.replace(old, target="slot", values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replayed = api._replayed(ReplayRequest(old, request_id="r2", actor="ann",
+                                               **replay))
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert ("recycle_at_limit relaunch is not applied: a scratch launch can't recycle "
+                "itself") in replayed.warnings
+        # So the launch check does not refuse the replay.
+        assert "scratch-recycle" not in {r.code for r in api._check(replayed, {})}
+    # compact is replayed as it was.
+    stored = {**old.values, "recycle_at_limit": "compact"}
+    replayed = api._replayed(ReplayRequest(
+        dataclasses.replace(old, values_json=json.dumps(stored)), relaunch_of="r1",
+        request_id="r2", actor="ann"))
+    assert replayed.values["recycle_at_limit"] == "compact"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
 # -- the model pin ------------------------------------------------------------------------
 
 
