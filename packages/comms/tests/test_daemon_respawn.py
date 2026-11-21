@@ -374,6 +374,8 @@ def test_at_most_three_respawns_per_claim_in_ten_minutes_and_one_line_past_it(
     assert r.replace(KEY, record, "-") is None
     assert len(starts.calls) == 3
     assert caplog.text.count("replaces it no more for now") == 1
+    assert ("The session's next start or prompt starts a new one itself, and says mail "
+            "has stopped only if that one fails too") in caplog.text
     assert r.replace("other-key", record, "-") == (word.BOUND, ""), "the cap is per key"
     clock.advance(respawn.RESPAWN_WINDOW_S - 3 * 60 + 1)
     assert r.replace(KEY, record, "-") == (word.BOUND, ""), "the oldest left the window"

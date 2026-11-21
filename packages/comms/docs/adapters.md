@@ -292,7 +292,7 @@ restart of the daemon's service doesn't kill it. When `systemd-run` fails, the d
 why and starts the adapter in its own cgroup instead: a restart of the daemon then ends
 that adapter, and the restarted daemon replaces it. The daemon replaces one session's
 adapter at most 3 times in 10 minutes; past that it logs once and leaves the session to
-its next prompt.
+its next start or prompt, which starts a new adapter itself.
 
 The session is told at its next start or prompt, in one line before the start's layer one
 and roster or the prompt's roster changes, which it gets as it would with its adapter

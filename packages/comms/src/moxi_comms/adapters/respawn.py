@@ -444,9 +444,10 @@ class Respawner:
                 if key not in self._capped:
                     self._capped.add(key)
                     log.warning("the comms adapter of claim %s was replaced %d times in "
-                                "%.0f minutes; this daemon replaces it no more for now, "
-                                "and the session's next start or prompt says why mail "
-                                "has stopped", key, RESPAWN_CAP, RESPAWN_WINDOW_S / 60)
+                                "%.0f minutes; this daemon replaces it no more for now. "
+                                "The session's next start or prompt starts a new one "
+                                "itself, and says mail has stopped only if that one "
+                                "fails too", key, RESPAWN_CAP, RESPAWN_WINDOW_S / 60)
                 return False
             self._capped.discard(key)
             recent.append(now)
