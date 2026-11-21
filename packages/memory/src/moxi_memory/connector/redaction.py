@@ -1,8 +1,9 @@
 """The chat redaction as the memory provider uses it: secrets' `chat_redact`, reached
 through `moxi.modules.load`, checked before every call so the tool fails closed.
 
-`Gate.open()` loads secrets and runs the chat redaction on an empty text. When either
-fails (secrets missing or broken, a chat set that can't run, the fallback worker broken)
+`Gate.open()` loads secrets and runs the chat redaction on an empty text, once plain and
+once with a `between` step. When either fails (secrets missing or broken, a chat set that
+can't run, the fallback worker broken, a `chat_redact` that takes no `between`)
 it raises `Off` with the reason, and the tool refuses `redaction-off`. Otherwise it gives
 a `Redactor`, which redacts through `chat_redact` alone and counts the placeholders it
 added, for the call log.
@@ -40,14 +41,17 @@ class Off(Exception):
 
 
 class Redactor:
-    """One call's redaction: `chat_redact`, and how many placeholders it added."""
+    """One call's redaction: `chat_redact`, and how many placeholders it added.
+    `between`, when given, is `chat_redact`'s own: a change to the text made between its
+    two passes."""
 
-    def __init__(self, chat_redact: Callable[[str], str]):
+    def __init__(self, chat_redact: Callable[..., str]):
         self._chat_redact = chat_redact
         self.redactions = 0
 
-    def __call__(self, text: str) -> str:
-        out = self._chat_redact(text)
+    def __call__(self, text: str, *, between: Callable[[str], str] | None = None) -> str:
+        out = (self._chat_redact(text) if between is None
+               else self._chat_redact(text, between=between))
         self.redactions += max(0, out.count(PLACEHOLDER) - text.count(PLACEHOLDER))
         return out
 
@@ -87,6 +91,12 @@ class Gate:
             raise Off(f"the chat sets can't run: {exc}") from exc
         if empty != "":
             raise Off("the chat sets came back unscanned on an empty text")
+        try:
+            chat_redact("", between=str)
+        except TypeError:
+            raise Off("the secrets module's chat_redact takes no between") from None
+        except Exception as exc:  # noqa: BLE001 - any failure means no redaction
+            raise Off(f"the chat sets can't run: {exc}") from exc
         return Redactor(chat_redact)
 
     def row(self) -> tuple[str, str, str]:

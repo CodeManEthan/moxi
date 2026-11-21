@@ -23,11 +23,13 @@ full or `deadline` passes, when the walk stops, ranks what it kept and says `cut
 
 1. The text within `rows.EDGE_CHARS` of a stored cut, widened to whitespace, becomes
    `CUT_EDGE` (`rows.hide_cut_edges`).
-2. The chat redaction runs over the whole result. A text it couldn't scan drops the
-   row.
+2. The chat redaction runs over the whole result, with each whitespace run made one
+   space between its two passes (`squeeze`), so its last pass sees the text exactly as
+   a snippet shows it. A text it couldn't scan drops the row.
 3. The redacted text goes into an in-memory FTS5 table with memory's tokenizer, and the
    snippet is FTS5's `snippet()` of it for the words, with no match marks, `…` at a cut
    edge and at most `SNIPPET_TOKENS` tokens, then cut to `SNIPPET_CHARS` at a space.
+   Nothing but those cuts changes the redacted text.
 4. A row whose redacted text doesn't match as its window needs is dropped. The count of
    dropped rows goes to the call log only.
 
@@ -142,10 +144,15 @@ def match_every(tokens: tuple[str, ...]) -> str:
     return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
 
 
+def squeeze(text: str) -> str:
+    """`text` with each whitespace run made one space and none at either end."""
+    return " ".join(text.split())
+
+
 def cut_snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
-    """`text` with its whitespace runs made single spaces, cut to at most `limit`
-    characters at the last space before, `…` closing a cut."""
-    text = " ".join(text.split())
+    """`text` cut to at most `limit` characters at the last space before, `…` closing a
+    cut. It only cuts, so the snippet is a slice of the text the redaction last saw."""
+    text = text.strip()
     if len(text) <= limit:
         return text
     head = text[:limit - len(SNIPPET_CUT)]
@@ -267,7 +274,7 @@ class _Probe:
 
 
 class _Walk:
-    def __init__(self, query: Query, redact: Callable[[str], str], deadline: float,
+    def __init__(self, query: Query, redact: Callable[..., str], deadline: float,
                  clock: Callable[[], float]):
         self.query = query
         self.redact = redact
@@ -283,7 +290,7 @@ class _Walk:
         if key in self.read:
             return self.read[key]
         text = rows.hide_cut_edges(cand.text, CUT_EDGE)
-        clean = self.redact(text)
+        clean = self.redact(text, between=squeeze)
         if clean == UNSCANNED and text != UNSCANNED:
             self.unscanned += 1
             got = None
