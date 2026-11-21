@@ -254,7 +254,6 @@ the second calls.
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import shlex
 import sys
@@ -276,14 +275,17 @@ def _writes(parser: argparse.ArgumentParser) -> None:
 
 
 def _actor(args) -> str:
-    """Who the verb is done by: the name given with `--as`, else the OS user."""
+    """Who the verb is done by: the name given with `--as`, else the OS user, as
+    `actors.default` gives it."""
+    from . import actors
+
     if args.actor is not None:
         if not args.actor.strip():
             raise BadArgument("--as names nobody", "give a name: --as NAME")
         return args.actor
     try:
-        return getpass.getuser()
-    except (KeyError, OSError):
+        return actors.default()
+    except BadArgument:
         raise BadArgument("the user this command runs as has no name",
                           "say who is doing this with --as NAME") from None
 
