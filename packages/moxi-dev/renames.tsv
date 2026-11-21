@@ -756,6 +756,7 @@ comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	own = sorted(set(def
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	parse_directors	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(defaults) - set(entry_keys))	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(section) - set(entry_keys))	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/respawn.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--claude", default="claude", help="the claude binary")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--director", action="append", default=[],	keep	default	default
@@ -801,6 +802,13 @@ comms	packages/comms/src/moxi_comms/api/__init__.py	send	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	send_as	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	session	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	session_of	name	deadline	timeout_s
+comms	packages/comms/src/moxi_comms/archive.py	rows = self._conn("record").execute(sql + " ORDER BY id",	keep	record	record
+comms	packages/comms/src/moxi_comms/archive.py	rows = self._conn("record").execute(sql + " ORDER BY id DESC LIMIT ?",	keep	record	record
+comms	packages/comms/src/moxi_comms/archive.py	row = self._conn("record").execute(	keep	record	record
+comms	packages/comms/src/moxi_comms/archive.py	record, identities = cfg.archive.record, cfg.archive.identities	keep	record	record
+comms	packages/comms/src/moxi_comms/archive.py	_warned: set = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/archive.py	if found is None or found.record is None:	keep	record	record
+comms	packages/comms/src/moxi_comms/archive.py	if found is None or found.record is None or not hasattr(record, "skip_ids_to"):	keep	record	record
 comms	packages/comms/src/moxi_comms/bindings.py	BindingHistory.open	name	e	exc
 comms	packages/comms/src/moxi_comms/bindings.py	conn = opener(path, env=env, check_same_thread=False)	keep	env	env
 comms	packages/comms/src/moxi_comms/cache.py	CacheState	name	age_seconds	age_s
@@ -829,7 +837,7 @@ comms	packages/comms/src/moxi_comms/cards.py	_budget	kwonly	truncated	truncated
 comms	packages/comms/src/moxi_comms/cards.py	_decode	kwonly	truncated	truncated
 comms	packages/comms/src/moxi_comms/cards.py	answer	name	e	exc
 comms	packages/comms/src/moxi_comms/cards.py	render	kwonly	truncated	truncated
-comms	packages/comms/src/moxi_comms/checks.py	__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",	keep	RELAUNCH	RELAUNCH
+comms	packages/comms/src/moxi_comms/checks.py	__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "STOPPED_FIX", "SUPERVISED",	keep	RELAUNCH	RELAUNCH
 comms	packages/comms/src/moxi_comms/claimfile.py	if roots and not any(proc.alive(r.pid, r.start) for r in roots):	keep	any	any
 comms	packages/comms/src/moxi_comms/claimfile.py	return any(r.reach == TREE and proc.alive(r.pid, r.start) for r in roots_of(record))	keep	any	any
 comms	packages/comms/src/moxi_comms/claimfile.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -899,7 +907,7 @@ comms	packages/comms/src/moxi_comms/cli.py	lines += _field("injected", "nothing 
 comms	packages/comms/src/moxi_comms/cli.py	lines += _field("injected", f"through {through}{size}")	keep	injected	injected
 comms	packages/comms/src/moxi_comms/cli.py	m.add_argument("--dry-run", dest="dry_run", action="store_true",	keep	dry_run	dry_run
 comms	packages/comms/src/moxi_comms/cli.py	main	name	e	exc
-comms	packages/comms/src/moxi_comms/cli.py	msgs = ctx.record.history(room["room_id"], limit=args.limit)	keep	record	record
+comms	packages/comms/src/moxi_comms/cli.py	msgs, from_archive = archive.timeline(ctx.record, room["room_id"], args.limit)	keep	record	record
 comms	packages/comms/src/moxi_comms/cli.py	r = sub.add_parser("reply", help="answer a message")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--audience", metavar="NAME",	keep	NAME	NAME
 comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--cap", metavar="N", help=CAP_HELP)	keep	help	help
@@ -937,6 +945,7 @@ comms	packages/comms/src/moxi_comms/cli.py	sa = so_sub.add_parser("add", help="r
 comms	packages/comms/src/moxi_comms/cli.py	help="register a name a session held before, or one with mail "	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	sr = so_sub.add_parser("renew", help="replace NAME's token; run it where the program "	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	sx = so_sub.add_parser("remove", help="free NAME: it is an ordinary name again")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="start an OpenCode session for an identity in the config file's "	keep	help	help
 comms	packages/comms/src/moxi_comms/client.py	"""Fire-and-forget notification (`activity` and its kinds, `injected`,	keep	injected	injected
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
@@ -1158,6 +1167,7 @@ comms	packages/comms/src/moxi_comms/daemon.py	since = self.record.since	keep	rec
 comms	packages/comms/src/moxi_comms/daemon.py	t.join(timeout=1.0)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/daemon.py	trim = getattr(self.record, "trim", None)	keep	record	record
 comms	packages/comms/src/moxi_comms/daemon.py	w.closed = True	keep	closed	closed
+comms	packages/comms/src/moxi_comms/daemon.py	archive.skip_ids(self.record)	keep	record	record
 comms	packages/comms/src/moxi_comms/directors.py	-	name	ENV_VAR	DIRECTORS_ENV
 comms	packages/comms/src/moxi_comms/directors.py	if author.get("name") in set(directors or ()):	keep	set	set
 comms	packages/comms/src/moxi_comms/directory.py	conn = opener(path, env=env)	keep	env	env
@@ -1200,8 +1210,8 @@ comms	packages/comms/src/moxi_comms/mcp/tokens.py	wanted = held if claims is Non
 comms	packages/comms/src/moxi_comms/mcp/tools.py	"adder", "descriptions", "refused"]	keep	refused	refused
 comms	packages/comms/src/moxi_comms/mcp/tools.py	"delivered": list(result.delivered), "expired": list(result.expired)}	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/mcp/tools.py	"delivered": list(result.delivered), "expired": list(result.expired)}	keep	expired	expired
-comms	packages/comms/src/moxi_comms/mcp/tools.py	"enum": ["delivered", "waiting", "expired", "withdrawn"]}})}}),	keep	delivered	delivered
-comms	packages/comms/src/moxi_comms/mcp/tools.py	"enum": ["delivered", "waiting", "expired", "withdrawn"]}})}}),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/mcp/tools.py	"enum": ["delivered", "waiting", "expired", "withdrawn",	keep	delivered	delivered
+comms	packages/comms/src/moxi_comms/mcp/tools.py	"enum": ["delivered", "waiting", "expired", "withdrawn",	keep	expired	expired
 comms	packages/comms/src/moxi_comms/mcp/tools.py	"expired": _STRS}),	keep	expired	expired
 comms	packages/comms/src/moxi_comms/mcp/tools.py	"remove": _object({"message_id": _STR, "withdrawn": _STRS, "delivered": _STRS,	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/mcp/tools.py	DELIVERED, WAITING, EXPIRED, WITHDRAWN = "delivered", "waiting", "expired", "withdrawn"	keep	delivered	delivered
@@ -1217,7 +1227,7 @@ comms	packages/comms/src/moxi_comms/mcp/tools.py	_send_result	kwonly	interrupt	i
 comms	packages/comms/src/moxi_comms/mcp/tools.py	_state	kwonly	waiting	waiting
 comms	packages/comms/src/moxi_comms/mcp/tools.py	addressed = any(tag_matches(t, identity) for t in ml.recipients)	keep	any	any
 comms	packages/comms/src/moxi_comms/mcp/tools.py	msg = daemon.record.get_message(str(message_id))	keep	record	record
-comms	packages/comms/src/moxi_comms/mcp/tools.py	msgs = ctx.record.history(room["room_id"], limit=limit) if room else []	keep	record	record
+comms	packages/comms/src/moxi_comms/mcp/tools.py	msgs, from_archive = archive.timeline(ctx.record, room["room_id"] if room else None,	keep	record	record
 comms	packages/comms/src/moxi_comms/mcp/tools.py	return refused(wire.CODE_NAMES.get(e.code, "refused"), reason)	keep	refused	refused
 comms	packages/comms/src/moxi_comms/mcp/tools.py	return set()	keep	set	set
 comms	packages/comms/src/moxi_comms/mcp/tools.py	rows, seen = [], set()	keep	set	set
@@ -1655,6 +1665,12 @@ comms	packages/comms/tests/test_api.py	base = {"HOME": "/h", "MOXI_COMMS_CLAIM_S
 comms	packages/comms/tests/test_api.py	before = len(rig.record.history(rig.names_channel))	keep	record	record
 comms	packages/comms/tests/test_api.py	for name, params in {"attributed": ["message_id", "deadline"],	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_api.py	op = api.Sender.operator("900001").environ(base)	use	.environ	.sender_env
+comms	packages/comms/tests/test_archive.py	assert first is not None and first.record is not None	keep	record	record
+comms	packages/comms/tests/test_archive.py	old = rig.record.get_message(str(OLD_ASK))	keep	record	record
+comms	packages/comms/tests/test_archive.py	assert rig.record.get_message(str(SHADOWED)) is None or \	keep	record	record
+comms	packages/comms/tests/test_archive.py	"before the counter moved" not in rig.record.get_message(str(SHADOWED)).content, \	keep	record	record
+comms	packages/comms/tests/test_archive.py	assert archive.skip_ids(rig.record) is None, "once"	keep	record	record
+comms	packages/comms/tests/test_archive.py	assert f"re:{OLD_ASK}" in rig.record.get_message(elder.queue[0]["message_id"]).content	keep	record	record
 comms	packages/comms/tests/test_arm_register_race.py	c = self.srv._client	keep	_client	_client
 comms	packages/comms/tests/test_attributed_read.py	@pytest.mark.parametrize("bad", ["", "  ", "abc", "12x", "-5"])	keep	bad	bad
 comms	packages/comms/tests/test_attributed_read.py	assert set(answer) == set(ATTRIBUTED_FIELDS)	keep	set	set
@@ -2198,7 +2214,7 @@ comms	packages/comms/tests/test_help.py	-	name	test_help_needs_no_claim_and_no_e
 comms	packages/comms/tests/test_help.py	monkeypatch.setattr(cli.Context, "record", property(boom))	keep	record	record
 comms	packages/comms/tests/test_hygiene.py	== set(sub.choices)) \	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	_shipped_text	name	f	fh
-comms	packages/comms/tests/test_hygiene.py	assert len(set(ADAPTER_KINDS)) == 4	keep	set	set
+comms	packages/comms/tests/test_hygiene.py	assert len(set(ADAPTER_KINDS)) == 5	keep	set	set
 comms	packages/comms/tests/test_hygiene.py	assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",	keep	set	set
 comms	packages/comms/tests/test_kinds.py	assert set(kinds.BUILT_IN) <= names	keep	set	set
 comms	packages/comms/tests/test_launcher_reads.py	-	name	test_a_socket_outside_the_runtime_directory_is_none	test_a_socket_outside_the_runtime_dir_is_none
@@ -2330,7 +2346,7 @@ comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0),
 comms	packages/comms/tests/test_mcp_tokens.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)	keep	record	record
 comms	packages/comms/tests/test_mcp_tokens.py	self.broken: set = set()	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"REPLY_OWN_UNREADABLE_TOOL", "INTERRUPT_IGNORED_OPERATOR_TOOL"} <= set(texts)	keep	set	set
-comms	packages/comms/tests/test_mcp_tools.py	"agents": set(), "whoami": set(), "history": {"identity", "limit"},	keep	set	set
+comms	packages/comms/tests/test_mcp_tools.py	"agents": set(), "whoami": set(), "history": {"identity", "limit", "skip"},	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"expired": []}	keep	expired	expired
 comms	packages/comms/tests/test_mcp_tools.py	"withdrawn": ["later-two"], "delivered": [],	keep	delivered	delivered
 comms	packages/comms/tests/test_mcp_tools.py	assert "reviewer" in s["withdrawn"] + s["delivered"]	keep	delivered	delivered
@@ -2416,6 +2432,7 @@ comms	packages/comms/tests/test_opencode_tools.py	daemon = Daemon(rig.record, cl
 comms	packages/comms/tests/test_opencode_tools.py	return [tmp_path, os.environ["HOME"], os.environ["MOXI_COMMS_RUNTIME_DIR"]]	keep	HOME	HOME
 comms	packages/comms/tests/test_opencode_window.py	assert any("is not offered" in row["text"] for row in lines)	keep	any	any
 comms	packages/comms/tests/test_opencode_window.py	proc = w.launch(window="alt")	keep	window	window
+comms	packages/comms/tests/test_opencode_window.py	proc = w.launch(run=RUN_VERB)	keep	run	run
 comms	packages/comms/tests/test_operator_lane.py	assert rig.daemon.attribute(older, live=False) == rig.daemon.attribute(posted[0],	keep	live=	live=
 comms	packages/comms/tests/test_operator_lane.py	assert rig.record.get_message(mid).withdrawn_at	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	assert rig.record.get_message(mid).withdrawn_at is None	keep	record	record
@@ -2972,6 +2989,15 @@ comms	packages/comms/tests/turns_endpoint.py	self._settle(did, {"kind": "refused
 comms	packages/comms/tests/turns_endpoint.py	self.turn["deliveries"].append((delivery, "opened"))	keep	opened	opened
 comms	packages/comms/tests/turns_endpoint.py	value = {"kind": "refused", "reason": "idle", "delivery": did, "ref": ref}	keep	refused	refused
 comms	packages/comms/tests/turns_endpoint.py	value = {"kind": "refused", "reason": step[1], "delivery": did, "ref": ref}	keep	refused	refused
+comms	packages/comms/src/moxi_comms/adapters/respawn.py	self._capped: set[str] = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/respawn.py	self._busy: set[str] = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/respawn.py	if not any(now - t < RESPAWN_WINDOW_S for t in times)]:	keep	any	any
+comms	packages/comms/src/moxi_comms/daemon.py	on_fatal=lambda why: stopping.set(), respawn_adapters=True)	keep	set	set
+comms	packages/comms/tests/test_claude_launch.py	assert wait_until(lambda: not any(t.name == "comms-respawn"	keep	any	any
+comms	packages/comms/tests/test_daemon_respawn.py	r.stopping.set()	keep	set	set
+comms	packages/comms/tests/test_daemon_respawn.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,	keep	record	record
+comms	packages/comms/tests/test_daemon_respawn.py	self.keys.append(set(keys))	keep	set	set
+comms	packages/comms/tests/test_daemon_respawn.py	start=False)	keep	start	start
 connector	packages/connector/src/moxi_connector/app.py	"ms": round((time.monotonic() - self.started) * 1000, 1),	keep	round	round
 connector	packages/connector/src/moxi_connector/app.py	None, lambda: log_.write(row, durable=durable, collapse=collapse))	keep	durable	durable
 connector	packages/connector/src/moxi_connector/app.py	Tools.call_tool	name	e	exc

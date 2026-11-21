@@ -224,6 +224,15 @@ class ReplayConfig:
 
 
 @dataclass
+class ArchiveConfig:
+    """`[archive]`: an older comms' record and identities files, read in place
+    (`archive.py`). An empty path names none."""
+
+    record: str = ""
+    identities: str = ""
+
+
+@dataclass
 class CommsConfig:
     backend: str = _default("backend")
     local: LocalConfig = field(default_factory=LocalConfig)
@@ -234,6 +243,7 @@ class CommsConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     connector: ConnectorConfig = field(default_factory=ConnectorConfig)
     block: bool = _default("block")
@@ -463,6 +473,8 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
+        archive=ArchiveConfig(record=str(v["archive.record"] or ""),
+                              identities=str(v["archive.identities"] or "")),
         mcp=McpConfig(enabled=v["mcp.enabled"], port=v["mcp.port"]),
         connector=connector,
         block=v["block"],
@@ -591,7 +603,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
 
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
-           "ProvisionConfig", "ReplayConfig", "CommsConfig",
+           "ProvisionConfig", "ArchiveConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]
