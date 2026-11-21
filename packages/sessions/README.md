@@ -150,7 +150,9 @@ sessions under `rows`; a row's `activity` and `prompt` carry their `text` only w
 **Redaction.** When the secrets module is installed (the `secrets` extra), `read` passes
 each message's text, each tool call's line and each title through secrets' `credentials`
 and `broad` sets before it is cut, so a cut never leaves part of a secret that no longer
-matches. The sets are fixed. Without secrets, `read` prints as written and says so once on
+matches. The sets are fixed. A `gitleaks:allow` mark beside a secret doesn't keep it, nor
+does a line a rule's allowlist names (a secret mount, say), and a token split by an
+invisible character (a zero-width space, a soft hyphen) is still found and redacted. Without secrets, `read` prints as written and says so once on
 stderr, and `read --json` says `"redacted": false`. `list` passes a session's name
 through the same sets, and with `--text` what was said; without secrets it says so when
 `--text` is given, and `list --json` says `"redacted": false`. What `list --text` shows

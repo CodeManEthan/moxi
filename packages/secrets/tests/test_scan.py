@@ -279,6 +279,37 @@ def test_gitleaks_allow_keeps_its_line_out_for_the_gitleaks_sets_only(engine_nam
                                                    ("credentials",)))
 
 
+def test_scan_keeps_what_the_mark_and_the_line_allowlists_keep(engine_name):
+    r = corpus.rng(57)
+    token = corpus.github(r)
+    assert not any(h.set in GITLEAKS for h in scan(
+        '{"text": "t = ' + token + '  # gitleaks:allow"}', GITLEAKS))
+    for form, path in corpus.LINE_ALLOWED:
+        text = form.format(value=corpus.generic_value(r))
+        assert scan(text, ("broad",), path=path) == [], form
+        # Without the line, the same value is a hit.
+        assert any(h.rule == "generic-api-key" for h in scan(
+            text.split(" ")[-1].strip('"'), ("broad",), path=path)), form
+
+
+def test_scan_reads_past_see_through_characters_and_still_keeps_the_mark(engine_name):
+    token = corpus.github(corpus.rng(58))
+    chars = corpus.see_through()
+    lines = ["k " + corpus.split(token, c) + " end" for c in chars]
+    hits = [h for h in scan("\n".join(lines), ("credentials",)) if h.rule == "github-pat"]
+    assert [h.line for h in hits] == list(range(1, len(chars) + 1))
+    for h, c in zip(hits, chars):
+        line_start = sum(len(x) + 1 for x in lines[:h.line - 1])
+        assert (h.start - line_start, h.end - line_start) == (2, 2 + len(token) + 1)
+        assert h.fingerprint == scan_mod.fingerprint(token)
+    marked = "t = " + corpus.split(token, "\u200b") + "  # gitleaks:allow"
+    assert scan(marked, ("credentials",)) == []
+    # A token no character splits gives the same hit as without one beside it.
+    plain = scan("x " + token, ("credentials",))
+    assert [(h.start, h.end) for h in scan("x " + token + "\r\u200b", ("credentials",))] \
+        == [(h.start, h.end) for h in plain]
+
+
 # -- hits -----------------------------------------------------------------------------------
 
 def test_a_hit_holds_no_secret_and_its_repr_shows_none(engine_name):

@@ -15,9 +15,10 @@ deadline plus 0.5 s, and exits when it fires; it cancels the timer when the text
 Windows has no such timer: there a child whose caller was killed runs until its search
 ends. It holds no lock and writes nothing.
 
-The protocol, one request at a time: a JSON line {"sets", "path", "size", "deadline"}
-and then `size` bytes of UTF-8; the reply is one JSON line {"hits": {set: [[rule, start,
-end], ...]}}.
+The protocol, one request at a time: a JSON line {"sets", "path", "keep_marked", "size",
+"deadline"} and then `size` bytes of UTF-8; the reply is one JSON line {"hits": {set:
+[[rule, start, end], ...]}}. `keep_marked` is `run_gitleaks`' keyword; a header without
+it reads as true.
 """
 
 from __future__ import annotations
@@ -141,16 +142,17 @@ _lock = threading.Lock()
 last_failure: str | None = None
 
 
-def scan(t, set_names, path) -> dict:
+def scan(t, set_names, path, *, keep_marked=True) -> dict:
     """{set: [(rule, start, end), ...] or None} for the gitleaks-format sets.
 
     None for a set means the text is unscanned for it: the deadline passed or the worker
-    failed. Never raises.
+    failed. `keep_marked` goes to the child's `run_gitleaks`. Never raises.
     """
     global _worker, last_failure
     data = t.etext.encode("utf-8")
     wait = deadline(len(data))
-    header = {"sets": list(set_names), "path": path, "size": len(data), "deadline": wait}
+    header = {"sets": list(set_names), "path": path, "keep_marked": bool(keep_marked),
+              "size": len(data), "deadline": wait}
     with _lock:
         try:
             if _worker is None or not _worker.alive():
@@ -221,6 +223,7 @@ def main() -> int:
             request = json.loads(header)
             size = int(request["size"])
             wait = float(request["deadline"])
+            keep_marked = bool(request.get("keep_marked", True))
         except (ValueError, KeyError, TypeError):
             return 2
         _arm(wait + CHILD_GRACE)
@@ -228,7 +231,8 @@ def main() -> int:
         if len(data) != size:
             return 0
         t = engine.Text(data.decode("utf-8", "surrogateescape"))
-        hits = run_gitleaks(t, tuple(request["sets"]), request.get("path"), eng)
+        hits = run_gitleaks(t, tuple(request["sets"]), request.get("path"), eng,
+                            keep_marked=keep_marked)
         _arm(0)
         try:
             stdout.write(json.dumps({"hits": hits}).encode("ascii") + b"\n")
