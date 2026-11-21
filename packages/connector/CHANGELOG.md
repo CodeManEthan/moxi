@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Every tool answer, refusals included, leaves the door with control and format
+  characters removed from its text and from every string of its structured value: C0
+  controls but newline and tab, DEL, C1 and Unicode format characters (bidi controls,
+  zero-width characters, tag characters, the byte order mark). The provider interface's
+  doc says a provider that redacts removes those characters before it redacts.
 - Every setting carries page fields, which `moxi config connector show --json` prints
   and the settings page draws: a plain label, a line where the label can't carry it,
   and the unit of a sign-in's life. The connector needs moxi 0.1.9 or later.

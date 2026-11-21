@@ -33,6 +33,15 @@ A provider gives:
   control socket's peer before every mint and `shell(env)` in the verb, each answering a
   refusal text or None.
 
+The connector scrubs every answer after the provider gives it: from the text part and
+from every string of the structured value, at any depth, it removes the C0 control
+characters but newline and tab, DEL, the C1 range and every Unicode format character
+(category `Cf`: bidi controls, zero-width characters, the soft hyphen, the byte order
+mark, tag characters). A provider that redacts removes those same characters before it
+redacts, and hands the connector text the scrub leaves unchanged: no text may reach the
+chat that redaction didn't see in its final form, and the scrub must never be the step
+that joins the halves of a split secret.
+
 Two providers that declare one tool name both lose it: no provider's tool shadows
 another's. A tool whose `call` raises answers "The tool failed; the connector's log has
 the request id." and the exception stays in the connector's log, never sent.
