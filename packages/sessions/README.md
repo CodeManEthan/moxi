@@ -685,4 +685,4 @@ behaves as it did.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/sessions/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.10/packages/sessions/LICENSE).

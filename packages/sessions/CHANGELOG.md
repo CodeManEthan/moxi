@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.10 (2026-11-20)
 
 - `records_since`'s batch names the Claude prompt ids its lines moved the turn to,
   in order (`Batch.prompt_ids`), a prompt that drew no request included, whatever kinds
