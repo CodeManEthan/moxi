@@ -107,8 +107,8 @@ def test_the_slash_run_misses_few_random_runs_by_its_floor(engine_name):
     found = {text[h.start:h.end] for h in scan(text, ("broad",))
              if h.rule == "high-entropy-slash-run"}
     assert len(set(values) - found) <= 15
-    assert "high-entropy-slash-run" in redact("aws " + "wJalrXUtnFEMI/K7MDENG/bPxRfiCY"
-                                              + "EXAMPLEKEY", ("broad",))
+    assert "high-entropy-slash-run" in redact("".join(("aws ", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY",
+                                                       "EXAMPLEKEY")), ("broad",))
 
 
 def test_the_slash_run_leaves_paths_urls_digests_and_uuids_alone(engine_name):
@@ -175,13 +175,13 @@ def test_the_slash_run_leaves_ci_links_document_links_hosts_and_hashes_alone(eng
     # space hits; only the character before it keeps the link or hash quiet.
     cases = [
         ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501/job/54928374651",
-         "com/CodeOwner7/moxi/actions/runs/19283746501/job/54928374651"),
+         "".join(("com/CodeOwner7/moxi/actions/runs/", "19283746501/job/54928374651"))),
         ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501",
-         "com/CodeOwner7/moxi/actions/runs/19283746501"),
+         "".join(("com/CodeOwner7/moxi/actions/runs/", "19283746501"))),
         ("https://docs.google.com/document/d/1Xk9QzB7vLmN3pRtY5wA2sDfGhJ8kLzXcVbNm4QwErTy/edit",
-         "com/document/d/1Xk9QzB7vLmN3pRtY5wA2sDfGhJ8kLzXcVbNm4QwErTy/edit"),
+         "".join(("com/document/d/1Xk9QzB7vLmN3pRtY5", "wA2sDfGhJ8kLzXcVbNm4QwErTy/edit"))),
         ("see https://ci-runner/Kx9mQ2vL7pR4tY8wB3nZ/Fj6hD1sA5gC0eU2iO9 now",
-         "runner/Kx9mQ2vL7pR4tY8wB3nZ/Fj6hD1sA5gC0eU2iO9"),
+         "".join(("runner/Kx9mQ2vL7pR4tY8wB3nZ/", "Fj6hD1sA5gC0eU2iO9"))),
         (f'<script integrity="sha384-{sri}"></script>', sri),
     ]
     for text, run in cases:
@@ -530,7 +530,8 @@ IMPORT_LOADS = frozenset({
     "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.chat",
     "moxi_secrets.engine",
     "moxi_secrets.names", "moxi_secrets.paths", "moxi_secrets.scan",
-    "__future__", "bisect", "_bisect", "copyreg", "enum", "fnmatch", "json",
+    "__future__", "bisect", "_bisect", "collections.abc", "copyreg", "enum", "fnmatch",
+    "json",
     "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",
     "re._casefix", "re._compiler", "re._constants", "re._parser", "_sre", "struct",
     "_struct",

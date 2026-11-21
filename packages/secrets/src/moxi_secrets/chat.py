@@ -29,9 +29,13 @@ anything outside ASCII.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 
 from .scan import UNSCANNED, _set_names, placeholder, redacted
+
+TYPE_CHECKING = False  # typing itself costs more at import than the hint is worth
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: The sets every chat read redacts with, fixed in code.
 CHAT_SETS = ("credentials", "broad", "personal-data")
