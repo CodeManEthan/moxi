@@ -2,6 +2,123 @@
 
 ## Unreleased
 
+- A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
+  hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
+  that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's
+  table and `Check against a bill`) have none now; the chart's table marks the day's or
+  month's cell. `Check against a bill` names a price group's rule (`long-context`) in its
+  Priced by cell, where the `Not whole` column held it.
+- The token index moves to version 3 and keeps the prompt ids of each Claude transcript,
+  a prompt that drew no request (`/exit`, `/clear`, another local command) included. The
+  Sessions table's Turns counts a Claude session's prompts from them, where it counted
+  only the prompts that drew a request; Codex and OpenCode sessions count their turns as
+  before. The first pass after the upgrade reads every Claude transcript again from its
+  start, about as long as `--rebuild` takes over them; Codex and OpenCode are not read
+  again. A transcript that pass can't read, such as one on an offline archive drive,
+  keeps its old count until it is read. An older usage can't open a version 3 index.
+  usage now requires moxi-sessions 0.2.10, the first with `Batch.prompt_ids`.
+- The page's opened Sessions section is its table of every session of the range, read at
+  once; the two lists of two-line rows (the last seven days' ten dearest with `Show`, and
+  `Earlier`) and the section's `Table` toggle are gone. A session opens first in the
+  section, over the table, which stays. The table's columns are Project (or Folder
+  without the projects module), Session, Started, Active, Turns, Input, Cache create,
+  Cache read, Output, Subagent share and Est. cost; Harness, Models, Requests, Tokens,
+  Context and the Folder column beside Project are gone. Each token class cell has a bar
+  against its column's most among the rows read, in the class's shade, and a Codex
+  session's name a `codex` badge. The Active header's hover says `First → last request
+  (not the file's mtime)` and Turns' `Prompts in the main session file; never summed with
+  subagents`; Subagent share's header has no hover.
+- The page chart's table lists its periods oldest first, where it listed them newest
+  first, and has the day and a column per part of the chart, with no Total column (the
+  harness's own cost went with it). A day reads as
+  its date (`2026-11-08`, where it read `Nov 8`), and a part with nothing that day reads
+  `$0.00`, where its cell was blank.
+- The page's chart by cost is named `Daily estimated cost — by class` or `— by model`
+  (`Monthly` where its bars are months), and By model the line under it says `Per-model
+  dollars, straight from the index.`
+- The heat map names a day by its date: `2026-11-03: 1.75 USD` for a reader that cannot
+  see its shade, `0.00 USD` for a day nothing was used, and `2026-11-03` in its hover and
+  its table, where it wrote `Nov 3 2026` and `nothing used`.
+- The Sessions table reads 500 sessions at a time (`/api/sessions` takes `top` up to
+  500) and reads the next 500 as the rows drawn near the end, or on `Load more`, where it
+  read 200 on `Show`. A next page that failed is read again only on a scroll that moves
+  the rows drawn or on `Load more`. Its rows sit in a box of their own, 40 px each, only
+  those in view drawn, and the arrow keys move a row cursor; Enter on a row opens its session. Rows of
+  one value sort by session id then harness in either direction, where they kept the
+  order by cost (then tokens). A session with no turn id counts 0 turns, where its cell
+  was empty, and the subagent share is drawn as a meter.
+- The page's heat map follows only the project (or folder) filter, no longer Harness and
+  Model, and is drawn even when no day of the 53 weeks was used. Every day is a button,
+  not only the used ones; weeks are a fixed 13 px apart, where the pitch shrank to fit;
+  every month is named; each day's hover gives its cost and tokens, and its token classes
+  (at 0 on a day nothing was used) only when the day is in the range, where a day nothing
+  was used gave its cost alone; its table lists the days that cost something, and a used
+  day whose cost is not whole, oldest first, where it listed every used day. It is named `Daily estimated
+  cost — trailing 53 weeks`, and its line names the time zone of its days.
+- The page's filter line has By class / By model beside Cost / Tokens. By model the chart
+  by cost is stacked by model, the six that cost most in the range in four shades and two
+  line fills of the text colour and the rest as one `Other` part. The chart's table
+  follows the split: a column per token class By class, where it had a column per model,
+  and a column per model By model. Under Tokens both buttons are off.
+- The page names the token classes Input, Cache create, Cache read and Output (legends,
+  hovers, table heads and the Token kinds rows), where it said Fresh input and Cache
+  write(s), and a table's column of dollars reads `Est. cost`, where it read `Cost`. The
+  Cost / Tokens switch, the Cost group's name and the 5-minute and 1-hour cache write
+  prices keep their words.
+- The page's Project (or Folder) button counts what is picked, one included: `1 project`
+  or `1 folder`, where it used to show the one picked by name.
+- `moxi usage context` with a session or agent it cannot find, or a session more than one
+  harness holds, prints one line on stderr and nothing on stdout, `--json` included, and
+  exits 2 as before; it used to print `context unknown: <why>` (or `"found": false`) on
+  stdout. A session in more than one harness is named with the path of each record.
+- The line a subagent leaves for its parent cuts the agent id to eight characters and `…`
+  (one character), not `...`.
+- The page's chart by cost stacks each bar by token class (fresh input, cache write,
+  cache read, output), each part the class's own dollars from `/api/terms` by the chart's
+  period, under a legend, with every class on hover. By tokens it draws two charts:
+  `Cache reads` alone and `Billable work` (fresh input, cache writes, output) stacked,
+  each with its share of the range's tokens.
+- The page has a heat map under the chart: each day's estimated cost over the 53 weeks to
+  today, whatever the range, under the other filters, in five shades set by the
+  quantiles of the days that cost something. A used day is a button that sets the range
+  to it; `Table` lists the used days.
+- The Sessions section's `Table` lists every session of the range, 200 at a time with
+  `Show` for more, where it listed only the rows the lists had shown. A header button
+  sorts by its column (`aria-sort`), highest first, and a second click turns it around.
+  It has a Turns column and a Subagent share column, each sortable.
+  A press on a row, or Enter on its session's name, opens the session first in the
+  section, as its address does.
+- The page's Project (or Folder) filter picks several at once: each entry is a check that
+  adds it or takes it away and leaves the menu open, the button counts them (`2
+  projects`), and `all` clears them. Everything under the filter line reads the files of
+  any of them.
+- A report's `project` and `work_dir` each take one key or a sequence of them, and keep
+  the files any of them matches; several go out in `filters` joined by `, `. The page's
+  report routes take several projects or folders in `project` and `folder`, one to a
+  line. `/api/sessions` takes `sort` (`cost`, `tokens`, `requests`, `fresh_input`,
+  `cache_write`, `cache_read`, `output`, `started`, `active`, `turns`, `subagent_share`,
+  `project`) and `order` (`asc` or `desc`), and pages with `top` and `skip` in that
+  order. Its rows carry `turns`, the distinct turns of the session's main file, and
+  `subagent_share`, the part of the session's cost its subagents ran up.
+- The `sessions` report's rows carry `turns` and `subagent_cost`.
+- `moxi usage context SESSION` with no `--harness` asks every harness and refuses a
+  session more than one holds, naming them, where it took the first. It exits 0 whenever
+  it names the context's state, `context unknown` included, and 2 for a session or agent
+  it cannot find or a session in more than one harness; it used to exit 1 for any unknown
+  context. `Context` has `found`, and its JSON a `found` key.
+- `moxi usage restart-point --measure --days N` measures over the last N days this once;
+  `restart_point.days` stays the window of every other measure. N below 1, or `--days`
+  without `--measure`, exits 2.
+- The worker ceiling's default warning and refusal carry the wrap-up recipe: commit with
+  one `-m` in single quotes and no heredoc, `$` or backtick, get the commit line from
+  `moxi repo rules`, put every trailer in the last paragraph, and return a
+  `CEILING HANDOFF` block. `ceiling.allow_commands` defaults to `moxi repo rules`, the
+  command the refusal names; it used to start empty.
+- A command in `ceiling.allow_commands` is allowed past the worker ceiling only whole: a
+  command with a word more or fewer is refused, where any words after an entry used to
+  pass. A word written `<...>`, such as `<key>`, stands for one name word, so an entry
+  can allow one argument and no more. An entry that relied on trailing words needs a
+  `<...>` word for each.
 - Every setting carries page fields, which `moxi config usage show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, the
   unit of each wait, age and token count, seven settings shown first (the default

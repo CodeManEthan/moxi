@@ -47,7 +47,7 @@ var O=globalThis,N=O.ShadowRoot&&(O.ShadyCSS===void 0||O.ShadyCSS.nativeShadow)&
         ${this.#i("Last 7 days",s.week)}
       </div>
       <table>
-        <thead><tr><th>Day</th><th class="num">Cost</th><th class="num">Tokens</th></tr></thead>
+        <thead><tr><th>Day</th><th class="num">Est. cost</th><th class="num">Tokens</th></tr></thead>
         <tbody>${s.days.slice().reverse().map(u=>h`
           <tr data-day=${u.day}><td>${u.day}</td>
             <td class="num">${ne(u.cost)}${this.#t(u)}</td>

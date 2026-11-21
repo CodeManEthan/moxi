@@ -76,6 +76,11 @@ export interface SessionRow extends RowSums, SessionRef {
   models: string[];
   first_ts: number | null;
   last_ts: number | null;
+  /** How many turns the main session's file holds, whatever the range; 0 when none of
+   * its requests says its turn. */
+  turns: number;
+  /** The part of the cost its subagents ran up, 0 to 1; null when a cost is not known. */
+  subagent_share: number | null;
   /** The newest request's whole prompt against its window; null when it was not read. */
   context: Context | null;
 }

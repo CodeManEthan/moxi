@@ -356,7 +356,9 @@ def test_preview_prints_the_argv_and_the_stamped_env(work, monkeypatch, capsys):
     assert lines[1] == "argv:" and lines[2].startswith("  claude ")
     # A word with a newline in it is quoted across lines, as a shell reads it back.
     assert "--model opus" in out and "'Brief from launcher, launched by " in lines[2]
-    assert lines[lines.index("env:") + 1].startswith("  MOXI_LAUNCHER_REQUEST=")
+    env_lines = lines[lines.index("env:") + 1:]
+    assert "  MOXI_USAGE_WARN_AT=2x" in env_lines
+    assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)
     assert dict(seen["request"].typed) == {"model": "opus", "brief": BRIEF}
     assert rows() == []
 
