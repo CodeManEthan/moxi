@@ -83,7 +83,7 @@ LIMIT_HARNESSES = ("claude", "codex")
 #: The most sessions `/api/window` lists under a window's total.
 USED_MAX = 10
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
-TOP_MAX = 200
+TOP_MAX = 500
 TOP_DEFAULT = 200
 #: What `/api/sessions` sorts by: a sum of the row, `started` (its first request), `active`
 #: (its first request to its last), `turns`, `subagent_share` or `project` (its project
@@ -214,7 +214,7 @@ SESSION_REF = {
 #: and last request in range, and its context. `session_id` is null for a file with no
 #: session id: no route reads such a row by id, so it has no session view, a null
 #: `context` and a null `known`. `turns` is how many distinct turns its main file's
-#: requests carry, whatever the range, null when none carries a turn id;
+#: requests carry, whatever the range, 0 when none carries a turn id;
 #: `subagent_share` the part of its cost in range its subagents ran up, 0 to 1, 0 when
 #: its cost is 0 and null when its cost or its subagents' is not known.
 SESSION_ROW = {
@@ -224,7 +224,7 @@ SESSION_ROW = {
     "models": _WORDS,
     "first_ts": _WHEN,
     "last_ts": _WHEN,
-    "turns": _MAYBE_INT,
+    "turns": _INT,
     "subagent_share": _MAYBE_FLOAT,
     "context": CONTEXT,
     **ROW_SUMS,

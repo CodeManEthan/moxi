@@ -77,7 +77,7 @@ export const FIRST_TOP = 10;
 /** How many more rows each `Show` reads. */
 export const PAGE = 30;
 /** The most rows one read of `/api/sessions` sends. */
-export const TOP_MAX = 200;
+export const TOP_MAX = 500;
 
 /** A list's days, both included; `since` is null for the days of all time before the
  * first list. */

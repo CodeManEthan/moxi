@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BOARD_PAGE, BOARD_START, contextWords, nextOrder, SessionList, sessionLine, sessionsBoard, sessionsClosed, spanWords,
+  BOARD_PAGE, BOARD_START, boardWindow, contextWords, LOAD_MORE, moveCursor, nextOrder, SessionList, sessionLine, sessionsBoard, sessionsClosed, spanWords,
 } from "../src/sessions-section.ts";
 import { boardPath, earlierLine, listRead, sessionLists, sessionsPath } from "../src/sessions-model.ts";
 import { START } from "../src/filter-model.ts";
@@ -104,8 +104,10 @@ test("the table: every figure of each session, a sort on each column the server 
     ["Cache create", "cache_write"], ["Cache read", "cache_read"], ["Output", "output"], ["Tokens", "tokens"],
     ["Subagent share", "subagent_share"], ["Est. cost", "cost"], ["Context", null]]);
   assert.deepEqual(board.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
-                                         "1h 28m", "4", "15", "300", "400", "200", "300", "1.20k", "25%", "$5.35",
+                                         "1h 28m", "4", "15", "300", "400", "200", "300", "1.20k", "", "$5.35",
                                          "10 of 100"]);
+  // The subagent share is a meter in its column, named for a reader that cannot see it.
+  assert.deepEqual(board.rows[0].share, { value: 0.25, label: "Subagent share 25%" });
   // Turns and Subagent share say what they count on hover.
   assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => column.label),
                    ["Turns", "Subagent share"]);
@@ -132,13 +134,15 @@ test("with projects the project column takes the project sort; a cost not whole 
   assert.deepEqual([board.line, board.more], ["2 sessions · showing 2", false]);
 });
 
-test("a session with no turn ids or no known share leaves those cells empty; a share under 1% says so", () => {
+test("a session with no turn ids counts 0 turns; a share not known has no meter", () => {
   const list = listRead(answer([row("s-1", 2), row("s-2", 1, { turns: 0, subagent_share: 0 }),
                                 row("s-3", 1, { turns: 12, subagent_share: 0.004 })]));
   const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
   const at = (label) => board.columns.findIndex((column) => column.label === label);
   assert.deepEqual(board.rows.map((line) => [line.cells[at("Turns")], line.cells[at("Subagent share")]]),
-                   [["", ""], ["0", "0%"], ["12", "under 1%"]]);
+                   [["0", ""], ["0", ""], ["12", ""]]);
+  assert.deepEqual(board.rows.map((line) => line.share),
+                   [null, { value: 0, label: "Subagent share 0%" }, { value: 0.004, label: "Subagent share 0%" }]);
 });
 
 test("a click on the sorted column turns it around; another column starts highest first", () => {
@@ -163,18 +167,40 @@ test("the table writes a folder from the home folder, and as its last segment wi
 test("the table is read over the whole range in its order, a page at a time", async () => {
   const state = { ...START, harness: "claude" };
   assert.equal(boardPath(state, TODAY, { sort: "started", order: "asc" }, BOARD_PAGE),
-               "api/sessions?since=2026-10-10&until=2026-11-08&harness=claude&sort=started&order=asc&top=200");
-  assert.equal(boardPath({ ...START, range: { kind: "all" } }, TODAY, BOARD_START, BOARD_PAGE, 200),
-               "api/sessions?sort=cost&order=desc&top=200&skip=200");
-  const { ask, asked } = server(many(450));
+               "api/sessions?since=2026-10-10&until=2026-11-08&harness=claude&sort=started&order=asc&top=500");
+  assert.equal(boardPath({ ...START, range: { kind: "all" } }, TODAY, BOARD_START, BOARD_PAGE, 500),
+               "api/sessions?sort=cost&order=desc&top=500&skip=500");
+  const { ask, asked } = server(many(1100));
   const board = new SessionList(ask, (top, skip) => boardPath(START, TODAY, BOARD_START, top, skip), BOARD_PAGE,
                                 () => {}, BOARD_PAGE);
   await board.refresh();
   await board.show();
-  assert.equal(board.feed.value.rows.length, 400);
-  assert.equal(board.feed.value.more, 50);
+  assert.equal(board.feed.value.rows.length, 1000);
+  assert.equal(board.feed.value.more, 100);
   assert.deepEqual(asked.map((item) => item.replace(/^.*&sort/, "sort")),
-                   ["sort=cost&order=desc&top=200", "sort=cost&order=desc&top=200&skip=200"]);
+                   ["sort=cost&order=desc&top=500", "sort=cost&order=desc&top=500&skip=500"]);
+  assert.equal(LOAD_MORE, "Load more");
+});
+
+test("the table draws the rows in view and six more each side, and reads on near the end", () => {
+  // A box 480 px tall shows 12 rows of 40 px.
+  assert.deepEqual(boardWindow(500, 0, 480), { start: 0, end: 24, above: 0, below: 476 * 40, near: false });
+  assert.deepEqual(boardWindow(500, 4000, 480), { start: 94, end: 118, above: 94 * 40, below: 382 * 40, near: false });
+  // The last row drawn within 20 of the end reads the next page.
+  assert.equal(boardWindow(500, 18_400, 480).near, false);
+  assert.equal(boardWindow(500, 18_600, 480).near, true);
+  assert.equal(boardWindow(30, 0, 480).near, true);
+  // A box not yet measured is taken as 400 px.
+  assert.equal(boardWindow(500, 0, 0).end, 22);
+  assert.deepEqual(boardWindow(0, 0, 480), { start: 0, end: 0, above: 0, below: 0, near: true });
+});
+
+test("the arrow keys move the row cursor one row, within the rows", () => {
+  assert.equal(moveCursor(0, "ArrowDown", 3), 1);
+  assert.equal(moveCursor(2, "ArrowDown", 3), 2);
+  assert.equal(moveCursor(0, "ArrowUp", 3), 0);
+  assert.equal(moveCursor(2, "ArrowUp", 3), 1);
+  assert.equal(moveCursor(1, "Enter", 3), 1);
 });
 
 test("a range of seven days or fewer has no earlier line", () => {

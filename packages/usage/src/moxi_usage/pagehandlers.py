@@ -292,7 +292,7 @@ def _session_row(row: Mapping[str, Any]) -> dict[str, Any]:
             "name": None, "folder": None, "started": None, "known": None,
             "cwd": _str(row.get("cwd")), "project": _str(row.get("project")),
             "models": _words(row.get("models")), "first_ts": _num(row.get("first_ts")),
-            "last_ts": _num(row.get("last_ts")), "turns": _int(row.get("turns")),
+            "last_ts": _num(row.get("last_ts")), "turns": _int(row.get("turns")) or 0,
             "subagent_share": _share(row), "context": None, **_row_sums(row)}
 
 
@@ -314,6 +314,13 @@ def _by_cost(row: Mapping[str, Any]) -> tuple:
             sid or "", first is None, first or 0.0, row["cwd"] or "")
 
 
+def _tie(row: Mapping[str, Any]) -> tuple:
+    """The order of rows of one value in `/api/sessions`: by session id, then harness; a
+    row with no id after those with one, by its first request and folder."""
+    sid, first = row["session_id"], row["first_ts"]
+    return (sid is None, sid or "", row["harness"], first is None, first or 0.0, row["cwd"] or "")
+
+
 def _sort_value(row: Mapping[str, Any], sort: str) -> Any:
     """The value of `row` a sort by `sort` orders by; None for a row that has none."""
     if sort == "started":
@@ -328,11 +335,9 @@ def _sort_value(row: Mapping[str, Any], sort: str) -> Any:
 
 def _sorted(rows: list[dict[str, Any]], sort: str, order: str) -> list[dict[str, Any]]:
     """The rows by `sort`, the least first with `order` `asc`, else the most first; a
-    row with no value for it comes last either way, and rows of one value keep
-    `_by_cost`'s order."""
-    rows = sorted(rows, key=_by_cost)
-    if sort == "cost" and order == "desc":
-        return rows
+    row with no value for it comes last either way, and rows of one value keep `_tie`'s
+    order either way."""
+    rows = sorted(rows, key=_tie)
     have = [row for row in rows if _sort_value(row, sort) is not None]
     have.sort(key=lambda row: _sort_value(row, sort), reverse=order == "desc")
     return have + [row for row in rows if _sort_value(row, sort) is None]
@@ -352,10 +357,10 @@ def _contexts(keys: list[tuple[str | None, str]]) -> dict[tuple[str | None, str]
 
 
 def sessions(call: Any) -> dict[str, Any]:
-    """`GET /api/sessions`: the sessions by cost, the dearest first, then by tokens, then
-    by harness and session id; or, with `sort` (`SESSION_SORTS`), by that value, the
-    most first unless `order` is `asc`, a row with no value last and rows of one value
-    in the order by cost. `rows` is `top` of them (200 unless asked, at most 200)
+    """`GET /api/sessions`: the sessions by cost, the dearest first, or, with `sort`
+    (`SESSION_SORTS`), by that value, the most first unless `order` is `asc`; a row with
+    no value (an unpriced cost) last either way, and rows of one value by session id,
+    then harness, either way. `rows` is `top` of them (200 unless asked, at most 500)
     after the first `skip` (none unless asked); `count` is how many there are and `more`
     how many come after the rows sent. `skip` is a place in the order as the index stood
     at this call, so a pass between two calls can move a row. Each row sent carries its

@@ -122,8 +122,41 @@ export const SHARE_TITLE = "The part of the session's cost in the range its suba
 /** The table's first order: dearest first. */
 export const BOARD_START: BoardOrder = { sort: "cost", order: "desc" };
 
-/** How many rows a read of the table asks for: the first, and each `Show`. */
+/** How many rows a read of the table asks for: the first, and each `Load more`. */
 export const BOARD_PAGE = TOP_MAX;
+/** The act under the table that reads its next page. */
+export const LOAD_MORE = "Load more";
+
+/** The table's rows in its box: each `height` px tall; `overscan` more drawn on each side
+ * of those in view; the next page read once the last drawn is within `prefetch` rows of
+ * the end. */
+export const BOARD_ROW = { height: 40, overscan: 6, prefetch: 20 };
+
+/** The rows of the table drawn: `[start, end)`, with the px left above and below them. */
+export interface BoardWindow {
+  start: number;
+  end: number;
+  above: number;
+  below: number;
+  /** The last row drawn is near the end: the next page is to be read. */
+  near: boolean;
+}
+
+/** Which of `count` rows a box `viewport` px tall scrolled `top` px down draws. */
+export function boardWindow(count: number, top: number, viewport: number): BoardWindow {
+  const { height, overscan, prefetch } = BOARD_ROW;
+  const visible = Math.ceil(Math.max(height, viewport || 400) / height);
+  const start = Math.min(count, Math.max(0, Math.floor(top / height) - overscan));
+  const end = Math.min(count, start + visible + overscan * 2);
+  return { start, end, above: start * height, below: Math.max(0, (count - end) * height), near: end >= count - prefetch };
+}
+
+/** The row the table's cursor is on after a key: one down for `ArrowDown`, one up for
+ * `ArrowUp`, kept within the rows; any other key leaves it. */
+export function moveCursor(at: number, key: string, count: number): number {
+  const step = key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : 0;
+  return Math.max(0, Math.min(count - 1, at + step));
+}
 
 /** One column of the table; `sort` null for a column it cannot be sorted by. */
 export interface BoardColumn {
@@ -142,11 +175,16 @@ export interface BoardColumn {
  * page at a time. */
 export interface Board {
   columns: BoardColumn[];
-  /** `session` is the session the row opens; null for a row with no session id. */
-  rows: { key: string; cells: string[]; session: { harness: string; id: string } | null }[];
+  /** `session` is the session the row opens; null for a row with no session id. `share`
+   * is the subagent share drawn as a meter in its column, whose cell is empty; null
+   * where the share is not known. */
+  rows: {
+    key: string; cells: string[]; session: { harness: string; id: string } | null;
+    share: { value: number; label: string } | null;
+  }[];
   /** `54 sessions · showing 30`. */
   line: string;
-  /** More sessions are after the rows shown: `Show` reads the next page. */
+  /** More sessions are after the rows shown: `Load more` reads the next page. */
   more: boolean;
 }
 
@@ -187,6 +225,8 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
   const rows = list.rows.map((row, i) => ({
     key: rowKey(row),
     session: row.session_id === null ? null : { harness: row.harness, id: row.session_id },
+    share: row.subagent_share === null ? null
+      : { value: row.subagent_share, label: `Subagent share ${Math.round(row.subagent_share * 100)}%` },
     cells: [
       sessionName(row, today, clock).name,
       ...(projects ? [row.project ?? ""] : []),
@@ -195,11 +235,11 @@ export function sessionsBoard(list: ListRead, by: BoardOrder, today: string | nu
       row.models.join(", "),
       when(row.first_ts),
       row.first_ts === null || row.last_ts === null ? "" : fmtSpan(Math.max(0, row.last_ts - row.first_ts)),
-      row.turns === null ? "" : row.turns.toLocaleString("en-US"),
+      (row.turns ?? 0).toLocaleString("en-US"),
       row.requests.toLocaleString("en-US"),
       fmtTokens(row.fresh_input), fmtTokens(row.cache_write), fmtTokens(row.cache_read), fmtTokens(row.output),
       fmtTokens(row.tokens),
-      row.subagent_share === null ? "" : percentWords(row.subagent_share * 100),
+      "",
       costWords(sumRows([row])),
       row.context === null ? "" : contextCell(row.context),
       ...(flagged ? [whys[i] ?? ""] : []),

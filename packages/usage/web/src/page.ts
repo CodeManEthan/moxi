@@ -104,7 +104,7 @@ import {
 } from "./terms-model.ts";
 import type { Kinds, PricesModel, PricesPart } from "./terms-model.ts";
 import {
-  BOARD_PAGE, BOARD_START, nextOrder, OPEN, SessionList, sessionLine, sessionsBoard, sessionsClosed, SESSIONS_LABEL, SHOW,
+  BOARD_PAGE, BOARD_ROW, BOARD_START, boardWindow, LOAD_MORE, moveCursor, nextOrder, OPEN, SessionList, sessionLine, sessionsBoard, sessionsClosed, SESSIONS_LABEL, SHOW,
 } from "./sessions-section.ts";
 import type { Board, BoardOrder, BoardSort, SessionLine, SessionsClosed } from "./sessions-section.ts";
 import {
@@ -303,6 +303,15 @@ const STYLES = css`
   .tbl th button.sort { color: inherit; }
   .tbl th[aria-sort=ascending] button.sort, .tbl th[aria-sort=descending] button.sort { color: var(--moxi-text); }
   .tbl tr[data-opens] { cursor: pointer; }
+  /* The Sessions table: its rows in a box of their own, a fixed height each, the head
+     kept in view. */
+  .scroll.board { max-height: 480px; overflow: auto; }
+  .scroll.board thead th { position: sticky; top: 0; z-index: 1; background: var(--moxi-bg); }
+  .scroll.board tbody tr { height: ${BOARD_ROW.height}px; white-space: nowrap; }
+  .scroll.board tbody tr.on:focus-visible { outline: 1px solid var(--moxi-border-strong); outline-offset: -1px; }
+  .sm { display: inline-block; width: 56px; height: 9px; vertical-align: middle; }
+  .sm .base { fill: var(--moxi-border-strong); }
+  .sm .fill { fill: var(--moxi-text); }
   .tbl td a.go { color: var(--moxi-text); text-decoration: none; }
   .tbl tr[data-opens]:hover a.go, .tbl td a.go:focus-visible { text-decoration: underline; }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
@@ -400,6 +409,8 @@ export class UsagePage extends LitElement {
     heatTable: { state: true },
     sectionTable: { state: true },
     boardBy: { state: true },
+    boardTop: { state: true },
+    boardCursor: { state: true },
     pricesPart: { state: true },
     searchText: { state: true },
     sessionPart: { state: true },
@@ -425,6 +436,11 @@ export class UsagePage extends LitElement {
   sectionTable: SectionKey | "sessions" | null = null;
   /** The Sessions table's order. */
   boardBy: BoardOrder = BOARD_START;
+  /** How far the Sessions table's box is scrolled, in px, and how tall it is. */
+  boardTop = 0;
+  #boardHeight = 0;
+  /** The table row the arrow keys move and Enter opens. */
+  boardCursor = 0;
   /** What is open under the price table. */
   pricesPart: PricesPart | null = null;
   /** What `Find a model` searches for. */
@@ -1483,33 +1499,74 @@ export class UsagePage extends LitElement {
   }
 
   /** The Sessions table: a header button per column it sorts by, the rows read, and the
-   * line that counts them with `Show` for the next page. A row with a session opens it:
-   * a plain press anywhere on it, or its name, a link to the session's address. */
+   * line that counts them with `Load more` for the next page, which is read too once the
+   * rows drawn near the end. The rows sit in a box of their own and only those in view
+   * are drawn. A row with a session opens it: a plain press anywhere on it, Enter or
+   * Space on the row, or its name, a link to the session's address. The arrow keys move
+   * the row cursor. */
   #boardTable(board: Board) {
-    const sortBy = (sort: BoardSort) => { this.boardBy = nextOrder(this.boardBy, sort); };
+    const sortBy = (sort: BoardSort) => {
+      this.boardBy = nextOrder(this.boardBy, sort);
+      this.boardCursor = 0;
+      this.boardTop = 0;
+    };
     const plain = (event: MouseEvent): boolean => event.button === 0 && !event.metaKey && !event.ctrlKey
       && !event.shiftKey && !event.altKey;
-    return html`<div class="scroll"><table class="tbl" data-part="table" data-table="sessions">
+    const count = board.rows.length;
+    const cursor = Math.min(this.boardCursor, Math.max(0, count - 1));
+    const win = boardWindow(count, this.boardTop, this.#boardHeight);
+    if (win.near && board.more) queueMicrotask(() => { void this.#board?.show(); });
+    const scrolled = (event: Event) => {
+      const box = event.currentTarget as HTMLElement;
+      this.#boardHeight = box.clientHeight;
+      this.boardTop = box.scrollTop;
+    };
+    const keyed = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      this.boardCursor = moveCursor(cursor, event.key, count);
+      void this.updateComplete.then(() => {
+        const row = this.renderRoot.querySelector<HTMLElement>(`tr[data-index="${this.boardCursor}"]`);
+        row?.scrollIntoView({ block: "nearest" });
+        row?.focus();
+      });
+    };
+    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" style="height: ${px}px"></tr>` : nothing);
+    return html`<div class="scroll board" data-part="board" @scroll=${scrolled}><table class="tbl" data-part="table"
+      data-table="sessions" aria-rowcount=${count + 1}>
       <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
         aria-sort=${column.aria ?? nothing} title=${column.title ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
           class="act sort" data-sort=${column.sort} @click=${() => sortBy(column.sort as BoardSort)}>${column.label}${
           column.arrow === null ? nothing : html`<span aria-hidden="true"> ${column.arrow}</span>`}</button>`}</th>`)}</tr></thead>
-      <tbody>${board.rows.map((row) => {
+      <tbody @keydown=${keyed}>${pad(win.above)}${repeat(board.rows.slice(win.start, win.end), (row) => row.key, (row, at) => {
+        const index = win.start + at;
         const session = row.session;
         const go = (event: MouseEvent): void => {
+          this.boardCursor = index;
           if (session === null || !plain(event)) return;
           event.preventDefault();
           this.#openFromTable(session);
         };
-        return html`<tr data-row=${row.key} data-opens=${session === null ? nothing : ""} @click=${go}>${row.cells.map((cell, i) =>
+        const pressed = (event: KeyboardEvent): void => {
+          if (session === null || (event.key !== "Enter" && event.key !== " ") || event.target !== event.currentTarget) return;
+          event.preventDefault();
+          this.#openFromTable(session);
+        };
+        return html`<tr data-row=${row.key} data-index=${index} aria-rowindex=${index + 2}
+          tabindex=${index === cursor ? 0 : -1} class=${index === cursor ? "on" : ""}
+          data-opens=${session === null ? nothing : ""} @click=${go} @keydown=${pressed}>${row.cells.map((cell, i) =>
           html`<td class=${board.columns[i]?.num ? "n" : ""}>${i === 0 && session !== null
             ? html`<a class="go" href=${addressPath(sessionAddress(session.harness, session.id))}
                 @click=${(event: MouseEvent) => { if (!plain(event)) event.stopPropagation(); }}>${cell}</a>`
-            : cell}</td>`)}</tr>`;
-      })}</tbody>
+            : board.columns[i]?.sort === "subagent_share" && row.share !== null
+              ? html`<svg class="sm" role="img" aria-label=${row.share.label} viewBox="0 0 56 9"><title>${row.share.label}</title>
+                  <rect class="base" x="0" y="4" width="56" height="1"></rect>
+                  <rect class="fill" x="0" y="3" width=${56 * Math.max(0, Math.min(1, row.share.value))} height="3"></rect></svg>`
+              : cell}</td>`)}</tr>`;
+      })}${pad(win.below)}</tbody>
     </table></div>
     <div class="more" data-part="more" data-more="table"><span>${board.line}</span>${board.more
-      ? html`<button type="button" class="act" data-act="show" @click=${() => { void this.#board?.show(); }}>${SHOW}</button>`
+      ? html`<button type="button" class="act" data-act="show" @click=${() => { void this.#board?.show(); }}>${LOAD_MORE}</button>`
       : nothing}</div>`;
   }
 

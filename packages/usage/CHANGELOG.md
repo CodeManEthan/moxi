@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The Sessions table reads 500 sessions at a time (`/api/sessions` takes `top` up to
+  500) and reads the next 500 as the rows drawn near the end, or on `Load more`, where it
+  read 200 on `Show`. Its rows sit in a box of their own, 40 px each, only those in view
+  drawn, and the arrow keys move a row cursor; Enter on a row opens its session. Rows of
+  one value sort by session id then harness in either direction, where they kept the
+  order by cost (then tokens). A session with no turn id counts 0 turns, where its cell
+  was empty, and the subagent share is drawn as a meter.
 - The page's heat map follows only the project (or folder) filter, no longer Harness and
   Model, and is drawn even when no day of the 53 weeks was used. Every day is a button,
   not only the used ones; weeks are a fixed 13 px apart, where the pitch shrank to fit;

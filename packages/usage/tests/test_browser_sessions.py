@@ -2,7 +2,8 @@
 usage's real page server: the closed row naming the range's dearest session with the
 count that opens it; opened, the week's ten dearest as two-line rows, the line for the
 rest of the week and its `Show`, the earlier days' line and its `Show`, the table of
-every session sorted by a column with its turns and subagent share, a table row
+every session sorted by a column with its turns and subagent share, its rows in a box
+with a row cursor on the arrow keys, a table row
 opening its session, a row's `Open` and the address it writes; a range of
 seven days or fewer with no earlier line; Cost's `most to` naming today's two dearest;
 and the section at a phone's width.
@@ -203,12 +204,12 @@ def test_the_table_holds_every_session_of_the_range_and_sorts_by_a_column(page):
     expect(rows_of(section)).to_have_count(10)
     with page.expect_request(lambda request: "sort=cost" in request.url) as sent:
         section.get_by_role("button", name="Table").click()
-    assert "order=desc" in sent.value.url and "top=200" in sent.value.url, sent.value.url
+    assert "order=desc" in sent.value.url and "top=500" in sent.value.url, sent.value.url
     table = section.locator("table[data-part=table]")
     # Every session of the 30 days, not only the rows the lists show.
     expect(table.locator("tbody tr")).to_have_count(16)
     expect(section.locator("[data-more=table]")).to_have_text("16 sessions · showing 16")
-    expect(section.locator("[data-more=table]").get_by_role("button", name="Show")).to_have_count(0)
+    expect(section.locator("[data-more=table]").get_by_role("button", name="Load more")).to_have_count(0)
     heads = table.locator("th").all_inner_texts()
     assert heads[:3] == ["Session", "Project", "Folder"], heads
     assert {"Harness", "Models", "Started", "Active", "Requests", "Input", "Cache create", "Cache read",
@@ -251,7 +252,9 @@ def test_the_table_counts_turns_and_the_subagent_share_and_sorts_by_both(page):
     first = table.locator("tbody tr").first.locator("td")
     # Each request of the seed is a prompt of its own, and no session has a subagent.
     expect(first.nth(column["Turns"])).to_have_text("16")
-    expect(first.nth(column["Subagent share"])).to_have_text("0%")
+    # The share is a meter, named for a reader that cannot see it.
+    expect(first.nth(column["Subagent share"]).get_by_role("img")).to_have_attribute(
+        "aria-label", "Subagent share 0%")
 
     turns = table.get_by_role("button", name="Turns")
     with page.expect_request(lambda request: "sort=turns&order=desc" in request.url):
@@ -300,6 +303,36 @@ def test_a_table_row_opens_its_session_first_in_the_section(page):
     assert path_of(page) == f"/m/usage/sessions/claude/{session_id(1)}"
     expect(table).to_have_count(0)
 
+
+
+def test_the_tables_rows_sit_in_a_box_and_the_arrow_keys_move_a_row_cursor_enter_opens(page):
+    section = sessions_of(open_page(page, "sessions"))
+    section.get_by_role("button", name="Table").click()
+    table = section.locator("table[data-part=table]")
+    rows = table.locator("tbody tr")
+    expect(rows).to_have_count(16)
+    expect(table).to_have_attribute("aria-rowcount", "17")
+    # Each row is 40 px tall, in a box of its own that scrolls under the head.
+    assert rows.first.bounding_box()["height"] == pytest.approx(40, abs=0.5)
+    box = section.locator("[data-part=board]").bounding_box()
+    assert box["height"] <= 480.5, box
+    # One row at a time takes the focus: the cursor starts on the first.
+    expect(table.locator("tbody tr[tabindex='0']")).to_have_count(1)
+    rows.first.focus()
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("ArrowDown")
+    third = rows.nth(2)
+    expect(third).to_be_focused()
+    expect(third).to_have_attribute("tabindex", "0")
+    key = third.get_attribute("data-row")
+    # Enter on the row opens its session first in the section.
+    with page.expect_request(lambda request: "/m/usage/api/session?" in request.url):
+        page.keyboard.press("Enter")
+    assert path_of(page) == f"/m/usage/sessions/{key}"
+    expect(table).to_have_count(0)
+    expect(section.locator(f'[data-list=placed] moxi-ui-row[data-key="{key}"]')).to_have_attribute("open", "")
 
 def test_a_rows_open_writes_its_address_and_reads_as_close(page):
     panel = open_page(page, "sessions")

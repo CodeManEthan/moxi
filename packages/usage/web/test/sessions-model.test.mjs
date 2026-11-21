@@ -201,11 +201,12 @@ test("rows with no session id are one file each", () => {
   assert.equal(addPage(listRead(answer([one])), answer([two], { skip: 1 })).rows.length, 2);
 });
 
-test("a list is read again to the depth it was read to, at most 200 rows a read", () => {
+test("a list is read again to the depth it was read to, at most 500 rows a read", () => {
   assert.deepEqual(depthPages(0), [{ top: 10, skip: 0 }]);
   assert.deepEqual(depthPages(40), [{ top: 40, skip: 0 }]);
   assert.deepEqual(depthPages(1, 1), [{ top: 1, skip: 0 }]);
-  assert.deepEqual(depthPages(430), [{ top: 200, skip: 0 }, { top: 200, skip: 200 }, { top: 30, skip: 400 }]);
+  assert.deepEqual(depthPages(430), [{ top: 430, skip: 0 }]);
+  assert.deepEqual(depthPages(1100), [{ top: 500, skip: 0 }, { top: 500, skip: 500 }, { top: 100, skip: 1000 }]);
 });
 
 test("a share is a whole percent rounded down, never 0% above zero, null without a whole", () => {
