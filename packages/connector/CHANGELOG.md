@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `moxi_connector.provider.Limit`, opt-in per provider: at most two calls at once, a third
+  waiting up to 5 seconds before it refuses `busy`, each call's work in a thread and
+  refused `timeout` 20 seconds after it began, a thread that outlives its call holding its
+  place until it ends.
 - `docs/security.md`, "What crosses the door", covers the read tools memory, sessions and
   notes give: what each reaches, what is redacted and with which sets, what isn't,
   hostile text and the advice to keep "always allow" off for tools that send or share,

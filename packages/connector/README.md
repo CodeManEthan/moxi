@@ -118,6 +118,13 @@ characters, the byte order mark). A provider that redacts must hand over text it
 redaction saw in that final form: redact the raw text, remove those characters, then
 redact again, so the scrub never changes text redaction didn't see.
 
+A provider whose tools read a lot can bound them with one `Limit` of its own, shared by
+its tools: `await LIMIT.run(work)` runs `work()`, a plain function returning a `Result`,
+in a thread. At most two calls of the provider run at once; a third waits up to 5
+seconds, then answers the refusal `busy`; a call still running 20 seconds after it began
+answers `timeout`, and its thread holds its place until it ends. It is opt-in: comms'
+tools don't use one.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).

@@ -45,6 +45,24 @@ them first and redacting once is not enough: the redactor sees through some invi
 characters, and removing one can glue a word onto a key and break the boundary its
 pattern needs.
 
+A provider may bound its own calls with a `Limit`, one per provider, shared by its tools;
+nothing makes a provider use one, and comms doesn't. At most two calls of the provider run
+at once. A third waits up to 5 seconds for a place, then answers the refusal `busy`. Each
+call's work runs in a thread of its own, and a call still running 20 seconds after it
+began answers the refusal `timeout`. A thread that outlives its call finishes, its answer
+is dropped, and it holds its place until it ends; a caller that hangs up ends the call the
+same way. The work is a plain function of no arguments that returns a `Result`:
+
+    LIMIT = Limit()
+
+    async def read_note(args, ctx):
+        result = await LIMIT.run(functools.partial(_read_note, args))
+        ctx.log(refusal=result.refusal, ...)
+        return result
+
+The work runs off the event loop, so it calls nothing of `ctx`; the coroutine logs what
+the work returned. An exception the work raises comes out of `run`, as a tool's own would.
+
 Two providers that declare one tool name both lose it: no provider's tool shadows
 another's. A tool whose `call` raises answers "The tool failed; the connector's log has
 the request id." and the exception stays in the connector's log, never sent.
@@ -58,6 +76,9 @@ error answer; so does a call whose caller hung up first, or whose answer failed 
 
 from __future__ import annotations
 
+import asyncio
+import collections
+import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -68,6 +89,14 @@ GROUP = "moxi.connector.providers"
 LEVELS = ("ok", "warn", "fail")
 #: What a tool that raised answers.
 TOOL_FAILED = "The tool failed; the connector's log has the request id."
+#: A `Limit`'s calls at once, seconds a call waits for a place, and seconds a call may run.
+LIMIT_AT_ONCE = 2
+LIMIT_WAIT_S = 5.0
+LIMIT_CALL_S = 20.0
+#: What a call answers, refused `busy`, when no place frees in time.
+BUSY = "Another read is running; try again in a moment."
+#: What a call answers, refused `timeout`, when it runs past its time.
+TIMEOUT = "The read took longer than 20 seconds and nothing came back; try a smaller one."
 
 #: Field names no log row may hold, at any depth, from the connector or a provider: what
 #: would put a secret or a message body in the call log.
@@ -211,5 +240,124 @@ class Ctx:
         self._fields.update(fields)
 
 
-__all__ = ["Ctx", "FORBIDDEN", "GROUP", "Gate", "HOST_FIELDS", "LEVELS", "Provider",
-           "Result", "StatusRow", "TOOL_FAILED", "Tool", "refused_field"]
+class Limit:
+    """How many calls of one provider run at once, how long a call waits for a place, and
+    how long it may run: `at_once` calls, a wait of `wait_s` seconds, `call_s` seconds from
+    the call's start. One provider makes one and every tool of it calls `run`.
+
+    It belongs to no event loop: a provider's `Limit` is made at import and serves every
+    loop the process runs."""
+
+    def __init__(self, *, at_once: int = LIMIT_AT_ONCE, wait_s: float = LIMIT_WAIT_S,
+                 call_s: float = LIMIT_CALL_S):
+        if at_once < 1:
+            raise ValueError("a Limit lets at least one call run")
+        self.at_once = at_once
+        self.wait_s = wait_s
+        self.call_s = call_s
+        self._lock = threading.Lock()
+        self._held = 0
+        self._waiting: collections.deque[tuple[asyncio.AbstractEventLoop, asyncio.Future]] \
+            = collections.deque()
+
+    @property
+    def held(self) -> int:
+        """The places held now, by calls running and by threads that outlived theirs."""
+        with self._lock:
+            return self._held
+
+    async def run(self, work: Callable[[], Result]) -> Result:
+        """`work()` in a thread of its own once a place is free, its `Result` answered; the
+        refusal `busy` when no place frees within `wait_s`, `timeout` when `call_s` pass
+        from this call's start first."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.call_s
+        if not await self._take(loop, min(self.wait_s, self.call_s)):
+            return Result.refused("busy", BUSY)
+        answered: asyncio.Future = loop.create_future()
+
+        def body() -> None:
+            try:
+                outcome: tuple[bool, Any] = (True, work())
+            except BaseException as exc:  # noqa: BLE001 - handed to the call, which raises it
+                outcome = (False, exc)
+            finally:
+                self._release()
+            try:
+                loop.call_soon_threadsafe(_settle, answered, outcome)
+            except RuntimeError:
+                pass                    # the loop has closed; nobody waits for the answer
+
+        try:
+            threading.Thread(target=body, name="moxi-connector-limit", daemon=True).start()
+        except BaseException:
+            self._release()
+            raise
+        try:
+            async with asyncio.timeout_at(deadline):
+                ok, value = await asyncio.shield(answered)
+        except TimeoutError:
+            return Result.refused("timeout", TIMEOUT)
+        if not ok:
+            raise value
+        return value
+
+    async def _take(self, loop: asyncio.AbstractEventLoop, wait_s: float) -> bool:
+        """Take a place, waiting up to `wait_s` seconds for one. True once taken."""
+        with self._lock:
+            if self._held < self.at_once and not self._waiting:
+                self._held += 1
+                return True
+            given: asyncio.Future = loop.create_future()
+            self._waiting.append((loop, given))
+        try:
+            async with asyncio.timeout(wait_s):
+                return await given
+        except TimeoutError:
+            return self._abandon(loop, given)    # True: the place came as the wait ended
+        except asyncio.CancelledError:
+            if self._abandon(loop, given):
+                self._release()
+            raise
+
+    def _abandon(self, loop: asyncio.AbstractEventLoop, given: asyncio.Future) -> bool:
+        """Stop waiting. True when a release had already handed this waiter its place."""
+        with self._lock:
+            try:
+                self._waiting.remove((loop, given))
+            except ValueError:
+                pass                    # a release chose this waiter
+            else:
+                return False
+        # The release's hand-over has run (the place is ours) or will run on this loop and
+        # find the wait cancelled, and pass the place on.
+        return given.done() and not given.cancelled()
+
+    def _release(self) -> None:
+        """Give a place back: to the longest waiter, else to the pool. Any thread."""
+        with self._lock:
+            while self._waiting:
+                loop, given = self._waiting.popleft()
+                try:
+                    loop.call_soon_threadsafe(self._give, given)
+                except RuntimeError:
+                    continue            # that waiter's loop has closed
+                return
+            self._held -= 1
+
+    def _give(self, given: asyncio.Future) -> None:
+        """On the waiter's loop: hand it the place, or pass it on when it stopped waiting."""
+        if given.done():
+            self._release()
+        else:
+            given.set_result(True)
+
+
+def _settle(answered: asyncio.Future, outcome: tuple[bool, Any]) -> None:
+    if not answered.done():
+        answered.set_result(outcome)
+
+
+__all__ = ["BUSY", "Ctx", "FORBIDDEN", "GROUP", "Gate", "HOST_FIELDS", "LEVELS",
+           "LIMIT_AT_ONCE", "LIMIT_CALL_S", "LIMIT_WAIT_S", "Limit", "Provider", "Result",
+           "StatusRow", "TIMEOUT", "TOOL_FAILED", "Tool", "refused_field"]
