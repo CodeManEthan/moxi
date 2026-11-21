@@ -80,7 +80,11 @@ its switch, for example `moxi config set turns guards.removal true`:
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
-guards that run beyond the switches: guard ids or paths to guard files.
+guards that run beyond the switches: guard ids or paths to guard files. A module's guard
+can also name the sessions it runs in, by a function of the session's environment that
+turns asks once, when the session starts; it then runs in those sessions with no switch
+and no entry on `guards.run`. `moxi doctor turns` asks that function in its own
+environment, so a guard on only in certain sessions reads off there.
 
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse

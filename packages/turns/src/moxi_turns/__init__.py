@@ -59,9 +59,13 @@ out of the harness. This package is turns' whole public API, the announcement's
                               additions=None)   # an OpenCode host, experimental
     turns.Guard(name, calls, *, who="any", match=None, match_flags="", judge=None,
                 deny="", wants=(), on_error="allow", deadline_ms=500, switch=None,
-                doc="")       # a guard, declared in a module's GUARDS (group
+                sessions=None, doc="", step="call")
+                              # a guard, declared in a module's GUARDS (group
                               # moxi.turns.guards); its judge takes a ToolCall (prompts:
-                              # Prompt values) and answers None | Allow(line) | Deny(reason)
+                              # Prompt values) and answers None | Allow(line) | Deny(reason);
+                              # sessions, "package.module:function", takes the session's
+                              # env and answers True to turn the guard on there, asked
+                              # once at the session's start
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,

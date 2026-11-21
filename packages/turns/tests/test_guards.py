@@ -44,8 +44,27 @@ def no_switches(module, key):
     return False, None
 
 
-def load(on=(), *entries, switches=no_switches):
-    return guards.load(list(on), entries=list(entries), switches=switches)
+def load(on=(), *entries, switches=no_switches, sessions=None, env=None):
+    return guards.load(list(on), entries=list(entries), switches=switches,
+                       sessions=sessions, env=env)
+
+
+#: What the `sessions` functions below were called with.
+SEEN_ENVS = []
+
+
+def subconscious_on(env):
+    """A `sessions` function: yes where the test's stamp is set."""
+    SEEN_ENVS.append(dict(env))
+    return env.get("TEST_GUARD_STAMP") == "1"
+
+
+def sessions_raises(env):
+    raise RuntimeError("a bug in the sessions function")
+
+
+def sessions_not_bool(env):
+    return "yes"
 
 
 # -- the values --------------------------------------------------------------------------
@@ -67,7 +86,8 @@ def test_the_values_are_plain_data_and_reach_the_package():
 def test_the_defaults_are_the_designs():
     g = Guard("x", {"claude": ("*",)}, judge="pkg.mod:fn")
     assert (g.who, g.match, g.match_flags, g.deny, g.wants, g.on_error, g.deadline_ms,
-            g.switch, g.doc) == ("any", None, "", "", (), "allow", 500, None, "")
+            g.switch, g.sessions, g.doc) == ("any", None, "", "", (), "allow", 500, None,
+                                             None, "")
     assert g.problems() == []
     assert g.deadline() == 500 and g.deadline(200) == 200
     assert Guard("x", {}, judge="a:b", deadline_ms=9000).deadline() == guards.MAX_WAIT_MS
@@ -110,6 +130,9 @@ def test_the_guard_module_imports_only_the_standard_library():
     ({"deadline_ms": 1.5}, "deadline_ms"),
     ({"switch": "removal"}, "switch 'removal'"),
     ({"switch": 1}, "switch 1"),
+    ({"sessions": "nocolon"}, "sessions 'nocolon'"),
+    ({"sessions": ":own"}, "sessions ':own'"),
+    ({"sessions": 1}, "sessions 1"),
     ({"doc": "two\nlines"}, "one line"),
 ])
 def test_every_field_is_checked(kw, why):
@@ -264,6 +287,74 @@ def test_a_switch_that_cannot_be_read_reads_off_and_is_a_problem_listed_or_not()
     assert "config gone" in loaded.problems[0].reason
 
 
+def test_a_sessions_function_that_says_yes_turns_a_guard_on():
+    asked = []
+
+    def sessions(target):
+        asked.append(target)
+        return target == "pkg.mod:yes", None
+
+    loaded = load(["mod.both"], Entry("mod", [
+        data_only("yes", sessions="pkg.mod:yes"), data_only("no", sessions="pkg.mod:no"),
+        data_only("both", sessions="pkg.mod:yes"),
+        data_only("all", sessions="pkg.mod:yes", switch="rows.on")]),
+        switches=lambda module, key: (True, None), sessions=sessions)
+    assert {o.id: o.by for o in loaded.on} == {
+        "mod.yes": ("sessions",), "mod.both": ("list", "sessions"),
+        "mod.all": ("switch", "sessions")}
+    assert [f.id for f in loaded.off] == ["mod.no"]
+    assert sorted(asked) == ["pkg.mod:no", "pkg.mod:yes", "pkg.mod:yes", "pkg.mod:yes"]
+    assert loaded.problems == ()
+
+
+def test_a_sessions_function_that_reads_off_is_a_problem_listed_or_not():
+    def sessions(target):
+        return True, "it answered str, not True or False"
+
+    loaded = load(["mod.listed"], Entry("mod", [
+        data_only("listed", sessions="pkg.mod:fn"),
+        data_only("unlisted", sessions="pkg.mod:fn")]), sessions=sessions)
+    assert [(o.id, o.by) for o in loaded.on] == [("mod.listed", ("list",))]
+    assert [f.id for f in loaded.off] == ["mod.unlisted"]
+    assert [(p.id, p.kind, p.on) for p in loaded.problems] == [
+        ("mod.listed", "sessions", True), ("mod.unlisted", "sessions", False)]
+    assert "sessions pkg.mod:fn reads off: it answered str" in loaded.problems[0].reason
+
+    def raising(target):
+        raise RuntimeError("reader gone")
+
+    loaded = load([], Entry("mod", [data_only("g", sessions="pkg.mod:fn")]),
+                  sessions=raising)
+    assert loaded.on == () and loaded.problems[0].kind == "sessions"
+    assert "reader gone" in loaded.problems[0].reason
+
+
+def test_the_default_reader_calls_the_function_with_the_sessions_environment():
+    SEEN_ENVS.clear()
+    entry = Entry("mod", [data_only("g", sessions="test_guards:subconscious_on")])
+    on = load([], entry, env={"TEST_GUARD_STAMP": "1"})
+    assert [(o.id, o.by) for o in on.on] == [("mod.g", ("sessions",))]
+    assert SEEN_ENVS == [{"TEST_GUARD_STAMP": "1"}]
+    off = load([], entry, env={})
+    assert off.on == () and [f.id for f in off.off] == ["mod.g"] and off.problems == ()
+
+
+@pytest.mark.parametrize("target, why", [
+    ("test_guards:sessions_raises", "RuntimeError: a bug in the sessions function"),
+    ("test_guards:sessions_not_bool", "it answered str, not True or False"),
+    ("nowhere_at_all.mod:fn", "ModuleNotFoundError"),
+    ("test_guards:no_such_function", "AttributeError"),
+])
+def test_read_sessions_reads_off_with_why(target, why):
+    value, problem = guards.read_sessions(target, env={})
+    assert value is False and why in problem
+
+
+def test_read_sessions_without_an_env_reads_this_process(monkeypatch):
+    monkeypatch.setenv("TEST_GUARD_STAMP", "1")
+    assert guards.read_sessions("test_guards:subconscious_on") == (True, None)
+
+
 def test_a_list_entry_for_a_module_not_installed_is_missing():
     loaded = load(["usage.ceiling", "mod.typo"], Entry("mod", [data_only("g")]))
     assert {(p.id, p.kind) for p in loaded.problems} == {("usage.ceiling", "missing"),
@@ -355,10 +446,12 @@ def test_a_toml_file_declares_data_only_guards_all_on(tmp_path):
      "data-only and names no judge"),
     ('[[guard]]\nname = "g"\ncalls = { claude = ["Bash"] }\ndeny = "n"\n'
      'switch = "guards.x"\n', "can name no switch"),
+    ('[[guard]]\nname = "g"\ncalls = { claude = ["Bash"] }\ndeny = "n"\n'
+     'sessions = "a.b:c"\n', "can name no sessions function"),
     ('[[guard]]\nname = "g"\ncalls = { codex = ["Edit"] }\ndeny = "n"\n', "apply_patch"),
 ])
-def test_a_toml_guard_that_names_a_judge_a_switch_or_an_alias_is_refused(tmp_path, text,
-                                                                          why):
+def test_a_toml_guard_naming_a_judge_a_switch_sessions_or_an_alias_is_refused(tmp_path,
+                                                                              text, why):
     path = tmp_path / "mine.toml"
     path.write_text(text)
     loaded = load([str(path)])
@@ -413,11 +506,12 @@ def test_a_py_file_holds_guards_whose_judge_may_be_its_own(tmp_path):
     assert guards.judge_of(loaded.on[1].found)(None) is None
 
 
-def test_a_py_file_naming_a_switch_is_refused(tmp_path):
+@pytest.mark.parametrize("field", ["switch='guards.removal'",
+                                   "sessions='test_guards:subconscious_on'"])
+def test_a_py_file_naming_a_switch_or_sessions_is_refused(tmp_path, field):
     path = tmp_path / "g.py"
     path.write_text("from moxi_turns.guards import Guard\n"
-                    "GUARDS = (Guard('s', {'claude': ('Bash',)}, deny='n', "
-                    "switch='guards.removal'),)\n")
+                    f"GUARDS = (Guard('s', {{'claude': ('Bash',)}}, deny='n', {field}),)\n")
     loaded = load([str(path)])
     assert loaded.on == ()
     assert [(p.id, p.kind) for p in loaded.problems] == [("file:g.s", "shape")]

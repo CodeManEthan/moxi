@@ -23,6 +23,12 @@
   (the endpoint's first line carries `prompt_wait_ms`), and a Codex launch bakes it into
   its UserPromptSubmit hook command. The runner plugin is version 0.2.2, so `moxi install
   turns` updates an install at user scope.
+- A guard takes `sessions`, `"package.module:function"`: a function of the session's
+  environment that answers True to turn the guard on in that session, beside
+  `guards.run` and its switch. An endpoint asks it once, at the session's start, and keeps
+  the answer through every `ready`. One that does not import, raises or answers something
+  other than a bool reads off, is logged, and fails its `moxi doctor turns` row. A custom
+  guard file can name none, since the list already turns its guards on.
 - Question mode's prompt reminder leaves the agent to judge whether the questions are
   wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
   end of its output once they are answered. "pros", as voice input spells "prose", now
