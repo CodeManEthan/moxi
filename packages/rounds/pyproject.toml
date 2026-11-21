@@ -28,6 +28,8 @@ notes = ["moxi-notes>=0.1,<0.2"]
 # turns: with it, a session's start runs the sweep of leftover folders when
 # sweep.at_start is on.
 turns = ["moxi-turns>=0.2,<0.3"]
+# ui: with it, the rounds page shows in the browser UI shell.
+ui = ["moxi-ui>=0.2.4,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -43,7 +45,9 @@ rounds = "moxi_rounds.module"
 rounds = "moxi_rounds.listeners"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs rounds' page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -55,7 +59,7 @@ packages = ["src/moxi_rounds"]
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
 only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
-                "src/moxi_rounds", "tests"]
+                "src/moxi_rounds", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

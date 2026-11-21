@@ -58,6 +58,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import (builds, checking, ci, closing, decisions, drift, findings, flows, holds,
                next_step, pointers, questions, report_block, showing, skips, stages,
@@ -754,14 +755,15 @@ def strip(parts: Iterable[Part], *, size: int = STRIP_SIZE) -> list[dict]:
     made = []
     for one, act in found[:size]:
         build, event = act["build"], act["event"]
-        stage_cells = [cell(one, step, Items()) for step in one.every
-                       if step.stage == build.stage]
+        stage_steps = [step for step in one.every if step.stage == build.stage]
         made.append({"round": one.name, "project": one.found.project,
                      "stage": build.stage,
                      "closed": one.state.status != states.OPEN,
                      "act_at": event.get("at"), "act": act_words(event),
                      "builder": checking.commission_of(one.state, build).get("builder"),
-                     "branch": build.branch, "cells": stage_cells})
+                     "branch": build.branch,
+                     "steps": [step.step for step in stage_steps],
+                     "cells": [cell(one, step, Items()) for step in stage_steps]})
     return made
 
 
@@ -851,7 +853,7 @@ def _by_severity(listed: Iterable[Mapping]) -> dict:
 
 
 def _facts(part_: Part, column: str, stage: str | None,
-           now: Mapping | None) -> list[list]:
+           now: Mapping | None) -> list[dict]:
     state = part_.state
     facts: list[list] = []
     if column == steps.DESIGN:
@@ -886,7 +888,14 @@ def _facts(part_: Part, column: str, stage: str | None,
                   ["shares", ", ".join(f"{one['round']} {one['stage']}"
                                        for one in data.get("shares", ())) or None],
                   ["problem", (data.get("problem") or {}).get("reason")]]
-    return [one for one in facts if one[1] is not None]
+    return [{"key": key, "value": _fact_word(value)} for key, value in facts
+            if value is not None]
+
+
+def _fact_word(value: Any) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
 
 
 def _verdicts(part_: Part, column: str, stage: str | None) -> list[dict]:

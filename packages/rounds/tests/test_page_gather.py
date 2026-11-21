@@ -216,7 +216,8 @@ def test_a_build_s_git_state_is_the_current_reading_s_on_a_kept_part(kit, made,
     (kit / "ledger" / "design.md").write_text("# ledger\n", encoding="utf-8")
     board_.current()
     assert BUSY not in made
-    facts = dict(board_.record("step", BUSY, column="build", stage="B1")["facts"])
+    facts = {one["key"]: one["value"]
+             for one in board_.record("step", BUSY, column="build", stage="B1")["facts"]}
     assert facts["problem"] == "second reading"
 
 

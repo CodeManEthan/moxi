@@ -460,7 +460,7 @@ def _closed_card(name: str, settings) -> board.Part | None:
         return None
     if found.unreadable is not None:
         return None
-    made = board.part(found, {}, models=(settings or {}).get("models"))
+    made = board.part(found, {}, models=None if settings is None else settings["models"])
     with _cards_lock:
         _cards[name] = (stat, made)
     return made

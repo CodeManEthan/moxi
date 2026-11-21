@@ -608,6 +608,8 @@ def test_the_strip_holds_the_newest_acts_and_the_stage_as_it_reads_now(kit):
     assert [(one["stage"], one["act"]) for one in found] == [("B1", "check passed")]
     assert found[0]["builder"] == "builder-1"
     assert [one["step_state"] for one in found[0]["cells"]][:2] == ["done", "done"]
+    assert found[0]["steps"][:3] == ["commission", "build", "check"]
+    assert len(found[0]["steps"]) == len(found[0]["cells"])
     assert [one["stage"] for one in board.strip([made])] == ["B1", "B2"]
 
 
