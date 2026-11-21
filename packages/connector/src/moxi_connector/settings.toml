@@ -41,3 +41,12 @@ read = "start"
 label = "A sign-in lasts for"
 line = "After its last refresh."
 unit = "days"
+
+[tools.withheld]
+type = "list"
+items = "str"
+default = []
+doc = "Tool names the door serves to no grant: left out of the tool list, and a call to one answers as an unknown tool. Read at the start; restart the connector (moxi connector disable, then enable) to change it."
+read = "start"
+label = "Tools withheld from Claude"
+line = "Left out of the tool list Claude sees. Read when the connector starts."

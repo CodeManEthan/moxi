@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `tools.withheld` lists tools the door serves to no grant: they are left out of
+  `tools/list`, a call to one answers as an unknown tool, and `moxi connector status` and
+  the doctor's providers row name each one. Read at the connector's start.
 - Every tool answer, refusals included, leaves the door with control and format
   characters removed from its text and from every string of its structured value: C0
   controls but newline and tab, DEL, C1 and Unicode format characters (bidi controls,
