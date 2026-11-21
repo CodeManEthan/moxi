@@ -3,7 +3,8 @@ over `page_kit`'s rounds, seeded under the shell's own home. The shell has only 
 and projects. One test per job of the page: the contract check; no style the shell's
 policy refuses; what waits on him and the walk through it; a question with its options
 and passage from its marker; a failed check's red job, run and output file; a build's
-verdict; a strip card and its stage's tabs; the folds of a many-stage round; a round's
+verdict; a strip card and its stage's tabs, and the card staying open with its build when
+the strip moves; the folds of a many-stage round; a round's
 card and the key; an address that opens its popover; a ruling of a round with no docket,
 under its line; a new question without a reload; the strip's way back to a line a filter hides; a closed round's card; and the phone
 layout at 390 px."""
@@ -161,6 +162,30 @@ def test_a_strip_card_opens_its_step_and_moves_along_its_stage(shell, ui_page):
     expect(pop.locator(".title")).to_have_text("commission of B1")
     expect(pop).to_contain_text("builder-1")
     expect(pop.get_by_role("button", name="Show its line on the board")).to_be_visible()
+
+
+def test_an_open_strip_card_stays_with_its_build_when_the_strip_moves(ui_shells,
+                                                                      ui_shell_options,
+                                                                      ui_contexts):
+    # A shell of its own, so the build it commissions changes no other test's strip.
+    own = ui_shells(**ui_shell_options)
+    with page_kit.under(own):
+        rounds_dir = page_kit.seed(page_kit.shell_home(own) / "notes")
+    panel = open_panel(ui_contexts(own).pages[0])
+    cards = panel.locator(".strip .card")
+    first = cards.filter(has_text="B1").first
+    expect(cards.first).to_contain_text("B1")
+    first.click()
+    expect(first).to_have_attribute("aria-expanded", "true")
+    with page_kit.under(own):
+        page_kit.append(rounds_dir / "billing-export", "build.commissioned", stage="B3",
+                        repo="kestrel", branch="branch-b3", base=page_kit.BASE,
+                        target="main", builder="builder-1", build="0123456789abcdef")
+    expect(cards.first).to_contain_text("B3", timeout=20_000)
+    expect(cards.filter(has_text="B1").first).to_have_attribute("aria-expanded", "true")
+    expect(cards.first).to_have_attribute("aria-expanded", "false")
+    expect(panel.locator('.strip .card[aria-expanded="true"]')).to_have_count(1)
+    expect(popover(panel).locator(".title")).to_contain_text("of B1")
 
 
 def test_a_many_stage_round_folds_and_unfolds(shell, ui_page):

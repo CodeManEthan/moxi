@@ -99,10 +99,12 @@ WAITING = lb.Out("table", items={
     "parked": INT,
 })
 
-#: One build of the strip: its round and stage, whether the round has closed, its act in
-#: words and when, its builder and branch, and its stage's steps with their cells.
+#: One build of the strip: its round and stage, the line of its commission, whether the
+#: round has closed, its act in words and when, its builder and branch, and its stage's
+#: steps with their cells.
 RECENT = lb.Out("table", items={
-    "round": TEXT, "project": TEXT, "stage": TEXT, "closed": BOOL, "act_at": _s(),
+    "round": TEXT, "project": TEXT, "stage": TEXT, "build": INT, "closed": BOOL,
+    "act_at": _s(),
     "act": lb.Out("string", mark="scrub"), "builder": _s(), "branch": _s(),
     "steps": WORDS, "cells": _list(CELL),
 })

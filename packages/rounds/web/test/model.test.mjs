@@ -5,7 +5,7 @@ import {
   addressRoute, ageWord, arrange, cardView, cellLabel, chips, closedWords, foldsOf, footWords, holdOf, isOpenNow,
   isShown, itemMarker, itemsOf, itemView, layoutOf, linesShown, markAttributes, markKey, moreLabel, noLongerOpen,
   parseAddress, parseMarkKey, passageText, phoneWaiting, phraseShown, phraseText, placePopover, pointerPath, popoverWidth,
-  recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripStep,
+  recordQuery, revealBy, revealing, sessionAt, sheetMarks, sheetQuestions, stepHead, stepSections, stripCard, stripKey, stripStep,
   timeWord, waitingCounts, walkFoot, walkStep,
 } from "../src/model.ts";
 
@@ -360,12 +360,23 @@ test("a round's card, open and closed", () => {
 });
 
 test("a strip card: its words and the step it opens", () => {
-  const entry = { round: "kestrel/a", project: "kestrel", stage: "B2", closed: false, act_at: "2026-11-21T09:00:00Z",
+  const entry = { round: "kestrel/a", project: "kestrel", stage: "B2", build: 7, closed: false, act_at: "2026-11-21T09:00:00Z",
                   act: "CI green", builder: "builder-1", branch: "b2", steps: ["commission", "build", "check", "verify-build", "finish"],
                   cells: [cell("done"), cell("done"), cell("done", { word: "green" }), cell("owed"), cell("waiting")] };
   assert.deepEqual(stripCard(entry, NOW), { slug: "a", stage: "B2", age: "3h", act: "CI green", label: "a B2, CI green, 3h ago" });
   assert.equal(stripStep(entry), "verify-build");
   assert.equal(stripStep({ ...entry, cells: entry.cells.map(() => cell("done")) }), "finish");
+});
+
+test("a strip card is known by its build, not by where it sits in the strip", () => {
+  const card = (round, stage, build) => ({ round, project: "kestrel", stage, build, closed: false, act_at: null, act: "commissioned",
+                                           builder: null, branch: null, steps: [], cells: [] });
+  const before = [card("kestrel/a", "B1", 4), card("kestrel/a", "B2", 9)];
+  const after = [card("kestrel/b", "B1", 2), ...before];
+  assert.deepEqual(after.map(stripKey).slice(1), before.map(stripKey));
+  assert.equal(new Set(after.map(stripKey)).size, 3);
+  // A stage commissioned again after a drop is a second build: its own card.
+  assert.notEqual(stripKey(card("kestrel/a", "B2", 9)), stripKey(card("kestrel/a", "B2", 12)));
 });
 
 test("the foot: when it was read, the parked questions, and a failed read after a good one", () => {

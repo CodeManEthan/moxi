@@ -39,7 +39,7 @@ import {
   parseAddress, parseMarkKey, PASSAGE_LINES, phoneWaiting, PHONE_PX, phraseShown, placePopover, POP_WIDE, POP_WIDTH,
   popoverWidth, revealBy,
   READ_PASSAGE, READING, READING_AFTER_MS, recordQuery, revealing, sessionAt, sheetMarks, sheetQuestions, SHOW_LINE,
-  slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard,
+  slugOf, stageOf, stateWords, stepHead, stepName, stepSections, STRIP_CAPTION, STRIP_EMPTY, STRIP_HEAD, stripCard, stripKey,
   stripStep, stripTabs, UNREADABLE_LEAD, unreadableWords, WAITING_LEAD, waitingCounts, walkFoot, WALK_BUTTON,
   walkStep,
 } from "./model.ts";
@@ -77,7 +77,7 @@ const DONE: Cell = { state: "done", word: null, count: null, settled: true, here
 
 /** Where an open popover hangs: a marker on the board, a strip card, a name, the waiting
  * line or the Key button. */
-type Anchor = { kind: "board" } | { kind: "strip"; at: number };
+type Anchor = { kind: "board" } | { kind: "strip"; card: string };
 
 export class RoundsPage extends LitElement {
   static properties = { route: { type: String } };
@@ -467,7 +467,7 @@ export class RoundsPage extends LitElement {
   /** The element an open address hangs from. */
   #anchorOf(address: Address): Element | null {
     const root = this.renderRoot as ShadowRoot;
-    if (this.#anchor.kind === "strip") return root.querySelector(`[data-card="${this.#anchor.at}"]`);
+    if (this.#anchor.kind === "strip") return root.querySelector(`[data-card="${CSS.escape(this.#anchor.card)}"]`);
     const value = this.#feed?.value;
     if (!value) return null;
     const esc = (text: string) => CSS.escape(text);
@@ -588,13 +588,14 @@ export class RoundsPage extends LitElement {
 
   #strip(value: Board): TemplateResult {
     const now = this.#feed?.now() ?? null;
-    const open = this.#anchor.kind === "strip" && this.#address ? this.#anchor.at : -1;
+    const open = this.#anchor.kind === "strip" && this.#address ? this.#anchor.card : null;
     return html`<div class="strip-head"><h2>${STRIP_HEAD}</h2> <span class="dim">${STRIP_CAPTION}</span></div>
       ${value.recent.length === 0 ? html`<p class="dim">${STRIP_EMPTY}</p>` : html`<div class="strip">
-        ${value.recent.map((entry, at) => {
+        ${value.recent.map((entry) => {
           const card = stripCard(entry, now);
-          return html`<button type="button" class="card" data-card=${at} aria-expanded=${open === at ? "true" : "false"}
-              aria-label=${card.label} @click=${() => this.#openStrip(entry, at)}>
+          const key = stripKey(entry);
+          return html`<button type="button" class="card" data-card=${key} aria-expanded=${open === key ? "true" : "false"}
+              aria-label=${card.label} @click=${() => this.#openStrip(entry)}>
             <span class="top"><span class="slug"><span class="strong">${card.slug}</span>
               <span class="dim">${card.stage}</span></span><span class="dim">${card.age}</span></span>
             <span class="bottom">${this.#smallRail(entry.cells, card.label)}<span class="act">${card.act}</span></span>
@@ -602,12 +603,13 @@ export class RoundsPage extends LitElement {
         })}</div>`}`;
   }
 
-  #openStrip(entry: Recent, at: number): void {
+  #openStrip(entry: Recent): void {
     const step = stripStep(entry);
     if (step === null) return;
     const address: Address = { kind: "step", round: entry.round, column: step, stage: entry.stage };
-    if (this.#anchor.kind === "strip" && this.#anchor.at === at && this.#address) this.#close();
-    else this.#open(address, { anchor: { kind: "strip", at } });
+    const card = stripKey(entry);
+    if (this.#anchor.kind === "strip" && this.#anchor.card === card && this.#address) this.#close();
+    else this.#open(address, { anchor: { kind: "strip", card } });
   }
 
   #empty(value: Board): TemplateResult {

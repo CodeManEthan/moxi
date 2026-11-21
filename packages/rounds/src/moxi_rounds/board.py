@@ -762,7 +762,8 @@ def act_words(event: Mapping) -> str:
 
 def strip(parts: Iterable[Part], *, size: int = STRIP_SIZE) -> list[dict]:
     """The builds last acted on, newest first, `size` of them, ties to the later event
-    in its log: each with its round, stage, whether its round has closed, its act and
+    in its log: each with its round, stage, the line of its commission (`build`), which
+    tells two builds of one stage apart, whether its round has closed, its act and
     when, the builder and branch, and its stage's cells as they read now."""
     found = []
     for one in parts:
@@ -775,7 +776,7 @@ def strip(parts: Iterable[Part], *, size: int = STRIP_SIZE) -> list[dict]:
         build, event = act["build"], act["event"]
         stage_steps = [step for step in one.every if step.stage == build.stage]
         made.append({"round": one.name, "project": one.found.project,
-                     "stage": build.stage,
+                     "stage": build.stage, "build": build.n,
                      "closed": one.state.status != states.OPEN,
                      "act_at": event.get("at"), "act": act_words(event),
                      "builder": checking.commission_of(one.state, build).get("builder"),

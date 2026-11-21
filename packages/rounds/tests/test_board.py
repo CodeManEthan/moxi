@@ -626,6 +626,9 @@ def test_the_strip_holds_the_newest_acts_and_the_stage_as_it_reads_now(kit):
     assert found[0]["steps"][:3] == ["commission", "build", "check"]
     assert len(found[0]["steps"]) == len(found[0]["cells"])
     assert [one["stage"] for one in board.strip([made])] == ["B1", "B2"]
+    commissions = [event["n"] for event in made.state.history
+                   if event["type"] == "build.commissioned"]
+    assert [one["build"] for one in board.strip([made])] == commissions
 
 
 # -- the passage -------------------------------------------------------------------------

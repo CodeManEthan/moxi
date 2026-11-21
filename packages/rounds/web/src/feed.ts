@@ -93,6 +93,8 @@ export interface Recent {
   round: string;
   project: string;
   stage: string;
+  /** The line of the build's commission in its round's log: two builds of one stage differ. */
+  build: number;
   closed: boolean;
   act_at: string | null;
   act: string;

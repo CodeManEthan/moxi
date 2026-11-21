@@ -994,6 +994,11 @@ export function stripStep(entry: Recent): string | null {
   return (steps.find((one) => !one.cell!.settled) ?? steps[steps.length - 1]).id;
 }
 
+/** A strip card's build, the same wherever a live update moves the card in the strip. */
+export function stripKey(entry: Recent): string {
+  return `${entry.round}#${entry.build}`;
+}
+
 /** A strip card's words: the slug and stage, its age, and the act. */
 export function stripCard(entry: Recent, now: number | null): { slug: string; stage: string; age: string; act: string;
                                                                    label: string } {
