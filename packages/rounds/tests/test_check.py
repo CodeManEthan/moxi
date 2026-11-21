@@ -164,6 +164,91 @@ def test_the_check_s_own_time_limit_applies_without_the_flag(build, declare):
     assert ran(path)[0]["exit_code"] is None
 
 
+POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals and /proc")
+
+
+@POSIX
+def test_with_no_limit_set_a_run_stops_at_the_default_on_sigint(
+        build, declare, monkeypatch):
+    # Core's check ended a run at 3600 s by default, SIGINT first and SIGKILL 30 s on.
+    assert (checking.DEFAULT_TIMEOUT_S, checking.GRACE_S) == (3600.0, 30.0)
+    monkeypatch.setattr(checking, "DEFAULT_TIMEOUT_S", 1.0)
+    path, _tree, made = build
+    declare(f"""
+        import signal, sys, time
+        def stop(signum, frame):
+            open({str(made.scratch / "caught")!r}, "w").write(signal.Signals(signum).name)
+            sys.exit(3)
+        signal.signal(signal.SIGINT, stop)
+        time.sleep(60)
+        """)
+
+    checking.check(ROUND, "B1", by="coder")
+
+    [event] = ran(path)
+    assert event["exit_code"] is None and event["duration_s"] < 20
+    assert (made.scratch / "caught").read_text() == "SIGINT"
+
+
+@POSIX
+def test_the_check_lock_is_held_while_the_command_runs_and_not_inherited(
+        build, declare):
+    # Core's check held the machine's check lock around the run; the command did not
+    # inherit its descriptor.
+    path, _tree, _made = build
+    lock = checking.lock_file()
+    declare(f"""
+        import fcntl, os, sys
+        lock = {str(lock)!r}
+        mine = [one for one in os.listdir("/proc/self/fd")
+                if os.path.realpath(f"/proc/self/fd/{{one}}") == lock]
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            sys.exit(5)
+        except BlockingIOError:
+            sys.exit(6 if mine else 0)
+        """)
+
+    assert checking.check(ROUND, "B1", by="coder").exit_code == 0
+
+
+def test_with_no_wait_a_held_check_lock_refuses_with_nothing_run(
+        build, declare, holder):
+    # Core's --no-wait refused at once, naming the holder.
+    path, _tree, made = build
+    declare(PASS)
+    held = holder(checking.lock_file())
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder", wait=False)
+    held.stdin.close()
+
+    [unmet] = caught.value.unmet
+    assert unmet.reason == (f"another check holds the machine's check lock "
+                            f"{checking.lock_file()}: pid {held.pid}")
+    assert ran(path) == [] and not list(made.scratch.glob("check-*.log"))
+
+
+def test_a_run_waits_for_the_check_lock_and_says_who_holds_it(build, declare, holder):
+    # Core's check waited for the lock by default and said once who held it.
+    import threading
+
+    path, _tree, _made = build
+    declare(PASS)
+    held = holder(checking.lock_file())
+    said: list[str] = []
+    threading.Timer(2.0, held.stdin.close).start()
+
+    done = checking.check(ROUND, "B1", by="coder", say=said.append)
+
+    assert done.passed and len(ran(path)) == 1
+    assert said[0] == (f"waiting for the machine's check lock {checking.lock_file()}, "
+                       f"held by pid {held.pid}")
+    assert said[1].startswith("got the check lock after ")
+    assert done.duration_s < 2.0
+
+
 def test_with_no_round_the_check_finds_the_build_from_its_worktree(
         build, declare, monkeypatch, capsys):
     path, _tree, made = build
