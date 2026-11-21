@@ -6,8 +6,8 @@
   seat, project or folder (of the same harness) bound, always at the global scope, so a
   project scope is no longer carried. Where no launch bound one, and for any harness but
   Codex, it fills a default: a seat named for one of its project's agents that sets no
-  identity gets its own name, else the project's `lead`, else `<key>-lead` when comms
-  lists that name. `/api/last` answers that default with no launch, with the
+  identity gets its own name, else a project of kind `agent` its own key, else the
+  project's `lead`, else `<key>-lead` when comms lists that name. `/api/last` answers that default with no launch, with the
   `harnesses` it is for.
 - `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
   --session ID [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs

@@ -1484,6 +1484,8 @@ DEFAULT_HARNESSES = tuple(h for h in catalog.HARNESSES if h != "codex")
 #: The launch states of a launch that has not yet started, whose identity is not yet
 #: bound.
 NOT_STARTED = ("spawning", "failed")
+#: The project kind of an agent's home, whose default identity is its own key.
+AGENT_KIND = "agent"
 
 
 def last(query: Mapping[str, Any]) -> dict[str, Any]:
@@ -1543,8 +1545,9 @@ def default_identity(query: Mapping[str, Any], key: str, value: str) -> str | No
 
     On a seat that sets no identity, of the project the query names (else the one the
     seat names as its `project` or `home`): the seat's own name when the project has an
-    agent of that name. Else, with a project: its `lead` when set, else `<key>-lead` when
-    comms lists that name, bound or standing, in any scope."""
+    agent of that name. Else, with a project: its own key when its kind is `agent`, else
+    its `lead` when set, else `<key>-lead` when comms lists that name, bound or standing,
+    in any scope."""
     if key == "cwd":
         return None
     project_key = value
@@ -1564,6 +1567,8 @@ def default_identity(query: Mapping[str, Any], key: str, value: str) -> str | No
         project = _project(project_key)
     if project is None:
         return None
+    if getattr(project, "kind", None) == AGENT_KIND:
+        return str(project.key)
     if getattr(project, "lead", None):
         return str(project.lead)
     guess = f"{project.key}-lead"

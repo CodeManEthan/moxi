@@ -533,7 +533,8 @@ names them, each with `Clear`. The comms identity filled is the one the newest l
 there of the same harness bound, and always at the global scope: a project scope is
 never carried. Where no launch bound one, and for any harness but Codex, a seat named for
 one of its project's agents that sets no identity is filled with its own name, else a
-project with its `lead`, or with `<key>-lead` when comms lists that name; `Default` on
+project of kind `agent` with its own key, any other with its `lead`, or with
+`<key>-lead` when comms lists that name; `Default` on
 the line names it. Under the box, `Run again` lists up to three earlier
 launches there; pointing at one shows what a click runs today, and one click runs it
 again where the button places a launch.

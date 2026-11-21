@@ -86,8 +86,9 @@ def world(tmp_path, monkeypatch):
     for root in roots.values():
         root.mkdir()
     (roots["proj-a"] / "src").mkdir()
-    table = {key: SimpleNamespace(key=key, root=str(root), lead=None, associated=(),
-                                  agents=(), notes_root=None) for key, root in roots.items()}
+    table = {key: SimpleNamespace(key=key, root=str(root), kind="project", lead=None,
+                                  associated=(), agents=(), notes_root=None)
+             for key, root in roots.items()}
 
     def get_project(key):
         if key in table:
@@ -562,6 +563,20 @@ def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
     assert identity_of(last(project="proj-a")) == ("boss", "")
     # A folder has no default.
     assert last(cwd=str(world.root))["values"] == []
+
+
+def test_an_agent_projects_default_is_its_own_key_before_its_lead(world, monkeypatch):
+    world.projects["proj-a"].kind = "agent"
+    world.projects["proj-a"].lead = "boss"
+    comms_listing(monkeypatch, "proj-a-lead")
+    # Held by comms or not, ahead of the lead and of `<key>-lead`.
+    assert identity_of(last(project="proj-a")) == ("proj-a", "")
+    # A seat that is no agent's falls to its project's own key.
+    assert identity_of(last(seat="pilot", project="proj-a")) == ("proj-a", "")
+    # A launch that bound a name still comes first.
+    launch({"values": {"cwd": str(world.root), "model": "opus"}}, "named")
+    bound("named", "scout")
+    assert identity_of(last(project="proj-a")) == ("scout", "")
 
 
 def test_a_seat_named_for_one_of_its_projects_agents_defaults_to_its_own_name(world):
