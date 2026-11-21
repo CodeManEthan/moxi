@@ -11620,6 +11620,7 @@ secrets	packages/secrets/src/moxi_secrets/scan.py	self.by_id = {(r.set, r.id): r
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.set = set_name	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	spans = {(h.set, h.rule, h.start, h.end) for h in hits}	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	spans.add((h.set, h.rule, h.start, h.end))	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	unscanned = {h.set for h in hits if h.rule == UNSCANNED}	keep	set	set
 secrets	packages/secrets/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/corpus.py	codes |= set(range(first, last + 1))	keep	set	set
 secrets	packages/secrets/tests/corpus.py	if any(h.rule == "generic-api-key" for h in scan(value, ("broad",))):	keep	any	any
@@ -11659,6 +11660,8 @@ secrets	packages/secrets/tests/test_redact.py	assert [(h.set, h.rule) for h in s
 secrets	packages/secrets/tests/test_redact.py	assert not survived & set(range(h.start, h.end)), (t, kw, h)	keep	set	set
 secrets	packages/secrets/tests/test_redact.py	if any(scan_mod._path_only(h) for h in hits):	keep	any	any
 secrets	packages/secrets/tests/test_redact.py	text = form.format(value=value)	keep	value	value
+secrets	packages/secrets/tests/test_redact.py	value = make(corpus.rng(60))	keep	auto	auto
+secrets	packages/secrets/tests/test_redact.py	value = make(corpus.rng(60))	keep	start	start
 secrets	packages/secrets/tests/test_redact.py	value = make(r)	keep	start	start
 secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "generic-api-key" for h in scan(	keep	any	any
 secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "github-pat" for h in scan(f"t = {token}\n# gitleaks:allow",	keep	any	any
@@ -13517,6 +13520,7 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._gate_refused: set[s
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.ended.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.session_known.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	slot[0].set()	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	"prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),	keep	round	round
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	while not self.ended.is_set() and not any(e.is_set() for e in events):	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
@@ -13631,6 +13635,11 @@ turns	packages/turns/src/moxi_turns/codex.py	still: set[str] | None = set(self._
 turns	packages/turns/src/moxi_turns/codex.py	timeout=2.0,	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=remaining)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/codex.py	self._opened: tuple[str, str] | None = None	keep	_opened	_opened
+turns	packages/turns/src/moxi_turns/codex.py	self._placed: set[str] = set()	keep	set	set
+turns	packages/turns/src/moxi_turns/codex.py	opened = self._opened	keep	_opened	_opened
+turns	packages/turns/src/moxi_turns/codex.py	self._placed &= set(live)	keep	set	set
+turns	packages/turns/src/moxi_turns/codex.py	self._opened = (turn_id, delivery_id) if delivery_id is not None else None	keep	_opened	_opened
 turns	packages/turns/src/moxi_turns/codex_appserver.py	_from_app_server	name	folder	server_dir
 turns	packages/turns/src/moxi_turns/codex_appserver.py	answer = session.codex_limits(timeout=remaining)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/codex_appserver.py	codex_rate_limits	name	timeout	timeout_s
@@ -13701,7 +13710,7 @@ turns	packages/turns/src/moxi_turns/endpoint.py	_busy	name	shells	include_shells
 turns	packages/turns/src/moxi_turns/endpoint.py	`entering` answers `expired`. The adapter's `expired` runs on a thread of its own:	keep	expired	expired
 turns	packages/turns/src/moxi_turns/endpoint.py	`entering` answers `expired`. The adapter's `expired` runs on a thread of its own:	use	`expired`	`on_expired`
 turns	packages/turns/src/moxi_turns/endpoint.py	`open()` opens the endpoint; `stop()` (or the adapter's `gone()`) ends it. The core's	use	`gone()	`on_gone()
-turns	packages/turns/src/moxi_turns/endpoint.py	`refused` `idle`. It never becomes a turn of its own."""	keep	refused	refused
+turns	packages/turns/src/moxi_turns/endpoint.py	`refused` `idle`. It never becomes a turn of its own. `by` and `senders` are as	keep	refused	refused
 turns	packages/turns/src/moxi_turns/endpoint.py	`stop_shells`, `shells` None reads as a list turns cannot vouch for."""	use	shells	include_shells
 turns	packages/turns/src/moxi_turns/endpoint.py	adapter's `expired`. A hand-off may block the worker (a line write the runner does not	keep	expired	expired
 turns	packages/turns/src/moxi_turns/endpoint.py	adapter's `expired`. A hand-off may block the worker (a line write the runner does not	use	`expired`	`on_expired`
@@ -14106,6 +14115,7 @@ turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == 
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Ran(None, expected)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Refused("draft")	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Refused("unsupported")	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_endpoint.py	assert runner.enter(line["nonce"], draft=False, agents=0)["verdict"] == "pass"	keep	draft	draft
 turns	packages/turns/tests/test_claude_endpoint.py	assert runner.enter(line["nonce"], draft=False, agents=None)["verdict"] == "pass"	keep	draft	draft
 turns	packages/turns/tests/test_claude_endpoint.py	assert runner.next_line(timeout=0.1) == {"op": "floors",	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	out.append(events.get(timeout=timeout))	keep	timeout	timeout
@@ -14336,7 +14346,8 @@ turns	packages/turns/tests/test_doctor.py	-	name	test_a_v1_directory_is_named_an
 turns	packages/turns/tests/test_doctor.py	assert any(name.startswith("endpoint fake pid") for name in rows)	keep	any	any
 turns	packages/turns/tests/test_doctor.py	assert not any("opencode" in name and "hook time" in name for name in rows)	keep	any	any
 turns	packages/turns/tests/test_doctor.py	assert not any(r.state in ("fail", "warn") for r in rows.values())	keep	any	any
-turns	packages/turns/tests/test_doctor.py	switches=switches or read, env=env)	keep	env	env
+turns	packages/turns/tests/test_doctor.py	switches=switches or read, sessions=sessions or answer, env=env)	keep	env	env
+turns	packages/turns/tests/test_doctor.py	switches=switches or read, sessions=sessions or answer, env=env)	keep	sessions	sessions
 turns	packages/turns/tests/test_doctor.py	{"event": "bad", "ms": "x"}]})	keep	bad	bad
 turns	packages/turns/tests/test_endpoint.py	"mod_version"} <= set(hello)	keep	set	set
 turns	packages/turns/tests/test_endpoint.py	-	name	test_a_dead_directory_is_swept_and_a_starting_one_is_not	test_a_dead_dir_is_swept_and_a_starting_one_is_not
@@ -14413,7 +14424,7 @@ turns	packages/turns/tests/test_guards.py	assert any(why in p for p in problems)
 turns	packages/turns/tests/test_guards.py	assert set(loaded.import_ms) == {"mod"}	keep	set	set
 turns	packages/turns/tests/test_guards.py	assert set(module.QUESTIONS) == {"guards.removal", "guards.no_nested_agents",	keep	set	set
 turns	packages/turns/tests/test_guards.py	env = {"MOXI_FAKEMOD_CONFIG_HOME": str(cfg), "HOME": str(tmp_path)}	keep	HOME	HOME
-turns	packages/turns/tests/test_guards.py	g.switch, g.doc) == ("any", None, "", "", (), "allow", 500, None, "")	keep	any	any
+turns	packages/turns/tests/test_guards.py	g.switch, g.sessions, g.doc) == ("any", None, "", "", (), "allow", 500, None,	keep	any	any
 turns	packages/turns/tests/test_guards.py	loaded = load(["bad.g", "mod.g"], Entry("bad", ImportError("no such module")),	keep	bad	bad
 turns	packages/turns/tests/test_guards.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
 turns	packages/turns/tests/test_held_turns.py	("TurnEnded", (turns.DeliveryRef(d.id, None, "opened"),))]	keep	opened	opened
