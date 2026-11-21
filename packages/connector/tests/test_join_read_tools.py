@@ -8,10 +8,10 @@ after the host's scrub; the call log's rows as the host writes them; and a secre
 in a transcript and in a note, read through every tool, never coming back. The data is
 real: a Claude Code transcript under the test's home, memory's index of it built by
 memory's own ingest, and a notes root set in notes' config. Beside the canary, which is a
-secret's shape in any frame, read_session is planted shapes that only a change or a join
-after the redaction would make (a key's value apart from its name by a no-break space, a
-subagent id holding `token` before its title), and opens a nested subagent by the pair a
-search_memory hit gives. Outside a workspace with memory, sessions, notes and secrets'
+secret's shape in any frame, search_memory and read_session are planted shapes that only
+a change or a join after the redaction would make (a key's value apart from its name by a
+no-break space, a subagent id holding `token` before its title), and read_session opens a
+nested subagent by the pair a search_memory hit gives. Outside a workspace with memory, sessions, notes and secrets'
 chat redaction installed beside the host, the module skips.
 """
 
@@ -299,17 +299,27 @@ AGENT_KEYED = "a9fTokenQ2x"
 
 def test_shapes_a_squeeze_or_a_join_would_make_come_back_redacted(world, scrubbed):
     """A key's name and its value apart by a no-break space in a tool call, which one
-    line made after the redaction would join; and a subagent id holding `token` before
-    its title, which the header joins. Neither piece is a secret's shape alone."""
+    line made after the redaction would join, through search_memory's snippet and
+    read_session's call line; and a subagent id holding `token` before its title, which
+    the header joins. Neither piece is a secret's shape alone."""
     t = sessions_api.testing.ClaudeTranscript(sessions_api.root("claude"),
                                               session_id=SESSION_KEYED,
                                               cwd=f"{world}/work/proj-b")
     t.user("set the service up", origin="human")
-    t.request().tool_use("Bash", {"command": f"export API_KEY=\u00a0{KEYED}"})
+    t.request().tool_use("Bash", {"command": f"cd turbine && export API_KEY=\u00a0{KEYED}"})
     child = t.subagent(AGENT_KEYED)
     child.title(TITLE)
     child.user("look into it", origin="human")
     t.write()
+    assert ingest.run("walk", config=_memory_config(), launcher=links.Link(links.NONE),
+                      then=lambda args: None) is not None
+
+    _, got, _ = _calls(_registry(), [("search_memory", {"words": "turbine"})])
+    found = got["search_memory"]
+    assert not found["isError"], found
+    [hit] = found["structuredContent"]["hits"]
+    assert hit["session"] == SESSION_KEYED and "turbine" in hit["snippet"]
+    assert KEYED not in _shown(found) and "[REDACTED:" in hit["snippet"]
 
     _, got, _ = _calls(_registry(), [
         ("read_session", {"session": SESSION_KEYED, "turns": 10})])
