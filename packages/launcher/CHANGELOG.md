@@ -18,8 +18,8 @@
   did, until the session has been idle an hour (`held`, word `shells`); only then does it
   exit and stop them at Claude's exit dialog. `--dry-run` says which.
 - The start posture checks the brief, as Core's did: `preview` and `run` refuse a `go`
-  launch with no brief, brief file or handoff, and a brief under `with:<identity>`, whose
-  director sends the first message (`posture-brief`). On a launch that binds no comms
+  launch with no brief, brief file or handoff, and a brief or handoff under
+  `with:<identity>`, whose director sends the first message (`posture-brief`). On a launch that binds no comms
   identity, a word after `--` that is not a flag counts as the first turn, since the
   harness reads it as its opening prompt. A brief under `operator` is sent.
 - A scratch launch keeps no notes, as Core's did: a `notes_dir` typed or set by its preset

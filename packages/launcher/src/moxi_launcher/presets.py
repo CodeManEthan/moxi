@@ -164,7 +164,8 @@ class ScratchNotes(Refused):
 
 class PostureBrief(Refused):
     """A brief that doesn't fit the start posture: a `go` launch with nothing to start on,
-    or a brief under `with:<identity>`, whose director sends the first message."""
+    or a brief or handoff under `with:<identity>`, whose director sends the first
+    message."""
 
     code = "posture-brief"
 
@@ -531,7 +532,7 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
     needs a first turn to start on (a brief, a brief file or a handoff, or, on a launch
     that binds no comms identity, a word passed on to the harness that is not a flag,
     which the harness reads as its opening prompt), and a launch under `with:<identity>`
-    takes no brief, since its director sends the first message. `binds` says whether the
+    takes no brief and no handoff, since its director sends the first message. `binds` says whether the
     launch binds a comms identity. A replay (a relaunch or a resume) never comes here."""
     brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
         values.get("brief_file"))
@@ -543,11 +544,16 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
                            "give it --brief, --brief-file or --handoff"
                            + ("" if binds else ", or its task after --")
                            + ", or pick another posture")
-    if posture.startswith(WITH) and brief:
+    if posture.startswith(WITH):
         who = posture[len(WITH):]
-        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
-                                    "first message",
-                           "drop the brief, or pick go")
+        if brief:
+            raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends "
+                                        "the first message",
+                               "drop the brief, or pick go")
+        if catalog.is_set(values.get("handoff")):
+            raise PostureBrief("handoff", f"posture {posture} takes no handoff: {who} "
+                                          "sends the first message",
+                               "drop the handoff, or pick go")
 
 
 def _carries_words(extra: object) -> bool:
