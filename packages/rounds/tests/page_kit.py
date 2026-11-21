@@ -12,6 +12,12 @@ In the project `kestrel`:
 - `broken`, whose log can't be read.
 - a question for the project itself.
 
+In the project `osprey`, whose root is a git repo and which declares a check:
+
+- `nest` on the built-in `small` flow, which builds one stage in a repo: B1, commissioned
+  and `building` in git (its branch holds a commit of its own), its check failed at the
+  branch's tip.
+
 A test shell keeps its files under a home of its own, and its page servers read rounds
 from there; `under(shell)` points this process at that home while a test seeds it, so
 nothing is written outside it.
@@ -22,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import subprocess
 import textwrap
 import time
 from collections.abc import Callable, Iterator
@@ -34,6 +41,7 @@ BUSY = "kestrel/billing-export"
 FRESH = "kestrel/ledger"
 SHUT = "kestrel/archive"
 BROKEN = "kestrel/broken"
+SMALL = "osprey/nest"
 PTR = "comms:1234567"
 BASE, TIP = "0" * 40, "1" * 40
 
@@ -46,6 +54,12 @@ steps = [ { step = "design", by = "lead" },
           { step = "verify-build", by = "checker" },
           { step = "finish", by = "builder" },
           { step = "retro", by = "worker" } ]
+"""
+
+#: Rounds' config: the flows above, and the check `osprey` declares.
+CONFIG = FLOWS + """
+[projects.osprey]
+check = { command = "false" }
 """
 
 
@@ -65,14 +79,14 @@ def design(round_dir: Path, name: str, entries: str) -> None:
     verdicts.record(name, report, by="checker")
 
 
-def stage(id_: str) -> str:
-    return (f'[[stage]]\nid = "{id_}"\nrepo = "kestrel"\nbranch = "branch-{id_.lower()}"\n'
+def stage(id_: str, repo: str = "kestrel") -> str:
+    return (f'[[stage]]\nid = "{id_}"\nrepo = "{repo}"\nbranch = "branch-{id_.lower()}"\n'
             "after = []\n")
 
 
-def add_project(key: str, notes_root: Path) -> None:
+def add_project(key: str, notes_root: Path) -> Path:
     """Add the project `key` to the projects list, its root a new folder under the home,
-    its notes under `notes_root`."""
+    its notes under `notes_root`; returns its root."""
     from moxi import cli
 
     root = Path.home() / "roots" / key
@@ -80,6 +94,27 @@ def add_project(key: str, notes_root: Path) -> None:
     notes_root.mkdir(parents=True, exist_ok=True)
     assert cli.main(["projects", "add", key, "--root", str(root)]) == 0
     assert cli.main(["projects", "set", key, "--notes-root", str(notes_root)]) == 0
+    return root
+
+
+def git(root: Path, *args: str) -> str:
+    """Run git in `root` with no config of the user's, and give what it printed."""
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(root.parent),
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+           "GIT_AUTHOR_NAME": "coder", "GIT_AUTHOR_EMAIL": "coder@example.test",
+           "GIT_COMMITTER_NAME": "coder", "GIT_COMMITTER_EMAIL": "coder@example.test"}
+    done = subprocess.run(["git", "-C", str(root), *args], env=env, capture_output=True,
+                          text=True, check=False)
+    assert done.returncode == 0, f"git {' '.join(args)}: {done.stderr}"
+    return done.stdout.strip()
+
+
+def commit(root: Path, name: str) -> str:
+    """Write the file `name` in `root`, commit it, and give the commit."""
+    (root / name).write_text(name + "\n", encoding="utf-8")
+    git(root, "add", "--", name)
+    git(root, "commit", "-q", "-m", f"add {name}")
+    return git(root, "rev-parse", "HEAD")
 
 
 def write_config(text: str) -> Path:
@@ -94,7 +129,7 @@ def seed(notes_root: Path) -> Path:
     """Write the rounds above under `notes_root`, the project's config and its rounds'
     config included; returns the rounds folder."""
     add_project("kestrel", notes_root)
-    write_config(FLOWS)
+    write_config(CONFIG)
     rounds_dir = notes_root / "rounds"
     opening.open_round(BUSY, description="billing export", by="planner", flow="staged")
     for name in (FRESH, SHUT, BROKEN):
@@ -129,7 +164,33 @@ def seed(notes_root: Path) -> Path:
     append(rounds_dir / "archive", "round.closed")
     with log.round_log(rounds_dir / "broken").open("ab") as fh:
         fh.write(b"not an event\n")
+    seed_small(notes_root.parent / "osprey-notes")
     return rounds_dir
+
+
+def seed_small(notes_root: Path) -> str:
+    """Write `osprey`'s round under `notes_root`, its root a git repo; returns the tip
+    of B1's branch, where its check failed."""
+    root = add_project("osprey", notes_root)
+    git(root, "init", "-q", "-b", "main")
+    base = commit(root, "README")
+    git(root, "switch", "-q", "-c", "branch-b1")
+    tip = commit(root, "work")
+    git(root, "switch", "-q", "main")
+    opening.open_round(SMALL, description="a nest on the small flow", by="planner",
+                       flow="small")
+    nest = notes_root / "rounds" / "nest"
+    (nest / "design.md").write_text(
+        "# A design\n\n```toml rounds\n"
+        + stage("B1", "osprey") + "```\n",
+        encoding="utf-8")
+    freezing.freeze(SMALL, by="lead")
+    append(nest, "build.commissioned", stage="B1", repo="osprey", branch="branch-b1",
+           base=base, target="main", builder="builder-2", build="fedcba9876543210",
+           worktree="/w/nest-B1")
+    append(nest, "check.ran", stage="B1", step="check", commit=tip, argv=["false"],
+           exit_code=1, duration_s=1.5, output="/scratch/check-2.log")
+    return tip
 
 
 #: A Moxi locator variable the test kit sets for this process; the shell sets its own.

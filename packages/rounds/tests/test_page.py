@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
@@ -19,7 +20,7 @@ import pytest
 import page_kit
 from moxi import modules
 from moxi_rounds import board
-from page_kit import BROKEN, BUSY, FRESH, SHUT
+from page_kit import BROKEN, BUSY, FRESH, SHUT, SMALL
 
 ph = pytest.importorskip("moxi_rounds.pagehandlers")
 page = pytest.importorskip("moxi_rounds.page")
@@ -132,7 +133,7 @@ def test_the_board_fits_its_shape_and_holds_every_kind_of_row(kit):
     assert conforms(value, lb.Out("table", items={"now": lb.Out("float"), **page.BOARD}))
     assert set(value) == {"now", *page.BOARD}
     assert value["state"] == "up"
-    assert {one["name"] for one in value["rounds"]} == {BUSY, FRESH}
+    assert {one["name"] for one in value["rounds"]} == {BUSY, FRESH, SMALL}
     assert [one["name"] for one in value["unreadable"]] == [BROKEN]
     assert [one["name"] for one in value["closed"]] == [SHUT]
     busy = next(one for one in value["rounds"] if one["name"] == BUSY)
@@ -140,6 +141,12 @@ def test_the_board_fits_its_shape_and_holds_every_kind_of_row(kit):
     assert busy["folds"]["landed"] + busy["folds"]["not_started"]["n"] == 5
     fresh = next(one for one in value["rounds"] if one["name"] == FRESH)
     assert len(fresh["lines"]) == 1
+    small = next(one for one in value["rounds"] if one["name"] == SMALL)
+    assert small["flow"] == "small"
+    [line] = [one for one in small["lines"] if one["stage"] == "B1"]
+    cells = dict(zip([one["id"] for one in value["columns"]], line["cells"], strict=True))
+    assert (cells["check"]["state"], cells["check"]["word"]) == ("failed", "failed")
+    assert cells["verify-design"] is None
     waiting = value["waiting"]
     assert {one["holder"] for one in waiting["questions"]} == {BUSY, "kestrel"}
     assert [one["id"] for one in waiting["decisions"]] == ["B1.M1"]
@@ -223,6 +230,23 @@ def test_the_records_hold_what_the_page_draws(kit):
     assert "--chose K" in question["answer"]
     assert "Q1 is asked here" in question["passage"]
     assert closed["record"]["ended"] is not None
+
+
+def test_a_build_in_git_shows_its_state_and_its_failed_check(kit):
+    board_value(kit)
+    tip = page_kit.git(Path.home() / "roots" / "osprey", "rev-parse", "branch-b1")
+    [_, (_, build), (_, check)] = run(
+        ("/api/rounds", None),
+        ("/api/record", {"what": "step", "round": SMALL, "column": "build", "stage": "B1"}),
+        ("/api/record", {"what": "step", "round": SMALL, "column": "check", "stage": "B1"}))
+    facts = {one["key"]: one["value"] for one in build["record"]["facts"]}
+    assert facts["state"] == "building"
+    assert facts["why"] == "branch-b1 holds work main does not"
+    assert facts["head"] == tip
+    check = check["record"]
+    assert (check["state"], check["word"]) == ("failed", "failed")
+    [ran] = check["runs"]
+    assert (ran["exit_code"], ran["commit"]) == (1, tip)
 
 
 def test_a_record_of_a_round_no_longer_open_is_gone(kit):

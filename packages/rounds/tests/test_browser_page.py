@@ -2,7 +2,8 @@
 over `page_kit`'s rounds, seeded under the shell's own home. The shell has only ui, rounds
 and projects. One test per job of the page: the contract check; no style the shell's
 policy refuses; what waits on him and the walk through it; a question with its options
-and passage from its marker; a failed check's red job, run and output file; a build's
+and passage from its marker; a failed check's red job, run and output file; a build in a
+git repo, on the small flow, with its state and its check failed at the tip; a build's
 verdict; a strip card and its stage's tabs, and the card staying open with its build when
 the strip moves; the folds of a many-stage round; a round's
 card and the key; an address that opens its popover; a ruling of a round with no docket,
@@ -139,6 +140,23 @@ def test_a_failed_check_shows_its_red_job_its_run_and_its_output(shell, ui_page)
     expect(check).to_have_attribute("open", "")
 
 
+def test_a_build_in_git_shows_its_state_and_its_check_failed_at_the_tip(shell, ui_page):
+    panel = open_panel(ui_page)
+    check = mark(panel, "check|B1", round_=page_kit.SMALL)
+    expect(check).to_have_attribute("state", "failed")
+    expect(check).to_have_attribute("label", "check of B1, nest: failed")
+    check.click()
+    pop = popover(panel)
+    expect(pop.locator(".title")).to_have_text("check of B1")
+    expect(pop).to_contain_text("failed (exit 1)")
+    expect(pop.locator(".mono", has_text="/scratch/check-2.log")).to_be_visible()
+    ui_page.keyboard.press("Escape")
+    mark(panel, "build|B1", round_=page_kit.SMALL).click()
+    expect(pop.locator(".title")).to_have_text("build of B1")
+    expect(pop).to_contain_text("building")
+    expect(pop).to_contain_text("branch-b1 holds work main does not")
+
+
 def test_a_builds_verdict_shows_with_its_open_finding(shell, ui_page):
     panel = open_panel(ui_page)
     mark(panel, "verify-build|B1").click()
@@ -152,7 +170,7 @@ def test_a_strip_card_opens_its_step_and_moves_along_its_stage(shell, ui_page):
     panel = open_panel(ui_page)
     cards = panel.locator(".strip .card")
     expect(cards.first).to_be_visible()
-    card = cards.filter(has_text="B1").first
+    card = cards.filter(has_text="billing-export B1").first
     card.click()
     pop = popover(panel)
     expect(card).to_have_attribute("aria-expanded", "true")
@@ -173,7 +191,7 @@ def test_an_open_strip_card_stays_with_its_build_when_the_strip_moves(ui_shells,
         rounds_dir = page_kit.seed(page_kit.shell_home(own) / "notes")
     panel = open_panel(ui_contexts(own).pages[0])
     cards = panel.locator(".strip .card")
-    first = cards.filter(has_text="B1").first
+    first = cards.filter(has_text="billing-export B1").first
     expect(cards.first).to_contain_text("B1")
     first.click()
     expect(first).to_have_attribute("aria-expanded", "true")
@@ -182,7 +200,7 @@ def test_an_open_strip_card_stays_with_its_build_when_the_strip_moves(ui_shells,
                         repo="kestrel", branch="branch-b3", base=page_kit.BASE,
                         target="main", builder="builder-1", build="0123456789abcdef")
     expect(cards.first).to_contain_text("B3", timeout=20_000)
-    expect(cards.filter(has_text="B1").first).to_have_attribute("aria-expanded", "true")
+    expect(cards.filter(has_text="billing-export B1").first).to_have_attribute("aria-expanded", "true")
     expect(cards.first).to_have_attribute("aria-expanded", "false")
     expect(panel.locator('.strip .card[aria-expanded="true"]')).to_have_count(1)
     expect(popover(panel).locator(".title")).to_contain_text("of B1")
@@ -242,7 +260,7 @@ def test_a_ruling_of_a_round_with_no_docket_opens_under_its_line(ui_shells, ui_s
     quick = "kestrel/quick"
     with page_kit.under(own):
         page_kit.seed(page_kit.shell_home(own) / "notes")
-        page_kit.write_config(page_kit.FLOWS + textwrap.dedent("""\
+        page_kit.write_config(page_kit.CONFIG + textwrap.dedent("""\
             [flows.quick]
             steps = [ { step = "design", by = "lead" }, { step = "build", by = "builder" },
                       { step = "finish", by = "builder" } ]
@@ -267,7 +285,7 @@ def test_show_its_line_sets_the_filter_that_hides_it_and_scrolls_to_it(shell, ui
     panel = open_panel(ui_page)
     panel.get_by_role("button", name=re.compile(r"^Wrapping up")).click()
     expect(panel.locator(f'moxi-ui-rail[data-round="{BUSY}"]')).to_have_count(0)
-    panel.locator(".strip .card").filter(has_text="B1").first.click()
+    panel.locator(".strip .card").filter(has_text="billing-export B1").first.click()
     popover(panel).get_by_role("button", name="Show its line on the board").click()
     expect(panel.get_by_role("button", name="All", exact=True)).to_have_attribute("aria-pressed", "true")
     line = mark(panel, "check|B1")

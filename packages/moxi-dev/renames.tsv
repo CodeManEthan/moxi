@@ -9575,6 +9575,8 @@ rounds	packages/rounds/src/moxi_rounds/page.py	for key in ("what", "round", "col
 rounds	packages/rounds/src/moxi_rounds/page.py	lb.Route("/api/events", "read", "moxi_rounds.pagehandlers:events", stream=True,	keep	stream	stream
 rounds	packages/rounds/src/moxi_rounds/page.py	query=RECORD_QUERY, returns={"gone": BOOL, "record": RECORD}),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/page.py	return lb.Out("string", mark=mark, nullable=True)	keep	nullable	nullable
+rounds	packages/rounds/src/moxi_rounds/page.py	"round": TEXT, "project": TEXT, "stage": TEXT, "build": INT, "closed": BOOL,	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/page.py	"round": TEXT, "project": TEXT, "stage": TEXT, "build": INT, "closed": BOOL,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/pagehandlers.py	"recent": [], "rounds": [], "closed": [], "unreadable": []}	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/pagehandlers.py	"record", "events"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/pagehandlers.py	_logged: set = set()	keep	set	set
@@ -9952,6 +9954,7 @@ rounds	packages/rounds/tests/page_kit.py	if key == "HOME" or key.startswith("XDG
 rounds	packages/rounds/tests/page_kit.py	notes_root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/page_kit.py	return Path(shell.env["HOME"])	keep	HOME	HOME
 rounds	packages/rounds/tests/page_kit.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/page_kit.py	env = {"PATH": os.environ.get("PATH", ""), "HOME": str(root.parent),	keep	HOME	HOME
 rounds	packages/rounds/tests/test_api.py	"a round that has ended": ["show", D],	keep	show	show
 rounds	packages/rounds/tests/test_api.py	"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_api.py	"one round": ["show", A],	keep	show	show
@@ -10125,6 +10128,7 @@ rounds	packages/rounds/tests/test_brief.py	test_fold_records_a_slice_over_the_li
 rounds	packages/rounds/tests/test_brief.py	warns of a slice over the limit; `show` and the round note say which slices of an open	keep	show	show
 rounds	packages/rounds/tests/test_browser_page.py	assert any("/m/rounds/api/rounds" in url for url in check.requests), check.requests	keep	any	any
 rounds	packages/rounds/tests/test_browser_page.py	expect(waiting).to_contain_text("4 questions in 3 rounds", timeout=20_000)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_browser_page.py	expect(cards.first).to_contain_text("B3", timeout=20_000)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_build_drop.py	"after": []}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_build_drop.py	"record": "comms:1234567", "tips": []},	keep	record	record
 rounds	packages/rounds/tests/test_build_drop.py	"scratch": str(scratch)}, actor="planner")	use	actor=	by=
@@ -10173,6 +10177,7 @@ rounds	packages/rounds/tests/test_builds.py	assert (status.state, status.by, sta
 rounds	packages/rounds/tests/test_builds.py	assert (status.state, status.own_commits) == (EMPTY, True)	use	status.own_commits	status.has_own_commits
 rounds	packages/rounds/tests/test_builds.py	return log.append(self.path, type_, fields, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_builds.py	round_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_builds.py	for count, grown in enumerate(state.folding(events), start=1):	keep	start	start
 rounds	packages/rounds/tests/test_by_branch.py	-	name	test_a_build_is_found_from_a_folder_inside_its_worktree	test_a_build_is_found_from_a_dir_inside_its_worktree
 rounds	packages/rounds/tests/test_by_branch.py	actor="coder")	use	actor=	by=
 rounds	packages/rounds/tests/test_by_branch.py	actor="planner")	use	actor=	by=
@@ -10959,6 +10964,10 @@ rounds	packages/rounds/tests/test_page.py	question = question["record"]	keep	rec
 rounds	packages/rounds/tests/test_page.py	return (isinstance(sent, dict) and set(sent) <= set(shape.items)	keep	set	set
 rounds	packages/rounds/tests/test_page.py	shape = lb.Out("table", items={"gone": lb.Out("bool"), "record": page.RECORD})	keep	record	record
 rounds	packages/rounds/tests/test_page.py	whats = set()	keep	set	set
+rounds	packages/rounds/tests/test_page.py	cells = dict(zip([one["id"] for one in value["columns"]], line["cells"], strict=True))	keep	strict	strict
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "step", "round": SMALL, "column": "build", "stage": "B1"}),	keep	round	round
+rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "step", "round": SMALL, "column": "check", "stage": "B1"}))	keep	round	round
+rounds	packages/rounds/tests/test_page.py	facts = {one["key"]: one["value"] for one in build["record"]["facts"]}	keep	record	record
 rounds	packages/rounds/tests/test_page_gather.py	assert board_.record("card", QUIET)["name"] == QUIET	keep	record	record
 rounds	packages/rounds/tests/test_page_gather.py	assert board_.record("step", BUSY, column="design") is None	keep	record	record
 rounds	packages/rounds/tests/test_page_gather.py	assert found["ended"]["how"] == "closed"	keep	closed	closed
