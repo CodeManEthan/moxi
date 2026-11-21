@@ -282,7 +282,7 @@ def test_an_unlisted_root_outside_the_cut_s_roots_shows_no_full_path():
     assert not shows_a_piece_of_the_token(result.text)
 
 
-def test_an_unlisted_reason_cuts_the_home_folder_start_was_given(monkeypatch):
+def test_an_unlisted_reason_cuts_the_home_dir_start_was_given(monkeypatch):
     monkeypatch.setenv("HOME", "/elsewhere/me")
     roots = [{"harness": "codex", "root": "/srv/codex/sessions",
               "reason": "/data/me/.cache/codex/lock cannot be read", "parts": None}]
