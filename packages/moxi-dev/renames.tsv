@@ -3949,6 +3949,7 @@ launcher	packages/launcher/tests/test_browser_home_beside_usage.py	kit.published
 launcher	packages/launcher/tests/test_browser_home_beside_usage.py	re.compile(f"^reviewer goes cold at {HOUR}$"), timeout=PASS_MS)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_home_beside_usage.py	self.turns.script(sessions={sid: kit.waiting()})	keep	sessions	sessions
 launcher	packages/launcher/tests/test_browser_home_fill.py	"identities": [{"harness": "claude", "identity": "scout", "at": at, "refused": None, "note": None},	keep	refused	refused
+launcher	packages/launcher/tests/test_browser_home_fill.py	"identities": [{"harness": "codex", "identity": "cdx", "at": at, "refused": None, "note": None}]}	keep	refused	refused
 launcher	packages/launcher/tests/test_browser_home_fill.py	-	name	add_folder	add_dir
 launcher	packages/launcher/tests/test_browser_home_fill.py	-	name	folder	work_dir_fixture
 launcher	packages/launcher/tests/test_browser_home_fill.py	extra = str(Path(shell.env["HOME"]) / "work" / "proj-a")	keep	HOME	HOME
