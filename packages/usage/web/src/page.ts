@@ -782,19 +782,16 @@ export class UsagePage extends LitElement {
       // Under the same filters the paths change only with a new day. The menus' lists
       // then keep their last value until the new reads answer, so the filter line keeps
       // every filter, and a menu the person opened stays open, while the lists reload.
-      // The heat map keeps its last days until its new read answers, so it stays drawn,
-      // and the day picked keeps the focus, while it reloads.
       const filters = JSON.stringify([state, this.#folders()]);
       const sameFilters = filters === this.#askedFilters;
       this.#askedFilters = filters;
       const heldPlaces = sameFilters ? this.#places?.value ?? null : null;
       const heldModels = sameFilters ? this.#models?.value ?? null : null;
-      const heldHeat = this.#heat?.value ?? null;
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
-      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update).hold(heldHeat);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)

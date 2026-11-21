@@ -10,8 +10,6 @@
   piece that was open before: from a session opened from the Sessions table, to the
   table, and from the table to the page. The page rewrote its address in place, so Back
   left it.
-- Picking a day on the heat map leaves the map drawn, and the day keeps the focus, while
-  the page reads the new range; the map was gone until its read answered.
 - The project filter reads `All projects` (`All folders` by folder) on its first item
   and on its button with none picked, where it read `all`.
 - The table under Tokens puts Cache create before Cache read, as the cost chart and its
