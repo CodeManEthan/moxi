@@ -606,6 +606,8 @@ def test_a_relaunch_whose_new_session_exited_is_still_relaunch_failed(conn):
 def test_a_stop_before_the_exit_ends_the_run_stopped(conn):
     got = go(conn, arm(conn), stop=True)
     assert got.outcome == "stopped" and got.session.commands == []
+    assert got.session.deliveries[0].startswith(
+        f"Relaunch note from launcher: run {got.run.run_id} did not run (stopped: ")
 
 
 def test_a_stop_from_the_exit_on_is_deferred_until_the_respawn(conn):

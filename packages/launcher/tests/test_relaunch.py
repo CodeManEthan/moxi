@@ -1018,6 +1018,104 @@ def test_status_of_no_such_run_is_refused(conn):
     assert caught.value.code == "no-run" and caught.value.exit_code == 3
 
 
+# -- stop -------------------------------------------------------------------------------------
+
+
+class JobSlots:
+    """slots' `job`, answering one job by name."""
+
+    def __init__(self, found=None, error=None):
+        self.found, self.error, self.asked = found, error, []
+
+    def job(self, name):
+        self.asked.append(name)
+        if self.error is not None:
+            raise self.error
+        return self.found
+
+
+def running_job(pid, *, running=True):
+    return SimpleNamespace(name="relaunch-x", running=running, pane_pid=pid)
+
+
+@pytest.fixture
+def child():
+    import subprocess
+    import sys
+
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    yield process
+    if process.poll() is None:
+        process.kill()
+    process.wait(5)
+
+
+def open_relaunch(conn, *, kind="relaunch", mode="self", job="slots:relaunch-x"):
+    return store.insert_run(conn, kind=kind, mode=mode, request_id="r1", session_id=SID,
+                            by="planner", slot="3", job=job)
+
+
+def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
+    run = open_relaunch(conn)
+    api = JobSlots(running_job(child.pid))
+    result = relaunch.stop_run(run.run_id, conn=conn, slots_api=api)
+    assert result.exit_code == 0 and api.asked == ["relaunch-x"]
+    assert result.lines == (f"stop sent to run {run.run_id}: it ends stopped before the "
+                            "exit; from the exit on, it ends after the relaunch is tried",)
+    assert result.data == {"run_id": run.run_id, "outcome": "stop-sent", "pid": child.pid}
+    assert child.wait(5) == -relaunch.STOP_SIGNAL
+
+
+def test_a_repair_run_is_stopped_too(conn, child):
+    run = open_relaunch(conn, mode="repair", job="slots:repair-x")
+    sent = []
+    relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)),
+                      kill=lambda pid, sig: sent.append((pid, sig)))
+    assert sent == [(child.pid, relaunch.STOP_SIGNAL)]
+
+
+def test_a_stop_of_no_run_another_kind_or_an_ended_run_is_refused(conn):
+    def refused(run_id):
+        with pytest.raises(relaunch.Refused) as caught:
+            relaunch.stop_run(run_id, conn=conn, slots_api=JobSlots(),
+                              kill=lambda *a: pytest.fail("nothing is sent"))
+        assert caught.value.exit_code == 3
+        return caught.value.code
+
+    assert refused("feedfacecafebeef") == "no-run"
+    compact = open_relaunch(conn, kind="compact", mode="self", job="proc:1@1.0")
+    assert refused(compact.run_id) == "not-relaunch"
+    store.end_run(conn, compact.run_id, "compacted")
+    run = open_relaunch(conn)
+    store.end_run(conn, run.run_id, "relaunched")
+    assert refused(run.run_id) == "not-open"
+
+
+@pytest.mark.parametrize("api", [
+    JobSlots(None),
+    JobSlots(running_job(None)),
+    JobSlots(running_job(os.getpid(), running=False)),
+    JobSlots(error=RuntimeError("slots broke")),
+    None,
+], ids=["no-job", "no-pid", "pane-dead", "unreadable", "no-slots"])
+def test_a_stop_whose_job_is_gone_is_refused_and_sends_nothing(conn, api, monkeypatch):
+    monkeypatch.setattr(relaunch.slots, "api", lambda: None)
+    run = open_relaunch(conn)
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.stop_run(run.run_id, conn=conn, slots_api=api,
+                          kill=lambda *a: pytest.fail("nothing is sent"))
+    assert caught.value.code == "job-gone" and store.get_run(conn, run.run_id).open
+
+
+def test_a_stop_whose_pid_has_ended_is_refused(conn, child):
+    child.kill()
+    child.wait(5)
+    run = open_relaunch(conn)
+    with pytest.raises(relaunch.Refused) as caught:
+        relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)))
+    assert caught.value.code == "job-gone"
+
+
 # -- repair -----------------------------------------------------------------------------------
 
 

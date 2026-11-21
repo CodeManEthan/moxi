@@ -3,6 +3,7 @@
     arm_self(handoff)              # --self --handoff FILE: the session relaunches itself
     call_director(session)         # SESSION_ID | IDENTITY: a director relaunches it
     status(run)                    # --status RUN: the run and its events
+    stop_run(run)                  # --stop RUN: stop a run's job
     from_record(run)               # --from-record RUN: launch it again from a run's record
 
 Relaunch is offered with turns and slots installed and slots running here; the session
@@ -49,6 +50,13 @@ mailed); and the quiet read must pass now, or the call ends `held` (exit 75) wit
 written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
 past that it exits 75 naming `--status`.
 
+**A stop** (`--stop`) sends the job of an open relaunch or repair run SIGTERM: before the
+exit the run ends `stopped` and a self run's session is told by a note; from the exit on,
+the stop waits until the relaunch was tried. It reads the job's process from slots and
+checks it still runs; a run that is not a relaunch or repair run is refused
+`not-relaunch`, one that has ended `not-open`, and one whose job is gone `job-gone`. Anyone
+who can run the launcher's CLI as this user may stop a run.
+
 **A repair** (`--from-record`) is for a run that exited its session and did not relaunch
 it (`relaunch-failed`, `gone`, or `error` after the exit, and a repair that failed so),
 including a run left open by a job that died after the exit, whose job is gone. It
@@ -61,6 +69,7 @@ the launch's chain.
 from __future__ import annotations
 
 import os
+import signal
 import sqlite3
 import stat
 import time
@@ -440,6 +449,52 @@ def status(run_id: str, *, conn: sqlite3.Connection | None = None) -> Result:
     return Result(exits.OK, tuple(lines), run, data)
 
 
+#: What a stop sends a run's job.
+STOP_SIGNAL = signal.SIGTERM
+
+
+def stop_run(run_id: str, *, conn: sqlite3.Connection | None = None,
+             slots_api: Any | None = None,
+             kill: Callable[[int, int], None] = os.kill) -> Result:
+    """Send the job of the open relaunch or repair run `run_id` SIGTERM, and say what that
+    does. Refused, with nothing sent: no such run (`no-run`), a run of another kind
+    (`not-relaunch`), an ended run (`not-open`), and a run whose job is gone or can't be
+    read (`job-gone`). `kill` stands in for `os.kill`."""
+    from moxi import proc
+
+    with _store(conn) as c:
+        run = store.get_run(c, run_id)
+    if run is None:
+        raise Refused("no-run", f"there is no run {run_id}", "check the run id")
+    if run.kind != "relaunch":
+        raise Refused("not-relaunch", f"run {run_id} is a {run.kind} run, not a relaunch "
+                                      "or a repair", "only a relaunch or repair run is stopped")
+    if not run.open:
+        raise Refused("not-open", f"run {run_id} has ended: {run.outcome}",
+                      f"moxi launcher relaunch --status {run_id} shows it")
+    kind, _, name = (run.job or "").partition(":")
+    api = slots_api if slots_api is not None else slots.api()
+    found = None
+    if kind == "slots" and name and api is not None:
+        try:
+            found = api.job(name)
+        except Exception:  # noqa: BLE001  (a job that can't be read is not stopped)
+            found = None
+    pid = getattr(found, "pane_pid", None) if getattr(found, "running", False) else None
+    if not isinstance(pid, int) or proc.identity(pid) is None:
+        raise Refused("job-gone", f"run {run_id}'s job {run.job or '(none)'} is not running",
+                      f"nothing was sent; moxi launcher relaunch --status {run_id} shows "
+                      "the run, and --from-record repairs one that exited its session")
+    try:
+        kill(pid, STOP_SIGNAL)
+    except ProcessLookupError:
+        raise Refused("job-gone", f"run {run_id}'s job ended before the stop reached it",
+                      f"moxi launcher relaunch --status {run_id} shows the run") from None
+    return Result(exits.OK, (f"stop sent to run {run_id}: it ends stopped before the exit; "
+                             "from the exit on, it ends after the relaunch is tried",), run,
+                  {"run_id": run_id, "outcome": "stop-sent", "pid": pid})
+
+
 def run_line(run: store.Run) -> str:
     """One line for a run: what it is, and where it stands or how it ended."""
     what = f"run {run.run_id}: {run.kind} ({run.mode}) of session {run.session_id}"
@@ -751,4 +806,4 @@ def _span(seconds: float) -> str:
 __all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "Refused", "Result",
            "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
            "is_director", "job_argv", "may_recycle", "not_warm", "offered", "outcome_result", "run_line",
-           "start_job", "status"]
+           "start_job", "status", "stop_run"]
