@@ -65,6 +65,11 @@ list, is not answered again by a call for more, and is in the next list. A sessi
 is in `recent` only because of the time (it has not changed, and `now` has moved past
 its hour) leaves `recent` for its day between two calls; the next list places it.
 
+**Projects.** `fold_projects` folds the sessions into projects by the folder each ran
+in, through a `for_paths` its caller hands in (projects' read API, which the page server
+loads), and lists the folders of this week's sessions that no project holds. It reads
+every session's head, as `list_work_dirs` does.
+
 **Names by key.** `name_sessions` answers, for `(harness, session)` pairs a caller
 already holds, what names each one: its name, its folder and its start, by the code a
 row's are read by, so a session is named the same wherever it is shown. It is not a
@@ -107,6 +112,13 @@ DAYS = 7
 
 #: The most folders a folders answer lists.
 WORK_DIRS_MAX = 200
+
+#: How long after its last change a session counts as this week's in the fold into
+#: projects, in seconds: seven days.
+WEEK_S = 7 * 86_400
+
+#: The most folders in no project the fold into projects lists.
+LOOSE_DIRS_MAX = 20
 
 #: How many subagents an opened session lists.
 SUBAGENTS_MAX = 8
@@ -577,6 +589,122 @@ def list_work_dirs(cat: Catalog | None = None, *, harness: str | None = None,
             "more": max(0, len(order) - limit)}
 
 
+def claim(entry: Entry) -> str:
+    """The session as another module names it: `<harness>/<session id>`, the id being
+    the one the harness writes for it (a Codex thread id, which its rollout file is
+    named by)."""
+    return f"{entry.harness}/{entry.session}"
+
+
+def fold_projects(cat: Catalog | None = None, *, for_paths: Any, recent_s: float,
+                  now: float | None = None,
+                  limit: int = LOOSE_DIRS_MAX) -> dict[str, Any]:
+    """The sessions folded into projects by their folders: `{projects, folders, more,
+    roots}`.
+
+    `for_paths` takes the distinct folders the sessions ran in and answers, for each, the
+    key of the project it is in or None (projects' read API's `for_paths`); this module
+    never decides which project holds a folder. It is called once.
+
+    `projects` is `{key, at, all, week, recent}` for each project that holds a session,
+    by key: `at` the newest change among its sessions (None when none has a change
+    time), `all` how many sessions it holds, `week` and `recent` the claims (`claim`) of
+    its sessions changed within `WEEK_S` and within `recent_s` of `now`, newest first.
+    A session a program started is in `at` and `all` and never in `week` or `recent`,
+    as it is never in a list's `recent`.
+
+    `folders` is `{folder, at, week}` for each folder no project holds where a session
+    not started by a program changed within `WEEK_S`: `at` as a project's, `week` how
+    many such sessions; newest `at` first, at most `limit`, and `more` how many were
+    left off. A session whose head names no folder is in neither. Reads every session's
+    head not read yet.
+
+    `roots` is `{harness, root, reason, parts, lost}` per harness whose root was not read
+    whole, as a list's `roots` says, with `lost` the catalog's (`Unread.lost`) as
+    `{path, reason}`: where a root could not be listed (`reason` set), none of its
+    sessions is in `projects` or `folders`; where `lost` names a folder or a file, the
+    sessions in it are in neither. Either way some counts are short. A harness that is
+    not on the machine is in no `roots`: it has no sessions.
+
+    `unread` is `{harness, path, reason}` for each session whose head could not be read:
+    which folder it ran in is not known, so it is in neither and some count is short. A
+    session whose file is gone since its root was listed is not one: it has no session
+    left to count.
+
+    Raises ValueError for a `recent_s` that is not a number, and whatever `for_paths`
+    raises."""
+    cat = _catalog(cat)
+    now = _now(now)
+    recent_cut, week_cut = _cutoff(now, recent_s), _cutoff(now, WEEK_S)
+    gathered = cat.gather()
+    cat.read_heads()
+    by_dir: dict[str, list[tuple[Entry, bool]]] = {}
+    unread: list[dict[str, Any]] = []
+    for entry in gathered.entries:
+        head = cat.kept_head(entry)
+        if head is None:
+            head = cat.head(entry)       # kept for an older listing of the file: read now
+        if head is None:
+            reason = _unopened(entry.path)
+            if reason is not None:
+                unread.append({"harness": entry.harness, "path": entry.path,
+                               "reason": reason})
+            continue
+        where = _work_dir(head.work_dir)
+        if where:
+            by_dir.setdefault(where, []).append((entry, head.by_program is True))
+    keys = for_paths(sorted(by_dir)) if by_dir else {}
+    held: dict[str, list[tuple[Entry, bool]]] = {}
+    loose: list[dict[str, Any]] = []
+    for where, found in by_dir.items():
+        key = keys.get(where)
+        if key is not None:
+            held.setdefault(key, []).extend(found)
+            continue
+        week = sum(1 for entry, program in found
+                   if not program and _since(entry, week_cut))
+        if week:
+            loose.append({"folder": where, "at": _newest_at(found), "week": week})
+    projects = []
+    for key in sorted(held):
+        found = sorted(held[key], key=lambda pair: pair[0].order)
+        live = [entry for entry, program in found if not program]
+        projects.append({
+            "key": key, "at": _newest_at(found), "all": len(found),
+            "week": [claim(e) for e in live if _since(e, week_cut)],
+            "recent": [claim(e) for e in live if _since(e, recent_cut)]})
+    loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))
+    return {"projects": projects, "folders": loose[:limit],
+            "more": max(0, len(loose) - limit),
+            "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason,
+                       "parts": r.parts,
+                       "lost": [{"path": path, "reason": why} for path, why in r.lost]}
+                      for r in gathered.roots],
+            "unread": unread}
+
+
+def _unopened(path: str) -> str | None:
+    """Why a session's file whose head could not be read can't be opened; None when it
+    is gone."""
+    try:
+        with open(path, "rb"):
+            pass
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return "its first lines could not be read"
+
+
+def _since(entry: Entry, cut: int) -> bool:
+    return entry.changed_ns is not None and entry.changed_ns >= cut
+
+
+def _newest_at(found: Iterable[tuple[Entry, bool]]) -> float | None:
+    times = [entry.changed_ns for entry, _ in found if entry.changed_ns is not None]
+    return max(times) / 1_000_000_000 if times else None
+
+
 # --- one session, opened ----------------------------------------------------------------------
 
 def _spoken(record: Any) -> bool:
@@ -853,7 +981,8 @@ def session_facts(keys: Iterable[Sequence[Any]]) -> dict[str, Any]:
 
 
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
-           "NEWEST_ROWS", "DAYS", "WORK_DIRS_MAX", "SUBAGENTS_MAX", "FACTS_MAX", "FIND_MIN",
+           "NEWEST_ROWS", "DAYS", "WORK_DIRS_MAX", "WEEK_S", "LOOSE_DIRS_MAX",
+           "SUBAGENTS_MAX", "FACTS_MAX", "FIND_MIN", "claim", "fold_projects",
            "RECENT", "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
            "more_sessions", "list_work_dirs", "open_session", "name_sessions",

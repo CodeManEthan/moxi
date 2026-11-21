@@ -8,6 +8,8 @@ result with a `refusal` code, never an exception.
 * **Who sends.** Only the provider's identity (`[connector] identity`, `claude-app` by
   default), through its live binding's token: `sending.run` with a bound sender, through
   the daemon's socket, so every check the send verb makes runs. Never the operator.
+  Its context notes open single-reply asks instead of refusing over them, and names
+  cures in the connector's words (`sending.CURES_CONNECTOR`).
 * **What is read.** Only mail sent to the identity: the pushes of its own binding, and,
   for `send_and_wait`, the record's reply to the message it sent, addressed to the
   identity. Mail to the operator is never returned.
@@ -73,14 +75,17 @@ DESCRIPTIONS = {
              "reply_to to a message id to answer that message, and new_name to message a "
              "name that hasn't started yet. The answer says, per agent, whether it was "
              "delivered now, held for the agent's next turn, or is waiting for the name. "
-             + UNTRUSTED),
+             "Single-reply asks an agent is still waiting on you to answer don't stop "
+             "the send; the answer lists them. " + UNTRUSTED),
     "check_messages": ("Read the new messages agents sent you, oldest first, and mark them "
                        "read. It returns at most limit messages and says how many more "
                        "wait. " + UNTRUSTED),
     "send_and_wait": ("Send one agent a message that asks for one reply, and wait up to "
                       "wait_s seconds for it. If the agent can't read it now, or no reply "
                       "comes in time, the answer says so and the reply shows in "
-                      "check_messages later. " + UNTRUSTED),
+                      "check_messages later. Like send, it goes even while the agent "
+                      "waits on single-reply asks from you, and the answer lists them. "
+                      + UNTRUSTED),
 }
 
 _STR = {"type": "string"}
@@ -147,7 +152,7 @@ OUTPUTS: dict[str, dict] = {
         "outcome": {"type": "string", "enum": ["replied", "not-delivered", "no-reply"]},
         "message_id": _NULL_STR, "recipients": _RECIPIENTS,
         "reply": {"anyOf": [_MESSAGE, {"type": "null"}]},
-        "other_new": {"type": "integer"}}),
+        "other_new": {"type": "integer"}, "notes": {"type": "array", "items": _STR}}),
 }
 
 #: Each tool's MCP hints, as true as a hint can be: `check_messages` consumes mail (a
@@ -181,7 +186,7 @@ class Tools:
     `Result`); `on_refused(code, text, **fields)` an error result.
 
     `record` and `env` are what the send verb reads (the record, the config's roots);
-    `clock` ages messages."""
+    `clock` ages messages, and is the send's clock, which ages the asks it judges."""
 
     def __init__(self, link, *, result: Callable, on_refused: Callable, wait_default_s: int,
                  wait_max: int, record=None, env: Mapping[str, str] | None = None,
@@ -252,7 +257,8 @@ class Tools:
                 recipients=[r.qualified for r in result.recipients])
         if result.outcome != sending.OUTCOME_SENT:
             return self._send_refused(result)
-        return self.result(self._sent_text(result), self._sent_fields(result))
+        return self.result(_with_notes(self._sent_text(result), result),
+                           self._sent_fields(result))
 
     async def _send(self, tags, text, *, posture, reply_to=None, new_name=False):
         link = self.link
@@ -269,7 +275,9 @@ class Tools:
             message_id=None)
         context = sending.Context(record=self.record, socket_path=link.socket_path,
                                   env=dict(self.env if self.env is not None else os.environ),
-                                  deadline=DEADLINE, cures=sending.CURES_TOOL)
+                                  deadline=DEADLINE, clock=self.clock,
+                                  cures=sending.CURES_CONNECTOR,
+                                  when_asks_open=sending.ASKS_OPEN_NOTE)
         return await asyncio.to_thread(sending.run, context, args, tags=tags,
                                        sender=sender)
 
@@ -441,10 +449,10 @@ class Tools:
         if result.outcome != sending.OUTCOME_SENT:
             return self._send_refused(result)
         fields = self._sent_fields(result)
-        del fields["outcome"], fields["notes"]
+        del fields["outcome"]
         recipient = result.recipients[0] if result.recipients else None
         if recipient is None or recipient.delivery != sending.DELIVERY_LIVE:
-            return self.result(f"{self._sent_text(result)} {LATER}",
+            return self.result(_with_notes(f"{self._sent_text(result)} {LATER}", result),
                                {**fields, "outcome": "not-delivered", "reply": None,
                                 "other_new": 0})
         sent = str(result.message_id)
@@ -455,10 +463,10 @@ class Tools:
             found = await self._wait_for_reply(sent, recipient.qualified, deadline, dropped)
             if found is None:
                 ctx.log(waited=wait, replied=False)
-                return self.result(
+                return self.result(_with_notes(
                     f"No reply within {wait} second{'' if wait == 1 else 's'}. The "
                     f"message was sent, msg {sent}. The "
-                    "reply will show in check_messages.",
+                    "reply will show in check_messages.", result),
                     {**fields, "outcome": "no-reply", "reply": None, "other_new": 0})
             reply, pushed = found
             mid = str(reply["message_id"])
@@ -490,8 +498,8 @@ class Tools:
         text = f"Reply from {to}:\n{self._spoken(message)}"
         if others:
             text += f"\n{others} other new message{'' if others == 1 else 's'}."
-        return self.result(text, {**fields, "outcome": "replied", "reply": message,
-                                  "other_new": others})
+        return self.result(_with_notes(text, result), {
+            **fields, "outcome": "replied", "reply": message, "other_new": others})
 
     async def _wait_for_reply(self, sent: str, author: str, deadline: float,
                               skip: set[str] = frozenset()):
@@ -575,7 +583,7 @@ class Tools:
         """One message as it is read aloud: who, how long ago, its id, what it asks, and
         its text."""
         who = m["from"]["name"] + frame_marks(m["from"])
-        bits = [f"From {who}", _ago(m["age_s"]), f"msg {m['id']}"]
+        bits = [f"From {who}", sending.spoken_ago(m["age_s"]), f"msg {m['id']}"]
         if m["reply_to"]:
             bits.append(f"in reply to msg {m['reply_to']}")
         ask = _ASKS.get(m["posture"])
@@ -603,17 +611,10 @@ def _clean(text: str) -> str:
     return "\n".join(scrub(line.rstrip("\r")) for line in str(text).split("\n"))
 
 
-def _ago(seconds) -> str:
-    if seconds is None:
-        return "at an unknown time"
-    seconds = max(0.0, float(seconds))
-    if seconds < 60:
-        return "just now"
-    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
-        if seconds >= size:
-            n = int(seconds // size)
-            return f"{n} {unit}{'' if n == 1 else 's'} ago"
-    return "just now"                                        # pragma: no cover
+def _with_notes(text: str, result) -> str:
+    """A sent answer's text with each note of its send after it, one per line, as its
+    `notes` field carries them."""
+    return "\n".join([text, *result.notes])
 
 
 __all__ = ["ANNOTATIONS", "DESCRIPTIONS", "LIMIT", "NAMES", "OUTPUTS", "Tools",

@@ -1251,6 +1251,7 @@ comms	packages/comms/src/moxi_comms/page.py	"delivered": lb.Out("list", items=lb
 comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"earlier": lb.Out("table", nullable=True, items={	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"expired": lb.Out("list", items=lb.Out("string")),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	"harness": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=100)},	keep	required	required
 comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=500)},	keep	required	required
@@ -1433,6 +1434,7 @@ comms	packages/comms/src/moxi_comms/sending.py	thread.note = THREAD_NOTE_MISSING
 comms	packages/comms/src/moxi_comms/sending.py	thread.note = THREAD_NOTE_MISSING.format(id=reply_to)	keep	id	id
 comms	packages/comms/src/moxi_comms/sending.py	waiting = set(answer.get("waiting") or ())	keep	set	set
 comms	packages/comms/src/moxi_comms/sending.py	what=what, names=names_text, new=new_flag()))	keep	new	new
+comms	packages/comms/src/moxi_comms/sending.py	whom = "this recipient" if len(set(resolved)) == 1 else "these recipients"	keep	set	set
 comms	packages/comms/src/moxi_comms/store/books.py	"""Why `message_id` left `name`'s queue undelivered (`withdrawn` or `expired`), from	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`ids` may no longer go to `name`'s model (`reason`, `withdrawn` or `expired`):	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`withdrawn` or `expired` for a message that may no longer be delivered; None	keep	expired	expired
@@ -1718,6 +1720,7 @@ comms	packages/comms/tests/test_books.py	test_delete_racing_open_digest_ends_wit
 comms	packages/comms/tests/test_books.py	test_the_books_serve_many_threads_on_one_connection.work	name	e	exc
 comms	packages/comms/tests/test_books.py	{"id": "102", "reason": "expired"}]	keep	expired	expired
 comms	packages/comms/tests/test_browser_page.py	"folder": project},	keep	folder	folder
+comms	packages/comms/tests/test_browser_page.py	"stale": False, "ready": None, "at": time.time()},	keep	stale	stale
 comms	packages/comms/tests/test_browser_page.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
 comms	packages/comms/tests/test_browser_page.py	return rig.record.post_as_identity(by, rig.names_channel,	keep	record	record
 comms	packages/comms/tests/test_browser_page.py	self.answer: dict = {"refused": None}	keep	refused	refused
@@ -1726,6 +1729,9 @@ comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": None}	
 comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": {"code": "gone", "row": None, "problem": "the launch has ended",	keep	refused	refused
 comms	packages/comms/tests/test_browser_page.py	texts = set()	keep	set	set
 comms	packages/comms/tests/test_browser_page.py	timeout=15_000)	keep	timeout	timeout
+comms	packages/comms/tests/test_browser_project_leads.py	assert any("/m/projects/api/projects" in url for url in asked), asked	keep	any	any
+comms	packages/comms/tests/test_browser_project_leads.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
+comms	packages/comms/tests/test_browser_project_leads.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_browser_roster.py	"waiting on planner", timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	assert any(roster_kit.ROSTER in url for url in check.requests), check.requests	keep	any	any
 comms	packages/comms/tests/test_browser_roster.py	expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold", timeout=PUSH_MS)	keep	timeout	timeout
@@ -1736,6 +1742,8 @@ comms	packages/comms/tests/test_browser_roster.py	expect(roster).to_have_attribu
 comms	packages/comms/tests/test_browser_roster.py	expect(rows(roster)).to_have_count(4, timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_browser_roster.py	shell	name	directory	clock_dir
+comms	packages/comms/tests/test_browser_session_where.py	assert not any(planner.session_id in url for url in asked), asked	keep	any	any
+comms	packages/comms/tests/test_browser_session_where.py	wait_for(lambda: any(SESSIONS_READ in url and session_id in url for url in asked), 10,	keep	any	any
 comms	packages/comms/tests/test_cache_clock.py	(tmp_path / "work").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_cache_clock.py	-	name	test_cache_source_is_the_sessions_directory_under_codex_home	test_cache_source_is_the_sessions_dir_under_codex_home
 comms	packages/comms/tests/test_cache_clock.py	@pytest.mark.parametrize("bad", ["above", "unparseable"])	keep	bad	bad
@@ -2053,6 +2061,13 @@ comms	packages/comms/tests/test_connector_tools.py	rig.record.history(rig.names_
 comms	packages/comms/tests/test_connector_tools.py	t = tools_mod.Tools(link, result=Result, on_refused=Result.refused, wait_default_s=2,	keep	refused	refused
 comms	packages/comms/tests/test_connector_tools.py	tools.wait_max = 1	keep	wait_max	wait_max
 comms	packages/comms/tests/test_connector_tools.py	wait_max=5, record=rig.record)	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	assert rig.record.get_message(got.structured["message_id"]).author_id == ME	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	rig.record.get_message(got.structured["message_id"]).content).reply_to == second	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	real = rig.record	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	tools.record = GetFails()	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	for tool in set(mcp_tools.INPUTS) - set(tools_mod.NAMES):	keep	set	set
+comms	packages/comms/tests/test_connector_tools.py	assert set(NOT_SHOWN) <= set(texts)	keep	set	set
+comms	packages/comms/tests/test_connector_tools.py	pairs = [(rig.record.get_message(i), SimpleNamespace(qualified="planner@proj-a"))	keep	record	record
 comms	packages/comms/tests/test_console_identity.py	assert not any(CONSOLE in a["open"] for a in console.daemon.asks.values())	keep	any	any
 comms	packages/comms/tests/test_console_identity.py	c.send(RELAY, "any", machine_line.compose([PLANNER], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_console_identity.py	msg = console.record.get_message(mid)	keep	record	record
@@ -2541,6 +2556,7 @@ comms	packages/comms/tests/test_posture.py	return rig.record.history(rig.names_c
 comms	packages/comms/tests/test_posture.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_posture.py	wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))	keep	any	any
 comms	packages/comms/tests/test_posture.py	wait_until(lambda: any(p["message_id"] == mid for p in reviewer.queue))	keep	any	any
+comms	packages/comms/tests/test_posture.py	ctx = sending.Context(record=rig.record, clock=rig.clock,	keep	record	record
 comms	packages/comms/tests/test_posture_intent.py	"closed": {None: REFUSED_63, "none": REFUSED_63, "once": REFUSED_63,	keep	closed	closed
 comms	packages/comms/tests/test_posture_intent.py	ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})	keep	env	env
 comms	packages/comms/tests/test_posture_intent.py	EXEMPT = {"no-reply": "none", "in-thread": "open", "once-closed": "none", "closed": "open",	keep	closed	closed
@@ -11842,7 +11858,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	None if updated is None 
 sessions	packages/sessions/src/moxi_sessions/catalog.py	_activity	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	flight.done.set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	if _spoken(record) and record.role == "user" and record.injected is False:	keep	injected	injected
-sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in paths))	keep	any	any
+sessions	packages/sessions/src/moxi_sessions/catalog.py	if not any(path.startswith(f"{other}/") for other in why)}	keep	any	any
 sessions	packages/sessions/src/moxi_sessions/catalog.py	live: set[str] = set()           # the files whose heads a catalog keeps	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_head	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_prompt	name	handle	fh
@@ -12034,6 +12050,11 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	turn and the prompt of the
 sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it returns and of no other session, unless `folder` is asked.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	`folders` is `{folder, at, week}` for each folder no project holds where a session	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	sessions is in `projects` or `folders`; where `lost` names a folder or a file, the	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/lists.py	loose.append({"folder": where, "at": _newest_at(found), "week": week})	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/lists.py	loose.sort(key=lambda row: (-(row["at"] or -1.0), row["folder"]))	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/lists.py	return {"projects": projects, "folders": loose[:limit],	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/module.py	is 5 plus the archive folders, `corpus` and `find`'s `include_archives`), the verb	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/opencode.py	"session": ("id", "parent_id", "title", "directory", "version", "model", "agent",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	SessionRow	name	directory	work_dir
@@ -12093,6 +12114,9 @@ sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "r
 sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "read", _target("folders"), query=WORK_DIRS_QUERY,	use	_target("folders")	_target("work_dirs")
 sessions	packages/sessions/src/moxi_sessions/page.py	number; `folder`, an absolute path a session's own record names (compared as written,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/page.py	starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	"folder": _PATH, "at": _MAYBE_FLOAT, "week": _INT})),	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	* `folders`: `{folder, at, week}` for each folder that no project holds and where a	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/page.py	`projects`, `folders` and `more`. `state` is `up`; `off` when projects is not installed or	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	"until": _seconds(query, "until"), "find": query.get("find")}	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	**The list.** `listing`, `more`, `session` and `folders` read through the process's one	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	-	name	folders	work_dirs
@@ -12101,6 +12125,8 @@ sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_filters	name	folde
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	`find`, `window`, `subagents` and the list's functions (`moxi_sessions.lists`) and write	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	use	out["folder"]	out["work_dir"]
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	"detail": None, "projects": [], "folders": [], "more": 0}	keep	folders	folders
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_logged: set[Any] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/read.py	* `closed`: the keys of requests an earlier batch handed on with `final` false that	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/read.py	* `first`: with `head`, line 1's records (an OpenCode session's first message's), not	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	-	name	_needs_session	_require_session
@@ -12286,6 +12312,7 @@ sessions	packages/sessions/tests/test_api.py	assert {"retention", "Retention"} <
 sessions	packages/sessions/tests/test_api.py	before = {"find", "sources", "subagents", "window", "retention", "Retention"}	keep	find	find
 sessions	packages/sessions/tests/test_api.py	found = modules.load("sessions", interface=2)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_api.py	test_the_list_answers_through_the_api_over_the_roots_the_process_names	name	folders	session_dirs
+sessions	packages/sessions/tests/test_api.py	assert set(module.OPTIONAL) == {"ui", "secrets", "turns", "projects"}	keep	set	set
 sessions	packages/sessions/tests/test_archives.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO, "--harness", "codex")	keep	find	find
 sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO)	keep	find	find
@@ -12325,6 +12352,10 @@ sessions	packages/sessions/tests/test_browser_page.py	expect(view).to_have_attri
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{LONG}")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{SESSION}")	keep	sessions	sessions
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_project_facts.py	assert report["folders"] == [{"folder": both["scratch"], "at": pytest.approx(now - 2 * HOUR, abs=1),	keep	folders	folders
+sessions	packages/sessions/tests/test_browser_project_facts.py	return Path(shell.env["HOME"])	keep	HOME	HOME
+sessions	packages/sessions/tests/test_browser_project_facts.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/tests/test_browser_questions.py	"""A Claude Code session in `folder` under the home folder, last changed at `at`:	use	`folder`	`work_dir`
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	use	input=	input_tokens=
@@ -12338,6 +12369,14 @@ sessions	packages/sessions/tests/test_browser_questions.py	held[name] = sorted(s
 sessions	packages/sessions/tests/test_browser_questions.py	home = env["HOME"]	keep	HOME	HOME
 sessions	packages/sessions/tests/test_browser_questions.py	on_both.run	name	failed	exc
 sessions	packages/sessions/tests/test_browser_questions.py	s = db.session(title="a title the harness made", directory=f"{home}/scratch")	use	directory=	work_dir=
+sessions	packages/sessions/tests/test_browser_running.py	stub.answer = {"refused": {"code": "not-waiting", "row": None, "problem": "it is not waiting", "hint": ""}}	keep	refused	refused
+sessions	packages/sessions/tests/test_browser_running.py	stub.answer = {"refused": None}	keep	refused	refused
+sessions	packages/sessions/tests/test_browser_running.py	held = {"state": "up", "detail": None, "refused": None,	keep	refused	refused
+sessions	packages/sessions/tests/test_browser_running.py	expect(button).to_have_class("set")	keep	set	set
+sessions	packages/sessions/tests/test_browser_running.py	pytest.mark.skipif(not any(found.name == "launcher" for found in modules.scan()),	keep	any	any
+sessions	packages/sessions/tests/test_browser_running.py	"where": {"target": "slot", "slot": slot, "project_key": project, "folder": project},	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_running.py	self.answer: dict = {"refused": None}	keep	refused	refused
+sessions	packages/sessions/tests/test_browser_running.py	expect(row).to_have_attribute("name", "from-topic", timeout=30_000)	keep	timeout	timeout
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_a_folder_under_the_home_folder_is_written_with_a_tilde_in_the_list	test_a_dir_under_the_home_dir_is_written_with_a_tilde_in_the_list
 sessions	packages/sessions/tests/test_browser_transcript.py	-	name	test_an_unnamed_session_is_named_by_its_folder_and_when_it_started	test_an_unnamed_session_is_named_by_its_dir_and_when_it_started
 sessions	packages/sessions/tests/test_browser_transcript.py	assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)	keep	any	any
@@ -12675,6 +12714,8 @@ sessions	packages/sessions/tests/test_page.py	package="moxi_sessions")	keep	pack
 sessions	packages/sessions/tests/test_page.py	return body["refused"]	keep	refused	refused
 sessions	packages/sessions/tests/test_page.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page.py	test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why	name	directory	subagents_dir
+sessions	packages/sessions/tests/test_page.py	assert not any(attr.get("required") for attr in facts["attributes"].values())	keep	any	any
+sessions	packages/sessions/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "window", "project-facts"}	keep	set	set
 sessions	packages/sessions/tests/test_page_list.py	"find"}	keep	find	find
 sessions	packages/sessions/tests/test_page_list.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	"harness", "since", "until", "folder",	keep	folder	folder
@@ -12712,6 +12753,18 @@ sessions	packages/sessions/tests/test_page_list.py	opencode.user("Do the thing."
 sessions	packages/sessions/tests/test_page_list.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page_list.py	test_the_filters_narrow_the_list_and_keep_the_counts_exact	name	by_folder	by_work_dir
 sessions	packages/sessions/tests/test_page_list.py	test_two_folder_requests_at_once_read_each_head_once.ask	name	folder	work_dir
+sessions	packages/sessions/tests/test_page_projects.py	assert (answer["projects"], answer["folders"], answer["more"]) == ([], [], 0)	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [("/work/moxi", 1)]	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [(f["folder"], f["week"]) for f in answer["folders"]] == [("/work/moxi", 1)]	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert [f["folder"] for f in answer["folders"]] == [f"/work/f{n:02d}" for n in range(1, 21)]	keep	folder	folder
+sessions	packages/sessions/tests/test_page_projects.py	assert [f["folder"] for f in answer["folders"]] == [f"/work/f{n:02d}" for n in range(1, 21)]	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["folders"] == [] and answer["more"] == 0	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["folders"][0]["at"] == pytest.approx(now - 600, abs=1)	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	assert answer["state"] == "up" and answer["projects"] == answer["folders"] == []	keep	folders	folders
+sessions	packages/sessions/tests/test_page_projects.py	opencode.user("Do the thing.", at=now - 180)	keep	at	at
+sessions	packages/sessions/tests/test_page_projects.py	self.offers = set(offers)	keep	set	set
 sessions	packages/sessions/tests/test_prompt_kept.py	assert cat._prompt(entry, program=None) is None	keep	program	program
 sessions	packages/sessions/tests/test_prompt_kept.py	if isinstance(r, Message) and r.role == "user" and r.injected is False]	keep	injected	injected
 sessions	packages/sessions/tests/test_prompt_kept.py	rewrite	name	handle	fh
@@ -16606,3 +16659,9 @@ turns	packages/turns/tests/test_browser_states.py	assert {"text", "text-dim"} <=
 turns	packages/turns/tests/test_browser_states.py	first.listed(set(), reach="absent")	keep	set	set
 turns	packages/turns/tests/test_browser_states.py	panel.listed(set())	keep	set	set
 turns	packages/turns/tests/test_browser_states.py	texts = set()	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	pick(view, "folder", "atlas")	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_text(re.compile("^atlas"))	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	assert set(page.evaluate("window.writtenAddresses")) <= {"/m/sessions/?more=recent:3"}	keep	set	set
+sessions	packages/sessions/tests/test_browser_address.py	assert set(after) == {"/m/sessions/?harness=claude"}, written	keep	set	set

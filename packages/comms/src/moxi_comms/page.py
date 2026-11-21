@@ -69,6 +69,10 @@ ROW = lb.Out("table", items={
     "module": lb.Out("string", nullable=True),
     "tier": lb.Out("string", nullable=True),
     "adapter": lb.Out("string", nullable=True),
+    #: The harness a live row's adapter kind is a session of (`claude`, `codex` or
+    #: `opencode`), as comms' kinds declare it; null for a person kind, a kind this comms
+    #: doesn't accept and a standing row. The page server adds it to the row.
+    "harness": lb.Out("string", nullable=True),
     "directors": lb.Out("list", items=lb.Out("string")),
     "session_id": lb.Out("string", nullable=True),
     "bound_at": lb.Out("float", nullable=True),

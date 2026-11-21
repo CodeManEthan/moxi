@@ -463,6 +463,22 @@ range of days), and the count: `62 sessions`, or `15 of 62 sessions` once someth
 narrows the list. The list is read when the page opens, when its tab is shown again, and
 every 30 seconds while the tab is visible; groups you showed more of stay as they were.
 
+**Running now.** With launcher installed, the sessions it runs now come first, under `N
+running`, in the order Home draws them: a session that waits on agents while nothing will
+keep its cache warm leads. A row is named by the launch's name, with where it runs beside
+it (`slot 3 · atlas-api`), its cache fact (`goes cold at 14:20`), what it waits on
+(`waiting on 2 agents`) and its newest message, or `launched` before it has one. A running
+session is drawn in this group only, not again under `Active recently` or its day, though
+`N more` still counts it. With a filter set the group keeps the launches whose session
+the narrowed list holds; under the find field there is no group. With nothing running
+there is no group, and a read that fails draws `Running` with `Moxi couldn't read the
+running sessions`. A waiting session whose cache a press would cover has `Keep warm` at the
+desk (not through the phone gateway): it asks launcher to keep that cache warm, and stays
+disabled until launcher has answered and its next value has come, or for 20 seconds; a
+refusal's words show on the row until the next value. A launch whose session id launcher
+has not learned has nothing to open. Without launcher none of this is drawn and the list
+starts with `Active recently`.
+
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
 can be open at once. The session is read when its row is opened. Opened, a row shows the
 newest message a person typed (`You`) and the model's newest message after it (`Reply`),
@@ -474,9 +490,32 @@ run it in where the harness needs one, and `Copy`, which puts the command on the
 clipboard. A folder under your home folder is written with `~`, here and in the Folder
 menu; any other folder is written whole. A piece the record does not give is not drawn. Under them `Read the
 transcript` goes to the session's address and `Copy id` copies its id. An opened row is
-read again after a newer list only when that list shows the session changed. Leaving the
-list for a transcript and coming back gives the list from its top, with no filter set
-and no row open.
+read again after a newer list only when that list shows the session changed.
+
+**The list's address.** The list keeps its state in the query of its own address,
+`/m/sessions/`: `folder` (an absolute path), `harness`, `when` (`today`, `7d`, `30d`, or a
+range of days such as `2026-11-01..2026-11-05`, either end left open), `find` (the text as
+it was sent), `more` (how many times each group's `Show` read more, such as
+`recent:1,2026-11-09:2`) and `program` (each day whose program line is open, and how far it
+was paged). A key is written only when it differs from its default, so the plain list is
+`/m/sessions/` with no `?`. Each change rewrites the address in place and adds no history
+entry, so one Back leaves the list. Back from a transcript, a reload and a link opened
+elsewhere bring the list back with its filters, find and depth: the list reads each group
+again to the depth the address names, one read at a time and at most 40 reads, then writes
+the depth it reached. Back and a reload also bring back the rows that were open and the
+scroll, which the browser's history entry keeps; a link carries neither. The scroll lands
+once those rows and, with launcher installed, the running group are drawn. A transcript
+opened from the list carries the list's query in its own address, on through its subagents
+and its parent, and its `Sessions` link goes back to the list with it.
+
+An address is a request. A value the list's own controls could have set is taken. Anything
+else (a harness the list does not know, a folder that is not absolute, a `when`, `more` or
+`program` value of another form, a count of 0, a group or a key given twice, a key the list
+does not use) is dropped before the list is read, and one dim line above the list names
+it: `This address held harness=foo, which the list does not take; the list is shown
+without it.` A value that matches nothing narrows the list to nothing, as the filter would.
+A depth the list cannot reach is read as far as the list goes. Once the list has read to
+the address's depth, the address is rewritten to say exactly what the list shows.
 
 Under the list a dim line names each harness whose sessions could not be read, with the
 reason, and says how many Codex sessions are left out because their files are compressed.
@@ -485,11 +524,19 @@ On a machine with no session the page says so in place of the list.
 **One session.** A session's address is `<harness>/<session id>`, or
 `claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
 a Codex subagent thread each open at their own id. Over the session, the first line has
-`Sessions`, which goes back to the list, the session's name as the list names it (a name
+`Sessions`, which goes back to the list (as it was left, when the session was opened from
+it), the session's name as the list names it (a name
 typed for it, else its folder and when it started) and `Refresh`. The second has the
 harness, the model and from when to when, and `Details`, which shows and hides the rest:
 the harness's name, the session's id, its title, directory, last activity, version,
-parent session, entrypoint and the file it was read from. A subagent, and a session
+parent session, entrypoint and the file it was read from. Where the turns reach a Claude Code
+session's start, the line there reads `Started today 07:40 in harbor-infra, by hand` when
+both of these say a person started it: its head names an entrypoint that isn't a
+program's (`by_program` false), and launcher, asked once when the transcript opens,
+refuses the session as never launched. Anywhere else (a Codex or OpenCode session, whose
+record doesn't say who started it, a Claude Code session whose head wasn't read or names
+a program, one a launch holds, or no launcher) the line is the plain `This is the start
+of the session.` A subagent, and a session
 another one started, is not in the list, so it keeps a heading that names it by its id or
 title, with those facts in the open. Under the header come the session's last five turns,
 oldest first. Each message shows as
@@ -511,6 +558,37 @@ Other modules' pages can place the one-session view with the shell's `place()`, 
 and, for a Claude Code subagent, `agent`. It links to the page at the session's address. A
 subagent chosen in the block opens in the block, with Back to return.
 
+**On the Projects page.** With the `projects` extra too, and projects' page in the shell,
+sessions places a `project-facts` component on the Projects page. A project's row gets
+when it was last active (the newest change of any of its sessions) and `N active
+recently`, its sessions that changed within `list.recent_s`. sessions reads every session,
+and draws none of these facts when one can't be read, so `not used yet` means the project
+has no session. An opened project gets a `Sessions` row, `N sessions this week` with a
+link to this page, left out when none changed in the last 7 days; and Remove lists `its N
+sessions and their transcripts` among what stays. Under the projects, `Not a project`
+lists up to 20 folders no project holds where a session changed in the last 7 days, each
+with `N sessions this week`, and says how many more there are. A session a program started
+counts toward a project's last activity and its Remove line, never toward `active
+recently` or the week. The component reads the page server when it is placed and every 60
+seconds while the tab is visible. It reports nothing, so the page draws none of these
+facts, when projects is not installed or is too old, when projects' store can't be read,
+when a session can't be read (a harness's sessions folder exists and can't be listed, a
+folder or a file under it that may hold a session can't be listed, or a session's first
+lines can't be read: it would be missing from the counts), and when the read fails. A
+session's subagents folder that can't be listed holds no session of its own, so it changes
+no count and the facts still show.
+
+Its read is `/api/projects`. It reads every session's first lines, once for as long as the
+page server runs, as `/api/folders` does, then asks projects' read API (`for_paths`) once
+which project holds each folder the sessions ran in; sessions never decides that itself.
+It answers `projects` (`{key, at, all, week, recent}` each: the newest change, how many
+sessions, and the sessions changed in the last 7 days and within `list.recent_s`, each
+named `<harness>/<session id>`), `folders` (`{folder, at, week}`) and `more`, beside
+`now`, `today`, `home`, `recently_s`, `state` and `detail`. `state` is `up`, `off`
+without projects or with one older than its read API's interface 2, or `error`; `detail`
+is then a fixed sentence that names no file, and an `error`'s reason goes to the page
+server's log.
+
 The list is four reads of the page server: `/api/list` (the counts and the groups, with
 the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
 group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
@@ -521,7 +599,11 @@ which does not search every session's first lines as a `find` does. On a page se
 first open the name comes a fraction of a second after the turns, while the server lists
 the sessions it can show.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
-request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+request. With launcher installed the page also reads three of launcher's routes and its
+push topic: `/api/running` (the launches running now) with each read of the list; the topic
+`running` at the desk, which brings each new value as launcher has it; `/api/keep-warm` on a
+`Keep warm` press; and `/api/state?session=<id>` once when a Claude Code session's transcript
+opens. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
 the list read in memory for as long as it runs, and keeps no more of a message than it
 sends.
@@ -539,21 +621,19 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - A second line on Codex rows: sessions would need to read the rollout's `user.text` item
   kind as the mark of a typed message (see "Listing sessions"). A second line on OpenCode
   rows: OpenCode's record has no such mark to read.
-- An address for the list's filters, its find and how far it was paged, so that they are
-  kept across a visit to a transcript and another page can link to the list already
-  narrowed. Today the address names the list or one session and nothing more.
 - Find over names and typed prompts: it needs an index of them in sessions, which is a
   store with what was typed in it. Find takes an id or a folder's name.
-- Running sessions as a group of their own, with the slot and the template each was
-  started from, the effort on the `Session` line, and `Resume` that starts the session
-  from the page: they need the launcher's read of what it launched.
+- The template a running session was started from, the effort on the `Session` line, and
+  `Resume` that starts the session from the page: they need more of launcher's read of
+  what it launched than `/api/running` gives.
 - A running session's state (working, how many subagents and shells are busy, a line for
   trouble, the turn that is open) and a session that waits for an answer: they need
   turns to say them by session.
-- A Project filter in place of Folder, and the project beside a row's name: they need the
-  projects module to answer many folders' projects in one read.
-- Whether a session's cache is warm or cold and until when, with a way to keep it warm:
-  it needs the cache module's state by session.
+- A Project filter in place of Folder, and the project beside a row's name: the
+  `projects` extra answers many folders' projects in one read, and the list doesn't use
+  it yet.
+- Whether the cache of a session launcher doesn't run is warm or cold and until when,
+  with a way to keep it warm: it needs the cache module's state by session.
 - Cost, the number of prompts and the context's size, on a row or on a transcript: they
   need the usage module's figures by session.
 - Mail counts, such as one message held for a session: they need comms' count of mail
@@ -582,7 +662,10 @@ modules.
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
 UI shell, whose page-server base sessions' page server runs on. The optional extra
 `secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with. The optional
-extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
+extra `turns` adds `moxi-turns`, which enforces the transcript-read guard. The optional
+extra `projects` adds `moxi-projects`, whose read API (interface 2, `for_paths`) says which
+project holds each folder, for the facts on the Projects page; a projects that doesn't
+offer it reads as absent.
 
 ## Interfaces
 

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- The connector's `send` and `send_and_wait` are no longer refused while an agent waits on
+  a single reply from the Claude app. The message posts, and the answer ends with a note
+  listing the asks still open from its recipients: newest first, at most three and a
+  count of the rest, each with its age and its first line. A reply through the connector
+  lists the others the same way, leaving out the ask it answers. Both tools now speak every
+  note of their send, and `send_and_wait` returns a `notes` field. The connector's refusals
+  name only its own tools and parameters (`sending.CURES_CONNECTOR`). Agent sessions'
+  tools and `moxi comms send` keep the refusal and its text.
+- With turns installed, comms' page reads turns' `/api/sessions` while a send box is
+  open, with each check and every 30 s, and joins each session whose turn is open to its
+  address by session id. A message the dry run would deliver to that session now reads
+  `Delivered. <name> is working; it reads this when its turn ends.` Without turns, or
+  for a name whose turn isn't open, the line is as before.
 - The Comms page says what the connector's name is: the row of the name that comms' tools
   in the Claude apps bind reads `Claude's apps, through the connector` after the name. Each live row of
   `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
@@ -169,6 +182,17 @@
   offline, tried to bind the name it already held, read the refusal as another session
   holding it, and stayed offline for the rest of the session. A close from a connection
   the shim has already replaced now changes nothing.
+- The Comms page says where an agent works when launcher doesn't: with sessions installed,
+  a bound name's row reads its session's folder, when it started and its harness
+  (`atlas-api · started today 12:45 · claude`), and its opened row's `Session` line names
+  the session and links to it on the Sessions page; opening the row asks sessions again,
+  so a name typed in the harness since shows there. Launcher's where still wins for a
+  session it runs. Each row of the page's roster carries `harness`, the harness its
+  binding's adapter kind is a session of, or null.
+- The Comms page says which project a name leads: with projects installed, a standing
+  name in `Other names` that leads a project reads `leads <key>` on its shown row
+  (`leads harbor-infra`), from projects' list of projects. A name that leads nothing, or
+  an install without projects, shows nothing of it.
 
 ## 0.3.0 (2026-11-08)
 

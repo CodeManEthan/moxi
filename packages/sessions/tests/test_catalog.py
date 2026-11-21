@@ -326,7 +326,9 @@ def test_a_project_dir_that_cannot_be_listed_is_counted_as_an_unread_part(roots,
     gathered = Catalog(roots).gather()
 
     assert [e.session for e in gathered.entries] == [sid(1)]
-    assert gathered.roots == (Unread(CLAUDE, str(roots[CLAUDE]), None, 1),)
+    # The folder may hold a main session, so it is lost.
+    assert gathered.roots == (Unread(CLAUDE, str(roots[CLAUDE]), None, 1,
+                                     (("-work-proj-b", "Permission denied"),)),)
     assert CLAUDE in gathered.listed
 
 
@@ -346,6 +348,7 @@ def test_a_session_whose_subagents_dir_cannot_be_listed_has_no_count(roots, lock
     entries = {e.session: e for e in gathered.entries}
 
     assert entries[sid(1)].subagents is None and entries[sid(2)].subagents == 0
+    # A subagents folder holds no main session, so nothing is lost.
     assert gathered.roots == (Unread(CLAUDE, str(roots[CLAUDE]), None, 1),)
 
 
@@ -353,12 +356,14 @@ def test_a_session_whose_subagents_dir_cannot_be_listed_has_no_count(roots, lock
 def test_a_codex_day_that_cannot_be_listed_is_counted_as_an_unread_part(roots, locked):
     r = rollout(roots, 1)
     r.user("Do the thing.")
-    locked(r.write().parent)
+    day = r.write().parent
+    locked(day)
 
     gathered = Catalog(roots).gather()
 
     assert gathered.entries == () and gathered.unreadable == 0
-    assert gathered.roots == (Unread(CODEX, str(roots[CODEX]), None, 1),)
+    lost = ((day.relative_to(roots[CODEX]).as_posix(), "Permission denied"),)
+    assert gathered.roots == (Unread(CODEX, str(roots[CODEX]), None, 1, lost),)
 
 
 @not_root
@@ -370,6 +375,7 @@ def test_a_rollout_that_cannot_be_opened_is_listed_and_counted_as_unread(roots, 
     gathered = Catalog(roots).gather()
 
     assert [e.session for e in gathered.entries] == [tid(1)]
+    # It is an entry, so it is not lost.
     assert gathered.roots == (Unread(CODEX, str(roots[CODEX]), None, 1),)
 
 
@@ -432,7 +438,7 @@ def test_a_claude_session_gives_every_detail(roots):
     t.write()
 
     assert details(roots) == Details(
-        work_dir="/work/proj-a", started=START, by_program=None, name="fix the tests",
+        work_dir="/work/proj-a", started=START, by_program=False, name="fix the tests",
         model="claude-model-y", activity=Said(START + 1, "agent", "All fixed."),
         prompt=Said(START, "you", "please fix them"))
 
@@ -481,7 +487,8 @@ def test_an_opencode_session_gives_its_work_dir_start_and_model_and_no_name(root
 
 
 @pytest.mark.parametrize("entrypoint, expected", [
-    ("sdk-cli", True), ("sdk-py", True), ("cli", None), ("claude-vscode", None)])
+    ("sdk-cli", True), ("sdk-py", True), ("cli", False), ("claude-vscode", False),
+    ("", None), (7, None)])
 def test_a_program_is_told_by_the_entrypoint_the_head_writes(roots, entrypoint, expected):
     t = transcript(roots, entrypoint=entrypoint)
     t.user("go")
@@ -873,7 +880,7 @@ def test_a_failed_last_turn_read_gives_nulls_and_is_tried_again(roots, monkeypat
 
     monkeypatch.setattr(catalog_module, "window", broken)
     failed = cat.details(only(cat))
-    assert failed == Details(work_dir="/work/proj-a", started=START,
+    assert failed == Details(work_dir="/work/proj-a", started=START, by_program=False,
                              prompt=Said(START, "you", "one"))
 
     monkeypatch.setattr(catalog_module, "window", real)

@@ -340,11 +340,13 @@ class Answer:
 
 @dataclass(frozen=True)
 class PaneUse:
-    """Whether a person may be at a slot's run pane: `pane_in_mode` (copy mode or another
-    tmux mode), `attached` (clients on the slot's session), `client_activity` (the
-    latest activity of those clients, epoch seconds, None with none attached) and
-    `pane_activity` (the run window's last output or input; the run window has the one
-    pane). `pane_id` is None, and the rest empty, when the slot has no run pane."""
+    """How a slot's run pane is in use: `pane_in_mode` (copy mode or another tmux mode),
+    `attached` (clients on the slot's session), `client_activity` (the latest activity
+    of those clients, epoch seconds, None with none attached) and `pane_activity` (the
+    run window's last output or input; the run window has the one pane). A launcher's
+    check for a person reads `pane_in_mode` and `client_activity`; it never reads
+    `pane_activity`, which any output moves. `pane_id` is None, and the rest empty, when
+    the slot has no run pane."""
 
     slot: int
     pane_id: str | None
