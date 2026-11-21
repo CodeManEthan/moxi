@@ -4632,6 +4632,7 @@ launcher	packages/launcher/tests/test_page_waits.py	started.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_waits.py	wired.turns.find = slow("find", wired.turns.find)	keep	find	find
 launcher	packages/launcher/tests/test_pin.py	base_env = ({"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_pin.py	"""sessions' `find` and `records_back` over hits and requests made up here: one entry	keep	find	find
+launcher	packages/launcher/tests/test_pin.py	new = sessions.testing.CodexRollout(root, thread_id=THREAD, start=old.clock + 86400 * 3)	keep	start	start
 launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
 launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir
 launcher	packages/launcher/tests/test_presets.py	-	name	test_the_callers_directory_gets_its_project_key	test_the_callers_dir_gets_its_project_key
