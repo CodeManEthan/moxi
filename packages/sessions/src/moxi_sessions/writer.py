@@ -11,9 +11,14 @@ message with a compaction marker; never from its text. One of:
   alone, which falls back to the line's `userType`;
 * `unknown`: a user message whose submitter the harness doesn't say;
 * `channel`, `hook` (a plugin's), `task` (a background task's notification), `harness`
-  (a message the harness composed: a meta line, an injected context, a system or
-  developer message, a turn it made up, a wrapper or interrupt line) and `summary` (a
-  compaction summary the harness asked the model for).
+  (a message the harness composed: a meta line whose origin names none of the kinds
+  above, an injected context, a system or developer message, a turn it made up, a wrapper
+  or interrupt line) and `summary` (a compaction summary the harness asked the model
+  for).
+
+An injected user message's origin kind is read before its meta flag: Claude Code marks
+peer, coordinator and channel lines, and some plugin and task lines, `isMeta` beside
+the origin that names their sender.
 
 A record that is neither a message nor a tool call has no writer: None.
 
@@ -28,7 +33,7 @@ first asked for; `opening` needs no such build.
 message: Claude Code's (`claude.WRAPPER_TAGS`), Codex's (`codex.WRAPPER_TAGS`) and
 `SHARED_WRAPPERS`. `opens_with_output(text)` says whether a text opens with one after
 the opening characters, and `opens_with_tag(text)` whether it opens with `<` followed by
-an ASCII letter.
+a letter of any script (`str.isalpha`).
 """
 
 from __future__ import annotations
@@ -76,9 +81,13 @@ def writer(record: Record) -> str | None:
     role = record.role
     if flags.get("isCompactSummary") is True or _opencode_summary(record, flags):
         return SUMMARY
+    injected = record.injected
+    kind = record.origin_kind
+    if role == "user" and injected is True and isinstance(kind, str) \
+            and kind in ORIGIN_WRITERS:
+        return ORIGIN_WRITERS[kind]
     if flags.get("isMeta") is True:
         return HARNESS
-    injected = record.injected
     if role == "assistant":
         return MODEL if injected is False else HARNESS
     if role != "user":
@@ -86,8 +95,7 @@ def writer(record: Record) -> str | None:
     if injected is False:
         return PERSON
     if injected is True:
-        kind = record.origin_kind
-        return ORIGIN_WRITERS.get(kind, HARNESS) if isinstance(kind, str) else HARNESS
+        return HARNESS
     return UNKNOWN_WRITER
 
 
@@ -124,10 +132,10 @@ def opens_with_output(text: str) -> bool:
 
 
 def opens_with_tag(text: str) -> bool:
-    """Whether `text` opens, after the opening characters, with `<` and an ASCII
-    letter."""
+    """Whether `text` opens, after the opening characters, with `<` and a letter of any
+    script (`str.isalpha`)."""
     head = opening(text)[:2]
-    return len(head) == 2 and head[0] == "<" and head[1].isascii() and head[1].isalpha()
+    return len(head) == 2 and head[0] == "<" and head[1].isalpha()
 
 
 def output_wrappers() -> tuple[str, ...]:

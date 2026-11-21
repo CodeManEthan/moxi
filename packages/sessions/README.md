@@ -668,8 +668,10 @@ path. Roots that couldn't be listed are named in `unlisted`, by their last part 
 
 **`read_session`** reads part of one session's transcript. Inputs: `session` (required),
 `harness` (needed only when more than one harness holds the id), `agent` (a subagent's
-id, to read that subagent's own transcript), `around` (an ISO 8601 time or epoch seconds;
-left out, the last turns), `turns` (1 to 10, default 3) and `thoughts` (default false).
+id at any depth, as `search_memory` gives it, to read that subagent's own transcript; a
+Codex or OpenCode subagent's subagent is found down the session's tree), `around` (an
+ISO 8601 time or epoch seconds; left out, the last turns), `turns` (1 to 10, default 3)
+and `thoughts` (default false).
 It finds a session as `moxi sessions read` does, archive folders included, and reads the
 records, since only a record says who wrote a message (`writer`, under Interfaces):
 
@@ -705,8 +707,9 @@ with any scheme, port and path) shows as `local`. The roots are your home folder
 backtick or one of `<>|,;(){}[]`, and takes a redaction placeholder in it whole, so
 `/home/you/[REDACTED:github-pat]/x.md` shows as `x.md`. A bare root shows its own name
 (`/home/` shows `home`, `~/` shows `~`). The cut runs inside `chat_redact`, between its
-two passes, so the last redaction sees exactly the text sent; the folder's cut and every
-other change to a text run there too. A path outside the roots in a message stays whole;
+two passes, and so do the folder's cut and the squeeze that puts a tool call's argument on
+one line (before the path cut). Only a cut to length comes after, so the last redaction
+sees exactly the text sent. A path outside the roots in a message stays whole;
 the `folder` is always its last part. A refusal or `unlisted` reason that names a path
 sessions holds (a root, an archive folder, the session's file and its folder) cuts that
 path to its last part wherever it occurs, under any root or none, and a path under the

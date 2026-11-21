@@ -176,9 +176,9 @@ class Message(Record):
     requested model where the harness writes one. `flags` holds the harness's own
     booleans on the line, verbatim (`isMeta`, `isCompactSummary`, `isApiErrorMessage`,
     OpenCode's `summary`). `origin` is where the harness says the message came from.
-`origin_kind` is the kind the line's own `origin` object names, None when the line holds
-no such object; unknown on a harness that writes none (Codex, OpenCode). Unlike `origin`,
-it never falls back to another field.
+    `origin_kind` is the kind the line's own `origin` object names, None when the line
+    holds no such object; unknown on a harness that writes none (Codex, OpenCode). Unlike
+    `origin`, it never falls back to another field.
 
     `injected` says whether something other than the person at the session's prompt
     submitted the message: the harness, a plugin, a channel, a peer session or a
@@ -355,14 +355,25 @@ SUMMARY_KEYS = ("file_path", "path", "notebook_path", "command", "pattern", "url
 SUMMARY_CHARS = 160
 
 
+def one_line(text: str) -> str:
+    """`text` on one line: each run of whitespace one space, none at either end."""
+    return " ".join(text.split())
+
+
+def squeezed_first(redact: Callable[[str], str]) -> Callable[[str], str]:
+    """A redaction that makes a summary's line (`tool_summary`) from one that keeps the
+    text's shape: the text is put on one line (`one_line`) and then redacted, so nothing
+    changes the text after its redaction but the cut."""
+    return lambda text: redact(one_line(text))
+
+
 def _flat(text: str, limit: int, redact: Callable[[str], str] | None = None) -> str:
-    """One line, cut at `limit` characters, the cut admitted. With `redact`, the whole
-    text is redacted first and cut after, so no secret is cut short of the shape that
-    would match it."""
+    """One line, cut at `limit` characters, the cut admitted. With `redact`, the line is
+    `redact`'s answer for the whole text, cut after it and changed no other way, so no
+    secret is cut short of the shape that would match it, and nothing after the redaction
+    can glue a value onto its key."""
     text = str(text)
-    if redact is not None:
-        text = redact(text)
-    text = " ".join(text.split())
+    text = one_line(text) if redact is None else redact(text)
     if len(text) <= limit:
         return text
     return f"{text[:limit]}... [+{len(text) - limit} chars]"
@@ -374,8 +385,11 @@ def tool_summary(name: Any, tool_input: Any, *,
     input holds as non-blank text, else its input as compact JSON, the argument cut at
     `SUMMARY_CHARS` characters.
 
-    `redact`, a function from text to text, is applied to the name and to the whole
-    argument before the cut. A record's own `summary` is made without it."""
+    `redact` makes the line: a function that takes the name, and the whole argument
+    before the cut, as written, and answers it redacted and on one line. It puts the text
+    on one line before its redaction or between two passes of it, never after
+    (`squeezed_first` makes one from a redaction that keeps the text's shape). Only the
+    cut changes its answer. A record's own `summary` is made without it."""
     label = name if isinstance(name, str) else "?"
     if redact is not None:
         label = redact(label)
@@ -534,6 +548,6 @@ __all__ = [
     "Record", "Request", "Message", "ToolCall", "ToolResult", "Marker", "MARKERS",
     "LimitWindow", "Limits", "Malformed", "Other", "KINDS",
     "UNDECODABLE", "NOT_OBJECT", "BAD_STRUCTURE",
-    "SUMMARY_KEYS", "SUMMARY_CHARS", "tool_summary",
+    "SUMMARY_KEYS", "SUMMARY_CHARS", "one_line", "squeezed_first", "tool_summary",
     "to_json", "from_json", "document",
 ]

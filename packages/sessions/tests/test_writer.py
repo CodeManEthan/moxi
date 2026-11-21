@@ -102,9 +102,10 @@ def test_opening_skips_what_str_lstrip_and_sqlite_ltrim_leave():
     assert api.opening("\U000e0041<x") == "<x"          # a tag character
 
 
-def test_a_tag_is_lt_and_an_ascii_letter_after_the_opening_characters():
+def test_a_tag_is_lt_and_a_letter_after_the_opening_characters():
     assert api.opens_with_tag("​\n<command-name>/clear")
     assert api.opens_with_tag("<A")
+    assert api.opens_with_tag("<é") and api.opens_with_tag("<Ж") and api.opens_with_tag("<中")
     assert not api.opens_with_tag("< a")
     assert not api.opens_with_tag("<​a")       # a character inside the tag
     assert not api.opens_with_tag("<1")
@@ -150,6 +151,20 @@ def test_a_character_inside_the_tag_is_not_skipped(transcript):
 def test_each_claude_origin_kind_names_its_writer(transcript, origin, expected):
     message = claude_user(transcript, "hi", origin=origin)
     assert message.origin_kind == origin
+    assert api.writer(message) == expected
+
+
+@pytest.mark.parametrize("origin, expected", [
+    ("peer", "peer"), ("coordinator", "coordinator"), ("channel", "channel"),
+    ("plugin", "hook"), ("task-notification", "task"),
+    ("human", "harness"), ("some-new-kind", "harness"),
+])
+def test_an_origin_naming_its_sender_beats_the_meta_flag(transcript, origin, expected):
+    """Claude Code writes every peer, coordinator and channel line, and some plugin and
+    task lines, with `isMeta` beside the origin. The origin names the sender; a meta
+    line whose origin names none of them is the harness's."""
+    message = claude_user(transcript, "hi", origin=origin, isMeta=True)
+    assert message.injected is True and message.origin_kind == origin
     assert api.writer(message) == expected
 
 
