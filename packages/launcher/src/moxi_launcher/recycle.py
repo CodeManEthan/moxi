@@ -104,11 +104,12 @@ COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this s
                 "its next idle.")
 
 #: Why a scratch launch may not recycle itself, and what to do instead. A scratch folder
-#: has no notes directory to keep a handoff in, so a launch that works in one is refused
-#: `recycle_at_limit = relaunch` wherever its values are checked
-#: (`catalog.refuse_scratch_recycle`), an older such row is refused the self arm and gets
-#: no line at its mark, and a replay of one recycles `off`. `compact` stays open to a
-#: scratch.
+#: has no notes directory to keep a handoff in. A launch that works in one and is given
+#: `recycle_at_limit = relaunch` by a flag, the page or its preset is refused wherever its
+#: values are checked (`catalog.refuse_scratch_recycle`); one that has it from
+#: `[defaults]` holds `off` with a warning (`presets.resolve`). An older such row is
+#: refused the self arm and gets no line at its mark, and a replay of one recycles `off`.
+#: `compact` stays open to a scratch.
 SCRATCH_RECYCLE = catalog.SCRATCH_RECYCLE
 
 #: Stands for a seam looked up here.

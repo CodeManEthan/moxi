@@ -1053,7 +1053,8 @@ class ScratchRecycle(Refused):
 
 def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
     """Refuse `ScratchRecycle` when `values` set `scratch` and `recycle_at_limit =
-    relaunch` together."""
+    relaunch` together. `presets.resolve` has already set a `[defaults]` relaunch to
+    `off` on a scratch launch, so what reaches here was typed or set by the preset."""
     if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
         raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
 

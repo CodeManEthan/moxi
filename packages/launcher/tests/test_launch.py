@@ -978,6 +978,31 @@ def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
 
 
 @POSIX
+def test_a_scratch_launch_whose_preset_sets_relaunch_is_refused(harness, tmp_path,
+                                                                 monkeypatch):
+    recycling_scratch(monkeypatch, tmp_path, "off")
+    write_presets('[seat.s]\nscratch = true\ntarget = "slot"\n'
+                  'recycle_at_limit = "relaunch"\n')
+    req = LaunchRequest(seat="s", cwd=str(tmp_path), request_id="r9", session_id=SID)
+    assert "scratch-recycle" in {r.code for r in api.check(req)}
+    with pytest.raises(api.ScratchRecycle):
+        api.launch(req)
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_launch_holds_a_defaults_relaunch_off(harness, tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: module != "comms")
+    write_presets('[defaults]\nrecycle_at_limit = "relaunch"\n')
+    req = scratch_request(tmp_path)
+    assert api.check(req) == []
+    result = api.launch(req)
+    assert presets.SCRATCH_RECYCLE_OFF in result.warnings
+    assert row("r9").values["recycle_at_limit"] == "off"
+    assert row("r9").values["sources"]["recycle_at_limit"] == presets.LEFT_OUT
+
+
+@POSIX
 def test_a_scratch_launch_may_compact_at_its_limit(harness, tmp_path, monkeypatch):
     for recycle in ("compact", "off"):
         req = recycling_scratch(monkeypatch, tmp_path, recycle)

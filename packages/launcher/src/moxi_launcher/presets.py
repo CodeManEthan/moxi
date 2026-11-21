@@ -344,17 +344,14 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     warnings, in file order; none means the file is good. Types and values come from the
     catalog; a row whose module is absent fails with "needs <module>"; a project key must
     be known to projects; an `instructions_file` must be readable; an `agent` role must be
-    found among the harness's role files; a preset, or `[defaults]` alone, must not set
-    `scratch` with `recycle_at_limit = relaunch`. A `moxi.config.ConfigError` (the file
-    is not TOML, or holds a table it should not) is raised, not returned."""
+    found among the harness's role files; a preset that sets `recycle_at_limit =
+    relaunch` must not launch in a scratch folder. A `[defaults]` relaunch is not
+    flagged: a scratch launch holds `off` in its place, as `resolve` does. A
+    `moxi.config.ConfigError` (the file is not TOML, or holds a table it should not) is
+    raised, not returned."""
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
-    try:
-        # `[defaults]` reaches every launch: a pair it sets alone refuses each one.
-        catalog.refuse_scratch_recycle(defaults)
-    except Refused as exc:
-        problems.append(Problem.of("defaults", exc.row, exc))
     # An empty harness is unset, as `resolve` reads it: the shipped default.
     base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
     for preset in found.all():
@@ -371,12 +368,19 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
                  defaults: Mapping[str, object], base_harness: str,
                  avail) -> list[Problem]:
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
-    resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset."""
+    resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
+    whose place, when it names one, replaces the one `[defaults]` names. On a scratch
+    launch a `[defaults]` relaunch holds `off`, as `resolve` holds it."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
     effective.update({k: v for k, v in defaults.items() if k in rows})
+    if [k for k in PLACE if catalog.is_set(values.get(k))]:
+        effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
+    if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
+            and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
+        effective[RECYCLE_AT_LIMIT] = "off"
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
@@ -998,10 +1002,13 @@ def resolve(request, *, presets: Presets | None = None,
             available: Callable[[str], bool] | None = None) -> Resolved:
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
-    holding its shipped default. Reads projects when a place needs it. Raises a
-    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
-    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
-    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
+    holding its shipped default. A scratch launch holds `recycle_at_limit = off`, with
+    the `SCRATCH_RECYCLE_OFF` warning, when `relaunch` came from `[defaults]`; typed or
+    set by the preset, the pair is refused (`catalog.ScratchRecycle`). Reads projects when
+    a place needs it. Raises a `catalog.Refused`: `UnknownPreset`, `BadPreset`,
+    `OffPosture`, `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`,
+    `ProjectsBusy`, or the catalog's `BadValue`; a `moxi.config.ConfigError` when the
+    file can't be read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
     preset, harness, place = laid.preset, laid.harness, laid.place
@@ -1018,6 +1025,9 @@ def resolve(request, *, presets: Presets | None = None,
     values["cwd"] = cwd or ""
     values["scratch"] = scratch
     values["project"] = project.key if project is not None else ""
+    if scratch and _default_relaunch(values, sources):
+        values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
+        warnings.append(SCRATCH_RECYCLE_OFF)
 
     _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
@@ -1060,6 +1070,21 @@ def resolve(request, *, presets: Presets | None = None,
         agents=tuple(project.agents) if project is not None else (),
         identity=identity, scope=scope, posture=str(posture), target=target,
         off_posture=off_posture, links=frozenset(links), warnings=tuple(warnings))
+
+
+#: The row that recycles a launch at its context limit.
+RECYCLE_AT_LIMIT = "recycle_at_limit"
+#: The warning of a scratch launch whose `recycle_at_limit = relaunch` came from
+#: `[defaults]`: a scratch launch can't recycle itself, so that launch holds `off`.
+SCRATCH_RECYCLE_OFF = ("recycle_at_limit relaunch is left out: a scratch launch can't "
+                       "recycle itself, so the default relaunch holds off here")
+
+
+def _default_relaunch(values: Mapping[str, object], sources: Mapping[str, str]) -> bool:
+    """Whether `recycle_at_limit = relaunch` came from `[defaults]` (or the shipped
+    default), which reach every launch, not from the preset named or a flag."""
+    return (values.get(RECYCLE_AT_LIMIT) == "relaunch"
+            and sources.get(RECYCLE_AT_LIMIT) in (SHIPPED, DEFAULTS))
 
 
 #: The row holding a headless launch's exit rule; each value is one `--exit` of comms'

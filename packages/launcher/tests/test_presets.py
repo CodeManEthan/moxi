@@ -1275,9 +1275,19 @@ def test_a_preset_that_sets_scratch_and_relaunch_is_flagged():
     assert found[0].hint == "recycle with compact, or launch in a directory"
 
 
-def test_defaults_that_set_scratch_and_relaunch_are_flagged_alone():
-    found = errors('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n', RECYCLES)
-    assert [(p.where, p.code) for p in found] == [("defaults", "scratch-recycle")]
+def test_a_defaults_relaunch_is_not_flagged_on_a_scratch():
+    # `[defaults]` reaches every launch, so its relaunch holds off on a scratch one.
+    for text in ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'
+                 '[seat.s]\nposture = "go"\n'):
+        assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_a_preset_place_replaces_the_defaults_scratch_in_the_check():
+    text = ('[defaults]\nscratch = true\n'
+            '[seat.s]\ncwd = "/work"\nrecycle_at_limit = "relaunch"\n')
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
 
 
 def test_a_preset_meeting_the_defaults_in_the_pair_is_flagged():
@@ -1299,3 +1309,31 @@ def test_resolve_refuses_a_scratch_set_to_relaunch():
         resolve('[seat.s]\nscratch = true\n', RECYCLES, seat="s",
                 typed={"recycle_at_limit": "relaunch"})
     assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+
+
+def test_resolve_refuses_a_scratch_whose_preset_sets_relaunch():
+    for text in ('[seat.s]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'):
+        with pytest.raises(catalog.ScratchRecycle):
+            resolve(text, RECYCLES, seat="s")
+
+
+@pytest.mark.parametrize("text, asked", [
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+     {"seat": "s"}),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n', {"typed": {"scratch": True}}),
+    ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n', {})])
+def test_a_defaults_relaunch_holds_off_on_a_scratch_with_a_warning(text, asked):
+    got = resolve(text, RECYCLES, **asked)
+    assert got.scratch and got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert presets.SCRATCH_RECYCLE_OFF in got.warnings
+    assert "recycle_at_limit" not in got.chosen
+
+
+def test_a_defaults_relaunch_stays_outside_a_scratch(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    got = resolve('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"), typed={"target": "slot"})
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert presets.SCRATCH_RECYCLE_OFF not in got.warnings

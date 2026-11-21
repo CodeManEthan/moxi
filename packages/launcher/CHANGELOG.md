@@ -23,8 +23,9 @@
   or at `1x` when it warns at none.
 - A scratch launch can't set `--recycle-at-limit relaunch` (`scratch-recycle`, exit 3): a
   scratch has no notes directory to keep a handoff in. Its preview refuses it too, on the
-  command line and the page, and `presets check` flags a preset or `[defaults]` that sets
-  both. `compact` is open to it. A scratch
+  command line and the page, and `presets check` flags a preset that sets it and
+  launches in a scratch. A `[defaults]` relaunch holds `off` on a scratch launch, with a
+  warning. `compact` is open to it. A scratch
   launch recorded with the option before is refused the self relaunch, gets no recycle
   line, and recycles `off` when it is relaunched or resumed, with a warning.
 - A relaunch of a launch that names no model comes back on the model the session last
