@@ -16,7 +16,7 @@ sessions names the host's package. When that load fails, importing this package 
 * At most two calls run at once, each in a thread of its own, ended at 20 seconds: the
   host's `Limit`, one for the provider.
 * `start(env)` keeps the environment the roots are read with for the status rows, and
-  never raises: a missing root or set shows in `status()`, and the tools refuse per call.
+  whose home folder the tools' path cuts use, and never raises: a missing root or set shows in `status()`, and the tools refuse per call.
 * `status()` gives the `redaction` row and the `roots` row.
 """
 
@@ -67,6 +67,7 @@ class Sessions:
     async def start(self, env: Mapping[str, str]) -> None:
         self.env = dict(env)
         self.reader.env = self.env
+        self.lister.env = self.env
 
     async def stop(self) -> None:
         return None

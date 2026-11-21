@@ -225,6 +225,20 @@ def test_the_work_dir_is_cut_between_the_redaction_s_passes():
     assert scrubbed == "app"
 
 
+def test_a_name_has_its_local_paths_cut_between_the_redaction_s_passes():
+    names = ["fix /home/someone/x/y", "plain name, no path", f"see /home/someone/{SLASHED}"]
+    newest, _ = fake_newest([{**ROW, "session": f"s{n}", "name": name}
+                             for n, name in enumerate(names)])
+    _, provider = built(newest=newest)
+    result, _ = call(provider, "list_sessions", {})
+    cut, plain, slashed = (row["name"] for row in result.structured["sessions"])
+    assert cut == "fix y"
+    assert plain == "plain name, no path"
+    # Cut first, the name would end in the secret's last part, `i2Ow4`.
+    assert slashed == "see [REDACTED:high-entropy-slash-run]"
+    assert "/home/someone" not in result.text
+
+
 def test_a_work_dir_the_scrub_leaves_empty_is_none():
     newest, _ = fake_newest([{**ROW, "folder": "\u200b"}])
     _, provider = built(newest=newest)
