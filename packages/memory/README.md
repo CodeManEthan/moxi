@@ -626,16 +626,22 @@ past the newest 500 that do, isn't found; `moxi memory search` at the machine fi
 texts cut, redacted only with its own `redact.sets`, so the text within 64 characters of
 a stored cut, widened to the next whitespace, shows as `[REDACTED:cut-edge]`: a secret
 the cut split could leave a part no rule matches. Then the whole text goes through the
-chat redaction, which makes each run of spaces, tabs and newlines one space between its
-two passes, so its last pass sees the text as the snippet shows it: a key and a value
-blank lines apart, which one space would join, are redacted. Then the snippet is taken
-from the redacted text around the words, at most 64 tokens and 300 characters, cut at a
-space, with `…` where it leaves text out and no marks around the words. Nothing else
-changes it.
+chat redaction. Between its two passes it makes each run of spaces, tabs and newlines one
+space, then cuts each local path to its last segment and shows each loopback address as
+`local`, as `read_session` does (sessions' `cut_local`): `/home/you/notes/x.md` shows as
+`x.md`, `http://localhost:8080/api` as `local`. So its last pass sees the text as the
+snippet shows it: a key and a value blank lines apart, which one space would join, are
+redacted. Then the snippet is taken from the redacted text around the words, at most 64
+tokens and 300 characters, cut at a space, with `…` where it leaves text out and no marks
+around the words. Nothing else changes it. The words must match the text after the cut,
+so a row whose only match for a word was inside a path (`zircon` in
+`/home/you/zircon/run.sh`) is dropped, as a row whose word sat only in a redacted value
+is.
 
 **Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
-redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
-snippets, project labels, notes, and an id that isn't in a session id's shape. Session
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode,
+with the path cut between its two passes: snippets, project labels, notes, and an id
+that isn't in a session id's shape. Session
 ids, harness names, kinds, writers, times, counts and flags go as they are. The text part
 joins a hit's project label and snippet into a line, so it goes through `chat_redact`
 again whole: a label such as `keycloak` before `user: <value>` makes a keyed shape that
@@ -659,7 +665,7 @@ with rows that record no writer, and a failure when it or memory's sets can't be
 and a `memory redaction` row (whether the chat sets load, and secrets' engine).
 
 **The call log** records `words` (how many), `hits`, `hits_dropped` (rows whose words
-matched only text the redaction hid), `unscanned`, `redactions`, `cut` and `refusal`. It
+matched only text the redaction hid or a path the cut shortened), `unscanned`, `redactions`, `cut` and `refusal`. It
 never holds the words searched for, text read or a session id.
 
 What a chat that reads this tool can do with what it read, and what redaction doesn't

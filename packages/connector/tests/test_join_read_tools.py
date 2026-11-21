@@ -86,7 +86,8 @@ def _memory_config() -> dict:
 def world(tmp_path):
     """A Claude Code session under the test's home holding the canary, memory's index of
     it, and a notes root with a note holding the canary whole and split by an invisible
-    character. Gives the home folder."""
+    character. The model's turn also names a file by its full path under the home folder
+    and a loopback address. Gives the home folder."""
     home = os.environ["HOME"]
     project = f"{home}/work/proj-a"
     t = sessions_api.testing.ClaudeTranscript(sessions_api.root("claude"),
@@ -94,7 +95,8 @@ def world(tmp_path):
     t.user(f"deploy{ZWSP} the widget with {CANARY} {RLO}today", origin="human")
     req = t.request()
     req.tool_use("Read", {"file_path": f"{project}/src/widget.py"})
-    t.assistant(f"The widget deploy is done; the key {CANARY} worked.")
+    t.assistant(f"The widget deploy is done; the key {CANARY} worked. Logged to "
+                f"{project}/docs/deploy-log.md, live at http://localhost:8080/status.")
     t.write()
     report = ingest.run("walk", config=_memory_config(), launcher=links.Link(links.NONE),
                         then=lambda args: None)
@@ -225,6 +227,11 @@ def test_each_read_tool_answers_through_the_door_redacted_and_unchanged_by_the_s
     hits = got["search_memory"]["structuredContent"]["hits"]
     assert hits and {h["session"] for h in hits} == {SESSION}
     assert {h["writer"] for h in hits} <= {"person", "model"}
+    # the planted path and loopback address come back cut, as read_session cuts them
+    found = _shown(got["search_memory"])
+    assert "Logged to deploy-log.md, live at local" in found, found
+    assert "Read(widget.py)" in found
+    assert world not in found and "/docs/" not in found and "localhost" not in found
 
     sessions = got["list_sessions"]["structuredContent"]["sessions"]
     [mine] = [s for s in sessions if s["session"] == SESSION]

@@ -544,6 +544,50 @@ def test_a_guessed_hidden_value_answers_as_a_word_in_no_row(db):
         assert guess.text == miss.text
 
 
+# --- local paths ---------------------------------------------------------------------------
+
+def test_a_local_path_in_a_snippet_shows_as_its_last_segment(db):
+    put(db, "deploy notes kept in /home/someone/notes/x.md for later")
+    result, _ = search({"words": "deploy"})
+    assert snippets(result) == ["deploy notes kept in x.md for later"]
+    assert "/home/" not in result.text and "someone" not in result.text
+    assert result.text.splitlines()[1].endswith("user: deploy notes kept in x.md for later")
+
+
+def test_a_loopback_origin_in_a_snippet_shows_as_local(db):
+    put(db, "deploy answered on http://localhost:8080/api/v1 and http://127.0.0.1:9/x")
+    result, _ = search({"words": "deploy"})
+    assert snippets(result) == ["deploy answered on local and local"]
+    assert "localhost" not in result.text and "127.0.0.1" not in result.text
+
+
+def test_a_local_path_in_a_project_label_shows_as_its_last_segment(db):
+    put(db, "deploy the widgets", label="/home/someone/work/widgets")
+    result, _ = search({"words": "deploy"})
+    assert result.structured["hits"][0]["project"] == "widgets"
+    assert "someone" not in result.text
+
+
+def test_a_hit_whose_word_matches_only_inside_a_path_is_dropped(db):
+    put(db, "the notes live in /home/someone/zircon/x.md today")
+    result, fields = search({"words": "zircon"})
+    assert result.structured["hits"] == []
+    assert fields["hits_dropped"] == 1
+    other, _ = search({"words": "nowhereword"})
+    assert result.structured == other.structured and result.text == other.text
+
+
+def test_a_word_only_inside_a_path_answers_as_a_word_in_no_row(db):
+    put(db, "deploy from /home/someone/zircon/run.sh now", at=500.0)
+    for n in range(walk.WINDOW + 20):
+        put(db, f"deploy step {n}" + (" deploy" * (n % 3)), at=float(n))
+    for limit in (1, 20):
+        guess, _ = search({"words": "deploy zircon", "limit": limit})
+        miss, _ = search({"words": "deploy nowhereword", "limit": limit})
+        assert guess.structured == miss.structured
+        assert guess.text == miss.text
+
+
 def test_a_rebuild_that_switches_generations_leaves_the_search_its_reader(db):
     put(db, "deploy first", at=2.0)
     put(db, "deploy second", at=1.0)
