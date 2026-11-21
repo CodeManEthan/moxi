@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `question_mode.origins` is renamed `prompt.own_origins`, default still
+  `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
+  `prompt` event carries `own`, true when its origin is on that list, and question mode's
+  reminder reads it. A config file that still sets the old key is told to set the new one.
+  On Codex a prompt typed in the window now carries the origin `composer`, and one the
+  host handed in for a delivery carries none.
 - Question mode's prompt reminder leaves the agent to judge whether the questions are
   wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
   end of its output once they are answered. "pros", as voice input spells "prose", now

@@ -120,14 +120,16 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   Default 3000.
 - `after_tool.wait_ms`: how long the after-tool listeners may take on one tool call,
   together, in milliseconds. Default 300.
-- `question_mode.origins`: the prompt origins question mode counts as yours. Default
-  `["composer", "bridge"]`: `composer` is a prompt typed at this terminal, `bridge` one
-  sent from the Claude apps through Remote Control.
+- `prompt.own_origins`: the prompt origins that count as yours, which question mode and
+  every prompt listener read (a `prompt` event's `own`). Default `["composer", "bridge"]`:
+  `composer` is a prompt typed at this terminal, `bridge` one sent from the Claude apps
+  through Remote Control. On Codex a prompt typed in the window is `composer`.
 - `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
   question-mode reminder. Default `["prose", "pros"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
-`stop_handler.wait_ms` instead.
+`stop_handler.wait_ms` instead. `question_mode.origins` is renamed: a file that still sets
+it is told to set `prompt.own_origins` instead.
 
 ## The panel
 

@@ -693,16 +693,44 @@ def test_a_subagents_prompt_gets_no_listener_text_and_raises_no_prompt_event(
         out = ping(monkeypatch, harness, "UserPromptSubmit", {
             "session_id": "thread-1", "turn_id": "turn-2", "prompt": "fix the build"})
         assert context_of(out) == "remember the plan"
-        assert [(e.event, e.text, e.origin) for e in events] == [
-            ("prompt", "fix the build", None)]
+        assert [(e.event, e.text, e.origin, e.own) for e in events] == [
+            ("prompt", "fix the build", "composer", True)]
 
         # A guard that wants the prompts gets the main turn's, never the subagent's task.
         ping(monkeypatch, harness, "PreToolUse", pre("Bash", turn_id="turn-2"))
-        assert CALLS[-1].prompts == (Prompt(None, "fix the build"),)
+        assert CALLS[-1].prompts == (Prompt("composer", "fix the build"),)
         ping(monkeypatch, harness, "UserPromptSubmit", {
             "session_id": "thread-1", "turn_id": "turn-3", "prompt": "now ship it"})
         ping(monkeypatch, harness, "PreToolUse", pre("Bash", turn_id="turn-3"))
-        assert CALLS[-1].prompts == (Prompt(None, "now ship it"),)
+        assert CALLS[-1].prompts == (Prompt("composer", "now ship it"),)
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_prompt_the_host_handed_in_carries_no_origin_and_a_typed_one_is_composer(
+        monkeypatch, turns_env):
+    events = []
+    endpoint, harness, _ = host(turns_env, registry=prompt_registry(events))
+    try:
+        def submit(turn_id, text):
+            ping(monkeypatch, harness, "UserPromptSubmit", {
+                "session_id": "thread-1", "turn_id": turn_id, "prompt": text})
+
+        harness._pending_delivery = "d-1"          # the host's turn/start is out
+        submit("turn-4", "a digest")
+        harness._pending_delivery = None
+        submit("turn-4", "typed in the window")    # joins the turn; no steer handed in
+        monkeypatch.setattr(endpoint, "delivery_text",
+                            {"d-2": "other", "d-3": "steered text"}.get)
+        harness._steering.update({"d-2", "d-3"})
+        submit("turn-4", "steered text")           # the steer whose text it is
+        submit("turn-4", "neither")                # two steers out, no text matches
+        harness._steering.clear()
+        submit("turn-5", "a new turn")             # no delivery opened it
+        assert [(e.text, e.origin, e.own) for e in events] == [
+            ("a digest", None, False), ("typed in the window", "composer", True),
+            ("steered text", None, False), ("neither", "composer", True),
+            ("a new turn", "composer", True)]
     finally:
         end_endpoint(endpoint)
 

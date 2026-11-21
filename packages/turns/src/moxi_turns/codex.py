@@ -322,6 +322,8 @@ class CodexHarness(Harness):
         self._reported_turns: set[str] = set()
         self._settled_turns: set[str] = set()
         self._steering: set[str] = set()
+        #: The last main turn a UserPromptSubmit named: a later prompt naming it joined it.
+        self._prompted_turn: str | None = None
         self._ending: str | None = None    # the turn whose Stop was answered unblocked
         self._steers_out = 0               # turn/steer requests sent and not yet answered
         self._steers_idle = threading.Condition(self._lock)
@@ -404,7 +406,7 @@ class CodexHarness(Harness):
         self.guards.reload()
         return self.guards.take_notes()
 
-    def prompt_seen(self, turn_id, text: str | None) -> None:
+    def prompt_seen(self, turn_id, text: str | None, origin: str | None = None) -> None:
         """A main-loop prompt: the current main turn's prompts, for guards that want
         them. A prompt in another turn starts the list again."""
         if not isinstance(text, str):
@@ -414,7 +416,34 @@ class CodexHarness(Harness):
             held, prompts = self._prompts
             if turn_id is None or turn_id != held:
                 prompts = ()
-            self._prompts = (turn_id, (*prompts, Prompt(None, text)))
+            self._prompts = (turn_id, (*prompts, Prompt(origin, text)))
+
+    def prompt_delivery(self, turn_id, text: str | None) -> str | None:
+        """The delivery a main-loop UserPromptSubmit is the text of, or None for a prompt
+        typed in the window.
+
+        A turn's first prompt is a delivery's when the host has a `turn/start` out for
+        one (it waits to be tied), or when the turn it names is the open turn a delivery
+        opened. A later prompt in the same turn is a steer's when one is being handed in
+        and its text equals the prompt's (or only one is), else the window's."""
+        turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+        with self._lock:
+            first = turn_id is None or turn_id != self._prompted_turn
+            if turn_id is not None:
+                self._prompted_turn = turn_id
+            pending = self._pending_delivery
+            steering = sorted(self._steering)
+        endpoint = self.endpoint
+        if first:
+            if pending is not None:
+                return pending
+            return endpoint.opened_by(turn_id) if turn_id is not None else None
+        if not steering:
+            return None
+        same = [i for i in steering if endpoint.delivery_text(i) == text]
+        if same:
+            return same[0]
+        return steering[0] if len(steering) == 1 else None
 
     def context_tokens(self) -> int | None:
         """The main thread's context, in tokens, from its last token reading; None

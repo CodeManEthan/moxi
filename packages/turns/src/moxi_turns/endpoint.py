@@ -626,10 +626,24 @@ class Endpoint:
 
     def prompt(self, text: str | None = None, origin: str | None = None) -> str | None:
         """A prompt entered (UserPromptSubmit), with its text and its origin's kind where
-        the harness gives them. Returns the listeners' added context."""
+        the harness gives them. The event's `own` is true when the origin is on
+        `prompt.own_origins`, read now. Returns the listeners' added context."""
         if self._gone is not None:
             return None
-        return self._ask(self._event("prompt", text=text, origin=origin))
+        return self._ask(self._event("prompt", text=text, origin=origin,
+                                     own=self._own(origin)))
+
+    def _own(self, origin: str | None) -> bool:
+        """Whether a prompt of `origin` is the person's own: the origin is on
+        `prompt.own_origins`. A prompt with no origin never is."""
+        if origin is None:
+            return False
+        try:
+            listed = self._config.use(turns_config.OWN_ORIGINS)
+        except Exception as exc:  # noqa: BLE001 - a config that reads nothing counts none
+            log.warning("prompt.own_origins does not read (%s); the prompt is not own", exc)
+            return False
+        return origin in {o for o in listed or () if isinstance(o, str)}
 
     def after_tool(self, tool: str, *, tool_use_id: str | None = None,
                    agent_id: str | None = None, is_error: bool | None = None,
@@ -817,6 +831,21 @@ class Endpoint:
         with self._lock:
             d = self._deliveries.get(delivery_id)
             return d is not None and d.state in (_QUEUED, _INFLIGHT) and not d.expired
+
+    def opened_by(self, turn_id: str) -> str | None:
+        """The delivery that opened the open turn `turn_id`, or None (no such turn is
+        open, or the person's own opened it)."""
+        with self._lock:
+            turn = self.ledger.open
+            if turn is None or turn.turn_id != turn_id:
+                return None
+            return turn.delivery_id
+
+    def delivery_text(self, delivery_id: str) -> str | None:
+        """The text of a delivery the endpoint still keeps, or None."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            return None if d is None else d.spec.text
 
     def learn_session(self, session_id: str | None) -> bool:
         """The adapter learned the session's id (on Claude Code the runner sends it on

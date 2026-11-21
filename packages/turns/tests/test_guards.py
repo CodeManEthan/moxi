@@ -468,7 +468,7 @@ def test_turns_settings_declare_the_keys_with_their_defaults():
               "guards.question_mode": ("bool", False, "use"),
               "guards.max_wait_ms": ("int", 3000, "use"),
               "after_tool.wait_ms": ("int", 300, "use"),
-              "question_mode.origins": ("list", ["composer", "bridge"], "use")}
+              "prompt.own_origins": ("list", ["composer", "bridge"], "use")}
     for name, (kind, default, read) in expect.items():
         key = keys[name]
         assert (key.type, key.default, key.read, key.env) == (kind, default, read, None)
@@ -478,6 +478,8 @@ def test_turns_settings_declare_the_keys_with_their_defaults():
 @pytest.mark.parametrize("text, old, new", [
     ('[guards]\non = ["turns.removal"]\n', "guards.on", "guards.run"),
     ("[start]\nlimit = 100\n", "start.limit", "start.limit_chars"),
+    ('[question_mode]\norigins = ["composer"]\n', "question_mode.origins",
+     "prompt.own_origins"),
 ])
 def test_a_renamed_key_is_refused_naming_the_new_one(turns_env, text, old, new):
     write_config(turns_env, text)
