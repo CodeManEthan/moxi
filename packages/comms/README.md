@@ -37,7 +37,9 @@ Claude Code, Codex and OpenCode sessions take part through adapters. A Claude Co
 session `moxi comms claude` launches gets an adapter process of its own, which binds the
 session's name and delivers mail into the session through Moxi turns, the one way into a
 harness session: `moxi comms claude` loads turns' Claude plugins into the session it
-starts. Codex and OpenCode work through experimental adapters.
+starts. Codex and OpenCode work through experimental adapters. Each digest comms hands
+turns names comms as the module that asked and the senders of its messages, so a
+session's `prompt` listeners can tell a comms delivery from a prompt the user typed.
 
 Two words come up throughout. The **operator** is the human running this system: you,
 sending from your own terminal as the `operator` identity; the operator's messages are
