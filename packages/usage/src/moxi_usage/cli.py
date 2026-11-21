@@ -532,7 +532,8 @@ def _restart_point(args: argparse.Namespace, prog: str) -> int:
 
 def restart_lines(found: Any) -> list[str]:
     """The text of `moxi usage restart-point`: when and over what it was measured, then
-    one line per model and population with S, P, g and each mark."""
+    one line per model and population with S, P, g and each mark, a borrowed row naming
+    its lender."""
     from .thresholds import MARKS
 
     if found.doc is None:
@@ -551,6 +552,9 @@ def restart_lines(found: Any) -> list[str]:
             each = marks[mark]
             cells.append(f"{mark} {each.tokens:,}" if each.available else f"{mark} -")
         said = "" if "fallback" not in row else ", its main row"
+        if row.get("borrowed_from"):
+            said = (f", borrowed from {row['borrowed_from']}"
+                    + ("'s main row" if "fallback" in row else ""))
         w = row.get("w")
         line = (f"  {model:<24} {population:<8} n {row.get('n')}{said}: S {row.get('S'):,.0f}"
                 f", P {row.get('P'):,.0f}, g {row.get('g'):,.0f}, "
@@ -559,10 +563,14 @@ def restart_lines(found: Any) -> list[str]:
         reasons = dict.fromkeys(each.reason for each in marks.values() if not each.available)
         for reason in reasons:
             lines.append(f"  {'':<24} {'':<8} unavailable: {reason}")
+    borrowed = {(model, population): row["borrowed_from"]
+                for model, population, row, _ in found.rows if row.get("borrowed_from")}
     for model, populations in sorted((doc.get("thin") or {}).items()):
         for population, count in sorted(populations.items()):
+            lender = borrowed.get((model, population))
             lines.append(f"  {model:<24} {population:<8} {count} files, under the 20 a "
-                         "row needs")
+                         "row needs"
+                         + (f"; borrows {lender}'s row" if lender else ""))
     for model, why in sorted((doc.get("no_w") or {}).items()):
         lines.append(f"  {model:<24} {'':<8} no row: {why}")
     return lines

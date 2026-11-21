@@ -160,6 +160,21 @@
   `moxi_usage.windows`, which imports only `math`, so the segment loads without the
   readings store. `readings` and `limits` import them back, so every name is where it
   was and nothing behaves differently.
+- The shipped model table prices `claude-fable-5-2` and `claude-mythos-5-2` ($8 / $40,
+  cache reads $0.20, 5-minute writes $10, 1-hour $16, fast mode $16 / $80) and
+  OpenCode's free `big-pickle`, `minimax-m3.1-flash-free` and `space-bunny-free` (at 0),
+  each a supplement row with its source and date, where their tokens were unpriced. The
+  LiteLLM snapshot is the same, so no other price moves. A Fable or Mythos session now
+  gets its own read and write multipliers; a free model still gets no restart-point row,
+  since its input price is 0.
+- A model named in `thresholds.BORROWED_ROW` that has no measured row of its own for a
+  population uses the named model's row for it: `claude-fable-5-2` borrows
+  `claude-opus-5-5`'s, so a Fable session gets warn-at marks before it has the 20 files a
+  row needs. Only S, P and g are borrowed; `r` and `w` come from the model's own prices.
+  Its own row wins once the measure writes one. A `Threshold` names the lender in
+  `borrowed_from`, as do `/api/restart-point` and `restart-point --json`; `restart-point`
+  prints the row as `borrowed from claude-opus-5-5` and the thin line adds `borrows
+  claude-opus-5-5's row`; an unavailable reason says when the row was borrowed.
 
 ## 0.2.1 (2026-11-10)
 

@@ -7,6 +7,9 @@
   the read keeps and with no line decoded beyond those a filtered read decodes now. The
   batches of a transcript from no cursor name every prompt id it wrote. A Codex or
   OpenCode batch's is empty.
+- `read` and `list --text` redact a secret beside a `gitleaks:allow` mark or on a line a
+  rule's allowlist names, and a token an invisible character splits, through secrets'
+  `redact`, which no longer keeps either. sessions' code is unchanged; tests pin it.
 - The page's list keeps its filters, find text and how far each group was paged in its
   own address (`/m/sessions/?harness=claude&when=7d&more=recent:1`), so Back from a
   transcript, a reload and a shared link bring it back as it was; Back and a reload also

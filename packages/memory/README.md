@@ -151,6 +151,18 @@ index. `--relabel` also derives each session's project
 label again from its folder where that folder still exists; a session whose folder is gone
 keeps its label.
 
+**After secrets' `redact` changes.** No ingest rebuilds the index, and none redacts again
+the rows already stored: an ingest stores its new rows under the `redact` installed now
+and leaves the rest as they are. Each index records which `redact` stored its rows
+(secrets' `REDACT_VERSION`; an index without the record counts as version 1). When an
+upgrade brings a secrets whose version is higher, the doctor's `index` row warns, and the
+fix is to run `moxi memory reindex` once. That rebuild is a version rebuild: before it
+asks, `reindex` says that it redacts every row again, drops no session and no row of a
+source it can't read to its end, keeps those rows redacted again and trimmed at their
+stored cuts, that a row of a source it reads to its end which the source no longer gives
+still leaves (unless its session has a source it can't read), and that a later
+`reindex` drops what a rebuild drops. The version rebuild is described under Redaction.
+
 ### Status
 
 `moxi memory status` prints the index's generation and tokenizer; rows per tier and
@@ -342,6 +354,34 @@ secret longer than 64 KiB that straddles the window's edge could leave a part in
 kept. A text secrets reports it could not scan is stored as `[REDACTED:unscanned]` alone.
 What search prints, and what the library returns, is the redacted text.
 
+secrets' `redact` keeps no secret whole for text beside it: a secret on a line marked
+`gitleaks:allow`, or on a line one of a rule's line allowlists names, is redacted. It also
+reads past the characters a renderer may show as nothing (controls, format characters
+such as the zero-width space and the soft hyphen, and the rest Unicode names
+default-ignorable), so a token one of them splits is redacted too, the characters inside
+it included, and every character outside a secret is stored as it was.
+
+**Rows stored under an older `redact`.** Rows already in the index were redacted by the
+`redact` installed when they were stored. The rebuild a typed `moxi memory reindex` runs
+over an index whose `redact` version is below the installed secrets' redacts every row
+again. It reads every source from its start, as any rebuild does, so a source it reads to
+its end gives its rows afresh. Then, source by source, it keeps everything of each source
+it didn't read to its end: a deleted transcript or subagent file, a file in a folder that
+didn't answer, a compressed rollout, a harness `harnesses` leaves out, subagents' files
+with `index.include_subagents` off, an imported Codex thread, a read that failed. It keeps
+their rows and tails, read positions and secret-path calls, and every session in the
+session table, so it drops no session. A row is kept when any source that may have given
+it is one it didn't read to its end, so in a session with such a source, a row a source it
+did read no longer gives is kept too. Each kept text is redacted again with today's
+`redact.sets`, cut to today's sizes and given the session table's label. A kept text
+that was cut first loses its cut edge: from the cut to the first whitespace at least 64
+characters away, or to the text's other end when there is none, and its marker counts
+what went, since a secret the older `redact` let through could straddle the cut and leave
+a fragment no rule matches. The characters `redact` reads past count nothing toward the
+64 and don't end the span. A secret written over several lines, cut, from a source that
+is gone, keeps the lines further than that from the cut. Kept rows of a folder that
+didn't answer stay trimmed until a later rebuild reads that folder.
+
 A tool call is a secret-path call when any whitespace-separated word of a string in its
 input is a path secrets says must not be read (`.env*`, `auth.json`, anything under
 `.ssh/`, `*.pem` and the rest of secrets' list); strings inside lists, nested objects and
@@ -381,6 +421,10 @@ longer open it.
   it starts, and those are the ones a long rebuild reads late. A transcript deleted
   between the listing and its read is an error in the root, so that rebuild drops no
   Claude Code session; run `reindex` again, as `status` says.
+- **The version rebuild drops nothing.** The one rebuild after an upgrade that raises
+  secrets' `redact` version keeps every session and every row of a source it can't read
+  (see Redaction). The rebuild after it is an ordinary one again: it drops each session
+  whose transcript is gone, and the rows it kept of a gone source in a session it reads.
 - **A session read from an archive copy** loses the lines written after the copy was made
   once the live file is gone, since it is read from the first folder that holds it.
 
@@ -474,7 +518,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 
 | row | ok | otherwise |
 |---|---|---|
-| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since; `fail` when it can't be read (fix for each: `moxi memory reindex`) |
+| `index` | the generation, schema, tokenizer, `redact version N` (which secrets `redact` stored its rows) and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions, or redacted the index again | `warn` with no index yet, when a rebuild was killed before it finished and none has finished since, or while the redact version is below the installed secrets' (rows stored before may hold secrets today's `redact` catches); `fail` when it can't be read (fix for each: `moxi memory reindex`) |
 | `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet (fix: `moxi memory reindex`), for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
 | `folders` | each folder of each harness as the last run found it, from the index; it tests none itself | `off` with no index; `warn` for a folder that didn't answer the last run (since when and why: offline, failed during the run with its first error's path, or lists nothing, with which of the two facts holds: the sources memory read from it, or when a listing last showed it holding an entry), an archive folder never listed whole, or one the last rebuild didn't read (fix: make it answer, or take it off sessions' config; its sessions then leave at the next `moxi memory reindex`; for an archive folder that lists nothing, take it off sessions' config if you emptied it on purpose), and for a folder walked before that sessions' config no longer names, whose sessions leave at the next rebuild unless another folder holds them (fix: put it back in sessions' config, or let them go) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |

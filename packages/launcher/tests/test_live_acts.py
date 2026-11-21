@@ -162,24 +162,33 @@ def processes_running(marker: str) -> list[int]:
 
 
 #: The person window these tests set (`relaunch.person_s`), short of the default two
-#: minutes. Claude redraws its screen for some seconds after a turn ends (a hint, its
-#: status line), and slots counts that as the pane's activity.
+#: minutes, so a hold for a person ends soon in a test.
 PERSON_S = 10
 
 
 def settled(row: store.LaunchRow) -> None:
-    """Wait until the slot's pane has drawn nothing for longer than `PERSON_S`, so the
-    quiet read's person check passes."""
-    from moxi_launcher import slots
+    """Wait until the session's quiet read holds nothing. The answer shows in the pane
+    before turns closes the turn, and an act refuses or waits on a read that holds."""
+    from moxi_launcher import quiet, slots, target
 
     api_ = slots.api()
+    held: list[str] = []
 
-    def quiet() -> bool:
-        use = api_.pane_use(row.slot)
-        return (use.pane_activity is not None
-                and time.time() - use.pane_activity > PERSON_S + 1)
-    wait_for(quiet, timeout=120, interval=1.0,
-             what=f"slot {row.slot}'s pane to draw nothing for {PERSON_S} s")
+    def is_quiet() -> bool:
+        found = target.find(row.session_id, slots_api=api_)
+        try:
+            if found.session is None:
+                held[:] = ["the session is not live"]
+                return False
+            reading = quiet.read(found.session, slot=row.slot, slots_api=api_,
+                                 person_s=PERSON_S)
+            held[:] = [str(hold) for hold in reading.holds]
+            return reading.quiet
+        finally:
+            found.close()
+    wait_for(is_quiet, timeout=120, interval=1.0,
+             what=lambda: f"session {row.session_id}'s quiet read to hold nothing; "
+                          f"held: {'; '.join(held)}")
 
 
 def claude_in_slot(work: Path, env: dict[str, str], brief: str, *, extra=(), **typed):

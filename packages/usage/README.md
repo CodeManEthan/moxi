@@ -56,8 +56,10 @@ keeps every row that prices text generation per token (LiteLLM's `chat`, `respon
 lists it for), stores prices in dollars per million tokens, and keeps the prompt-size and
 service tiers LiteLLM gives (`above_200k`, `priority`, `flex`). It adds the rows of
 `data/supplement.toml`, facts LiteLLM lacks, each with its source and the date it was
-read: fast-mode prices, the `[1m]` long-context window, and each provider's default cache
-multipliers. The snapshot's date and its file's sha256 are recorded in the table.
+read: fast-mode prices, the `[1m]` long-context window, each provider's default cache
+multipliers, and rows of their own for models newer than the snapshot (Claude Fable 5.2
+and Mythos 5.2, and OpenCode's free models). The snapshot's date and its file's sha256
+are recorded in the table.
 
 Three layers, a later one winning for a model id:
 
@@ -259,13 +261,19 @@ the harness marked a person at the keyboard: Claude Code's `cli` entrypoint, Cod
 source or an originator in `restart_point.interactive_originators`; set
 `restart_point.interactive_only = false` to take every main session. A population needs
 20 files for a row; a model's subagents with no row of their own use its main row, and say
-so. A restart's write cost `w` is each model's own, from the model table: its cache-write
+so. A model named in the borrow table (`thresholds.BORROWED_ROW`: `claude-fable-5-2`
+borrows `claude-opus-5-5`'s row) uses the named model's row for a population until it has
+20 files of its own, with its own prices for `r` and `w`, and `restart-point` says which
+row it borrowed. A restart's write cost `w` is each model's own, from the model table:
+its cache-write
 price over its input price. A model priced for both 5-minute and 1-hour writes (Claude's)
 weighs the two by how much of that population's writes were for an hour; a model with one
 write price takes it, and one with none (OpenAI bills writes as input) takes 1.0. So
 Codex and OpenCode sessions get rows on their own, never Claude's `w`. A model the table
 doesn't know, or gives no input price or one of 0, has no row, and the measure names it
-with the reason. The result goes to `STATE/usage/restart-point.json`. `moxi usage
+with the reason. So OpenCode's free models, priced at 0, never get a row or a warn-at
+mark: restarting a free session saves nothing. The result goes to
+`STATE/usage/restart-point.json`. `moxi usage
 restart-point` prints
 the rows and each warn-at mark (1x, 1.5x, 2x) in tokens. A mark the measure or the model
 table can't support (no row, no cache-read price) is shown as unavailable with the reason,

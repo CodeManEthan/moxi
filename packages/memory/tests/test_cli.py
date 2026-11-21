@@ -240,6 +240,26 @@ def test_reindex_says_what_a_rebuild_drops_before_it_starts_the_child(capsys, mo
     assert "process 4242" in out
 
 
+def test_reindex_over_rows_an_older_redact_stored_says_what_it_keeps(capsys, monkeypatch):
+    t = claude()
+    t.user("a prompt")
+    t.write()
+    run()
+    with index.writer() as w:
+        conn = w.connect()
+        try:
+            conn.execute("DELETE FROM meta WHERE key = ?", (index.REDACT_VERSION_KEY,))
+        finally:
+            conn.close()
+    monkeypatch.setattr(start, "spawn", lambda args: 4242)
+    code, out, _ = memory(capsys, "reindex")
+    assert code == 0
+    assert "stored under secrets' redact version 1" in out
+    assert "drops no session, and no row of a source it can't read to its end" in out
+    assert "that the source no longer gives leaves" in out
+    assert "drops each session whose transcript is gone from every folder" not in out
+
+
 def test_reindex_while_a_rebuild_runs_is_queued_behind_it(capsys, monkeypatch):
     spawned = []
     monkeypatch.setattr(start, "spawn", lambda args: spawned.append(args) or 4242)

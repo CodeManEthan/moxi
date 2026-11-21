@@ -1156,11 +1156,12 @@ def test_the_restart_point_is_the_first_mark_of_the_models_main_sessions(priced_
     before = path.read_bytes(), path.stat().st_mtime_ns, sorted(path.parent.iterdir())
     for model in MARKS_EXACT:
         assert get("/api/restart-point", model=model) == {
-            "model": model, "tokens": MARKS_EXACT[model]["1x"], "reason": None}
+            "model": model, "tokens": MARKS_EXACT[model]["1x"], "borrowed_from": None,
+            "reason": None}
     # a bracket or date suffix reads the base model's row, and the answer names that row
     assert get("/api/restart-point", model="claude-opus-5-5[1m]") == {
         "model": "claude-opus-5-5", "tokens": MARKS_EXACT["claude-opus-5-5"]["1x"],
-        "reason": None}
+        "borrowed_from": None, "reason": None}
     assert (path.read_bytes(), path.stat().st_mtime_ns,
             sorted(path.parent.iterdir())) == before
 
@@ -1180,7 +1181,7 @@ def test_the_restart_point_is_null_with_its_reason_for_a_model_the_measure_lacks
         priced_marks):
     write_params()
     body = get("/api/restart-point", model="gpt-x")
-    assert body == {"model": "gpt-x", "tokens": None,
+    assert body == {"model": "gpt-x", "tokens": None, "borrowed_from": None,
                     "reason": "the restart-point measure has no main row for gpt-x"}
     # a measure's file that does not read is a reason too, not a refusal
     body = get("/api/restart-point", model="claude-opus-5")
@@ -1194,8 +1195,19 @@ def test_the_restart_point_needs_a_model():
     status, _ = asyncio.run(ask(served(), "/api/restart-point", {}))
     assert status == 400
     body = get("/api/restart-point", model="")
-    assert body == {"model": "", "tokens": None,
+    assert body == {"model": "", "tokens": None, "borrowed_from": None,
                     "reason": "no model is known for the session"}
+
+
+def test_the_restart_point_of_a_model_that_borrows_a_row_names_the_lender(monkeypatch):
+    from test_thresholds import borrow_table, with_opus
+
+    monkeypatch.setattr(models, "table", lambda *a, **k: borrow_table())
+    write_params(with_opus())
+    assert get("/api/restart-point", model="claude-fable-5-2[1m]") == {
+        "model": "claude-fable-5-2", "tokens": 140_380,
+        "borrowed_from": "claude-opus-5-5", "reason": None}
+    assert get("/api/restart-point", model="claude-opus-5-5")["borrowed_from"] is None
 
 
 # --- limits ---------------------------------------------------------------------------------
