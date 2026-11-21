@@ -375,6 +375,16 @@ def test_commit_rules_are_applied_at_push(repo, names, remote):
     refused(push(repo, "origin", "main"), TAG)
 
 
+def test_commit_rules_reach_the_trailers_at_push_as_the_repo_sets(repo, names, remote):
+    public_repo(repo, PIECE, "repo/commit-rules",
+                sets=("main=main", "tag-pattern=" + r"\[[A-Z][0-9]+\]"))
+    commit(repo, f"Add\n\nBody.\n\nNote: see {TAG}\n", flags=("--no-verify",))
+    passed(push(repo, "origin", "main"))
+    git(repo, "config", "moxi-repo.piece.repo/commit-rules.tag-check-trailers", "true")
+    commit(repo, f"Add more\n\nBody.\n\nNote: also {TAG}\n", flags=("--no-verify",))
+    refused(push(repo, "origin", "main"), TAG)
+
+
 @pytest.mark.parametrize("setting, key", [("drop-trailer", "Claude-Session"),
                                           ("pass-trailer", "Commit-Check")])
 def test_a_leftover_key_in_the_repos_own_commit_is_refused(repo, names, remote, setting,

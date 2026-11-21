@@ -8453,7 +8453,7 @@ repo	packages/repo/src/moxi_repo/commit_proof.py	return any(os.path.lexists(os.p
 repo	packages/repo/src/moxi_repo/commit_proof.py	shape = _Shape(separators or ":", set())	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	"fail": "closed",	keep	closed	closed
 repo	packages/repo/src/moxi_repo/commit_rules.py	block_keys: set[str] = set()	keep	set	set
-repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines, which no tag check reads	keep	set	set
+repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines; tag-checked if tag_check_trailers	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	return any(name.startswith(token) for name in self.configured)	keep	any	any
 repo	packages/repo/src/moxi_repo/committer.py	"""Hold the committer's lock for the block, waiting up to `wait` seconds (None: as	keep	wait	wait
 repo	packages/repo/src/moxi_repo/committer.py	"min_interval": spec.min_interval, "message": spec.message,	use	"min_interval"	"min_interval_s"

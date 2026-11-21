@@ -259,6 +259,26 @@ def test_rule_lines_skips_empty_values():
         "- trailers this repo refuses: Round", "- a rule"]
 
 
+
+def test_with_tag_check_trailers_the_pattern_lines_say_the_trailers_are_included():
+    settings = {"tag-pattern": [TAG], "rule": ["a rule"]}
+    assert rule_lines(settings) == [f"- no text matching: {TAG}", "- a rule"]
+    for value in ("true", "maybe"):
+        assert rule_lines({**settings, "tag-check-trailers": [value]}) == [
+            f"- no text matching, trailers included: {TAG}", "- a rule"]
+    assert rule_lines({**settings, "tag-check-trailers": ["false"]}) == [
+        f"- no text matching: {TAG}", "- a rule"]
+
+
+def test_rules_says_the_trailers_are_included_when_the_setting_is_on(demo, capsys):
+    repo = demo.repo()
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE, "--set", f"tag-pattern={TAG}",
+               "--set", "tag-check-trailers=true")[0] == 0
+    code, out, _ = run(capsys, "rules", str(repo))
+    assert code == 0
+    assert f"- no text matching, trailers included: {TAG}" in out.splitlines()
+
+
 # -- the lines read without the proof piece's ------------------------------------------------
 
 def objects(repo) -> int:
