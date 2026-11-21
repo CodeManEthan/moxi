@@ -409,6 +409,21 @@ def test_a_dead_worker_makes_a_text_with_a_see_through_character_unscanned(dead_
         ("credentials", "unscanned"), ("broad", "unscanned")]
 
 
+def test_the_copy_does_not_ask_the_worker_again_for_a_set_left_unscanned(dead_worker,
+                                                                         monkeypatch):
+    real, asked = fallback.scan, []
+
+    def counting(t, set_names, *args, **kwargs):
+        asked.append(tuple(set_names))
+        return real(t, set_names, *args, **kwargs)
+    monkeypatch.setattr(fallback, "scan", counting)
+    for text in ("a " + corpus.split("value", "​"), '{\\"key\\":\\"value\\"}'):
+        asked.clear()
+        assert [(h.set, h.rule) for h in scan(text, GITLEAKS)] == [
+            ("credentials", "unscanned"), ("broad", "unscanned")]
+        assert asked == [GITLEAKS], text
+
+
 # -- nothing beside a secret keeps it -------------------------------------------------------
 
 def test_the_allow_mark_keeps_nothing_out_of_redact(engine_name):
@@ -527,8 +542,130 @@ def test_a_split_token_after_a_word_and_a_see_through_character_is_redacted(engi
         ("stripe-access-token", 4, 4 + len(token))]
 
 
+# -- escaped quotes -------------------------------------------------------------------------
+
+def json_escaped(text, times=1):
+    """`text` as JSON writes it inside a string, `times` deep."""
+    for _ in range(times):
+        text = text.replace("\\", "\\\\").replace('"', '\\"')
+    return text
+
+
+def generic_json_value(r):
+    """A value broad's generic-api-key finds after `"api_key":` in plain JSON."""
+    while True:
+        value = corpus.chars(r, 24)
+        if [h.rule for h in scan('{"api_key":"' + value + '"}', ("broad",))] == [
+                "generic-api-key"]:
+            return value
+
+
+@pytest.fixture
+def count_copies(monkeypatch):
+    """Counts the copies the scan reads: count_copies() -> the count since the last call."""
+    real = scan_mod._copy_hits
+    seen = [0]
+
+    def counting(*args, **kwargs):
+        seen[0] += 1
+        return real(*args, **kwargs)
+    monkeypatch.setattr(scan_mod, "_copy_hits", counting)
+
+    def take():
+        n, seen[0] = seen[0], 0
+        return n
+    return take
+
+
+#: Rules that need a quote, whitespace, `;` or the end after the key: (rule, sets, a
+#: value it finds, the JSON key before the value).
+ESCAPED_RULES = (
+    ("stripe-access-token", ("credentials",), corpus.stripe, "key"),
+    ("gcp-api-key", ("credentials",), corpus.google_api, "key"),
+    ("generic-api-key", ("broad",), generic_json_value, "api_key"),
+)
+
+
+@pytest.mark.parametrize("rule, sets, make, key", ESCAPED_RULES,
+                         ids=[e[0] for e in ESCAPED_RULES])
+@pytest.mark.parametrize("form", ["plain", "escaped once", "escaped twice",
+                                  "single quotes escaped"])
+def test_a_key_before_an_escaped_quote_is_found_and_replaced_alone(engine_name, rule, sets,
+                                                                   make, key, form):
+    value = make(corpus.rng(60))
+    plain = '{"' + key + '":"' + value + '"}'
+    text = {"plain": plain,
+            "escaped once": json_escaped(plain),
+            "escaped twice": json_escaped(plain, 2),
+            "single quotes escaped": plain.replace('"', "\\'")}[form]
+    at = text.index(value)
+    assert [(h.rule, h.start, h.end) for h in scan(text, sets)] == [
+        (rule, at, at + len(value))]
+    out = redact(text, sets)
+    assert out == text.replace(value, ph(rule))
+    assert redact(out, sets) == out
+
+
+def test_a_key_the_text_already_matches_gives_one_hit(engine_name, count_copies):
+    value = corpus.stripe(corpus.rng(61))
+    text = '{"key":"' + value + '"} ' + json_escaped('{"note":"x"}')
+    count_copies()
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("credentials",))] == [
+        ("stripe-access-token", 8, 8 + len(value))]
+    assert count_copies() == 1
+
+
+def test_the_allow_mark_keeps_an_escaped_key_out_of_scan_and_not_out_of_redact(
+        engine_name):
+    value = corpus.stripe(corpus.rng(62))
+    for text in ('{"key":"' + value + '"}  # gitleaks:allow',
+                 json_escaped('{"key":"' + value + '"}') + "  # gitleaks:allow"):
+        assert scan(text, ("credentials",)) == [], text
+        assert redact(text, ("credentials",)) == \
+            text.replace(value, ph("stripe-access-token")), text
+
+
+def test_a_split_token_and_an_escaped_key_are_found_in_one_copy_and_the_split_alone(
+        engine_name, count_copies):
+    # One copy removes both kinds; a second removes the see-through characters alone.
+    r = corpus.rng(63)
+    token, value = corpus.github(r), corpus.stripe(r)
+    text = "a " + corpus.split(token, "​") + " " + json_escaped(
+        '{"key":"' + value + '"}')
+    count_copies()
+    assert [h.rule for h in scan(text, ("credentials",))] == [
+        "github-pat", "stripe-access-token"]
+    assert count_copies() == 2
+    out = redact(text, ("credentials",))
+    assert out == "a " + ph("github-pat") + " " + json_escaped(
+        '{"key":"' + ph("stripe-access-token") + '"}')
+
+
+@pytest.mark.parametrize("sep", ["\\'", '\\"'])
+def test_a_split_run_after_an_escaped_quote_keeps_its_own_boundary(engine_name, sep):
+    # high-entropy-run takes a boundary character on each side. With the backslash
+    # removed, the one quote between the runs is the first match's, and the second run,
+    # whole only once the zero-width space is removed, needs the copy without the
+    # see-through characters alone.
+    r = corpus.rng(65)
+    one, two = corpus.chars(r, 44), corpus.chars(r, 44)
+    text = "x " + one + sep + corpus.split(two, "​", 20) + " y"
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("broad",))] == [
+        ("high-entropy-run", 2, 46), ("high-entropy-run", 48, 93)]
+
+
+@pytest.mark.parametrize("before", ["\\n", "\\\\x", '"', "\\ "])
+def test_a_backslash_before_anything_but_a_quote_builds_no_copy(engine_name,
+                                                                count_copies, before):
+    value = corpus.stripe(corpus.rng(64))
+    text = "a " + before + " " + value + " " + before + "end"
+    count_copies()
+    assert [h.rule for h in scan(text, ("credentials",))] == ["stripe-access-token"]
+    assert count_copies() == 0
+
+
 def test_redact_version():
-    assert REDACT_VERSION == 2
+    assert REDACT_VERSION == 3
     assert "REDACT_VERSION" in moxi_secrets.__all__
 
 

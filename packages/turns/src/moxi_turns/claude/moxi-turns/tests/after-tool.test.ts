@@ -325,7 +325,7 @@ describe('what the context asks carry', () => {
     w.classicInSubmit = text => $.classic.UserPromptSubmit({ prompt: text })
     await attached($, w)
     await $.prompt.submit({ text: 'what next?', origin: { kind: 'composer' } })
-    expect(contextAsks(w)).toEqual([{ event: 'prompt', source: null, session_id: expect.any(String), text: 'what next?', origin: 'composer' }])
+    expect(contextAsks(w)).toEqual([{ event: 'prompt', source: null, session_id: expect.any(String), text: 'what next?', origin: 'composer', opens: true }])
   })
 
   test('another plugin\'s prompt carries origin plugin', async ($: E, on) => {
@@ -350,7 +350,7 @@ describe('what the context asks carry', () => {
     const w = world(on)
     await attached($, w)
     await $.classic.UserPromptSubmit({ prompt: 'hi' })
-    expect(contextAsks(w)).toEqual([{ event: 'prompt', source: null, session_id: expect.any(String), text: 'hi', origin: null }])
+    expect(contextAsks(w)).toEqual([{ event: 'prompt', source: null, session_id: expect.any(String), text: 'hi', origin: null, opens: true }])
   })
 
   test('the runner\'s own delivery carries origin null', async ($: E, on) => {

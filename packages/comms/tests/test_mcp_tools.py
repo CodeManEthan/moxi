@@ -88,7 +88,7 @@ def test_the_parameters_are_the_designed_ones():
         "send": {"to", "text", "posture", "expires", "interrupt", "reply_to", "new",
                  "new_name"},
         "reply": {"message_id", "text", "posture", "expires", "interrupt"},
-        "agents": set(), "whoami": set(), "history": {"identity", "limit"},
+        "agents": set(), "whoami": set(), "history": {"identity", "limit", "skip"},
         "remove": {"message_id"}}
     assert got["send"]["required"] == ["to", "text", "posture"]
     assert got["send"]["properties"]["posture"]["enum"] == ["none", "optional", "once",
@@ -101,6 +101,8 @@ def test_the_parameters_are_the_designed_ones():
     assert got["remove"]["required"] == ["message_id"]
     limit = got["history"]["properties"]["limit"]
     assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 200, 20)
+    assert got["history"]["properties"]["skip"] == {"type": "integer", "minimum": 0,
+                                                    "default": 0}
     for name in ("interrupt", "new", "new_name"):
         assert got["send"]["properties"][name] == {"type": "boolean", "default": False}
 
