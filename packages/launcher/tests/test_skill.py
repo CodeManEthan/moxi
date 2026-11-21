@@ -41,3 +41,11 @@ def test_the_skill_states_the_recycle_steps():
     assert "End the turn" in section
     assert "`relaunched`" in section and "read the handoff" in section
     assert "background shell" not in section
+
+
+def test_the_skill_gives_each_reason_a_session_has_no_handoff_dir():
+    text = skill_text()
+    section = text.split("## Where it goes", 1)[1].split("## The file name", 1)[0]
+    assert "has no key" in section
+    assert "no notes directory" in section and "`notes_dir`" in section
+    assert "Say so and stop" in section
