@@ -73,13 +73,14 @@ project's or a folder's never include a seat's.
 answered apart from the values, once for each harness (`identities`), so the form fills
 the one for the harness it is drawn for, whatever harness the newest launch ran. For a
 harness it is the name of the newest launch of that harness that bound one, skipping one
-still spawning, where a project's launches include those made through its seats, and its
-scope is always the empty one, which comms reads as global: a project scope is never
-carried. With no such launch, and for any harness but Codex, it is the default
-(`default_identity`): on a seat named for one of its project's agents that sets no
-identity, the seat's own name; else a project of kind `agent`'s own key; else the
-project's `lead`; else `<key>-lead`, only when comms lists that name. With no launch at
-all the answer has no `at` and no values, only the identities.
+still spawning, where a project's launches include those made through its seats, unless
+comms reports that name retired, and its scope is always the empty one, which comms
+reads as global: a project scope is never carried. With no such name, and for any
+harness but Codex, it is the default (`default_identity`): on a seat named for one of
+its project's agents that sets no identity, the seat's own name; else a project of kind
+`agent`'s own key; else the project's `lead`; else `<key>-lead`, only when comms lists
+that name. With no launch at all the answer has no `at` and no values, only the
+identities.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
@@ -170,8 +171,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, joiner, keepwarm, names, presets, recycle, relaunch,
-               settings, slots, state, store, target, targets, waits)
+from . import (api, catalog, first, identity, job, joiner, keepwarm, names, presets, recycle,
+               relaunch, settings, slots, state, store, target, targets, waits)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -1520,19 +1521,19 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
                   key: tuple[str, str]) -> list[dict[str, Any]]:
     """The comms identity a form drawn for each harness fills with, for the launches
     `found` (newest first) of what `query` asks for (`key`): the name the newest launch of
-    that harness bound (`binding_launch`) and when that launch was made, else, for a
-    harness in `DEFAULT_HARNESSES`, `default_identity` with no time. A harness whose
-    identity row is not carried, or that has neither, is left out; the scope is the
-    empty one, which comms reads as global."""
+    that harness bound (`binding_launch`) and when that launch was made, unless comms
+    reports that name retired; else, for a harness in `DEFAULT_HARNESSES`,
+    `default_identity` with no time. A harness whose identity row is not carried, or that
+    has neither, is left out; the scope is the empty one, which comms reads as global."""
     out: list[dict[str, Any]] = []
     unbound: list[str] = []
     for harness in catalog.HARNESSES:
         if not getattr(catalog.row(harness, "identity"), "carry", False):
             continue
         row = binding_launch(found, harness)
-        if row is not None:
-            out.append({"harness": harness, "identity": _bare(row.identity),
-                        "at": row.created_at})
+        name = _bare(row.identity) if row is not None else ""
+        if row is not None and name and not _retired(name):
+            out.append({"harness": harness, "identity": name, "at": row.created_at})
         elif harness in DEFAULT_HARNESSES:
             unbound.append(harness)
     default = default_identity(query, *key) if unbound else None
@@ -1544,6 +1545,16 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
 def _bare(identity: str | None) -> str:
     """A comms identity without its scope."""
     return (identity or "").split("@", 1)[0]
+
+
+def _retired(name: str) -> bool:
+    """Whether comms' `identity_state` reports `name`, at the global scope, retired; False
+    when comms is not installed, has no such check, or can't say."""
+    try:
+        state = identity.ask(name, None, joiner.comms_api())
+    except Exception:  # noqa: BLE001  (comms can't say: the name stands)
+        return False
+    return getattr(state, "state", None) == "retired"
 
 
 def binding_launch(found: list[store.LaunchRow], harness: str) -> store.LaunchRow | None:

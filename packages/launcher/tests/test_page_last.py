@@ -529,6 +529,22 @@ def comms_listing(monkeypatch, *names: str) -> None:
                         lambda: SimpleNamespace(roster=lambda: roster))
 
 
+def comms_retiring(monkeypatch, *retired: str, listed: tuple[str, ...] = ()) -> list:
+    """comms installed, its `identity_state` reporting `retired` names retired and every
+    other name free, its roster listing `listed`; the names asked about, with their
+    scopes."""
+    asked = []
+
+    def identity_state(name, scope=None):
+        asked.append((name, scope))
+        return SimpleNamespace(state="retired" if name in retired else "free")
+
+    roster = SimpleNamespace(bound=(), standing=tuple(SimpleNamespace(name=n) for n in listed))
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: SimpleNamespace(
+        roster=lambda: roster, identity_state=identity_state))
+    return asked
+
+
 def identity_of(said: dict, harness: str = "claude") -> str | None:
     """The comms identity the answer `said` fills a form drawn for `harness` with."""
     found = [entry["identity"] for entry in said["identities"] if entry["harness"] == harness]
@@ -574,6 +590,33 @@ def test_a_projects_identity_counts_the_launches_made_through_its_seats(world):
     assert said["at"] == stored("bare").created_at and identity_of(said) == "planner-2"
     # A folder's launches still leave out a seat's.
     assert identity_of(last(cwd=str(world.root))) is None
+
+
+def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monkeypatch):
+    root = str(world.root)
+    launch({"values": {"cwd": root, "model": "opus"}}, "older")
+    launch({"values": {"cwd": root, "model": "opus"}}, "newer")
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("older", "scout")
+    bound("newer", "ghost@proj-a", "proj-a")
+    bound("codex", "ghost")
+    asked = comms_retiring(monkeypatch, "ghost", listed=("proj-a-lead",))
+    said = last(project="proj-a")
+    # Asked at the global scope the form fills; the older launch's name is not reached.
+    assert ("ghost", None) in asked
+    assert (identity_of(said), identity_at(said)) == ("proj-a-lead", None)
+    # Codex has no default to fall to.
+    assert identity_of(said, "codex") is None
+    # A name comms doesn't report retired stands, and so does one it can't say about.
+    comms_retiring(monkeypatch)
+    assert identity_of(last(project="proj-a")) == "ghost"
+
+    def down(name, scope=None):
+        raise RuntimeError("daemon gone")
+
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api",
+                        lambda: SimpleNamespace(identity_state=down))
+    assert identity_of(last(project="proj-a"), "codex") == "ghost"
 
 
 def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
