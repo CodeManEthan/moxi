@@ -103,7 +103,9 @@ RESPAWN_WINDOW_S = 600.0
 #: claim key made unit-safe (`unit_name`).
 UNIT_PREFIX = "moxi-comms-adapter-"
 #: The variables `systemd-run --user` reaches the user manager with.
-USER_MANAGER_ENV = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+RUNTIME_DIR_ENV = "XDG_RUNTIME_DIR"
+BUS_ENV = "DBUS_SESSION_BUS_ADDRESS"
+USER_MANAGER_ENV = (RUNTIME_DIR_ENV, BUS_ENV)
 #: The most of `systemd-run`'s stderr a failed scope's log line carries.
 SYSTEMD_RUN_STDERR_CHARS = 300
 #: `Respawner`'s default: find `systemd-run` when this process runs in a service.
@@ -256,9 +258,10 @@ def with_user_manager(env: dict) -> dict:
     """`env` with the variables `systemd-run --user` reaches the user manager with
     (`USER_MANAGER_ENV`) taken from this process where `env` has none."""
     out = dict(env)
-    for var in USER_MANAGER_ENV:
-        if not out.get(var) and os.environ.get(var):
-            out[var] = os.environ[var]
+    if not out.get(RUNTIME_DIR_ENV) and os.environ.get(RUNTIME_DIR_ENV):
+        out[RUNTIME_DIR_ENV] = os.environ[RUNTIME_DIR_ENV]
+    if not out.get(BUS_ENV) and os.environ.get(BUS_ENV):
+        out[BUS_ENV] = os.environ[BUS_ENV]
     return out
 
 
@@ -414,7 +417,7 @@ class Respawner:
     def replace(self, key: str, record: dict, stopped_at: str) -> object:
         """Start a new adapter for the gone one keyed `key`, inside the cap. Answers its
         word, or None when none was started or it gave none in time."""
-        if self.stopping.is_set() or not self.take_slot(key):
+        if self.stopping.is_set() or not self.admit(key):
             return None
         who = (record.get("claim") or {}).get("qualified") or key
         try:
@@ -430,9 +433,9 @@ class Respawner:
                  f"{word[1]}".rstrip())
         return word
 
-    def take_slot(self, key: str) -> bool:
-        """Take one of `key`'s slots in the cap for a respawn starting now: True when one
-        was free, and it is counted; False past the cap, where the key is logged once
+    def admit(self, key: str) -> bool:
+        """Count a respawn of `key` starting now into the cap: True when the cap had room,
+        and it is counted; False past the cap, where the key is logged once
         until the window lets it in again."""
         now = self.clock()
         with self._lock:
@@ -538,12 +541,10 @@ def note_writer(key: str, session_dir: Path, stopped_at: str):
 
 def write_note(session_dir: Path, line: str) -> Path:
     """Write the session's note, 0600, whole: a temporary file renamed over it."""
+    from moxi import files
+
     target = Path(session_dir) / NOTE
-    tmp = target.with_name(f".{NOTE}.{os.getpid()}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(line + "\n")
-    os.replace(tmp, target)
+    files.atomic_write(target, line + "\n", mode=0o600)
     return target
 
 
@@ -564,6 +565,7 @@ def session_of(key: str, env: dict):
 __all__ = ["CLAUDE_KIND", "CannotRespawn", "FIND", "GONE_POLL_S", "GONE_WAIT_S",
            "LOCK_PREFIX", "NOTE", "RESPAWN_CAP", "RESPAWN_WINDOW_S", "Respawner",
            "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S",
+           "BUS_ENV", "RUNTIME_DIR_ENV",
            "claude_root", "in_service",
            "lock_path", "main", "note_writer", "respawn_adapter", "session_dir",
            "session_env", "session_of", "starter_argv", "unit_name", "with_user_manager",
