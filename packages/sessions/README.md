@@ -737,7 +737,7 @@ id or text read.
 
 What a chat that reads these tools can do with what it read, and what redaction doesn't
 catch, is in the connector's
-[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/connector/docs/security.md).
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.10/packages/connector/docs/security.md).
 Read it before you turn the tools on.
 
 ## Install
