@@ -20,11 +20,14 @@ import sys
 import textwrap
 import threading
 import time
+import tomllib
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
+from packaging.requirements import Requirement
 
 import moxi.store
 from moxi import modules
@@ -1782,8 +1785,12 @@ def test_the_page_asks_for_sessions_names_through_interface_5():
     found = modules.load("sessions", interface=5)
     assert found.ok, found.reason
     assert callable(found.api.session_facts)
-    declared = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"moxi-sessions>=0.2.8,<0.3"' in declared
+    # usage never admits a sessions older than 0.2.8, the first with interface 5.
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    wanted = [Requirement(line) for line in project["dependencies"]]
+    [needed] = [req for req in wanted if req.name == "moxi-sessions"]
+    assert not needed.specifier.contains("0.2.7")
+    assert needed.specifier.contains(metadata.version("moxi-sessions"))
 
 
 def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names):
