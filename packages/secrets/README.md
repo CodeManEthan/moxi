@@ -157,7 +157,14 @@ through `chat_redact(text)` and nothing else. It:
 1. redacts the text with `CHAT_SETS` in strict mode, with no path, `allow` or `known`;
 2. removes C0 controls other than newline and tab, DEL, C1 controls and every format
    character (category `Cf`), the characters a host's scrub removes;
-3. redacts what is left again the same way, and returns that.
+3. runs `between`, when the caller gives one (`chat_redact(text, between=...)`), on what
+   is left: the caller's own change to the text, such as a read tool cutting local paths;
+4. redacts what is left again the same way, and returns that.
+
+A reader changes a text only through `between`, apart from cutting it to a length
+afterwards, so the last redaction sees exactly the text sent: a change that glues a word
+onto a token (a path cut to its last segment, right after a key) can't take the token's
+boundary away.
 
 The first pass sees the raw text, so a zero-width space, VT, FF, lone CR or NEL between
 a word and a token still gives the token its boundary; the second judges exactly the
