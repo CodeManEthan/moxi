@@ -126,6 +126,12 @@ def notes_dir(project: str) -> Path:
     return _notes_dir(_record(_projects().get, project))
 
 
+def lead(project: str) -> str | None:
+    """The lead agent the record of the project `project` (its key, in any case) names,
+    or None when it names none. Raises `UnknownProject`."""
+    return _record(_projects().get, project).lead
+
+
 def root(project: str) -> tuple[str, Path]:
     """The key of the project `project` (its key, in any case) as the projects list
     stores it, and the folder its record names as its root: for a build's repo, where
@@ -243,5 +249,5 @@ def _notes_dir(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "root",
-           "slugs", "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "lead",
+           "root", "slugs", "names"]

@@ -246,7 +246,7 @@ def test_a_round_opened_with_a_lead_keeps_it_in_its_opening(rounds, capsys):
 
 
 @pytest.mark.parametrize("lead", ["x y", "a@b@c", "a/b", ""])
-def test_a_lead_of_no_names_shape_is_refused_before_the_folder_is_made(
+def test_a_lead_of_no_names_shape_is_refused_before_anything_is_made(
         rounds, capsys, lead):
     assert run("proj-a/a-round", "--lead", lead) == 2
 

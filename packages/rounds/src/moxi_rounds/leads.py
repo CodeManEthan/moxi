@@ -59,8 +59,14 @@ def check(name: object, again: str) -> str:
 def of(state: states.State, project_lead: str | None) -> dict | None:
     """The lead of the round `state` is of, to use: `{"name", "from"}`, from the
     round's own log, else the project's record (`project_lead`), else None."""
-    if state.lead:
-        return {"name": state.lead, "from": ROUND}
+    return chosen(state.lead, project_lead)
+
+
+def chosen(own: str | None, project_lead: str | None) -> dict | None:
+    """`of`, for a reader that has the round's own lead (`own`) without its state: the
+    index's row of the round, say."""
+    if own:
+        return {"name": own, "from": ROUND}
     if project_lead:
         return {"name": project_lead, "from": PROJECT}
     return None
@@ -119,5 +125,5 @@ def mark(target: str, lead: str, *, by: str, settings=None,
                failed=written.failed)
 
 
-__all__ = ["NAME", "ROUND", "PROJECT", "CHANGED", "is_name", "check", "of", "Led",
-           "mark"]
+__all__ = ["NAME", "ROUND", "PROJECT", "CHANGED", "is_name", "check", "of", "chosen",
+           "Led", "mark"]

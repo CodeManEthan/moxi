@@ -645,7 +645,7 @@ def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
 
     note = (closed / "round-note.md").read_text(encoding="utf-8")
     assert "status: closed\n" in note.split("---")[1]
-    assert f"- status: closed\n- ended: closed at {at}\n" in note
+    assert f"- status: closed\n- lead: none\n- ended: closed at {at}\n" in note
     assert "close waits for" not in note
     export = run(capsys, "list", ROUND, "--questions")
     assert (f"This round has ended: closed at {at}. Nothing of it is put to the "
