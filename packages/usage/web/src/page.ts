@@ -58,9 +58,11 @@
 // filter line is asked with it.
 //
 // One piece is open at a time, a limit row or a section, and the address names it
-// (`address-model.ts`). The page is placed with the route the address gave. When a piece
-// opens or closes the page rewrites the address of the history entry it is on and adds no
-// entry, so Back leaves the page, and a reload or a new placement opens the same piece.
+// (`address-model.ts`). The page is placed with the route the address gave. When the
+// person opens or closes a piece the page adds a history entry at its address, so Back
+// returns to the piece that was open before; the page itself is not placed again until
+// Back or Forward places it. Where the page closes a piece itself, it rewrites the entry
+// it is on. A reload or a new placement opens the piece the address names.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
@@ -640,8 +642,8 @@ export class UsagePage extends LitElement {
     return this.#at;
   }
 
-  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. The
-   * address of the history entry the page is on is rewritten to name it. */
+  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. A new
+   * history entry names it, so Back returns to the piece that was open. */
   open(address: Address): void {
     const next = settled(address, this.#folders());
     if (sameAddress(next, this.#at)) return;
@@ -658,14 +660,18 @@ export class UsagePage extends LitElement {
     this.agentPart = null;
     if (next.piece !== "sessions") this.#placed = null;
     this.#closePart();
-    this.#setAt(next);
+    this.#setAt(next, { push: true });
     this.requestUpdate();
   }
 
-  #setAt(address: Address): void {
+  /** Makes `address` the open piece and writes it to the browser's address: in a new
+   * history entry with `push`, else in place of the entry the page is on. */
+  #setAt(address: Address, { push = false }: { push?: boolean } = {}): void {
     this.#at = address;
     const path = addressWrite(address, location.pathname);
-    if (path !== null) history.replaceState(history.state, "", path);
+    if (path === null) return;
+    if (push) history.pushState(null, "", path);
+    else history.replaceState(history.state, "", path);
   }
 
   #closeWindow(): void {

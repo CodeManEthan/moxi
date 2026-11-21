@@ -519,10 +519,11 @@ Its addresses, after `/m/usage/`:
 | `projects`, `folders` | the Projects or the Folders section, whichever the install has |
 | `models`, `kinds`, `prices` | that section |
 
-One piece is open at a time, and the address names it. The page rewrites the address in
-place as a piece opens or closes, adding no history entry, so Back leaves the page; a
-reload, or Back from the Sessions page, opens the same piece again, though not the scroll
-or how far it was shown. The range, the filters and Cost / Tokens are not part of the
+One piece is open at a time, and the address names it. Each piece opened or closed adds
+a history entry at its address, so Back returns to the piece that was open before: from a
+session opened from the table, to the table. A reload, or Back and Forward, places the
+page again and opens the piece the address names, though not the scroll or how far it
+was shown. The range, the filters and Cost / Tokens are not part of the
 address: they are kept until the shell's page is reloaded, which starts again on the last
 30 days with no filter. An address the page does not have opens it with nothing opened
 and a line at the foot.

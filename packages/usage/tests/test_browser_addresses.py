@@ -1,7 +1,7 @@
 """The addresses of usage's page and its opened limit row in a browser, through a real
 shell that starts usage's real page server: each address opened directly, the address
-rewritten in place when a piece opens or closes (so Back leaves the page and Forward
-comes back to the piece), a reload landing on the same piece, the range, the filters and
+written in a new history entry when a piece opens or closes (so Back returns to the
+piece that was open, and leaves the page from the piece it was placed on), a reload landing on the same piece, the range, the filters and
 the measure kept from one placement of the page to the next and never written into the
 address, an address the page does not have, and a limit row opened with every line, with
 each line absent, while its read is out, when it fails and when it is refused, and at a
@@ -248,9 +248,9 @@ def test_a_limit_address_whose_window_has_no_fresh_row_closes_to_the_page(seeded
     expect(lines_of(panel)).to_have_count(0)
 
 
-# --- the address is rewritten in place -----------------------------------------------------
+# --- each move is a history entry -----------------------------------------------------------
 
-def test_opening_and_closing_rewrite_the_address_and_add_no_history_entry(seeded, page):
+def test_opening_and_closing_each_add_a_history_entry_and_the_page_stays_placed(seeded, page):
     panel = open_page(page)
     expect(limit(panel, FIVE)).to_be_visible()
     entries = page.evaluate("history.length")
@@ -273,18 +273,24 @@ def test_opening_and_closing_rewrite_the_address_and_add_no_history_entry(seeded
     limit(panel, OPUS).get_by_text("Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/")
     expect(opened(panel)).to_have_count(0)
-    assert page.evaluate("history.length") == entries
+    # Five moves, five entries.
+    assert page.evaluate("history.length") == entries + 5
     # The page was not placed again for any of it.
     assert panel.evaluate("el => el.isConnected")
 
 
-def test_back_leaves_the_page_and_forward_comes_back_to_the_opened_piece(seeded, page):
+def test_back_returns_to_the_piece_before_and_forward_comes_back_to_the_opened_one(seeded, page):
     page.goto("/m/ui/modules")
     panel = open_page(page)
     limit(panel, FIVE).click()
     expect(opened(panel)).to_have_count(1)
     page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/")
+    expect(opened(panel_of(page))).to_have_count(0)
+    page.go_back()
     expect(page).to_have_url(f"{seeded.url}/m/ui/modules")
+    page.go_forward()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/")
     page.go_forward()
     expect(page).to_have_url(f"{seeded.url}/m/usage/limit/claude/plan/300")
     panel = panel_of(page)
@@ -310,7 +316,6 @@ def test_a_reload_lands_on_the_piece_that_was_open(seeded, page):
 
 def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     panel = open_page(page, "sessions")
-    entries = page.evaluate("history.length")
     session_row(panel, FIRST).get_by_role("link").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
     panel.locator("[data-line=subagents]").get_by_role("button", name="Show").click()
@@ -323,7 +328,29 @@ def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
     placed_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
-    assert page.evaluate("history.length") == entries
+
+
+def test_back_from_a_session_opened_from_the_table_returns_to_the_table(seeded, page):
+    page.goto("/m/ui/modules")
+    panel = open_page(page)
+    panel.locator("section[data-group=sessions] [data-part=count]").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
+    table = panel.locator("section[data-group=sessions] table[data-table=sessions]")
+    table.locator(f'tr[data-row="claude/{FIRST}"] td').last.click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
+    expect(placed_row(panel, FIRST)).to_have_attribute("open", "")
+    # Back: the table, with no session opened over it.
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
+    panel = panel_of(page)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]").first).to_be_visible()
+    expect(panel.locator("section[data-group=sessions] [data-list=placed]")).to_have_count(0)
+    # Back again: the page with nothing open, then the page before it.
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/")
+    expect(panel_of(page).locator("section[data-group=sessions] table")).to_have_count(0)
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/ui/modules")
 
 
 # --- the range, the filters and the measure ------------------------------------------------

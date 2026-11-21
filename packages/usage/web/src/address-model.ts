@@ -123,9 +123,8 @@ export function limitAddress(harness: string, limit: string, minutes: number): A
   return { piece: "limit", harness, limit, minutes };
 }
 
-/** What the page does to the browser's address when the piece that is open changes: it
- * rewrites the entry it is on and adds none, so Back leaves the page. Null when the
- * address already says it, or when the document is not at the page. */
+/** The browser address the page writes when the piece that is open changes. Null when
+ * the address already says it, or when the document is not at the page. */
 export function addressWrite(address: Address, pathname: string): string | null {
   if (!/^\/m\/usage(\/|$)/.test(pathname)) return null;
   const path = addressPath(address);
