@@ -265,9 +265,11 @@ def _words(error: BaseException) -> str:
 
 
 def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
-    """The settings a notice reads: the fallback and the reserved-name retry bound."""
-    return {"fallback": str(current.get("relaunch.fallback") or ""),
-            "retry_s": float(current.get("relaunch.notice_retry_s", 30))}
+    """The settings a notice reads: the fallback and the reserved-name retry bound.
+    `current` is the launcher's `moxi.config.Settings`, which reads by key and has no
+    `get`, or a mapping that holds the keys."""
+    return {"fallback": str(current["relaunch.fallback"] or ""),
+            "retry_s": float(current["relaunch.notice_retry_s"])}
 
 
 __all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",

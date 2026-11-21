@@ -11,8 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi.config import Settings
+from moxi.paths import Layout
 
-from moxi_launcher import job, notices, store
+from moxi_launcher import job, notices, settings, store
 from moxi_launcher import job as job_module
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -260,9 +262,11 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
         return launch(request) if callable(launch) else (launch or launched_result())
 
     clock = Clock()
+    if not isinstance(settings, Settings):
+        settings = {**SETTINGS, **(settings or {})}
     runner = cls(conn, run.run_id, turns=FakeTurns(session), slots_api=slots_api,
-                 comms=comms, sessions=sessions, cache=cache, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
-                 clock=clock, sleep=clock.sleep)
+                 comms=comms, sessions=sessions, cache=cache, launch=fake_launch,
+                 settings=settings, clock=clock, sleep=clock.sleep)
     if stop:
         runner.ask_stop(15)
     outcome = runner.go()
@@ -707,6 +711,39 @@ def test_a_refused_notice_goes_once_to_the_fallback(conn):
        settings={"relaunch.fallback": "lead"},
        launch=launched_result(state="failed", outcome=None, reason="spawn-failed"))
     assert [s[2] for s in comms.sent] == [["boss"], ["lead"]]
+
+
+def real_settings(text: str = "") -> Settings:
+    """The launcher's settings as the job reads them in use: `settings.current()`, which
+    reads by key and has no `get`, over a config file holding `text`."""
+    path = Layout("launcher").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return settings.current()
+
+
+def test_a_directors_notice_reads_the_real_settings(conn):
+    comms = FakeComms(outcomes=("refused", "sent"))
+    got = go(conn, arm(conn, mode="director"), comms=comms,
+             settings=real_settings('[relaunch]\nfallback = "lead"\n'),
+             launch=launched_result(state="failed", outcome=None, reason="spawn-failed"))
+    assert got.outcome == "relaunch-failed"
+    assert [s[2] for s in comms.sent] == [["boss"], ["lead"]]
+    assert f"--from-record {got.run.run_id}" in comms.sent[1][3]
+
+
+def test_a_self_runs_note_reads_the_real_settings(conn, checks):
+    refusing(checks)
+    comms = FakeComms()
+    got = go(conn, arm(conn), comms=comms, settings=real_settings())
+    assert got.outcome == "refused" and comms.sent == []
+    assert got.session.deliveries[0].startswith("Relaunch note from launcher: run ")
+    unread = FakeSession(delivered="refused")
+    missed = go(conn, arm(conn), comms=comms, session=unread,
+                settings=real_settings('[relaunch]\nfallback = "lead"\n'))
+    assert missed.outcome == "refused" and unread.deliveries
+    assert [s[2] for s in comms.sent] == [["boss"]]
+    assert "note-not-taken (the run ended refused: no-cwd)" in comms.sent[0][3]
 
 
 def test_an_offline_daemon_is_tried_once_more_then_recorded(conn):
