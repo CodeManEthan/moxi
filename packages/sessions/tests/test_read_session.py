@@ -508,6 +508,28 @@ def test_no_redaction_refuses_redaction_off():
     assert result.refusal == "redaction-off" and fields == {"refusal": "redaction-off"}
 
 
+def test_a_message_its_redaction_couldnt_scan_shows_the_placeholder_alone(transcript):
+    """secrets answers the unscanned placeholder alone for a text it couldn't scan: the
+    row and its line show that and the message's size, and not a word of it."""
+    unscanned = "[REDACTED:unscanned]"
+    text = "a message too long to scan, mentioning the deploy key"
+
+    class Unscanned:
+        def chat_redact(self, text, *, between=None):
+            return text if "too long to scan" not in text else unscanned
+
+        def secret_path(self, value):
+            return None
+
+    transcript.user(text, origin="human")
+    result, _ = read(claude_source(transcript), gate=Gate(lambda: Unscanned()))
+    (row,) = rows(result)
+    assert row["kind"] == "message" and row["writer"] == "person"
+    assert row["text"] == unscanned and row["chars"] == len(text)
+    assert result.text.splitlines()[-1].endswith(f"You: {unscanned}")
+    assert "deploy" not in result.text and "deploy" not in str(result.structured)
+
+
 def test_secrets_without_secret_path_is_off():
     class NoWalker:
         def chat_redact(self, text):
