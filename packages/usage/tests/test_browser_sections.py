@@ -165,7 +165,7 @@ def test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir(page
         '"no project" is ~/work/loose. A project row opens the Sessions section above, filtered to it.')
     section.locator("[data-part=sentence] a", has_text="~/work/loose").click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
-    expect(place_button(panel)).to_have_text("~/work/loose▾")
+    expect(place_button(panel)).to_have_text("1 folder▾")
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
@@ -198,7 +198,7 @@ def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
                              and "project=proj-b" in request.url):
         section.locator('a[data-row="project:proj-b"]').click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
-    expect(place_button(panel)).to_have_text("proj-b▾")
+    expect(place_button(panel)).to_have_text("1 project▾")
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
     # Sessions is open, so Projects is closed again.
     expect(rows_of(section)).to_have_count(0)
@@ -396,7 +396,7 @@ def test_without_projects_dirs_are_written_whole_with_no_row_for_no_project(smal
         rows_of(section).nth(1).click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
     expect(panel.locator("[data-part=filters] [data-filter=place] .k")).to_have_text("Folder")
-    expect(place_button(panel)).to_have_text("~/work/proj-b▾")
+    expect(place_button(panel)).to_have_text("1 folder▾")
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 

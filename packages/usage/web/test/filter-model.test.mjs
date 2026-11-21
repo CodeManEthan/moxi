@@ -149,15 +149,16 @@ test("Project lists the range's projects after all, and is absent until they are
   assert.deepEqual(line.place.items[1].patch, { projects: ["proj-a"], paths: [] });
   assert.deepEqual(line.place.items[0], { key: "", label: "all", figure: null, picked: true, ruled: false, several: false,
                                           patch: { projects: [], paths: [] } });
-  // One that is set leads the list when the range no longer holds it, and shows before the list answers.
+  // One that is set leads the list when the range no longer holds it, and shows before the list
+  // answers; the button counts it.
   const set = filterLine(facts({ state: state({ projects: ["proj-c"] }), places }));
-  assert.deepEqual([set.place.value, set.place.set, labels(set.place)], ["proj-c", true, ["all", "proj-c", "proj-a", "proj-b"]]);
+  assert.deepEqual([set.place.value, set.place.set, labels(set.place)], ["1 project", true, ["all", "proj-c", "proj-a", "proj-b"]]);
   assert.deepEqual(set.place.items.map((item) => item.picked), [false, true, false, false]);
   assert.deepEqual(labels(filterLine(facts({ state: state({ projects: ["proj-c"] }) })).place), ["all", "proj-c"]);
   // A folder set while the filter is by project: the folder is what it says, the projects stay to pick.
   const folder = filterLine(facts({ state: state({ paths: ["/work/loose"] }), places }));
   assert.deepEqual([folder.place.label, folder.place.value, labels(folder.place)],
-                   ["Project", "~/loose", ["all", "~/loose", "proj-a", "proj-b"]]);
+                   ["Project", "1 folder", ["all", "~/loose", "proj-a", "proj-b"]]);
   assert.deepEqual(folder.place.items[2].patch, { projects: ["proj-a"], paths: [] });
 });
 
@@ -170,7 +171,7 @@ test("without projects the filter is Folder, each folder written whole from the 
   assert.deepEqual(labels(line.place), ["all", "~/code/proj-a", "/srv/proj-b"]);
   assert.deepEqual(line.place.items[1].patch, { paths: ["/home/alice/code/proj-a"], projects: [] });
   const set = filterLine(facts({ state: state({ paths: ["/srv/proj-b"] }), places, folders: true }));
-  assert.deepEqual([set.place.value, set.place.set], ["/srv/proj-b", true]);
+  assert.deepEqual([set.place.value, set.place.set], ["1 folder", true]);
   assert.equal(tilde("/home/alice", "/home/alice/"), "~");
   assert.equal(tilde("/home/alicia/x", "/home/alice"), "/home/alicia/x");
   assert.equal(tilde("/work/x", null), "/work/x");

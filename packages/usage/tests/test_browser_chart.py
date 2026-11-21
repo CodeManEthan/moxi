@@ -462,7 +462,7 @@ def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small,
     with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url) as sent:
         box.get_by_role("menuitemcheckbox", name="/work/proj-b").click()
     assert "folder=%2Fwork%2Fproj-b" in sent.value.url, sent.value.url
-    expect(box.locator("button.pick")).to_have_text("/work/proj-b▾")
+    expect(box.locator("button.pick")).to_have_text("1 folder▾")
     expect(bars_of(panel)).to_have_count(1)
 
 
@@ -487,7 +487,7 @@ def test_the_place_filter_picks_several_and_reads_them_one_to_a_line(small, ui_c
     expect(bars_of(panel)).to_have_count(3)
     # Picking one again takes it away; `all` clears them and closes the menu.
     entries.filter(has_text="/work/proj-a").click()
-    expect(box.locator("button.pick")).to_have_text("/work/proj-b▾")
+    expect(box.locator("button.pick")).to_have_text("1 folder▾")
     box.get_by_role("menuitemradio", name=re.compile(r"\ball$")).click()
     expect(box.get_by_role("menu")).to_have_count(0)
     expect(box.locator("button.pick")).to_have_text("all▾")

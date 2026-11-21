@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The page's Project (or Folder) button counts what is picked, one included: `1 project`
+  or `1 folder`, where it used to show the one picked by name.
 - `moxi usage context` with a session or agent it cannot find, or a session more than one
   harness holds, prints one line on stderr and nothing on stdout, `--json` included, and
   exits 2 as before; it used to print `context unknown: <why>` (or `"found": false`) on

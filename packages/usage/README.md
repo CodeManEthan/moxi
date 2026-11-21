@@ -408,8 +408,9 @@ sessions module. Top to bottom:
 - **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
   From … to …, All time), each range with its figure under the filters set; Project, or
   Folder where the projects module is not installed, which picks any number of them
-  (`2 projects`) and `all` to clear them; Harness and Model, each drawn only
-  when there is more than one to choose or one is set; and Cost / Tokens. Everything
+  (the button counts them: `1 project`, `2 projects`) and `all` to clear them; Harness
+  and Model, each drawn only when there is more than one to choose or one is set; and
+  Cost / Tokens. Everything
   under it follows them.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures

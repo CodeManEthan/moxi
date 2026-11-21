@@ -540,12 +540,12 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
             expect(names).to_have_text(["~/work/proj-a", "~/work/proj-b", "~/work/scratch"])
             expect(places.get_by_text("no project")).to_have_count(0)
             target = places.locator("[data-part=rows] .tr2", has_text="~/work/proj-b")
-            set_to = "~/work/proj-b▾"
+            set_to = "1 folder▾"
         else:
             expect(names).to_have_text(["proj-a", "proj-b", "no project"])
             expect(places.locator("[data-part=sentence]")).to_contain_text('"no project" is ~/work/scratch.')
             target = places.locator('a[data-row="project:proj-b"]')
-            set_to = "proj-b▾"
+            set_to = "1 project▾"
         target.click()
         expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
         expect(filter_of(panel, "place").locator("button.pick")).to_have_text(set_to)

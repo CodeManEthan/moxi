@@ -244,14 +244,15 @@ function toggled(values: string[], value: string): string[] {
 }
 
 /** The project (or folder) menu: `all`, then the entries, any number of them picked, those
- * picked that are not entries first. `noun` counts several picked on the button. */
+ * picked that are not entries first. The button counts those picked by `noun`, one
+ * included (`1 project`). */
 function places(label: string, noun: string, current: string[], entries: [string, string][],
                 patch: (values: string[]) => Partial<PageState>, name: (value: string) => string): Menu {
   const listed = [...current.filter((value) => !entries.some(([key]) => key === value)).map((value): [string, string] => [value, name(value)]),
                   ...entries];
   return {
     key: "place", label,
-    value: current.length === 0 ? ALL : current.length === 1 ? name(current[0]) : countWords(current.length, noun),
+    value: current.length === 0 ? ALL : countWords(current.length, noun),
     set: current.length > 0,
     items: [item("", ALL, current.length === 0, patch([])),
             ...listed.map(([value, words]) => severalItem(value, words, current.includes(value), patch(toggled(current, value))))],
