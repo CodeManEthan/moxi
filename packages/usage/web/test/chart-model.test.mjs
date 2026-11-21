@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  axisWords, BILLABLE_SERIES, chartDraw, chartGroup, chartModel, chartTable, classCosts, COST_SERIES, modelSeries, niceTop,
+  axisWords, BILLABLE_SERIES, chartDraw, chartGroup, chartModel, chartTables, classCosts, COST_SERIES, modelSeries, niceTop,
   NOTHING_USED, tokenCharts,
 } from "../src/chart-model.ts";
+
+/** The one table the chart has by cost. */
+function chartTable(...args) {
+  const tables = chartTables(...args);
+  assert.deepEqual(tables.map((one) => one.name), [null]);
+  return tables[0].table;
+}
 
 const TODAY = "2026-11-08";    // a Sunday
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -147,43 +154,55 @@ test("the table has no total column, marks a row not whole in its Day cell, and 
   assert.equal(table.rows[2].key, "no time");
 });
 
-test("the tokens table: a column per token class in the cost chart's order, by day or by month", () => {
+test("by tokens a table for each chart: Cache reads, then Billable work's classes in its order", () => {
   const rows = [day("2026-11", 1, 1700, { fresh_input: 100, cache_read: 1200, cache_write: 300, output: 100 }),
                 day("2026-11", 1, 300, { model: "m-b", fresh_input: 200, output: 100, unknown_rows: 1, complete: false }),
                 day("2026-10", null, 50, { output: 50, complete: false })];
-  const table = chartTable(report(rows), "tokens", "month");
-  assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Month", "Input", "Cache create", "Cache read", "Output"]);
-  assert.deepEqual(table.rows.map((row) => [row.cells, row.why]), [
-    [["Oct 2026", "0", "0", "0", "50"], null],
-    [["Nov 2026", "300", "300", "1.20k", "200"], "1 request with a token count the harness didn't report"],
+  const [reads, billable, ...more] = chartTables(report(rows), "tokens", "month");
+  assert.deepEqual(more, []);
+  assert.equal(reads.name, "Cache reads");
+  assert.deepEqual(reads.table.columns.map((column) => column.label), ["Month", "Cache read"]);
+  assert.deepEqual(reads.table.rows.map((row) => [row.cells, row.why]), [
+    [["Oct 2026", "0"], null],
+    [["Nov 2026", "1.20k"], "1 request with a token count the harness didn't report"],
   ]);
-  assert.deepEqual(chartTable(report([]), "tokens").rows, []);
+  assert.equal(billable.name, "Billable work");
+  assert.deepEqual(billable.table.columns.map((column) => column.label), ["Month", "Input", "Cache create", "Output"]);
+  assert.deepEqual(billable.table.rows.map((row) => [row.cells, row.why]), [
+    [["Oct 2026", "0", "0", "50"], null],
+    [["Nov 2026", "300", "300", "200"], "1 request with a token count the harness didn't report"],
+  ]);
+  assert.deepEqual(chartTables(report([]), "tokens").map((one) => [one.name, one.table.rows]),
+                   [["Cache reads", []], ["Billable work", []]]);
+  const days = chartTables(report([day(TODAY, 1, 10, { cache_read: 10 })]), "tokens");
+  assert.deepEqual(days.map((one) => one.table.columns[0].label), ["Day", "Day"]);
 });
 
 // --- the group and the layout -------------------------------------------------------------
 
 test("the group is the chart with Table beside its sentence, or the table with Chart", () => {
   const drawn = chartGroup(DAILY, MONTH, "cost", TODAY, false);
-  assert.deepEqual([drawn.label, drawn.sentence, drawn.toggle, drawn.nothing, drawn.table],
-                   ["Each day", "The most in these 30 days was today, $19.54. 8 days had no sessions.", "Table", null, null]);
+  assert.deepEqual([drawn.label, drawn.sentence, drawn.toggle, drawn.nothing, drawn.tables],
+                   ["Each day", "The most in these 30 days was today, $19.54. 8 days had no sessions.", "Table", null, []]);
   assert.equal(drawn.charts.length, 1);
   assert.equal(drawn.charts[0].bars.length, 30);
   const tabled = chartGroup(DAILY, MONTH, "cost", TODAY, true);
   assert.deepEqual([tabled.sentence, tabled.toggle, tabled.charts, tabled.nothing], [drawn.sentence, "Chart", [], null]);
-  assert.equal(tabled.table.rows.length, 22);
+  assert.equal(tabled.tables.length, 1);
+  assert.equal(tabled.tables[0].table.rows.length, 22);
+  assert.equal(chartGroup(DAILY, MONTH, "tokens", TODAY, true).tables.length, 2);
   assert.equal(chartGroup(report([day("2026-10", 4)]), { kind: "all" }, "cost", TODAY, false).label, "Each month");
 });
 
 test("a range that holds nothing says so in the chart's place", () => {
   assert.deepEqual(chartGroup(report([]), MONTH, "cost", TODAY, true),
-                   { label: "Each day", sentence: null, toggle: null, nothing: NOTHING_USED, charts: [], table: null });
+                   { label: "Each day", sentence: null, toggle: null, nothing: NOTHING_USED, charts: [], tables: [] });
 });
 
 test("rows that all have no time show as their table alone", () => {
   const group = chartGroup(report([day(null, 0.25)]), MONTH, "cost", TODAY, false);
   assert.deepEqual([group.sentence, group.toggle, group.nothing, group.charts], [null, null, null, []]);
-  assert.deepEqual(group.table.rows.map((row) => row.cells[0]), ["no time"]);
+  assert.deepEqual(group.tables[0].table.rows.map((row) => row.cells[0]), ["no time"]);
 });
 
 test("the chart at 584 px: a column a day, today's value beside its bar, four labels", () => {
@@ -384,6 +403,6 @@ test("the cost table follows the split: a column per token class, or per model",
                    ["Day", "m-1", "m-2", "m-3", "m-4", "m-5", "m-6", "Other"]);
   assert.deepEqual(at(models, "2026-11-07"), ["2026-11-07", "$0.00", "$0.00", "$0.00", "$0.00", "$0.00", "$0.50", "$0.50"]);
   // The group's table follows it too.
-  assert.equal(chartGroup(MODELS, MONTH, "cost", TODAY, true, null, "model").table.columns[1].label, "m-1");
-  assert.equal(chartGroup(DAILY, MONTH, "cost", TODAY, true, TERMS).table.columns[1].label, "Input");
+  assert.equal(chartGroup(MODELS, MONTH, "cost", TODAY, true, null, "model").tables[0].table.columns[1].label, "m-1");
+  assert.equal(chartGroup(DAILY, MONTH, "cost", TODAY, true, TERMS).tables[0].table.columns[1].label, "Input");
 });

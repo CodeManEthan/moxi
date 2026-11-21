@@ -13,8 +13,9 @@
   Back left it. A limit row, Models and Kinds still rewrite the address in place.
 - The project filter reads `All projects` (`All folders` by folder) on its first item
   and on its button with none picked, where it read `all`.
-- The table under Tokens puts Cache create before Cache read, as the cost chart and its
-  table do.
+- Under Tokens each chart has its own table: `Cache reads` with a Cache read column, and
+  `Billable work` with Input, Cache create and Output, in the order its chart stacks
+  them. One table held all four classes.
 - A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
   hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
   that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's

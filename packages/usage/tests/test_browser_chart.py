@@ -391,10 +391,20 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
     panel.get_by_role("button", name="Tokens", exact=True).click()
-    # The token classes in the same order as under Cost.
-    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
-    # Today's three requests of 1000, 1500 and 2000 output tokens, in the last row.
-    assert table.locator("tbody tr").last.locator("td").nth(4).inner_text() == "4.50k"
+    # A table for each chart, under its name: the cache reads, then the billable work's
+    # classes in the order its chart stacks them.
+    expect(group.locator("[data-part=chart-name]")).to_have_text(["Cache reads", "Billable work"])
+    tables = group.get_by_role("table")
+    expect(tables).to_have_count(2)
+    reads, billable = tables.nth(0), tables.nth(1)
+    expect(reads.locator("thead th")).to_have_text(["Day", "Cache read"])
+    expect(billable.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
+    expect(reads.locator("tbody tr")).to_have_count(3)
+    expect(billable.locator("tbody tr")).to_have_count(3)
+    # Today's three requests read ten cache tokens each and wrote 1000, 1500 and 2000
+    # output tokens, in the last row.
+    expect(reads.locator("tbody tr").last.locator("td")).to_have_text([re.compile(r"^\d{4}-\d{2}-\d{2}$"), "30"])
+    expect(billable.locator("tbody tr").last.locator("td").nth(3)).to_have_text("4.50k")
 
     group.get_by_role("button", name="Chart").click()
     expect(group.get_by_role("table")).to_have_count(0)

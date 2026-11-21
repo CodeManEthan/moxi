@@ -437,8 +437,9 @@ sessions module. Top to bottom:
   (`Monthly` where its bars are months), and By model the line under it says `Per-model
   dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
   with its share of all tokens, and `Billable work`, input, cache writes and output
-  stacked; their table has a column for each token class, in the order the chart by cost
-  stacks them. A table's column of dollars reads `Est. cost`.
+  stacked; `Table` gives each its own table under its name, `Cache reads` with a `Cache
+  read` column and `Billable work` with `Input`, `Cache create` and `Output`. A table's
+  column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a

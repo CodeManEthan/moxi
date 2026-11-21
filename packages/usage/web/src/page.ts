@@ -1231,8 +1231,8 @@ export class UsagePage extends LitElement {
     </form>`;
   }
 
-  /** The chart's group: its sentence and one of the chart, its table, or the sentence
-   * that nothing was used. */
+  /** The chart's group: its sentence and its charts, their tables, each under its chart's
+   * name where it has one, or the sentence that nothing was used. */
   #chartGroup(group: ChartGroup) {
     // The group's label column is beside the chart only on a wide page.
     const wide = !window.matchMedia("(max-width: 720px)").matches;
@@ -1248,7 +1248,8 @@ export class UsagePage extends LitElement {
           ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
         ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
-        ${group.table === null ? nothing : this.#table(group.table)}
+        ${group.tables.map(({ name, table }) => html`${name === null ? nothing
+          : html`<p class="chartn" data-part="chart-name">${name}</p>`}${this.#table(table)}`)}
       </div>
     </section>`;
   }
