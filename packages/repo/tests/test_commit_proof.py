@@ -13,7 +13,8 @@ import re
 from conftest import POSIX_ONLY, change, commit, git, head
 
 from moxi_repo import api, cli, commit_proof, gitconf, settings
-from moxi_repo.commit_proof import check_message, proof_line, proof_value, read_lines
+from moxi_repo.commit_proof import (check_message, proof_line, proof_value, read_lines,
+                                   without_lines)
 
 pytestmark = POSIX_ONLY
 
@@ -94,6 +95,23 @@ def test_a_line_beside_prose_or_in_the_subject_paragraph_is_not_read():
             "# ------------------------ >8 ------------------------\n"
             "\nCommit-Check: cccccccccccc\n")
     assert read_lines(text) == ([(4, "bbbbbbbbbbbb")], [])
+
+
+def test_the_lines_read_go_with_their_continuations_and_every_other_line_stays():
+    # The commit step this piece was ported from dropped each Commit-Check line it read,
+    # with the lines continuing it, and left the rest of the message byte for byte.
+    text = ("Fix it\nCommit-Check: 000000000000\n\nThe old line was\n"
+            "Commit-Check: 111111111111\n\nAcked-by: alice\nCommit-Check: aaaaaaaaaaaa\n"
+            "  continued\nSigned-off-by: bob\n\ncommit-check: BBBBBBBBBBBB\r\n"
+            "# Commit-Check: cccccccccccc\n")
+    assert without_lines(text) == (
+        "Fix it\nCommit-Check: 000000000000\n\nThe old line was\n"
+        "Commit-Check: 111111111111\n\nAcked-by: alice\nSigned-off-by: bob\n\n"
+        "# Commit-Check: cccccccccccc\n")
+    # With a value, only the lines holding it go, its case ignored.
+    assert without_lines(text, value="bbbbbbbbbbbb") == text.replace(
+        "commit-check: BBBBBBBBBBBB\r\n", "")
+    assert without_lines("Fix it\n\nBody.\n") == "Fix it\n\nBody.\n"
 
 
 def test_each_refusal_names_the_rules_command_and_the_work_tree():
@@ -226,6 +244,40 @@ def test_a_commit_with_the_line_for_the_staged_tree_passes(demo):
     done = commit(repo, message=message("Acked-by: alice", line_for(repo) + "\n",
                                         "Signed-off-by: bob <bob@example.invalid>"))
     assert done.returncode == 0, done.stderr
+
+
+def message_of(repo, rev: str = "HEAD") -> str:
+    return git(repo, "log", "-1", "--format=%B", rev).stdout
+
+
+def test_a_matched_line_is_dropped_from_the_commit_and_the_other_trailers_stay(demo):
+    # The commit step this piece was ported from dropped the line once it matched.
+    repo = with_piece(demo)
+    change(repo)
+    done = commit(repo, message=message("Acked-by: alice", line_for(repo),
+                                        "Signed-off-by: bob <bob@example.invalid>"))
+    assert done.returncode == 0, done.stderr
+    assert message_of(repo) == ("Add a note\n\nWhy it was needed.\n\nAcked-by: alice\n"
+                                "Signed-off-by: bob <bob@example.invalid>\n\n")
+
+
+def test_a_refused_message_is_left_as_it_was_written(demo):
+    repo = with_piece(demo)
+    change(repo)
+    stale = line_for(repo)
+    change(repo, "second.md")
+    refused(commit(repo, message=message(stale)))
+    written = (repo / ".git" / "COMMIT_EDITMSG").read_text(encoding="utf-8")
+    assert written == message(stale)
+
+
+def test_the_committers_own_commit_keeps_its_line(demo):
+    repo = with_piece(demo)
+    change(repo)
+    done = commit(repo, message=message("Commit-Check: 000000000000"),
+                  env={"MOXI_REPO_COMMITTER": "notes/save"})
+    assert done.returncode == 0, done.stderr
+    assert "Commit-Check: 000000000000" in message_of(repo)
 
 
 def test_a_missing_line_is_refused_naming_the_command_and_the_work_tree(demo):
@@ -413,6 +465,35 @@ def test_a_clean_merge_passes_without_a_line(demo):
     assert done.returncode == 0, done.stderr
     assert "demo/msg" in demo.ids()
     assert len(git(repo, "rev-list", "--parents", "-1", "HEAD").stdout.split()) == 3
+
+
+def test_a_clean_merge_drops_the_lines_for_its_tree_and_keeps_the_others(demo):
+    # The commit step this piece was ported from dropped, on a clean merge, the lines
+    # holding the merge's own value.
+    repo = with_piece(demo)
+    git(repo, "checkout", "-q", "-b", "side")
+    change(repo, "side.md")
+    assert commit(repo, message=message(line_for(repo))).returncode == 0
+    git(repo, "checkout", "-q", "main")
+    change(repo, "main.md")
+    assert commit(repo, message=message(line_for(repo))).returncode == 0
+    merged = git(repo, "merge-tree", "--write-tree", "HEAD", "side").stdout.split()[0]
+    own = proof_line(salt_of(repo), merged)
+    done = git(repo, "merge", "--no-ff", "-q", "-m",
+               f"Merge side\n\n{own}\nCommit-Check: 000000000000", "side", check=False)
+    assert done.returncode == 0, done.stderr
+    assert message_of(repo) == "Merge side\n\nCommit-Check: 000000000000\n\n"
+
+
+def test_a_replay_drops_every_line_it_reads(demo):
+    # The commit step this piece was ported from dropped every line on a replay.
+    repo = with_piece(demo)
+    _diverge(repo)
+    assert git(repo, "cherry-pick", "side", check=False).returncode != 0
+    _resolve(repo)
+    done = commit(repo, message=message("Commit-Check: 000000000000", "Acked-by: alice"))
+    assert done.returncode == 0, done.stderr
+    assert message_of(repo) == "Add a note\n\nWhy it was needed.\n\nAcked-by: alice\n\n"
 
 
 def test_a_merge_with_changes_of_its_own_needs_the_line(demo):

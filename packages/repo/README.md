@@ -256,8 +256,9 @@ only what its prepare step judged.
   key, is a trailer stranded in the body. Every trailer has a value. A key on the repo's
   refused list is refused.
 - **No tags.** The subject and body, without the block's trailers, comment lines and
-  anything below the scissors line, are matched against the repo's tag patterns. With no
-  pattern there is no tag check. A comment line is any line that starts with the repo's
+  anything below the scissors line, are matched against the repo's tag patterns; with
+  `tag-check-trailers` on, the block's trailers are matched too. With no pattern there is
+  no tag check. A comment line is any line that starts with the repo's
   comment prefix, whatever git's cleanup mode: a line that starts with `#` is not checked
   even under `git commit -m` or `--cleanup=verbatim`, where git keeps it in the message, and
   with `core.commentChar=auto` the prefix is taken as `#`.
@@ -266,19 +267,26 @@ only what its prepare step judged.
 repo: commit-msg refused by repo/commit-rules: no tags: line 3 has "TAG-12"; say it in plain words
 ```
 
-Its three settings live in each repo's git config, and only a command that names the
-repo changes them. Each takes any number of values:
+Its settings live in each repo's git config, and only a command that names the repo
+changes them. The first three take any number of values:
 
 - `refused-trailer`: a trailer key the repo refuses, matched ignoring case.
 - `tag-pattern`: a regular expression a tag matches.
 - `rule`: one of the repo's own rules for a committer, free text. The piece checks none
   of them; `moxi repo rules` prints them.
+- `tag-check-trailers`: one value, `true` or `false` as git spells a bool (`yes`, `on`,
+  `1`, `no`, `off`, `0`). When true, the tag patterns are matched against every line of
+  the trailer block as well, continuation lines included, so a trailer such as
+  `Note: see TAG-12` is refused. Unset, it is false and the trailers are not read for
+  tags. `add` refuses any other value; one written into git config by hand reads as true
+  and refuses every commit, naming the fix.
 
 ```sh
 moxi repo git-hooks add ~/src/app repo/commit-rules \
     --set refused-trailer=Signed-off-by --set 'tag-pattern=\bTAG-[0-9]+\b' \
     --set 'rule=say what changed and why in plain words'
 moxi repo git-hooks add ~/src/app repo/commit-rules --set tag-pattern=   # no tag check
+moxi repo git-hooks add ~/src/app repo/commit-rules --set tag-check-trailers=true
 ```
 
 Two config keys turn it on more widely:
@@ -319,7 +327,8 @@ Commit-Check: 3fa1c2d4e5b6
 
 - The heading names the work tree PATH is in, a linked work tree's own top.
 - Where `repo/commit-rules` is registered: the trailer keys it refuses on one line, a line
-  for each tag pattern, then each `rule` value as written. A kind with no value prints no
+  for each tag pattern (`- no text matching, trailers included:` where
+  `tag-check-trailers` is on), then each `rule` value as written. A kind with no value prints no
   line. Where the piece is disabled its lines still print, under one line saying so:
   `repo/commit-rules is disabled in this repo: nothing checks a commit against the lines
   below`.
@@ -372,6 +381,11 @@ git commit -m 'notes: add today' -m 'Commit-Check: 3fa1c2d4e5b6'
 ```text
 repo: commit-msg refused by repo/commit-proof: commit proof: line 3 doesn't match the tree being committed in /home/alice/src/app: the index changed after the line was printed, or the line is another repo's; stage first, run: moxi repo rules /home/alice/src/app, and commit with the line it prints
 ```
+
+- **The line once read** is dropped: a message the piece passes loses the `Commit-Check`
+  lines it read, with any line continuing one, and the commit is made without them. On a
+  clean merge only the lines holding that merge's own value go. A refused message is
+  left as it was written, and so is a commit repo's committer makes.
 
 The piece checks the tree that will land. Under `git commit PATH` and `git commit -a` git
 commits a temporary index, so the line for the work tree's whole index doesn't match when

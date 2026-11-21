@@ -32,14 +32,16 @@ other, so its row says when the stage reads as skipped.
 
 - `design`: done once a version is frozen; ready until then.
 - `verify-design`: done while the design's standing at
-  its current version is one that counts as verified. It waits for a frozen version,
-  for that version to pass the check of its trace rows where the check was asked for,
-  and for whatever must happen before a pass can read the design. `Step.asked` says
-  which pass is asked for.
+  its current version is one that counts as verified and that version passes the
+  check of its trace rows (`tracing.outcome`: one frozen where the check was not asked
+  for passes, one whose event holds no result does not). It waits for a frozen
+  version, for that version to pass the check, and for whatever must happen before a
+  pass can read the design. `Step.asked` says which pass is asked for.
 - the questions step: ready while a question of the round reads as open, with the
-  questions in `Step.questions`; done when none does. Asked of one stage, it reads the
-  questions that hold that stage: skipped where a skip for the stage stands and nothing
-  holds it.
+  questions in `Step.questions`; done when none does. While a version is frozen that
+  does not pass the check of its trace rows, it waits for one that does where it
+  would be ready. Asked of one stage, it reads the questions that hold that stage:
+  skipped where a skip for the stage stands and nothing holds it.
 - `commission` of a stage: done once the stage has a build that is open or finished.
   Until then it waits for a frozen design where the flow has a design step, a
   verified one where it verifies the design (each step skipped counts as done), no
@@ -285,19 +287,15 @@ def _design(state: states.State, about: Asked) -> Step:
 
 def _verify_design(state: states.State, about: Asked) -> Step:
     asked = brake.asked(state, name=about.name)
-    if versions.standing(state).word in versions.VERIFIED:
-        return Step(VERIFIES, DONE, asked=asked)
     fold = f"moxi rounds fold {about.name}"
     version = versions.current(state)
     if version is None:
         return Step(VERIFIES, WAITING, asked=asked, waits=(
             Unmet("no version of the design is frozen", fold),))
-    waits = []
-    if not tracing.passes(state):
-        found = tracing.recorded(version)
-        said = tracing.lines({**found.stored(), "version": version.n, "stale_now": ()})
-        waits.append(Unmet(f"{said[0]}; a version whose rows pass is waited for",
-                           f"give {versions.DESIGN_FILE} the rows, then {fold}"))
+    traced = tracing.unmet(version, fold=fold)
+    if versions.standing(state).word in versions.VERIFIED and traced is None:
+        return Step(VERIFIES, DONE, asked=asked)
+    waits = [] if traced is None else [traced]
     if asked is not None and asked.instead:
         # No pass can read the design until this is done.
         waits.append(Unmet(asked.why, "; ".join(asked.instead)))
@@ -305,17 +303,23 @@ def _verify_design(state: states.State, about: Asked) -> Step:
 
 
 def _docket(state: states.State, about: Asked) -> Step:
+    version = versions.current(state)
+    wait = (None if version is None else
+            tracing.unmet(version, fold=f"moxi rounds fold {about.name}"))
+    traced = () if wait is None else (wait,)
     if about.stage is not None:
         holding = holds.on_stage(state, about.stage, on_closed=about.on_closed)
         if holding:
-            return Step(QUESTIONS, READY, stage=about.stage,
-                        questions=tuple(one.id for one in holding))
+            return Step(QUESTIONS, WAITING if traced else READY, stage=about.stage,
+                        waits=traced, questions=tuple(one.id for one in holding))
         skipped = skips.is_skipped(state, QUESTIONS, about.stage)
         return Step(QUESTIONS, SKIPPED if skipped else DONE, stage=about.stage)
     asked = tuple(
         one.id for one in state.questions
         if questions.current(one, state, on_closed=about.on_closed) == questions.OPEN)
-    return Step(QUESTIONS, READY if asked else DONE, questions=asked)
+    if not asked:
+        return Step(QUESTIONS, DONE)
+    return Step(QUESTIONS, WAITING if traced else READY, waits=traced, questions=asked)
 
 
 COMMISSION = "commission"
