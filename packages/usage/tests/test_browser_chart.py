@@ -676,6 +676,28 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(used).to_have_count(5)
 
 
+def test_a_picked_day_leaves_the_heat_map_drawn_and_keeps_the_focus_while_it_reloads(page):
+    panel = open_page(page)
+    grid = heat_of(panel).locator("svg[data-part=heat]")
+    newest = grid.locator("rect[data-used=true]").last
+    expect(newest).to_be_visible()
+    day = newest.get_attribute("data-day")
+    # The pick's reads are held until the map has been looked at.
+    held = []
+    page.route("**/m/usage/api/daily?*", lambda route: held.append(route))
+    newest.focus()
+    page.keyboard.press("Enter")
+    expect(filter_of(panel, "range").locator("button.pick")).to_have_text(re.compile(r"^\w{3} \d+( \d{4})?▾$"))
+    assert held, "the pick asked for no read"
+    expect(grid).to_be_visible()
+    expect(panel.locator(f'svg[data-part=heat] rect[data-day="{day}"]')).to_be_focused()
+    for route in held:
+        route.continue_()
+    page.unroute("**/m/usage/api/daily?*")
+    expect(chart_of(panel).locator("g[data-period]")).to_have_attribute("data-period", day)
+    expect(panel.locator(f'svg[data-part=heat] rect[data-day="{day}"]')).to_be_focused()
+
+
 def test_the_heat_map_follows_only_the_place_filter_and_its_table_lists_the_used_days(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page)
