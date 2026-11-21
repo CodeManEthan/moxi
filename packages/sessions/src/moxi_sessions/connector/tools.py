@@ -1,4 +1,5 @@
-"""The sessions provider's tools: `list_sessions` and `read_session`.
+"""The sessions provider's shared helpers and `list_sessions`; `read_session` is in
+`reading`.
 
 Each tool's work runs off the event loop under the provider's `Limit`, opens a redaction
 first (`redaction.Gate`), and answers a `Result` or a refusal. Every string an answer
@@ -143,7 +144,7 @@ class Lister:
         self.gate = gate
         self.newest = newest
 
-    def __call__(self, args: Mapping[str, Any]) -> Any:
+    def __call__(self, args: Mapping[str, Any], log: dict[str, Any]) -> Any:
         try:
             redact = self.gate.open()
         except Off:
@@ -172,6 +173,7 @@ class Lister:
                          "listed whole; its sessions may be missing.")
         for row in rows:
             del row["_changed"]
+        log["rows"] = len(rows)
         return self.result(text="\n".join(lines),
                            structured={"sessions": rows, "unlisted": unlisted})
 

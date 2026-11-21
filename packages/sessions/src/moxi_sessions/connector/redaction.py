@@ -6,7 +6,8 @@ before every call so a tool fails closed.
 fails (secrets missing or broken, a chat set that can't run, the fallback worker broken)
 it raises `Off` with the reason, and the tool refuses `redaction-off`. Otherwise it gives
 a `Redactor`, which redacts through `chat_redact` alone and counts the placeholders it
-added, for the call log.
+added, for the call log, and carries secrets' `secret_path`, which names the secret path
+a tool call's input holds. A secrets module that offers no `secret_path` is off too.
 """
 
 from __future__ import annotations
@@ -32,10 +33,14 @@ class Off(Exception):
 
 
 class Redactor:
-    """One call's redaction: `chat_redact`, and how many placeholders it added."""
+    """One call's redaction: `chat_redact`, and how many placeholders it added.
+    `secret_path(value)` is secrets' own: the first secret path a tool's input names, or
+    None."""
 
-    def __init__(self, chat_redact: Callable[[str], str]):
+    def __init__(self, chat_redact: Callable[[str], str],
+                 secret_path: Callable[[Any], str | None]):
         self._chat_redact = chat_redact
+        self.secret_path = secret_path
         self.redactions = 0
 
     def __call__(self, text: str) -> str:
@@ -73,7 +78,10 @@ class Gate:
             raise Off(f"the chat sets can't run: {exc}") from exc
         if empty != "":
             raise Off("the chat sets came back unscanned on an empty text")
-        return Redactor(chat_redact)
+        secret_path = getattr(secrets, "secret_path", None)
+        if not callable(secret_path):
+            raise Off("the secrets module offers no secret_path")
+        return Redactor(chat_redact, secret_path)
 
     def row(self) -> tuple[str, str, str]:
         """The `redaction` status row: whether the chat sets load, and the engine."""

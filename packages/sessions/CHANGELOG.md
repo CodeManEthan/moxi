@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `read_session` on the connector: part of one session's transcript, the last turns or
+  the turns around a time, a subagent's own transcript with `agent`. A message's text
+  shows only where its record names the person at the prompt, the model's own turn or
+  another agent's session as its writer, or where the writer isn't recorded and the text
+  opens with no tag; a text that opens with an output wrapper never shows. Every other
+  message is one line of its kind and size, a tool result its size and whether it failed,
+  and a tool call its redacted summary, or its tool and path only when its input names a
+  secret path. Text goes through secrets' `chat_redact` whole, then is cut at 4,000
+  characters; an answer holds at most 40,000, the oldest turns going first. The redaction
+  gate now also needs secrets' `secret_path`, and refuses `redaction-off` without it.
 - A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
   `list_sessions` to the Claude apps. Each row gives the session, harness, kind (`main`
   or `program`), start and last change in UTC, the name, and the last part of its folder

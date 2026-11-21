@@ -29,6 +29,7 @@ from typing import Any
 
 from moxi import modules
 
+from . import reading
 from . import tools as tools_mod
 from .redaction import Gate
 
@@ -50,8 +51,8 @@ def _interface():
 
 class Sessions:
     """The provider's state for one connector process. `gate` opens each call's
-    redaction; `newest` and `reader` are the list's and the transcript's reads (a test
-    hands in its own)."""
+    redaction; `reads` hands the list its `newest` and the transcript reader its
+    `locate`, `subagents`, `turns_last` and `turns_around` (a test hands in its own)."""
 
     def __init__(self, api, *, gate: Gate | None = None, **reads: Any):
         self.api = api
@@ -60,6 +61,8 @@ class Sessions:
         self.env: dict[str, str] = dict(os.environ)
         self.lister = tools_mod.Lister(api.Result, self.gate,
                                        **{k: v for k, v in reads.items() if k == "newest"})
+        self.reader = reading.Reader(api.Result, self.gate,
+                                     **{k: v for k, v in reads.items() if k != "newest"})
 
     async def start(self, env: Mapping[str, str]) -> None:
         self.env = dict(env)
@@ -93,25 +96,26 @@ class Sessions:
             return ("roots", "warn", "can't be listed: " + "; ".join(failed))
         return ("roots", "ok", "; ".join(said))
 
-    def _call(self, work, logged):
+    def _call(self, work):
+        """A tool's call: `work(args, log)` under the provider's `Limit`, then its
+        call-log fields, which `work` puts in `log`."""
         async def call(args, ctx):
-            result = await self.limit.run(functools.partial(work, dict(args)))
-            ctx.log(refusal=result.refusal, **logged(result))
+            log: dict[str, Any] = {}
+            result = await self.limit.run(functools.partial(work, dict(args), log))
+            ctx.log(refusal=result.refusal, **reading.logged(result, log))
             return result
         return call
 
     def provider(self):
         api = self.api
-
-        def list_logged(result):
-            rows = (result.structured or {}).get("sessions")
-            return {"rows": len(rows) if isinstance(rows, list) else 0}
-
         tools = [api.Tool("list_sessions", tools_mod.LIST_DESCRIPTION, tools_mod.LIST_INPUT,
-                          self._call(self.lister, list_logged),
-                          output_schema=tools_mod.LIST_OUTPUT,
+                          self._call(self.lister), output_schema=tools_mod.LIST_OUTPUT,
                           annotations=dict(tools_mod.ANNOTATIONS),
-                          title="List sessions")]
+                          title="List sessions"),
+                 api.Tool("read_session", reading.READ_DESCRIPTION, reading.READ_INPUT,
+                          self._call(self.reader), output_schema=reading.READ_OUTPUT,
+                          annotations=dict(tools_mod.ANNOTATIONS),
+                          title="Read a session")]
         return api.Provider(tools=tuple(tools), start=self.start, stop=self.stop,
                             status=self.status)
 
