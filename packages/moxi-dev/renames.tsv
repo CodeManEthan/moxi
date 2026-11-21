@@ -16708,7 +16708,7 @@ rounds	packages/rounds/tests/test_page_acts.py	"id": "B1.W1", "state": "done", "
 rounds	packages/rounds/tests/test_page_acts.py	"ids": ["C1"], "record": pointer}	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	"text": "export on each close", "record": pointer, "kind": "substance",	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	assert (event["id"], event["rules"], event["chose"], event["record"]) == (	keep	record	record
-rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["chose"], event["record"]) == (	keep	record	record
+rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["chose"], event["record"], event["stages"]) == (	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["question"], event["state"], event["record"]) == (	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	assert (event["rules"], event["record"]) == (f"readback={listed.through}", pointer)	keep	record	record
 rounds	packages/rounds/tests/test_page_acts.py	assert again.found and again.event is None and again.wait.record == pointer	keep	record	record

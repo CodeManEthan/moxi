@@ -31,6 +31,8 @@ EARLY = "2026-01-02T03:04:05Z"
 #: no list leaves one out for falling in the second it is computed in.
 LEDGER_AT, S1_AT, C1_AT = ("2026-01-02T03:04:04Z", "2026-01-02T03:04:06Z",
                            "2026-01-02T03:04:07Z")
+#: The second a test holds the clock at, later than every time the kit records at.
+NOW_AT = "2026-01-02T03:05:00Z"
 
 
 def minted(at: str | None = None) -> str:
@@ -257,8 +259,8 @@ def test_an_accept_is_one_ruling_with_the_key_chosen_and_no_stages(kit):
     pick(item="B1.M1=accept", record=pointer)
 
     event = last(kit)
-    assert (event["rules"], event["chose"], event["record"]) == (
-        "B1.M1=accept", "accept", pointer)
+    assert (event["rules"], event["chose"], event["record"], event["stages"]) == (
+        "B1.M1=accept", "accept", pointer, "none")
     [one] = decisions.of_round(folded(kit))
     assert (one.state, one.chose) == (decisions.RULED, "accept")
 
@@ -360,6 +362,17 @@ def test_a_read_back_through_a_time_that_is_no_rulings_is_refused(kit):
     unmet = refused(pick, PROJECT, f"readback={EARLY}")
 
     assert any(EARLY in one.reason for one in unmet)
+
+
+def test_a_read_back_through_the_second_it_is_made_in_is_refused(kit, monkeypatch):
+    monkeypatch.setattr(log, "stamp", lambda when_s=None: NOW_AT)
+    ruling.rule(PROJECT, text="Exports are kept a year.", record=SAID, by="atlas-lead")
+    before = everything_logged(kit)
+
+    [unmet] = refused(pick, PROJECT, f"readback={NOW_AT}")
+
+    assert f"{NOW_AT} is not yet past" in unmet.reason
+    assert everything_logged(kit) == before
 
 
 # -- mark a job done ---------------------------------------------------------------------
