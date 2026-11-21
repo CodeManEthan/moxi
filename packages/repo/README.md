@@ -373,6 +373,11 @@ git commit -m 'notes: add today' -m 'Commit-Check: 3fa1c2d4e5b6'
 repo: commit-msg refused by repo/commit-proof: commit proof: line 3 doesn't match the tree being committed in /home/alice/src/app: the index changed after the line was printed, or the line is another repo's; stage first, run: moxi repo rules /home/alice/src/app, and commit with the line it prints
 ```
 
+- **The line once read** is dropped: a message the piece passes loses the `Commit-Check`
+  lines it read, with any line continuing one, and the commit is made without them. On a
+  clean merge only the lines holding that merge's own value go. A refused message is
+  left as it was written, and so is a commit repo's committer makes.
+
 The piece checks the tree that will land. Under `git commit PATH` and `git commit -a` git
 commits a temporary index, so the line for the work tree's whole index doesn't match when
 those commit something else: `git commit -a` over unstaged changes is refused as stale,

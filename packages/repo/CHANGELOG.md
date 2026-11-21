@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `repo/commit-proof` drops the `Commit-Check` lines it read from a message it passes,
+  with the lines continuing them, so the line is not in the commit. On a clean merge only
+  the lines holding the merge's own value go. A refused message, and a commit repo's
+  committer makes, keep theirs.
 - The git hooks page is redrawn on ui's row element. `Hooks` gathers what needs you
   (problems, failing auto-commits, open records) under one verdict line; `Repos` has a
   row per repo that opens in place with its events, today's records, auto-commit, rules,
