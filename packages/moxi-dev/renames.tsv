@@ -16288,6 +16288,7 @@ usage	packages/usage/tests/test_context.py	child.assistant("found", usage=usage(
 usage	packages/usage/tests/test_context.py	r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=400_000, cache_write=12_000))	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=410_000, cache_write=2_000))	use	input=	input_tokens=
+usage	packages/usage/tests/test_convert.py	"minimax-m3.1-flash-free", "space-bunny-free"} <= set(own)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	"restart_point", "marks", "turns"} <= set(names)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.optional) == {"turns", "projects", "ui"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}	keep	set	set
@@ -16368,6 +16369,7 @@ usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read
 usage	packages/usage/tests/test_measure.py	t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read, cache_write=write,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	w = round(2.0 * 0.998 + 1.25 * 0.002, 3)	keep	round	round
 usage	packages/usage/tests/test_page.py	"/api/cost": ("read", set(), False),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/events": ("read", set(), True),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/limits": ("read", set(), False),	keep	set	set

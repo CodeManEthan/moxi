@@ -26,7 +26,7 @@ from the model table, and parameters that give a restart point. Without all thre
 answer is `unavailable` with the reason, and no mark is computed.
 
 **A borrowed row.** A model named in `BORROWED_ROW` that has no measured row of its own
-for a population uses the named model's row for that population. Only `S`, `P` and `g`
+for a population uses the named model's row for that population. Only `s`, `p` and `g`
 come from that row: `r` is the model's own, and `w` is worked out from the model's own
 prices at the borrowed row's 1-hour share of writes. The model's own row wins as soon as
 the measure writes one, and the answer names the lender in `borrowed_from`.
