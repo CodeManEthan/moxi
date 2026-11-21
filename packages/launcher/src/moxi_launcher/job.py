@@ -43,8 +43,8 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    launch's consent, idleness and the number again. `Ran`, any `Failed` and turns' `gone`
    go on to the pane; a refusal that clears by itself (`busy-turn`, `draft`,
    `busy-agents`, `stale-turn`, `rate`, `in-flight`, `loading`) sends a self run back to
-   step 1 with the hold released, after a 2 s pause, and ends a director's run `held`; `not-allowed` and
-   `unsupported` end it `not-exited`.
+   step 1 with the hold released, after a 2 s pause, and ends a director's run `held`;
+   `not-allowed` and `unsupported` end it `not-exited`.
 4. The exit dialog. Within `relaunch.dialog_s`: a pane that ended goes on; once the dialog
    has fully matched on two reads at least 0.5 s apart, the last checks (turns' facts show
    the same turn number and no open turn; the pane shows no person) and then at once the
@@ -1495,8 +1495,8 @@ __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED",
            "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
            "LaunchCheckFailed", "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of",
            "choose_slot", "gone", "job_name", "launch_check", "launch_request", "main",
-           "placed", "recorded_pin", "record_refused", "refused_detail", "repairable", "replay_request",
-           "resume_request", "root_run", "run", "run_request", "write_request"]
+           "placed", "recorded_pin", "record_refused", "refused_detail", "repairable",
+           "replay_request", "resume_request", "root_run", "run", "run_request", "write_request"]
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

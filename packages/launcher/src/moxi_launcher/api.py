@@ -58,9 +58,10 @@ preset read, and its own request id (and, but for a resume, its own Claude sessi
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
 default with a warning, as a comms name does without comms; so does a scratch row's
-`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A relaunch's model pin
-(`pin.choose`) is its model only when the stored values name none; the new row records the
-stored model and a `model-pin` event, never the pin as a value. It never sends the row's
+`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A
+relaunch's model pin (`pin.choose`) is its model only when the stored values name none;
+the new row records the stored model and a `model-pin` event, never the pin as a value.
+It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
 launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
 none. **A replay's environment is built from the row and the settings only**: the row's recorded
@@ -368,7 +369,8 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     busy, a posture off its default, a scratch launch set to recycle itself:
     `recycle_at_limit = relaunch`, `compact` being open to one), a directory that does
     not exist, a scratch folder's parent this user can't trust (a link, another user's,
-    or open to others), a slot named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
+    or open to others), a slot
+    named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
     named slot that is held, occupied or missing)."""
@@ -888,9 +890,9 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "RELAUNCH_ENV",
-           "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
-           "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
-           "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",
-           "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview", "release_hold",
-           "running"]
+__all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV",
+           "RELAUNCH_ENV", "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline",
+           "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
+           "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
+           "ScratchRecycle", "ScratchRoot", "check", "exit_code", "launch", "launch_kind",
+           "launch_kinds", "open_hold", "prepare", "preview", "release_hold", "running"]

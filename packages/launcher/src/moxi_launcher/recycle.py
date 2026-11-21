@@ -508,6 +508,6 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_AFTER", "RELAUNCH_LINE",
-           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "cache_read",
-           "claude_projects", "codex_sessions", "crossing_line", "end", "on_crossing",
-           "relaunch_line", "scratch_relaunch", "start_compact", "verdict_of"]
+           "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict",
+           "ask_expiry", "cache_read", "claude_projects", "codex_sessions", "crossing_line",
+           "end", "on_crossing", "relaunch_line", "scratch_relaunch", "start_compact", "verdict_of"]

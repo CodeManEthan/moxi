@@ -51,7 +51,8 @@ relaunch armed or relaunched, a session exited); 1 a start that failed, or a run
 ended in a failed outcome; 2 bad arguments or a bad value; 3 refused (before the launch's
 row is written nothing is written, after it the row says why); 75 a lock held past its
 wait, an act held by the session's state now, or a run still going past the follow
-bound or still open under `relaunch --status`: try again. A refusal prints one line ending in its short code, and a hint.
+bound or still open under `relaunch --status`: try again. A refusal prints one line
+ending in its short code, and a hint.
 `--json` prints the verb's data, with its outcome word.
 """
 
@@ -752,8 +753,8 @@ def _act_parsers(verbs) -> None:
         "relaunch", help="relaunch a session in its slot", allow_abbrev=False,
         description="Relaunch a session in its slot: this session with --self and a handoff "
                     "for the new one, or another as one of its directors. --status shows a "
-                    "run; --stop stops one; --from-record launches again the session of a run that exited it "
-                    "and did not bring it back.")
+                    "run; --stop stops one; --from-record launches again the session of a "
+                    "run that exited it and did not bring it back.")
     relaunch.add_argument("target", nargs="?", metavar="SESSION_ID|IDENTITY",
                           help="the session to relaunch as its director: its session id or "
                                "its comms name. The call follows the run for "

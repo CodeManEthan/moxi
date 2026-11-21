@@ -129,8 +129,9 @@ def owes_note(run: store.Run, outcome: str | None,
 
 def note_text(run: store.Run) -> str:
     """The note a self run's session left in place is sent."""
-    return NOTES.get(run.outcome or "", NOTE).format(run=run.run_id, word=run.word or run.outcome or "ended",
-                       detail=run.detail or "no detail")
+    return NOTES.get(run.outcome or "", NOTE).format(
+        run=run.run_id, word=run.word or run.outcome or "ended",
+        detail=run.detail or "no detail")
 
 
 def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: float) -> bool:

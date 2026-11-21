@@ -170,5 +170,5 @@ def daemon_errors(comms: Any) -> tuple[type[BaseException], ...]:
     return (error,) if isinstance(error, type) and issubclass(error, BaseException) else ()
 
 
-__all__ = ["NO_SESSION_YET", "TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
-           "ask", "check", "daemon_errors", "shown", "words"]
+__all__ = ["NO_SESSION_YET", "TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+           "IdentityTaken", "ask", "check", "daemon_errors", "shown", "words"]

@@ -899,7 +899,7 @@ def _span(seconds: float) -> str:
     return f"{seconds:g} seconds"
 
 
-__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "Refused", "Result",
-           "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
-           "is_director", "job_argv", "may_recycle", "not_warm", "offered", "outcome_result", "run_line",
-           "start_job", "status", "stop_run"]
+__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "UNREADABLE", "Refused",
+           "Result", "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
+           "is_director", "job_argv", "may_recycle", "model_words", "not_warm", "offered",
+           "outcome_result", "run_line", "start_job", "status", "stop_run"]

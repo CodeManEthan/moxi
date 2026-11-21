@@ -402,8 +402,13 @@ own reads:
   no notes directory to keep a handoff in, so it can't take `relaunch`
   (`scratch-recycle`, exit 3): the launch and its preview, on the command line and the
   page, refuse the pair, and `presets check` flags a preset or `[defaults]` that sets
-  both. `compact` is open to it. With `--limit-at` unset the mark
-  is the launch's `warn_at`, or `1x` when it warns at none.
+  both. `compact` is open to it. With `--limit-at` unset, the mark is the one usage
+  warns this launch at: its `warn_at` when that is a mark; when `warn_at` is unset,
+  usage's own `marks.default` when usage loads and that is a mark; otherwise (`warn_at`
+  is `off`, or usage's default is off or can't be read) `1x`. The mark is fixed when the
+  launch is composed: a later change to usage's `marks.default` moves usage's notice but
+  not the stamped mark, and a relaunch composes its mark again from the values then. A
+  `compact` launch takes its mark the same way.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out: running subagents, or
