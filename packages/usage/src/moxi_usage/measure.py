@@ -32,8 +32,9 @@ Per population (`thresholds` has the equations they feed):
   request; `n`, the file count. A request's context is its whole prompt (the index's
   `input`, cache reads and writes included).
 * A population of fewer than 20 files gets no row, so a thin sample never gives a mark.
-* `w`, per model from the model table and never borrowed from another model: the
-  model's own cache-write price over its input price (`thresholds.write_multiplier`). A
+* `w`, per model from the model table, always worked out from the model's own prices
+  (a borrowed row brings only S, P, g and its 1-hour share): the model's own
+  cache-write price over its input price (`thresholds.write_multiplier`). A
   model priced for both 5-minute and 1-hour writes (Anthropic's) weighs the two by the
   1-hour share of cache writes over the population's own requests that state both
   counts (0 when none does); with Anthropic's prices that is `2.0 x share + 1.25 x (1 -
@@ -46,6 +47,11 @@ Per population (`thresholds` has the equations they feed):
   effect, so a price change moves it.
 * A subagent population with no row of its own carries the same model's `main` row,
   marked `fallback: main`.
+
+The measure writes only rows of a model's own files. A model in `thresholds.BORROWED_ROW`
+with no row of its own for a population borrows the named model's row for it when the
+marks are worked out (`thresholds.threshold`), and `restart_point()` lists that row with
+its `borrowed_from`.
 
 The result goes to `STATE/usage/restart-point.json` with `moxi.files.atomic_write`.
 `measure()` reads the clock and the config only through its arguments, so the whole
@@ -284,7 +290,9 @@ class RestartPoint:
     then `problem` says which. `rows` holds one `(model, population, row, marks)` per
     measured population, `row` the measured parameters (its `w` the one the table in
     effect gives, None when it gives none) and `marks` each mark's
-    `thresholds.Threshold`, a fallback subagent row among them."""
+    `thresholds.Threshold`, a fallback subagent row among them. A row a model borrows
+    (`thresholds.BORROWED_ROW`) shows the lender's S, P, g and `n`, the borrower's own
+    `w`, and `borrowed_from`."""
 
     path: str
     doc: dict | None = None
@@ -327,16 +335,21 @@ def restart_point(*, env: Mapping[str, str] | None = None, table: Any = None) ->
         table = current(env)
     rows = []
     models = doc.get("models") if isinstance(doc.get("models"), Mapping) else {}
-    for model in sorted(models):
-        populations = models[model] if isinstance(models[model], Mapping) else {}
+    for model in sorted({*models, *thresholds.BORROWED_ROW}):
         for population in thresholds.POPULATIONS:
-            row = populations.get(population)
-            if not isinstance(row, Mapping):
+            row = thresholds.measured_row(doc, model, population)
+            lender = None
+            if row is None and model in thresholds.BORROWED_ROW:
+                lender = thresholds.BORROWED_ROW[model]
+                row = thresholds.measured_row(doc, lender, population)
+            if row is None:
                 continue
             marks = thresholds.all_marks(model, population, doc=doc, table=table)
             shown = dict(row)
             w, _ = thresholds.measured_write_multiplier(model, row, table=table)
             shown["w"] = None if w is None else _round(w)
+            if lender is not None:
+                shown["borrowed_from"] = lender
             rows.append((model, population, shown, marks))
     return RestartPoint(str(path), doc, None, tuple(rows))
 
