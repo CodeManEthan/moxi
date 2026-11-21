@@ -9,7 +9,8 @@ interface 6 is interface 5 plus the archive folders: `corpus`, `find`'s
 `shadowed`, `archive_dirs`, `archive_answers` and `ArchiveAnswer`, and `Retention`'s
 `archive_dirs`; interface 7 is interface 6 plus who wrote a message and what it opens
 with (`writer`, `WRITERS`, `OPENING`, `opening`, `OUTPUT_WRAPPERS`, `opens_with_output`,
-`opens_with_tag`). Every call of interface 6 behaves as it did.
+`opens_with_tag`) and the local-path cut (`cut_local`). Every call of interface 6 behaves
+as it did.
 A caller loads sessions with the newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
@@ -115,6 +116,11 @@ Who wrote a message (interface 7; `moxi_sessions.writer` says each value):
 * `OUTPUT_WRAPPERS`: the tags a harness or a fleet tool puts around output in a user
   message; `opens_with_output(text)` and `opens_with_tag(text)` (`<` and an ASCII letter),
   each after the opening characters.
+* `cut_local(text, env=None)`: the text with each loopback origin made `local` and each
+  local path (under the home folder `env` names, `~/`, `$HOME/`, `/home/`, `/tmp/`,
+  `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`, `/mnt/`, `/media/`, `/run/` or `/srv/`)
+  cut to its last segment, a redaction placeholder in it taken whole, as text leaving
+  the machine needs (`moxi_sessions.pathcut`).
 
 Each harness's mapping, and the line reads under the records:
 
@@ -156,6 +162,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("writer", "WRITERS", "OPENING", "opening", "OUTPUT_WRAPPERS",
                      "opens_with_output", "opens_with_tag"), "writer"),
+    **dict.fromkeys(("cut_local",), "pathcut"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),
     **dict.fromkeys(("archive_dirs", "archive_answers", "ArchiveAnswer"), "archives"),

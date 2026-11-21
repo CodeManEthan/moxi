@@ -4,7 +4,8 @@ It offers interfaces 2 to 7, the read API in `moxi_sessions.api` (interface 3 is
 plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`;
 interface 5 is 4 plus `session_facts`, which names sessions asked for by key; interface 6
 is 5 plus the archive folders, `corpus` and `find`'s `include_archives`; interface 7 is 6
-plus `writer`, who wrote a message, and `opening`, what it opens with), the verb
+plus `writer`, who wrote a message, `opening`, what it opens with, and `cut_local`,
+the local-path cut), the verb
 `moxi sessions`, a setup that prints how long each harness keeps its transcripts, and,
 with the `ui` extra, a page in the browser UI shell that lists the sessions and shows one
 session's last turns, and a block other pages may place for that view. With the

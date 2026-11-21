@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `chat_redact(text, between=...)`: a caller's own change to the text (a read tool
+  cutting local paths) runs after the strip and before the second redaction, so the last
+  redaction judges the text exactly as sent and a change that glues a word onto a secret
+  can't break its boundary. `between=None` is the redaction as before.
 - `chat_redact(text)` and `CHAT_SETS` (`credentials`, `broad`, `personal-data`, fixed in
   code): the one redaction for text bound for a reader outside the machine. It redacts
   with the chat sets in strict mode, removes C0 controls other than newline and tab, DEL,

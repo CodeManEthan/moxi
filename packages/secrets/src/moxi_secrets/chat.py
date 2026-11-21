@@ -13,6 +13,12 @@ or the unscanned placeholder alone when either pass could not scan the text. Red
 before the removal keeps the boundary such a character gives between a word and the token
 after it; redacting after it judges the text exactly as it is sent.
 
+`between`, when given, is a reader's own change to the text (a read tool cutting local
+paths, say). It runs on the text after the removal and before the second redaction, so the
+last redaction sees exactly the text sent: a change that glues a word onto a secret can't
+break the boundary the secret's rule needs. A reader changes a text nowhere else, apart
+from cutting it to a length afterwards.
+
 It fails closed: when a chat set can't run (python-stdnum missing for personal-data) it
 raises `SetUnavailable` and returns nothing.
 
@@ -23,6 +29,7 @@ anything outside ASCII.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from .scan import UNSCANNED, _set_names, placeholder, redacted
 
@@ -54,18 +61,21 @@ def scrub(text: str) -> str:
     return "".join(c for c in text if not scrubbed(c))
 
 
-def chat_redact(text: str) -> str:
+def chat_redact(text: str, *, between: Callable[[str], str] | None = None) -> str:
     """`text` redacted for a chat: the chat sets in strict mode, the scrub's characters
-    removed, then the chat sets in strict mode again. The unscanned placeholder alone when
-    either pass could not scan the text. Raises `SetUnavailable` when a chat set can't
-    run."""
+    removed, `between` (when given) run on what is left, then the chat sets in strict mode
+    again. The unscanned placeholder alone when either pass could not scan the text.
+    Raises `SetUnavailable` when a chat set can't run."""
     if not isinstance(text, str):
         raise TypeError("text is a str")
     names = _set_names(CHAT_SETS)
     first, unscanned = redacted(text, names, strict=True)
     if unscanned:
         return placeholder(UNSCANNED)
-    last, unscanned = redacted(scrub(first), names, strict=True)
+    middle = scrub(first)
+    if between is not None:
+        middle = between(middle)
+    last, unscanned = redacted(middle, names, strict=True)
     if unscanned:
         return placeholder(UNSCANNED)
     return last

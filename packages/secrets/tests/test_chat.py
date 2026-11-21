@@ -144,3 +144,53 @@ def test_placeholder_text_in_the_input_is_not_read_as_unscanned(engine_name):
 def test_only_a_str_is_redacted():
     with pytest.raises(TypeError):
         chat_redact(b"bytes")  # type: ignore[arg-type]
+
+
+# --- a reader's change between the passes ----------------------------------------------------
+
+#: A made-up token of the GitHub personal-token rule's shape.
+GHP = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+_PATH = __import__("re").compile(r"/(?:home|srv)/[^\s\"'`<>|,;(){}\[\]]*")
+
+
+def cut_paths(text):
+    """A stand-in for a read tool's path cut: each path under /home/ or /srv/ cut to its
+    last segment."""
+    return _PATH.sub(lambda m: [p for p in m.group(0).split("/") if p][-1], text)
+
+
+def test_between_runs_after_the_strip_and_before_the_last_redaction():
+    seen = []
+
+    def between(text):
+        seen.append(text)
+        return text + " tail"
+
+    assert chat_redact("a​b", between=between) == "ab tail"
+    assert seen == ["ab"]
+
+
+def test_a_token_a_cut_path_glues_a_word_onto_comes_back_redacted():
+    out = chat_redact(f"{GHP}/home/u/file", between=cut_paths)
+    assert "ghp_" not in out and "[REDACTED:" in out
+    glued = chat_redact(f"deploy/srv/app/{GHP} now", between=cut_paths)
+    assert "ghp_" not in glued and "[REDACTED:" in glued
+
+
+def test_a_value_the_cut_glues_onto_a_word_is_judged_as_sent():
+    # The first pass sees a path; only the cut text puts the key after its name.
+    out = chat_redact("aws_secret_access_key=/home/u/" + VALUE, between=cut_paths)
+    assert VALUE not in out
+
+
+def test_a_placeholder_inside_a_path_survives_the_cut():
+    out = chat_redact(f"see /srv/app/{GHP}/x", between=cut_paths)
+    assert "[REDACTED:" in out and "ghp_" not in out
+
+
+@pytest.mark.parametrize("text", [
+    "", "plain words", f"token {GHP} here", "a​b\x1bc", f"key={VALUE}",
+    "4111 1111 1111 1111",
+])
+def test_between_none_is_the_redaction_as_before(text):
+    assert chat_redact(text, between=None) == chat_redact(text)
