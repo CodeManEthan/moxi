@@ -405,7 +405,7 @@ def test_a_danger_value_and_a_posture_row_fill_like_any_other(world):
 
 def test_a_key_with_no_launch_or_no_key_fills_nothing(world):
     none = {"state": "up", "detail": None, "at": None, "harness": None, "values": [],
-            "harnesses": None}
+            "identities": []}
     assert last() == none
     assert last(cwd=str(world.work)) == none
     launch({"values": {"cwd": str(world.work), "model": "opus"}}, "r1")
@@ -529,9 +529,16 @@ def comms_listing(monkeypatch, *names: str) -> None:
                         lambda: SimpleNamespace(roster=lambda: roster))
 
 
-def identity_of(said: dict) -> tuple:
-    values = handed_values(said)
-    return values.get("identity"), values.get("scope")
+def identity_of(said: dict, harness: str = "claude") -> str | None:
+    """The comms identity the answer `said` fills a form drawn for `harness` with."""
+    found = [entry["identity"] for entry in said["identities"] if entry["harness"] == harness]
+    return found[0] if found else None
+
+
+def identity_at(said: dict, harness: str = "claude") -> str | None:
+    """When the launch that bound the identity `said` gives `harness` was made."""
+    [at] = [entry["at"] for entry in said["identities"] if entry["harness"] == harness]
+    return at
 
 
 def test_the_identity_is_the_newest_started_launch_of_the_harness_that_bound_one(world):
@@ -544,10 +551,12 @@ def test_the_identity_is_the_newest_started_launch_of_the_harness_that_bound_one
     bound("named", "scout@proj-a", "proj-a")
     bound("spawning", "ghost", state="spawning")
     said = last(project="proj-a")
-    assert said["at"] == stored("unnamed").created_at and said["harnesses"] is None
-    # The name only, at the scope comms reads as global: a project scope is not carried.
-    assert identity_of(said) == ("scout", "")
-    assert handed_values(said)["model"] == "sonnet"
+    assert said["at"] == stored("unnamed").created_at
+    # The name only: the identity rows are not handed back with the values, so a project
+    # scope is not carried.
+    assert identity_of(said) == "scout" and identity_at(said) == stored("named").created_at
+    assert identity_of(said, "codex") == "cdx"
+    assert handed_values(said) == {"model": "sonnet"}
 
 
 def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
@@ -557,10 +566,10 @@ def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
     assert last(project="proj-a")["values"] == []
     comms_listing(monkeypatch, "proj-a-lead")
     said = last(project="proj-a")
-    assert (said["at"], said["harness"], said["harnesses"]) == (None, None, ["claude"])
-    assert identity_of(said) == ("proj-a-lead", "")
+    assert (said["at"], said["harness"], said["values"]) == (None, None, [])
+    assert said["identities"] == [{"harness": "claude", "identity": "proj-a-lead", "at": None}]
     world.projects["proj-a"].lead = "boss"
-    assert identity_of(last(project="proj-a")) == ("boss", "")
+    assert identity_of(last(project="proj-a")) == "boss"
     # A folder has no default.
     assert last(cwd=str(world.root))["values"] == []
 
@@ -570,24 +579,24 @@ def test_an_agent_projects_default_is_its_own_key_before_its_lead(world, monkeyp
     world.projects["proj-a"].lead = "boss"
     comms_listing(monkeypatch, "proj-a-lead")
     # Held by comms or not, ahead of the lead and of `<key>-lead`.
-    assert identity_of(last(project="proj-a")) == ("proj-a", "")
+    assert identity_of(last(project="proj-a")) == "proj-a"
     # A seat that is no agent's falls to its project's own key.
-    assert identity_of(last(seat="pilot", project="proj-a")) == ("proj-a", "")
+    assert identity_of(last(seat="pilot", project="proj-a")) == "proj-a"
     # A launch that bound a name still comes first.
     launch({"values": {"cwd": str(world.root), "model": "opus"}}, "named")
     bound("named", "scout")
-    assert identity_of(last(project="proj-a")) == ("scout", "")
+    assert identity_of(last(project="proj-a")) == "scout"
 
 
 def test_a_seat_named_for_one_of_its_projects_agents_defaults_to_its_own_name(world):
     world.projects["proj-a"].agents = ("planner", "scout")
-    assert identity_of(last(seat="planner")) == ("planner", "")
+    assert identity_of(last(seat="planner")) == "planner"
     # A seat with no home of its own reads the project the line names.
     assert last(seat="scout")["values"] == []
-    assert identity_of(last(seat="scout", project="proj-a")) == ("scout", "")
+    assert identity_of(last(seat="scout", project="proj-a")) == "scout"
     # A seat that is no agent's falls to the project's lead.
     world.projects["proj-a"].lead = "boss"
-    assert identity_of(last(seat="pilot", project="proj-a")) == ("boss", "")
+    assert identity_of(last(seat="pilot", project="proj-a")) == "boss"
 
 
 def test_a_seat_that_sets_its_own_identity_has_no_default(world):
@@ -601,10 +610,27 @@ def test_a_launch_that_bound_none_takes_the_default_but_codex_takes_none(world):
     root = str(world.root)
     world.projects["proj-a"].lead = "boss"
     launch({"values": {"cwd": root, "model": "opus"}}, "claude")
-    assert identity_of(last(project="proj-a")) == ("boss", "")
+    assert identity_of(last(project="proj-a")) == "boss"
     launch({"values": {"harness": "codex", "cwd": root}}, "codex")
     said = last(project="proj-a")
-    assert said["harness"] == "codex" and identity_of(said) == (None, None)
+    assert said["harness"] == "codex" and identity_of(said, "codex") is None
+
+
+def test_each_harness_has_its_own_identity_whatever_the_newest_launch_ran(world):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    said = last(project="proj-a")
+    # A form drawn for Claude gets Claude's default though the newest launch ran Codex.
+    assert said["harness"] == "codex"
+    assert (identity_of(said), identity_at(said)) == ("boss", None)
+    launch({"values": {"cwd": root, "model": "opus"}}, "claude")
+    bound("claude", "scout")
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex-2")
+    said = last(project="proj-a")
+    assert said["at"] == stored("codex-2").created_at
+    assert identity_of(said) == "scout" and identity_of(said, "codex") == "cdx"
 
 
 # --- /api/recents ---------------------------------------------------------------------------

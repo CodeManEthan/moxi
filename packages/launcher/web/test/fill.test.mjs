@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BY_DEFAULT, CHIP_ROWS, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST, harnessStep,
-  keptFill, lastKey, lastValue, lastWhen, parseLast, WHOSE, withoutFill,
+  BY_DEFAULT, CHIP_ROWS, filledAt, fillFace, fillIn, fillNote, fillOf, fillRows, fills, fillText, fromLast, FROM_LAST,
+  harnessStep, keptFill, lastKey, lastValue, lastWhen, parseLast, WHOSE, withoutFill,
 } from "../src/fill-model.ts";
 import { changes, offRows, turnedOn, valueNow, withOption } from "../src/options-model.ts";
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
@@ -52,11 +52,14 @@ const shippedForm = (harness, ...over) => {
   return formOf(harness, ...rows);
 };
 
-/** `/api/last`'s answer: `values` as `[name, value]`, a list's value its items. */
+const AT = "2026-11-10T17:52:10.995351Z";
+
+/** `/api/last`'s answer: `values` as `[name, value]`, a list's value its items, and `identities`. */
 const lastOf = (harness, ...values) => parseLast({
-  state: "up", detail: null, at: "2026-11-10T17:52:10.995351Z", harness,
+  state: "up", detail: null, at: AT, harness,
   values: values.map(([name, value]) => ({ name, value: Array.isArray(value) ? null : value,
                                            items: Array.isArray(value) ? value : null })),
+  identities: [],
 });
 
 const filled = (form) => filledFields(CATALOG, form, NO_PRESET);
@@ -65,10 +68,11 @@ test("an answer of the last launch is read, and one that is not one is not", () 
   assert.deepEqual(lastOf("claude", ["model", "opus"], ["add_dir", ["/work/a"]]), {
     state: "up", detail: null, at: "2026-11-10T17:52:10.995351Z", harness: "claude",
     values: [{ name: "model", value: "opus", items: null }, { name: "add_dir", value: null, items: ["/work/a"] }],
-    harnesses: null,
+    identities: [],
   });
-  assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], harnesses: null }),
-                   { state: "up", detail: null, at: null, harness: null, values: [], harnesses: null });
+  const identities = [{ harness: "claude", identity: "scout", at: AT }, { harness: "codex", identity: "cdx", at: null }];
+  assert.deepEqual(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], identities }),
+                   { state: "up", detail: null, at: null, harness: null, values: [], identities });
   assert.equal(parseLast({ state: "up" }), null);
   assert.equal(parseLast("no"), null);
 });
@@ -92,14 +96,14 @@ test("the harness of the last launch fills only where the form leaves the harnes
   // A preset that sets the launch's own harness fills as usual.
   assert.equal(harnessStep(last, shippedForm("codex", ["harness", "codex", "preset"])), "same");
   // No launch fills nothing.
-  assert.equal(harnessStep(parseLast({ state: "up", detail: null, at: null, harness: null, values: [] }),
-                           shippedForm("claude")), "none");
+  assert.equal(harnessStep(parseLast({ state: "up", detail: null, at: null, harness: null, values: [],
+                                       identities: [] }), shippedForm("claude")), "none");
 });
 
 /** `/api/last`'s answer with no launch: the default identity `name`, for `harnesses`. */
 const defaultOf = (name, harnesses = ["claude"]) => parseLast({
-  state: "up", detail: null, at: null, harness: null, harnesses,
-  values: [{ name: "identity", value: name, items: null }, { name: "scope", value: "", items: null }],
+  state: "up", detail: null, at: null, harness: null, values: [],
+  identities: harnesses.map((harness) => ({ harness, identity: name, at: null })),
 });
 const IDENTITY = field("identity", { group: "seat", sub: "Comms", label: "Comms identity" });
 const SCOPE = field("scope", { group: "seat", sub: "Comms", label: "Comms scope" });
@@ -107,7 +111,8 @@ const SCOPE = field("scope", { group: "seat", sub: "Comms", label: "Comms scope"
 test("with no launch the default identity fills a form drawn for a harness it is for, at the global scope", () => {
   const given = defaultOf("proj-a-lead");
   assert.equal(fills(given), true);
-  assert.equal(fills(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], harnesses: null })), false);
+  assert.equal(fills(parseLast({ state: "up", detail: null, at: null, harness: null, values: [], identities: [] })),
+               false);
   assert.equal(harnessStep(given, shippedForm("claude")), "same");
   // Codex has no default.
   assert.equal(harnessStep(given, shippedForm("codex", ["harness", "codex", "preset"])), "none");
@@ -118,6 +123,33 @@ test("with no launch the default identity fills a form drawn for a harness it is
   // A row the preset or the defaults set is never filled over.
   const set = formOf("claude", ["harness", "claude"], ["identity", "planner", "preset"], ["scope", null]);
   assert.deepEqual(fillOf(given, filledFields(catalog, set, NO_PRESET), set), {});
+});
+
+test("the identity filled is the one for the form's harness, whatever harness the last launch ran", () => {
+  const catalog = [...CATALOG, IDENTITY, SCOPE];
+  const answer = (identities) => parseLast({
+    state: "up", detail: null, at: AT, harness: "codex",
+    values: [{ name: "model", value: "gpt-5", items: null }, { name: "identity", value: "stale", items: null }],
+    identities,
+  });
+  const last = answer([{ harness: "claude", identity: "scout", at: "2026-11-09T08:00:00Z" },
+                       { harness: "codex", identity: "cdx", at: AT }]);
+  // `[defaults]` sets Claude: the Codex launch's values don't fill, Claude's identity does.
+  const pinned = formOf("claude", ["harness", "claude", "defaults"], ["model", null], ["identity", null], ["scope", null]);
+  assert.equal(harnessStep(last, pinned), "none");
+  const fill = fillOf(last, filledFields(catalog, pinned, NO_PRESET), pinned);
+  assert.deepEqual(fill, { identity: "scout" });
+  // It says when the Claude launch that bound it was made, or that it is the default.
+  assert.equal(filledAt(last, fill, "claude"), "2026-11-09T08:00:00Z");
+  const fallback = answer([{ harness: "claude", identity: "boss", at: null }]);
+  assert.deepEqual(fillOf(fallback, filledFields(catalog, pinned, NO_PRESET), pinned), { identity: "boss" });
+  assert.equal(filledAt(fallback, { identity: "boss" }, "claude"), null);
+  // A form drawn for Codex fills Codex's, never an identity from the values.
+  const codex = formOf("codex", ["harness", "codex"], ["model", null], ["identity", null], ["scope", null]);
+  const both = fillOf(last, filledFields(catalog, codex, NO_PRESET), codex);
+  assert.deepEqual(both, { model: "gpt-5", identity: "cdx" });
+  assert.equal(filledAt(last, both, "codex"), AT);
+  assert.deepEqual(fillOf(fallback, filledFields(catalog, codex, NO_PRESET), codex), { model: "gpt-5" });
 });
 
 test("a value fills only a row the form has, shows here and leaves at its shipped default", () => {

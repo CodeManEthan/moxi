@@ -3,12 +3,13 @@
 ## Unreleased
 
 - Home fills the comms identity as Core's desk did: the name the newest launch of the
-  seat, project or folder (of the same harness) bound, always at the global scope, so a
-  project scope is no longer carried. Where no launch bound one, and for any harness but
-  Codex, it fills a default: a seat named for one of its project's agents that sets no
-  identity gets its own name, else a project of kind `agent` its own key, else the
-  project's `lead`, else `<key>-lead` when comms lists that name. `/api/last` answers that default with no launch, with the
-  `harnesses` it is for.
+  seat, project or folder of the harness the form is drawn for bound, whatever harness the
+  last launch ran, always at the global scope, so a project scope is no longer carried.
+  Where no launch of that harness bound one, and for any harness but Codex, it fills a
+  default: a seat named for one of its project's agents that sets no identity gets its
+  own name, else a project of kind `agent` its own key, else the project's `lead`, else
+  `<key>-lead` when comms lists that name. `/api/last` answers the identity apart from
+  the values, once for each harness, in `identities`.
 - `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
   --session ID [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs
   did; they run the same ask cache's timer starts. `clear-expired --session ID` asks only

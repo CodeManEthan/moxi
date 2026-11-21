@@ -69,14 +69,16 @@ ticket, so what the page shows of a recent is what running it again runs. The la
 are those of the seat the query names, else of its project, else of its folder, and a
 project's or a folder's never include a seat's.
 
-**The comms identity `/api/last` hands back is not the newest launch's own.** It is the
-name of the newest launch of the same harness that bound one, skipping one still spawning,
-and its scope is always the empty one, which comms reads as global: a project scope is
-never carried. With no such launch, and for any harness but Codex, it is the default
-(`default_identity`): on a seat named for one of its project's agents that sets no
-identity, the seat's own name; else the project's `lead`; else `<key>-lead`, only when
-comms lists that name. With no launch at all the answer has no `at`, and `harnesses`
-names the harnesses that default is for.
+**The comms identity `/api/last` hands back is not the newest launch's own.** It is
+answered apart from the values, once for each harness (`identities`), so the form fills
+the one for the harness it is drawn for, whatever harness the newest launch ran. For a
+harness it is the name of the newest launch of that harness that bound one, skipping one
+still spawning, and its scope is always the empty one, which comms reads as global: a
+project scope is never carried. With no such launch, and for any harness but Codex, it
+is the default (`default_identity`): on a seat named for one of its project's agents that
+sets no identity, the seat's own name; else a project of kind `agent`'s own key; else the
+project's `lead`; else `<key>-lead`, only when comms lists that name. With no launch at
+all the answer has no `at` and no values, only the identities.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
@@ -1476,8 +1478,8 @@ def launches_of(conn: sqlite3.Connection | None, key: str,
 # -- /api/last ------------------------------------------------------------------------------
 
 
-#: The rows of a launch's comms identity, which `/api/last` hands back by
-#: `launched_identity`, never as the newest launch's request gave them.
+#: The rows of a launch's comms identity, which `/api/last` hands back in `identities`,
+#: never as the newest launch's request gave them.
 IDENTITY_ROWS = ("identity", "scope")
 #: The harnesses a default identity is offered for: every one but Codex.
 DEFAULT_HARNESSES = tuple(h for h in catalog.HARNESSES if h != "codex")
@@ -1491,51 +1493,64 @@ AGENT_KIND = "agent"
 def last(query: Mapping[str, Any]) -> dict[str, Any]:
     """`/api/last`'s answer: for the newest launch of the seat, project or folder asked
     for, when it was made, its harness, and each value its own request gave
-    (`request_of`) for a row that may be filled from an earlier launch (`carry`), with
-    the identity and scope as `launched_identity`, else `default_identity`, gives them.
-    With no such launch, no `at` and no harness, and only the default identity, with the
-    `harnesses` it is for; with no key asked, no values."""
-    none = _up(at=None, harness=None, values=[], harnesses=None)
+    (`request_of`) for a row that may be filled from an earlier launch (`carry`) but the
+    identity and scope; and the comms identity each harness fills with (`identities_of`).
+    With no such launch, no `at`, no harness and no values; with no key asked, nothing."""
+    none = _up(at=None, harness=None, values=[], identities=[])
     key = whose(query)
     if key is None:
         return none
     with _store() as conn:
         found = launches_of(conn, *key)
+    named = identities_of(found, query, key)
     if not found:
-        named = default_identity(query, *key)
-        if named is None:
-            return none
-        return _up(at=None, harness=None, values=handed_rows(_named(named)),
-                   harnesses=list(DEFAULT_HARNESSES))
+        return {**none, "identities": named}
     row = found[0]
     values = request_of(row, _available())["values"]
     kept = {name: value for name, value in values.items() if name not in IDENTITY_ROWS
             and getattr(catalog.row(row.harness, name), "carry", False)}
-    named = launched_identity(found, row.harness)
-    if named is None and row.harness in DEFAULT_HARNESSES:
-        named = default_identity(query, *key)
-    if named is not None and getattr(catalog.row(row.harness, "identity"), "carry", False):
-        kept.update(_named(named))
     return _up(at=row.created_at, harness=row.harness, values=handed_rows(kept),
-               harnesses=None)
+               identities=named)
 
 
-def _named(name: str) -> dict[str, str]:
-    """The identity and scope rows for the comms name `name`, at the scope comms reads as
-    global."""
-    return {"identity": name, "scope": ""}
+def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
+                  key: tuple[str, str]) -> list[dict[str, Any]]:
+    """The comms identity a form drawn for each harness fills with, for the launches
+    `found` (newest first) of what `query` asks for (`key`): the name the newest launch of
+    that harness bound (`binding_launch`) and when that launch was made, else, for a
+    harness in `DEFAULT_HARNESSES`, `default_identity` with no time. A harness whose
+    identity row is not carried, or that has neither, is left out; the scope is the
+    empty one, which comms reads as global."""
+    out: list[dict[str, Any]] = []
+    unbound: list[str] = []
+    for harness in catalog.HARNESSES:
+        if not getattr(catalog.row(harness, "identity"), "carry", False):
+            continue
+        row = binding_launch(found, harness)
+        if row is not None:
+            out.append({"harness": harness, "identity": _bare(row.identity),
+                        "at": row.created_at})
+        elif harness in DEFAULT_HARNESSES:
+            unbound.append(harness)
+    default = default_identity(query, *key) if unbound else None
+    if default is not None:
+        out += [{"harness": harness, "identity": default, "at": None} for harness in unbound]
+    return out
 
 
-def launched_identity(found: list[store.LaunchRow], harness: str) -> str | None:
-    """The comms name of the newest launch in `found` (newest first) of `harness` that
-    bound one, without its scope; None when none did. A launch not yet started, or
-    failed, binds none."""
+def _bare(identity: str | None) -> str:
+    """A comms identity without its scope."""
+    return (identity or "").split("@", 1)[0]
+
+
+def binding_launch(found: list[store.LaunchRow], harness: str) -> store.LaunchRow | None:
+    """The newest launch in `found` (newest first) of `harness` that bound a comms name;
+    None when none did. A launch not yet started, or failed, binds none."""
     for row in found:
         if row.harness != harness or row.state in NOT_STARTED:
             continue
-        name = (row.identity or "").split("@", 1)[0]
-        if name:
-            return name
+        if _bare(row.identity):
+            return row
     return None
 
 
@@ -1608,7 +1623,7 @@ def read_last(call: Any) -> dict[str, Any]:
             return last(call.query)
         except Exception as exc:
             return _failed(exc, "reading the last launch failed", at=None, harness=None,
-                           values=[], harnesses=None)
+                           values=[], identities=[])
 
 
 def _command(words: list[str]) -> str:

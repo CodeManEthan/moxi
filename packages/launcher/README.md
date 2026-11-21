@@ -530,8 +530,10 @@ through the shell's own settings, where a locked key is refused.
 Rows the form leaves at their shipped defaults are filled from the last launch of the
 seat, else the project, else the folder on the line; `From last launch` on the line
 names them, each with `Clear`. The comms identity filled is the one the newest launch
-there of the same harness bound, and always at the global scope: a project scope is
-never carried. Where no launch bound one, and for any harness but Codex, a seat named for
+there of the harness the form is drawn for bound, whatever harness the last launch ran,
+so it fills even where `[defaults]` or a preset sets another harness and no other value
+does; it is always at the global scope: a project scope is never carried. Where no launch
+of that harness bound one, and for any harness but Codex, a seat named for
 one of its project's agents that sets no identity is filled with its own name, else a
 project of kind `agent` with its own key, any other with its `lead`, or with
 `<key>-lead` when comms lists that name; `Default` on

@@ -4,17 +4,20 @@
 // The last launch is keyed as the line names it: the seat while one is applied, else the
 // project, else the folder (`lastQuery`), so a launch never fills from another seat's or
 // another project's launch, even in the same folder. `/api/last` answers that launch's
-// harness and the values its own request gave, never one of a row that is not carried. Its
-// comms identity is the one launches there bound, at the global scope, else the default
-// identity; with no launch it answers only that default, for the harnesses it names.
+// harness and the values its own request gave, never one of a row that is not carried. The
+// comms identity comes apart from them, once for each harness: the one launches there of
+// that harness bound, at the global scope, else the default identity. The form fills the
+// one for the harness it is drawn for, whatever harness the newest launch ran; with no
+// launch only that fills.
 //
 // A value fills only where the form has the row, the row is shown on this install, and the
 // form leaves it at its shipped default: what the user's `[defaults]` or the applied preset
 // set is never filled over, and neither is a row the user set here. The harness goes first:
 // when the launch ran another harness and the form leaves the harness at its shipped
 // default, the harness fills like a row and the form is read again for it, and the values
-// fill against that form; when `[defaults]` or the preset sets another harness, nothing
-// fills, since the values are rows of a harness this launch does not use.
+// fill against that form; when `[defaults]` or the preset sets another harness, only the
+// comms identity for the form's harness fills, since the values are rows of a harness this
+// launch does not use.
 //
 // A filled value is not a change. It is named on its own item on the line above the box,
 // with what it is, where it came from and `Clear`, and under its row in the panel. One the
@@ -68,17 +71,28 @@ export interface LastValue {
   items: string[] | null;
 }
 
+/** The comms identity a form drawn for `harness` fills with: the name the newest launch of that
+ * harness bound, made `at`, else the default, with a null `at`. */
+export interface LastIdentity {
+  harness: string;
+  identity: string;
+  at: string | null;
+}
+
 /** `/api/last`'s answer: when the launch was made and its harness, both null with no launch,
- * the values it carries, and with no launch the harnesses its values (the default identity)
- * are for. */
+ * the values it carries but the comms identity and scope, and the identity of each harness
+ * that has one. */
 export interface Last {
   state: "up" | "error";
   detail: string | null;
   at: string | null;
   harness: string | null;
   values: LastValue[];
-  harnesses: string[] | null;
+  identities: LastIdentity[];
 }
+
+/** The rows of the comms identity, which fill from `identities`, never from `values`. */
+export const IDENTITY_ROWS: readonly string[] = ["identity", "scope"];
 
 export function parseLast(data: unknown): Last | null {
   if (!isTable(data) || (data.state !== "up" && data.state !== "error") || !Array.isArray(data.values)) return null;
@@ -86,15 +100,21 @@ export function parseLast(data: unknown): Last | null {
     .map((row) => ({ name: row.name as string, value: text(row.value),
                      items: Array.isArray(row.items) ? row.items.filter((item): item is string => typeof item === "string")
                        : null }));
-  const harnesses = Array.isArray(data.harnesses)
-    ? data.harnesses.filter((item): item is string => typeof item === "string") : null;
+  const identities = (Array.isArray(data.identities) ? data.identities : [])
+    .filter((row): row is Fields => isTable(row) && typeof row.harness === "string" && typeof row.identity === "string")
+    .map((row) => ({ harness: row.harness as string, identity: row.identity as string, at: text(row.at) }));
   return { state: data.state, detail: text(data.detail), at: text(data.at), harness: text(data.harness), values,
-           harnesses };
+           identities };
 }
 
-/** Whether an answer fills anything: a launch, or with none a default. */
+/** Whether an answer fills anything: a launch, or with none an identity. */
 export function fills(last: Last): boolean {
-  return last.at !== null || last.values.length > 0;
+  return last.at !== null || last.identities.length > 0;
+}
+
+/** The comms identity `last` gives a form drawn for `harness`, if any. */
+export function identityFor(last: Last, harness: string): LastIdentity | null {
+  return last.identities.find((row) => row.harness === harness) ?? null;
 }
 
 /** Which key a query of `/api/last` names: the first given of `seat`, `project`, `cwd`. */
@@ -113,13 +133,14 @@ export function lastValue(field: FieldDescriptor, row: LastValue): FormValue {
 
 /** What the harness of the last launch does to the fill: `same` when the form is drawn for
  * it, `read` when the form leaves the harness at its shipped default so it fills and the
- * form is read again for it, `none` when nothing fills (no launch, or `[defaults]` or the
- * preset sets another harness). With no launch, the default fills (`same`) only for a form
- * drawn for one of the harnesses it is for. */
+ * form is read again for it, `none` when none of its values fill (no launch, or
+ * `[defaults]` or the preset sets another harness); the comms identity for the form's
+ * harness fills all the same. With no launch, `same` when there is an identity for the
+ * form's harness. */
 export type HarnessStep = "same" | "read" | "none";
 
 export function harnessStep(last: Last, form: Form): HarnessStep {
-  if (last.at === null) return last.values.length > 0 && (last.harnesses ?? []).includes(form.harness) ? "same" : "none";
+  if (last.at === null) return identityFor(last, form.harness) !== null ? "same" : "none";
   if (last.harness === null) return "none";
   if (last.harness === form.harness) return "same";
   const row = form.rows.find((item) => item.name === HARNESS_ROW);
@@ -133,15 +154,27 @@ function leftShipped(form: Form, name: string): boolean {
   return row !== undefined && row.source === "shipped" && !row.withheld;
 }
 
+/** The identity and scope rows `last` gives a form drawn for `harness`: the name at the
+ * empty scope, which comms reads as global; none when it gives that harness none. */
+export function identityRows(last: Last, harness: string): LastValue[] {
+  const found = identityFor(last, harness);
+  return found === null ? [] : [{ name: "identity", value: found.identity, items: null },
+                                { name: "scope", value: "", items: null }];
+}
+
 /**
- * The values `last` fills over the form for its own harness, by row, in the fields' order:
- * each value of a row the fields have, shown here, carried from one launch to the next,
- * left at its shipped default by `form`, not named in `held` (a row the user set here), and
- * not the value it holds already. The harness is not among them: it fills by `harnessStep`.
+ * The values `last` fills over the form, by row, in the fields' order: the launch's own
+ * values when the form is drawn for its harness, and the comms identity for the form's
+ * harness; of them, each value of a row the fields have, shown here, carried from one launch
+ * to the next, left at its shipped default by `form`, not named in `held` (a row the user
+ * set here), and not the value it holds already. The harness is not among them: it fills by
+ * `harnessStep`.
  */
 export function fillOf(last: Last, fields: readonly PanelField[], form: Form,
                        held: ReadonlySet<string> = new Set()): Record<string, FormValue> {
-  const given = new Map(last.values.map((row) => [row.name, row]));
+  const own = last.harness === form.harness
+    ? last.values.filter((row) => !IDENTITY_ROWS.includes(row.name)) : [];
+  const given = new Map([...own, ...identityRows(last, form.harness)].map((row) => [row.name, row]));
   const out: Record<string, FormValue> = {};
   for (const field of fields) {
     const row = given.get(field.name);
@@ -210,6 +243,14 @@ export function fillRows(filled: Readonly<Record<string, FormValue>>, fields: re
 export function fillFace(rows: readonly FillRow[]): { text: string; danger: boolean } | null {
   if (rows.length === 0) return null;
   return { text: rows.length === 1 ? rows[0].label : `${rows.length} settings`, danger: rows.some((row) => row.danger) };
+}
+
+/** When what `filled` holds was set, for a form drawn for `harness`: the last launch's time
+ * while one of its own values fills, else the time of the launch that bound the identity
+ * filled; null for the default identity. */
+export function filledAt(last: Last, filled: Readonly<Record<string, FormValue>>, harness: string): string | null {
+  if (Object.keys(filled).some((name) => !IDENTITY_ROWS.includes(name))) return last.at;
+  return identityFor(last, harness)?.at ?? null;
 }
 
 /** Whose last launch the line names, as the item's sentence says it. */

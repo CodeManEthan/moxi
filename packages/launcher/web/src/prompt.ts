@@ -144,9 +144,8 @@ import type {
 } from "./options-model.ts";
 
 import {
-  BY_DEFAULT, CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast, HARNESS_ROW, harnessStep,
-  keptFill,
-  lastKey, lastWhen, parseLast, withoutFill,
+  BY_DEFAULT, CLEAR, filledAt, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast, HARNESS_ROW,
+  harnessStep, keptFill, lastKey, lastWhen, parseLast, withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -886,17 +885,18 @@ export class LauncherPrompt extends LitElement {
       return;
     }
     const step = harnessStep(last, form);
-    if (step === "none" || (step === "read" && this.#fillHarness === last.harness)) {
-      this.#filledNothing();
-      return;
-    }
-    if (step === "read") {
+    if (step === "read" && this.#fillHarness !== last.harness) {
       this.#fillHarness = last.harness as string;
       void this.#readForm(this.#fillHarness, true);
       return;
     }
     const held = new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
+    // Off the launch's harness only the comms identity for the form's own harness fills.
     const values = fillOf(last, this.fields as PanelField[], form, held);
+    if (step !== "same" && Object.keys(values).length === 0) {
+      this.#filledNothing();
+      return;
+    }
     this.filled = this.#fillHarness === form.harness ? { [HARNESS_ROW]: form.harness, ...values } : values;
     this.last = last;
     this.#waiting = null;
@@ -1099,9 +1099,14 @@ export class LauncherPrompt extends LitElement {
         this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
   }
 
-  /** When the last launch the fill came from was made, as the page says it. */
+  /** When the launch the fill came from was made; null for a default identity. */
+  get #fillAt(): string | null {
+    return this.last === null ? null : filledAt(this.last, this.#fill, this.#form?.harness ?? "");
+  }
+
+  /** When the launch the fill came from was made, as the page says it. */
   get #lastWhen(): string {
-    return this.last === null ? "" : lastWhen(this.last.at ?? "", new Date());
+    return this.last === null ? "" : lastWhen(this.#fillAt ?? "", new Date());
   }
 
   /** `· From last launch <label>` on the line, once a value is filled, or `· Default <label>`
@@ -1112,7 +1117,7 @@ export class LauncherPrompt extends LitElement {
     const face = fillFace(rows);
     if (face === null || this.last === null) return nothing;
     const open = this.menu === "fill";
-    const from = this.last.at === null ? BY_DEFAULT : FROM_LAST;
+    const from = this.#fillAt === null ? BY_DEFAULT : FROM_LAST;
     return html`<span class="sep" aria-hidden="true">·</span><span class="k">${from}</span><span
       class=${open ? "anchor open" : "anchor"} data-item="fill"><button type="button" class="pre" aria-haspopup="true"
         aria-expanded=${open ? "true" : "false"} aria-label=${`${from} ${face.text}`}
