@@ -300,7 +300,9 @@
   its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
   time the menu opens, resumes the newest session the user made in the place the line
   names that can be resumed now, in a slot or by copying its resume command, with the
-  lines under the box saying how the resume went; the box keeps its text.
+  lines under the box saying how the resume went. The box's text goes as the resume's
+  brief, or the brief file while one is set, and a resume that starts empties the box as
+  a launch does; an empty box sends none, so a `go` session is refused.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an

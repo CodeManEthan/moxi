@@ -530,7 +530,10 @@ preset or copy a command, and goes after the launch that sent it, as a brief fil
 An empty box with no handoff starts a session with no first turn. The `+` beside the chip
 takes a brief from a file instead, which turns the box off while it is set, takes a
 handoff from a file, and offers to continue your last session in the place on the line;
-with `Scratch` on the line there is none to continue. A slot or headless launch is
+with `Scratch` on the line there is none to continue. A continue sends the box's text as
+the resume's brief, or the brief file while one is set, and the box empties once the
+resume starts, as after a launch. An empty box sends no brief, so a `go` session is
+refused until you type one. A slot or headless launch is
 previewed and handed to a detached job as on the page, and a line under the box says
 where it started, or why it failed or was refused. A terminal launch is not run: its
 command is copied for you to paste.

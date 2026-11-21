@@ -9,7 +9,8 @@
 // `Continue the last session` resumes the newest past session of the place the line above
 // the box names, made by the user the page server launches as; it is read from
 // `/api/sessions` each time the menu opens, never when the piece loads. A click on it is
-// `POST /api/resume` with that session and nothing else: the box keeps its text. A scratch
+// `POST /api/resume` with that session and the box's text as its brief, or the brief file
+// in its place while one is set, as a launch sends them; an empty box sends none. A scratch
 // folder has no past sessions: with Scratch on the line the entry says there is none to
 // continue, and no other place's session is offered.
 //
@@ -17,7 +18,8 @@
 
 import type { FieldDescriptor } from "/m/ui/client.js";
 
-import type { Past } from "./panel.ts";
+import { resumeBody as pastResumeBody } from "./panel.ts";
+import type { Past, ResumeBody } from "./panel.ts";
 import { tilde } from "./prompt-model.ts";
 import type { Pick } from "./prompt-model.ts";
 
@@ -79,7 +81,11 @@ export function continueWords(past: Past): string {
   return past.target === "slot" ? RESUMES_IN_SLOT : COPIES_RESUME;
 }
 
-/** The body of the click's `POST /api/resume`. */
-export function resumeBody(past: Past): { session: string } {
-  return { session: past.session_id ?? "" };
+/** The body of the click's `POST /api/resume`: the session, and `brief`, the box's text, as
+ * its brief, or `briefFile` in its place while one is set, as a launch sends them. Each goes
+ * only when it holds more than spaces, as a past session's resume on the launcher page
+ * sends them. */
+export function resumeBody(past: Past, brief: string, briefFile: string): ResumeBody {
+  const session = past.session_id ?? "";
+  return briefFile === "" ? pastResumeBody(session, brief, "") : pastResumeBody(session, "", briefFile);
 }

@@ -72,10 +72,20 @@ test("a session with no id to resume is not offered", () => {
   assert.equal(lastSession([past({ session_id: null })], PROJECT, "operator", HOME), null);
 });
 
-test("the entry's dim line says what a click does, and the click sends the session alone", () => {
+test("the entry's dim line says what a click does", () => {
   assert.equal(continueWords(past()), RESUMES_IN_SLOT);
   assert.equal(continueWords(past({ target: "terminal", slot: null })), COPIES_RESUME);
-  assert.deepEqual(resumeBody(past({ session_id: "abc" })), { session: "abc" });
+});
+
+test("the click sends the box's text as the resume's brief, or the brief file in its place, and none from an empty box", () => {
+  const one = past({ session_id: "abc" });
+  assert.deepEqual(resumeBody(one, "Carry on.\n", ""), { session: "abc", brief: "Carry on.\n" });
+  assert.deepEqual(resumeBody(one, "", ""), { session: "abc" });
+  assert.deepEqual(resumeBody(one, " \n ", ""), { session: "abc" });
+  assert.deepEqual(resumeBody(one, "", "/w/brief.md"), { session: "abc", brief_file: "/w/brief.md" });
+  // While a file is set the box is off: its text stays behind and the file goes.
+  assert.deepEqual(resumeBody(one, "text the file stands in for", "/w/brief.md"),
+                   { session: "abc", brief_file: "/w/brief.md" });
 });
 
 test("the sessions read keeps project_key and actor", () => {

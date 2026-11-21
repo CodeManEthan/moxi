@@ -1,7 +1,7 @@
 """The `+` on Home in a browser, through a real shell that starts the launcher's real page
 server. `Continue the last session` offers only a session the shell's own user made in the
-place the line names, and resumes it in a slot with the lines under the box while the box
-keeps its text; a brief from a file turns the box off and launches with that file as the
+place the line names, and resumes it in a slot with the lines under the box, the box's text
+as the resume's brief, and the box emptied once the resume starts; a brief from a file turns the box off and launches with that file as the
 first turn; a handoff from a file, or one a preset names, is on its line under the box,
 goes in the launch beside the box's text, and `Clear` takes it out of the next launch or
 copied command only: after that, or once a preset is picked, the preset's handoff is back
@@ -114,12 +114,14 @@ def test_continue_the_last_session_is_not_offered_for_another_actors_session(pag
     expect(entry(menu, "Continue the last session")).to_have_count(0)
 
 
-def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(page, shell, fake, work_dir):
-    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell))
+def test_his_own_last_session_is_offered_and_resumes_in_a_slot_with_the_box_as_its_brief(
+        page, shell, fake, work_dir):
+    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell),
+                   posture="go")
     # A newer session of another actor in the same folder is passed over.
     kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), by="planner")
     piece = kit.open_home(page)
-    piece.locator("textarea").fill("a draft that stays")
+    piece.locator("textarea").fill("Carry on from the login form.")
     menu = plus_menu(page, piece)
     found = entry(menu, "Continue the last session")
     expect(found).to_be_visible()
@@ -128,14 +130,17 @@ def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(p
     before = len(fake.starts())
     with page.expect_request(lambda request: request.url.endswith(RESUME)) as sent:
         found.click()
-    assert json.loads(sent.value.post_data) == {"session": sid}
+    assert json.loads(sent.value.post_data) == {"session": sid, "brief": "Carry on from the login form."}
     expect(menu).to_have_count(0)
     expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Resumed in slot 3 · "),
                                                                     timeout=20_000)
     start = started(fake, before + 1)
     assert start["slot"] == 3 and start["cwd"] == str(work_dir), start
     assert "--resume" in start["argv"] and sid in start["argv"], start["argv"]
-    expect(piece.locator("textarea")).to_have_value("a draft that stays")
+    row = kit.newest_launch(shell)
+    assert (row.resume_of, row.brief) == ("his-own-in-folder", "Carry on from the login form."), row
+    # The resume that started with the box's text lets go of it, as a launch does.
+    expect(piece.locator("textarea")).to_have_value("")
     expect(piece.locator(".go")).to_be_enabled()
 
 

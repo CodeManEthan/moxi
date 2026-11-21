@@ -123,7 +123,9 @@
 // offered when the menu's read of `/api/sessions`, made each time it opens, holds a session
 // of the line's place that he made and can resume now; its dim line says whether it resumes
 // in a slot or copies the resume command. A click resumes it at once through `/api/resume`,
-// with the lines under the box a launch has, in a resume's words; the box keeps its text.
+// with the lines under the box a launch has, in a resume's words. The box's text goes as the
+// resume's brief, or the brief file in its place while one is set, and a resume that starts
+// empties the box and lets go of the file as a launch does; an empty box sends none.
 // With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
 // continue.
 //
@@ -579,8 +581,8 @@ export class LauncherPrompt extends LitElement {
   #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
-  /** The box's text when the button was pressed; null for a recent run again, a resume, or a
-   * launch with a brief file, which send none of it. */
+  /** The box's text when the button or `Continue the last session` was pressed; null for a
+   * recent run again, or a launch or resume with a brief file, which send none of it. */
   #sent: string | null = "";
   /** The values that can do harm turned on when the button was pressed, by row. */
   #sentOn: Record<string, string> = {};
@@ -1379,19 +1381,22 @@ export class LauncherPrompt extends LitElement {
       }}>${CLEAR_FILE}</button></div>`;
   }
 
-  /** A click on `Continue the last session`: the session resumed at once, its lines under the
-   * box, or its command copied. The box, the panel and the fill stay as they are. */
+  /** A click on `Continue the last session`: the session resumed at once with the box's text
+   * as its brief, or the brief file while one is set, its lines under the box, or its command
+   * copied. A resume that starts lets go of the box's text or the file as a launch does; the
+   * panel and the fill stay as they are. */
   async #continue(past: Past): Promise<void> {
     if (inFlight(this.flight)) return;
     const mine = (this.#pressed += 1);
     this.#stopFollow();
-    this.#sent = null;
+    const body = resumeBody(past, this.brief, this.briefFile);
+    this.#sentFile = this.briefFile === "" ? null : this.briefFile;
+    this.#sent = this.#sentFile === null ? this.brief : null;
     this.#sentOn = {};
-    this.#sentFile = null;
     this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
-    const sent = resumeSent(await api("launcher", "api/resume", resumeBody(past)));
+    const sent = resumeSent(await api("launcher", "api/resume", body));
     if (mine !== this.#pressed) return;
     if (sent.copy !== null) {
       await this.#copy(mine, sent.copy, []);
@@ -2047,9 +2052,9 @@ export class LauncherPrompt extends LitElement {
     if (mine === this.#pressed) this.#landed(followed(this.flight, answer));
   }
 
-  /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, lets go of the brief file and of the handoff set
-   * or cleared it was launched with, unless one was changed since, so the form's handoff
+  /** Takes the followed launch's or resume's next state. One that started empties the box,
+   * unless its text was changed since the press, lets go of the brief file and of the handoff
+   * set or cleared it was launched with, unless one was changed since, so the form's handoff
    * shows again, and lets go of each value that can do harm it was launched with, unless its
    * row was changed since the press. */
   #landed(next: Flight): void {
