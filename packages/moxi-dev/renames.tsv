@@ -5670,6 +5670,7 @@ memory	packages/memory/src/moxi_memory/doctor.py	if any(r.in_config and r.is_arc
 memory	packages/memory/src/moxi_memory/doctor.py	if any(not r.in_config for recs in records.values() for r in recs):	keep	any	any
 memory	packages/memory/src/moxi_memory/doctor.py	return Row(MODULE, "folders", "warn", "; ".join(lines), "; ".join(fixes) or None)	keep	folders	folders
 memory	packages/memory/src/moxi_memory/index.py	found = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	counted = set(own)	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	self.seen: set[tuple[str, str]] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	self.unlisted: set[str] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	kind = link.api.launch_kind(session_id, timeout=KIND_WAIT)	use	timeout=	timeout_s=
@@ -5688,9 +5689,13 @@ memory	packages/memory/src/moxi_memory/ingest.py	self.compressed: set[tuple[str,
 memory	packages/memory/src/moxi_memory/ingest.py	"""The hits of `find` for a session: in `asked` when given, else in the folders	keep	find	find
 memory	packages/memory/src/moxi_memory/ingest.py	found = (api.find(harness, session_id, root=asked) if asked	keep	find	find
 memory	packages/memory/src/moxi_memory/ingest.py	else api.find(harness, session_id))	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	listed.setdefault((harness, session_id), set()).add(source)	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	listings = api.corpus(harness, since=since, heads=True)	keep	heads	heads
 memory	packages/memory/src/moxi_memory/ingest.py	listings = api.corpus(harness, since=since, heads=True)	keep	since	since
+memory	packages/memory/src/moxi_memory/ingest.py	own = listed.get((harness, session_id), set())	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	read_paths: set[str] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	return not counted or any((harness, s) not in whole for s in counted)	keep	any	any
+memory	packages/memory/src/moxi_memory/ingest.py	sessions = sorted(set(old.execute(	keep	set	set
 memory	packages/memory/src/moxi_memory/listener.py	self.done.set()	keep	set	set
 memory	packages/memory/src/moxi_memory/rows.py	that sessions doesn't mark `injected`, that the harness doesn't flag as meta, and that	keep	injected	injected
 memory	packages/memory/src/moxi_memory/rows.py	is not a compaction summary. A message sessions marks `injected` as unknown is kept;	keep	injected	injected
@@ -5724,7 +5729,9 @@ memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders
 memory	packages/memory/tests/test_index.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=0.1):	keep	wait	wait
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=1.0) as started:	keep	wait	wait
+memory	packages/memory/tests/test_ingest.py	assert any(text.startswith(word) and "[REDACTED:" in text for text in stored), word	keep	any	any
 memory	packages/memory/tests/test_ingest.py	assert any(x.startswith("Read(/work/project/widget.py)") for x in got)	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert calls <= set(rd.conn.execute("SELECT harness, source FROM secret_calls"))	keep	set	set
 memory	packages/memory/tests/test_ingest.py	assert {"def render(): pass", "sprocket.py", "gizmo.py"} <= set(tails)	keep	set	set
 memory	packages/memory/tests/test_ingest.py	m.text("synthetic only", synthetic=True)	keep	synthetic	synthetic
 memory	packages/memory/tests/test_ingest.py	assert not any(gone in text for text in got), gone	keep	any	any
@@ -5732,6 +5739,7 @@ memory	packages/memory/tests/test_ingest.py	assert not any("work" in x for x in 
 memory	packages/memory/tests/test_ingest.py	assert set(before) < set(after) and len(after) == len(before) + 1	keep	set	set
 memory	packages/memory/tests/test_ingest.py	assert any("[REDACTED:" in x for x in texts("tails"))	keep	any	any
 memory	packages/memory/tests/test_ingest.py	assert any(r[3] for r in index_rows())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert not any(piece in row_of("heron") for piece in PIECES)	keep	any	any
 memory	packages/memory/tests/test_ingest.py	assert not any(r[3] for r in index_rows())	keep	any	any
 memory	packages/memory/tests/test_ingest.py	assert [p.wait(timeout=60) for p in procs] == [0] * len(procs)	keep	timeout	timeout
 memory	packages/memory/tests/test_listener.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -5767,8 +5775,11 @@ memory	packages/memory/src/moxi_memory/ingest.py	Ingest.ask_kind	kwonly	answered
 memory	packages/memory/src/moxi_memory/setup.py	timer_lines	kwonly	timer_on	timer_on
 memory	packages/memory/tests/test_index.py	-	name	test_the_writer_lock_is_a_file_in_memorys_state_directory	test_the_writer_lock_is_a_file_in_memorys_state_dir
 memory	packages/memory/tests/test_ingest.py	FakeLauncher.__init__	kwonly	fail	fail
+memory	packages/memory/tests/test_ingest.py	assert not any(piece in text for piece in PIECES for text in stored)	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert report.dropped == 1 and not any(x.startswith("egret") for x in texts())	keep	any	any
 memory	packages/memory/tests/test_ingest.py	launcher	kwonly	fail	fail
 memory	packages/memory/tests/test_ingest.py	other	kwonly	asked	asked
+memory	packages/memory/tests/test_ingest.py	return set(rd.conn.execute("SELECT harness, source FROM sources"))	keep	set	set
 memory	packages/memory/tests/test_labels.py	-	name	test_the_nearest_folder_holding_git_names_the_project	test_the_nearest_dir_holding_git_names_the_project
 memory	packages/memory/tests/test_labels.py	test_a_git_file_that_leads_nowhere_names_its_own_dir	name	folder	sub_dir
 memory	packages/memory/tests/test_labels.py	-	name	test_a_git_file_that_leads_nowhere_names_its_own_folder	test_a_git_file_that_leads_nowhere_names_its_own_dir
@@ -7877,6 +7888,8 @@ notes	packages/notes/tests/test_doctor.py	-	name	test_topics_warns_on_a_missing_
 notes	packages/notes/tests/test_doctor.py	_setup_ran	kwonly	ran	ran
 notes	packages/notes/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 notes	packages/notes/tests/test_filter.py	assert "AIza" not in sh(root, "show", "HEAD:b.md").stdout	keep	show	show
+notes	packages/notes/tests/test_filter.py	assert sh(root, "show", "HEAD:a.md").stdout == \	keep	show	show
+notes	packages/notes/tests/test_filter.py	assert sh(root, "show", "HEAD:b.md").stdout == f"intro\n{line}\nmore\n"	keep	show	show
 notes	packages/notes/tests/test_filter.py	assert sh(root, "show", "HEAD:c.md").stdout == "met [REDACTED:private-name] today\nand again\n"	keep	show	show
 notes	packages/notes/tests/test_filter.py	return sh(root, "show", f":{name}").stdout	keep	show	show
 notes	packages/notes/tests/test_gates.py	assert sh(root, "show", "HEAD:clean.md").stdout == "fine, still\n"	keep	show	show
@@ -11511,20 +11524,32 @@ secrets	packages/secrets/src/moxi_secrets/paths.py	if any(fnmatchcase(part, g) f
 secrets	packages/secrets/src/moxi_secrets/personal.py	cut = target.find(space, m.start(), m.end())	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/scan.py	__slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	__slots__ = ("set", "rule", "description", "start", "end", "line", "fingerprint")	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append(	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	etext.find(_ALLOW_MARK, lo, hi - 1 if cut else hi) >= 0)	keep	find	find
+secrets	packages/secrets/src/moxi_secrets/scan.py	for s, e in by_secret.get((h.set, h.rule, h.fingerprint), ())):	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	hit.set, hit.rule, hit.description, start, end, 1, hit.fingerprint)))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	i = text.find(value)	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/scan.py	i = text.find(value, i + 1)	keep	find	find
+secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.end) in spans or any(	keep	any	any
+secrets	packages/secrets/src/moxi_secrets/scan.py	if (h.set, h.rule, h.start, h.end) in spans or any(	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if hit.set not in GITLEAKS_SETS:	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	if rule.keywords and not any(k in keywords for k in rule.keywords):	keep	any	any
+secrets	packages/secrets/src/moxi_secrets/scan.py	if keyword_size(position) and not any(	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/scan.py	load_sets	name	handle	fh
+secrets	packages/secrets/src/moxi_secrets/scan.py	out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	return "".join(sorted(c for c in set(text) if seen_through(c)))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	return (f"Hit(set={self.set!r}, rule={self.rule!r}, line={self.line}, "	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	return any(eng.compile(p[key]).search(path) for p in self.paths)	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/scan.py	return any(eng.compile(p[key]).search(target) for p in self.regexes)	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/scan.py	rule = load_sets().by_id.get((hit.set, hit.rule))	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.by_id = {(r.set, r.id): r for rules in self.rules.values() for r in rules}	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/scan.py	self.set = set_name	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	spans = {(h.set, h.rule, h.start, h.end) for h in hits}	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/scan.py	spans.add((h.set, h.rule, h.start, h.end))	keep	set	set
 secrets	packages/secrets/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+secrets	packages/secrets/tests/corpus.py	codes |= set(range(first, last + 1))	keep	set	set
+secrets	packages/secrets/tests/corpus.py	if any(h.rule == "generic-api-key" for h in scan(value, ("broad",))):	keep	any	any
 secrets	packages/secrets/tests/corpus.py	words += " " + make(r) + " " + chars(r, 4, string.ascii_lowercase)	keep	start	start
 secrets	packages/secrets/tests/test_allow.py	-	name	test_a_git_directory_reached_through_a_link_is_still_a_git_directory	test_a_git_dir_reached_through_a_link_is_still_a_git_dir
 secrets	packages/secrets/tests/test_allow.py	-	name	test_the_callers_git_directory_counts_whatever_its_name	test_the_callers_git_dir_counts_whatever_its_name
@@ -11557,17 +11582,23 @@ secrets	packages/secrets/tests/test_names.py	held = set(FOLDS.get(chr(c), chr(c)
 secrets	packages/secrets/tests/test_names.py	pool = set()	keep	set	set
 secrets	packages/secrets/tests/test_names.py	pool = set(FOLDS) | {chr(c) for c in range(0x21, 0x7F)} | set(ALPHABET)	keep	set	set
 secrets	packages/secrets/tests/test_personal.py	ids = make(corpus.rng(len(kind)), IDS_PER_KIND)	keep	start	start
+secrets	packages/secrets/tests/test_redact.py	assert [(h.set, h.rule) for h in scan(text, GITLEAKS)] == [	keep	set	set
 secrets	packages/secrets/tests/test_redact.py	assert not survived & set(range(h.start, h.end)), (t, kw, h)	keep	set	set
 secrets	packages/secrets/tests/test_redact.py	if any(scan_mod._path_only(h) for h in hits):	keep	any	any
+secrets	packages/secrets/tests/test_redact.py	text = form.format(value=value)	keep	value	value
 secrets	packages/secrets/tests/test_redact.py	value = make(r)	keep	start	start
+secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "generic-api-key" for h in scan(	keep	any	any
 secrets	packages/secrets/tests/test_scan.py	assert any(h.rule == "github-pat" for h in scan(f"t = {token}\n# gitleaks:allow",	keep	any	any
 secrets	packages/secrets/tests/test_scan.py	assert any(text[h.start:h.end] in value for h in hits)	keep	any	any
 secrets	packages/secrets/tests/test_scan.py	assert loaded - IMPORT_LOADS == set()	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	assert not any(h.set in GITLEAKS for h in hits)	keep	set	set
+secrets	packages/secrets/tests/test_scan.py	assert not any(h.set in GITLEAKS for h in scan(	keep	any	any
+secrets	packages/secrets/tests/test_scan.py	assert not any(h.set in GITLEAKS for h in scan(	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	assert set(info) == set(SETS)	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	assert {"private-names", "personal-data"} <= {h.set for h in hits}	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	loaded = set(out.stdout.split())	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	return {(h.set, h.rule) for h in hits}	keep	set	set
+secrets	packages/secrets/tests/test_scan.py	text = form.format(value=corpus.generic_value(r))	keep	value	value
 secrets	packages/secrets/tests/test_scan.py	value = make(r)	keep	start	start
 secrets	packages/secrets/tests/test_settings.py	assert cli.main(["config", "secrets", "show", "--json"]) == 0	keep	show	show
 secrets	packages/secrets/tests/test_tools.py	"added": ["c"], "removed": ["a"], "changed": ["b"]}	keep	changed	changed
@@ -16314,6 +16345,7 @@ usage	packages/usage/tests/test_context.py	child.assistant("found", usage=usage(
 usage	packages/usage/tests/test_context.py	r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=400_000, cache_write=12_000))	use	input=	input_tokens=
 usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=410_000, cache_write=2_000))	use	input=	input_tokens=
+usage	packages/usage/tests/test_convert.py	"minimax-m3.1-flash-free", "space-bunny-free"} <= set(own)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	"restart_point", "marks", "turns"} <= set(names)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.optional) == {"turns", "projects", "ui"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}	keep	set	set
@@ -16394,6 +16426,7 @@ usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read
 usage	packages/usage/tests/test_measure.py	t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read, cache_write=write,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	w = round(2.0 * 0.998 + 1.25 * 0.002, 3)	keep	round	round
 usage	packages/usage/tests/test_page.py	"/api/cost": ("read", set(), False),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/events": ("read", set(), True),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/limits": ("read", set(), False),	keep	set	set

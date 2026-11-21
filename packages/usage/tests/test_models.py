@@ -252,3 +252,54 @@ def test_the_shipped_table_carries_litellms_license_notice():
     readme = (Path(__file__).parents[1] / "README.md").read_text()
     license_section = readme[readme.index("## License"):]
     assert "data/LICENSE-litellm" in license_section
+
+
+# --- the shipped table's own rows for models newer than its LiteLLM snapshot -------------
+
+NEWER = {"claude-fable-5-2": "anthropic", "claude-mythos-5-2": "anthropic",
+         "big-pickle": "opencode", "minimax-m3.1-flash-free": "opencode",
+         "space-bunny-free": "opencode"}
+
+
+@pytest.mark.parametrize("model", ["claude-fable-5-2", "claude-mythos-5-2"])
+def test_the_fable_and_mythos_rows_carry_every_price_the_multipliers_read(model):
+    from moxi_usage import thresholds
+
+    table = models.Table(models.shipped())
+    facts = table.lookup(model)
+    assert step(facts) == (2, model)
+    assert facts.provider == "anthropic" and facts.provenance.filled == ()
+    assert (facts.input, facts.output, facts.cache_read, facts.cache_write_5m,
+            facts.cache_write_1h) == (8.0, 40.0, 0.2, 10.0, 16.0)
+    assert (facts.window, facts.max_output) == (1000000, 128000)
+    assert facts.tiers["fast"] == {"speed": "fast", "input": 16.0, "output": 80.0,
+                                   "cache_read": 0.4, "cache_write_5m": 20.0,
+                                   "cache_write_1h": 32.0}
+    assert thresholds.read_multiplier(model, table=table) == (0.025, None)
+    assert thresholds.write_multiplier(facts, 1.0) == (2.0, None)
+    assert thresholds.write_multiplier(facts, 0.0) == (1.25, None)
+
+
+@pytest.mark.parametrize("model", ["big-pickle", "minimax-m3.1-flash-free",
+                                   "space-bunny-free"])
+def test_opencodes_free_models_are_priced_at_0_and_get_no_multiplier(model):
+    from moxi_usage import thresholds
+
+    table = models.Table(models.shipped())
+    facts = table.lookup(model)
+    assert step(facts) == (2, model) and facts.priced
+    assert facts.provider == "opencode" and facts.provenance.filled == ()
+    assert (facts.input, facts.output) == (0.0, 0.0)
+    assert facts.cache_read is UNKNOWN and facts.cache_write_1h is UNKNOWN
+    assert thresholds.read_multiplier(model, table=table)[0] is None
+    w, why = thresholds.write_multiplier(facts, 1.0)
+    assert w is None and "not above 0" in why
+
+
+def test_the_newer_rows_come_from_the_supplement_with_its_source_and_date():
+    rows = models.shipped()["models"]
+    for model, provider in NEWER.items():
+        provenance = rows[model]["provenance"]
+        assert provenance["source"] == "supplement" and rows[model]["provider"] == provider
+        (cited,) = provenance["supplement"]
+        assert cited["source"] and cited["as_of"] == "2026-11-20"
