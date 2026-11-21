@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (2026-11-21)
 
 - `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
