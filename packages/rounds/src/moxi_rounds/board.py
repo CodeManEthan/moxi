@@ -43,7 +43,7 @@ every other step the `by` of its entry in the round's recorded flow.
 and the end cells; then a line for each other stage with an open build; then the
 other stages, folded. **Groups**, first that fits: `yours`, `stuck` (a failed cell; a
 stage whose first step not settled is `finish` and waiting; a design changed since
-its version was frozen), `wrapping` (`retro` ready, or every stage of the plan
+its version was frozen while it still holds a commission to come), `wrapping` (`retro` ready, or every stage of the plan
 finished), `moving`.
 
 **The strip** (`strip`): a build's act is the newest event of its round's log that
@@ -514,6 +514,20 @@ def design_moved(part_: Part):
     return None if seen is None else seen.design
 
 
+def design_holds(part_: Part) -> bool:
+    """Whether a design changed since its version was frozen still holds something: the
+    plan holds no stage yet, or a stage of it has its commission to come. A round whose
+    every stage is past its commission is held by nothing a moved design refuses."""
+    plan = stages.in_plan(part_.state)
+    if not plan:
+        return True
+    for one in plan:
+        commission_step = part_.step(steps.COMMISSION, one.id)
+        if commission_step is not None and not commission_step.settled:
+            return True
+    return False
+
+
 def _held_at_finish(part_: Part) -> list[steps.Step]:
     found = []
     for one in stages.in_plan(part_.state):
@@ -530,7 +544,7 @@ def group(part_: Part, found: Mapping, items: Items) -> str:
     if items.count:
         return YOURS
     if (any(one["state"] == FAILED for one in found.values()) or _held_at_finish(part_)
-            or design_moved(part_) is not None):
+            or (design_moved(part_) is not None and design_holds(part_))):
         return STUCK
     retro = part_.step(steps.RETRO, None)
     plan = stages.in_plan(part_.state)
@@ -1190,5 +1204,5 @@ __all__ = ["ROUND_PART", "STAGE_PART", "END_PART", "CLOSE", "STATES", "YOURS", "
            "fixes_owed", "columns", "cell", "close_cell", "cells", "lead_stage", "lines",
            "group", "phrase", "round_value", "ordered", "acts", "ACT_WORDS", "act_words",
            "strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",
-           "item_record", "answer_line", "card", "passage", "by_of", "design_moved", "last_at", "rev",
+           "item_record", "answer_line", "card", "passage", "by_of", "design_moved", "design_holds", "last_at", "rev",
            "WHATS"]

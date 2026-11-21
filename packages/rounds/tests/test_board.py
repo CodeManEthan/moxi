@@ -448,7 +448,23 @@ def test_a_design_changed_since_its_version_was_frozen_is_stuck(kit):
     seen = checking.seen_of(found.state, ROUND, settings=own.load())
     made = board.part(found, seen)
     assert board.design_moved(made) is not None
+    # B1's commission is still to come, and the moved design holds it.
+    assert board.design_holds(made)
     assert group_of(made) == "stuck"
+
+
+def test_a_design_changed_after_every_stage_was_commissioned_is_not_stuck_for_it(kit):
+    round_dir = kit()
+    verified(round_dir, stage("B1"))
+    commission(round_dir)
+    (round_dir / "design.md").write_text("# changed\n", encoding="utf-8")
+    found = showing.show(ROUND, refresh=False)
+    moved = checking.seen_of(found.state, ROUND, settings=own.load())[None]
+    made = board.part(found, {**seen_of("B1"), None: moved})
+    assert board.design_moved(made) is not None
+    assert made.step("commission", "B1").settled
+    assert not board.design_holds(made)
+    assert group_of(made) == "moving"
 
 
 def test_a_round_whose_retro_is_ready_is_wrapping(kit):
