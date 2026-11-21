@@ -14,7 +14,8 @@ notes names the host's package. When that load fails, importing this package rai
 The tools read only the notes root, notes' own `root` setting, under the path rules of
 `pathrules`, and every text they return goes through `moxi_secrets.chat_redact` first.
 
-* `list_notes` and `read_note` (`tools`), run under the host's `Limit`.
+* `list_notes`, `read_note` and `search_notes` (`tools`, `search`), run under the
+  host's `Limit`.
 * `start(env)` checks the root and the chat redaction, and never raises: a tool refuses
   per call, and the status rows say why.
 * `status()` gives two rows: `root`, the notes root or why it can't be read, and

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `search_notes` in the Claude apps finds notes by words in their path or text: whole
+  words, case ignored, every word needed, path hits first and then the newest, at most
+  20. Its walk never follows a link and opens only files `read_note` would read, at most
+  1 MiB each, and stops at 6 seconds; each match is read again, put through the chat
+  redaction and kept only when every word still matches, until 16 seconds after the call
+  began. A word that sits only inside a redacted secret finds nothing.
 - Two tools in the Claude apps, with the `connector` extra: `list_notes` lists one folder
   of the notes root (folders by name, then files newest first, 200 a page, and a count of
   what it hides), and `read_note` reads a text file a page at a time (400 lines and 40,000
