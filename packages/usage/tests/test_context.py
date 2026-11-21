@@ -115,10 +115,17 @@ def test_the_verb_exits_0_for_any_state_it_names_and_2_for_an_id_it_cannot_find(
     assert capsys.readouterr().out == "context 412,330 / 1,000,000 (41%)\n"
     assert cli.main(["context", SESSION, "--agent", AGENT, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["tokens"] == 21_005
-    assert cli.main(["context", "0190b000-0000-7000-8000-0000000000ff"]) == 2
-    assert "context unknown: no session" in capsys.readouterr().out
+    # An id it cannot find prints one line on stderr and nothing on stdout, --json too.
+    for json_flag in ([], ["--json"]):
+        assert cli.main(["context", "0190b000-0000-7000-8000-0000000000ff", *json_flag]) == 2
+        said = capsys.readouterr()
+        assert said.out == ""
+        assert said.err.startswith("moxi usage context: no session 0190b000-0000-7000-8000-0000000000ff "
+                                   "found in claude, codex, opencode")
+        assert len(said.err.splitlines()) == 1
     assert cli.main(["context", SESSION, "--agent", "a0190b00000000ff"]) == 2
-    assert "no agent a0190b00000000ff found" in capsys.readouterr().out
+    said = capsys.readouterr()
+    assert said.out == "" and "no agent a0190b00000000ff found" in said.err
     t = ClaudeTranscript(Path(sessions.root("claude")), session_id=THREAD)
     t.user("go")
     t.write()
@@ -141,10 +148,13 @@ def test_an_id_in_more_than_one_harness_is_refused_naming_them(capsys):
     r.write()
     both = api.context(THREAD)
     assert not both.found and not both.known and both.harness is None
-    assert both.reason == (f"session {THREAD} is in more than one harness (claude, "
-                           "codex); give --harness")
+    claude_path = next(Path(sessions.root("claude")).rglob(f"{THREAD}.jsonl"))
+    codex_path = next(Path(sessions.root("codex")).rglob(f"*{THREAD}*.jsonl"))
+    assert both.reason == (f"session {THREAD} is in more than one harness (claude at "
+                           f"{claude_path}; codex at {codex_path}); give --harness")
     assert cli.main(["context", THREAD]) == 2
-    assert "more than one harness (claude, codex)" in capsys.readouterr().out
+    said = capsys.readouterr()
+    assert said.out == "" and said.err == f"moxi usage context: {both.reason}\n"
     assert cli.main(["context", THREAD, "--harness", "codex"]) == 0
     assert capsys.readouterr().out == "context 50,000 / 200,000 (25%)\n"
     assert api.context(THREAD, harness="claude").tokens == 1_010

@@ -35,7 +35,8 @@ class Context:
     (the source read) describe what was read, and `harness` is the harness that held
     the session (None when none did, or more than one did). `found` is false when the
     session is in no harness asked or in more than one, or the agent is not among its
-    subagents; `reason` then says which, naming the harnesses."""
+    subagents; `reason` then says which, naming the harnesses asked or, for a session in
+    more than one, each harness and the path of each record it holds."""
 
     session_id: str
     harness: str | None
@@ -89,7 +90,7 @@ def _known_text(value: Any) -> str | None:
 def _source(sessions: Any, session_id: str, harness: str | None) -> tuple[Any, str | None, str]:
     """The session's source, the harness that held it, and why there is none. With no
     `harness` every harness is asked, and an id more than one holds is refused, naming
-    them, rather than guessed at."""
+    each harness and the path of each record it holds, rather than guessed at."""
     asked = HARNESSES if harness is None else (harness,)
     reasons = []
     readable: list[tuple[str, Any]] = []
@@ -97,7 +98,8 @@ def _source(sessions: Any, session_id: str, harness: str | None) -> tuple[Any, s
     for name in asked:
         found = sessions.find(name, session_id)
         if found.hits:
-            holders.append(name)
+            paths = ", ".join(str(hit.source.path) for hit in found.hits)
+            holders.append(f"{name} at {paths}")
         hits = [hit for hit in found.hits if not hit.compressed]
         if hits:
             readable.append((name, hits[0].source))
@@ -110,7 +112,7 @@ def _source(sessions: Any, session_id: str, harness: str | None) -> tuple[Any, s
             reasons.append(f"{name}: {'; '.join(said)}")
     if len(holders) > 1:
         return None, None, (f"session {session_id} is in more than one harness "
-                            f"({', '.join(holders)}); give --harness")
+                            f"({'; '.join(holders)}); give --harness")
     if readable:
         name, source = readable[0]
         return source, name, ""

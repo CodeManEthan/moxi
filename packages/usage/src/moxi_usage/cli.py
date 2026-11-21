@@ -410,13 +410,16 @@ def _context(args: argparse.Namespace, prog: str) -> int:
               "current session", file=sys.stderr)
         return codes.USAGE
     found = context(args.session, harness=args.harness, agent_id=args.agent)
+    if not found.found:
+        print(f"{prog} context: {found.reason}", file=sys.stderr)
+        return codes.USAGE
     if args.json:
         print(json.dumps(found.as_dict(), indent=2))
     else:
         print(found.text())
         if found.known and found.reason:
             print(f"note: {found.reason}")
-    return codes.OK if found.found else codes.USAGE
+    return codes.OK
 
 
 # --- marks ------------------------------------------------------------------------------

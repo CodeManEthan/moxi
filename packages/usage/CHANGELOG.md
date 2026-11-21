@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `moxi usage context` with a session or agent it cannot find, or a session more than one
+  harness holds, prints one line on stderr and nothing on stdout, `--json` included, and
+  exits 2 as before; it used to print `context unknown: <why>` (or `"found": false`) on
+  stdout. A session in more than one harness is named with the path of each record.
 - The line a subagent leaves for its parent cuts the agent id to eight characters and `…`
   (one character), not `...`.
 - The page's chart by cost stacks each bar by token class (fresh input, cache write,
