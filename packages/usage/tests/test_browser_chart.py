@@ -333,7 +333,10 @@ def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(p
     # Today ran on Sonnet alone: its Haiku cell reads $0.00.
     expect(table.locator("tbody tr").last.locator("td")).to_have_text(
         [re.compile(r"^\d{4}-\d{2}-\d{2}$"), re.compile(rf"^{MONEY}$"), "$0.00"])
+    # The split draws the chart again, its chart and not its table; its table follows it.
     by_class.click()
+    expect(table).to_have_count(0)
+    group.get_by_role("button", name="Table").click()
     expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
 
     # Under Tokens the split is by class, and both buttons are off.
@@ -429,11 +432,51 @@ def test_each_chart_has_its_own_table_with_every_figure_in_its_place(page):
     expect(tables.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
     expect(chart_of(panel)).to_have_attribute("aria-label", "Cache read tokens each day, last 30 days")
     expect(chart_of(panel).locator("g[data-period]")).to_have_count(3)
-    # Back by cost the chart's table is as it was left.
+    # Back by cost the chart is drawn again, its chart and not its table.
     panel.get_by_role("button", name="Cost", exact=True).click()
-    expect(chart_of(panel)).to_have_count(0)
-    expect(group.get_by_role("table").locator("thead th")).to_have_text(
-        ["Day", "Input", "Cache create", "Cache read", "Output"])
+    expect(chart_of(panel)).to_have_count(1)
+    expect(group.get_by_role("table")).to_have_count(0)
+
+
+def test_every_chart_shows_its_chart_again_each_time_it_is_drawn_again(page):
+    panel = open_page(page)
+    group, heat = panel.locator("[data-group=chart]"), heat_of(panel)
+    expect(bars_of(panel)).to_have_count(3)
+
+    def tables_shown() -> None:
+        group.get_by_role("button", name="Table").click()
+        heat.get_by_role("button", name="Table").click()
+        expect(chart_of(panel)).to_have_count(0)
+        expect(heat.locator("svg[data-part=heat]")).to_have_count(0)
+
+    def charts_shown() -> None:
+        expect(chart_of(panel)).to_have_count(1)
+        expect(group.get_by_role("table")).to_have_count(0)
+        expect(heat.locator("svg[data-part=heat]")).to_be_visible()
+        expect(heat.get_by_role("table")).to_have_count(0)
+
+    # A new range.
+    tables_shown()
+    pick(panel, "range", "Last 7 days")
+    charts_shown()
+    # A new split.
+    tables_shown()
+    panel.locator("[data-part=split]").get_by_role("button", name="By model").click()
+    charts_shown()
+    # A new address: a section opened.
+    tables_shown()
+    panel.locator("[data-group=models] [data-part=count]").click()
+    expect(page).to_have_url(re.compile(r"/m/usage/models$"))
+    charts_shown()
+    # A new measure: each chart by tokens shows its chart, whatever the others showed.
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    group.locator('[data-chart="Cache reads"]').get_by_role("button", name="Table").click()
+    expect(chart_of(panel)).to_have_count(1)
+    panel.get_by_role("button", name="Cost", exact=True).click()
+    charts_shown()
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    expect(chart_of(panel)).to_have_count(2)
+    expect(group.get_by_role("table")).to_have_count(0)
 
 
 def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_foot(page):

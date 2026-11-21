@@ -24,6 +24,9 @@
 - Each chart has its own `Table` beside its name, which switches that chart alone; the
   chart by cost keeps its name over its table. One `Table` beside the sentence switched
   every chart of the group.
+- Every chart, and the heat map, shows its chart again, not its table, each time the page
+  draws it again: on a new address, range, filter, Cost / Tokens or split, and after a
+  pass. A table stayed in a chart's place until its `Chart` was clicked.
 - A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
   hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
   that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's

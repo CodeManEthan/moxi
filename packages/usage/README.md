@@ -443,8 +443,9 @@ sessions module. Top to bottom:
   with its share of all tokens, and `Billable work`, input, cache writes and output
   stacked; each has its own `Table` beside its name, which switches that chart alone to its
   table, `Cache reads` with a `Cache read` column and `Billable work` with `Input`, `Cache
-  create` and `Output`. Each chart keeps its choice of Table or Chart while the page is
-  open. A table's
+  create` and `Output`. Every chart, and the heat map, shows its chart again, not its
+  table, each time the page draws it again: on a new address, range, filter, Cost /
+  Tokens or split, and after a pass. A table's
   column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter

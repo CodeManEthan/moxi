@@ -468,7 +468,9 @@ export class UsagePage extends LitElement {
   menu: Menu["key"] | null = null;
   /** The Range menu shows the two days of `From … to …`. */
   custom = false;
-  /** The charts whose tables stand in their place, by `ChartPart` key. */
+  /** The charts whose tables stand in their place, by `ChartPart` key. Each chart goes
+   * back to its chart, the heat map with them, whenever what they show is drawn again:
+   * a new address, range, filter, measure or split, or a pass that read the index. */
   tabled: ReadonlySet<string> = new Set();
   /** The heat map's table stands in its place. */
   heatTable = false;
@@ -565,6 +567,8 @@ export class UsagePage extends LitElement {
   /** The state and folders the reads under the filter line were asked under. */
   #askedFilters: string | null = null;
   #askedAllTime: string | null = null;
+  /** The address and state the charts were last drawn for. */
+  #drawnFor: string | null = null;
   /** The range the chart's reads were last asked under, and the one before it, which a
    * held chart is drawn under until its read answers. */
   #chartRange: PageState["range"] | null = null;
@@ -782,6 +786,11 @@ export class UsagePage extends LitElement {
         ? { harness: at.harness, id: at.session } : null;
     }
     this.#followWindow();
+    const drawnFor = JSON.stringify([this.#at, heldState()]);
+    if (drawnFor !== this.#drawnFor) {
+      if (this.#drawnFor !== null) this.#showCharts();
+      this.#drawnFor = drawnFor;
+    }
     const status = this.#status;
     if (status === null || !hasBelow(status)) return;
     const update = () => this.requestUpdate();
@@ -970,12 +979,19 @@ export class UsagePage extends LitElement {
     this.#event = event;
     this.#events += 1;
     if (!event.running) {
+      this.#showCharts();
       void this.#status?.refresh();
       void this.#daily?.refresh();
       for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#board,
                           ...this.#openedFeeds()]) void feed?.refresh();
     }
     this.requestUpdate();
+  }
+
+  /** Every chart shows its chart again, not its table. */
+  #showCharts(): void {
+    if (this.tabled.size > 0) this.tabled = new Set();
+    this.heatTable = false;
   }
 
   async #askPass(): Promise<void> {
