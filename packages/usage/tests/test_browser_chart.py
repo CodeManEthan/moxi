@@ -543,12 +543,13 @@ def test_model_lists_the_ranges_models_and_filters_to_one(page):
     expect(box).to_have_count(0)
 
 
-def test_project_offers_all_alone_when_no_session_has_a_project(page):
+def test_project_offers_all_projects_alone_when_no_session_has_a_project(page):
     panel = open_page(page)
     box = filter_of(panel, "place")
     expect(box.locator(".k")).to_have_text("Project")
+    expect(box.locator("button.pick")).to_have_text("All projects▾")
     box.locator("button.pick").click()
-    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
+    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*All projects$")])
 
 
 def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small, ui_contexts):
@@ -557,8 +558,9 @@ def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small,
     box = filter_of(panel, "place")
     expect(box.locator(".k")).to_have_text("Folder")
     expect(bars_of(panel)).to_have_count(3)
+    expect(box.locator("button.pick")).to_have_text("All folders▾")
     box.locator("button.pick").click()
-    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
+    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*All folders$")])
     expect(box.get_by_role("menuitemcheckbox")).to_have_text(["/work/proj-a", "/work/proj-b"])
     with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url) as sent:
         box.get_by_role("menuitemcheckbox", name="/work/proj-b").click()
@@ -586,12 +588,12 @@ def test_the_place_filter_picks_several_and_reads_them_one_to_a_line(small, ui_c
     expect(box.locator("button.pick")).to_have_text("2 folders▾")
     expect(entries.and_(page.locator("[aria-checked=true]"))).to_have_count(2)
     expect(bars_of(panel)).to_have_count(3)
-    # Picking one again takes it away; `all` clears them and closes the menu.
+    # Picking one again takes it away; `All folders` clears them and closes the menu.
     entries.filter(has_text="/work/proj-a").click()
     expect(box.locator("button.pick")).to_have_text("1 folder▾")
-    box.get_by_role("menuitemradio", name=re.compile(r"\ball$")).click()
+    box.get_by_role("menuitemradio", name=re.compile(r"All folders$")).click()
     expect(box.get_by_role("menu")).to_have_count(0)
-    expect(box.locator("button.pick")).to_have_text("all▾")
+    expect(box.locator("button.pick")).to_have_text("All folders▾")
     expect(bars_of(panel)).to_have_count(3)
 
 

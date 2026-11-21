@@ -140,27 +140,27 @@ test("the two days open on the range in force and make a range only in order", (
   assert.equal(custom.range.items[4].picked, true);
 });
 
-test("Project lists the range's projects after all, and is absent until they are read", () => {
+test("Project lists the range's projects after All projects, and is absent until they are read", () => {
   assert.equal(filterLine(facts()).place, null);
   const places = report([{ ...sums(), project: "proj-a", cwd: "/work/proj-a", models: [] },
                          { ...sums(), project: null, cwd: "/work/loose", models: [] },
                          { ...sums(), project: "proj-b", cwd: "/work/proj-b", models: [] }], { home: "/work" });
   const line = filterLine(facts({ places }));
-  assert.deepEqual([line.place.label, line.place.value, line.place.set], ["Project", "all", false]);
-  assert.deepEqual(labels(line.place), ["all", "proj-a", "proj-b"]);
+  assert.deepEqual([line.place.label, line.place.value, line.place.set], ["Project", "All projects", false]);
+  assert.deepEqual(labels(line.place), ["All projects", "proj-a", "proj-b"]);
   assert.deepEqual(line.place.items[1].patch, { projects: ["proj-a"], paths: [] });
-  assert.deepEqual(line.place.items[0], { key: "", label: "all", figure: null, picked: true, ruled: false, several: false,
+  assert.deepEqual(line.place.items[0], { key: "", label: "All projects", figure: null, picked: true, ruled: false, several: false,
                                           patch: { projects: [], paths: [] } });
   // One that is set leads the list when the range no longer holds it, and shows before the list
   // answers; the button counts it.
   const set = filterLine(facts({ state: state({ projects: ["proj-c"] }), places }));
-  assert.deepEqual([set.place.value, set.place.set, labels(set.place)], ["1 project", true, ["all", "proj-c", "proj-a", "proj-b"]]);
+  assert.deepEqual([set.place.value, set.place.set, labels(set.place)], ["1 project", true, ["All projects", "proj-c", "proj-a", "proj-b"]]);
   assert.deepEqual(set.place.items.map((item) => item.picked), [false, true, false, false]);
-  assert.deepEqual(labels(filterLine(facts({ state: state({ projects: ["proj-c"] }) })).place), ["all", "proj-c"]);
+  assert.deepEqual(labels(filterLine(facts({ state: state({ projects: ["proj-c"] }) })).place), ["All projects", "proj-c"]);
   // A folder set while the filter is by project: the folder is what it says, the projects stay to pick.
   const folder = filterLine(facts({ state: state({ paths: ["/work/loose"] }), places }));
   assert.deepEqual([folder.place.label, folder.place.value, labels(folder.place)],
-                   ["Project", "1 folder", ["all", "~/loose", "proj-a", "proj-b"]]);
+                   ["Project", "1 folder", ["All projects", "~/loose", "proj-a", "proj-b"]]);
   assert.deepEqual(folder.place.items[2].patch, { projects: ["proj-a"], paths: [] });
 });
 
@@ -169,8 +169,8 @@ test("without projects the filter is Folder, each folder written whole from the 
                          { ...sums(), project: null, cwd: "/srv/proj-b", models: [] },
                          { ...sums(), project: null, cwd: null, models: [] }], { home: "/home/alice" });
   const line = filterLine(facts({ places, folders: true }));
-  assert.deepEqual([line.place.label, line.place.value], ["Folder", "all"]);
-  assert.deepEqual(labels(line.place), ["all", "~/code/proj-a", "/srv/proj-b"]);
+  assert.deepEqual([line.place.label, line.place.value], ["Folder", "All folders"]);
+  assert.deepEqual(labels(line.place), ["All folders", "~/code/proj-a", "/srv/proj-b"]);
   assert.deepEqual(line.place.items[1].patch, { paths: ["/home/alice/code/proj-a"], projects: [] });
   const set = filterLine(facts({ state: state({ paths: ["/srv/proj-b"] }), places, folders: true }));
   assert.deepEqual([set.place.value, set.place.set], ["1 folder", true]);
