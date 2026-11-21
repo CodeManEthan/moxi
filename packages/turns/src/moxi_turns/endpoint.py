@@ -855,15 +855,6 @@ class Endpoint:
             d = self._deliveries.get(delivery_id)
             return d is not None and d.state in (_QUEUED, _INFLIGHT) and not d.expired
 
-    def opened_by(self, turn_id: str) -> str | None:
-        """The delivery that opened the open turn `turn_id`, or None (no such turn is
-        open, or the person's own opened it)."""
-        with self._lock:
-            turn = self.ledger.open
-            if turn is None or turn.turn_id != turn_id:
-                return None
-            return turn.delivery_id
-
     def delivery_text(self, delivery_id: str) -> str | None:
         """The text of a delivery the endpoint still keeps, or None."""
         with self._lock:

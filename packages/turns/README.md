@@ -132,7 +132,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `prompt.own_origins`: the prompt origins that count as yours, which question mode and
   every prompt listener read (a `prompt` event's `own`). Default `["composer", "bridge"]`:
   `composer` is a prompt typed at this terminal, `bridge` one sent from the Claude apps
-  through Remote Control. On Codex a prompt typed in the window is `composer`.
+  through Remote Control. On Codex a prompt typed in the window is `composer`, except
+  while a delivery the host handed in is still out and the prompt's text matches none:
+  then it carries no origin.
 - `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
   question-mode reminder. Default `["prose", "pros"]`.
 

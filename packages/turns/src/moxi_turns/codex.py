@@ -326,6 +326,12 @@ class CodexHarness(Harness):
         self._last_message: tuple[str | None, str | None] = (None, None)
         #: The last main turn a UserPromptSubmit named: a later prompt naming it joined it.
         self._prompted_turn: str | None = None
+        #: The last main turn reported and the delivery whose ``turn/start`` opened it,
+        #: `(turn id, delivery id)`, set under the same hold that frees the waiting slot;
+        #: None when no delivery opened it.
+        self._opened: tuple[str, str] | None = None
+        #: The hand-ins a UserPromptSubmit has already been placed on: each is placed once.
+        self._placed: set[str] = set()
         self._ending: str | None = None    # the turn whose Stop was answered unblocked
         self._steers_out = 0               # turn/steer requests sent and not yet answered
         self._steers_idle = threading.Condition(self._lock)
@@ -420,33 +426,39 @@ class CodexHarness(Harness):
                 prompts = ()
             self._prompts = (turn_id, (*prompts, Prompt(origin, text)))
 
-    def prompt_delivery(self, turn_id, text: str | None) -> tuple[str | None, bool]:
-        """`(delivery, opens)` for a main-loop UserPromptSubmit: the delivery it is the
-        text of, or None for a prompt typed in the window, and whether it opens its turn
-        (false: it joins a turn an earlier prompt named; a hook with no turn id opens).
+    def place_prompt(self, turn_id, text: str | None) -> tuple[str | None, str | None,
+                                                                 bool]:
+        """`(origin, delivery, opens)` for a main-loop UserPromptSubmit, and marks the
+        hand-in it places the prompt on.
 
-        A turn's first prompt is a delivery's when the host has a `turn/start` out for
-        one (it waits to be tied), or when the turn it names is the open turn a delivery
-        opened. A later prompt in the same turn is a steer's when one is being handed in
-        and its text equals the prompt's (or only one is), else the window's."""
+        The host's hand-ins still out are the delivery whose `turn/start` it has out, the
+        delivery that opened the turn the prompt names, and each steer it is handing in;
+        each stays out until a prompt is placed on it. A prompt whose text equals one's
+        is that delivery's and carries no origin. One that equals none is typed in the
+        window (`composer`) only when no hand-in is out: while one is, the prompt could be
+        it with its text changed, so it carries no origin and no delivery, and is never
+        `composer`. `opens` is whether the prompt opens its turn (false: it joins a turn
+        an earlier prompt named; a hook with no turn id opens)."""
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
         with self._lock:
-            first = turn_id is None or turn_id != self._prompted_turn
+            opens = turn_id is None or turn_id != self._prompted_turn
             if turn_id is not None:
                 self._prompted_turn = turn_id
-            pending = self._pending_delivery
-            steering = sorted(self._steering)
+            opened = self._opened
+            live = [self._pending_delivery, opened[1] if opened else None,
+                    *sorted(self._steering)]
+            self._placed &= set(live)
+            if opened is not None and turn_id is not None and opened[0] != turn_id:
+                live[1] = None    # it opened another turn: this prompt is not its text
+            out = [i for i in dict.fromkeys(live) if i is not None and i not in self._placed]
+        if not out:
+            return codex_hooks.PROMPT_ORIGIN, None, opens
         endpoint = self.endpoint
-        if first:
-            if pending is not None:
-                return pending, True
-            return (endpoint.opened_by(turn_id) if turn_id is not None else None), True
-        if not steering:
-            return None, False
-        same = [i for i in steering if endpoint.delivery_text(i) == text]
-        if same:
-            return same[0], False
-        return (steering[0] if len(steering) == 1 else None), False
+        placed = next((i for i in out if endpoint.delivery_text(i) == text), None)
+        if placed is not None:
+            with self._lock:
+                self._placed.add(placed)
+        return None, placed, opens
 
     def context_tokens(self) -> int | None:
         """The main thread's context, in tokens, from its last token reading; None
@@ -1318,6 +1330,9 @@ class CodexHarness(Harness):
                 delivery_id = None   # settled meanwhile: the turn counts as the person's
             if delivery_id is not None:
                 self._pending_delivery = None
+            # The tie is the host's own, made before the lock is let go: a prompt that
+            # lands before the endpoint opens the turn still finds the delivery out.
+            self._opened = (turn_id, delivery_id) if delivery_id is not None else None
             command = None
             compaction = self._compacting
             if (delivery_id is None and compaction is not None
