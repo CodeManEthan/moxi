@@ -322,6 +322,8 @@ class CodexHarness(Harness):
         self._reported_turns: set[str] = set()
         self._settled_turns: set[str] = set()
         self._steering: set[str] = set()
+        #: The main thread's last completed agent message, `(turn id, text)`.
+        self._last_message: tuple[str | None, str | None] = (None, None)
         #: The last main turn a UserPromptSubmit named: a later prompt naming it joined it.
         self._prompted_turn: str | None = None
         self._ending: str | None = None    # the turn whose Stop was answered unblocked
@@ -897,6 +899,21 @@ class CodexHarness(Harness):
         self._unconfirmed = {agent_id for agent_id, entry in carried.items()
                              if entry[1] is not True}
 
+    def _note_message(self, params: dict) -> None:
+        """A completed agent message of the session's own thread: the latest is its
+        turn's answer so far, which a delivery the turn took ends with."""
+        item = params.get("item")
+        if not isinstance(item, dict) or item.get("type") != proto.AGENT_MESSAGE_ITEM:
+            return
+        text, turn_id = item.get("text"), params.get("turnId")
+        if not isinstance(text, str) or not isinstance(turn_id, str):
+            return
+        with self._lock:
+            thread = params.get("threadId")
+            if isinstance(thread, str) and thread != self.session_id:
+                return
+            self._last_message = (turn_id, text)
+
     def _track_collab(self, params: dict) -> None:
         """An item's start or end: a collab tool call's notices update the record. Items
         of the session's thread count, and those of a subagent's own thread (its spawns)."""
@@ -1343,6 +1360,8 @@ class CodexHarness(Harness):
             self._on_completed(params)
         elif method in ("item/started", "item/completed"):
             self._track_collab(params)
+            if method == "item/completed":
+                self._note_message(params)
         elif method == "thread/tokenUsage/updated":
             self._token_usage(params)
         elif method == LIMITS_UPDATED:
@@ -1530,7 +1549,9 @@ class CodexHarness(Harness):
             if self._ending == actual:
                 self._ending = None
             self.thread_active = False
-        self.endpoint.turn_ended(actual, outcome)
+            said, text = self._last_message
+            answer = text if said == actual else None
+        self.endpoint.turn_ended(actual, outcome, answer=answer)
 
     def stop_facts(self, frame: dict) -> StopFacts:
         task_types = frame.get("task_types")

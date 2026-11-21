@@ -753,8 +753,11 @@ class Endpoint:
             self._emit(self._turn_started(turn))
             self._cond.notify_all()
 
-    def turn_ended(self, turn_id: str | None, outcome: str) -> None:
-        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`)."""
+    def turn_ended(self, turn_id: str | None, outcome: str, *,
+                   answer: str | None = None) -> None:
+        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`).
+        `answer` is the turn's final text where the harness gives it; every delivery the
+        turn took ends with it."""
         if outcome not in OUTCOMES:
             log.warning("turn %s ended with outcome %r, not one of %s; it counts as "
                         "error", turn_id, outcome, ", ".join(OUTCOMES))
@@ -766,6 +769,7 @@ class Endpoint:
             if turn is None:
                 log.warning("turn %s ended while no turn was open; ignored", turn_id)
                 return
+            turn.answer = answer
             if turn_id is not None and turn.turn_id is not None and turn_id != turn.turn_id:
                 log.warning("turn %s ended while the ledger held turn %s open; the open "
                             "one ends", turn_id, turn.turn_id)
@@ -931,7 +935,8 @@ class Endpoint:
                 # text went into a turn whose `turn.ended` has gone out without it.
                 log.warning("steer %s confirmed after its turn %s ended; it ends with "
                             "that turn", d.id, turn.turn_id)
-                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error"))
+                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error",
+                                            answer=turn.answer))
             self._cond.notify_all()
 
     def on_stop(self, facts: StopFacts) -> str | None:
@@ -1593,7 +1598,7 @@ class Endpoint:
             turn.ended_held = True   # its TurnEnded waits with its TurnStarted
             return
         outcome = turn.outcome or "error"
-        ended = Ended(turn.turn_id, outcome)
+        ended = Ended(turn.turn_id, outcome, answer=turn.answer)
         for delivery_id in [turn.delivery_id, *turn.steered]:
             d = self._deliveries.get(delivery_id) if delivery_id else None
             if d is not None and d.state != _DONE:

@@ -97,7 +97,9 @@ own count from 1 for this load, and `kind`:
 
     session        {session_id, mod_version}       the runner's `$.session.id()`
     turn.start     {turn_id}                        a main-loop `turn.start`
-    turn.complete  {turn_id, reason, is_aborted}    a main-loop `turn.complete`
+    turn.complete  {turn_id, reason, is_aborted, answer}
+                                                    a main-loop `turn.complete`; `answer`
+                                                    is its final visible text
     submit.close   {delivery, end, reason}          a submit settled: `end` is `resolve`,
                                                     `drop` or `fail` (it rejected); a
                                                     drop's `reason` is the gate's code read

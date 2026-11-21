@@ -64,7 +64,7 @@ VALUES = {
     "started": ("delivery", "ref", "turn_id"),
     "refused": ("delivery", "ref", "reason"),
     "lost": ("delivery", "ref", "reason"),
-    "ended": ("delivery", "ref", "turn_id", "outcome"),
+    "ended": ("delivery", "ref", "turn_id", "outcome", "answer"),
     "ran": ("new_session_id", "shells"),
     "failed": ("reason",),
     "passed": (),

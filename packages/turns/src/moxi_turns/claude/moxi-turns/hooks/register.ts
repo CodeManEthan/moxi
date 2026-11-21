@@ -40,7 +40,8 @@
 //            landed; `seq` counts from 1 per runner load, in the order sent. Kinds:
 //              session        {session_id, mod_version}  first, once the hello came
 //              turn.start     {turn_id}
-//              turn.complete  {turn_id, reason, is_aborted}
+//              turn.complete  {turn_id, reason, is_aborted, answer}  answer: the turn's
+//                             final visible text
 //              submit.close   {delivery, end, reason}  the submit settled: end is resolve,
 //                             drop (reason: the gate's code, else `dropped`; `unsupported`
 //                             when the gate is not loaded and nothing was submitted) or
@@ -1479,7 +1480,7 @@ export const register: Register = on => {
       if (e.agentId === undefined && e.isAborted) dropMainLoopCalls()
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = null
-      await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
+      await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted, answer: e.answer })
       if (win !== null) arm($, win, IDLE_FAIL_MS)
       // A reading at every turn's end, whatever the measures said (the plain call is free).
       try {

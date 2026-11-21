@@ -13,8 +13,8 @@ type E = any
 
 const start = ($: E) => $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
 const turnStart = ($: E, turnId: string) => $.turn.start({ text: '', turnId })
-const turnEnd = ($: E, turnId: string, reason = 'answer') =>
-  $.turn.complete({ answer: '', durationMs: 1, isAborted: reason === 'aborted', turnId, reason })
+const turnEnd = ($: E, turnId: string, reason = 'answer', answer = '') =>
+  $.turn.complete({ answer, durationMs: 1, isAborted: reason === 'aborted', turnId, reason })
 
 async function attached($: E, w: World): Promise<void> {
   await start($)
@@ -415,13 +415,13 @@ describe('the report queue', () => {
     const w = world(on)
     await start($)
     await turnStart($, 't1')
-    await turnEnd($, 't1')
+    await turnEnd($, 't1', 'answer', 'done.')
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
     expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.2.1' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
-    expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false })
+    expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
 
   test('a turn-start hook waits at most 1 s for its report, and the report still lands after', async ($: E, on) => {
@@ -467,7 +467,7 @@ describe('main-loop turns only', () => {
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
     expect(w.reports().slice(1)).toEqual([
       { seq: 2, kind: 'turn.start', turn_id: 't1' },
-      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false },
+      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: '' },
     ])
   })
 

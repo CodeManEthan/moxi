@@ -13,6 +13,9 @@
   `prompt` event carries `delivery_by` and `delivery_senders` from the delivery that is
   the prompt, both None for a prompt turns did not hand in, and `opens`, false when the
   prompt joins a main-loop turn already running.
+- A delivery's `ended` value carries `answer`, the final text of the turn that took it:
+  on Claude Code the assistant's final visible text ("" when there was none), on Codex
+  the turn's last agent message, null where the harness gave none.
 - Question mode's prompt reminder leaves the agent to judge whether the questions are
   wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
   end of its output once they are answered. "pros", as voice input spells "prose", now

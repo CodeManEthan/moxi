@@ -180,6 +180,31 @@ def test_a_submitted_delivery_is_tied_to_the_app_servers_turn(turns_env):
         end_endpoint(endpoint)
 
 
+def test_a_deliverys_end_carries_its_turns_last_agent_message(turns_env):
+    endpoint, harness, app = _host(turns_env)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
+
+    def message(turn_id, text, thread="thread-1"):
+        app.on_notification("item/completed", {
+            "threadId": thread, "turnId": turn_id,
+            "item": {"type": "agentMessage", "id": "m", "text": text}}, None)
+
+    try:
+        first = session.deliver("hello", only_if_idle=True)
+        assert first.wait_started(2).turn_id == "turn-1"
+        message("turn-1", "looking")
+        message("turn-1", "found it")
+        message("turn-1", "a subagent's words", thread="thread-sub")
+        app.complete()
+        assert first.wait_ended(2).answer == "found it"
+        second = session.deliver("again", only_if_idle=True)
+        second.wait_started(2)
+        app.complete()                        # no agent message in this turn
+        assert second.wait_ended(2).answer is None
+    finally:
+        end_endpoint(endpoint)
+
+
 def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
     endpoint, harness, app = _host(turns_env)
     session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)

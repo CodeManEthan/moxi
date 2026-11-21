@@ -153,7 +153,7 @@ turn, an agent, a shell) is a plain object with no `kind`.
 | `started` | `delivery`, `ref`, `turn_id` |
 | `refused` | `delivery`, `ref`, `reason` (a delivery's); `reason` alone (a command's) |
 | `lost` | `delivery`, `ref`, `reason` |
-| `ended` | `delivery`, `ref`, `turn_id`, `outcome` |
+| `ended` | `delivery`, `ref`, `turn_id`, `outcome`, `answer` |
 | `ran` | `new_session_id`, `shells` |
 | `failed` | `reason` |
 | `passed` | none: an `exit` the harness's gate let through (see `command`) |

@@ -201,6 +201,22 @@ def test_deliver_waits_for_the_running_turn_and_two_are_two_turns(make_endpoint)
     assert idle_start(s) == turns.Refused("busy-turn")
 
 
+def test_a_deliverys_end_carries_the_turns_final_text(make_endpoint):
+    ep, fake = make_endpoint()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("a")
+    assert bare(d.wait_started(1)) == turns.Started("t1")
+    st = s.steer("b")
+    st.wait_started(1)
+    fake.end_turn(answer="NOTHING")
+    assert bare(d.wait_ended(1)) == turns.Ended("t1", "answer", answer="NOTHING")
+    assert bare(st.wait_ended(1)).answer == "NOTHING"
+    e = s.deliver("c")
+    e.wait_started(1)
+    fake.end_turn()                           # a harness that gives no final text
+    assert bare(e.wait_ended(1)).answer is None
+
+
 def test_steer(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
