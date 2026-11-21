@@ -211,6 +211,29 @@ def test_a_launch_with_usage_warns_at_2x_unless_it_sets_another_mark(monkeypatch
     assert stamped(got) is None
 
 
+def test_a_seat_or_codex_launch_warns_only_at_a_mark_it_sets():
+    """The 2x default reaches one-off, project and scratch launches only. A seat outside
+    a scratch folder, or a Codex launch, holds no mark unless `[defaults]`, its preset or
+    a flag sets one; then it holds that mark."""
+    with_usage = only("usage")
+    seat = '[seat.s]\nmodel = "opus"\n'
+
+    def mark(text="", **request):
+        got = resolve(text, available=with_usage, **request)
+        return got.values["warn_at"], "usage" in got.links
+
+    assert mark(seat, seat="s") == ("", False)
+    assert mark(seat, seat="s", left_out=["warn_at"]) == ("", False)
+    assert mark(typed={"harness": "codex"}) == ("", False)
+    assert mark('[seat.s]\nwarn_at = "1x"\n', seat="s") == ("1x", True)
+    assert mark(seat, seat="s", typed={"warn_at": "1.5x"}) == ("1.5x", True)
+    assert mark('[defaults]\nwarn_at = "off"\n' + seat, seat="s") == ("off", True)
+    assert mark(typed={"harness": "codex", "warn_at": "2x"}) == ("2x", True)
+    assert mark() == ("2x", True)
+    assert mark('[project.p]\nmodel = "opus"\n', project_preset="p") == ("2x", True)
+    assert mark('[seat.s]\nscratch = true\n', seat="s") == ("2x", True)
+
+
 def test_each_later_layer_wins():
     text = ('[defaults]\nmodel = "sonnet"\neffort = "low"\nnative_name = "d"\n'
             '[seat.planner]\nmodel = "opus"\neffort = "high"\n')

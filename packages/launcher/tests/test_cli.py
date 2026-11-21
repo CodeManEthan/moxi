@@ -371,7 +371,7 @@ def test_preview_json_is_one_object_with_argv_and_env(work, capsys):
     assert (shown["harness"], shown["mode"], shown["target"]) == ("codex", "exec",
                                                                   "headless")
     assert shown["argv"][:2] == ["codex", "exec"]
-    assert set(shown["env"]) == {common.REQUEST_ENV, "MOXI_USAGE_WARN_AT"}
+    assert set(shown["env"]) == {common.REQUEST_ENV}
     assert shown["first_turn"] is None and shown["values"]["scratch"] is True
     assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST_ENV]).exists()
 
