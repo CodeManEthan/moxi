@@ -192,11 +192,21 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             found.close()
 
 
+#: The hint of a launch refused `no-self-recycle` for its `recycle_at_limit`.
+SELF_RECYCLE_HINT = ("finish the work and stop; a launch with --recycle-at-limit relaunch "
+                     "can recycle itself")
+#: The same hint for a scratch launch, which can't be made with that option.
+SCRATCH_HINT = ("finish the work and stop; a scratch launch recycles only by compacting, "
+                "and a launch in a directory with --recycle-at-limit relaunch can recycle "
+                "itself")
+
+
 def may_recycle(row: store.LaunchRow) -> None:
     """Refuse `no-self-recycle` unless the launch was made with `--recycle-at-limit
     relaunch`, the option that lets its session recycle itself, and not in a scratch
     folder (`recycle.SCRATCH_RECYCLE`: a row recorded before a scratch launch was refused
-    the option)."""
+    the option). A scratch row refused for its value gets `SCRATCH_HINT`, since a scratch
+    launch can't take the option."""
     value = row.values.get("recycle_at_limit")
     if recycle.scratch_relaunch(row.values):
         problem, hint = recycle.SCRATCH_RECYCLE
@@ -204,8 +214,7 @@ def may_recycle(row: store.LaunchRow) -> None:
                                          f"folder, and {problem}", hint)
     if value == "relaunch":
         return
-    hint = ("finish the work and stop; a launch with --recycle-at-limit relaunch can "
-            "recycle itself")
+    hint = SCRATCH_HINT if row.values.get("scratch") else SELF_RECYCLE_HINT
     if value == "compact":
         raise Refused("no-self-recycle", f"launch {row.request_id} recycles at its limit by "
                                          "compacting, so it can't relaunch itself", hint)
@@ -899,7 +908,7 @@ def _span(seconds: float) -> str:
     return f"{seconds:g} seconds"
 
 
-__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "UNREADABLE", "Refused",
-           "Result", "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
+__all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "SCRATCH_HINT",
+           "SELF_RECYCLE_HINT", "UNREADABLE", "Refused", "Result", "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
            "is_director", "job_argv", "may_recycle", "model_words", "not_warm", "offered",
            "outcome_result", "run_line", "start_job", "status", "stop_run"]

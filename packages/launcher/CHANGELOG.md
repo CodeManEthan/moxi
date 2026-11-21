@@ -32,7 +32,9 @@
   launches in a scratch. A `[defaults]` relaunch holds `off` on a scratch launch, with a
   warning. `compact` is open to it. A scratch
   launch recorded with the option before is refused the self relaunch, gets no recycle
-  line, and recycles `off` when it is relaunched or resumed, with a warning.
+  line, and recycles `off` when it is relaunched or resumed, with a warning. A scratch
+  launch refused the self relaunch for any other value is pointed at compacting or a
+  launch in a directory, not at the option it can't take.
 - A relaunch of a launch that names no model comes back on the model the session last
   used, read from the newest request in its transcript that names one, and records it as
   a `model-pin` event; the new row keeps no model, so a resume of it runs the row's own. The
