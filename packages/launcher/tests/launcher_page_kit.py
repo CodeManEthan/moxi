@@ -104,8 +104,8 @@ def launch_log(shell: Any) -> Iterator[Any]:
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
          session_id: str | None = None, cwd: str = "/work/page", by: str = "ann",
          config_dir: str | os.PathLike | None = None, claimed: bool = False,
-         values: dict | None = None) -> str:
-    """A Claude launch's row made by `by`, started; its process this test's own when
+         values: dict | None = None, posture: str = "operator") -> str:
+    """A Claude launch's row made by `by`, under `posture`, started; its process this test's own when
     `live`, else one that has ended. With `config_dir` the row records it as the
     session's `CLAUDE_CONFIG_DIR`, where `transcript` writes. With `claimed` its claim
     names this test's own process as the turns endpoint, so `target.find` passes for a
@@ -121,7 +121,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     with launch_log(shell) as conn:
         store.insert(conn, request_id=request_id, by=by, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
-                     posture="operator", session_id=sid, slot=slot, base_env=base_env)
+                     posture=posture, session_id=sid, slot=slot, base_env=base_env)
         # A start time no running process has, so an ended launch's process reads ended.
         store.set_state(conn, request_id, "started", pid=me.pid,
                         pid_started=me.started if live else 1.0)

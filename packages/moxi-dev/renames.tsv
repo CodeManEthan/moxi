@@ -3375,6 +3375,8 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	if args.session is not None 
 launcher	packages/launcher/src/moxi_launcher/cli.py	elif args.session is None and not args.dry_run:	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="ask only of the launch whose current session is ID")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(recycle.clear_expired(args.session, dry_run=args.dry_run), args)	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the brief, sent as the resumed session's first turn; a "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="a file holding the brief, sent as the resumed session's "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -3627,6 +3629,9 @@ launcher	packages/launcher/src/moxi_launcher/page.py	topics={"sessions": _table(
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	"slot": Field("string", required=False, max=QUERY_MAX),	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	"brief": Field("string", required=False),	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	"brief_file": Field("string", required=False, max=PATH_MAX)},	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""The `sessions` topic's value: every live launch's state. Never raises."""	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`/api/state`'s answer: the state of the launched session `session`, or `refused`	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	"""`GET /api/events`: the stream over the `sessions` and `launches` topics. The first	keep	sessions	sessions
@@ -3718,6 +3723,7 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session no launch h
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return any(getattr(entry, "name", None) == name	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	return {"refused": None, "command": _command(words)}	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	_agents_folder	_agents_dir
 launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	folder_place	dir_place
@@ -3795,6 +3801,7 @@ launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	environ	calle
 launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	met	exc
 launcher	packages/launcher/src/moxi_launcher/resume.py	return Result(codes.OK, lines, data={"sessions": [e.as_json() for e in entries]})	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	session = turns.find(session_id=session_id)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/resume.py	brief_file = catalog.row(row.harness, "brief_file").check(brief_file)	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/seed.py	"""The launch's home folder: its `HOME`, else this account's."""	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/seed.py	home = env.get("HOME")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/seed.py	return done(REFUSED.format(why="changed"))	keep	changed	changed
@@ -4589,6 +4596,9 @@ launcher	packages/launcher/tests/test_page_resume.py	return said["refused"]["cod
 launcher	packages/launcher/tests/test_page_resume.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_page_resume.py	self.live, self.failing = set(live), set(failing)	keep	set	set
 launcher	packages/launcher/tests/test_page_resume.py	store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",	use	actor=	by=
+launcher	packages/launcher/tests/test_page_resume.py	assert said == {"refused": None, "command": f"moxi launcher resume {SID} --brief "	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	refused = resumed({"session": SID})["refused"]	keep	refused	refused
+launcher	packages/launcher/tests/test_page_resume.py	assert requested("r9")["refused"]["code"] == "posture-brief"	keep	refused	refused
 launcher	packages/launcher/tests/test_page_running.py	"folder": "proj-a"}	keep	folder	folder
 launcher	packages/launcher/tests/test_page_running.py	"folder": "sub"}	keep	folder	folder
 launcher	packages/launcher/tests/test_page_running.py	"target", "slot", "project_key", "folder"}	keep	folder	folder

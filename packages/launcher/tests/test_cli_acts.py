@@ -116,8 +116,11 @@ PARSES = [
      {"limit": 5, "before": "2026-10-30T00:00:00Z", "json": True}),
     (["sessions"], {"verb": "sessions", "limit": None, "before": None, "json": False}),
     (["sessions", "--limit", "2", "--json"], {"limit": 2, "json": True}),
-    (["resume", SID], {"verb": "resume", "session_id": SID, "slot": None}),
+    (["resume", SID], {"verb": "resume", "session_id": SID, "slot": None, "brief": None,
+                       "brief_file": None}),
     (["resume", SID, "--slot", "4"], {"slot": "4"}),
+    (["resume", SID, "--brief", "Carry on."], {"brief": "Carry on.", "brief_file": None}),
+    (["resume", SID, "--brief-file", "b.md"], {"brief": None, "brief_file": "b.md"}),
     (["keep-warm", "hold", "build-7"], {"verb": "keep-warm", "action": "hold",
                                         "name": "build-7", "json": False}),
     (["keep-warm", "release", "build-7"], {"action": "release", "name": "build-7"}),
@@ -168,6 +171,8 @@ REFUSED = [
     ["sessions", "--bogus"],
     ["resume"],
     ["resume", SID, "--slot"],
+    ["resume", SID, "--brief"],
+    ["resume", SID, "--brief-f", "b.md"],
     ["keep-warm"],
     ["keep-warm", "hold"],
     ["keep-warm", "open", "x"],
@@ -602,9 +607,22 @@ def test_resume_hands_the_slot_and_the_warn_printer_over(monkeypatch, capsys):
                  result(codes.OK, "launch r9 started in slot 4", outcome="resumed"))
     status, out, _ = run(["resume", SID, "--slot", "4"], capsys)
     assert (status, out) == (codes.OK, "launch r9 started in slot 4\n")
-    assert seen == [((SID,), {"slot": "4", "warn": cli._warn})]
+    assert seen == [((SID,), {"slot": "4", "brief": None, "brief_file": None,
+                              "warn": cli._warn})]
     run(["resume", SID], capsys)
     assert seen[-1][1]["slot"] is None
+
+
+def test_resume_hands_its_brief_over_and_reads_a_brief_file_from_where_it_runs(
+        monkeypatch, capsys, tmp_path):
+    seen = calls(monkeypatch, resume, "resume",
+                 result(codes.OK, "launch r9 started in slot 4", outcome="resumed"))
+    run(["resume", SID, "--brief", "Carry on."], capsys)
+    assert (seen[-1][1]["brief"], seen[-1][1]["brief_file"]) == ("Carry on.", None)
+    monkeypatch.chdir(tmp_path)
+    run(["resume", SID, "--brief-file", "b.md"], capsys)
+    assert (seen[-1][1]["brief"], seen[-1][1]["brief_file"]) == (None,
+                                                                 str(tmp_path / "b.md"))
 
 
 def test_resume_whose_launch_failed_exits_1_on_stderr(monkeypatch, capsys):
@@ -633,6 +651,19 @@ def test_resume_of_a_headless_launch_is_refused_and_writes_nothing(conn, capsys)
     launched(conn, target_="headless")
     status, _, err = run(["resume", SID], capsys)
     assert status == codes.REFUSED and err.splitlines()[0].endswith("[headless]")
+    assert [r.request_id for r in store.log(conn)] == ["r1"]
+
+
+def test_resume_of_a_go_launch_with_no_brief_is_refused_and_writes_nothing(conn, capsys):
+    """Through the real verb: a resumed go session does not wake itself either."""
+    launched(conn)
+    conn.execute("UPDATE launches SET posture = 'go'")
+    status, _, err = run(["resume", SID], capsys)
+    assert status == codes.REFUSED and "[posture-brief]" in err.splitlines()[0]
+    assert "posture go needs a brief on a resume" in err
+    assert "give the resume --brief or --brief-file" in err
+    status, _, err = run(["resume", SID, "--brief", "Go.", "--brief-file", "/b.md"], capsys)
+    assert status == codes.USAGE and "both brief and brief_file are given" in err
     assert [r.request_id for r in store.log(conn)] == ["r1"]
 
 

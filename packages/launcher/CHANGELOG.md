@@ -24,6 +24,11 @@
 - Exit-session holds while the session runs a background shell or Monitor, until the
   session has been idle an hour (`held`, word `shells`); only then does it exit and stop
   them at Claude's exit dialog. `--dry-run` says which.
+- `moxi launcher resume` takes `--brief TEXT` or `--brief-file FILE`, and the page's
+  resume a brief or a brief file beside each past session; the brief is sent as the
+  resumed session's first turn, as a launch's is. A resume of a `go` launch with no brief
+  is refused before anything starts (`posture-brief`), since a resumed session does not
+  wake itself either, and a brief under `with:<identity>` is refused as on a launch.
 - The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
   brief, brief file or handoff, and a brief under `with:<identity>`, whose director
   sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent

@@ -2,7 +2,8 @@
 again where it left off.
 
     sessions()                     # sessions: one entry per launch, newest first
-    resume(session_id)             # resume SESSION_ID [--slot N]: launch it again, resumed
+    resume(session_id)             # resume SESSION_ID [--slot N] [--brief TEXT | --brief-file
+                                   #   FILE]: launch it again, resumed
 
 **The list** is the launch log's, one entry per launch, newest first, each with the id the
 launch was last known by (after a clear or a compaction it is not the one it started
@@ -14,8 +15,12 @@ marks only its own entry: its liveness is unread, and it is not offered for resu
 **A resume** launches the row again from its stored values (`api.ReplayRequest`, no
 preset read), with the row's own environment rule, `resume_of` naming the launch it
 resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
-Codex host's `--resume <thread id>`. It sends no first turn. It keeps the session id it
-resumes, and that id then belongs to the new launch, so every later act on the id finds
+Codex host's `--resume <thread id>`. It sends no first turn of the row's: the row's brief
+is not sent again. A brief given to the resume (`--brief` or `--brief-file`, one of them) is
+its first turn, sent as a launch sends its own (`first`). The start posture rules it as it
+rules a launch's (`presets.check_resume_brief`): a resume of a `go` launch needs one, since
+a resumed session does not wake itself either, and a resume under `with:<identity>` takes
+none. It keeps the session id it resumes, and that id then belongs to the new launch, so every later act on the id finds
 the new launch. A Codex launch with a comms name resumes like any other: its replay runs
 comms' Codex wrapper with the wrapper's own flags and then `--resume <thread id>`, and the
 wrapper binds the name to that thread and continues it. Only a resume passes `--resume`: a
@@ -33,7 +38,11 @@ It is refused, with nothing written, when:
   moxi-comms lets it resume. Whether comms can is read once per list, not once per entry;
 - its session is live now (`live`): attach to it instead; liveness is read again at the
   call, whatever the list said;
-- its liveness can't be read (`liveness-unread`, exit 1).
+- its liveness can't be read (`liveness-unread`, exit 1);
+- the brief doesn't fit: both `--brief` and `--brief-file` given, a brief file's path not
+  absolute, no brief for a `go` launch, or a brief under `with:<identity>`
+  (`posture-brief`). A brief file that can't be read is refused as a launch's is, when
+  the resume composes.
 
 The check that the session is not live is made again as the new launch's row is written,
 in the same store transaction: while another launch of the session is still starting, or
@@ -237,6 +246,7 @@ def live_refusal(row: store.LaunchRow, session_id: str | None, *, live: bool | N
 
 
 def resume(session_id: str, *, slot: int | str | None = None,
+           brief: str | None = None, brief_file: str | None = None,
            request_id: str | None = None, caller_env: Mapping[str, str] | None = None,
            turns: Any = LOOK, slots_api: Any = LOOK,
            launch: Callable[..., Any] | None = None,
@@ -246,8 +256,9 @@ def resume(session_id: str, *, slot: int | str | None = None,
     written (`store.RunOpen` while a run on the launch is open and its job runs); returns the new launch's outcome. A launch in this terminal does not return
     on Linux and macOS.
 
-    `slot` is the slot to use in place of the original's; `request_id` the new launch's
-    (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
+    `slot` is the slot to use in place of the original's; `brief` or `brief_file` the
+    brief sent as the resumed session's first turn (`checked_brief` checks them);
+    `request_id` the new launch's (minted when None), its idempotency key. `turns`, `slots_api` and `launch` stand in
     for turns' and slots' APIs (None: not installed) and `api.launch`."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
@@ -261,6 +272,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
             refused = live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
+        brief, brief_file = checked_brief(row, brief, brief_file)
         # A relaunch, exit or recycle under way owns the session: between its exit and
         # its respawn the session reads not live, and a resume then would run a second.
         slots_found = _slots(slots_api)
@@ -273,7 +285,8 @@ def resume(session_id: str, *, slot: int | str | None = None,
 
     request = api.ReplayRequest(row, resume_of=row.request_id,
                                 request_id=request_id or str(uuid.uuid4()),
-                                session_id=newest, actor=first.actor(env), slot=chosen)
+                                session_id=newest, actor=first.actor(env), slot=chosen,
+                                brief=brief, brief_file=brief_file)
     try:
         if launch is None:
             result = api.launch(request, env=caller_env, warn=warn)
@@ -289,6 +302,21 @@ def resume(session_id: str, *, slot: int | str | None = None,
         "state": result.state, "reason": result.reason, "request_id": result.request_id,
         "session_id": result.session_id, "resume_of": row.request_id,
         "target": result.target, "slot": result.slot, "duplicate": result.duplicate})
+
+
+def checked_brief(row: store.LaunchRow, brief: str | None,
+                  brief_file: str | None) -> tuple[str | None, str | None]:
+    """The brief and brief file a resume of `row` sends, checked: a brief file's path as a
+    launch's is (absolute, `~` expanded), and the start posture's rule for the brief
+    (`presets.check_resume_brief`). Raises the refusal they meet; each one not given is
+    None."""
+    brief = brief or None
+    if catalog.is_set(brief_file):
+        brief_file = catalog.row(row.harness, "brief_file").check(brief_file)
+    brief_file = brief_file or None
+    presets.check_resume_brief(row.posture or "", brief=brief or "",
+                               brief_file=brief_file or "")
+    return brief, brief_file
 
 
 def met_refusal(met: store.SessionLive) -> Refused:
@@ -382,6 +410,6 @@ def _close(session: Any) -> None:
         pass
 
 
-__all__ = ["ATTACH_SLOT", "ATTACH_TERMINAL", "Past", "Refused", "Result", "choose_slot",
-           "entry", "live_refusal", "liveness", "met_refusal", "resume", "session_line",
-           "sessions", "static_refusal"]
+__all__ = ["ATTACH_SLOT", "ATTACH_TERMINAL", "Past", "Refused", "Result", "checked_brief",
+           "choose_slot", "entry", "live_refusal", "liveness", "met_refusal", "resume",
+           "session_line", "sessions", "static_refusal"]

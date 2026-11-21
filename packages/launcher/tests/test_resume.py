@@ -45,10 +45,11 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", harness="claude", target_name="slot", session_id=SID,
-             slot="3", identity=None, live=False, pid=None, at=None, values=None):
+             slot="3", identity=None, live=False, pid=None, at=None, values=None,
+             posture="operator"):
     store.insert(conn, request_id=request_id, by="ann", harness=harness,
                  target=target_name, cwd="/work", values=values or {"model": "opus"},
-                 argv=[harness], env={}, posture="operator",
+                 argv=[harness], env={}, posture=posture,
                  session_id=session_id if harness == "claude" else None,
                  slot=slot if target_name == "slot" else None, identity=identity, at=at)
     if harness == "codex" and session_id:
@@ -466,6 +467,43 @@ def test_a_resume_replays_the_row_with_resume_of_and_its_newest_id(conn):
     assert result.data["session_id"] == SID2
 
 
+def test_a_resume_of_a_go_launch_with_no_brief_is_refused_and_nothing_launched(conn):
+    launched(conn, posture="go")
+    for given in ({}, {"brief": " \n"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            go(conn, **given)
+        assert caught.value.code == "posture-brief"
+        assert "posture go needs a brief on a resume" in caught.value.problem
+    assert launches(conn) == 1
+
+
+def test_a_resume_hands_its_brief_or_brief_file_to_the_replay(conn):
+    launched(conn, posture="go")
+    _, launch = go(conn, brief="Carry on.")
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == ("Carry on.", None)
+    _, launch = go(conn, brief_file="~/brief.md")
+    assert launch.requests[0].brief is None
+    assert launch.requests[0].brief_file == str(Path("~/brief.md").expanduser())
+    # Under operator a resume needs none, and sends none.
+    launched(conn, request_id="r2", session_id=SID2, posture="operator")
+    _, launch = go(conn, SID2)
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None, None)
+
+
+@pytest.mark.parametrize("posture, given, code, row", [
+    ("with:lead", {"brief": "Go."}, "posture-brief", "brief"),
+    ("with:lead", {"brief_file": "/w/brief.md"}, "posture-brief", "brief"),
+    ("go", {"brief": "Go.", "brief_file": "/w/brief.md"}, "bad-value", "brief"),
+    ("go", {"brief_file": "brief.md"}, "bad-value", "brief_file"),
+])
+def test_a_brief_that_doesnt_fit_the_resume_is_refused(conn, posture, given, code, row):
+    launched(conn, posture=posture)
+    with pytest.raises(catalog.Refused) as caught:
+        go(conn, **given)
+    assert (caught.value.code, caught.value.row) == (code, row)
+    assert launches(conn) == 1
+
+
 def test_a_resume_mints_its_request_id(conn):
     launched(conn)
     _, launch = go(conn)
@@ -702,6 +740,25 @@ def test_a_slot_named_for_a_terminal_resume_is_refused(work, harness, no_exec):
         resume.resume(SID, slot=4, request_id="r2", turns=None, slots_api=None)
     assert api.exit_code(refused.value) == 2
     assert with_store(lambda c: store.get(c, "r2")) is None
+
+
+def test_a_resumes_brief_is_its_first_turn_and_a_go_resume_without_one_is_refused(
+        work, harness, no_exec, tmp_path):
+    first_launch(work, posture="go", brief="Build it.")
+    with pytest.raises(presets.PostureBrief):
+        resume.resume(SID, request_id="r2", turns=None, slots_api=None)
+    assert with_store(lambda c: store.get(c, "r2")) is None and not no_exec[1:]
+    resume.resume(SID, request_id="r2", brief="Carry on.", turns=None, slots_api=None)
+    argv = no_exec[-1]["argv"]
+    [turn] = [word for word in argv if word.startswith("Brief from launcher")]
+    assert turn.endswith("\n\nCarry on.") and "Build it." not in " ".join(argv)
+    assert with_store(lambda c: store.get(c, "r2")).brief == "Carry on."
+    ended("r2")
+    brief = tmp_path / "brief.md"
+    brief.write_text("Read the file.\n")
+    resume.resume(SID, request_id="r3", brief_file=str(brief), turns=None, slots_api=None)
+    [turn] = [w for w in no_exec[-1]["argv"] if w.startswith("Brief from launcher")]
+    assert turn.rstrip().endswith("Read the file.")
 
 
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):

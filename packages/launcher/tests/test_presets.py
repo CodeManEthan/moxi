@@ -577,6 +577,35 @@ def test_a_handoff_under_with_is_sent_first_and_the_director_follows():
         assert (got.posture, got.values["handoff"]) == (posture, "/w/handoff.md")
 
 
+def test_a_resume_of_a_go_launch_needs_a_brief():
+    # A resumed session does not wake itself either.
+    with pytest.raises(presets.PostureBrief) as caught:
+        presets.check_resume_brief("go", brief="  \n")
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert caught.value.problem == ("posture go needs a brief on a resume: a resumed "
+                                    "session does not wake itself either, so with no "
+                                    "first turn it sits idle")
+    assert caught.value.hint == "give the resume --brief or --brief-file"
+    presets.check_resume_brief("go", brief="Carry on.")
+    presets.check_resume_brief("go", brief_file="/w/brief.md")
+
+
+def test_a_resume_takes_the_brief_as_a_launch_does_under_each_posture():
+    for first in ({"brief": "Go."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            presets.check_resume_brief("with:lead", **first)
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    presets.check_resume_brief("with:lead")
+    for posture in ("operator", "", "relaunched (handoff: /h.md)"):
+        presets.check_resume_brief(posture)
+        presets.check_resume_brief(posture, brief="Read the design.")
+    with pytest.raises(presets.BadValue) as caught:
+        presets.check_resume_brief("go", brief="Go.", brief_file="/w/brief.md")
+    assert (caught.value.row, caught.value.problem, caught.value.hint) == (
+        "brief", "both brief and brief_file are given", "give one of them")
+
+
 def test_a_brief_under_operator_or_no_posture_is_sent():
     # Under operator the session reads its brief and waits, as the operator ruled; with no
     # posture the brief goes as it always did. Neither needs one.

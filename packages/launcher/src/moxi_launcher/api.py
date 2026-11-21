@@ -59,8 +59,8 @@ keeps the row's directory, a scratch one too. An option row (keep-warm, recyclin
 install no longer offers, or whose value's needs it no longer meets, goes back to its
 default with a warning, as a comms name does without comms. It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
-launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
-none. **A replay's environment is built from the row and the settings only**: the row's recorded
+launcher, relaunched by <actor>: <path>`, a director's relaunch sends none, and a resume
+sends the brief it was given, if any, as a launch sends its own. **A replay's environment is built from the row and the settings only**: the row's recorded
 base (`base_env_json`: the short list slots' server keeps, the core's locators, the
 keep-lists' and provider names classed recorded, on Windows the names a process needs
 to start; `common.base_env`), then each name the user lists, read from the replaying
@@ -189,7 +189,9 @@ class ReplayRequest:
     in the new row's `posture` and never in its `values_json`. `handoff` is the handoff a
     self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
     `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
-    relaunch, whose credentials come from `relaunch.director_pass_env`.
+    relaunch, whose credentials come from `relaunch.director_pass_env`. `brief` and
+    `brief_file` are the brief a resume was given (at most one of them), sent as its first
+    turn; the row's own brief is never sent again.
 
     For a slot launch: `slot` is the slot it goes to, else the row's own when `respawn`,
     else the one the row's values name; `hold` is the slot hold the caller has, which
@@ -213,6 +215,8 @@ class ReplayRequest:
     respawn: bool = False
     chain: str | None = None
     director: bool = False
+    brief: str | None = None
+    brief_file: str | None = None
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -487,7 +491,7 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
 
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
-    left out, its handoff the replay's, its slot the replay's, with the mode worked out
+    the replay's (none but a resume's), its handoff the replay's, its slot the replay's, with the mode worked out
     again for the modules installed now. A comms identity is dropped, with a warning, when
     comms is no longer installed, as a fresh launch's is."""
     row = request.row
@@ -499,7 +503,8 @@ def _replayed(request: ReplayRequest) -> Replayed:
                                "replay it without respawn")
     stored = row.values
     values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
-    values.update(brief="", brief_file="", handoff=request.handoff or "")
+    values.update(brief=request.brief or "", brief_file=request.brief_file or "",
+                  handoff=request.handoff or "")
     slot = request.slot if request.slot is not None else (
         row.slot if request.respawn else None)
     if slot is not None:

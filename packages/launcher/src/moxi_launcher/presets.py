@@ -534,7 +534,9 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
     director sends the first message; a handoff there is sent first, and the director's
     message comes after it. `binds` says whether the launch binds a comms identity,
     `tail` is the words typed after `--`. Flags passed on otherwise (an unknown flag typed
-    before `--`, a layer's `extra_flags`, the page's field) carry no first turn. A replay (a relaunch or a resume) never comes here."""
+    before `--`, a layer's `extra_flags`, the page's field) carry no first turn. A replay
+    (a relaunch or a resume) never comes here; a resume's brief is checked by
+    `check_resume_brief`."""
     brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
         values.get("brief_file"))
     first = brief or catalog.is_set(values.get("handoff")) or (not binds and bool(tail))
@@ -549,6 +551,27 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
         raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
                                     "first message",
                            "drop the brief, or pick go")
+
+
+def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "") -> None:
+    """The start posture's rule for the brief a resume is given, as a launch's: one of
+    `brief` and `brief_file`, not both; a resume of a `go` launch needs one, since a
+    resumed session does not wake itself either; and a resume under `with:<identity>`
+    takes none, since its director sends the first message. `posture` is the resumed
+    launch's. Raises `BadValue` or `PostureBrief`."""
+    if brief and catalog.is_set(brief_file):
+        raise BadValue("brief", "both brief and brief_file are given", "give one of them")
+    given = bool(brief.strip()) or catalog.is_set(brief_file)
+    if posture == "go" and not given:
+        raise PostureBrief("brief", "posture go needs a brief on a resume: a resumed "
+                                    "session does not wake itself either, so with no first "
+                                    "turn it sits idle",
+                           "give the resume --brief or --brief-file")
+    if posture.startswith(WITH) and given:
+        who = posture[len(WITH):]
+        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
+                                    "first message",
+                           "resume it without a brief")
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
@@ -1427,7 +1450,8 @@ __all__ = [
     "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "PostureBrief",
     "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "ScratchNotes",
-    "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
+    "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
+    "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",
     "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",

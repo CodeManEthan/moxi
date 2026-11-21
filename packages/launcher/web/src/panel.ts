@@ -741,6 +741,22 @@ export function parsePasts(data: unknown): Pasts | null {
   return { state: "up", detail: null, sessions: sessions.filter(isPast) };
 }
 
+/** The body of a past session's `POST /api/resume`: its session, and the brief or the
+ * brief file typed beside it, each only when it holds more than spaces. Both typed go as
+ * they are, and the page server refuses them as a resume of both is refused. */
+export interface ResumeBody {
+  session: string;
+  brief?: string;
+  brief_file?: string;
+}
+
+export function resumeBody(session: string, brief: string, briefFile: string): ResumeBody {
+  const body: ResumeBody = { session };
+  if (brief.trim()) body.brief = brief;
+  if (briefFile.trim()) body.brief_file = briefFile.trim();
+  return body;
+}
+
 /** What a past session's resume does: `slot` runs it as a job, `terminal` gives the
  * command to copy, `none` when it can't be resumed now. */
 export type ResumeKind = "slot" | "terminal" | "none";

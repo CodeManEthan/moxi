@@ -116,13 +116,16 @@ again, as the presets file is now, and writes the request file
 the refusal the job recorded before it. A ticket used a second time is a 409, whether its
 request file is still there or the launch log already knows its id.
 
-`/api/resume` takes a session id, and a slot in place of the launch's own. It answers the
+`/api/resume` takes a session id, a slot in place of the launch's own, and a brief or a
+brief file (an absolute path), sent as the resumed session's first turn. It answers the
 refusals a resume meets before anything runs, as `moxi launcher resume` words them: no
 launch holds the id, the launch ran headless (nothing to resume it into), it has no session
 id, its harness is no longer launched, its session is live now (liveness read at the call),
-its liveness can't be read, or a relaunch, exit or recycle under way owns it (an open run
+its liveness can't be read, the brief doesn't fit (both given, none for a `go` launch, one
+under `with:<identity>`), or a relaunch, exit or recycle under way owns it (an open run
 whose job still runs). A launch that ran in a terminal is not resumed here: the
-answer is the `moxi launcher resume <id>` command to copy, since run here it would take the
+answer is the `moxi launcher resume <id>` command to copy, with its `--brief` or
+`--brief-file`, since run here it would take the
 server's place. A slot launch is resumed by the same detached job as a launch: a request
 file whose act is `resume`, under a new request id that becomes the new launch's, and a 202
 with the status path holding that id. What the resume meets later (a run opened since, a
@@ -2049,6 +2052,8 @@ def resumed(body: Mapping[str, Any]) -> Any:
     slot = str(body.get("slot") or "").strip() or None
     try:
         row = resumable(session)
+        brief, brief_file = resuming.checked_brief(row, str(body.get("brief") or ""),
+                                                   str(body.get("brief_file") or ""))
     except REFUSALS as exc:
         return {"refused": _refusal(exc), "command": None}
     if row.target != "slot":
@@ -2058,11 +2063,18 @@ def resumed(body: Mapping[str, Any]) -> Any:
                                            "and only a slot launch resumes in a slot",
                                 "hint": "resume it without a slot"},
                     "command": None}
-        return {"refused": None,
-                "command": _command(["moxi", "launcher", "resume", session])}
+        words = ["moxi", "launcher", "resume", session]
+        if brief is not None:
+            words += ["--brief", brief]
+        if brief_file is not None:
+            words += ["--brief-file", brief_file]
+        return {"refused": None, "command": _command(words)}
     request_id = _new_request_id()
+    given = {"brief": brief, "brief_file": brief_file}
     return _run_job(request_id, {"act": "resume", "request_id": request_id,
-                                 "session": session, "slot": slot}, used=RESUME_USED)
+                                 "session": session, "slot": slot,
+                                 **{k: v for k, v in given.items() if v is not None}},
+                    used=RESUME_USED)
 
 
 def resume(call: Any) -> Any:

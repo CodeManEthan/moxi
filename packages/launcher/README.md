@@ -138,8 +138,9 @@ default, there is no line.
   are: they go last on the harness's argv. Nothing else passed on counts: not an unknown
   flag typed before `--`, not `extra_flags` from a preset or `[defaults]`, and not the
   page's extra flags, so a `go` launch from the page needs a brief, a brief file or a
-  handoff. A relaunch or a resume
-  launches its row again and is not checked; a resume sends no first turn.
+  handoff. A relaunch launches its row again and is not checked. A resumed session does
+  not wake itself either, so a resume of a `go` launch needs a brief (`--brief` or
+  `--brief-file`), and is refused without one (`posture-brief`).
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through
   comms; a launch lists its directors with `--director`. The director sends the first
@@ -373,7 +374,13 @@ comms name continues its thread through comms' wrapper; a relaunch or recycle st
 new one): in its own slot when that can take it, else
 the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
 where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
-`TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while
+`TERM_PROGRAM_VERSION`) and nothing else of your shell's. The launch's own brief is not
+sent again. `--brief TEXT` or `--brief-file FILE` (one of them, the file read as a launch's
+is) is sent as the resumed session's first turn, the way a launch sends its brief. The
+start posture rules it as it rules a launch's: a resume of a `go` launch with neither is
+refused before anything starts (`posture-brief`), and so is a brief under
+`with:<identity>`. Under any other posture the brief is optional. Liveness is checked again
+as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the
 launch is under way, the resume is refused `run-open` (exit 3), naming the run.
@@ -492,8 +499,11 @@ The page has four parts.
   directory went away since the preview, say), the refusal shows under the launch.
 - **Past sessions.** Each launch's session, newest first. A session that ran in a slot
   resumes from here, in a detached job as a launch does; one that ran in a terminal gives
-  the `moxi launcher resume` command to copy. The refusals `moxi launcher resume` gives
-  (headless, live, a relaunch or recycle still under way) come back at once.
+  the `moxi launcher resume` command to copy, with the brief. Each row takes a brief, or a
+  brief file (an absolute path), sent as the resumed session's first turn; a session
+  launched with posture `go` needs one. The refusals `moxi launcher resume` gives
+  (headless, live, a relaunch or recycle still under way, no brief for a `go` launch) come
+  back at once.
 
 **The box on Home.** The shell's home opens on a box that starts a session without a
 visit to the page. Type what the agent should do and press the button. The line above the
@@ -637,7 +647,7 @@ nothing has used it for a while.
 | `moxi launcher exit-session SESSION_ID [--dry-run] [--json]` | exit a launched session |
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
-| `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
+| `moxi launcher resume SESSION_ID [--slot N] [--brief TEXT \| --brief-file FILE]` | launch a past session again, resumed, the brief its first turn |
 | `moxi launcher clear-expired [--session ID] [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, or of the one whose current session is ID, now |
 | `moxi launcher keep-warm --session ID [--dry-run] [--json]`, `keep-warm --dry-run [--json]` | the keep-warm ask of one session now; with `--dry-run` alone, of every live launch keep-warm is on for |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |

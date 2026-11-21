@@ -18,7 +18,7 @@ launched.
     moxi launcher exit-session SESSION_ID [--dry-run] [--json]
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
-    moxi launcher resume SESSION_ID [--slot N]
+    moxi launcher resume SESSION_ID [--slot N] [--brief TEXT | --brief-file FILE]
     moxi launcher clear-expired [--session ID] [--dry-run] [--json]
     moxi launcher keep-warm --session ID [--dry-run] [--json]
     moxi launcher keep-warm --dry-run [--json]
@@ -39,7 +39,8 @@ relaunches another as one of its directors, shows a run (`--status`), or launche
 the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `clear-expired` makes the expiry ask of every live launch that recycles on
+resumed, with `--brief` or `--brief-file` sent as its first turn (a `go` launch's resume
+needs one). `clear-expired` makes the expiry ask of every live launch that recycles on
 expiry, now, or with `--session ID` of the one whose current session is ID; `keep-warm --session ID` makes the keep-warm ask of one session, now, and
 `keep-warm --dry-run` of every live launch keep-warm is on for. With `--dry-run` each ask
 takes its reads and writes nothing. `keep-warm hold`, `release` and `holds` open, release
@@ -612,9 +613,12 @@ def _sessions(args: argparse.Namespace, prog: str) -> int:
 
 
 def _resume(args: argparse.Namespace, prog: str) -> int:
-    from . import resume
+    from . import catalog, resume
 
-    return _said(resume.resume(args.session_id, slot=args.slot, warn=_warn), args)
+    # A brief file is read against this directory, as a launch's is.
+    brief_file = catalog.cli_path(args.brief_file) if args.brief_file is not None else None
+    return _said(resume.resume(args.session_id, slot=args.slot, brief=args.brief,
+                               brief_file=brief_file, warn=_warn), args)
 
 
 def _clear_expired(args: argparse.Namespace, prog: str) -> int:
@@ -807,6 +811,12 @@ def _act_parsers(verbs) -> None:
                     "that can take it, else the lowest that can, or this terminal.")
     resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")
     resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")
+    resume.add_argument("--brief", metavar="TEXT",
+                        help="the brief, sent as the resumed session's first turn; a "
+                             "resume of a go launch needs one")
+    resume.add_argument("--brief-file", metavar="FILE",
+                        help="a file holding the brief, sent as the resumed session's "
+                             "first turn")
 
     clear = verbs.add_parser(
         "clear-expired", help="ask now whether each session that recycles on expiry is due",
