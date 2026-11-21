@@ -12,6 +12,10 @@
   what a version rebuild keeps. With this secrets, a secret on a line marked
   `gitleaks:allow` and a token split by an invisible character are redacted in new rows,
   and in old ones after that reindex.
+- An index stored under secrets' redact version 2 asks for one `moxi memory reindex`.
+  secrets' version 3 redacts a key followed by an escaped quote (`\"`), which a tool
+  call's input holds when a command quotes a key inside a string; version 2 stored it
+  whole. The reindex redacts every stored row again.
 - Archive folders: memory reads every folder sessions names for a harness, its live root
   and then its archive folders (`claude.archives`, `codex.archives`), each from its own
   last walk. A folder that is offline, fails at any depth during a run, or fails the test

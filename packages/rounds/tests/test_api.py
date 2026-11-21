@@ -384,10 +384,11 @@ def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_
             assert "extra == 'turns'" in requirement.replace('"', "'")
 
 
-def test_the_package_registers_its_module_and_its_turns_listener_and_no_git_hook():
+def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_hook():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
-    assert set(declared["project"]["entry-points"]) == {"moxi.modules", "moxi.turns.listeners"}
+    expected = {"moxi.modules", "moxi.turns.listeners", "moxi.projects"}
+    assert set(declared["project"]["entry-points"]) == expected
 
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}
-    assert groups == {"moxi.modules", "moxi.turns.listeners"}
+    assert groups == expected
     assert "moxi.repo.git_hooks" not in groups

@@ -1272,7 +1272,7 @@ dev = [
 
 [[package]]
 name = "moxi-rounds"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },
@@ -1396,7 +1396,7 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.9"
+version = "0.2.10"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },

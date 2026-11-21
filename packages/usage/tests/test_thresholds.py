@@ -212,6 +212,151 @@ def test_a_row_with_no_w_gives_no_mark():
     assert not any(each.available for each in found.values())
 
 
+# --- a borrowed row ---------------------------------------------------------------------
+
+#: The two models' own prices, as the shipped table has them (Fable reads its cache at
+#: 0.025x its input, Opus 5.5 at 0.05x; both write at 1.25x and 2x).
+BORROW_PRICES = {
+    "claude-fable-5-2": {"input": 8.0, "output": 40.0, "cache_read": 0.2,
+                         "cache_write_5m": 10.0, "cache_write_1h": 16.0},
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_read": 0.2,
+                        "cache_write_5m": 5.0, "cache_write_1h": 8.0},
+}
+OPUS_MAIN = {"n": 274, "S": 56264.5, "P": 25698.0, "g": 1432.713, "w": 1.9985,
+             "write_share_1h": 0.998}
+
+
+def borrow_table():
+    return models.Table(doc(BORROW_PRICES))
+
+
+def with_opus(**rows):
+    """A measure with Opus 5.5's main row and `rows` (each a model's populations)."""
+    params = {"schema": 1, "measured_at": "2026-11-20T03:10:00+00:00",
+              "models": {"claude-opus-5-5": {"main": dict(OPUS_MAIN)}}}
+    params["models"].update(copy.deepcopy(rows))
+    return params
+
+
+def fable_exact(row, mark):
+    """C(mark) for Fable over `row`'s S, P and g, with Fable's own r and its own w at the
+    row's 1-hour share."""
+    w = 16.0 / 8.0 * row["write_share_1h"] + 10.0 / 8.0 * (1.0 - row["write_share_1h"])
+    return thresholds.mark_exact(row["S"], row["P"], row["g"], w, 0.025, mark)
+
+
+@pytest.mark.parametrize("mark", thresholds.MARKS)
+def test_fable_5_2_borrows_opus_5_5s_s_p_and_g_with_its_own_r_and_w(mark):
+    params = with_opus()
+    found = thresholds.threshold("claude-fable-5-2[1m]", mark, doc=params,
+                                 table=borrow_table())
+    exact = fable_exact(OPUS_MAIN, mark)
+    assert found.available and found.reason is None
+    assert (found.model, found.population) == ("claude-fable-5-2", "main")
+    assert found.borrowed_from == "claude-opus-5-5"
+    assert found.exact == pytest.approx(exact) and found.tokens == math.ceil(exact)
+    assert found.as_dict()["borrowed_from"] == "claude-opus-5-5"
+    opus = thresholds.threshold("claude-opus-5-5", mark, doc=params, table=borrow_table())
+    assert found.tokens != opus.tokens and opus.borrowed_from is None
+
+
+def test_the_borrowed_marks_are_the_ones_the_live_opus_row_gives():
+    marks = thresholds.all_marks("claude-fable-5-2", doc=with_opus(), table=borrow_table())
+    assert {mark: found.tokens for mark, found in marks.items()} == {
+        "1x": 140_380, "1.5x": 276_480, "2x": 370_185}
+
+
+def test_the_borrowers_w_is_its_own_prices_at_the_lenders_share():
+    # Fable's own 5-minute and 1-hour prices at the lender's share, not the lender's w
+    row = dict(OPUS_MAIN, w=1.0)
+    found = thresholds.threshold("claude-fable-5-2", "1x", doc=with_opus(),
+                                 table=borrow_table())
+    lent_w = thresholds.threshold("claude-fable-5-2", "1x", table=borrow_table(),
+                                  doc={**with_opus(), "models": {"claude-opus-5-5":
+                                                                 {"main": row}}})
+    assert found.tokens == lent_w.tokens == math.ceil(fable_exact(OPUS_MAIN, "1x"))
+
+
+def test_a_row_of_its_own_ends_the_borrow():
+    own = {"n": 20, "S": 69263.0, "P": 25814.0, "g": 1982.0, "w": 1.9993,
+           "write_share_1h": 0.999}
+    params = with_opus(**{"claude-fable-5-2": {"main": own}})
+    found = thresholds.threshold("claude-fable-5-2", "2x", doc=params, table=borrow_table())
+    assert found.borrowed_from is None and "borrowed_from" not in found.as_dict()
+    assert found.tokens == math.ceil(fable_exact(own, "2x"))
+
+
+def test_its_own_subagent_row_is_used_while_its_main_row_is_borrowed():
+    own = {"n": 168, "S": 30000.0, "P": 20000.0, "g": 900.0, "w": 2.0,
+           "write_share_1h": 1.0}
+    params = with_opus(**{"claude-fable-5-2": {"subagent": own}})
+    params["models"]["claude-opus-5-5"]["subagent"] = {**OPUS_MAIN, "fallback": "main"}
+    sub = thresholds.threshold("claude-fable-5-2", "1x", "subagent", doc=params,
+                               table=borrow_table())
+    assert sub.borrowed_from is None and sub.fallback is None
+    assert sub.tokens == math.ceil(fable_exact(own, "1x"))
+    main = thresholds.threshold("claude-fable-5-2", "1x", "main", doc=params,
+                                table=borrow_table())
+    assert main.borrowed_from == "claude-opus-5-5"
+    assert main.tokens == math.ceil(fable_exact(OPUS_MAIN, "1x"))
+
+
+def test_with_no_row_of_either_population_both_are_borrowed():
+    params = with_opus()
+    params["models"]["claude-opus-5-5"]["subagent"] = {**OPUS_MAIN, "fallback": "main"}
+    sub = thresholds.threshold("claude-fable-5-2", "1x", "subagent", doc=params,
+                               table=borrow_table())
+    assert sub.borrowed_from == "claude-opus-5-5" and sub.fallback == "main"
+    assert sub.tokens == math.ceil(fable_exact(OPUS_MAIN, "1x"))
+
+
+def test_a_borrower_with_a_main_row_keeps_its_fallback_and_borrows_nothing():
+    own = {"n": 20, "S": 69263.0, "P": 25814.0, "g": 1982.0, "w": 1.9993,
+           "write_share_1h": 0.999}
+    params = with_opus(**{"claude-fable-5-2": {"main": own,
+                                               "subagent": {**own, "fallback": "main"}}})
+    params["models"]["claude-opus-5-5"]["subagent"] = dict(OPUS_MAIN)
+    sub = thresholds.threshold("claude-fable-5-2", "1x", "subagent", doc=params,
+                               table=borrow_table())
+    assert sub.fallback == "main" and sub.borrowed_from is None
+    assert sub.tokens == math.ceil(fable_exact(own, "1x"))
+
+
+def test_borrowing_with_no_lender_row_is_unavailable_and_says_so():
+    params = {"schema": 1, "models": {}}
+    found = thresholds.threshold("claude-fable-5-2", "2x", doc=params, table=borrow_table())
+    assert not found.available and found.borrowed_from is None
+    assert found.reason == ("the restart-point measure has no main row for "
+                            "claude-fable-5-2, nor for claude-opus-5-5, whose row it "
+                            "borrows")
+
+
+@pytest.mark.parametrize("change,said", [
+    ({"g": None}, "is incomplete"),
+    ({"g": 0}, "gives no restart point"),
+])
+def test_a_borrowed_row_that_gives_no_mark_says_it_was_borrowed(change, said):
+    params = with_opus()
+    params["models"]["claude-opus-5-5"]["main"].update(change)
+    found = thresholds.threshold("claude-fable-5-2", "1x", doc=params, table=borrow_table())
+    assert not found.available and found.borrowed_from is None
+    assert found.reason == ("the measured main row for claude-fable-5-2 (row borrowed "
+                            f"from claude-opus-5-5) {said}")
+
+
+def test_a_measured_model_never_borrows():
+    found = thresholds.threshold("claude-opus-5-5", "1x", doc=with_opus(),
+                                 table=borrow_table())
+    assert found.available and found.borrowed_from is None
+    sonnet = thresholds.threshold("claude-sonnet-5-5", "1x", doc=with_opus(),
+                                  table=borrow_table())
+    assert sonnet.reason == "the restart-point measure has no main row for claude-sonnet-5-5"
+
+
+def test_the_borrow_table_names_fable_5_2_and_opus_5_5_only():
+    assert thresholds.BORROWED_ROW == {"claude-fable-5-2": "claude-opus-5-5"}
+
+
 # --- the measure in effect, and its stamp ------------------------------------------------
 
 def test_the_measure_in_effect_is_read_from_its_file_and_again_when_it_changes():

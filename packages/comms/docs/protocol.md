@@ -19,8 +19,9 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
   app-server) and `opencode` (an OpenCode server). The kind `connector` is comms'
-  provider in the connector, which serves the Claude apps; it is a person kind, so its
-  mail is never held.
+  provider in the connector, which serves the Claude apps, and `speech` is a person
+  speaking through voice, which binds the operator's name as it. Both are person kinds,
+  so their mail is never held and their cache is never read.
   A send-only name is one a module or a registered program sends under and nobody binds
   or mails ([adapters.md](adapters.md#send-only-names)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down

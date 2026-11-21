@@ -1,15 +1,7 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1 (2026-11-21)
 
-The first version. It keeps the record of a round and takes it from its design through
-its builds, their checks, verification and finish, to the ratification of their
-decisions and the round's close.
-
-- Every setting carries page fields, which `moxi config rounds show --json` prints
-  and the settings page draws: a plain label, a line where the label can't carry it,
-  the unit of each number, and words for each value of `defaults.ratify` and
-  `defaults.check_on`. rounds needs moxi 0.1.9 or later.
 - A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
   ROUND --lead NAME` names a new one, written as `lead.changed` with the one before. A
   name is checked for its shape only. A round with no lead of its own reads its
@@ -22,6 +14,26 @@ decisions and the round's close.
 - `moxi_rounds.actors.default()`: the OS user an act is recorded as done by when no
   name is given, one answer for the command line and for a page that calls the verbs'
   functions in process.
+
+## 0.1.0 (unreleased)
+
+The first version. It keeps the record of a round and takes it from its design through
+its builds, their checks, verification and finish, to the ratification of their
+decisions and the round's close.
+
+- Every setting carries page fields, which `moxi config rounds show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  the unit of each number, and words for each value of `defaults.ratify` and
+  `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- `moxi rounds finish` is refused while a process uses the build's scratch folder,
+  naming the process. `finish` and `drop` don't move a scratch folder a process uses:
+  it stays for the sweep of leftover folders, named with the process, and a drop goes
+  through.
+- `moxi rounds check` holds the machine's check lock while its command runs, so one
+  check runs at a time on the machine; another run waits for it, or with `--no-wait`
+  is refused. A run with no `timeout_s` from the call, the check or the step stops at
+  3600 s, and a run at its limit gets SIGINT and 30 s later SIGKILL. rounds needs moxi
+  0.1.11 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,

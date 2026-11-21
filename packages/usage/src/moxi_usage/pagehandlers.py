@@ -180,6 +180,13 @@ def _report(answer: Mapping[str, Any], rows: list[dict[str, Any]],
     }
 
 
+def _places(value: Any) -> list[str] | None:
+    # A `project` or `folder` the page sends: one key, or several on lines of their own.
+    if not value:
+        return None
+    return [key for key in value.split("\n") if key] or None
+
+
 def _day(value: Any) -> str | None:
     # A day the page sends; an empty one leaves that end open.
     return value or None
@@ -188,8 +195,9 @@ def _day(value: Any) -> str | None:
 def _read(kind: str, query: Mapping[str, Any], **given: Any) -> dict[str, Any]:
     """`report(kind)` over the index as it is, with the route's filters, as a dict."""
     args = {"since": _day(query.get("since")), "until": _day(query.get("until")),
-            "harness": query.get("harness"), "project": query.get("project"),
-            "work_dir": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
+            "harness": query.get("harness"), "project": _places(query.get("project")),
+            "work_dir": _places(query.get("folder")), "model": query.get("model"),
+            "tz": "UTC" if query.get("utc") else None}
     args.update(given)
     try:
         return api.report(kind, fresh=False, **args).as_dict()
@@ -284,7 +292,17 @@ def _session_row(row: Mapping[str, Any]) -> dict[str, Any]:
             "name": None, "folder": None, "started": None, "known": None,
             "cwd": _str(row.get("cwd")), "project": _str(row.get("project")),
             "models": _words(row.get("models")), "first_ts": _num(row.get("first_ts")),
-            "last_ts": _num(row.get("last_ts")), "context": None, **_row_sums(row)}
+            "last_ts": _num(row.get("last_ts")), "turns": _int(row.get("turns")) or 0,
+            "subagent_share": _share(row), "context": None, **_row_sums(row)}
+
+
+def _share(row: Mapping[str, Any]) -> float | None:
+    """The part of a session's cost its subagents ran up: 0 when the cost is 0, None
+    when either cost is not known."""
+    whole, part = _num(row.get("cost")), _num(row.get("subagent_cost"))
+    if whole is None or part is None:
+        return None
+    return part / whole if whole > 0 else 0.0
 
 
 def _by_cost(row: Mapping[str, Any]) -> tuple:
@@ -294,6 +312,35 @@ def _by_cost(row: Mapping[str, Any]) -> tuple:
     cost, sid, first = row["cost"], row["session_id"], row["first_ts"]
     return (cost is None, -(cost or 0.0), -row["tokens"], row["harness"], sid is None,
             sid or "", first is None, first or 0.0, row["cwd"] or "")
+
+
+def _tie(row: Mapping[str, Any]) -> tuple:
+    """The order of rows of one value in `/api/sessions`: by session id, then harness; a
+    row with no id after those with one, by its first request and folder."""
+    sid, first = row["session_id"], row["first_ts"]
+    return (sid is None, sid or "", row["harness"], first is None, first or 0.0, row["cwd"] or "")
+
+
+def _sort_value(row: Mapping[str, Any], sort: str) -> Any:
+    """The value of `row` a sort by `sort` orders by; None for a row that has none."""
+    if sort == "started":
+        return row["first_ts"]
+    if sort == "active":
+        first, last = row["first_ts"], row["last_ts"]
+        return None if first is None or last is None else last - first
+    if sort == "project":
+        return row["project"] or row["cwd"]
+    return row[sort]
+
+
+def _sorted(rows: list[dict[str, Any]], sort: str, order: str) -> list[dict[str, Any]]:
+    """The rows by `sort`, the least first with `order` `asc`, else the most first; a
+    row with no value for it comes last either way, and rows of one value keep `_tie`'s
+    order either way."""
+    rows = sorted(rows, key=_tie)
+    have = [row for row in rows if _sort_value(row, sort) is not None]
+    have.sort(key=lambda row: _sort_value(row, sort), reverse=order == "desc")
+    return have + [row for row in rows if _sort_value(row, sort) is None]
 
 
 def _context(found: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -310,8 +357,10 @@ def _contexts(keys: list[tuple[str | None, str]]) -> dict[tuple[str | None, str]
 
 
 def sessions(call: Any) -> dict[str, Any]:
-    """`GET /api/sessions`: the sessions by cost, the dearest first, then by tokens, then
-    by harness and session id. `rows` is `top` of them (200 unless asked, at most 200)
+    """`GET /api/sessions`: the sessions by cost, the dearest first, or, with `sort`
+    (`SESSION_SORTS`), by that value, the most first unless `order` is `asc`; a row with
+    no value (an unpriced cost) last either way, and rows of one value by session id,
+    then harness, either way. `rows` is `top` of them (200 unless asked, at most 500)
     after the first `skip` (none unless asked); `count` is how many there are and `more`
     how many come after the rows sent. `skip` is a place in the order as the index stood
     at this call, so a pass between two calls can move a row. Each row sent carries its
@@ -326,7 +375,8 @@ def sessions(call: Any) -> dict[str, Any]:
     if skip < 0:
         raise lb.Refused("skip is a number of sessions, 0 or more")
     answer = _read("sessions", call.query)
-    rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
+    rows = _sorted([_session_row(row) for row in answer["rows"]],
+                   call.query.get("sort") or "cost", call.query.get("order") or "desc")
     sent = rows[skip:skip + top]
     found = _contexts([(row["harness"], row["session_id"]) for row in sent
                        if row["session_id"] is not None])
@@ -871,8 +921,9 @@ def restart_point(call: Any) -> dict[str, Any]:
     on with a main session of `model` costs more than restarting it: the first mark of
     the measure `moxi usage restart-point --measure` writes. `tokens` is null with the
     `reason` when it cannot be worked out: there is no measure, the measure has no row
-    for the model, or the model table lacks a price it needs. It reads the measure's
-    file and the model table and writes nothing."""
+    for the model, or the model table lacks a price it needs. `borrowed_from` names the
+    model whose measured row the mark was worked out from when the model borrows one,
+    else null. It reads the measure's file and the model table and writes nothing."""
     asked = call.query["model"]
     try:
         found = api.threshold(asked, "1x", "main")
@@ -880,7 +931,8 @@ def restart_point(call: Any) -> dict[str, Any]:
         raise lb.Refused(str(exc)) from None
     tokens = _int(found.tokens)
     reason = None if tokens is not None else _str(found.reason) or "no restart point"
-    return {"model": found.model or asked, "tokens": tokens, "reason": reason}
+    return {"model": found.model or asked, "tokens": tokens,
+            "borrowed_from": _str(found.borrowed_from), "reason": reason}
 
 
 # --- the pass, the topics and the poller ---------------------------------------------------

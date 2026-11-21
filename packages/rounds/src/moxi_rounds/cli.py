@@ -8,7 +8,8 @@
     moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
-    moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--as NAME]
+    moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--no-wait]
+                      [--as NAME]
     moxi rounds finish [ROUND STAGE] [--again ID] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
@@ -157,7 +158,9 @@ build is open, each ruling recorded since its block that reaches the stage.
 the build's worktree, which must be clean with the build's branch checked out, on a
 build that has work, with no shell, stdin closed, no `GIT_` variable, its output in
 `check-<n>.log` in the build's scratch folder, and its whole process tree ended at the
-check's `timeout_s` (or `--timeout-s`). The run is recorded with its commit, that
+check's `timeout_s` (or `--timeout-s`, else 3600 s): SIGINT, then SIGKILL 30 s later.
+One check runs at a time on the machine: a run waits for the check lock another holds,
+or with `--no-wait` is refused. The run is recorded with its commit, that
 commit's merge-base with the target, the argv as it ran, its exit code and its
 duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
@@ -1278,7 +1281,11 @@ def _declare_check(verbs) -> None:
                            "place of reading CI")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
-                             "of the check's or the step's own timeout_s")
+                             "of the check's or the step's own timeout_s (3600 when "
+                             "neither is set)")
+    parser.add_argument("--no-wait", action="store_true", dest="no_wait",
+                        help="refuse at once when another check on this machine holds "
+                             "the check lock, in place of waiting for it")
     _writes(parser)
 
 
@@ -1296,7 +1303,8 @@ def _check(args, out) -> int:
                           f"moxi rounds check {name} B<n>, or moxi rounds check in the "
                           "build's worktree")
     ran = checking.check(name, stage, by=_actor(args), step=args.step,
-                         full=args.full, timeout_s=args.timeout_s)
+                         full=args.full, timeout_s=args.timeout_s, wait=not args.no_wait,
+                         say=lambda line: print(line, file=sys.stderr, flush=True))
     if isinstance(ran, checking.CiChecked):
         return _ci_checked(ran, args, out)
     code = ran.exit_code
@@ -1382,7 +1390,7 @@ def _finish(args, out) -> int:
             print(f"{one.id}: kept the checkout it added, {one.kept}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
-    _cleanup_lines(done.removed, done.kept, out)
+    _cleanup_lines(done.removed, done.kept, out, done.unscanned)
     if done.branch is not None:
         print(f"branch: {done.branch}", file=out)
     _ref_lines(done.refs, out)
@@ -1537,7 +1545,7 @@ def _drop(args, out) -> int:
         print(f"ended {one['stage']}: {one['branch']} at "
               f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
               file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1559,7 +1567,7 @@ def _drop_build(args, out) -> int:
           f"{'no branch' if tip['tip'] is None else tip['tip'][:12]}, kept in git; "
           f"the stage stays owed: commission it again, or take it out of the plan",
           file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1654,9 +1662,11 @@ def _ref_account_lines(refs, swept, out) -> None:
         print(f"then: {arm}{ci_refs.REMOVE}", file=out)
 
 
-def _cleanup_lines(removed, kept, out) -> None:
-    """Say which of an ended build's folders were removed, and which the removal rule
-    kept, with the check that kept each."""
+def _cleanup_lines(removed, kept, out, unscanned=()) -> None:
+    """Say where the scratch gate was not run, which of an ended build's folders were
+    removed, and which the removal rule kept, with the check that kept each."""
+    for line in unscanned:
+        print(line, file=out)
     for removed_dir in removed:
         print(f"removed {removed_dir}", file=out)
     for one in kept:

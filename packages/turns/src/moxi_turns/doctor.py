@@ -9,15 +9,16 @@ and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed 
 `endpoint.json` and the Claude Code version; Codex; the OpenCode host's binary). turns
 has no doctor command of its own.
 
-The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
-names each guard on, its step, what turned it on and where it runs on each harness;
-`guard <id>` is `off` for an available guard nobody turned on, `fail` for one on the list
-that does not load, whose judge does not import or whose `match` does not compile, and for a
-switch that fails the core's check, listed or not, and `warn` for one on the list whose
-module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
-when the installed Claude Code is newer than the one its rule was checked against;
-`guard <id>: <harness>` says, as information, that a guard on covers no call there or
-that the harness has no pre-tool point. A guard's breaks are records the core shows.
+The guard rows read the list as an endpoint would, in the doctor's own process (a guard's
+`sessions` function is asked with the doctor's own environment): `guards` names each guard
+on, its step, what turned it on and where it runs on each harness; `guard <id>` is `off`
+for an available guard nobody turned on, `fail` for one on the list that does not load,
+whose judge does not import or whose `match` does not compile, and for a switch that fails
+the core's check or a `sessions` function that reads off, listed or not, and `warn` for
+one on the list whose module is not installed, whose import took over `IMPORT_WARN_MS`,
+or (the removal guard) when the installed Claude Code is newer than the one its rule was
+checked against; `guard <id>: <harness>` says, as information, that a guard on covers no
+call there or that the harness has no pre-tool point. A guard's breaks are records the core shows.
 The doctor adds readings and denies nothing.
 """
 
@@ -164,7 +165,7 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
     warns: dict[str, list[str]] = {}
     fixes: dict[str, str] = {}
     for p in loaded.problems:
-        if p.kind == "switch":
+        if p.kind in ("switch", "sessions"):
             fails.setdefault(p.id, []).append(p.reason)
         elif p.kind == "missing" and p.on:
             warns.setdefault(p.id, []).append(p.reason)
@@ -227,8 +228,11 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
         fix = (f"moxi config set {f.module} {f.guard.switch} true"
                if f.module and f.guard.switch
                else f"moxi config set turns {guards.ON_KEY} --add {f.id}")
-        yield moxi_doctor.Row(MODULE, f"guard {f.id}", "off",
-                              f.guard.doc or "available and off", fix)
+        detail = f.guard.doc or "available and off"
+        if f.guard.sessions:
+            detail = (f"{detail.rstrip('.')}; it also runs in each session "
+                      f"{f.guard.sessions} picks")
+        yield moxi_doctor.Row(MODULE, f"guard {f.id}", "off", detail, fix)
     on_ids = {o.id: o for o in loaded.on}
     for gid in dict.fromkeys([*fails, *warns]):
         reasons = fails.get(gid, []) + warns.get(gid, [])
@@ -241,17 +245,18 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
 
 
 def _off_fix(on) -> str | None:
-    """The command that turns guard `on` off: off the list, else its switch off."""
+    """The command that turns guard `on` off: off the list, else its switch off; None when
+    only its `sessions` function turned it on."""
     found = on.found
     if "list" in on.by:
         return f"moxi config set turns guards.run --remove {found.path or found.id}"
-    if found.module and found.guard.switch:
+    if "switch" in on.by and found.module and found.guard.switch:
         return f"moxi config set {found.module} {found.guard.switch} false"
     return None
 
 
 #: How the `guards` row says what turned a guard on.
-_BY = {"list": "guards.run", "switch": "its switch"}
+_BY = {"list": "guards.run", "switch": "its switch", "sessions": "its sessions function"}
 
 
 def _tool_points() -> dict[str, dict[str, bool]]:

@@ -149,9 +149,9 @@ class FakeHarness(Harness):
         self.endpoint.turn_started(turn_id, delivery_id)
         return turn_id
 
-    def end_turn(self, outcome: str = "answer") -> None:
+    def end_turn(self, outcome: str = "answer", answer: str | None = None) -> None:
         turn_id, self.open_turn = self.open_turn, None
-        self.endpoint.turn_ended(turn_id, outcome)
+        self.endpoint.turn_ended(turn_id, outcome, answer=answer)
 
     def run_command(self, request: CommandRequest) -> None:
         if self.endpoint.command_entering(request.id) is not None:
