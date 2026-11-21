@@ -152,8 +152,8 @@ def test_a_fork_of_a_live_session_records_fork_of_and_reads_as_a_fork(work, harn
     assert api.launch_kind(new_id) == "fork" and api.launch_kind(SID) == "one-off"
 
 
-def test_a_forks_environment_holds_nothing_of_the_asking_session(work, harness, no_exec,
-                                                                 monkeypatch):
+def test_a_forks_env_holds_nothing_of_the_asking_session(work, harness, no_exec,
+                                                         monkeypatch):
     parent(work)
     monkeypatch.setenv("MOXI_COMMS_NAME", "asker")
     monkeypatch.setenv("ASKERS_OWN", "1")
