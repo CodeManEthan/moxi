@@ -34,7 +34,8 @@ projects = ["moxi-projects>=0.1.4,<0.2"]
 # The session list and transcript reads in the Claude apps, through the public MCP host:
 # the host's provider interface, and personal-data's validators for the chat redaction.
 # The redaction itself is secrets', which the `secrets` extra installs; without it every
-# tool refuses. sessions reaches the host only through
+# tool refuses. Both need releases not yet out: the host with `Limit`, and secrets with
+# `chat_redact` and its `between` step. sessions reaches the host only through
 # moxi.modules.load("connector", interface=1).
 connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
 
