@@ -762,17 +762,17 @@ class Held:
 
     def __init__(self, page, pattern: str):
         self.routes = []
-        self.released = False
+        self.holding = True
         page.route(re.compile(pattern), self._hold)
 
     def _hold(self, route) -> None:
-        if self.released:
-            route.continue_()
-        else:
+        if self.holding:
             self.routes.append(route)
+        else:
+            route.continue_()
 
     def release(self) -> None:
-        self.released = True
+        self.holding = False
         for route in self.routes:
             route.continue_()
 
