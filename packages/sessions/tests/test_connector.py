@@ -225,6 +225,20 @@ def test_the_work_dir_is_cut_between_the_redaction_s_passes():
     assert scrubbed == "app"
 
 
+def test_a_name_has_its_local_paths_cut_between_the_redaction_s_passes():
+    names = ["fix /home/someone/x/y", "plain name, no path", f"see /home/someone/{SLASHED}"]
+    newest, _ = fake_newest([{**ROW, "session": f"s{n}", "name": name}
+                             for n, name in enumerate(names)])
+    _, provider = built(newest=newest)
+    result, _ = call(provider, "list_sessions", {})
+    cut, plain, slashed = (row["name"] for row in result.structured["sessions"])
+    assert cut == "fix y"
+    assert plain == "plain name, no path"
+    # Cut first, the name would end in the secret's last part, `i2Ow4`.
+    assert slashed == "see [REDACTED:high-entropy-slash-run]"
+    assert "/home/someone" not in result.text
+
+
 def test_a_work_dir_the_scrub_leaves_empty_is_none():
     newest, _ = fake_newest([{**ROW, "folder": "\u200b"}])
     _, provider = built(newest=newest)
@@ -266,6 +280,18 @@ def test_an_unlisted_root_outside_the_cut_s_roots_shows_no_full_path():
                       "reason": "a cannot be listed"}
     assert "/data" not in result.text and TOKEN not in result.text
     assert not shows_a_piece_of_the_token(result.text)
+
+
+def test_an_unlisted_reason_cuts_the_home_folder_start_was_given(monkeypatch):
+    monkeypatch.setenv("HOME", "/elsewhere/me")
+    roots = [{"harness": "codex", "root": "/srv/codex/sessions",
+              "reason": "/data/me/.cache/codex/lock cannot be read", "parts": None}]
+    newest, _ = fake_newest([], roots)
+    sessions, provider = built(newest=newest)
+    asyncio.run(sessions.start({"HOME": "/data/me"}))
+    result, _ = call(provider, "list_sessions", {})
+    assert result.structured["unlisted"][0]["reason"] == "lock cannot be read"
+    assert "/data/me" not in result.text
 
 
 @pytest.mark.parametrize("since", ["yesterday", "2026", "12x"])
