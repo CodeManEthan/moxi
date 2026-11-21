@@ -822,7 +822,9 @@ def test_a_new_adapter_whose_bind_is_refused_says_mail_has_stopped_and_why(
                                "comms adapter is gone, and a new one could not bind "
                                "it:"), said
         assert "already bound" in said and "relaunch the session" in said
-        assert cf.adapter_gone(cf.read(sid)), "the claim file stays"
+        # The refused adapter says why before its claim server closes the socket.
+        assert wait_until(lambda: cf.adapter_gone(cf.read(sid)), timeout=10), \
+            "the claim file stays"
         (row,) = checks.adapter_rows()
         assert row.state == "fail" and "mail has stopped" in row.detail
     finally:
