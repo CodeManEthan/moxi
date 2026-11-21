@@ -529,14 +529,14 @@ class RelaunchJob:
                 self._ended_under()
         while True:
             number = self.wait() if run.mode == "self" else run.turn_number
-            self.same_conversation()
-            self.read_pin()
+            self.end_if_changed()
+            self.refresh_pin()
             try:
                 self.hold()
                 self.check_stop()
                 if run.mode == "director":
-                    self.still_cold()
-                self.check_launch(self.request())
+                    self.end_if_warm()
+                self.end_if_refused(self.request())
                 self.guard()
                 self.acting = True
                 self.exit(number)
@@ -544,11 +544,11 @@ class RelaunchJob:
             except _Again as exc:
                 self.acting = False
                 self._release()
-                again = {"word": exc.word, "detail": exc.detail}
+                retry = {"word": exc.word, "detail": exc.detail}
                 if exc.word in PACED:
                     self.act_after = self.wall() + PACE_HOLD_OFF_S
-                    again["act_after"] = _stamp(self.act_after)
-                self.event("again", again)
+                    retry["act_after"] = _stamp(self.act_after)
+                self.event("again", retry)
                 self.sleep(POLL_S)
         self.dialog(number)
         self.name()
@@ -683,7 +683,7 @@ class RelaunchJob:
         return quiet.Hold("rate", f"turns' pace holds the exit until "
                                   f"{_stamp(self.act_after)}")
 
-    def same_conversation(self) -> None:
+    def end_if_changed(self) -> None:
         """The run acts only on the conversation that armed it: a session whose current id
         is no longer the run's (a `/clear` since) ends the run `changed`, untouched. A self
         run reads the id its wait's last facts gave; a director's run reads the facts once.
@@ -700,7 +700,7 @@ class RelaunchJob:
                      f"the session's current id is {found}, not {self.run.session_id}: "
                      "the conversation that armed the run is gone")
 
-    def read_pin(self) -> None:
+    def refresh_pin(self) -> None:
         """The model the relaunch comes back on, read again on each pass so a switch
         while the run waits is seen; a `model` event each time it changes."""
         from . import pin
@@ -713,7 +713,7 @@ class RelaunchJob:
             self.event("model", found.detail())
         self.pin = found
 
-    def check_launch(self, request: Any) -> None:
+    def end_if_refused(self, request: Any) -> None:
         """The launch check before an act: a launch that would be refused ends the run
         `refused`, its word the refusal's code, with the session untouched."""
         import dataclasses
@@ -728,7 +728,7 @@ class RelaunchJob:
         """The session the replay takes over: the run's, still live before the exit."""
         return self.run.session_id
 
-    def still_cold(self) -> None:
+    def end_if_warm(self) -> None:
         """A director's run reads the session's cache again after its hold: one warm or
         fresh can take a message, and ends the run `held`, word `warm`."""
         from . import relaunch
@@ -1100,7 +1100,7 @@ class RepairJob(RelaunchJob):
             mode=original.mode, handoff=original.handoff_path, by=original.actor,
             slot=choice.slot, respawn=choice.respawn,
             hold=self.holder if choice.recorded else None)
-        self.check_launch(request)
+        self.end_if_refused(request)
         self.respawn(request)
 
     @property
