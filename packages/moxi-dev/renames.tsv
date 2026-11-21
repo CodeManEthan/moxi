@@ -1616,8 +1616,8 @@ comms	packages/comms/tests/fake_turns.py	ref = DeliveryRef(delivery_id, d.ref if
 comms	packages/comms/tests/fake_turns.py	return self.reason.startswith(("untied", "expired"))	keep	expired	expired
 comms	packages/comms/tests/fake_turns.py	self.closed = False	keep	closed	closed
 comms	packages/comms/tests/fake_turns.py	self.closed = True	keep	closed	closed
-comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(None, text, method != "deliver", ref))	keep	delivered	delivered
-comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(did, text, method != "deliver", ref))	keep	delivered	delivered
+comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(None, text, method != "deliver", ref, *asker))	keep	delivered	delivered
+comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(did, text, method != "deliver", ref, *asker))	keep	delivered	delivered
 comms	packages/comms/tests/fake_turns.py	self.delivered: list[Handed] = []	keep	delivered	delivered
 comms	packages/comms/tests/fake_turns.py	while not self.closed:	keep	closed	closed
 comms	packages/comms/tests/fixtures/comms-0.2/make.py	adapter="claude-shim", at=now - 120)	keep	at	at
@@ -1858,6 +1858,7 @@ comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(
 comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(mid[0] in f.get("handled_ids", ()) and "answer" in f	keep	any	any
 comms	packages/comms/tests/test_claude_adapter.py	return rig.send(REVIEWER, text, *flags, sender=PLANNER)	keep	fail	fail
 comms	packages/comms/tests/test_claude_adapter.py	return rig.send(REVIEWER, text, *flags, sender=PLANNER)	keep	interrupt	interrupt
+comms	packages/comms/tests/test_claude_adapter.py	assert rig.send(REVIEWER, "from the builder", sender=BUILDER)[0] == 0	keep	fail	fail
 comms	packages/comms/tests/test_claude_adapter.py	send(rig, "refused")	keep	refused	refused
 comms	packages/comms/tests/test_claude_adapter.py	shim = rig.shim(name="reviewer", scope="proj-a", session_id=None, start=False)	keep	start	start
 comms	packages/comms/tests/test_claude_adapter.py	stall.set()	keep	set	set
@@ -1928,6 +1929,7 @@ comms	packages/comms/tests/test_codex_containment.py	added = tmp_path / "record"
 comms	packages/comms/tests/test_codex_containment.py	tmp_path / "record")	keep	record	record
 comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, text, *flags, sender=SENDER)	keep	fail	fail
 comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, text, *flags, sender=SENDER)	keep	interrupt	interrupt
+comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, "from the builder", sender=dict(name="builder",	keep	fail	fail
 comms	packages/comms/tests/test_codex_readiness.py	-	name	test_an_environment_with_no_moxi_script_finds_none	test_an_env_with_no_moxi_script_finds_none
 comms	packages/comms/tests/test_codex_turns_host.py	and any(f"msg {message_id}" in (item.get("text") or "")	keep	any	any
 comms	packages/comms/tests/test_codex_turns_host.py	assert any(row["event"] == "app-server-exit" for row in events(records))	keep	any	any
