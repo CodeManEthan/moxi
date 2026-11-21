@@ -871,8 +871,9 @@ def restart_point(call: Any) -> dict[str, Any]:
     on with a main session of `model` costs more than restarting it: the first mark of
     the measure `moxi usage restart-point --measure` writes. `tokens` is null with the
     `reason` when it cannot be worked out: there is no measure, the measure has no row
-    for the model, or the model table lacks a price it needs. It reads the measure's
-    file and the model table and writes nothing."""
+    for the model, or the model table lacks a price it needs. `borrowed_from` names the
+    model whose measured row the mark was worked out from when the model borrows one,
+    else null. It reads the measure's file and the model table and writes nothing."""
     asked = call.query["model"]
     try:
         found = api.threshold(asked, "1x", "main")
@@ -880,7 +881,8 @@ def restart_point(call: Any) -> dict[str, Any]:
         raise lb.Refused(str(exc)) from None
     tokens = _int(found.tokens)
     reason = None if tokens is not None else _str(found.reason) or "no restart point"
-    return {"model": found.model or asked, "tokens": tokens, "reason": reason}
+    return {"model": found.model or asked, "tokens": tokens,
+            "borrowed_from": _str(found.borrowed_from), "reason": reason}
 
 
 # --- the pass, the topics and the poller ---------------------------------------------------

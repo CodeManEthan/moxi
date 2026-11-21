@@ -25,6 +25,12 @@ its own carries the same model's `main` row, marked `fallback: main`), a read mu
 from the model table, and parameters that give a restart point. Without all three the
 answer is `unavailable` with the reason, and no mark is computed.
 
+**A borrowed row.** A model named in `BORROWED_ROW` that has no measured row of its own
+for a population uses the named model's row for that population. Only `S`, `P` and `g`
+come from that row: `r` is the model's own, and `w` is worked out from the model's own
+prices at the borrowed row's 1-hour share of writes. The model's own row wins as soon as
+the measure writes one, and the answer names the lender in `borrowed_from`.
+
 For a caller on a hook path (the warn-at listener): this module imports only `math` and
 `os`, and reads the measure and the model table at the first call that needs them.
 `threshold(model, mark, population)` answers from the measure and table in effect;
@@ -64,6 +70,13 @@ PARAMS_SCHEMA = 1
 
 MEASURE_FIX = "run `moxi usage restart-point --measure`"
 
+#: A model with no measured row of its own uses the named model's row until it has one
+#: (the measure needs 20 files of a population in its window). Drop an entry once the
+#: model is measured.
+BORROWED_ROW = {
+    "claude-fable-5-2": "claude-opus-5-5",
+}
+
 
 class ParamsError(Exception):
     """The measure's file is there and is not something the equations can read."""
@@ -76,13 +89,15 @@ class Threshold:
     taken off), `mark` one of `MARKS`, `population` `main` or `subagent`. `tokens` is the
     threshold, None exactly when the mark is unavailable, and then `reason` says why.
     `exact` is C as a real number. `fallback` is `main` when a subagent's mark comes from
-    the model's main row."""
+    a main row. `borrowed_from` names the model whose row the mark was worked out from,
+    None unless the row was borrowed (`BORROWED_ROW`)."""
 
-    __slots__ = ("model", "mark", "population", "tokens", "reason", "exact", "fallback")
+    __slots__ = ("model", "mark", "population", "tokens", "reason", "exact", "fallback",
+                 "borrowed_from")
 
     def __init__(self, model: str | None, mark: str, population: str, tokens: int | None,
                  reason: str | None = None, exact: float | None = None,
-                 fallback: str | None = None):
+                 fallback: str | None = None, borrowed_from: str | None = None):
         self.model = model
         self.mark = mark
         self.population = population
@@ -90,6 +105,7 @@ class Threshold:
         self.reason = reason
         self.exact = exact
         self.fallback = fallback
+        self.borrowed_from = borrowed_from
 
     @property
     def available(self) -> bool:
@@ -105,6 +121,8 @@ class Threshold:
             out["exact"] = self.exact
         if self.fallback is not None:
             out["fallback"] = self.fallback
+        if self.borrowed_from is not None:
+            out["borrowed_from"] = self.borrowed_from
         return out
 
     def __eq__(self, other: object) -> bool:
@@ -339,7 +357,9 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     `doc` is the measure's document (None for no measure); left out, it is the measure
     in effect (`params`). `table` is the model table; left out, the table in effect.
     Both `r` and `w` come from that table (`w` with the row's measured 1-hour share).
-    A config or model table that cannot be read gives `unavailable` with why."""
+    A model in `BORROWED_ROW` with no row of its own for `population` uses the lender's
+    row for it, and the answer's `borrowed_from` names the lender. A config or model
+    table that cannot be read gives `unavailable` with why."""
     if mark not in MARK_MULTIPLES:
         return Threshold(None, mark, population, None, f"{mark!r} is not a mark")
     if population not in POPULATIONS:
@@ -356,12 +376,19 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     if doc is None:
         return Threshold(base, mark, population, None,
                          f"the restart point has not been measured; {MEASURE_FIX}")
-    models = doc.get("models")
-    rows = models.get(base) if isinstance(models, Mapping) else None
-    row = rows.get(population) if isinstance(rows, Mapping) else None
-    if not isinstance(row, Mapping):
+    row = measured_row(doc, base, population)
+    lender = None
+    if row is None and base in BORROWED_ROW:
+        lender = BORROWED_ROW[base]
+        row = measured_row(doc, lender, population)
+        if row is None:
+            return Threshold(base, mark, population, None,
+                             f"the restart-point measure has no {population} row for "
+                             f"{base}, nor for {lender}, whose row it borrows")
+    if row is None:
         return Threshold(base, mark, population, None,
                          f"the restart-point measure has no {population} row for {base}")
+    whose = f"{base} (row borrowed from {lender})" if lender else base
     fallback = row.get("fallback") if row.get("fallback") == FALLBACK_MAIN else None
     try:
         if table is None:
@@ -384,14 +411,25 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     s, p, g = _number(row.get("S")), _number(row.get("P")), _number(row.get("g"))
     if s is None or p is None or g is None or w is None:
         return Threshold(base, mark, population, None,
-                         f"the measured {population} row for {base} is incomplete",
+                         f"the measured {population} row for {whose} is incomplete",
                          fallback=fallback)
     if g <= 0 or r <= 0 or restart_cost(s, p, w, r) <= 0:
         return Threshold(base, mark, population, None,
-                         f"the measured {population} row for {base} gives no restart "
+                         f"the measured {population} row for {whose} gives no restart "
                          "point", fallback=fallback)
     exact = mark_exact(s, p, g, w, r, mark)
-    return Threshold(base, mark, population, math.ceil(exact), None, exact, fallback)
+    return Threshold(base, mark, population, math.ceil(exact), None, exact, fallback,
+                     lender)
+
+
+def measured_row(doc: Mapping[str, Any], model: str, population: str
+                 ) -> Mapping[str, Any] | None:
+    """The measure's own row for `model` in `population` in `doc`, or None; never a
+    borrowed one."""
+    models = doc.get("models")
+    rows = models.get(model) if isinstance(models, Mapping) else None
+    row = rows.get(population) if isinstance(rows, Mapping) else None
+    return row if isinstance(row, Mapping) else None
 
 
 def all_marks(model: Any, population: str = MAIN, *, doc: Any = _UNSET, table: Any = None,
@@ -407,7 +445,7 @@ def all_marks(model: Any, population: str = MAIN, *, doc: Any = _UNSET, table: A
 
 
 __all__ = ["MARK_MULTIPLES", "MARKS", "OFF", "MAIN", "SUBAGENT", "POPULATIONS",
-           "FALLBACK_MAIN", "PARAMS_FILE",
+           "FALLBACK_MAIN", "PARAMS_FILE", "BORROWED_ROW", "measured_row",
            "PARAMS_SCHEMA", "ParamsError", "Threshold", "write_multiplier",
            "measured_write_multiplier", "restart_cost",
            "optimum_calls", "mark_exact", "base_model", "population_of", "params_path",

@@ -531,7 +531,10 @@ SUMMARY = {
 #: for when it names no model), `tokens` the context size past which carrying on costs
 #: more than restarting, and `reason` why there is none: no measure, no row for the
 #: model, or a price the model table lacks. Exactly one of `tokens` and `reason` is null.
-RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "reason": _MAYBE_SAYS}
+#: `borrowed_from` names the model whose measured row `tokens` was worked out from when
+#: the model borrows one (`thresholds.BORROWED_ROW`), else null.
+RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "borrowed_from": _MAYBE,
+                 "reason": _MAYBE_SAYS}
 
 #: The index topic: whether a pass started here runs now, the last pass, and its note.
 INDEX_TOPIC = {"running": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS}
