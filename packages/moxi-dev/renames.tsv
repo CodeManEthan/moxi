@@ -11890,7 +11890,7 @@ sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	name	at	positio
 sessions	packages/sessions/src/moxi_sessions/claude.py	_usage_request	kwonly	final	final
 sessions	packages/sessions/src/moxi_sessions/claude.py	`closed` entry). With `kinds` None, or a kind `MARKER_BYTES` has no entry for, every	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/claude.py	`final` true is never also in `closed`. Only request records ever come twice, and a	keep	closed	closed
-sessions	packages/sessions/src/moxi_sessions/claude.py	`final`, `closed` and `open_key` are the same as without it.	keep	closed	closed
+sessions	packages/sessions/src/moxi_sessions/claude.py	`final`, `closed`, `open_key` and `started` are the same as without it.	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/claude.py	`~` and the home directory taken from its `HOME`. A process that reports its session's	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/claude.py	and raw.find(b'"promptId"', first + 10) < 0):	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/claude.py	cut = raw.find(stop, 1, end)	keep	find	find
@@ -12140,7 +12140,7 @@ sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack.__init__	kwonly	
 sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack._map	kwonly	unterminated	unterminated
 sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	e	exc
 sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	handle	fh
-sessions	packages/sessions/src/moxi_sessions/read.py	__slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "_header")	keep	closed	closed
+sessions	packages/sessions/src/moxi_sessions/read.py	__slots__ = ("records", "cursor", "reset", "complete", "closed", "gone", "prompt_ids",	keep	closed	closed
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back	name	e	read_exc
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back	name	head	read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	_file_back.stream	name	e	exc

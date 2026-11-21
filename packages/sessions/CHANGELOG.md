@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `records_since`'s batch names the Claude prompt ids its lines moved the turn to,
+  in order (`Batch.prompt_ids`), a prompt that drew no request included, whatever kinds
+  the read keeps and with no line decoded beyond those a filtered read decodes now. The
+  batches of a transcript from no cursor name every prompt id it wrote. A Codex or
+  OpenCode batch's is empty.
 - The page's list keeps its filters, find text and how far each group was paged in its
   own address (`/m/sessions/?harness=claude&when=7d&more=recent:1`), so Back from a
   transcript, a reload and a shared link bring it back as it was; Back and a reload also
