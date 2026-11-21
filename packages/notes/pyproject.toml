@@ -27,6 +27,11 @@ dependencies = ["moxi>=0.1.9,<0.2", "moxi-repo>=0.1,<0.2", "moxi-secrets>=0.1,<0
 # projects only through moxi.modules.load("projects"), and projects reads notes' link
 # through its `moxi.projects` group below.
 projects = ["moxi-projects>=0.1,<0.2"]
+# notes' tools in the Claude apps: the public MCP host, and secrets with python-stdnum, so
+# every set the chat redaction uses is there whenever the tools are. Only the host loads
+# the provider `moxi_notes.connector`, which reaches it through
+# moxi.modules.load("connector", interface=1).
+connector = ["moxi-connector>=0.1,<0.2", "moxi-secrets[personal-data]>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -50,6 +55,11 @@ moxi-notes-snapshot = "moxi_notes.snapshot:main"
 # home folder or the login.
 [project.entry-points."moxi.turns.guards"]
 notes = "moxi_notes.guards"
+
+# notes' tools in the Claude apps: the public MCP host loads this provider, and nothing else
+# in notes imports it.
+[project.entry-points."moxi.connector.providers"]
+notes = "moxi_notes.connector:PROVIDER"
 
 # The secret gates, which repo's git hook runner calls in the notes repo.
 [project.entry-points."moxi.repo.git_hooks"]

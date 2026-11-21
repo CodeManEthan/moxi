@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A `connector` extra and a provider for the connector, the public MCP host, so notes can
+  give tools to the Claude apps. The extra brings the host and secrets with its
+  personal-data set. The provider reads only the notes root, judges every path by one
+  set of rules (relative, no dot part, no secret path, no name the chat redaction would
+  change, links followed and judged again, plain files of one link, text only, a size
+  cap, and the file read checked against the file judged), and shows a `root` and a
+  `redaction` status row.
 - Under `action = redact`, the committed copy redacts a secret beside a `gitleaks:allow`
   mark or on a line a rule's line allowlist names, which the gates still pass, and a
   token an invisible character splits, which the gates now refuse too; only an allowlist
