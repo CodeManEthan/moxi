@@ -536,7 +536,7 @@ Rows the form leaves at their shipped defaults are filled from the last launch o
 seat, else the project, else the folder on the line; `From last launch` on the line
 names them, each with `Clear`. The comms identity filled is the one the newest launch
 there of the harness the form is drawn for bound (a project's include those made through
-its seats), unless comms reports that name retired, whatever harness the last launch
+its seats), even one comms now reports retired, whatever harness the last launch
 ran, so it fills even where `[defaults]` or a preset sets another harness and no other
 value does; it is always at the global scope: a project scope is never carried. Where
 there is no such name, and for any harness but Codex, a seat named for one of its

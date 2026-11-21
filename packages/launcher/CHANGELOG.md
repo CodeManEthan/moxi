@@ -4,7 +4,7 @@
 
 - Home fills the comms identity as Core's desk did: the name the newest launch of the
   seat, project or folder of the harness the form is drawn for bound (a project's
-  include those made through its seats), unless comms reports that name retired,
+  include those made through its seats), even one comms now reports retired,
   whatever harness the last launch ran, always at the global scope, so a project scope
   is no longer carried. Where there is no such name, and for any harness but Codex, it
   fills a default: a seat named for one of its project's agents that sets no identity

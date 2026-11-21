@@ -594,7 +594,7 @@ def test_a_projects_identity_counts_the_launches_made_through_its_seats(world):
     assert identity_of(last(cwd=str(world.root))) is None
 
 
-def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monkeypatch):
+def test_a_launched_name_comms_reports_retired_stays_with_comms_refusal(world, monkeypatch):
     root = str(world.root)
     launch({"values": {"cwd": root, "model": "opus"}}, "older")
     launch({"values": {"cwd": root, "model": "opus"}}, "newer")
@@ -603,22 +603,24 @@ def test_a_launched_name_comms_reports_retired_falls_to_the_default(world, monke
     bound("newer", "ghost@proj-a", "proj-a")
     bound("codex", "ghost")
     asked = comms_saying(monkeypatch, {"ghost": "retired"}, listed=("proj-a-lead",))
-    said = last(project="proj-a")
-    # Asked at the global scope the form fills; the older launch's name is not reached.
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # Asked at the global scope the form fills. The retired name is kept, not dropped for
+    # the default or the older launch's name, and comms' refusal goes with it.
     assert ("ghost", None) in asked
-    assert (identity_of(said), identity_at(said)) == ("proj-a-lead", None)
-    # Codex has no default to fall to.
-    assert identity_of(said, "codex") is None
-    # A name comms doesn't report retired stands, and so does one it can't say about.
-    comms_saying(monkeypatch)
-    assert identity_of(last(project="proj-a")) == "ghost"
+    for harness in ("claude", "codex"):
+        assert said[harness]["identity"] == "ghost"
+        assert said[harness]["at"] is not None
+        assert said[harness]["refused"]["code"] == "identity-taken"
+        assert said[harness]["refused"]["problem"] == "identity ghost is retired"
+    # A name comms can't say about stands too, with nothing beside it.
 
     def down(name, scope=None):
         raise RuntimeError("daemon gone")
 
     monkeypatch.setattr(pagehandlers.joiner, "comms_api",
                         lambda: SimpleNamespace(identity_state=down))
-    assert identity_of(last(project="proj-a"), "codex") == "ghost"
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    assert said["codex"]["identity"] == "ghost" and said["codex"]["refused"] is None
 
 
 def test_each_identity_carries_comms_refusal_of_a_launch_under_it(world, monkeypatch):

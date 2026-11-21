@@ -73,10 +73,11 @@ project's or a folder's never include a seat's.
 answered apart from the values, once for each harness (`identities`), so the form fills
 the one for the harness it is drawn for, whatever harness the newest launch ran. For a
 harness it is the name of the newest launch of that harness that bound one, skipping one
-still spawning, where a project's launches include those made through its seats, unless
-comms reports that name retired, and its scope is always the empty one, which comms
+still spawning, where a project's launches include those made through its seats, even
+when comms reports that name retired, and its scope is always the empty one, which comms
 reads as global: a project scope is never carried. Each carries comms' refusal of a
-launch under it, if any, so the page shows the name with why it can't launch. With no such name, and for any
+launch under it, if any (a retired name's among them), so the page shows the name with
+why it can't launch. With no such name, and for any
 harness but Codex, it is the default (`default_identity`): on a seat named for one of
 its project's agents that sets no identity, the seat's own name; else a project of kind
 `agent`'s own key; else the project's `lead`; else `<key>-lead`, only when comms lists
@@ -1522,10 +1523,10 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
                   key: tuple[str, str]) -> list[dict[str, Any]]:
     """The comms identity a form drawn for each harness fills with, for the launches
     `found` (newest first) of what `query` asks for (`key`): the name the newest launch of
-    that harness bound (`binding_launch`) and when that launch was made, unless comms
-    reports that name retired; else, for a harness in `DEFAULT_HARNESSES`,
-    `default_identity` with no time. Each carries comms' refusal of a launch under that
-    name (`comms_refusal`), null when comms lets it through. A harness whose identity row
+    that harness bound (`binding_launch`) and when that launch was made, whatever comms
+    says of it now; else, for a harness in `DEFAULT_HARNESSES`, `default_identity` with no
+    time. Each carries comms' refusal of a launch under that name (`comms_refusal`), a
+    retired name's among them, null when comms lets it through. A harness whose identity row
     is not carried, or that has neither, is left out; the scope is the empty one, which
     comms reads as global."""
     out: list[dict[str, Any]] = []
@@ -1543,7 +1544,7 @@ def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
         row = binding_launch(found, harness)
         name = _bare(row.identity) if row is not None else ""
         refused = refusal_of(name) if name else None
-        if row is not None and name and getattr(refused, "state", None) != "retired":
+        if row is not None and name:
             out.append(_identity(harness, name, row.created_at, refused))
         elif harness in DEFAULT_HARNESSES:
             unbound.append(harness)
