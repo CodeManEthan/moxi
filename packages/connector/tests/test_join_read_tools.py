@@ -18,6 +18,7 @@ chat redaction installed beside the host, the module skips.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 from importlib import metadata
@@ -51,8 +52,12 @@ if (not all(modules.load(m).ok for m in TOOLS) or not _secrets.ok
     pytest.skip("memory, sessions, notes and secrets' chat redaction aren't installed "
                 "beside the host; the joins run in the workspace", allow_module_level=True)
 
-from moxi_memory import ingest, links  # noqa: E402 - only once memory is known installed
-from moxi_sessions import api as sessions_api  # noqa: E402 - likewise
+# Memory and sessions are optional beside the host and connector doesn't depend on them,
+# so the test reaches them by name, once the skip above has found them installed:
+# sessions through its API, memory's walk through its own modules.
+sessions_api = modules.load("sessions").api
+ingest = importlib.import_module("moxi_memory.ingest")
+links = importlib.import_module("moxi_memory.links")
 
 #: A made-up token of a credentials rule's shape: the canary.
 CANARY = "ghp_" + "Zq7Lm2Xc9Vb4Nn1Pk8Rt3Ws6Yd5Hf0Jg2UaX"

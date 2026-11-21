@@ -55,10 +55,8 @@ connector = "moxi_connector.module"
 # The sign-in page's browser test drives Playwright's Chromium against the door on
 # loopback, behind a TLS relay whose certificate cryptography makes on the spot.
 # moxi-ui's testing extra is how a package here brings its tests a browser; the test
-# imports Playwright and cryptography itself, so both are named too. The read tools' join
-# test imports memory and sessions to seed what the tools read, so both are named as well.
-dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2", "cryptography>=46",
-       "moxi-memory", "moxi-sessions"]
+# imports Playwright and cryptography itself, so both are named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2", "cryptography>=46"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
