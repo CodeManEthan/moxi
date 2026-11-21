@@ -55,7 +55,7 @@ def popover(panel):
 
 
 def test_the_page_keeps_the_contract(shell, ui_page, ui_component_check):
-    # B1's page acts on nothing, so its accent shows only on a selection or the focus;
+    # The page acts on nothing, so its accent shows only on a selection or the focus;
     # at rest it draws from the waiting line's tint and the dim text.
     check = ui_component_check(ui_page, "rounds", "page", tokens=("state-yours-soft", "text-dim"))
     assert check.element == "moxi-rounds-page"
