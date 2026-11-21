@@ -11,8 +11,9 @@ value of a type the row does not carry.
 **Redaction.** Given `redact`, a function from text to text, `view_row` passes each
 message's whole text, each tool call's name and whole argument, and each title through it
 before any cut, so a cut never leaves part of a secret that no longer matches its pattern.
-A tool call's summary is then made again from its input (`shape.tool_summary`), redacted
-before its 160-character cut, and the row's `name` and `server` are redacted too. Without
+A tool call's summary is then made again from its input (`shape.tool_summary`): put on
+one line, then redacted, then cut at 160 characters (`shape.squeezed_first`), and the
+row's `name` and `server` are redacted too. Without
 `redact` the row is the record's own.
 
 `redactor()` is the redaction `moxi sessions read` uses: secrets' `credentials` and `broad`
@@ -20,7 +21,9 @@ sets (`SETS`), fixed, through the secrets module when it loads, reached through
 `moxi.modules.load` because secrets is an optional link of sessions. When it doesn't load,
 `redactor()` says why and the read prints its text as written.
 
-**The reads.** `last` is sessions' `window`: the last turns. `around` reads the records
+**The reads.** `turns_last` and `turns_around` give turns of records, which a reader
+that needs more than the rows (who wrote each message) works from; `last` and `around`
+make rows of them. `last` is sessions' `window`: the last turns. `around` reads the records
 forward and keeps the turns around a time: the turn that holds it (the newest turn that
 started at or before it, else the first), up to half the rest before it and the others
 after, with more before when the session ends first. `whole` is every record. Each gives a
@@ -41,7 +44,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .shape import CODEX, UNKNOWN, Record, tool_summary
+from .shape import CODEX, UNKNOWN, Record, squeezed_first, tool_summary
 
 #: The most of one message's text a row carries, in UTF-8 bytes.
 TEXT_MAX = 65536
@@ -162,7 +165,8 @@ def _windows(windows: Any) -> list[dict[str, Any]]:
 
 def summary(record: Record, redact: Redact | None = None) -> str:
     """A tool call's summary line: the record's own without `redact`; with it, made again
-    from the call's input with the name and the whole argument redacted before the cut."""
+    from the call's input, `redact` making the name's and the whole argument's line
+    before the cut (`shape.tool_summary` says what it must do)."""
     if redact is None:
         return record.summary
     tool_input = record.input
@@ -189,7 +193,7 @@ def view_row(record: Record, *, redact: Redact | None = None) -> dict[str, Any]:
     for name, typed in FIELDS.get(kind, ()):
         value = getattr(record, name)
         if kind == "tool_call" and name == "summary":
-            value = summary(record, redact)
+            value = summary(record, squeezed_first(redact) if redact else None)
         elif kind == "tool_call" and name in ("name", "server"):
             value = _redacted(value, redact)
         put(row, unknown, name, value, typed)
@@ -337,9 +341,30 @@ def _groups(records: Iterator[Record]) -> Iterator[_Group]:
         yield group
 
 
-def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
-    """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
-    chosen are made rows, so the turns passed over on the way cost no redaction."""
+@dataclass
+class Turns:
+    """Turns of records, oldest first, each a list of records: what `turns_last` and
+    `turns_around` read. `header_of`, `earlier`, `later` and `ended` are as `Shown`
+    says."""
+
+    groups: list[list[Record]]
+    header_of: Callable[[], Any]
+    earlier: bool = False
+    later: bool = False
+    ended: str | None = None
+
+
+def turns_last(source: Any, turns: int) -> Turns:
+    """The last `turns` turns as records, through sessions' `window`."""
+    from .read import window
+
+    read = window(source, turns=turns)
+    groups = [group.records for group in _groups(iter(read.records))]
+    return Turns(groups, lambda: read.header, earlier=read.has_earlier, ended=read.ended)
+
+
+def turns_around(source: Any, at: float, turns: int) -> Turns:
+    """`turns` turns around the time `at` (epoch seconds) as records, read forward."""
     from .read import records
 
     before = (turns - 1) // 2
@@ -363,13 +388,20 @@ def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> 
                 later = True
                 break
             after.append(group)
-        take = min(len(kept) - 1, turns - 1 - len(after))
-        first = len(kept) - 1 - take
-        chosen = list(kept)[first:] + after
-        rows = [view_row(record, redact=redact) for group in chosen
-                for record in group.records]
-    return Shown("around", rows, lambda: header, turns=turns, around=at,
+    take = min(len(kept) - 1, turns - 1 - len(after))
+    first = len(kept) - 1 - take
+    chosen = list(kept)[first:] + after
+    return Turns([group.records for group in chosen], lambda: header,
                  earlier=dropped or first > 0, later=later)
+
+
+def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
+    """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
+    chosen are made rows, so the turns passed over on the way cost no redaction."""
+    read = turns_around(source, at, turns)
+    rows = [view_row(record, redact=redact) for group in read.groups for record in group]
+    return Shown("around", rows, read.header_of, turns=turns, around=at,
+                 earlier=read.earlier, later=read.later)
 
 
 def whole(source: Any, redact: Redact | None = None) -> Shown:
@@ -526,7 +558,8 @@ def lines(row: Mapping[str, Any]) -> list[str]:
     return [f"{when}  {said} {row.get('raw_kind', '')}"]
 
 
-__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "around", "cut_message",
+__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "Turns", "around",
+           "cut_message",
            "cut_text",
-           "header_row", "last", "lines", "redactor", "stamp", "summary", "view_row",
-           "whole"]
+           "header_row", "last", "lines", "redactor", "stamp", "summary", "turns_around",
+           "turns_last", "view_row", "whole"]

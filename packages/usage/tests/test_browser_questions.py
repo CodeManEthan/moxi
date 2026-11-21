@@ -557,7 +557,7 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
         expect(rows_of(sessions)).to_have_count(len(in_b))
         assert sorted(row_keys(rows_of(sessions))) == sorted(in_b)
         steps.append(shown(sessions))
-        settle(panel, "place", "all")
+        settle(panel, "place", "All folders" if shell.small else "All projects")
 
         # Which model: the Model filter narrows everything below to it.
         expect(filter_of(panel, "model").locator(".k")).to_have_text("Model")

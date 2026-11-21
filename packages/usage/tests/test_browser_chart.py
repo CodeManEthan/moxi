@@ -212,7 +212,7 @@ def test_each_range_redraws_the_chart_and_leaves_cost_as_it_was(page):
     pick(panel, "range", "Today")
     expect(bars_of(panel)).to_have_count(1)
     # One bar says its own value, so there is no sentence to compare it in.
-    expect(sentence_of(panel)).to_have_text("")
+    expect(sentence_of(panel)).to_have_count(0)
     expect(chart_of(panel).locator("[data-part=value]")).to_have_text(re.compile(rf"^{MONEY}$"))
 
     pick(panel, "range", "Last 90 days")
@@ -333,7 +333,10 @@ def test_by_model_each_bar_is_stacked_by_model_and_the_table_follows_the_split(p
     # Today ran on Sonnet alone: its Haiku cell reads $0.00.
     expect(table.locator("tbody tr").last.locator("td")).to_have_text(
         [re.compile(r"^\d{4}-\d{2}-\d{2}$"), re.compile(rf"^{MONEY}$"), "$0.00"])
+    # The split draws the chart again, its chart and not its table; its table follows it.
     by_class.click()
+    expect(table).to_have_count(0)
+    group.get_by_role("button", name="Table").click()
     expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Cache read", "Output"])
 
     # Under Tokens the split is by class, and both buttons are off.
@@ -371,7 +374,7 @@ def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     expect(group.locator("[data-part=legend] li")).to_have_text(["Input", "Cache create", "Output"])
 
 
-def test_table_shows_every_figure_of_the_chart_in_its_place(page):
+def test_each_chart_has_its_own_table_with_every_figure_in_its_place(page):
     panel = open_page(page)
     group = panel.locator("[data-group=chart]")
     expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by class")
@@ -390,14 +393,90 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     expect(last.nth(1)).to_have_text(re.compile(MONEY))
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
-    panel.get_by_role("button", name="Tokens", exact=True).click()
-    expect(table.locator("thead th")).to_have_text(["Day", "Input", "Cache read", "Cache create", "Output"])
-    # Today's three requests of 1000, 1500 and 2000 output tokens, in the last row.
-    assert table.locator("tbody tr").last.locator("td").nth(4).inner_text() == "4.50k"
+    # The cost chart's table keeps its name.
+    expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by class")
 
-    group.get_by_role("button", name="Chart").click()
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    # Each chart has its own Table under its name, and the charts by tokens are drawn
+    # whatever the chart by cost showed.
+    expect(group.locator("[data-part=chart-name]")).to_have_text(["Cache reads", "Billable work"])
+    expect(chart_of(panel)).to_have_count(2)
     expect(group.get_by_role("table")).to_have_count(0)
-    expect(chart_of(panel).nth(1).locator("g[data-period]")).to_have_count(3)
+    reads_head, billable_head = group.locator('[data-chart="Cache reads"]'), group.locator('[data-chart="Billable work"]')
+    expect(reads_head.get_by_role("button")).to_have_text("Table")
+    expect(billable_head.get_by_role("button")).to_have_text("Table")
+    # The cache reads' Table switches it alone.
+    reads_head.get_by_role("button", name="Table").click()
+    tables = group.get_by_role("table")
+    expect(tables).to_have_count(1)
+    expect(chart_of(panel)).to_have_count(1)
+    expect(chart_of(panel)).to_have_attribute("aria-label", "Billable tokens each day, last 30 days")
+    expect(tables.locator("thead th")).to_have_text(["Day", "Cache read"])
+    expect(billable_head.get_by_role("button")).to_have_text("Table")
+    billable_head.get_by_role("button", name="Table").click()
+    expect(tables).to_have_count(2)
+    expect(chart_of(panel)).to_have_count(0)
+    reads, billable = tables.nth(0), tables.nth(1)
+    expect(reads.locator("thead th")).to_have_text(["Day", "Cache read"])
+    expect(billable.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
+    expect(reads.locator("tbody tr")).to_have_count(3)
+    expect(billable.locator("tbody tr")).to_have_count(3)
+    # Today's three requests read ten cache tokens each and wrote 1000, 1500 and 2000
+    # output tokens, in the last row.
+    expect(reads.locator("tbody tr").last.locator("td")).to_have_text([re.compile(r"^\d{4}-\d{2}-\d{2}$"), "30"])
+    expect(billable.locator("tbody tr").last.locator("td").nth(3)).to_have_text("4.50k")
+
+    # Chart brings the cache reads back and leaves the billable work's table.
+    reads_head.get_by_role("button", name="Chart").click()
+    expect(tables).to_have_count(1)
+    expect(tables.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
+    expect(chart_of(panel)).to_have_attribute("aria-label", "Cache read tokens each day, last 30 days")
+    expect(chart_of(panel).locator("g[data-period]")).to_have_count(3)
+    # Back by cost the chart is drawn again, its chart and not its table.
+    panel.get_by_role("button", name="Cost", exact=True).click()
+    expect(chart_of(panel)).to_have_count(1)
+    expect(group.get_by_role("table")).to_have_count(0)
+
+
+def test_every_chart_shows_its_chart_again_each_time_it_is_drawn_again(page):
+    panel = open_page(page)
+    group, heat = panel.locator("[data-group=chart]"), heat_of(panel)
+    expect(bars_of(panel)).to_have_count(3)
+
+    def tables_shown() -> None:
+        group.get_by_role("button", name="Table").click()
+        heat.get_by_role("button", name="Table").click()
+        expect(chart_of(panel)).to_have_count(0)
+        expect(heat.locator("svg[data-part=heat]")).to_have_count(0)
+
+    def charts_shown() -> None:
+        expect(chart_of(panel)).to_have_count(1)
+        expect(group.get_by_role("table")).to_have_count(0)
+        expect(heat.locator("svg[data-part=heat]")).to_be_visible()
+        expect(heat.get_by_role("table")).to_have_count(0)
+
+    # A new range.
+    tables_shown()
+    pick(panel, "range", "Last 7 days")
+    charts_shown()
+    # A new split.
+    tables_shown()
+    panel.locator("[data-part=split]").get_by_role("button", name="By model").click()
+    charts_shown()
+    # A new address: a section opened.
+    tables_shown()
+    panel.locator("[data-group=models] [data-part=count]").click()
+    expect(page).to_have_url(re.compile(r"/m/usage/models$"))
+    charts_shown()
+    # A new measure: each chart by tokens shows its chart, whatever the others showed.
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    group.locator('[data-chart="Cache reads"]').get_by_role("button", name="Table").click()
+    expect(chart_of(panel)).to_have_count(1)
+    panel.get_by_role("button", name="Cost", exact=True).click()
+    charts_shown()
+    panel.get_by_role("button", name="Tokens", exact=True).click()
+    expect(chart_of(panel)).to_have_count(2)
+    expect(group.get_by_role("table")).to_have_count(0)
 
 
 def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_foot(page):
@@ -542,12 +621,13 @@ def test_model_lists_the_ranges_models_and_filters_to_one(page):
     expect(box).to_have_count(0)
 
 
-def test_project_offers_all_alone_when_no_session_has_a_project(page):
+def test_project_offers_all_projects_alone_when_no_session_has_a_project(page):
     panel = open_page(page)
     box = filter_of(panel, "place")
     expect(box.locator(".k")).to_have_text("Project")
+    expect(box.locator("button.pick")).to_have_text("All projects▾")
     box.locator("button.pick").click()
-    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
+    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*All projects$")])
 
 
 def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small, ui_contexts):
@@ -556,8 +636,9 @@ def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small,
     box = filter_of(panel, "place")
     expect(box.locator(".k")).to_have_text("Folder")
     expect(bars_of(panel)).to_have_count(3)
+    expect(box.locator("button.pick")).to_have_text("All folders▾")
     box.locator("button.pick").click()
-    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
+    expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*All folders$")])
     expect(box.get_by_role("menuitemcheckbox")).to_have_text(["/work/proj-a", "/work/proj-b"])
     with page.expect_request(lambda request: "/m/usage/api/daily?by=day" in request.url) as sent:
         box.get_by_role("menuitemcheckbox", name="/work/proj-b").click()
@@ -585,12 +666,12 @@ def test_the_place_filter_picks_several_and_reads_them_one_to_a_line(small, ui_c
     expect(box.locator("button.pick")).to_have_text("2 folders▾")
     expect(entries.and_(page.locator("[aria-checked=true]"))).to_have_count(2)
     expect(bars_of(panel)).to_have_count(3)
-    # Picking one again takes it away; `all` clears them and closes the menu.
+    # Picking one again takes it away; `All folders` clears them and closes the menu.
     entries.filter(has_text="/work/proj-a").click()
     expect(box.locator("button.pick")).to_have_text("1 folder▾")
-    box.get_by_role("menuitemradio", name=re.compile(r"\ball$")).click()
+    box.get_by_role("menuitemradio", name=re.compile(r"All folders$")).click()
     expect(box.get_by_role("menu")).to_have_count(0)
-    expect(box.locator("button.pick")).to_have_text("all▾")
+    expect(box.locator("button.pick")).to_have_text("All folders▾")
     expect(bars_of(panel)).to_have_count(3)
 
 
@@ -673,6 +754,67 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     days.first.click()
     expect(panel.locator("[data-group=chart] [data-part=none]")).to_have_text("Nothing was used in this range.")
     expect(used).to_have_count(5)
+
+
+class Held:
+    """Reads whose address matches `pattern`, held back until `release()`; later ones go
+    through."""
+
+    def __init__(self, page, pattern: str):
+        self.routes = []
+        self.holding = True
+        page.route(re.compile(pattern), self._hold)
+
+    def _hold(self, route) -> None:
+        if self.holding:
+            self.routes.append(route)
+        else:
+            route.continue_()
+
+    def release(self) -> None:
+        self.holding = False
+        for route in self.routes:
+            route.continue_()
+
+
+def test_a_picked_day_keeps_all_under_the_filter_line_drawn_and_faded_until_its_reads_answer(page):
+    panel = open_page(page)
+    below = panel.locator("[data-part=below]")
+    grid = heat_of(panel).locator("svg[data-part=heat]")
+    newest = grid.locator("rect[data-used=true]").last
+    expect(newest).to_be_visible()
+    expect(bars_of(panel)).to_have_count(3)
+    expect(below).to_have_css("opacity", "1")
+    day = newest.get_attribute("data-day")
+    # The chart's read for the day, and the map's own, which starts on its first day, are
+    # held back after the pick.
+    first = grid.get_by_role("button").first.get_attribute("data-day")
+    chart_read = Held(page, rf"/m/usage/api/daily\?by=day&since={day}&until={day}")
+    heat_read = Held(page, rf"/m/usage/api/daily\?by=day&since={first}&")
+    newest.focus()
+    page.keyboard.press("Enter")
+    expect(filter_of(panel, "range").locator("button.pick")).not_to_have_text("last 30 days▾")
+    # While the reads are out everything under the filter line stays drawn, faded as one,
+    # the last chart and map with it, and the day keeps the focus.
+    expect(below).to_have_css("opacity", "0.6")
+    expect(heat_of(panel).locator(".gl")).to_have_css("opacity", "1")
+    expect(bars_of(panel)).to_have_count(3)
+    expect(grid.locator("rect[data-used=true]")).to_have_count(5)
+    expect(panel.locator("[data-group=sessions] [data-part=count]")).to_be_visible()
+    expect(newest).to_be_focused()
+    assert chart_read.routes and heat_read.routes
+    chart_read.release()
+    # The chart is drawn from its answer; the map's read is still out.
+    expect(bars_of(panel)).to_have_count(1)
+    expect(bars_of(panel)).to_have_attribute("data-period", day)
+    expect(below).to_have_css("opacity", "0.6")
+    heat_read.release()
+    # Then the map is drawn anew from its read, and the day's new cell does not hold the
+    # focus the old one had.
+    expect(below).to_have_css("opacity", "1")
+    cell = grid.locator(f'rect[data-day="{day}"]')
+    expect(cell).to_be_visible()
+    expect(cell).not_to_be_focused()
 
 
 def test_the_heat_map_follows_only_the_place_filter_and_its_table_lists_the_used_days(small, ui_contexts):

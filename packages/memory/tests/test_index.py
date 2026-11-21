@@ -104,7 +104,7 @@ def test_a_generation_holds_the_tables_and_the_tokenizer():
         assert {"rows", "rows_fts", "tails", "tails_fts", "sources", "meta"} <= names
         assert index.meta_get(reader.conn, "tokenizer") == \
             "porter unicode61 remove_diacritics 2"
-        assert index.meta_get(reader.conn, "schema") == "1"
+        assert index.meta_get(reader.conn, "schema") == "2"
         sql = " ".join(r[0] for r in reader.conn.execute(
             "SELECT sql FROM sqlite_master WHERE name IN ('rows_fts', 'tails_fts')"))
         assert sql.count("tokenize = 'porter unicode61 remove_diacritics 2'") == 2

@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- `chat_redact(text, between=...)`: a caller's own change to the text (a read tool
+  cutting local paths) runs after the strip and before the second redaction, so the last
+  redaction judges the text exactly as sent and a change that glues a word onto a secret
+  can't break its boundary. `between=None` is the redaction as before.
+- `chat_redact(text)` and `CHAT_SETS` (`credentials`, `broad`, `personal-data`, fixed in
+  code): the one redaction for text bound for a reader outside the machine. It redacts
+  with the chat sets in strict mode, removes C0 controls other than newline and tab, DEL,
+  C1 controls and format characters, and redacts again; it returns that last text, or
+  `[REDACTED:unscanned]` alone when either pass could not scan the text. It raises
+  `SetUnavailable` when a chat set can't run, so a caller without python-stdnum refuses
+  rather than reads.
+- `scan` and `redact` take `strict=False`. With `strict`, nothing beside a value keeps it
+  whole: no `gitleaks:allow` mark and no allowlist of any kind (line, match, secret,
+  stopword, path) is read; each rule that ends with gitleaks' end condition runs its
+  regex without it (`strictRegex` in `sets.json`, written by the generator for both
+  engines); only `high-entropy-run` and `high-entropy-slash-run` keep an entropy floor,
+  met when the value or any stretch of it from 32 to 512 characters passes, so padding
+  glued on can't pull a value under; private names drop `allowed` and the author's name
+  and email. That search does at most 2 million steps per text, and a text that needs
+  more comes back unscanned. Strict reaches every copy a scan reads past see-through
+  characters, and the fallback worker's requests for each. The defaults are unchanged.
+- `secret_path(value)`: the first path in a tool call's input that `is_secret_path`
+  names, or None. Every whitespace-separated word of every string counts, split at shell
+  joins, inside lists and nested objects, and inside strings that hold JSON. It is the
+  walker memory's ingest used, moved here unchanged.
+- broad gains `high-entropy-slash-run`: a run of 40 or more base64 characters, up to two
+  `=` after it, holding a `/` or `+`, an upper-case letter, a lower-case letter and a
+  digit, no `//`, and entropy above 4.5, starting at the text's start or right after
+  whitespace, a quote, a backtick, `=`, `:`, `(`, `[`, `{`, `,`, `<` or `>`. It finds a
+  bare secret holding `/`, such as an AWS secret access key with no name before it,
+  which `high-entropy-run` leaves out, and leaves URLs, paths and page hashes alone,
+  since their runs start after a `.` or a `-`. Its
+  conditions are a rule field of Moxi's own, `requires`, which only `broad.toml` may use.
+  Text stored redacted before this release gets the rule only when redacted again.
 - `redact` no longer lets text beside a secret keep it: a `gitleaks:allow` mark, or a
   line a rule's line allowlist names, leaves the secret on that line redacted. `scan`
   still honours both.

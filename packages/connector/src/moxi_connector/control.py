@@ -9,8 +9,9 @@ The methods:
 
 - `status`: what `moxi connector status`, the doctor and `HEALTH` show of the running
   process: its pid and version, the origin's URL and the port row's warning, the loopback
-  port, each provider entry with its state and tools, the clashing tool names, the served
-  tools, the providers' own status rows, and the modules whose mint gate is loaded;
+  port, each provider entry with its state and tools, the clashing tool names, the tool
+  names `tools.withheld` lists, the served tools, the providers' own status rows, and the
+  modules whose mint gate is loaded;
 - `probe_expect`: register a fresh nonce for `moxi connector check`, answered as
   `{"nonce": ...}`;
 - `probe_seen` `{"nonce": ...}`: `{"seen": bool}`, whether a request carried it;
@@ -109,6 +110,7 @@ class Control:
                            if e.provider is not None else []}
                           for e in registry.entries],
             "clashes": registry.clashes(),
+            "withheld": sorted(registry.withheld),
             "tools": [{"name": name, "provider": module}
                       for name, (module, _) in registry.tools().items()],
             "rows": [list(row) for row in registry.status_rows()],

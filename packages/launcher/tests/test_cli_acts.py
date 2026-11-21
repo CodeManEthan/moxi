@@ -108,6 +108,7 @@ PARSES = [
     (["relaunch", "boss@work", "--dry-run"], {"target": "boss@work", "dry_run": True}),
     (["relaunch", "--status", "ab12", "--json"], {"status": "ab12", "json": True}),
     (["relaunch", "--from-record", "ab12"], {"from_record": "ab12", "target": None}),
+    (["relaunch", "--stop", "ab12", "--json"], {"stop": "ab12", "target": None, "json": True}),
     (["exit-session", SID], {"verb": "exit-session", "session_id": SID, "dry_run": False,
                              "json": False}),
     (["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),
@@ -147,6 +148,9 @@ REFUSED = [
     ["relaunch", "--self", "--handoff", "h.md", "--status", "ab12"],
     ["relaunch", "--status", "ab12", "--dry-run"],
     ["relaunch", "--from-record", "ab12", "--dry-run"],
+    ["relaunch", "--stop", "ab12", "--dry-run"],
+    ["relaunch", "--stop", "ab12", "--status", "ab12"],
+    ["relaunch", SID, "--stop", "ab12"],
     ["relaunch", "--status"],
     ["relaunch", SID, OTHER],
     # Nothing is abbreviated.
@@ -345,7 +349,8 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
                         {"word": "person", "detail": "a client was active 40 s ago"},
                         at="2026-10-31T10:01:00.000000Z")
     status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
-    assert (status, err) == (codes.OK, "")
+    # An open run exits 75, its lines still on stdout.
+    assert (status, err) == (codes.TEMPFAIL, "")
     lines = out.splitlines()
     assert lines[0] == (f"run {run_.run_id}: relaunch (self) of session {SID} in slot 3: "
                         "armed")
@@ -353,7 +358,7 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
     assert len(lines) == 4
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
     data = json.loads(out)
-    assert status == codes.OK and data["outcome"] == "armed"
+    assert status == codes.TEMPFAIL and data["outcome"] == "armed"
     assert data["wait"]["word"] == "person" and len(data["events"]) == 2
 
 
@@ -361,7 +366,9 @@ def test_relaunch_status_of_an_ended_run_carries_its_outcome(conn, capsys):
     launched(conn)
     run_ = ended_run(conn, "not-exited", word="mismatch", detail="the dialog changed")
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
-    assert status == codes.OK and json.loads(out)["outcome"] == "not-exited"
+    assert status == codes.ERROR and json.loads(out)["outcome"] == "not-exited"
+    status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
+    assert status == codes.ERROR and err == "" and "not-exited (mismatch)" in out
 
 
 def test_relaunch_status_of_no_run_is_refused(conn, capsys):
@@ -391,6 +398,23 @@ def test_relaunch_from_record_follows_its_repair(code, outcome, monkeypatch, cap
     status, out, err = run(["relaunch", "--from-record", "ab12"], capsys)
     assert status == code and seen == [(("ab12",), {})]
     assert (out if code == codes.OK else err) == f"run cd34: {outcome}\n"
+
+
+def test_relaunch_stop_says_what_the_stop_does(monkeypatch, capsys):
+    line = ("stop sent to run ab12: it ends stopped before the exit; from the exit on, it "
+            "ends after the relaunch is tried")
+    seen = calls(monkeypatch, relaunch, "stop_run", result(codes.OK, line,
+                                                           outcome="stop-sent"))
+    status, out, _ = run(["relaunch", "--stop", "ab12"], capsys)
+    assert status == codes.OK and seen == [(("ab12",), {})] and out == line + "\n"
+
+
+def test_relaunch_stop_of_an_ended_run_is_refused(conn, capsys):
+    launched(conn)
+    run_ = ended_run(conn, "relaunched")
+    status, out, err = run(["relaunch", "--stop", run_.run_id], capsys)
+    assert status == codes.REFUSED and out == ""
+    assert err.splitlines()[0].endswith("[not-open]")
 
 
 def test_relaunch_from_record_of_a_run_that_cant_be_repaired_is_refused(conn, capsys):

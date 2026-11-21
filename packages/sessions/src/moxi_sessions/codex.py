@@ -38,6 +38,7 @@ from .claude import (SAFE_ID_RE, _count, _said, decode, parse_line, parse_timest
 from .shape import (BAD_STRUCTURE, CODEX, NOT_OBJECT, UNKNOWN, LimitWindow, Limits,
                     Malformed, Marker, Message, Other, Record, Request, ToolCall,
                     ToolResult, tool_summary)
+from .writer import opening
 
 
 #: Codex's rollout name rule. `thread` is the thread id, `rollout` the suffix a revert
@@ -609,7 +610,8 @@ def _injected(payload: dict, role: Any, text: str) -> Any:
     The model's own message is false, and one of Codex's own roles (`HARNESS_ROLES`)
     true. A user message's content kinds decide it when written: true when every kind is
     one Codex added (`INJECTED_KINDS`), else unknown, an empty or unreadable list
-    included. With no kinds written, a fixed opening tag (`WRAPPER_TAGS`) makes it true;
+    included. With no kinds written, a fixed opening tag (`WRAPPER_TAGS`), after the opening
+    characters (`writer.opening`), makes it true;
     anything else is unknown."""
     if role == "assistant":
         return False
@@ -624,7 +626,7 @@ def _injected(payload: dict, role: Any, text: str) -> Any:
                     and all(isinstance(kind, str) and kind in INJECTED_KINDS
                             for kind in kinds))
         return True if injected else UNKNOWN
-    if text.lstrip().startswith(WRAPPER_TAGS):
+    if opening(text).startswith(WRAPPER_TAGS):
         return True
     return UNKNOWN
 
