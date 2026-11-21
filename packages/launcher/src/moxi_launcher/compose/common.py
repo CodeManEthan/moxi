@@ -263,6 +263,8 @@ class Context:
     identity block shows in place of the values' own (a relaunch's), which the values,
     and so the new row's `values_json`, never carry; None keeps the values' posture.
     `resume` says the session id is one the launch resumes, not one minted for it.
+    `fork_of` is the session id a fork launch forks: the harness starts the launch's
+    session from a copy of that session's conversation.
     `relaunched` marks a relaunch, whose handoff header says so. `extra_stamps` are
     stamps the replay adds to the option rows' own (`RELAUNCH_ENV`).
     """
@@ -293,6 +295,7 @@ class Context:
     windows: bool = os.name == "nt"
     posture: str | None = None
     resume: bool = False
+    fork_of: str | None = None
     relaunched: bool = False
     extra_stamps: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 

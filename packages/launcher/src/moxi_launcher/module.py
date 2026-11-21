@@ -8,7 +8,7 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 """
 
 #: The API module: `launch`, `check` and `preview`. Interface 1 is `launch_kind` and
-#: `launch_kinds`: the launch kind (`scratch`, `seat`, `project` or `one-off`) of a
+#: `launch_kinds`: the launch kind (`fork`, `scratch`, `seat`, `project` or `one-off`) of a
 #: session the launcher started, read from the launch log by session id. Interface 2 adds
 #: `running`: the launches running now, read from the launch log and the process table.
 INTERFACES = frozenset({1, 2})

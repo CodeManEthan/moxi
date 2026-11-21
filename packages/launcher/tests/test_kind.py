@@ -1,4 +1,4 @@
-"""A session's launch kind, read from the launch log by session id: each of the four kinds
+"""A session's launch kind, read from the launch log by session id: each of the five kinds
 and the order they are decided in, each case that answers None, ids learned after the
 start, launches made end to end, and a log that can't be read."""
 
@@ -68,30 +68,32 @@ def launch(conn, request_id="r1", *, harness="claude", session_id=CLAUDE_ID, val
                         project_key=project_key, **more).row
 
 
-# -- the four kinds, in their order --------------------------------------------------------
+# -- the five kinds, in their order --------------------------------------------------------
 
 
-@pytest.mark.parametrize("preset_kind, project_key, scratch, kind", [
-    (None, None, True, "scratch"),
-    ("seat", None, True, "scratch"),
-    ("project", None, True, "scratch"),
-    ("seat", None, False, "seat"),
-    ("seat", "moxi", False, "seat"),
-    ("project", None, False, "project"),
-    ("project", "moxi", False, "project"),
-    (None, "moxi", False, "project"),
-    (None, None, False, "one-off"),
+@pytest.mark.parametrize("preset_kind, project_key, scratch, fork_of, kind", [
+    (None, None, False, HAND_ID, "fork"),
+    ("seat", "moxi", True, HAND_ID, "fork"),
+    (None, None, True, None, "scratch"),
+    ("seat", None, True, None, "scratch"),
+    ("project", None, True, None, "scratch"),
+    ("seat", None, False, None, "seat"),
+    ("seat", "moxi", False, None, "seat"),
+    ("project", None, False, None, "project"),
+    ("project", "moxi", False, None, "project"),
+    (None, "moxi", False, None, "project"),
+    (None, None, False, None, "one-off"),
 ])
 def test_each_launch_answers_the_first_kind_that_holds(conn, preset_kind, project_key,
-                                                       scratch, kind):
+                                                       scratch, fork_of, kind):
     launch(conn, preset_kind=preset_kind, project_key=project_key,
-           values={"scratch": scratch})
+           values={"scratch": scratch}, fork_of=fork_of)
     assert api.launch_kind(CLAUDE_ID) == kind
     assert kind in api.KINDS
 
 
-def test_the_kinds_are_four_and_scratch_comes_first():
-    assert api.KINDS == ("scratch", "seat", "project", "one-off")
+def test_the_kinds_are_five_and_fork_comes_first():
+    assert api.KINDS == ("fork", "scratch", "seat", "project", "one-off")
 
 
 def test_a_row_made_before_the_place_rows_were_recorded_reads_by_its_columns(conn):
@@ -228,7 +230,7 @@ def test_a_log_held_past_the_wait_raises_busy_and_writes_nothing():
 
 def test_a_log_a_newer_launcher_wrote_is_refused_not_read(conn):
     launch(conn, preset_kind="seat")
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     with pytest.raises(core_store.StoreTooNew):
         api.launch_kind(CLAUDE_ID)
 

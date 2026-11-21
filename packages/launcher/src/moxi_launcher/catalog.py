@@ -67,6 +67,8 @@ What this module gives the rest of the launcher:
 
 - `load(harness)` and `launcher()`: the parsed catalogs, checked when read; `offered(...)`
   the rows a user may set on this install, for a harness when one is named.
+- `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
+  class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
   `when` and `offered_with` state, each refused with its own words.
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
@@ -133,12 +135,14 @@ POSTURE_FLAGS = {
 }
 #: Flags of turns' Codex host that a launch never passes on, though the host takes them,
 #: each with what to do instead. A thread is resumed only through the launcher's own
-#: resume, which adds `--resume` itself; a launch always
+#: resume, which adds `--resume` itself, and forked only through its fork, which adds
+#: `--fork`; a launch always
 #: runs the Codex window; an options file can set the sandbox where the posture check
 #: can't see it; and the launcher gives the seat's instructions itself.
 HELD_FLAGS = {
     "codex": {
         "--resume": "resume a past session with moxi launcher resume",
+        "--fork": "fork a session with moxi launcher fork",
         "--no-window": "a launch always runs the Codex window; leave --no-window out",
         "--options-file": "an options file can set the sandbox where the posture check "
                           "can't see it; give each setting with its own option, or with "
@@ -665,6 +669,34 @@ def row(harness: str, name: str) -> Row | None:
     if name in launcher():
         return launcher()[name]
     return load(harness).rows.get(name)
+
+
+def unset(row_: Row) -> object:
+    """The value that leaves `row_` unset: false for a bool, or a string row whose
+    default is false; [] for a list; "" for any other string or a path; the default for
+    the rest, an `enum` row's default being its value that sets nothing."""
+    if row_.type == "list":
+        return []
+    if row_.type == "bool" or (row_.type == "string" and row_.default is False):
+        return False
+    if row_.type in ("string", "path"):
+        return ""
+    return row_.default
+
+
+def forked(harness: str, values: Mapping[str, object]) -> dict[str, object]:
+    """A fork's values from its parent's recorded `values`, by each row's `fork` class:
+    a `copy` row as the parent ran it, a `drop` row unset (`unset`), an `own` row left
+    out for the fork's launch to compose again. A value that names no row of the
+    launcher or of `harness` is kept as it is."""
+    out: dict[str, object] = {}
+    for name, value in values.items():
+        found = row(harness, name)
+        if found is None or found.fork == "copy":
+            out[name] = value
+        elif found.fork == "drop":
+            out[name] = unset(found)
+    return out
 
 
 def _read(name: str) -> Catalog:

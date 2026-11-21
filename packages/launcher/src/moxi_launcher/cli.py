@@ -19,6 +19,7 @@ launched.
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
+    moxi launcher fork SESSION_ID [--target slot|terminal] [--slot N] [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
     moxi launcher show [SESSION_ID] [--json]
 
@@ -36,7 +37,8 @@ relaunches another as one of its directors, shows a run (`--status`), or launche
 the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `keep-warm` opens, releases and lists this session's named holds. `show` shows
+resumed. `fork` starts a new session from a copy of a session's conversation, live or
+not, and prints the new session's id. `keep-warm` opens, releases and lists this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -609,6 +611,13 @@ def _resume(args: argparse.Namespace, prog: str) -> int:
     return _said(resume.resume(args.session_id, slot=args.slot, warn=_warn), args)
 
 
+def _fork(args: argparse.Namespace, prog: str) -> int:
+    from . import fork
+
+    return _said(fork.fork(args.session_id, target=args.target, slot=args.slot,
+                           warn=_warn), args)
+
+
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
@@ -639,6 +648,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "exits": _exits,
     "sessions": _sessions,
     "resume": _resume,
+    "fork": _fork,
     "keep-warm": _keep_warm,
     "show": _state,
 }
@@ -790,6 +800,21 @@ def _act_parsers(verbs) -> None:
                     "that can take it, else the lowest that can, or this terminal.")
     resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")
     resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")
+
+    fork = verbs.add_parser(
+        "fork", help="start a new session from a copy of a session's conversation",
+        allow_abbrev=False,
+        description="Start a new session from a copy of a launched session's "
+                    "conversation, live or not, with the rows that shape what the "
+                    "harness sends copied from its launch and no comms name, brief or "
+                    "posture; print the new session's id. The session forked goes on as "
+                    "it was.")
+    fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")
+    fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",
+                      help="where the fork runs: this terminal (the default) or a slot")
+    fork.add_argument("--slot", metavar="N",
+                      help="with --target slot: the slot; the lowest free one when unset")
+    fork.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
         "keep-warm", help="open, release or list this session's holds", allow_abbrev=False,

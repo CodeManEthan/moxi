@@ -22,7 +22,7 @@ MINTED = "3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
 CLEARED = "7e8f9a0b-1c2d-4e3f-9a5b-6c7d8e9f0a1b"
 COMPACTED = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 V1_TABLES = ("launches", "session_ids", "events", "picks")
-V1_COLUMNS = store.COLUMNS[:-1]
+V1_COLUMNS = store.COLUMNS[:-2]
 T0 = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
 
 
@@ -86,9 +86,10 @@ def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
 
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert snapshot(conn) == before
         assert [r[0] for r in conn.execute("SELECT base_env_json FROM launches")] == [None] * 4
+        assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
         assert all(row.base_env_json is None and row.base_env is None
                    for row in store.log(conn))
         for table in ("runs", "run_events", "pending_compacts", "warm_holds", "exits"):
@@ -447,11 +448,11 @@ def test_prune_takes_at_most_its_limit_of_each_table_and_finishes_later(conn):
     assert conn.execute("SELECT count(*) FROM run_events").fetchone()[0] == 0
 
 
-def test_a_newer_store_than_version_2_is_refused(tmp_path):
+def test_a_newer_store_than_version_3_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     conn.close()
     with pytest.raises(core_store.StoreTooNew):
         store.connect(db)

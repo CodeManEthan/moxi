@@ -23,6 +23,9 @@ Schema version 2 adds the acts on a launched session and changes two things of v
   copied as they were, in the same order;
 - `launches` gains `base_env_json`, null on every row made before version 2.
 
+Schema version 3 adds `launches.fork_of`, the session id a fork launch (`moxi launcher
+fork`) copied, null on every other row and on every row made before version 3.
+
 Each later version adds through `migrate`; no row of an earlier one is lost.
 
 **A later step never moves a row's state back.** The states go forward in one order,
@@ -64,7 +67,7 @@ HARNESSES = ("claude", "codex")
 TARGETS = ("terminal", "headless", "slot")
 PRESET_KINDS = ("seat", "project")
 #: A launch's kind, as `LaunchRow.kind` decides it: the first that holds, in this order.
-KINDS = ("scratch", "seat", "project", "one-off")
+KINDS = ("fork", "scratch", "seat", "project", "one-off")
 #: The event a claim that moved to a new endpoint records.
 RECLAIMED = "reclaimed"
 #: The event a launch made from the page records, under its request id, when it is refused
@@ -255,8 +258,13 @@ CREATE INDEX launches_relaunch_of ON launches(relaunch_of);
 CREATE INDEX launches_resume_of ON launches(resume_of);
 """
 
+SCHEMA_3 = """
+ALTER TABLE launches ADD COLUMN fork_of TEXT;
+CREATE INDEX launches_fork_of ON launches(fork_of);
+"""
+
 #: The schema's steps, one per version; `PRAGMA user_version` counts those run.
-STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2)
+STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3)
 
 
 class TooLarge(store.StoreError):
@@ -324,7 +332,8 @@ class LaunchRow:
 
     `newest_session_id` is set only by `resolve`: the session id this launch was last
     known by, which after a clear or a compaction is not the one it started with.
-    `base_env_json` is null on a row made before schema version 2.
+    `base_env_json` is null on a row made before schema version 2. `fork_of` is the
+    session id a fork launch copied, null on any other launch.
     """
 
     request_id: str
@@ -356,6 +365,7 @@ class LaunchRow:
     reason: str | None
     updated_at: str
     base_env_json: str | None = None
+    fork_of: str | None = None
     newest_session_id: str | None = None
 
     @property
@@ -372,11 +382,14 @@ class LaunchRow:
 
     @property
     def kind(self) -> str:
-        """The launch's kind, the first of `KINDS` that holds: `scratch` when it works in
-        a scratch folder, whatever its preset; `seat` for a seat preset; `project` when it
-        names a project, by a project preset or a project key; else `one-off`. Scratch
-        comes first so that a seat launched in a scratch folder, as a test tool does, reads
-        as scratch."""
+        """The launch's kind, the first of `KINDS` that holds: `fork` for a launch that
+        forked another session (`fork_of` set), since it copies that session's whole
+        transcript; `scratch` when it works in a scratch folder, whatever its preset;
+        `seat` for a seat preset; `project` when it names a project, by a project preset
+        or a project key; else `one-off`. Scratch comes before the presets so that a seat
+        launched in a scratch folder, as a test tool does, reads as scratch."""
+        if self.fork_of:
+            return "fork"
         if self.values.get("scratch"):
             return "scratch"
         if self.preset_kind == "seat":
@@ -522,7 +535,8 @@ def insert(conn: sqlite3.Connection, *, request_id: str, by: str, harness: str,
            brief: str | None = None, handoff_path: str | None = None,
            handoff_key: str | None = None, relaunch_of: str | None = None,
            resume_of: str | None = None, base_env: Mapping[str, str | None] | None = None,
-           starting_s: float | None = None, at: str | None = None) -> Inserted:
+           fork_of: str | None = None, starting_s: float | None = None,
+           at: str | None = None) -> Inserted:
     """Write a launch's row in state `spawning`, before anything is started.
 
     One transaction, with `synchronous=FULL` so the row is on disk before the spawn,
@@ -539,6 +553,9 @@ def insert(conn: sqlite3.Connection, *, request_id: str, by: str, harness: str,
     launch holding the id is still starting (`spawning` with no process recorded, made
     less than `starting_s` ago: `stale_after_s()` when None) or its recorded process or
     claimed endpoint runs, so two resumes of one session at once launch it once.
+
+    `fork_of` is the session id a fork launch copies (`moxi launcher fork`); the fork's
+    own session id is minted for it, like any new launch's.
 
     `env` holds the stamped literals only, never a secret; `base_env` the child's values
     for the recorded names (`compose.common.base_env`), recorded so a replay can start
@@ -575,6 +592,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, by: str, harness: str,
         "pid_started": None, "endpoint": None, "state": "spawning", "reason": None,
         "updated_at": at,
         "base_env_json": None if base_env is None else _encode(dict(base_env)),
+        "fork_of": fork_of,
     }
     conn.execute("PRAGMA synchronous = FULL")
     try:
@@ -959,10 +977,11 @@ class Place(NamedTuple):
 
 def launched_by(row: LaunchRow, by: str) -> bool:
     """Whether `row` is a launch `by` made and may make again: one that did not fail,
-    that is no relaunch or resume of another, and that did not work in a scratch
+    that is no relaunch, resume or fork of another, and that did not work in a scratch
     folder."""
     return (row.state != "failed" and row.relaunch_of is None and row.resume_of is None
-            and row.actor == by and row.values.get("scratch") is not True)
+            and row.fork_of is None and row.actor == by
+            and row.values.get("scratch") is not True)
 
 
 def places(conn: sqlite3.Connection, by: str, limit: int = 5) -> list[Place]:

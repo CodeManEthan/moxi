@@ -10,7 +10,8 @@
     running() -> tuple[Running, ...]        # interface 2: the launches running now
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
-(a stored launch made again: a relaunch or a resume, its values the stored row's).
+(a stored launch made again: a relaunch, a resume or a fork, its values the stored
+row's).
 
 `launch` runs one launch in this order: resolve its values (`presets.resolve`), check the
 live state (`check`), compose it (`compose.build`, the call `preview` makes), find the
@@ -75,8 +76,19 @@ caller's terminal names (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERS
 Then the scrub and the stamps. No other variable of the replaying process reaches the
 child.
 
-**A session's launch kind** (interface 1) is read from the launch log: `scratch`, `seat`,
-`project` or `one-off` for the launch a session id belongs to, by the order in
+**A fork** is a replay of the launch row of the session it forks, made by `moxi launcher
+fork` (`fork.fork`): a new session that starts from a copy of that session's
+conversation, which may be live. Its values are the row's, each by its catalog row's
+`fork` class (`catalog.forked`): the rows that shape the request the harness sends as the
+parent ran them, so the fork reads the parent's prompt cache; the rows about who the
+session is, its first turn and how it lives and ends unset; and its target and slot its
+own. It has no preset, no comms name, no start posture and no brief, and its row records
+`fork_of`, the session id it copies, which makes its launch kind `fork`. Its environment
+is built as any replay's, so nothing of the asking process's session reaches it, and
+then gets the request's `stamps`.
+
+**A session's launch kind** (interface 1) is read from the launch log: `fork`, `scratch`,
+`seat`, `project` or `one-off` for the launch a session id belongs to, by the order in
 `store.LaunchRow.kind`, and None for a session the launcher didn't start (`store.kinds`).
 A launch learns some ids after its session starts (a Codex launch's id, the new id after a
 `/clear`), so an id that answers None now may answer a kind later. The read writes
@@ -177,7 +189,11 @@ class ReplayRequest:
     """A stored launch made again: `row` is its launch log row.
 
     `relaunch_of` or `resume_of` names the launch it makes again (the row's request id),
-    and goes on the new row. A resume's session id is `session_id`, else the row's newest
+    and goes on the new row. `fork_of`, in their place, makes it a fork of the session
+    with that id, whose launch `row` is: the fork's values are the row's by each row's
+    `fork` class, it runs in `target` (default `terminal`), and `stamps` are set on its
+    environment after the scrub. A resume of a fork is a fork too: its row keeps the
+    `fork_of` of the row it resumes. A resume's session id is `session_id`, else the row's newest
     (`row.newest_session_id`, which `store.resolve` sets), else the row's; it is passed
     with `--resume`, never minted. `request_id` and `actor` are as `LaunchRequest`'s.
 
@@ -210,6 +226,9 @@ class ReplayRequest:
     respawn: bool = False
     chain: str | None = None
     director: bool = False
+    fork_of: str | None = None
+    target: str | None = None
+    stamps: Mapping[str, str] = field(default_factory=dict)
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -304,7 +323,7 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             handoff_path=str(values.get("handoff") or "") or None,
             handoff_key=handoff_key, base_env=common.base_env(launch_env),
             relaunch_of=getattr(request, "relaunch_of", None),
-            resume_of=getattr(request, "resume_of", None))
+            resume_of=getattr(request, "resume_of", None), fork_of=_fork_of(request))
         if not inserted.new:
             return _stored(inserted.row)
 
@@ -477,11 +496,52 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
     return f"{name} {value} is not applied: {why[0]}"
 
 
+def _fork_of(request) -> str | None:
+    """The session id the launch `request` asks for forks: a fork's own `fork_of`, or,
+    for a resume, the `fork_of` of the row it resumes; None for any other launch."""
+    if not getattr(request, "replay", False):
+        return None
+    if request.fork_of:
+        return request.fork_of
+    return request.row.fork_of if request.resume_of else None
+
+
+def _forked(request: ReplayRequest) -> Replayed:
+    """A fork's resolved values: the row's by each row's `fork` class, in the request's
+    target and slot, with no preset, comms name, start posture, brief or handoff."""
+    row = request.row
+    if request.relaunch_of or request.resume_of:
+        raise ValueError("a fork is not a relaunch or a resume")
+    target = request.target or "terminal"
+    if target not in ("terminal", "slot"):
+        raise catalog.BadValue("target", f"a fork runs in this terminal or a slot, not "
+                                         f"{target}", "fork it with --target terminal or "
+                                                      "--target slot")
+    values = {**catalog.forked(row.harness, {k: v for k, v in row.values.items()
+                                             if k not in _NOT_REPLAYED}),
+              "target": target}
+    if request.slot is not None:
+        values["slot"] = str(request.slot)
+    mode, turns, warnings = presets.mode_of(row.harness, target, identity=None)
+    links = {name for name, on in (
+        ("turns", turns), ("projects", bool(row.project_key)),
+        ("slots", target == "slot")) if on}
+    return Replayed(
+        harness=row.harness, mode=mode, values=MappingProxyType(values),
+        sources=MappingProxyType({}), chosen=frozenset(), preset_kind=None,
+        preset_name=None, cwd=row.cwd, scratch=bool(values.get("scratch")),
+        project_key=row.project_key, agents=(), identity=None, scope=None, posture="",
+        target=target, off_posture=bool(row.values.get("off_posture", False)),
+        links=frozenset(links), warnings=tuple(warnings), hold=request.hold)
+
+
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
     left out, its handoff the replay's, its slot the replay's, with the mode worked out
     again for the modules installed now. A comms identity is dropped, with a warning, when
-    comms is no longer installed, as a fresh launch's is."""
+    comms is no longer installed, as a fresh launch's is. A fork's are `_forked`'s."""
+    if request.fork_of:
+        return _forked(request)
     row = request.row
     if request.relaunch_of and request.resume_of:
         raise ValueError("a replay is a relaunch or a resume, not both")
@@ -534,7 +594,10 @@ def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str
     if not getattr(request, "replay", False):
         return caller, None
     names = _pass_env(director=bool(getattr(request, "director", False)))
-    terminal = bool(request.resume_of) and request.row.target == "terminal"
+    if request.fork_of:
+        terminal = (request.target or "terminal") == "terminal"
+    else:
+        terminal = bool(request.resume_of) and request.row.target == "terminal"
     stored = request.row.base_env
     if stored is None:
         return common.replay_env(common.short_env(caller), caller, names,
