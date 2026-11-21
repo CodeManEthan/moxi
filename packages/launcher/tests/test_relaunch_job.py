@@ -229,7 +229,7 @@ def arm(conn, mode="self", handoff="/work/h.md", turn_number=4):
 
 
 def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, settings=None,
-       cls=job.RelaunchJob, stop=None):
+       cls=job.RelaunchJob, stop=None, sessions=None):
     session = session or FakeSession()
     slots_api = slots_api or FakeSlots(ended=True)
     seen = []
@@ -240,7 +240,7 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
 
     clock = Clock()
     runner = cls(conn, run.run_id, turns=FakeTurns(session), slots_api=slots_api,
-                 comms=comms, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
+                 comms=comms, sessions=sessions, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
                  clock=clock, sleep=clock.sleep)
     if stop:
         runner.ask_stop(15)
@@ -257,7 +257,7 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
 def test_a_self_run_relaunches_with_its_handoff_into_its_held_slot(conn):
     got = go(conn, arm(conn))
     assert got.outcome == "relaunched" and got.run.new_request_id == "r2"
-    assert got.events[:4] == ["hold", "exit", "exit-result", "pane-ended"]
+    assert got.events[:5] == ["model", "hold", "exit", "exit-result", "pane-ended"]
     assert got.session.commands == [("exit", 4)]
     request = got.requests[0]
     assert request.respawn and request.hold == got.run.run_id and request.slot == "3"
@@ -795,6 +795,94 @@ def test_a_repair_flagged_by_its_launch_tells_the_directors(conn):
                                     line=HELD_LINE))
     assert got.outcome == "relaunched" and got.run.word == "screen-not-answered"
     assert [s[2] for s in comms.sent] == [["boss"]]
+
+
+# -- the model pin ------------------------------------------------------------------------
+
+
+class PinSessions:
+    """sessions' `find` and `last_request`, the newest request naming each model of
+    `models` in turn, the last one from then on."""
+
+    def __init__(self, *models):
+        self.models, self.reads = list(models), 0
+
+    def find(self, harness, session_id, *, root=None):
+        return SimpleNamespace(hits=(SimpleNamespace(source="s0", compressed=False),))
+
+    def last_request(self, source):
+        self.reads += 1
+        model = self.models[0] if len(self.models) == 1 else self.models.pop(0)
+        return SimpleNamespace(request=SimpleNamespace(model=model, response_model=None,
+                                                       time=1.0))
+
+
+def no_model(conn):
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"director": ["boss"]}',))
+
+
+def model_events(conn, run):
+    return [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "model"]
+
+
+def test_a_row_naming_a_model_relaunches_on_it_with_no_pin(conn):
+    run = arm(conn)
+    got = go(conn, run, sessions=PinSessions("claude-opus-5-5"))
+    assert model_events(conn, run) == [{"model": "opus", "how": "row", "read": None}]
+    assert got.requests[0].model_pin is None
+
+
+def test_a_row_naming_no_model_relaunches_on_the_pin(conn):
+    no_model(conn)
+    run = arm(conn, mode="director")
+    got = go(conn, run, sessions=PinSessions("claude-fable-5-2"))
+    assert got.requests[0].model_pin == "claude-fable-5-2"
+    assert model_events(conn, run) == [{"model": "claude-fable-5-2", "how": "pinned",
+                                        "read": "claude-fable-5-2"}]
+
+
+def test_the_pin_is_read_on_each_pass_and_written_once_per_change(conn):
+    no_model(conn)
+    run = arm(conn)
+    session = FakeSession([Result("refused", "busy-turn"), Result("refused", "busy-turn"),
+                           Result("ran")])
+    seen = PinSessions("claude-opus-5-5", "claude-opus-5-5", "claude-fable-5-2")
+    got = go(conn, run, session=session, sessions=seen)
+    assert got.outcome == "relaunched" and seen.reads == 3
+    assert [d["model"] for d in model_events(conn, run)] == ["claude-opus-5-5",
+                                                             "claude-fable-5-2"]
+    assert got.requests[0].model_pin == "claude-fable-5-2"
+
+
+def test_a_default_pin_replays_with_no_model(conn):
+    no_model(conn)
+    run = arm(conn, mode="director")
+    got = go(conn, run, sessions=None)
+    assert got.requests[0].model_pin is None
+    assert model_events(conn, run)[0]["how"] == "default:no-sessions"
+
+
+def test_a_repair_reuses_the_root_runs_pin(conn):
+    no_model(conn)
+    original = failed_run(conn)
+    store.add_run_event(conn, original.run_id, "model",
+                        {"model": "claude-fable-5-2", "how": "pinned",
+                         "read": "claude-fable-5-2"})
+    seen = PinSessions("claude-opus-5-5")
+    repair = repair_run(conn, original)
+    got = go(conn, repair, slots_api=FakeSlots(shown=shown("free")), cls=job.RepairJob,
+             sessions=seen)
+    assert got.requests[0].model_pin == "claude-fable-5-2" and seen.reads == 0
+    assert model_events(conn, repair)[0]["model"] == "claude-fable-5-2"
+
+
+def test_a_repair_whose_root_run_wrote_no_pin_reads_the_transcript(conn):
+    no_model(conn)
+    original = failed_run(conn)
+    got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
+             cls=job.RepairJob, sessions=PinSessions("claude-opus-5-5"))
+    assert got.requests[0].model_pin == "claude-opus-5-5"
 
 
 def test_repairable_runs():

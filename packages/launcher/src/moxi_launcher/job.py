@@ -24,7 +24,9 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    (a draft, subagents, a read that failed) is read whole every 2 s, since its end may
    bring no event.
    Each change of the first word that holds is one `wait` event. Nothing holding goes on;
-   `relaunch.wait_s` after the run was armed it ends `expired`.
+   `relaunch.wait_s` after the run was armed it ends `expired`. Then, for every run, the
+   model the relaunch comes back on (`pin.choose`), read on each pass, a `model` event
+   when it changed.
 2. Hold the slot for the run (`slots.hold`, holder the run id). Refused: `not-held`.
 3. Exit, through turns, with the turn number the last quiet read saw. turns checks the
    launch's consent, idleness and the number again. `Ran`, any `Failed` and turns' `gone`
@@ -72,7 +74,9 @@ when it is occupied by the launch chain's own session (the original died after i
 respawn); otherwise (held or occupied by anyone outside the chain, or missing) the launch
 goes to the lowest launchable slot. Slots that don't answer about the recorded slot's hold
 are asked again a few times, then the repair ends `relaunch-failed` (`slots-busy`) with
-nothing launched, so it can be repeated. Its posture and first turn are the original run's.
+nothing launched, so it can be repeated. Its posture, first turn and model pin are the
+original run's: the pin from the original's last `model` event, or read from the old
+session's transcript when it wrote none.
 
 Each run ends with its outcome and tells whom `notices` says. As it starts, each job
 deletes ended runs older than `records.keep_days`.
@@ -299,7 +303,7 @@ class RelaunchJob:
     kind = "relaunch"
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
-                 slots_api: Any = LOOK, comms: Any = LOOK,
+                 slots_api: Any = LOOK, comms: Any = LOOK, sessions: Any = LOOK,
                  launch: Callable[..., Any] | None = None,
                  settings: Mapping[str, Any] | None = None,
                  clock: Callable[[], float] = time.monotonic,
@@ -307,6 +311,8 @@ class RelaunchJob:
                  sleep: Callable[[float], None] = time.sleep):
         self.conn, self.run_id = conn, run_id
         self._turns, self._slots, self._comms = turns, slots_api, comms
+        self._sessions = sessions
+        self.pin: Any | None = None
         self._launch = launch
         self._settings = settings
         self.clock, self.wall, self.sleep = clock, wall, sleep
@@ -356,6 +362,14 @@ class RelaunchJob:
 
             self._comms = presets.comms_api()
         return self._comms
+
+    @property
+    def sessions(self) -> Any:
+        if self._sessions is LOOK:
+            from . import joiner
+
+            self._sessions = joiner.sessions_api()
+        return self._sessions
 
     def launch(self, request: Any) -> Any:
         if self._launch is None:
@@ -418,6 +432,7 @@ class RelaunchJob:
                 self._ended_under()
         while True:
             number = self.wait() if run.mode == "self" else run.turn_number
+            self.read_pin()
             try:
                 self.hold()
                 self.check_stop()
@@ -549,6 +564,19 @@ class RelaunchJob:
                 # A draft cleared, a subagent done or a read that failed again may come
                 # with no event: the whole read again.
                 reading = watch.read(**read)
+
+    def read_pin(self) -> None:
+        """The model the relaunch comes back on, read again on each pass so a switch
+        while the run waits is seen; a `model` event each time it changes."""
+        from . import pin
+
+        found = pin.choose(self.row, self.run.session_id, sessions=self.sessions)
+        self.note_pin(found)
+
+    def note_pin(self, found: Any) -> None:
+        if found != self.pin:
+            self.event("model", found.detail())
+        self.pin = found
 
     def hold(self) -> None:
         """Step 2: hold the slot for the run."""
@@ -709,6 +737,7 @@ class RelaunchJob:
 
     def _replay(self, *, mode: str, handoff: str | None, by: str, slot: str | None,
                 respawn: bool, hold: str | None, director: bool = False) -> Any:
+        """The replay of the run's launch, on the run's model pin."""
         from . import api
         from .compose import common
 
@@ -718,7 +747,8 @@ class RelaunchJob:
         return api.ReplayRequest(
             self.row, relaunch_of=self.row.request_id, request_id=str(uuid.uuid4()),
             actor=by, posture=posture, handoff=handoff, run=self.run_id,
-            slot=slot, hold=hold, respawn=respawn, director=director)
+            slot=slot, hold=hold, respawn=respawn, director=director,
+            model_pin=self.pin.model if self.pin is not None and self.pin.pinned else None)
 
     def respawn(self, request: Any) -> None:
         """Steps 6 to 8: launch the row again; a self run's handoff goes as its first
@@ -838,11 +868,23 @@ class RepairJob(RelaunchJob):
             choice = self._hold_recorded(api, choice)
         self.event("slot", {"slot": choice.slot or None, "respawn": choice.respawn,
                             "holder": self.holder, "why": choice.why or None})
+        self.note_pin(self.recorded_pin(original))
         self.name()
         self.respawn(self._replay(
             mode=original.mode, handoff=original.handoff_path, by=original.actor,
             slot=choice.slot, respawn=choice.respawn,
             hold=self.holder if choice.recorded else None))
+
+    def recorded_pin(self, original: store.Run) -> Any:
+        """The root run's model pin, from its last `model` event; read from the old
+        session's transcript, which outlives it, when the root run wrote none."""
+        from . import pin
+
+        recorded = [event for event in store.run_events(self.conn, original.run_id)
+                    if event.kind == "model"]
+        if recorded:
+            return pin.Pin.of(recorded[-1].detail)
+        return pin.choose(self.row, original.session_id, sessions=self.sessions)
 
     def _hold_recorded(self, api: Any, choice: Choice) -> Choice:
         """Hold the recorded slot under the original run's id. Slots that don't answer

@@ -57,7 +57,9 @@ builds.
 preset read, and its own request id (and, but for a resume, its own Claude session id). It
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
-default with a warning, as a comms name does without comms. It never sends the row's
+default with a warning, as a comms name does without comms. A relaunch's model pin
+(`pin.choose`) is its model only when the stored values name none; the new row records the
+stored model and a `model-pin` event, never the pin as a value. It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
 launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
 none. **A replay's environment is built from the row and the settings only**: the row's recorded
@@ -194,7 +196,12 @@ class ReplayRequest:
     in the slot's ended run pane, keeping the pane (a relaunch); `chain` is the first
     request id of the chain of relaunches, which the slot's `meta` keeps (default: the
     first launch reached through `relaunch_of`, for a relaunch; else the new launch's
-    own id)."""
+    own id).
+
+    `model_pin` is the model a relaunch comes back on (`pin.choose`): it is the launch's
+    model only when the stored values name none, it never reaches the new row's
+    `values_json` (so a resume of the new launch runs the row's own model), and the new
+    launch records it as a `model-pin` event."""
 
     row: store.LaunchRow
     relaunch_of: str | None = None
@@ -210,6 +217,7 @@ class ReplayRequest:
     respawn: bool = False
     chain: str | None = None
     director: bool = False
+    model_pin: str | None = None
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -218,9 +226,10 @@ class ReplayRequest:
 @dataclass(frozen=True)
 class Replayed(presets.Resolved):
     """A replay's values, as `presets.resolve` gives a fresh launch's, with the slot hold
-    the replay comes with."""
+    the replay comes with and the model pin it applied (None when it applied none)."""
 
     hold: str | None = None
+    model_pin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +318,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             return _stored(inserted.row)
 
         rid = ids.request_id
+        model_pin = getattr(resolved, "model_pin", None)
+        if model_pin is not None:
+            store.add_event(conn, MODEL_PIN, {"model": model_pin, "how": "pinned"},
+                            request_id=rid)
         warnings = _warnings(resolved, composition)
         if base == "no-credentials":
             warnings += (NO_CREDENTIALS,)
@@ -429,6 +442,8 @@ def _live_names(env: Mapping[str, str] | None) -> frozenset[str]:
 #: The source recorded for a typed row whose value the caller filled in from an earlier
 #: launch.
 LAST = "last"
+#: The event a relaunch's launch records when it runs on a model pin: `model`, `how`.
+MODEL_PIN = "model-pin"
 #: What a replay does not take from the stored values as values: the composer's own
 #: record of the mode and the rows it left out, `--off-posture`, which goes back on
 #: its own field, and a fresh launch's record of what its request gave.
@@ -436,10 +451,20 @@ _NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
 
 
 def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
-    """The values a launch's row records: `values` as they are for a replay; for a fresh
-    launch, with `sources` and `filled` (see the module's text)."""
+    """The values a launch's row records: `values` as they are for a replay, the stored
+    model put back over a model pin it applied; for a fresh launch, with `sources` and
+    `filled` (see the module's text)."""
     if getattr(request, "replay", False):
-        return values
+        if getattr(resolved, "model_pin", None) is None:
+            return values
+        # The pin is the relaunch's alone: the row keeps the stored model.
+        kept = dict(values)
+        stored = request.row.values
+        if "model" in stored:
+            kept["model"] = stored["model"]
+        else:
+            kept.pop("model", None)
+        return kept
     sources = dict(resolved.sources)
     for name in getattr(request, "left_out", None) or ():
         sources.setdefault(str(name), presets.LEFT_OUT)
@@ -479,7 +504,8 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
 
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
-    left out, its handoff the replay's, its slot the replay's, with the mode worked out
+    left out, its handoff the replay's, its slot the replay's, its model the replay's
+    `model_pin` when the stored values name none, with the mode worked out
     again for the modules installed now. A comms identity is dropped, with a warning, when
     comms is no longer installed, as a fresh launch's is."""
     row = request.row
@@ -492,6 +518,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
     stored = row.values
     values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
     values.update(brief="", brief_file="", handoff=request.handoff or "")
+    model_pin = request.model_pin if request.model_pin and not values.get("model") else None
+    if model_pin is not None:
+        values["model"] = model_pin
     slot = request.slot if request.slot is not None else (
         row.slot if request.respawn else None)
     if slot is not None:
@@ -522,7 +551,7 @@ def _replayed(request: ReplayRequest) -> Replayed:
         scratch=bool(values.get("scratch")), project_key=row.project_key, agents=(),
         identity=identity, scope=scope, posture=str(posture or ""), target=target,
         off_posture=bool(stored.get("off_posture", False)), links=frozenset(links),
-        warnings=tuple(warnings), hold=request.hold)
+        warnings=tuple(warnings), hold=request.hold, model_pin=model_pin)
 
 
 def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
@@ -821,7 +850,7 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "LAST", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "RELAUNCH_ENV",
+__all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "RELAUNCH_ENV",
            "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",

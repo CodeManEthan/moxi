@@ -12,6 +12,10 @@ notices. A self arm needs a launch made with `--recycle-at-limit relaunch`: a la
 recycles by compacting, or not at all, is refused `no-self-recycle`, a dry run too. A
 director's call and a repair need no such launch.
 
+A launch that names no model comes back on the model its session last used (`pin`): the
+arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job
+reads it again before the exit.
+
 Each verb refuses (exit 3) with nothing written until its last step, which writes the run
 (`runs`, one open run per launch, so a second arm or call loses at insert, naming the
 open run) with its job's name and then starts the job, `moxi-launcher-job`, as a slots
@@ -64,7 +68,7 @@ from moxi import modules, paths
 from moxi import store as core_store
 from moxi.paths import Layout
 
-from . import catalog, first, handoffs, job, notices, quiet, recycle, slots, store, target
+from . import catalog, first, handoffs, job, notices, pin, quiet, recycle, slots, store, target
 from .compose import common
 
 #: The job script every relaunch run runs as.
@@ -112,9 +116,10 @@ def arm_self(handoff: str, *, dry_run: bool = False,
              caller_env: Mapping[str, str] | None = None, pid: int | None = None,
              turns: Any | None = None, slots_api: Any | None = None,
              settings: Mapping[str, Any] | None = None,
-             conn: sqlite3.Connection | None = None) -> Result:
+             conn: sqlite3.Connection | None = None, sessions: Any = LOOK) -> Result:
     """Arm a relaunch of the session this process runs in, with `handoff` as the new
-    session's first turn. Raises a refusal with nothing written."""
+    session's first turn. Raises a refusal with nothing written. `sessions` stands in for
+    sessions' API, which the model pin reads through (None: not installed)."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
@@ -126,8 +131,10 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             _no_open_run(c, row, api)
             path = check_handoff(handoff, c, row, sid)
             number = _no_live_agents(found.session)
+            chosen = _pin(row, sid, sessions, env)
             data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot,
-                    "handoff": str(path), "turn_number": number}
+                    "handoff": str(path), "turn_number": number,
+                    "model": chosen.model, "model_how": chosen.how}
             if dry_run:
                 return Result(exits.OK, (f"would arm a relaunch of session {sid} in slot "
                                          f"{row.slot}, handoff {path}",),
@@ -238,9 +245,11 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                   settings: Mapping[str, Any] | None = None,
                   conn: sqlite3.Connection | None = None,
                   clock: Callable[[], float] = time.monotonic,
-                  sleep: Callable[[float], None] = time.sleep) -> Result:
+                  sleep: Callable[[float], None] = time.sleep,
+                  sessions: Any = LOOK) -> Result:
     """Relaunch the session `which` (a session id or a bound comms name) as one of its
-    directors. Raises a refusal with nothing written; a hold now is a result, exit 75."""
+    directors. Raises a refusal with nothing written; a hold now is a result, exit 75.
+    `sessions` stands in for sessions' API, which the model pin reads through."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     if comms is LOOK:
@@ -269,8 +278,9 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
             _no_open_run(c, row, api)
             reading = quiet.read(found.session, slot=row.slot, slots_api=api,
                                  person_s=float(current["relaunch.person_s"]))
+            chosen = _pin(row, sid, sessions, env)
             data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot,
-                    "director": caller}
+                    "director": caller, "model": chosen.model, "model_how": chosen.how}
             if not reading.quiet:
                 hold = reading.first
                 return Result(exits.TEMPFAIL, (f"held: {hold}; nothing was done, try again "
@@ -601,6 +611,13 @@ def offered(found: target.Target, slots_api: Any | None = None) -> Any:
         raise Refused("no-exit", f"the {row.harness} session does not offer exit through "
                                  "turns", "relaunch needs a harness turns can exit")
     return api
+
+
+def _pin(row: store.LaunchRow, session_id: str, sessions: Any,
+         env: Mapping[str, str]) -> pin.Pin:
+    """The model a relaunch of the session would come back on, as the job reads it."""
+    return pin.choose(row, session_id, sessions=pin.LOOK if sessions is LOOK else sessions,
+                      env=env)
 
 
 def _no_open_run(conn: sqlite3.Connection, row: store.LaunchRow, api: Any) -> None:

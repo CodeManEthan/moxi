@@ -353,6 +353,54 @@ def test_a_directors_call_needs_no_self_recycle(conn):
     assert result.data["outcome"] == "started"
 
 
+# -- the model pin ------------------------------------------------------------------------
+
+
+class PinSessions:
+    """sessions' `find` and `last_request`, the newest request naming `model`."""
+
+    def __init__(self, model):
+        self.model, self.asked = model, []
+
+    def find(self, harness, session_id, *, root=None):
+        self.asked.append(session_id)
+        return SimpleNamespace(hits=(SimpleNamespace(source="s0", compressed=False),))
+
+    def last_request(self, source):
+        return SimpleNamespace(request=SimpleNamespace(model=self.model, response_model=None,
+                                                       time=1.0))
+
+
+def drop_model(conn):
+    row = store.get(conn, "r1")
+    values = {k: v for k, v in row.values.items() if k != "model"}
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_arm_says_the_model_the_relaunch_comes_back_on(conn, tmp_path, dry_run):
+    drop_model(conn)
+    seen = PinSessions("claude-fable-5-2")
+    result = arm(conn, handoff(tmp_path), sessions=seen, dry_run=dry_run)
+    assert (result.data["model"], result.data["model_how"]) == ("claude-fable-5-2", "pinned")
+    assert seen.asked == [SID]
+
+
+def test_the_arm_of_a_row_naming_a_model_reads_no_transcript(conn, tmp_path):
+    seen = PinSessions("claude-fable-5-2")
+    result = arm(conn, handoff(tmp_path), sessions=seen)
+    assert (result.data["model"], result.data["model_how"]) == ("opus", "row")
+    assert seen.asked == []
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_call_says_the_model_the_relaunch_comes_back_on(conn, dry_run):
+    drop_model(conn)
+    result = call(conn, follow=False, dry_run=dry_run, sessions=None)
+    assert (result.data["model"], result.data["model_how"]) == (None, "default:no-sessions")
+
+
 # -- the handoff --------------------------------------------------------------------------
 
 
