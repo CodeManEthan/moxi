@@ -4,10 +4,9 @@ sessions for Claude and Codex, and each reason the launch runs the default inste
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
-from moxi_sessions.testing.claude import ClaudeTranscript
-from moxi_sessions.testing.codex import CodexRollout
 
 from moxi_launcher import joiner, pin, store
 
@@ -39,8 +38,9 @@ def row_of(conn, tmp_path, *, harness="claude", values=None, session_id=SID):
     return store.get(conn, "r1")
 
 
-def claude_transcript(tmp_path) -> ClaudeTranscript:
-    return ClaudeTranscript(tmp_path / "cfg" / "projects", session_id=SID)
+def claude_transcript(sessions, tmp_path) -> Any:
+    """A Claude transcript of SID under the row's config dir, from sessions' API."""
+    return sessions.testing.ClaudeTranscript(tmp_path / "cfg" / "projects", session_id=SID)
 
 
 class Sessions:
@@ -82,7 +82,7 @@ def test_a_row_that_names_a_model_keeps_it_and_reads_nothing(conn, tmp_path):
 
 def test_a_claude_transcript_pins_the_request_before_a_synthetic_one(conn, tmp_path,
                                                                       sessions):
-    t = claude_transcript(tmp_path)
+    t = claude_transcript(sessions, tmp_path)
     t.user("go")
     t.assistant("working", model="claude-fable-5-2-20261101")
     t.synthetic()
@@ -93,7 +93,7 @@ def test_a_claude_transcript_pins_the_request_before_a_synthetic_one(conn, tmp_p
 
 
 def test_a_codex_rollout_pins_its_model(conn, tmp_path, sessions):
-    rollout = CodexRollout(tmp_path / "codex" / "sessions", thread_id=THREAD)
+    rollout = sessions.testing.CodexRollout(tmp_path / "codex" / "sessions", thread_id=THREAD)
     rollout.turn("gpt-6-codex")
     rollout.request()
     rollout.write()
@@ -105,11 +105,11 @@ def test_a_codex_rollout_pins_its_model(conn, tmp_path, sessions):
 def test_the_newest_of_several_codex_rollouts_wins_not_the_first_found(conn, tmp_path,
                                                                        sessions):
     root = tmp_path / "codex" / "sessions"
-    old = CodexRollout(root, thread_id=THREAD)
+    old = sessions.testing.CodexRollout(root, thread_id=THREAD)
     old.turn("gpt-5-codex")
     old.request()
     old.write()
-    new = CodexRollout(root, thread_id=THREAD, start=old.clock + 86400 * 3)
+    new = sessions.testing.CodexRollout(root, thread_id=THREAD, start=old.clock + 86400 * 3)
     new.turn("gpt-6-codex")
     new.request()
     new.write()
@@ -157,7 +157,7 @@ def test_the_newest_named_request_of_each_source_is_ranked_by_its_time(conn, tmp
 
 def test_a_real_claude_transcript_passes_back_over_a_request_naming_no_model(
         conn, tmp_path, sessions):
-    t = claude_transcript(tmp_path)
+    t = claude_transcript(sessions, tmp_path)
     t.user("go")
     t.assistant("working", model="claude-opus-5-5")
     t.user("again")
@@ -190,7 +190,7 @@ def test_a_missing_claude_file_is_unreadable(conn, tmp_path, sessions):
 
 def test_a_transcript_with_no_request_naming_a_model_runs_the_default(conn, tmp_path,
                                                                      sessions):
-    t = claude_transcript(tmp_path)
+    t = claude_transcript(sessions, tmp_path)
     t.user("go")
     t.write()
     got = pin.choose(row_of(conn, tmp_path), SID, sessions=sessions, env={})
