@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `secret_path(value)`: the first path in a tool call's input that `is_secret_path`
+  names, or None. Every whitespace-separated word of every string counts, split at shell
+  joins, inside lists and nested objects, and inside strings that hold JSON. It is the
+  walker memory's ingest used, moved here unchanged.
+- broad gains `high-entropy-slash-run`: a run of 40 or more base64 characters, up to two
+  `=` after it, holding a `/` or `+`, an upper-case letter, a lower-case letter and a
+  digit, no `//`, and entropy above 4.5. It finds a bare secret holding `/`, such as an
+  AWS secret access key with no name before it, which `high-entropy-run` leaves out. Its
+  conditions are a rule field of Moxi's own, `requires`, which only `broad.toml` may use.
+  Text stored redacted before this release gets the rule only when redacted again.
 - `redact` no longer lets text beside a secret keep it: a `gitleaks:allow` mark, or a
   line a rule's line allowlist names, leaves the secret on that line redacted. `scan`
   still honours both.

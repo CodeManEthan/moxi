@@ -52,6 +52,10 @@ RULE_FIELDS = frozenset({"id", "description", "regex", "keywords", "entropy", "s
 ALLOWLIST_FIELDS = frozenset({"description", "regexes", "regexTarget", "stopwords",
                               "condition", "paths"})
 PIN_FIELDS = frozenset({"tag", "commit", "sha256", "fetched"})
+#: Moxi's own rule fields, which only broad.toml may use (no gitleaks binary reads it).
+#: `requires` lists regexes a secret must each match, or the finding is no hit; strict
+#: mode keeps them, since they are part of the rule's shape.
+BROAD_FIELDS = frozenset({"requires"})
 
 
 class GenerationError(Exception):
@@ -527,7 +531,7 @@ def _rule(table: dict, file: str, source: str) -> dict:
     """One rule, resolved; raises _Dropped when the scanner cannot run it as gitleaks
     would."""
     rid = table["id"]
-    unknown = sorted(set(table) - RULE_FIELDS)
+    unknown = sorted(set(table) - RULE_FIELDS - (BROAD_FIELDS if file == BROAD else set()))
     if unknown:
         raise _Dropped(f"uses {', '.join(unknown)}, which the scanner does not implement")
     allowlists = table.get("allowlists", [])
@@ -551,6 +555,7 @@ def _rule(table: dict, file: str, source: str) -> dict:
         raise GenerationError(f"{file}: rule {rid}'s secretGroup is not a whole number")
     keywords = _strings(table.get("keywords", []), f"rule {rid}'s keywords", file)
     tags = _strings(table.get("tags", []), f"rule {rid}'s tags", file)
+    requires = _strings(table.get("requires", []), f"rule {rid}'s requires", file)
     return {
         "id": rid,
         "description": table.get("description", ""),
@@ -561,6 +566,7 @@ def _rule(table: dict, file: str, source: str) -> dict:
         "keywords": [k.lower() for k in keywords],
         "path": _pattern(path, "its path") if path else None,
         "tags": tags,
+        "requires": [_pattern(r, f"its requires {n}") for n, r in enumerate(requires, 1)],
         "allowlists": [_allowlist(a, file, f"rule {rid}'s allowlist {n}", rule=True)
                        for n, a in enumerate(allowlists, 1)],
     }

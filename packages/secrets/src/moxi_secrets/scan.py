@@ -253,7 +253,7 @@ def _unlined(allowlists) -> tuple:
 
 class _Rule:
     __slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",
-                 "path", "allowlists", "unlined")
+                 "path", "allowlists", "unlined", "requires")
 
     def __init__(self, set_name, raw):
         self.set = set_name
@@ -266,6 +266,12 @@ class _Rule:
         self.path = raw["path"]
         self.allowlists = tuple(_Allowlist(a) for a in raw["allowlists"])
         self.unlined = _unlined(self.allowlists)
+        self.requires = tuple(raw.get("requires", ()))
+
+    def shaped(self, secret, eng) -> bool:
+        """Whether `secret` matches each of the rule's `requires` regexes."""
+        key = eng.key
+        return all(eng.compile(p[key]).search(secret) for p in self.requires)
 
 
 class Sets:
@@ -546,6 +552,8 @@ def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
                 ss, se = conv(t, span[0]), conv(t, span[1])
                 secret = etext[ss:se]
                 if rule.entropy and _entropy(secret) <= rule.entropy:
+                    continue
+                if rule.requires and not rule.shaped(secret, eng):
                     continue
                 match = etext[s:e]
 
