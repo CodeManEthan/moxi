@@ -240,7 +240,8 @@ const STYLES = css`
                         border-radius: var(--moxi-radius); background: var(--moxi-bg); color: var(--moxi-text);
                         font: inherit; font-size: var(--moxi-font-size-sm); }
   .menu .custom button { color: var(--moxi-text); }
-  .grps.below { margin-top: 0; }
+  .grps.below { margin-top: 0; transition: opacity 180ms ease; }
+  .grps.below.stale { opacity: 0.6; }
   .chartl { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0 2px;
             font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
   .chartl button.act { flex: none; color: inherit; }
@@ -272,8 +273,6 @@ const STYLES = css`
   svg.ch.hm { margin: 6px 0 2px; }
   svg.ch.hm rect[role=button] { cursor: pointer; }
   .scroll.heat { padding: 0; }
-  [data-group=heat] .gl { transition: opacity 180ms ease; }
-  [data-group=heat] .gl.held { opacity: 0.6; }
   .scale { display: flex; align-items: center; gap: 3px; padding: 0 0 8px; font-size: var(--moxi-font-size-sm);
            line-height: 18px; color: var(--moxi-text-dim); }
   .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
@@ -566,6 +565,10 @@ export class UsagePage extends LitElement {
   /** The state and folders the reads under the filter line were asked under. */
   #askedFilters: string | null = null;
   #askedAllTime: string | null = null;
+  /** The range the chart's reads were last asked under, and the one before it, which a
+   * held chart is drawn under until its read answers. */
+  #chartRange: PageState["range"] | null = null;
+  #heldChartRange: PageState["range"] | null = null;
   #resize: ResizeObserver | null = null;
   #stops: (() => void)[] = [];
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -756,6 +759,7 @@ export class UsagePage extends LitElement {
     this.#closeBoard();
     this.#closePart();
     this.#asked = this.#askedFilters = this.#askedAllTime = null;
+    this.#chartRange = this.#heldChartRange = null;
   }
 
   /** Whether the project filter is by folder: projects is not installed. */
@@ -794,18 +798,27 @@ export class UsagePage extends LitElement {
       // Under the same filters the paths change only with a new day. The menus' lists
       // then keep their last value until the new reads answer, so the filter line keeps
       // every filter, and a menu the person opened stays open, while the lists reload.
-      // The heat map keeps its last days, drawn faded, until its new read answers.
+      // Everything under the filter line keeps its last value, drawn faded, until its new
+      // read answers: a list a section shares with a menu keeps it under new filters too.
       const filters = JSON.stringify([state, this.#folders()]);
       const sameFilters = filters === this.#askedFilters;
       this.#askedFilters = filters;
-      const heldPlaces = sameFilters ? this.#places?.value ?? null : null;
-      const heldModels = sameFilters ? this.#models?.value ?? null : null;
-      const heldHeat = this.#heat?.value ?? null;
+      const last = <V>(feed: Feed<V> | null): V | null => feed?.value ?? null;
+      const heldPlaces = sameFilters ? last(this.#places)
+        : paths.placesSection === paths.places ? last(this.#placesSection) : null;
+      const heldModels = sameFilters ? last(this.#models)
+        : paths.modelsSection === paths.models ? last(this.#modelsSection) : null;
+      const held = { chart: last(this.#chart), chartTerms: last(this.#chartTerms), heat: last(this.#heat),
+                     placesSection: last(this.#placesSection), modelsSection: last(this.#modelsSection),
+                     terms: last(this.#terms), sessions: last(this.#sessionsTop) };
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
-      this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
-      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
-      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update).hold(heldHeat);
+      this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update).hold(held.chart);
+      this.#heldChartRange = this.#chartRange;
+      this.#chartRange = state.range;
+      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update)
+        .hold(held.chartTerms);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update).hold(held.heat);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -813,11 +826,13 @@ export class UsagePage extends LitElement {
       this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update)
         .hold(heldModels);
       this.#placesSection = paths.placesSection === paths.places ? this.#places
-        : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update);
+        : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update).hold(held.placesSection);
       this.#modelsSection = paths.modelsSection === paths.models ? this.#models
-        : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update);
-      this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update);
-      this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update);
+        : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update).hold(held.modelsSection);
+      this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update)
+        .hold(held.terms);
+      this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update)
+        .hold(held.sessions);
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
     }
     this.#followBoard(state, today);
@@ -1052,8 +1067,10 @@ export class UsagePage extends LitElement {
       allTime: this.#allTime?.value ?? null, places: this.#places?.value ?? null, folders: this.#folders(),
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
+    // A held chart is drawn as it was, under the range it was read for.
+    const chartRange = chart?.loading === true && this.#heldChartRange !== null ? this.#heldChartRange : state.range;
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.tabled, this.#chartTerms?.value ?? null, state.split);
+      : chartGroup(report, chartRange, state.measure, today, this.tabled, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -1065,9 +1082,11 @@ export class UsagePage extends LitElement {
     ].filter((drawn) => drawn !== nothing);
     // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
     const heatReport = frame.below ? this.#heat?.value ?? null : null;
-    // The last read's days are held while the new read is out.
-    const heat = heatReport === null ? null
-      : { model: heatModel(heatReport, today, state.range), report: heatReport, held: this.#heat?.held === true };
+    const heat = heatReport === null ? null : { model: heatModel(heatReport, today, state.range), report: heatReport };
+    // Everything under the filter line is drawn faded while a read of it is out over what
+    // it shows.
+    const stale = [this.#chart, this.#chartTerms, this.#heat, this.#placesSection, this.#modelsSection, this.#terms,
+                   this.#prices, this.#sessionsTop].some((feed) => feed?.stale === true);
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -1077,8 +1096,8 @@ export class UsagePage extends LitElement {
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
-      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
-        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat.model, heat.report, heat.held)}${sections}</div>`}
+      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class=${stale ? "grps below stale" : "grps below"} data-part="below">${
+        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat.model, heat.report)}${sections}</div>`}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1278,9 +1297,9 @@ export class UsagePage extends LitElement {
   }
 
   /** The heat map's group: its name, its sentence and the map, or its table in the
-   * map's place. While `held`, the last read's days are drawn faded; the map is drawn
-   * anew for each report, so a cell's focus does not outlast the read it came from. */
-  #heatGroup(model: HeatModel, report: Report<DayRow>, held: boolean) {
+   * map's place. The map is drawn anew for each report, so a cell's focus does not
+   * outlast the read it came from. */
+  #heatGroup(model: HeatModel, report: Report<DayRow>) {
     const draw = heatDraw(model);
     const pick = (day: string) => {
       const range = customRange(day, day);
@@ -1293,7 +1312,7 @@ export class UsagePage extends LitElement {
     };
     return html`<section class="grp" data-group="heat">
       <div class="gk">${HEAT_LABEL}</div>
-      <div class=${held ? "gl held" : "gl"}>
+      <div class="gl">
         <p class="chartn" data-part="chart-name">${model.title}</p>
         <div class="chartl"><span data-part="sentence">${model.sentence}</span>
           <button type="button" class="act" data-part="table-toggle"

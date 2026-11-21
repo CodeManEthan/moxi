@@ -577,6 +577,9 @@ export class Feed<V> {
   loading = true;
   /** A read is running. */
   reading = false;
+  /** A read is out while the feed shows a value from before it: its last value, or one
+   * `hold` gave. False once the read answers, whatever it answers. */
+  stale = false;
   /** The server's clock minus this browser's, in seconds; null until a body gave `now`. */
   offset: number | null = null;
 
@@ -604,11 +607,6 @@ export class Feed<V> {
   hold(value: V | null): this {
     this.value = value;
     return this;
-  }
-
-  /** The value shown is one `hold` gave: the feed's own first read is still out. */
-  get held(): boolean {
-    return this.loading && this.value !== null;
   }
 
   /** The server's time now in epoch seconds: this browser's clock until a body gave `now`. */
@@ -659,6 +657,7 @@ export class Feed<V> {
   }
 
   async #once(): Promise<void> {
+    this.stale = this.value !== null;
     let answer = await this.#read();
     for (let tries = 0; answer.status === 503 && tries < RETRIES && !this.#closed; tries += 1) {
       await this.#wait(RETRY_MS);
@@ -668,6 +667,7 @@ export class Feed<V> {
     if (this.#closed) return;
     const at = this.#clock();
     this.loading = false;
+    this.stale = false;
     const data = answer.data as Record<string, unknown> | null;
     const value = answer.status === 200 ? this.#parse(data) : null;
     if (value !== null) {

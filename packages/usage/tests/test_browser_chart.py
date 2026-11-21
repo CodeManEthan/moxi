@@ -713,31 +713,62 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(used).to_have_count(5)
 
 
-def test_a_picked_day_keeps_the_heat_map_drawn_and_faded_until_its_read_answers(page):
+class Held:
+    """Reads whose address matches `pattern`, held back until `release()`; later ones go
+    through."""
+
+    def __init__(self, page, pattern: str):
+        self.routes = []
+        self.released = False
+        page.route(re.compile(pattern), self._hold)
+
+    def _hold(self, route) -> None:
+        if self.released:
+            route.continue_()
+        else:
+            self.routes.append(route)
+
+    def release(self) -> None:
+        self.released = True
+        for route in self.routes:
+            route.continue_()
+
+
+def test_a_picked_day_keeps_all_under_the_filter_line_drawn_and_faded_until_its_reads_answer(page):
     panel = open_page(page)
-    body = heat_of(panel).locator(".gl")
-    grid = body.locator("svg[data-part=heat]")
+    below = panel.locator("[data-part=below]")
+    grid = heat_of(panel).locator("svg[data-part=heat]")
     newest = grid.locator("rect[data-used=true]").last
     expect(newest).to_be_visible()
-    expect(body).to_have_css("opacity", "1")
+    expect(bars_of(panel)).to_have_count(3)
+    expect(below).to_have_css("opacity", "1")
     day = newest.get_attribute("data-day")
-    # The map's own read starts on its first day; it is held back after the pick.
+    # The chart's read for the day, and the map's own, which starts on its first day, are
+    # held back after the pick.
     first = grid.get_by_role("button").first.get_attribute("data-day")
-    held = []
-    page.route(re.compile(rf"/m/usage/api/daily\?by=day&since={first}&"), lambda route: held.append(route))
+    chart_read = Held(page, rf"/m/usage/api/daily\?by=day&since={day}&until={day}")
+    heat_read = Held(page, rf"/m/usage/api/daily\?by=day&since={first}&")
     newest.focus()
     page.keyboard.press("Enter")
-    expect(chart_of(panel).locator("g[data-period]")).to_have_attribute("data-period", day)
-    # While the read is out the last map stays drawn, faded, and the day keeps the focus.
-    expect(body).to_have_css("opacity", "0.6")
+    expect(filter_of(panel, "range").locator("button.pick")).not_to_have_text("last 30 days▾")
+    # While the reads are out everything under the filter line stays drawn, faded as one,
+    # the last chart and map with it, and the day keeps the focus.
+    expect(below).to_have_css("opacity", "0.6")
+    expect(heat_of(panel).locator(".gl")).to_have_css("opacity", "1")
+    expect(bars_of(panel)).to_have_count(3)
     expect(grid.locator("rect[data-used=true]")).to_have_count(5)
+    expect(panel.locator("[data-group=sessions] [data-part=count]")).to_be_visible()
     expect(newest).to_be_focused()
-    assert held
-    for route in held:
-        route.continue_()
+    assert chart_read.routes and heat_read.routes
+    chart_read.release()
+    # The chart is drawn from its answer; the map's read is still out.
+    expect(bars_of(panel)).to_have_count(1)
+    expect(bars_of(panel)).to_have_attribute("data-period", day)
+    expect(below).to_have_css("opacity", "0.6")
+    heat_read.release()
     # Then the map is drawn anew from its read, and the day's new cell does not hold the
     # focus the old one had.
-    expect(body).to_have_css("opacity", "1")
+    expect(below).to_have_css("opacity", "1")
     cell = grid.locator(f'rect[data-day="{day}"]')
     expect(cell).to_be_visible()
     expect(cell).not_to_be_focused()
