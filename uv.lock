@@ -1133,8 +1133,15 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+connector = [
+    { name = "moxi-connector" },
+    { name = "python-stdnum" },
+]
 projects = [
     { name = "moxi-projects" },
+]
+secrets = [
+    { name = "moxi-secrets", extra = ["personal-data"] },
 ]
 
 [package.dev-dependencies]
@@ -1146,12 +1153,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-repo", editable = "packages/repo" },
     { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-turns", editable = "packages/turns" },
+    { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["projects"]
+provides-extras = ["projects", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
