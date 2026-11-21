@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from moxi_rounds import (board, checking, drift, events, freezing, listing, log, next_step,
-                         opening, ruling, showing, steps, verdicts)
+from moxi_rounds import (board, checking, closing, drift, events, freezing, listing, log,
+                         next_step, opening, ruling, showing, steps, verdicts)
 from moxi_rounds import settings as own
 from moxi_rounds.errors import Unmet
 
@@ -717,6 +717,18 @@ def test_the_round_line_is_here_at_the_step_the_listing_gives(kit):
             for column, one in zip(columns, first["cells"], strict=True)
             if one and one["here"]]
     assert (row.step["step"], row.step["stage"]) in here
+
+
+def test_the_close_record_gives_what_the_close_waits_for_as_the_close_reads_it(kit):
+    _kit_rounds(kit)
+    found = showing.show(ROUND, refresh=False)
+    settings = own.load()
+    seen = checking.seen_of(found.state, ROUND, settings=settings)
+    made = board.part(found, seen)
+    got = board.record(made, "close", None, board.Items(), settings=settings)["close"]
+    assert got
+    assert got == list(closing.waits(found.state, on_closed=found.on_closed, seen=seen,
+                                     ratify=closing.ratify_of(settings, ROUND)))
 
 
 def test_his_cells_count_what_waits_on_him_for_the_round(kit):

@@ -1070,8 +1070,13 @@ def record(part_: Part, column: str, stage: str | None, items: Items, *,
         made["items"] = list(items.jobs)
         ratify = (closing.RATIFY_DEFAULT if settings is None
                   else closing.ratify_of(settings, part_.name))
+        # The part's steps were read with this `seen`, which holds the ratify setting
+        # wherever the flow has a step that reads it, so the close reads them again
+        # only for a part read without the settings.
+        every = (part_.every if None in part_.seen or not flows.has(state.steps, steps.RATIFY)
+                 else None)
         made["close"] = list(closing.waits(state, on_closed=part_.found.on_closed,
-                                           ratify=ratify, seen=part_.seen))
+                                           ratify=ratify, seen=part_.seen, every=every))
         made["fixes"] = [{"id": one.key, "since": one.at} for one in fixes_owed(state)]
     return made
 
