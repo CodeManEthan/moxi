@@ -56,8 +56,10 @@ keeps every row that prices text generation per token (LiteLLM's `chat`, `respon
 lists it for), stores prices in dollars per million tokens, and keeps the prompt-size and
 service tiers LiteLLM gives (`above_200k`, `priority`, `flex`). It adds the rows of
 `data/supplement.toml`, facts LiteLLM lacks, each with its source and the date it was
-read: fast-mode prices, the `[1m]` long-context window, and each provider's default cache
-multipliers. The snapshot's date and its file's sha256 are recorded in the table.
+read: fast-mode prices, the `[1m]` long-context window, each provider's default cache
+multipliers, and rows of their own for models newer than the snapshot (Claude Fable 5.2
+and Mythos 5.2, and OpenCode's free models). The snapshot's date and its file's sha256
+are recorded in the table.
 
 Three layers, a later one winning for a model id:
 
@@ -179,6 +181,10 @@ that Codex imported from elsewhere (its turn ids, or the imports file, say so) i
 so it is not counted twice. A rollout whose only mark is the desktop app's originator is
 counted.
 
+Beside its requests, a Claude transcript keeps the prompt ids it wrote, a prompt that drew
+no request (`/exit`, `/clear`, another local command) included; the Sessions table's Turns
+counts them.
+
 With Moxi's projects module installed, the pass records each session's project key while
 its directory exists, so a build worktree's sessions keep their project after the worktree
 is removed. A directory that no longer exists is never looked up.
@@ -237,25 +243,37 @@ request: `context 412,330 / 1,000,000 (41%)`. The tokens are the whole prompt; t
 is the one the harness wrote on the request (Codex does), else the model table's, and when
 neither is known the line says `window unknown`. `--agent ID` reads one of the session's
 agents from its own file, `--harness` names the harness (else Claude Code, Codex and
-OpenCode are asked in turn). It reads through sessions alone, so it needs no turns.
+OpenCode are all asked, and a session more than one holds is refused, naming each
+harness and where it holds the session). It exits 0 whenever it names the context's
+state, `context unknown: <why>` included. A session or agent it cannot find, or a session
+in more than one harness, is an error: one line on stderr, nothing on stdout (with
+`--json` too), exit 2. It reads
+through sessions alone, so it needs no turns.
 
 The restart point is where carrying on with a session costs more than restarting it. It
 is Wilson's economic order quantity: a restart costs one cache write of the settled
 context, and each call costs a cache read of a context that keeps growing. `moxi usage
 restart-point --measure` measures it from the token index (no transcript is read again):
-the last `restart_point.days` (21) of sessions with 5 requests or more, per model and per
+the last `restart_point.days` (21) of sessions, or the last N with `--days N` for that one
+measure, with 5 requests or more, per model and per
 population (main sessions; subagents and workflow agents). Main sessions count only when
 the harness marked a person at the keyboard: Claude Code's `cli` entrypoint, Codex's `cli`
 source or an originator in `restart_point.interactive_originators`; set
 `restart_point.interactive_only = false` to take every main session. A population needs
 20 files for a row; a model's subagents with no row of their own use its main row, and say
-so. A restart's write cost `w` is each model's own, from the model table: its cache-write
+so. A model named in the borrow table (`thresholds.BORROWED_ROW`: `claude-fable-5-2`
+borrows `claude-opus-5-5`'s row) uses the named model's row for a population until it has
+20 files of its own, with its own prices for `r` and `w`, and `restart-point` says which
+row it borrowed. A restart's write cost `w` is each model's own, from the model table:
+its cache-write
 price over its input price. A model priced for both 5-minute and 1-hour writes (Claude's)
 weighs the two by how much of that population's writes were for an hour; a model with one
 write price takes it, and one with none (OpenAI bills writes as input) takes 1.0. So
 Codex and OpenCode sessions get rows on their own, never Claude's `w`. A model the table
 doesn't know, or gives no input price or one of 0, has no row, and the measure names it
-with the reason. The result goes to `STATE/usage/restart-point.json`. `moxi usage
+with the reason. So OpenCode's free models, priced at 0, never get a row or a warn-at
+mark: restarting a free session saves nothing. The result goes to
+`STATE/usage/restart-point.json`. `moxi usage
 restart-point` prints
 the rows and each warn-at mark (1x, 1.5x, 2x) in tokens. A mark the measure or the model
 table can't support (no row, no cache-read price) is shown as unavailable with the reason,
@@ -267,7 +285,8 @@ never guessed. Turn on `restart_point.measure_weekly` to measure once a week on 
 With turns installed, usage's after-tool listener tells the model, once, when a context
 passes its mark: `context 120,000 passed the 1x restart point (100,808) for <model>`. The
 mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
-`marks.default` (`off`). The main session and each of its agents are measured against
+`marks.default` (`off`). The launcher stamps its `warn_at` row, `2x` unless the launch
+sets another; a seat launch or a Codex launch is stamped only with a mark it sets. The main session and each of its agents are measured against
 their own context; an agent's line also reaches its parent at the parent's next tool
 call. A mark fires once per rise past it: after a compaction brings the context below it,
 it can fire again. A floor tells turns the context below which the main session's calls
@@ -304,12 +323,22 @@ and it acts only when `ceiling.warn_tokens` and `ceiling.hard_tokens` are both a
 
 Past `warn_tokens` of growth the agent is told once, in one added line
 (`ceiling.warning_text`). Past `hard_tokens` the agent is latched: its tools are refused
-(`ceiling.deny_text`) until it returns, and this holds after a compaction. A latched agent
+(`ceiling.deny_text`) until it returns, and this holds after a compaction. The warning
+says to finish the smallest safe unit, commit it and return; the refusal gives the wrap-up
+recipe (commit with one `-m` in single quotes, with no heredoc, `$` or backtick; the commit
+line from `moxi repo rules`; every trailer in the last paragraph) and asks for a
+`CEILING HANDOFF` block: done, the commit or what is uncommitted, the report's path, what
+is left and the next first action. A latched agent
 may still call the return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit
 and read `.md` files under `ceiling.handoff_roots`, run git's status, diff, add and commit
 forms in its working directory or under `ceiling.work_roots`, and run the commands whose
-words start with an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
-Both root lists start empty, and no command beyond git is allowed until you add one.
+words are, whole, an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
+A word written `<...>` stands for one name word (a letter or digit, then letters, digits,
+`.`, `_` and `-`): `[["moxi", "repo", "rules"], ["make", "trailers", "<key>"]]` allows
+`moxi repo rules` with no argument and `make trailers` with one key, and refuses either
+with a word more or fewer.
+Both root lists start empty, and the one command allowed beyond git is `moxi repo rules`,
+which the refusal names.
 Markers live in `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the
 agents past the ceiling. The guard covers Claude and Codex subagents; turns runs no guard
 on OpenCode.
@@ -332,7 +361,7 @@ way. If a later Codex passes the directory, the guard holds it to the same rule.
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
-    moxi usage restart-point [--measure] [--json]
+    moxi usage restart-point [--measure [--days N]] [--json]
     moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
@@ -390,16 +419,51 @@ sessions module. Top to bottom:
   sits above the filter line and does not follow it.
 - **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
   From … to …, All time), each range with its figure under the filters set; Project, or
-  Folder where the projects module is not installed; Harness and Model, each drawn only
-  when there is more than one to choose or one is set; and Cost / Tokens. Everything
-  under it follows them.
+  Folder where the projects module is not installed, which picks any number of them
+  (the button counts them: `1 project`, `2 projects`) and `all` to clear them; Harness
+  and Model, each drawn only when there is more than one to choose or one is set; and
+  Cost / Tokens; and By class / By model, which says what the chart by cost is stacked by
+  and is off under Tokens. Everything under it follows them.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
-  are not whole, and `Table`, its rows as a table.
+  are not whole, and `Table`, its rows as a table. By cost and By class each bar is
+  stacked by token class (Input, Cache create, Cache read, Output), each part that class's
+  own dollars from the cost terms; By model it is stacked by model, the six that cost most
+  in the range each in a shade or a line fill of its own and the rest as one, `Other`.
+  Either way a legend names the parts, the hover gives every part, and the table, oldest
+  first, has the day (`2026-11-08`) and a column for each part, `$0.00` where a part had
+  nothing that day. The chart is named `Daily estimated cost — by class` or `— by model`
+  (`Monthly` where its bars are months), and By model the line under it says `Per-model
+  dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
+  with its share of all tokens, and `Billable work`, input, cache writes and output
+  stacked. A table's column of dollars reads `Est. cost`.
+- **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
+  over the 53 weeks to today, whatever the range, under the project (or folder) filter
+  alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
+  narrow page its box scrolls), each month is named over its first column, and the five
+  shades sit on the quantiles of the days that cost something. Every day is a button: a
+  click or Enter sets the range to it. A day is named by its date (`2026-11-03: 1.75
+  USD`); each day says its cost and tokens on hover, and its token classes (at 0 on a day
+  nothing was used) when it is in the range. `Table` lists the days that cost something,
+  and a used day whose cost is not whole, by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
-  - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
-    `Show` for thirty more, and the days before them as `Earlier`. A session opens in its
-    row: its requests, its context, a chart of its requests with its turns and
+  - Sessions. Opened, a table of every session of the range, dearest first, read 500 at
+    a time, the next 500 read as the rows drawn near the end or on `Load more` (a next
+    page that failed is read again only on a scroll that moves the rows drawn, or on
+    `Load more`). Its columns are the project (or the folder, without the projects
+    module), the session's name (with a `codex` badge on a Codex session), its start, how
+    long it was active (its first to its last request; the header's hover says so), its
+    turns (for Claude every prompt in its main transcript, one that drew no request
+    included; for Codex and OpenCode the turns its requests name; 0 where none is
+    recorded; the header's hover: `Prompts in the main session file; never summed with
+    subagents`), its Input, Cache create, Cache read and Output
+    tokens, each with a bar against the most of its column among the rows read, its
+    subagents' share of its cost as a meter, and its estimated cost. A click on a header
+    sorts by it, highest first, and again the other way, rows of one value by session id
+    then harness. Its rows sit in a box of their own, 40 px each, only those in view
+    drawn; the arrow keys move a row cursor. A press on a row, or Enter on it, opens its
+    session first in the section, over the table, as its address does. A session opens in
+    its row: its requests, its context, a chart of its requests with its turns and
     compactions, where its cost went, its subagents (a map, a row each, and one opened
     with its own requests), its harness, model and start, the restart point when one is
     measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.
@@ -412,12 +476,14 @@ sessions module. Top to bottom:
     saved, as an estimate.
   - Prices: how many of the range's models are priced, and the price table's date.
     Opened, their prices per million tokens; `Find a model`, a search over the whole
-    table; `Check against a bill`, every term of each price group with a subtotal per
-    model of several groups and the total; and `Details`, where each rate came from, its
+    table; `Check against a bill`, every term of each price group, with how it was
+    priced and any rule applied to it, a subtotal per model of several groups and the
+    total; and `Details`, where each rate came from, its
     tiers and periods, your own `[[model]]` rows and any rows skipped.
 
   Each opened section but Token kinds and Prices ends with `Table`: every figure its rows
-  carry, the harness's own cost where it reported one, and why a figure is not whole.
+  carry, the harness's own cost where it reported one, and a mark on a cost that is not
+  whole.
 - **The foot.** When the sessions were read, how many files each harness holds, and `Read
   new sessions` (`Reading new sessions…` while a pass runs). Under it, one dim line each
   while it holds: a harness the last pass could not read and why, files held back and
@@ -429,7 +495,10 @@ A session is shown by the name typed for it in its harness, else by its folder's
 segment and when it started (`proj-a · started today 09:14`, `proj-a · started Nov 3
 08:52`: the start's day is worded as the Sessions page words it), never by its id; `Copy id`
 copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
-could be priced, `no price`. A time is the hour and minute, and its day is worded against
+could be priced, `no price`. In a table such a cost carries a dim `*` in its own cell,
+why on hover and, for a screen reader, in the cell's text (`no price, not whole: nothing
+here could be priced`); no table has a column for it. The chart's table puts the mark in
+the day's (or month's) cell, as its cost is spread over the parts. A time is the hour and minute, and its day is worded against
 the page server's date: nothing for the same day, `yesterday` or `tomorrow`, the weekday
 within six days, else the date. With no request counted yet the page says so and offers
 `Read new sessions`; with no index, or one an older usage wrote, it gives the command
@@ -463,7 +532,7 @@ for bad news (it draws in the theme's text, border and background colours, with 
 accent, warning or error colour); a group for a harness with no plan window read
 (OpenCode, Claude without the turns module, Codex with no rollout); a title the harness
 made up, as a session's name; a decimal on a percent; a line for a harness whose folder
-was never on the machine; cost by class as a stacked chart; and the tabs and the `daily`,
+was never on the machine; and the tabs and the `daily`,
 `terms` and `session/<id>` addresses of the page before it. It has no screen of its own
 for a phone, and fits a window 360 px wide.
 
@@ -501,7 +570,7 @@ The page server's reads, each a `GET` under `/api`:
 | `limits` | none | each plan window now, from the stored readings, with `opened` |
 | `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
 | `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
-| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
+| `sessions` | `top` (1 to 500, 200 unless asked), `skip`, `sort`, `order` (`asc`, `desc`), filters | sessions, dearest first unless `sort` names another column: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context`, `turns`, `subagent_share` and what names it |
 | `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
 | `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
 | `models` | filters | tokens and cost by model, with where each price came from |
@@ -524,7 +593,10 @@ topics `limits` and `index`.
 app-server: the stream's poller pulls and publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
 the readings store only when it exists, and `restart-point` reads the measure's file and
 the model table. A session's `context` is the whole prompt of the newest request of its
-main file and the window it ran against, null when that is not known. `window`'s sessions
+main file and the window it ran against, null when that is not known. Its `turns` is how
+many distinct turns its main file's requests carry, whatever the range, 0 when none
+says its turn; its `subagent_share` is the part of its cost in the range that its
+subagents ran up, from 0 to 1. `window`'s sessions
 are given for the harness's main limit when its start is known and there is an index to
 read, else null.
 

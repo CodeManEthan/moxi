@@ -20,10 +20,10 @@ export const PRICES_LABEL = "Prices";
 /** The four classes Token kinds lists: the class's key, its name, the total's token
  * count it shows, and the cost terms' classes its dollars are summed from. */
 export const KINDS = [
-  { key: "cache_write", name: "Cache writes", tokens: "cache_write", terms: ["cache_write_5m", "cache_write_1h"] },
+  { key: "cache_write", name: "Cache create", tokens: "cache_write", terms: ["cache_write_5m", "cache_write_1h"] },
   { key: "output", name: "Output", tokens: "output", terms: ["output"] },
   { key: "cache_read", name: "Cache reads", tokens: "cache_read", terms: ["cache_read"] },
-  { key: "fresh_input", name: "Fresh input", tokens: "fresh_input", terms: ["input"] },
+  { key: "fresh_input", name: "Input", tokens: "fresh_input", terms: ["input"] },
 ] as const;
 
 /** One opened row of Token kinds. */
@@ -125,15 +125,15 @@ export function kindsSection(report: Terms | null): Kinds | null {
 /**
  * What caching saved, in one sentence that says what it stands for: the same tokens with
  * no cache, at the same table's prices. The cache writes' clause is absent when they cost
- * the same as fresh input (none were written, or the provider bills them as input). At
+ * the same as input (none were written, or the provider bills them as input). At
  * zero or less it says what caching cost over what it saved. Null with no saving.
  */
 export function savingWords(saving: Saving | null): string | null {
   if (saving === null) return null;
   const reads = `${fmtTokens(saving.read_tokens)} of ${fmtTokens(saving.input_tokens)} input tokens were read from cache.`;
-  const would = `With no cache, at the same prices, those reads would have cost ${fmtCost(saving.reads_at_input)} as fresh input`;
-  const writes = saving.write_extra > 0 ? `, and cache writes cost ${fmtCost(saving.write_extra)} more than fresh input`
-    : saving.write_extra < 0 ? `, and cache writes cost ${fmtCost(-saving.write_extra)} less than fresh input` : "";
+  const would = `With no cache, at the same prices, those reads would have cost ${fmtCost(saving.reads_at_input)} as input`;
+  const writes = saving.write_extra > 0 ? `, and cache writes cost ${fmtCost(saving.write_extra)} more than input`
+    : saving.write_extra < 0 ? `, and cache writes cost ${fmtCost(-saving.write_extra)} less than input` : "";
   const end = saving.saved > 0 ? `so caching saved about ${fmtCost(saving.saved)}`
     : `so caching cost about ${fmtCost(-saving.saved)} more than it saved`;
   return `${reads} ${would}; they cost ${fmtCost(saving.reads_cost)}${writes}, ${end}. An estimate.`;

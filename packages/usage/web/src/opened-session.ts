@@ -291,7 +291,7 @@ export function requestsTable(report: Report<RequestRow, RequestsTotal>, today: 
     ...["#", "Time", "Turn", "Model"].map((label) => ({ label, num: false })),
     { label: "Context", num: true },
     ...REQUEST_CLASSES.map(([, label]) => ({ label: label[0].toUpperCase() + label.slice(1), num: true })),
-    { label: "Cost", num: true },
+    { label: "Est. cost", num: true },
   ];
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
   const blank = REQUEST_CLASSES.map(() => "");
@@ -340,7 +340,7 @@ export function placedRow(report: Report<AgentRow> | null, requests: RequestRow[
     ...report.total, ...ref, unpriced_models: report.unpriced_models, rules: report.rules,
     cwd: ref.folder, project: null, models,
     first_ts: firsts.length ? Math.min(...firsts) : null, last_ts: lasts.length ? Math.max(...lasts) : null,
-    context: report.context ?? null,
+    turns: 0, subagent_share: null, context: report.context ?? null,
   };
 }
 
