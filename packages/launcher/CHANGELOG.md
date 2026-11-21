@@ -37,10 +37,16 @@
   flags alone included, since they go last on the harness's argv. Other flags passed on
   (unknown flags typed before `--`, a preset's or `[defaults]`' `extra_flags`, the page's
   field) don't count. A brief under `operator` is sent.
+- A scratch launch works in `/tmp/scratch-<uid>/<session name>`, a folder named by its
+  session name under a parent of the user's own, by the numeric uid, made 0700 if missing;
+  `TMPDIR` is no longer read. A later launch under the same name works in the same folder.
+  A session name that is not a plain name is refused for a scratch launch (`bad-value`,
+  row `name`), at preview and launch. On Windows the parent is `scratch-<user name>` in the
+  user's own temporary folder.
 - A scratch launch keeps no notes: a `notes_dir` typed or set by its preset
   is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
-  folder notes would keep notes for (a temporary folder under a notes place) is refused at
-  preview and launch.
+  folder notes would keep notes for is refused at preview and launch, with a hint that
+  names the `notes exclude` setting for the scratch parent.
 - With notes installed, a launch notes gives no notes directory (no `notes_dir` and none
   for its folder) has no handoff folder: a self relaunch is refused, saying the launch has
   no `handoffs/` to read from, `moxi launcher handoff dir` and `handoffs` refuse

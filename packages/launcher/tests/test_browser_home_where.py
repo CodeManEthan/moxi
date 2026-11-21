@@ -15,6 +15,7 @@ newest place.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -215,11 +216,6 @@ def test_a_project_picked_from_all_projects_is_the_line_and_the_launch_names_it(
 
 
 def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_off(page, shell):
-    # The shell's temp folder is under its home, where notes would give the scratch folder
-    # a notes home and the launch would be refused; a user's is outside it. Notes keeps
-    # none for it here, as the refusal tells a user to arrange.
-    done = shell.moxi("config", "set", "notes", "exclude", "--add", shell.env["TMPDIR"])
-    assert done.returncode == 0, done.stdout + done.stderr
     piece = kit.open_home(page)
     menu = open_where(piece)
     scratch = menu.locator('.others .row[data-place="scratch"]')
@@ -244,6 +240,9 @@ def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_
     expect(piece.locator('[data-line="started"]')).to_be_visible()
     row = kit.newest_launch(shell)
     assert row.values.get("scratch") is True and row.project_key is None, row
+    # The folder is named by the session name under this user's own parent in /tmp,
+    # whatever the shell's TMPDIR says.
+    assert row.cwd == f"/tmp/scratch-{os.getuid()}/{row.values['name']}", row
     # The tick is on Scratch; a folder picked again sends the folder alone.
     menu = open_where(piece)
     expect(menu.locator('.row[data-current="true"]')).to_have_attribute("data-place", "scratch")

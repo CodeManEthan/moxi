@@ -232,9 +232,14 @@ A launch made from inside a session drops that session's stamps from the environ
 passes on: every `CLAUDE*` variable except your own Claude Code configuration and
 sign-in (`CLAUDE_CONFIG_DIR`, the provider switches such as `CLAUDE_CODE_USE_BEDROCK`,
 `CLAUDE_CODE_OAUTH_TOKEN` and the others in the launcher's keep-list), and each
-module's own session stamps. A scratch launch works in a folder of its own under
-`moxi-scratch-<uid>` in the system's temporary folder, which only you may use. It keeps
-no notes: a `notes_dir` typed or set by its preset is refused (`scratch-notes`), one from
+module's own session stamps. A scratch launch works in `/tmp/scratch-<uid>/<session
+name>`: a folder named by its session name, under a parent of your own, by your numeric
+uid, made 0700 if missing, which only you may use. `TMPDIR` is not read. A launch under a
+name the folder already has works in it again. A session name that is not a plain name
+(letters, digits, `.`, `_` and `-`) is refused for a scratch launch (`bad-value`, row
+`name`), and so is a parent that is a link, not a folder, another user's or open to
+others (`scratch-root`). On Windows the parent is `scratch-<user name>` in your own
+temporary folder. It keeps no notes: a `notes_dir` typed or set by its preset is refused (`scratch-notes`), one from
 `[defaults]` is left out, and with notes installed a preview or launch whose scratch
 folder notes would keep notes for is refused too. With no notes folder it has no handoff
 folder either (see "Handoffs").

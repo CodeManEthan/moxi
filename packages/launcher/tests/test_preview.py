@@ -404,21 +404,15 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
         wait_for(lambda: log.exists() and log.read_text().strip(), timeout=60)
 
 
-def test_a_scratch_launch_works_in_a_dir_named_by_its_request_id(tmp_path):
-    import tempfile
-
-    # One parent per user, so no other user owns it.
-    assert common.scratch_dir("r1") == (
-        Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}" / "r1"
-        if hasattr(os, "getuid") else common.scratch_root() / "r1")
+def test_a_scratch_launch_works_in_a_dir_named_by_its_session_name(tmp_path):
     resolved = Resolved({"harness": "codex", "cwd": "", "scratch": True,
-                         "target": "headless", "brief": "b"})
+                         "target": "headless", "brief": "b", "name": "planner-1"})
     got = compose.build(Request(), resolved, modules=frozenset())
-    where = str(common.scratch_dir("r1"))
+    where = str(common.scratch_root() / "planner-1")
     assert list(got.argv[3:7]) == ["-c", "check_for_update_on_startup=false", "-C", where]
     assert "--skip-git-repo-check" in got.argv and got.values["cwd"] == where
     # Only the path: the launch makes the folder.
-    assert not common.scratch_dir("r1").exists()
+    assert not common.scratch_dir("planner-1").exists()
 
 
 def test_build_takes_the_resolvers_mode(monkeypatch):
@@ -472,8 +466,9 @@ def test_preview_of_a_scratch_codex_launch_names_the_scratch_dir():
         typed={"harness": "codex", "scratch": True, "target": "headless", "brief": "b"})),
         request_id="r9", session_id=None, actor="ann")
     got = api.preview(request)
-    assert str(common.scratch_dir("r9")) in got.argv
-    assert not common.scratch_dir("r9").exists()
+    assert got.values["name"] == "20261108-1245"
+    assert str(common.scratch_root() / "20261108-1245") in got.argv
+    assert not common.scratch_dir("20261108-1245").exists()
 
 
 def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch,

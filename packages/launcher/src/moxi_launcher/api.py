@@ -354,7 +354,8 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
 
     The composer's refusals are not among them, since this composes nothing: `preview` and
     `launch` give those, such as a scratch folder notes would give a notes home
-    (`presets.ScratchNotes` from `compose.build`), a headless launch with no brief, or a
+    (`presets.ScratchNotes` from `compose.build`) or a session name that can't name one
+    (`catalog.BadValue`, row `name`), a headless launch with no brief, or a
     brief or handoff file that can't be read."""
     caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
@@ -593,8 +594,8 @@ def _chain(conn, request, request_id: str) -> str:
 
 def _request_id_refusal(request_id: str | None) -> Refusal | None:
     """A refusal for a request id a caller gives that is not one plain file name, or None.
-    The id names the launch's scratch folder and run log, so one holding a separator or
-    `..` would put them outside the launcher's own folders."""
+    The id names the launch's run log, so one holding a separator or `..` would put it
+    outside the launcher's own folders."""
     if not request_id or common.plain_name(request_id):
         return None
     return catalog.BadValue("request_id", f"request id {request_id!r} is not a plain name",

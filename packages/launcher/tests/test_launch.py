@@ -861,15 +861,21 @@ def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkey
 # -- scratch -------------------------------------------------------------------------------
 
 
+#: The name every scratch launch here gets: the shipped template at the tests' one time,
+#: with no project and no agent.
+SCRATCH_NAME = "20261108-1245"
+
+
 @POSIX
 def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
-    assert not common.scratch_dir("r9").exists()
+    where = common.scratch_dir(SCRATCH_NAME)
+    assert not where.exists()
     api.preview(req)
-    assert not common.scratch_dir("r9").exists()
+    assert not where.exists()
     result = api.launch(req)
-    where = common.scratch_dir("r9")
+    assert row("r9").values["name"] == SCRATCH_NAME
     assert where.is_dir() and stat.S_IMODE(where.stat().st_mode) == 0o700
     run = harness.one()
     assert run["cwd"] == str(where) and "--skip-git-repo-check" in run["argv"]
@@ -891,7 +897,7 @@ def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path
     assert isinstance(refused, presets.ScratchNotes)
     with pytest.raises(presets.ScratchNotes):
         api.launch(req)
-    assert nothing_written("r9") and not common.scratch_dir("r9").exists()
+    assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
 def test_a_go_launch_with_no_brief_is_refused_before_anything_is_written(harness,
@@ -938,26 +944,74 @@ def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, mon
         api.preview(req)
     assert (caught.value.code, caught.value.row) == ("scratch-notes", "scratch")
     assert f"resolves to a notes home ({tmp_path / 'notes-home'})" in caught.value.problem
-    assert homes == [str(common.scratch_dir("r9"))]
+    root = common.scratch_root()
+    assert caught.value.hint == (f"keep notes out of {root} (moxi config set notes exclude "
+                                 f"--add {root}), or launch in a folder of your own")
+    assert homes == [str(common.scratch_dir(SCRATCH_NAME))]
     with pytest.raises(presets.ScratchNotes):
         api.launch(req)
-    assert nothing_written("r9") and not common.scratch_dir("r9").exists()
+    assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
 @POSIX
-def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path):
-    import tempfile
+def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
+        tmp_path, monkeypatch, real_scratch_tmp):
+    # The launcher's own parent, not the tests' stand-in: names only, nothing made.
+    assert real_scratch_tmp == Path("/tmp")
+    monkeypatch.setattr(common, "SCRATCH_TMP", real_scratch_tmp)
+    for temp in ("/var/tmp", str(tmp_path / "elsewhere")):
+        monkeypatch.setenv("TMPDIR", temp)
+        assert common.scratch_root() == Path(f"/tmp/scratch-{os.getuid()}")
+        assert common.scratch_dir("planner-1") == Path(f"/tmp/scratch-{os.getuid()}/planner-1")
 
+
+@POSIX
+def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path,
+                                                              own_scratch_tmp):
     root = common.scratch_root()
-    assert root == Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}"
+    assert root == own_scratch_tmp / f"scratch-{os.getuid()}"
     assert not root.exists()
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
     assert api.check(req) == []
     api.launch(req)
-    # A missing parent is made private, and the launch's folder in it.
+    # A missing parent is made private, and the launch's folder in it, by its name.
     assert stat.S_IMODE(root.stat().st_mode) == 0o700 and root.stat().st_uid == os.getuid()
-    assert common.scratch_dir("r9").parent == root
+    assert row("r9").cwd == str(root / SCRATCH_NAME)
+
+
+@POSIX
+def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_it(
+        harness, tmp_path):
+    typed = {"harness": "codex", "scratch": True, "target": "headless", "brief": BRIEF,
+             "name": "spike-1"}
+    api.launch(LaunchRequest(typed=typed, cwd=str(tmp_path), request_id="r1"))
+    where = common.scratch_root() / "spike-1"
+    assert row("r1").cwd == str(where) and where.is_dir()
+    (where / "left.txt").write_text("from the first\n")
+    api.launch(LaunchRequest(typed=typed, cwd=str(tmp_path), request_id="r2"))
+    assert row("r2").cwd == str(where) and (where / "left.txt").exists()
+
+
+@pytest.mark.parametrize("name", ["my spike", "../x", "a/b", "..", "."])
+def test_a_scratch_launch_under_a_name_that_is_not_a_plain_name_is_refused(
+        harness, tmp_path, name):
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF, "name": name}, cwd=str(tmp_path),
+                        request_id="r9")
+    with pytest.raises(catalog.BadValue) as caught:
+        api.preview(req)
+    assert (caught.value.code, caught.value.row) == ("bad-value", "name")
+    assert caught.value.problem == (f"the session name {name!r} is not a plain name, and a "
+                                    "scratch launch's folder is named by it")
+    assert caught.value.exit_code == exits.USAGE
+    with pytest.raises(catalog.BadValue):
+        api.launch(req)
+    assert nothing_written("r9") and not common.scratch_root().exists()
+    # Outside a scratch launch the same name is the session's.
+    req = LaunchRequest(typed={"harness": "codex", "target": "headless", "brief": BRIEF,
+                               "name": name}, cwd=str(tmp_path), request_id="r9")
+    assert api.preview(req).values["name"] == name
 
 
 def scratch_request(tmp_path, rid: str = "r9") -> LaunchRequest:
@@ -971,7 +1025,7 @@ def refused_before_the_row(tmp_path, words: str) -> None:
     assert refused.exit_code == exits.REFUSED and words in refused.problem
     with pytest.raises(api.ScratchRoot):
         api.launch(scratch_request(tmp_path))
-    assert row("r9") is None and not common.scratch_dir("r9").exists()
+    assert row("r9") is None and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
 @POSIX
@@ -1143,10 +1197,10 @@ def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
     assert not common.scratch_root().exists()
 
 
-def test_the_scratch_dir_of_a_request_id_that_is_not_a_plain_name_is_refused():
-    for rid in ("../x", "a/b", "..", "."):
+def test_the_scratch_dir_of_a_name_that_is_not_a_plain_name_is_refused():
+    for name in ("../x", "a/b", "..", ".", "", "my spike"):
         with pytest.raises(ValueError):
-            common.scratch_dir(rid)
+            common.scratch_dir(name)
     assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"
 
 
