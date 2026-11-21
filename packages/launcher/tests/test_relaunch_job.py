@@ -44,9 +44,9 @@ class FakeWatch:
         self._closed.set()
 
 
-def facts(*, turn_open=False, number=4, draft=False):
+def facts(*, turn_open=False, number=4, draft=False, session_id=None):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=draft,
-                           stale=False)
+                           stale=False, session_id=session_id)
 
 
 class FakeSession:
@@ -713,6 +713,127 @@ def test_without_comms_a_notice_is_recorded(conn):
              launch=launched_result(state="failed", outcome=None, reason="spawn-failed"))
     notice = [e for e in store.run_events(conn, got.run.run_id) if e.kind == "notice"][0]
     assert notice.detail["verdict"] == "recorded"
+
+
+# -- a session left in place ------------------------------------------------------------
+
+CLEARED = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+
+
+def notes_of(got):
+    return [e.detail for e in store.run_events(got.job.conn, got.run.run_id)
+            if e.kind == "note"]
+
+
+@pytest.mark.parametrize("delivered", ["started", "refused"])
+def test_a_self_run_not_exited_tells_its_session_and_past_it_only_when_not_taken(
+        conn, delivered):
+    comms = FakeComms()
+    session = FakeSession([Result("refused", "not-allowed")], delivered=delivered)
+    got = go(conn, arm(conn), session=session, comms=comms)
+    assert got.outcome == "not-exited" and got.run.word == "not-allowed"
+    assert len(session.deliveries) == 1
+    assert ("The relaunch did not exit this session (not-allowed): carry on with your "
+            "work") in session.deliveries[0]
+    if delivered == "started":
+        assert comms.sent == []
+    else:
+        assert [s[2] for s in comms.sent] == [["boss"]]
+        assert "note-not-taken (the run ended not-exited: not-allowed)" in comms.sent[0][3]
+
+
+def test_a_self_run_with_no_dialog_tells_its_session(conn):
+    comms = FakeComms()
+    session = FakeSession()
+    got = go(conn, arm(conn), session=session, comms=comms,
+             slots_api=FakeSlots(screens=(None,)), settings={"relaunch.dialog_s": 0})
+    assert got.outcome == "not-exited" and got.run.word == "no-dialog"
+    assert "did not exit this session (no-dialog)" in session.deliveries[0]
+    assert comms.sent == []
+
+
+def test_a_director_run_not_exited_still_tells_its_directors(conn):
+    comms = FakeComms()
+    session = FakeSession([Result("refused", "not-allowed")])
+    got = go(conn, arm(conn, mode="director"), session=session, comms=comms)
+    assert got.outcome == "not-exited"
+    assert session.deliveries == [] and [s[2] for s in comms.sent] == [["boss"]]
+
+
+@pytest.mark.parametrize("delivered", ["started", "refused"])
+def test_a_self_run_error_before_the_exit_tells_its_session(conn, delivered):
+    comms = FakeComms()
+    session = FakeSession(delivered=delivered)
+    got = go(conn, arm(conn), session=session, comms=comms,
+             slots_api=FakeSlots(hold=RuntimeError("slots broke")))
+    assert got.outcome == "error" and "exit" not in got.events
+    assert session.commands == []
+    assert ("The relaunch stopped with an error before the exit: carry on with your work."
+            in session.deliveries[0])
+    if delivered == "started":
+        assert comms.sent == []
+    else:
+        assert "note-not-taken (the run ended error: RuntimeError)" in comms.sent[0][3]
+
+
+def test_a_self_run_error_after_the_exit_tells_its_directors_and_no_note(conn):
+    comms = FakeComms()
+    slots_api = FakeSlots()
+
+    def wait_ended(slot, **kw):
+        raise RuntimeError("slots broke")
+
+    slots_api.wait_ended = wait_ended
+    session = FakeSession()
+    got = go(conn, arm(conn), session=session, comms=comms, slots_api=slots_api)
+    assert got.outcome == "error" and "exit" in got.events
+    assert session.deliveries == []
+    assert [s[2] for s in comms.sent] == [["boss"]]
+    assert "ended error: RuntimeError" in comms.sent[0][3]
+
+
+def test_a_self_run_after_a_clear_ends_changed_with_a_note_and_nothing_touched(conn):
+    comms = FakeComms()
+    session = FakeSession(facts_seq=[facts(session_id=CLEARED)])
+    got = go(conn, arm(conn), session=session, comms=comms)
+    assert got.outcome == "changed" and got.run.word == "changed"
+    assert CLEARED in got.run.detail
+    assert "the conversation that armed the run is gone" in got.run.detail
+    assert session.commands == [] and got.slots.calls == [] and got.requests == []
+    assert "Nothing was exited" in session.deliveries[0]
+    assert notes_of(got)[0]["verdict"] == "taken" and comms.sent == []
+
+
+def test_a_self_run_after_a_clear_whose_note_is_not_taken_tells_the_directors(conn):
+    comms = FakeComms()
+    session = FakeSession(facts_seq=[facts(session_id=CLEARED)], delivered="refused")
+    got = go(conn, arm(conn), session=session, comms=comms)
+    assert got.outcome == "changed"
+    assert "note-not-taken (the run ended changed: changed)" in comms.sent[0][3]
+
+
+def test_a_director_run_after_a_clear_ends_changed_and_tells_nobody(conn):
+    comms = FakeComms()
+    session = FakeSession(facts_seq=[facts(session_id=CLEARED)])
+    got = go(conn, arm(conn, mode="director"), session=session, comms=comms)
+    assert got.outcome == "changed" and session.commands == []
+    assert session.deliveries == [] and comms.sent == []
+
+
+def test_the_same_conversation_goes_on(conn):
+    got = go(conn, arm(conn), session=FakeSession(facts_seq=[facts(session_id=SID)]))
+    assert got.outcome == "relaunched"
+
+
+def test_only_a_self_run_owes_a_note(conn):
+    run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                           session_id=SID, by="planner", handoff_path="/work/h.md",
+                           slot="3", pane_id="%9", turn_number=4, job="slots:relaunch-x")
+    store.end_run(conn, run.run_id, "error", word="boom")
+    assert notices.owes_note(store.get_run(conn, run.run_id), "error", [])
+    repair = SimpleNamespace(mode="repair")
+    assert not notices.owes_note(repair, "error", [])
+    assert not notices.owes_note(repair, "not-exited", [])
 
 
 # -- repair ------------------------------------------------------------------------------

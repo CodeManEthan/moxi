@@ -24,7 +24,9 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    (a draft, subagents, a read that failed) is read whole every 2 s, since its end may
    bring no event.
    Each change of the first word that holds is one `wait` event. Nothing holding goes on;
-   `relaunch.wait_s` after the run was armed it ends `expired`. Then, for every run, the
+   `relaunch.wait_s` after the run was armed it ends `expired`. A session whose current
+   id is no longer the run's (a `/clear` since: the conversation that armed the run is
+   gone) ends the run `changed`, untouched. Then, for every run, the
    model the relaunch comes back on (`pin.choose`), read on each pass, a `model` event
    when it changed.
 2. Hold the slot for the run (`slots.hold`, holder the run id). Refused: `not-held`.
@@ -382,6 +384,7 @@ class RelaunchJob:
         self._sessions, self._cache = sessions, cache
         self._check = check
         self.pin: Any | None = None
+        self.facts: Any | None = None
         self._launch = launch
         self._settings = settings
         self.clock, self.wall, self.sleep = clock, wall, sleep
@@ -501,6 +504,7 @@ class RelaunchJob:
                 self._ended_under()
         while True:
             number = self.wait() if run.mode == "self" else run.turn_number
+            self.same_conversation()
             self.read_pin()
             try:
                 self.hold()
@@ -619,6 +623,7 @@ class RelaunchJob:
                 said = first.word
                 self.event("wait", {"word": first.word, "detail": first.detail})
             if first is None:
+                self.facts = reading.facts
                 return reading.turn_number
             left = bound - self.wall()
             if left <= 0:
@@ -636,6 +641,23 @@ class RelaunchJob:
                 # A draft cleared, a subagent done or a read that failed again may come
                 # with no event: the whole read again.
                 reading = watch.read(**read)
+
+    def same_conversation(self) -> None:
+        """The run acts only on the conversation that armed it: a session whose current id
+        is no longer the run's (a `/clear` since) ends the run `changed`, untouched. A self
+        run reads the id its wait's last facts gave; a director's run reads the facts once.
+        An id that can't be read is no change."""
+        facts = self.facts
+        if self.run.mode != "self":
+            try:
+                facts = self.target.session.facts()
+            except Exception:  # noqa: BLE001  (an id not read is no change)
+                facts = None
+        found = getattr(facts, "session_id", None)
+        if isinstance(found, str) and found and found != self.run.session_id:
+            self.end("changed", "changed",
+                     f"the session's current id is {found}, not {self.run.session_id}: "
+                     "the conversation that armed the run is gone")
 
     def read_pin(self) -> None:
         """The model the relaunch comes back on, read again on each pass so a switch
@@ -900,7 +922,8 @@ class RelaunchJob:
         if run is None or outcome is None:
             return
         told = notices.settings_of(self.settings)
-        if outcome in notices.NOTE_OUTCOMES and run.mode == "self":
+        events = store.run_events(self.conn, self.run_id)
+        if notices.owes_note(run, outcome, events):
             session = self.target.session if self.target is not None else None
             if session is not None and notices.note(
                     self.conn, run, session, wait_s=float(self.setting("relaunch.wait_s"))):
@@ -908,7 +931,6 @@ class RelaunchJob:
             outcome = notices.NOTE_NOT_TAKEN
         elif outcome not in notices.NOTICE_OUTCOMES and not notices.is_flagged(run):
             return
-        events = store.run_events(self.conn, self.run_id)
         notices.notify(self.conn, run, self.row, outcome, comms=self.comms,
                        repairable=repairable(run, events), clock=self.clock,
                        sleep=self.sleep, **told)
