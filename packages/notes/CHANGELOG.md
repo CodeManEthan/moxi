@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- notes' tools in the Claude apps need the secrets release with `chat_redact` and the
+  connector release with `Limit`. Neither is released yet; notes' floors on them rise
+  when they are.
 - `search_notes` in the Claude apps finds notes by words in their path or text: whole
   words, case ignored, every word needed, path hits first and then the newest, at most
   20. Its walk never follows a link and opens only files `read_note` would read, at most

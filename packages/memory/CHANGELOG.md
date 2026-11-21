@@ -50,6 +50,10 @@
   says what the last rebuild kept. Callers that compared those documents whole
   must allow the new keys. memory needs the sessions release with archive folders
   (interface 6).
+- memory needs the sessions release with interface 7 (`writer` and `opening`), and
+  `search_memory` needs the secrets release with `chat_redact` and the connector release
+  with `Limit`. No released version of the three carries them yet; memory's floors on
+  them rise when they are released.
 
 ## 0.1.0 (2026-11-08)
 
