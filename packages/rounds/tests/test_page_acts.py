@@ -27,8 +27,10 @@ HELD_WAIT_S = 0.2
 CHOICE = ["a=export nightly", "b=export on each close"]
 SAID = "comms:1234567"
 EARLY = "2026-01-02T03:04:05Z"
-#: Times in the past the kit's rulings are recorded at, so a read-back can name them.
-S1_AT, C1_AT = "2026-01-02T03:04:06Z", "2026-01-02T03:04:07Z"
+#: Times in the past the kit's rulings are recorded at, so a read-back can name them and
+#: no list leaves one out for falling in the second it is computed in.
+LEDGER_AT, S1_AT, C1_AT = ("2026-01-02T03:04:04Z", "2026-01-02T03:04:06Z",
+                           "2026-01-02T03:04:07Z")
 
 
 def minted(at: str | None = None) -> str:
@@ -88,7 +90,7 @@ def kit(git_repo, tmp_path, write_config, capsys):
     asking.ask(ENDED, "Is the ledger closed monthly?", by="atlas-lead", origin=SAID,
                options=CHOICE)
     ruling.rule(ENDED, text="The ledger closes on the first.", record=SAID,
-                by="atlas-lead")
+                by="atlas-lead", at=LEDGER_AT)
     dropping.drop(ENDED, by="operator", record=SAID, run_by="atlas-lead",
                   withdraw_questions=True)
     capsys.readouterr()
