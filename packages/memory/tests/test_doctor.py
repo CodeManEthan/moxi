@@ -4,6 +4,7 @@ import os
 
 import pytest
 from moxi.doctor import Row
+from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import additions, doctor, ingest, links, module, state, table
@@ -126,7 +127,7 @@ def test_the_index_row_shows_the_redact_version_and_warns_while_it_is_below_secr
 
     ingest_one()
     row = by_name()["index"]
-    assert row.state == "ok" and "redact version 2" in row.detail
+    assert row.state == "ok" and f"redact version {REDACT_VERSION}" in row.detail
     with index.writer() as w:
         conn = w.connect()
         try:
@@ -135,11 +136,11 @@ def test_the_index_row_shows_the_redact_version_and_warns_while_it_is_below_secr
             conn.close()
     row = by_name()["index"]
     assert row.state == "warn" and "redact version 1" in row.detail
-    assert "secrets' redact version 2 catches" in row.detail
+    assert f"secrets' redact version {REDACT_VERSION} catches" in row.detail
     assert row.fix == "moxi memory reindex"
     ingest.run("rebuild", launcher=links.Link(links.NONE), then=lambda args: None)
     row = by_name()["index"]
-    assert row.state == "ok" and "redact version 2" in row.detail
+    assert row.state == "ok" and f"redact version {REDACT_VERSION}" in row.detail
     assert "redacted again the rows stored under redact version 1" in row.detail
     assert "dropped no session" in row.detail
 

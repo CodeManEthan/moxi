@@ -1,7 +1,8 @@
 """The scan: the named sets, hits, redaction and line batches.
 
-Every scan reads past the see-through characters (`seen_through`): it scans the text as
-given, and, when it holds any, a copy without them whose hits it maps back.
+Every scan reads past the see-through characters (`seen_through`) and the backslashes
+that escape a quote: it scans the text as given, and, when it holds any, a copy without
+them whose hits it maps back.
 
 `sets.json` is read once per process. A gitleaks-format rule is compiled the first time
 its keyword appears. On RE2 the credentials and broad sets run here; without RE2 they run
@@ -37,9 +38,9 @@ _RULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules")
 #: Which `redact` this is. It rises with a release in which `redact`, called with its
 #: default keywords, redacts in some text a span the release before returned whole,
 #: because of how it reads text (a suppression it stops applying, characters it newly
-#: sees through). A change of rule data alone (a rule, regex, keyword, allowlist or
+#: reads past). A change of rule data alone (a rule, regex, keyword, allowlist or
 #: stopword in sets.json or the private-names lists) leaves it as it is.
-REDACT_VERSION = 2
+REDACT_VERSION = 3
 
 #: Unicode 17.0's Default_Ignorable_Code_Point: the 27 ranges DerivedCoreProperties.txt
 #: lists, unassigned code points included, as (first, last).
@@ -55,6 +56,10 @@ _IGNORABLE_FIRSTS = tuple(first for first, _ in _DEFAULT_IGNORABLE)
 #: The see-through characters ASCII holds.
 _ASCII_SEEN = "".join(chr(c) for c in (*range(0x20), 0x7F) if chr(c) not in "\t\n")
 _ASCII_SEEN_RX = re.compile("[" + "".join("\\x%02x" % ord(c) for c in _ASCII_SEEN) + "]")
+#: One backslash of a run that stands directly before a quote (`"` or `'`): the escape
+#: a quote inside a string takes (JSON's `\"`, Python's `\'`), once per level of
+#: nesting. It matches one character, so each removed character is one match.
+_ESCAPE = r"\\(?=\\*[\"'])"
 
 
 #: Strict mode: the rules whose shape is randomness alone. They keep their entropy floor,
@@ -766,7 +771,9 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=(),
 
     The scan reads past see-through characters (`seen_through`): it also finds what the
     text holds with them removed, so a token a zero-width space or a soft hyphen splits
-    is a hit, spanning the characters that split it.
+    is a hit, spanning the characters that split it. It reads past a run of backslashes
+    directly before a quote the same way, so a key followed by an escaped quote (`\\"`,
+    as JSON writes a quote inside a string) is a hit, the backslashes left outside it.
 
     With `strict`, nothing beside a value keeps it whole: no mark, allowlist or stopword
     is read, a rule's regex runs without gitleaks' end condition, only the rules in
@@ -791,7 +798,8 @@ _SPACED_RX = re.compile("[\x0b\x0c\x1c-\x1f\x85]|\r(?!\n)")
 
 def _spaced_copy(text, rx, names) -> str | None:
     """The third copy `_seen_hits` scans, as long as `text`, or None when it would equal
-    the copy without the see-through characters (the characters `rx` matches).
+    the copy without the characters `rx` matches (the see-through characters, and the
+    backslashes that escape a quote when `text` holds any).
 
     Each character `_SPACED_RX` matches becomes a space. A run of see-through characters
     that holds none of those, and that stands directly before a keyword of a rule in the
@@ -800,7 +808,8 @@ def _spaced_copy(text, rx, names) -> str | None:
     unless a keyword of that copy runs across the place (starts before it and ends past
     it): a run that splits a keyword, such as `sk_` and `live_` in a Stripe key's
     `sk_live`, stays removed. The copy's scan removes the rest, so a word before such a
-    run stays apart from the token after it.
+    run stays apart from the token after it. A run that ends in a backslash stands
+    before a quote, which starts no keyword, so it is never one of those.
     """
     spaced = _SPACED_RX.search(text) is not None
     found = load_sets().keyword_start([n for n in names if n in GITLEAKS_SETS])
@@ -818,10 +827,12 @@ def _spaced_copy(text, rx, names) -> str | None:
             return len(m.group()) if m else 0
 
         removed = 0
-        for m in re.finditer(rx.pattern + "+", text):
+        for m in re.finditer("(?:" + rx.pattern + ")+", text):
             run_start, run_end = m.span()
             position = run_start - removed
             removed += run_end - run_start
+            if text[run_end - 1] == "\\":
+                continue
             # One character past the run, so a carriage return at its end sees the
             # newline after it; that character is not see-through, so no match starts there.
             if spaced and _SPACED_RX.search(text, run_start, run_end + 1):
@@ -841,13 +852,18 @@ def _spaced_copy(text, rx, names) -> str | None:
 
 
 def _seen_hits(text, names, path, allow, known, *, keep_marked, strict=False) -> list:
-    """The hits of `text` and of a copy of it without its see-through characters, the
-    copy's mapped back to `text`, sorted by start. When `text` holds a see-through
-    character a rule may read as whitespace (`_SPACED_RX`), or a run of see-through
-    characters just before a rule's keyword, a third copy (`_spaced_copy`) holds a space
-    for each of those and none of the others, so a boundary one gave, or the boundary
-    a word needs from the token after it, survives; its hits are mapped back the same
-    way.
+    """The hits of `text` and of a copy of it without its see-through characters and
+    without each run of backslashes directly before a quote (`_ESCAPE`), the copy's
+    mapped back to `text`, sorted by start. One copy removes both kinds; there is none
+    when `text` holds neither. A text holding both is also scanned as a copy without
+    its see-through characters alone, so the copy finds every hit it found before
+    escapes were removed: a rule that takes a boundary character on each side can lose
+    a run to the run before it once a backslash between them is gone. When `text` holds a see-through character a rule may read
+    as whitespace (`_SPACED_RX`), or a run of see-through characters just before a
+    rule's keyword, a third copy (`_spaced_copy`) holds a space for each of those and
+    none of the others, so a boundary one gave, or the boundary a word needs from the
+    token after it, survives; it drops the escaping backslashes too, and its hits are
+    mapped back the same way.
 
     A copy hit's start and end map to the characters of `text` they came from, except
     that one at the copy's start starts at 0 and one at its end ends at `len(text)`, so
@@ -858,28 +874,46 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked, strict=False) ->
     of see-through characters at both ends. So a text gets the hits it has without the
     copies when no see-through character splits or borders a secret, or sits in the text
     a rule matches around one (the keyword of an assignment); where one does, a copy may
-    add a hit, such as a token whose end a following byte order mark broke.
+    add a hit, such as a token whose end a following byte order mark broke. An escaped
+    quote does the same: a key a rule needs a quote after is a hit when `\\"` follows it.
+    The trim reads see-through characters only; a hit never starts or ends on a removed
+    backslash, since a quote follows each.
+
+    A set the text scan left unscanned (the fallback ran out of time or its worker
+    failed) already has a hit over the whole text, so the copies don't scan it.
 
     `keep_marked` and `strict` reach the scan of every copy.
     """
     hits = _hits(text, names, path, allow, known, keep_marked=keep_marked, strict=strict)
     chars = _seen_in(text)
-    if not chars:
+    escaped = '\\"' in text or "\\'" in text
+    if not chars and not escaped:
         return hits
-    rx = re.compile("[" + "".join("\\U%08x" % ord(c) for c in chars) + "]")
-    bases = [text]
-    spaced = _spaced_copy(text, rx, names)
-    if spaced is not None:
-        bases.append(spaced)
+    unscanned = {h.set for h in hits if h.rule == UNSCANNED}
+    if unscanned:
+        names = tuple(n for n in names if n not in unscanned)
+    parts = ["[" + "".join("\\U%08x" % ord(c) for c in chars) + "]"] if chars else []
+    if escaped:
+        parts.append(_ESCAPE)
+    rx = re.compile("|".join(parts))
+    bases = [(text, rx)]
+    if chars:
+        spaced = _spaced_copy(text, rx, names)
+        if spaced is not None:
+            bases.append((spaced, rx))
+        if escaped:
+            # The see-through characters alone: a rule that takes a boundary character
+            # on each side can find in it a run the escape's removal joins to another.
+            bases.append((text, re.compile(parts[0])))
     spans = {(h.set, h.rule, h.start, h.end) for h in hits}
     by_secret: dict = {}
     for h in hits:
         by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))
     out = list(hits)
-    for base in bases:
+    for base, removed in bases:
         taken = []
-        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked,
-                            strict=strict):
+        for h in _copy_hits(base, removed, names, path, allow, known,
+                            keep_marked=keep_marked, strict=strict):
             inner_start, inner_end = h.start, h.end
             while inner_start < inner_end and seen_through(text[inner_start]):
                 inner_start += 1
@@ -901,7 +935,8 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked, strict=False) ->
 
 def _copy_hits(base, rx, names, path, allow, known, *, keep_marked, strict) -> list:
     """The hits of `base` without the characters `rx` matches, mapped back to `base`:
-    a hit at the copy's start starts at 0, and one at its end ends at `len(base)`."""
+    a hit at the copy's start starts at 0, and one at its end ends at `len(base)`. Each
+    match of `rx` is one character."""
     copy = rx.sub("", base)
     if not copy:
         return []

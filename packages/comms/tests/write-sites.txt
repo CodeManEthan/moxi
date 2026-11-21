@@ -16,6 +16,7 @@ src/moxi_comms/adapters/session.py _adapter_process os.open
 src/moxi_comms/adapters/shim_roster.py write_state os.fdopen
 src/moxi_comms/adapters/shim_roster.py write_state os.replace
 src/moxi_comms/adapters/terminal.py terminal_fd os.open
+src/moxi_comms/archive.py connect sqlite3.connect
 src/moxi_comms/claimfile.py write os.fdopen
 src/moxi_comms/claimfile.py write os.open
 src/moxi_comms/claimfile.py write os.replace
