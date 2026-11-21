@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The line a subagent leaves for its parent cuts the agent id to eight characters and `…`
+  (one character), not `...`.
 - The page's chart by cost stacks each bar by token class (fresh input, cache write,
   cache read, output), each part the class's own dollars from `/api/terms` by the chart's
   period, under a legend, with every class on hover. By tokens it draws two charts:
