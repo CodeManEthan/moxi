@@ -756,8 +756,14 @@ def act_words(event: Mapping) -> str:
         return f"job marked {event.get('state')}"
     if kind == finish_actions.ACTION and event.get("kind") and event.get("state"):
         return f"finish: {event.get('kind')} {event.get('state')}"
-    words = ACT_WORDS.get(kind)
-    return words if words is not None else kind.replace(".", " ").replace("_", " ")
+    return type_words(kind)
+
+
+def type_words(kind: Any) -> str:
+    """A type of event in words, as `ACT_WORDS` says it; a type it has no words for
+    reads as its name with the dots and underscores as spaces."""
+    words = ACT_WORDS.get(str(kind))
+    return words if words is not None else str(kind).replace(".", " ").replace("_", " ")
 
 
 def strip(parts: Iterable[Part], *, size: int = STRIP_SIZE) -> list[dict]:
@@ -847,7 +853,8 @@ def event_step(event: Mapping) -> tuple[str | None, str | None]:
 
 def _event(event: Mapping) -> dict:
     return {"n": event.get("n"), "at": event.get("at"), "by": event.get("actor"),
-            "type": event.get("type"), "of": showing.history_of(dict(event))}
+            "type": event.get("type"), "words": type_words(event.get("type")),
+            "of": showing.history_of(dict(event))}
 
 
 def events_of(part_: Part, column: str | None, stage: str | None) -> list[dict]:

@@ -275,7 +275,7 @@ test("a step record's sections in order, with CI red first and green folded", ()
     verdicts: [], findings: null, drift: null, gates: null, decisions: null, items: [], settled: [], close: [], fixes: [],
     next: { state: "ready", by: "builder", who: "builder-1", waits: [{ reason: "CI is red", fix: "push a fix" }],
             then: ["moxi rounds check kestrel/a B1"], reads: [], write: null, questions: [] },
-    events: [1, 2, 3, 4, 5, 6].map((n) => ({ n, at: "2026-11-21T10:0" + n + ":00Z", by: "lead", type: "check.run", of: `B1 #${n}` })),
+    events: [1, 2, 3, 4, 5, 6].map((n) => ({ n, at: "2026-11-21T10:0" + n + ":00Z", by: "lead", type: "check.ran", words: "check ran", of: `B1 #${n}` })),
   };
   const ctx = { today: "2026-11-21", home: "/home/u", now: NOW, clock: UTC, sessionAt: (w) => (w === "/home/u/w/a" ? "claude-1" : null) };
   const sections = stepSections(record, ctx);
@@ -293,7 +293,7 @@ test("a step record's sections in order, with CI red first and green folded", ()
   assert.deepEqual(sections[2].folds.map((one) => [one.label, one.rows.length]), [["1 earlier run", 1]]);
   assert.deepEqual(sections[3].wells, ["moxi rounds check kestrel/a B1"]);
   assert.equal(sections[4].rows.length, 4);
-  assert.equal(sections[4].rows[0][1].text, "check.run B1 #3");
+  assert.equal(sections[4].rows[0][1].text, "check ran B1 #3");
   assert.deepEqual(sections[4].folds.map((one) => [one.label, one.rows.length]), [["All 6 events", 2]]);
   assert.deepEqual(stepHead(record, cell("failed", { word: "red" })), { title: "check of B1", sub: "kestrel/a, failed, red" });
 });

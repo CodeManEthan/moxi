@@ -536,6 +536,9 @@ def test_a_check_s_record_has_its_runs_and_ci_red_first(kit):
     assert [(one["exit_code"], one["output"]) for one in found["runs"]] == [
         (1, "check-1.log")]
     assert [one["type"] for one in found["events"]] == ["check.ran", "ci.read"]
+    # Each says its type in words, as the strip does.
+    assert [one["words"] for one in found["events"]] == ["check ran", "CI read"]
+    assert [one["of"] for one in found["events"]] == ["B1", "B1"]
 
 
 def test_a_closed_round_s_card_is_read_from_its_log_alone(kit):

@@ -179,6 +179,8 @@ export interface Happened {
   at: string | null;
   by: string | null;
   type: string | null;
+  /** The type in words, as the strip says it. */
+  words: string | null;
   of: string | null;
 }
 

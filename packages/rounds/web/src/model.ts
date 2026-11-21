@@ -633,7 +633,7 @@ function eventsSection(events: readonly Happened[], ctx: Context): Section | nul
   if (events.length === 0) return null;
   const row = (one: Happened): Row => [
     { text: `${timeWord(one.at, ctx.today, ctx.clock)}  `, mono: true, tone: "dim" },
-    { text: [one.type ?? "event", one.of].filter(Boolean).join(" ") },
+    { text: [one.words ?? one.type ?? "event", one.of].filter(Boolean).join(" ") },
     ...(one.by ? [{ text: `, by ${one.by}`, tone: "dim" as const }] : []),
   ];
   const cut = Math.max(0, events.length - EVENTS_SHOWN);

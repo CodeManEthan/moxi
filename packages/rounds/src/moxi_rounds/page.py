@@ -151,7 +151,7 @@ BOARD = {
 }
 
 EVENT = lb.Out("table", items={"n": lb.Out("int", nullable=True), "at": _s(), "by": _s(),
-                               "type": _s(), "of": _s("scrub")})
+                               "type": _s(), "words": _s(), "of": _s("scrub")})
 
 FINDINGS = lb.Out("table", items={"blocker": INT, "major": INT, "minor": INT,
                                   "note": INT})
