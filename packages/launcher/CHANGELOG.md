@@ -25,7 +25,8 @@
   its handoff with its handoff skill. The shipped `moxi-handoff` skill triggers on that
   line, and its last step says to end the turn and make no further tool call.
 - `limit_at` has no default of its own: unset, a launch recycles at its `warn_at` mark,
-  or at `1x` when it warns at none.
+  or at `1x` when it warns at none. `moxi launcher show`, the page and its feed name the
+  mark such a launch was stamped with beside "at limit".
 - A scratch launch can't set `--recycle-at-limit relaunch` (`scratch-recycle`, exit 3): a
   scratch has no notes directory to keep a handoff in. Its preview refuses it too, on the
   command line and the page, and `presets check` flags a preset that sets it and
