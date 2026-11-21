@@ -13533,6 +13533,11 @@ turns	packages/turns/src/moxi_turns/codex.py	still: set[str] | None = set(self._
 turns	packages/turns/src/moxi_turns/codex.py	timeout=2.0,	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=remaining)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/codex.py	self._opened: tuple[str, str] | None = None	keep	_opened	_opened
+turns	packages/turns/src/moxi_turns/codex.py	self._placed: set[str] = set()	keep	set	set
+turns	packages/turns/src/moxi_turns/codex.py	opened = self._opened	keep	_opened	_opened
+turns	packages/turns/src/moxi_turns/codex.py	self._placed &= set(live)	keep	set	set
+turns	packages/turns/src/moxi_turns/codex.py	self._opened = (turn_id, delivery_id) if delivery_id is not None else None	keep	_opened	_opened
 turns	packages/turns/src/moxi_turns/codex_appserver.py	_from_app_server	name	folder	server_dir
 turns	packages/turns/src/moxi_turns/codex_appserver.py	answer = session.codex_limits(timeout=remaining)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/codex_appserver.py	codex_rate_limits	name	timeout	timeout_s
