@@ -287,6 +287,14 @@ def test_a_row_with_no_writer_is_never_a_hit_and_takes_no_place(db):
     ("\x00<x>deploy", "unknown", False),
     ("\x00deploy after a nul", "unknown", True),
     ("<​x>deploy, a tag split by a format character", "unknown", True),
+    ("<été>deploy", "unknown", False),
+    ("<É>deploy", "unknown", False),
+    ("<日本>deploy", "unknown", False),
+    ("<été>deploy typed", "person", True),
+    (" ​<é>deploy", "unknown", False),
+    ("\x00<é>deploy", "unknown", False),
+    ("< deploy after a no-break space", "unknown", True),
+    ("<½ deploy after a fraction", "unknown", True),
 ])
 def test_only_a_person_model_or_untagged_unknown_row_is_a_hit(db, text, writer, shown):
     put(db, text, writer=writer)
