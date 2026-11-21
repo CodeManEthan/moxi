@@ -238,9 +238,8 @@ def not_text(head: bytes) -> bool:
 def read_judged(resolved: str, st: os.stat_result, *, cap_bytes: int) -> bytes:
     """Rules 6 and 5 for a file judged as `st`: its bytes, read through a descriptor
     opened without following a link and checked against `st`."""
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     try:
-        fd = os.open(resolved, flags)
+        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError:
         raise Refused("changed") from None
     try:

@@ -41,11 +41,12 @@ def test_the_entry_is_named_for_notes_and_loads_the_provider():
     assert isinstance(PROVIDER, API.Provider)
 
 
-def test_the_connector_extra_brings_the_host_and_secrets_with_its_personal_data_set():
-    project = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["project"]
-    extra = project["optional-dependencies"]["connector"]
-    assert any(d.startswith("moxi-connector") for d in extra)
-    assert any(d.startswith("moxi-secrets[personal-data]") for d in extra)
+def test_the_extras_bring_the_host_and_secrets_with_its_personal_data_set():
+    extras = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["project"][
+        "optional-dependencies"]
+    assert any(d.startswith("moxi-connector") for d in extras["connector"])
+    assert any(d.startswith("python-stdnum") for d in extras["connector"])
+    assert any(d.startswith("moxi-secrets[personal-data]") for d in extras["secrets"])
 
 
 def test_notes_reaches_the_host_only_through_moxi_modules_load():
@@ -76,7 +77,7 @@ def test_a_missing_host_is_an_import_error_with_the_reason(monkeypatch):
         connector._interface()
 
 
-def _started(**kw):
+def _started():
     from moxi_notes.connector import build
 
     notes, provider = build(API)
@@ -91,8 +92,9 @@ def _rows(provider):
 def test_the_status_rows_name_the_root_and_the_chat_sets(tmp_path, monkeypatch):
     root = make_root(tmp_path)
     from moxi_secrets import engine
-    monkeypatch.setattr(engine, "re2_module", lambda: object())
     _, provider = _started()
+    # Only the row reads which engine runs; the redaction itself keeps the real one.
+    monkeypatch.setattr(engine, "re2_module", lambda: object())
     rows = _rows(provider)
     assert rows["root"] == ("ok", str(root))
     assert rows["redaction"] == ("ok", "the chat sets load, on RE2")
