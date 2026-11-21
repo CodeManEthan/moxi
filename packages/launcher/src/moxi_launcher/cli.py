@@ -19,7 +19,7 @@ launched.
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
-    moxi launcher clear-expired [--dry-run] [--json]
+    moxi launcher clear-expired [--session ID] [--dry-run] [--json]
     moxi launcher keep-warm --session ID [--dry-run] [--json]
     moxi launcher keep-warm --dry-run [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
@@ -40,7 +40,7 @@ the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
 resumed. `clear-expired` makes the expiry ask of every live launch that recycles on
-expiry, now; `keep-warm --session ID` makes the keep-warm ask of one session, now, and
+expiry, now, or with `--session ID` of the one whose current session is ID; `keep-warm --session ID` makes the keep-warm ask of one session, now, and
 `keep-warm --dry-run` of every live launch keep-warm is on for. With `--dry-run` each ask
 takes its reads and writes nothing. `keep-warm hold`, `release` and `holds` open, release
 and list this session's named holds. `show` shows
@@ -619,7 +619,7 @@ def _resume(args: argparse.Namespace, prog: str) -> int:
 def _clear_expired(args: argparse.Namespace, prog: str) -> int:
     from . import recycle
 
-    return _said(recycle.clear_expired(dry_run=args.dry_run), args)
+    return _said(recycle.clear_expired(args.session, dry_run=args.dry_run), args)
 
 
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
@@ -813,6 +813,8 @@ def _act_parsers(verbs) -> None:
         description="Make the expiry ask of every live launch that recycles on expiry, now: "
                     "each is cleared or compacted when its cache is cold and it is quiet. "
                     "Exit 1 when an ask ended blocked, failed or unconfirmed.")
+    clear.add_argument("--session", metavar="ID",
+                       help="ask only of the launch whose current session is ID")
     clear.add_argument("--dry-run", action="store_true",
                        help="print each session's verdict and what a run would do; writes "
                             "nothing")

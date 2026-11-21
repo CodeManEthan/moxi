@@ -550,9 +550,10 @@ def test_a_dry_run_ends_quietly_where_a_run_would(conn):
     assert (got.verdict.outcome, got.verdict.word) == (None, "warm")
 
 
-def sweep(conn, session, **kw):
-    return recycle.clear_expired(conn=conn, turns=FakeTurns(session), slots_api=FakeSlots(),
-                                 cache=FakeCache(), settings=SETTINGS, **kw)
+def sweep(conn, session, *, which=None, **kw):
+    return recycle.clear_expired(which, conn=conn, turns=FakeTurns(session),
+                                 slots_api=FakeSlots(), cache=FakeCache(),
+                                 settings=SETTINGS, **kw)
 
 
 def test_clear_expired_asks_every_live_launch_that_recycles_on_expiry(conn):
@@ -589,6 +590,21 @@ def test_clear_expired_with_no_launch_that_recycles_says_so(conn):
     got = sweep(conn, FakeSession())
     assert (got.exit_code, got.lines, got.data["sessions"]) == (
         0, ("no live launch recycles on expiry",), [])
+
+
+def test_clear_expired_with_a_session_asks_only_the_launch_last_known_by_it(conn):
+    launched(conn, request_id="r2", session_id=NEW, values={"recycle_on_expiry": "clear"})
+    got = sweep(conn, FakeSession(), which=NEW, dry_run=True)
+    assert [(s["request_id"], s["session_id"]) for s in got.data["sessions"]] == [
+        ("r2", NEW)]
+
+
+def test_clear_expired_with_a_session_no_launch_has_says_so_and_exits_0(conn):
+    session = FakeSession()
+    got = sweep(conn, session, which=OTHER)
+    assert (got.exit_code, got.lines, got.data["sessions"]) == (
+        0, (f"no live launch that recycles on expiry has current session {OTHER}",), [])
+    assert store.runs(conn) == [] and session.commands == []
 
 
 # -- the crossing handler ----------------------------------------------------------------

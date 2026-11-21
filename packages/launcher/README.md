@@ -400,11 +400,13 @@ A hold stays open until it is released, across a relaunch or a resume of the ses
 **Asking by hand.** cache's timer makes both asks on its own. To make them now, or to
 check a session nobody watches:
 
-    moxi launcher clear-expired [--dry-run] [--json]
+    moxi launcher clear-expired [--session ID] [--dry-run] [--json]
     moxi launcher keep-warm --session ID [--dry-run] [--json]
     moxi launcher keep-warm --dry-run [--json]
 
-`clear-expired` makes the expiry ask of every live launch that recycles on expiry.
+`clear-expired` makes the expiry ask of every live launch that recycles on expiry;
+with `--session ID`, only of the launch whose current session is ID, and when none is,
+it says so and exits 0.
 `keep-warm --session ID` makes the keep-warm ask of that session; with `--dry-run` and
 no session, of every live launch keep-warm is on for. Each ask is the one the timer
 makes. `--dry-run` takes its reads and writes nothing, and prints each session's verdict:
@@ -621,7 +623,7 @@ nothing has used it for a while.
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
-| `moxi launcher clear-expired [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, now |
+| `moxi launcher clear-expired [--session ID] [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, or of the one whose current session is ID, now |
 | `moxi launcher keep-warm --session ID [--dry-run] [--json]`, `keep-warm --dry-run [--json]` | the keep-warm ask of one session now; with `--dry-run` alone, of every live launch keep-warm is on for |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
 | `moxi launcher show [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |

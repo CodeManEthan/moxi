@@ -3363,7 +3363,6 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	and list this session's named holds. `show` shows	keep	show	show
-launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(recycle.clear_expired(dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(keepwarm.keep_warm(args.session, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	"clear-expired", help="ask now whether each session that recycles on expiry is due",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	help="print each session's verdict and what a run would do; writes "	keep	help	help
@@ -3374,6 +3373,8 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	help="print each session's v
 launcher	packages/launcher/src/moxi_launcher/cli.py	keep_warm.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	if args.session is not None or args.dry_run:	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/cli.py	elif args.session is None and not args.dry_run:	keep	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="ask only of the launch whose current session is ID")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	return _said(recycle.clear_expired(args.session, dry_run=args.dry_run), args)	keep	dry_run	dry_run
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
@@ -4163,11 +4164,13 @@ launcher	packages/launcher/tests/test_cli_acts.py	too_new	name	raw	conn
 launcher	packages/launcher/tests/test_cli_acts.py	{"self": True, "dry_run": True, "json": True}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	"dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	"dry_run": True, "json": True}),	keep	dry_run	dry_run
-launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired"], {"verb": "clear-expired", "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired", "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run
-launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((), {"dry_run": False})]	keep	dry_run	dry_run
-launcher	packages/launcher/tests/test_cli_acts.py	assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((), {"dry_run": True})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired", "--session", SID, "--dry-run"], {"session": SID, "dry_run": True}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	(["clear-expired"], {"verb": "clear-expired", "session": None, "dry_run": False,	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((None,), {"dry_run": True})	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((None,), {"dry_run": False})]	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	assert seen == [((SID,), {"dry_run": False}), ((None,), {"dry_run": True})]	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_cli_acts.py	assert seen[-1] == ((SID,), {"dry_run": False})	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
 launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME

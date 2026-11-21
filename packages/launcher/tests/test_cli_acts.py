@@ -127,8 +127,10 @@ PARSES = [
                                        "dry_run": False, "json": False}),
     (["keep-warm", "--dry-run", "--json"], {"action": None, "session": None,
                                             "dry_run": True, "json": True}),
-    (["clear-expired"], {"verb": "clear-expired", "dry_run": False, "json": False}),
+    (["clear-expired"], {"verb": "clear-expired", "session": None, "dry_run": False,
+                         "json": False}),
     (["clear-expired", "--dry-run", "--json"], {"dry_run": True, "json": True}),
+    (["clear-expired", "--session", SID, "--dry-run"], {"session": SID, "dry_run": True}),
     (["show"], {"verb": "show", "session_id": None, "json": False}),
     (["show", SID, "--json"], {"session_id": SID, "json": True}),
     (["log", "--table", "runs"], {"verb": "log", "table": "runs"}),
@@ -175,7 +177,8 @@ REFUSED = [
     ["keep-warm", "--session", SID, "holds"],
     ["keep-warm", "--dry-run", "hold", "x"],
     ["clear-expired", SID],
-    ["clear-expired", "--session", SID],
+    ["clear-expired", "--session"],
+    ["clear-expired", "--sess", SID],
     ["show", SID, OTHER],
     ["log", "--table", "nope"],
 ]
@@ -442,9 +445,11 @@ def test_clear_expired_runs_the_sweep_and_prints_its_lines(monkeypatch, capsys):
                  swept(codes.OK, f"session {SID} (launch r1): cleared"))
     status, out, err = run(["clear-expired"], capsys)
     assert (status, out, err) == (codes.OK, f"session {SID} (launch r1): cleared\n", "")
-    assert seen == [((), {"dry_run": False})]
+    assert seen == [((None,), {"dry_run": False})]
     status, out, _ = run(["clear-expired", "--dry-run", "--json"], capsys)
-    assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((), {"dry_run": True})
+    assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((None,), {"dry_run": True})
+    assert run(["clear-expired", "--session", SID], capsys)[0] == codes.OK
+    assert seen[-1] == ((SID,), {"dry_run": False})
 
 
 def test_clear_expired_with_a_verdict_to_see_exits_1_on_stderr(monkeypatch, capsys):

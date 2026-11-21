@@ -9,9 +9,10 @@
   identity gets its own name, else the project's `lead`, else `<key>-lead` when comms
   lists that name. `/api/last` answers that default with no launch, with the
   `harnesses` it is for.
-- `moxi launcher clear-expired [--dry-run]` and `moxi launcher keep-warm --session ID
-  [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs did; they run
-  the same ask cache's timer starts. `--dry-run` writes nothing and prints each
+- `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
+  --session ID [--dry-run]` make the expiry and keep-warm asks by hand, as Core's verbs
+  did; they run the same ask cache's timer starts. `clear-expired --session ID` asks only
+  of the launch whose current session is ID, and says so and exits 0 when none is. `--dry-run` writes nothing and prints each
   session's verdict and what a run would do, and `keep-warm --dry-run` with no session
   reads every live launch keep-warm is on for.
 - Exit-session holds while the session runs a background shell or Monitor, as Core's

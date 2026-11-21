@@ -413,25 +413,30 @@ class Asked:
                 "detail": self.verdict.detail, "run_id": self.verdict.run_id}
 
 
-def clear_expired(*, dry_run: bool = False, conn: sqlite3.Connection | None = None,
-                  turns: Any | None = None, slots_api: Any = LOOK, cache: Any = LOOK,
+def clear_expired(session: str | None = None, *, dry_run: bool = False,
+                  conn: sqlite3.Connection | None = None, turns: Any | None = None,
+                  slots_api: Any = LOOK, cache: Any = LOOK,
                   settings: Mapping[str, Any] | None = None,
                   caller_env: Mapping[str, str] | None = None) -> Any:
-    """`moxi launcher clear-expired [--dry-run]`: the expiry ask (`ask_expiry`) of every
-    live launch whose `recycle_on_expiry` acts, by the id it was last known by, newest
-    launch first. Returns the verb's `relaunch.Result`: exit 1 when an ask ended other
-    than quietly or done, else 0."""
+    """`moxi launcher clear-expired [--session ID] [--dry-run]`: the expiry ask
+    (`ask_expiry`) of every live launch whose `recycle_on_expiry` acts, by the id it was
+    last known by, newest launch first; with `session`, only of the launch last known by
+    that id, and with none such a line saying so. Returns the verb's `relaunch.Result`:
+    exit 1 when an ask ended other than quietly or done, else 0."""
     from . import live
 
     with sweep_log(conn) as opened:
         api = slots.api() if slots_api is LOOK and opened is not None else slots_api
         rows = [] if opened is None else [
-            r for r in live.live(opened) if r.values.get("recycle_on_expiry") in EXPIRY]
+            r for r in live.live(opened) if r.values.get("recycle_on_expiry") in EXPIRY
+            and r.newest_session_id and session in (None, r.newest_session_id)]
         asked = [Asked(r.request_id, r.newest_session_id, ask_expiry(
             r.newest_session_id, conn=opened, turns=turns, slots_api=api, cache=cache,
             settings=settings, caller_env=caller_env, dry_run=dry_run))
-            for r in rows if r.newest_session_id]
-    return swept(asked, dry_run=dry_run, none="no live launch recycles on expiry")
+            for r in rows]
+    none = ("no live launch recycles on expiry" if session is None else
+            f"no live launch that recycles on expiry has current session {session}")
+    return swept(asked, dry_run=dry_run, none=none)
 
 
 def swept(asked: Sequence[Asked], *, dry_run: bool, none: str) -> Any:
