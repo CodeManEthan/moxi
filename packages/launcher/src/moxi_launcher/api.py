@@ -564,7 +564,7 @@ def _replayed(request: ReplayRequest) -> Replayed:
         dropped = _unoffered_option(harness, target, values, name)
         if dropped is not None:
             warnings.append(dropped)
-    if recycle.scratch_relaunch(values):
+    if recycle.is_scratch_relaunch(values):
         values["recycle_at_limit"] = "off"
         warnings.append(f"recycle_at_limit relaunch is not applied: "
                         f"{recycle.SCRATCH_RECYCLE[0]}")

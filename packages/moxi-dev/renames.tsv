@@ -3754,6 +3754,7 @@ launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.notify_all()
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._changed.wait_for(lambda: self.events > seen or self.gone is not None,	keep	_changed	_changed
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
 launcher	packages/launcher/src/moxi_launcher/quiet.py	with self._changed:	keep	_changed	_changed
+launcher	packages/launcher/src/moxi_launcher/recycle.py	-	name	scratch_relaunch	is_scratch_relaunch
 launcher	packages/launcher/src/moxi_launcher/recycle.py	- `cleared` or `compacted`.	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	RAN = {"clear": "cleared", "compact": "compacted"}	keep	compacted	compacted
 launcher	packages/launcher/src/moxi_launcher/recycle.py	_act	name	error	exc

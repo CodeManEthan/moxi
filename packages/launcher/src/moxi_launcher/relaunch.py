@@ -208,7 +208,7 @@ def may_recycle(row: store.LaunchRow) -> None:
     the option). A scratch row refused for its value gets `SCRATCH_HINT`, since a scratch
     launch can't take the option."""
     value = row.values.get("recycle_at_limit")
-    if recycle.scratch_relaunch(row.values):
+    if recycle.is_scratch_relaunch(row.values):
         problem, hint = recycle.SCRATCH_RECYCLE
         raise Refused("no-self-recycle", f"launch {row.request_id} works in a scratch "
                                          f"folder, and {problem}", hint)

@@ -414,7 +414,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     key = store.crossing_key(session_id, getattr(crossing, "mark", None),
                              getattr(crossing, "at", None))
     if value == "relaunch":
-        if scratch_relaunch(row.values):
+        if is_scratch_relaunch(row.values):
             return None
         if not _told(conn, row.request_id, key):
             try:
@@ -439,7 +439,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     return COMPACT_LINE
 
 
-def scratch_relaunch(values: Mapping[str, Any]) -> bool:
+def is_scratch_relaunch(values: Mapping[str, Any]) -> bool:
     """Whether a launch's `values` set a scratch launch to recycle itself
     (`SCRATCH_RECYCLE`)."""
     return bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch"
@@ -511,4 +511,5 @@ __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", 
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_AFTER", "RELAUNCH_LINE",
            "SCRATCH_RECYCLE", "SHELLS_IDLE_S", "STOP_SHELLS", "UNCONFIRMED", "Verdict",
            "ask_expiry", "cache_read", "claude_projects", "codex_sessions", "crossing_line",
-           "end", "on_crossing", "relaunch_line", "scratch_relaunch", "start_compact", "verdict_of"]
+           "end", "is_scratch_relaunch", "on_crossing", "relaunch_line", "start_compact",
+           "verdict_of"]
