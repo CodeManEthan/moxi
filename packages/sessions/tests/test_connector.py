@@ -20,6 +20,11 @@ TOKEN = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 PACKAGE = Path(connector.__file__).parent
 
 
+def shows_a_piece_of_the_token(text: str) -> bool:
+    """Whether any 6 characters of `TOKEN` in a row show in `text`."""
+    return any(TOKEN[i:i + 6] in text for i in range(len(TOKEN) - 5))
+
+
 class Ctx:
     def __init__(self):
         self.fields = {}
@@ -256,11 +261,11 @@ def test_an_unlisted_root_outside_the_cut_s_roots_shows_no_full_path():
     assert first == {"harness": "codex", "root": "sessions",
                      "reason": "x cannot be listed: permission denied; sessions holds 2 "
                                "more"}
-    # The first pass takes the rest of the path into the token's hit, so the known root
-    # no longer matches; its top folder, `/data/`, still cuts what's left.
-    assert second == {"harness": "claude", "root": "[REDACTED:github-pat]",
-                      "reason": "[REDACTED:github-pat] cannot be listed"}
+    # The token is a segment before the last, so the cut drops it with the rest.
+    assert second == {"harness": "claude", "root": "projects",
+                      "reason": "a cannot be listed"}
     assert "/data" not in result.text and TOKEN not in result.text
+    assert not shows_a_piece_of_the_token(result.text)
 
 
 @pytest.mark.parametrize("since", ["yesterday", "2026", "12x"])
