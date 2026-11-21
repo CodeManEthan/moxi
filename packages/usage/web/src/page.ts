@@ -63,6 +63,8 @@
 // entry, so Back leaves the page, and a reload or a new placement opens the same piece.
 
 import { css, html, LitElement, nothing, svg } from "lit";
+import { Directive, directive, PartType } from "lit/directive.js";
+import type { ElementPart, PartInfo } from "lit/directive.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
@@ -400,6 +402,27 @@ const STYLES = css`
     .quietline { padding-top: 56px; white-space: normal; }
   }
 `;
+
+/** An element's height in px, written to the element's own style. The shell's style
+ * policy (style-src 'self') refuses a style attribute in markup, and Lit's
+ * styleMap writes one on its first draw; a write to the element's style is allowed. */
+class HeightPx extends Directive {
+  constructor(info: PartInfo) {
+    super(info);
+    if (info.type !== PartType.ELEMENT) throw new Error("heightPx goes on an element");
+  }
+
+  render(_px: number) {
+    return nothing;
+  }
+
+  override update(part: ElementPart, [px]: [number]) {
+    (part.element as HTMLElement).style.height = `${px}px`;
+    return nothing;
+  }
+}
+
+const heightPx = directive(HeightPx);
 
 export class UsagePage extends LitElement {
   static styles = STYLES;
@@ -1453,7 +1476,7 @@ export class UsagePage extends LitElement {
         row?.focus();
       });
     };
-    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" style="height: ${px}px"></tr>` : nothing);
+    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" ${heightPx(px)}></tr>` : nothing);
     return html`<div class="scroll board" data-part="board" @scroll=${scrolled}><table class="tbl" data-part="table"
       data-table="sessions" aria-rowcount=${count + 1}>
       <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
