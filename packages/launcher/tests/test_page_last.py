@@ -559,6 +559,23 @@ def test_the_identity_is_the_newest_started_launch_of_the_harness_that_bound_one
     assert handed_values(said) == {"model": "sonnet"}
 
 
+def test_a_projects_identity_counts_the_launches_made_through_its_seats(world):
+    world.projects["proj-a"].lead = "boss"
+    launch({"seat": "planner", "values": {"model": "sonnet"}}, "seat")
+    bound("seat", "planner")
+    said = last(project="proj-a")
+    # The seat's launch is no launch of the project's for the values, but its name counts.
+    assert (said["at"], said["values"]) == (None, [])
+    assert (identity_of(said), identity_at(said)) == ("planner", stored("seat").created_at)
+    launch({"values": {"cwd": str(world.root), "model": "opus"}}, "bare")
+    launch({"seat": "planner", "values": {"model": "fable"}}, "seat-2")
+    bound("seat-2", "planner-2")
+    said = last(project="proj-a")
+    assert said["at"] == stored("bare").created_at and identity_of(said) == "planner-2"
+    # A folder's launches still leave out a seat's.
+    assert identity_of(last(cwd=str(world.root))) is None
+
+
 def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
                                                                         monkeypatch):
     assert last(project="proj-a")["values"] == []

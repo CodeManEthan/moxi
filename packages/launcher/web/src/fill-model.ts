@@ -6,9 +6,9 @@
 // another project's launch, even in the same folder. `/api/last` answers that launch's
 // harness and the values its own request gave, never one of a row that is not carried. The
 // comms identity comes apart from them, once for each harness: the one launches there of
-// that harness bound, at the global scope, else the default identity. The form fills the
-// one for the harness it is drawn for, whatever harness the newest launch ran; with no
-// launch only that fills.
+// that harness bound (a project's seats' launches among them), at the global scope, else
+// the default identity. The form fills the one for the harness it is drawn for, whatever
+// harness the newest launch ran; with no launch only that fills.
 //
 // A value fills only where the form has the row, the row is shown on this install, and the
 // form leaves it at its shipped default: what the user's `[defaults]` or the applied preset

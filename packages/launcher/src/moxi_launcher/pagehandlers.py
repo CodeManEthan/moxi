@@ -73,10 +73,11 @@ project's or a folder's never include a seat's.
 answered apart from the values, once for each harness (`identities`), so the form fills
 the one for the harness it is drawn for, whatever harness the newest launch ran. For a
 harness it is the name of the newest launch of that harness that bound one, skipping one
-still spawning, and its scope is always the empty one, which comms reads as global: a
-project scope is never carried. With no such launch, and for any harness but Codex, it
-is the default (`default_identity`): on a seat named for one of its project's agents that
-sets no identity, the seat's own name; else a project of kind `agent`'s own key; else the
+still spawning, where a project's launches include those made through its seats, and its
+scope is always the empty one, which comms reads as global: a project scope is never
+carried. With no such launch, and for any harness but Codex, it is the default
+(`default_identity`): on a seat named for one of its project's agents that sets no
+identity, the seat's own name; else a project of kind `agent`'s own key; else the
 project's `lead`; else `<key>-lead`, only when comms lists that name. With no launch at
 all the answer has no `at` and no values, only the identities.
 
@@ -1445,12 +1446,12 @@ def _norm_dir(text: str) -> str:
     return os.path.normpath(os.path.expanduser(text))
 
 
-def _is_of(row: store.LaunchRow, key: str, value: str) -> bool:
+def _is_of(row: store.LaunchRow, key: str, value: str, *, seats: bool = False) -> bool:
     seat = row.preset_kind == "seat"
     if key == "seat":
         return seat and row.preset_name == value
     if key == "project":
-        return not seat and row.project_key == value
+        return (seats or not seat) and row.project_key == value
     return not seat and _norm_dir(row.cwd) == value
 
 
@@ -1462,17 +1463,17 @@ def made_again(row: store.LaunchRow, by: str) -> bool:
     return store.launched_by(row, by) and isinstance(row.values.get("sources"), dict)
 
 
-def launches_of(conn: sqlite3.Connection | None, key: str,
-                value: str) -> list[store.LaunchRow]:
+def launches_of(conn: sqlite3.Connection | None, key: str, value: str, *,
+                seats: bool = False) -> list[store.LaunchRow]:
     """The launches of a seat (`key` `seat`: its preset, wherever it ran), a project
-    (`project`: its key, and no seat named) or a folder (`cwd`: it ran there, and no
-    seat named) that `made_again` counts, newest first, among the newest
+    (`project`: its key, and no seat named, unless `seats`) or a folder (`cwd`: it ran
+    there, and no seat named) that `made_again` counts, newest first, among the newest
     `store.PLACES_SCAN` rows of the log."""
     if conn is None:
         return []
     actor = first.actor()
     return [row for row in store.log(conn, limit=store.PLACES_SCAN)
-            if made_again(row, actor) and _is_of(row, key, value)]
+            if made_again(row, actor) and _is_of(row, key, value, seats=seats)]
 
 
 # -- /api/last ------------------------------------------------------------------------------
@@ -1494,15 +1495,17 @@ def last(query: Mapping[str, Any]) -> dict[str, Any]:
     """`/api/last`'s answer: for the newest launch of the seat, project or folder asked
     for, when it was made, its harness, and each value its own request gave
     (`request_of`) for a row that may be filled from an earlier launch (`carry`) but the
-    identity and scope; and the comms identity each harness fills with (`identities_of`).
-    With no such launch, no `at`, no harness and no values; with no key asked, nothing."""
+    identity and scope; and the comms identity each harness fills with (`identities_of`),
+    which for a project reads its seats' launches too. With no such launch, no `at`, no
+    harness and no values; with no key asked, nothing."""
     none = _up(at=None, harness=None, values=[], identities=[])
     key = whose(query)
     if key is None:
         return none
     with _store() as conn:
         found = launches_of(conn, *key)
-    named = identities_of(found, query, key)
+        binding = launches_of(conn, *key, seats=True) if key[0] == "project" else found
+    named = identities_of(binding, query, key)
     if not found:
         return {**none, "identities": named}
     row = found[0]

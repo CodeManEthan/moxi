@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Home fills the comms identity as Core's desk did: the name the newest launch of the
-  seat, project or folder of the harness the form is drawn for bound, whatever harness the
-  last launch ran, always at the global scope, so a project scope is no longer carried.
+  seat, project or folder of the harness the form is drawn for bound (a project's
+  include those made through its seats), whatever harness the last launch ran, always at
+  the global scope, so a project scope is no longer carried.
   Where no launch of that harness bound one, and for any harness but Codex, it fills a
   default: a seat named for one of its project's agents that sets no identity gets its
   own name, else a project of kind `agent` its own key, else the project's `lead`, else
