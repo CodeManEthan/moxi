@@ -9,6 +9,7 @@ relaunches it flagged.
 | `relaunched`, not flagged | new | nobody |
 | `relaunched`, flagged (its word the finding) | new, held on a screen or not ready | directors, then fallback |
 | `expired`, `held`, `not-held`, `stopped` | untouched | a self run's session, one note |
+| `refused` | untouched: its launch would have been refused | a self run's session, one note; a director's or repair's directors, then fallback |
 | `not-exited`, `exit-pending` | still up, maybe at its exit dialog | directors, then fallback |
 | `relaunch-failed`, `first-turn-not-sent`, `gone`, `error` | down, or up without its handoff | directors, then fallback |
 | `note-not-taken` | the note was refused or lost | directors, then fallback |
@@ -47,10 +48,11 @@ from . import store
 log = logging.getLogger("moxi.launcher.notices")
 
 #: The outcomes after which a self run's session is told, by a note: it was not touched.
-NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped")
-#: The outcomes told past the session, to the directors and then the fallback.
+NOTE_OUTCOMES = ("expired", "held", "not-held", "stopped", "refused")
+#: The outcomes told past the session, to the directors and then the fallback; `refused`
+#: is told so only for a director's run or a repair, a self run's session by its note.
 NOTICE_OUTCOMES = ("not-exited", "exit-pending", "relaunch-failed", "first-turn-not-sent",
-                   "gone", "error")
+                   "gone", "error", "refused")
 #: The outcome of a relaunch whose new session runs; told past the session only when the
 #: launch flagged it (`is_flagged`).
 RELAUNCHED = "relaunched"
@@ -77,6 +79,7 @@ _SESSION = {
     "first-turn-not-sent": "The session was launched again, without its handoff.",
     "gone": "The session is down.",
     "error": "The session may be down.",
+    "refused": "Nothing was exited or launched: the launch would have been refused.",
     NOTE_NOT_TAKEN: "The session was not touched, and did not take the note saying so.",
     RELAUNCHED: "The session was launched again and is running, but it may be held on a "
                 "screen or not yet ready: attach to its slot to see it.",

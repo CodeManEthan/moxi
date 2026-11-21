@@ -13,6 +13,7 @@ import pytest
 from moxi import proc
 
 from moxi_launcher import job, notices, store
+from moxi_launcher import job as job_module
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 SETTINGS = {"relaunch.wait_s": 900, "relaunch.person_s": 120, "relaunch.dialog_s": 60,
@@ -208,6 +209,26 @@ HELD_LINE = ("launch r2 started in slot 3; flagged screen-not-answered: held on 
 NOT_READY_LINE = "launch r2 started in slot 3; flagged no-ready: not ready: attach to slot 3"
 
 
+class Checks:
+    """The launch check stood in for: every request it is asked about, and the refusal
+    it answers (None: the launch would be accepted)."""
+
+    def __init__(self):
+        self.asked, self.refusal = [], None
+
+    def __call__(self, request, env=None):
+        self.asked.append(request)
+        return self.refusal
+
+
+@pytest.fixture(autouse=True)
+def checks(monkeypatch):
+    """The launch check passes, unless a test says otherwise."""
+    found = Checks()
+    monkeypatch.setattr(job_module, "launch_check", found)
+    return found
+
+
 @pytest.fixture
 def conn(tmp_path):
     conn = store.connect(tmp_path / "launcher.db")
@@ -229,7 +250,7 @@ def arm(conn, mode="self", handoff="/work/h.md", turn_number=4):
 
 
 def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, settings=None,
-       cls=job.RelaunchJob, stop=None, sessions=None):
+       cls=job.RelaunchJob, stop=None, sessions=None, cache=None):
     session = session or FakeSession()
     slots_api = slots_api or FakeSlots(ended=True)
     seen = []
@@ -240,7 +261,7 @@ def go(conn, run, *, session=None, slots_api=None, comms=None, launch=None, sett
 
     clock = Clock()
     runner = cls(conn, run.run_id, turns=FakeTurns(session), slots_api=slots_api,
-                 comms=comms, sessions=sessions, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
+                 comms=comms, sessions=sessions, cache=cache, launch=fake_launch, settings={**SETTINGS, **(settings or {})},
                  clock=clock, sleep=clock.sleep)
     if stop:
         runner.ask_stop(15)
@@ -883,6 +904,75 @@ def test_a_repair_whose_root_run_wrote_no_pin_reads_the_transcript(conn):
     got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
              cls=job.RepairJob, sessions=PinSessions("claude-opus-5-5"))
     assert got.requests[0].model_pin == "claude-opus-5-5"
+
+
+# -- the launch check ---------------------------------------------------------------------
+
+
+def refusing(checks):
+    checks.refusal = SimpleNamespace(code="no-cwd", problem="the directory /work does not "
+                                     "exist", hint="make it")
+
+
+def test_the_job_checks_its_launch_under_its_hold_before_the_exit(conn, checks):
+    run = arm(conn)
+    got = go(conn, run)
+    assert got.outcome == "relaunched"
+    asked = checks.asked[0]
+    assert asked.replacing == SID and asked.hold == run.run_id and asked.respawn
+    assert got.events.index("hold") < got.events.index("exit")
+
+
+def test_a_self_run_whose_launch_would_be_refused_ends_refused_and_is_noted(conn, checks):
+    refusing(checks)
+    comms = FakeComms()
+    got = go(conn, arm(conn), comms=comms)
+    assert (got.outcome, got.run.word) == ("refused", "no-cwd")
+    assert "exit" not in got.events and got.session.commands == []
+    assert got.session.deliveries[0].startswith("Relaunch note from launcher: run ")
+    assert comms.sent == [] and "release" in got.slots.names()
+
+
+def test_a_directors_run_whose_launch_would_be_refused_tells_the_directors(conn, checks):
+    refusing(checks)
+    comms = FakeComms()
+    got = go(conn, arm(conn, mode="director"), comms=comms)
+    assert (got.outcome, got.run.word) == ("refused", "no-cwd")
+    assert "exit" not in got.events and got.session.deliveries == []
+    assert [s[2] for s in comms.sent] == [["boss"]]
+    assert "ended refused: no-cwd" in comms.sent[0][3]
+
+
+class Warm:
+    def __init__(self, kind):
+        self.kind = kind
+
+    def read(self, harness, session_id, **kw):
+        return SimpleNamespace(kind=self.kind)
+
+
+def test_a_directors_run_reads_the_cache_again_after_its_hold(conn):
+    got = go(conn, arm(conn, mode="director"), cache=Warm("warm"))
+    assert (got.outcome, got.run.word) == ("held", "warm")
+    assert "exit" not in got.events and "hold" in got.events
+    cold = go(conn, arm(conn, mode="director"), cache=Warm("cold"))
+    assert cold.outcome == "relaunched"
+
+
+def test_a_self_run_does_not_read_the_cache(conn):
+    got = go(conn, arm(conn), cache=Warm("warm"))
+    assert got.outcome == "relaunched"
+
+
+def test_a_repair_whose_launch_would_be_refused_launches_nothing(conn, checks):
+    original = failed_run(conn)
+    refusing(checks)
+    comms = FakeComms()
+    got = go(conn, repair_run(conn, original), slots_api=FakeSlots(shown=shown("free")),
+             cls=job.RepairJob, comms=comms)
+    assert (got.outcome, got.run.word) == ("refused", "no-cwd")
+    assert got.requests == [] and checks.asked[0].replacing is None
+    assert [s[2] for s in comms.sent] == [["boss"]]
 
 
 def test_repairable_runs():

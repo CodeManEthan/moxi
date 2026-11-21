@@ -201,7 +201,12 @@ class ReplayRequest:
     `model_pin` is the model a relaunch comes back on (`pin.choose`): it is the launch's
     model only when the stored values name none, it never reaches the new row's
     `values_json` (so a resume of the new launch runs the row's own model), and the new
-    launch records it as a `model-pin` event."""
+    launch records it as a `model-pin` event.
+
+    `replacing` is the session id of the session the replay takes over, for `check`
+    before a relaunch exits it: comms' name held by that session, and the slot whose run
+    pane is the row's own, are not refused. A holder that has reported no session id
+    can't be told apart from another session, so its name is still refused."""
 
     row: store.LaunchRow
     relaunch_of: str | None = None
@@ -218,6 +223,7 @@ class ReplayRequest:
     chain: str | None = None
     director: bool = False
     model_pin: str | None = None
+    replacing: str | None = None
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -226,10 +232,13 @@ class ReplayRequest:
 @dataclass(frozen=True)
 class Replayed(presets.Resolved):
     """A replay's values, as `presets.resolve` gives a fresh launch's, with the slot hold
-    the replay comes with and the model pin it applied (None when it applied none)."""
+    the replay comes with, the model pin it applied (None when it applied none), and the
+    session it takes over with that session's run pane (`ReplayRequest.replacing`)."""
 
     hold: str | None = None
     model_pin: str | None = None
+    replacing: str | None = None
+    replacing_pane: str | None = None
 
 
 @dataclass(frozen=True)
@@ -385,6 +394,17 @@ def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
         composition = compose.build(request, resolved, env=env)
     return dataclasses.replace(composition,
                                warnings=_warnings(resolved, composition))
+
+
+def prepare(request, composition: Composition,
+            env: Mapping[str, str] | None = None) -> str:
+    """The command `request`'s launch would run, as its target finds it in the child's
+    environment (`preview`'s `composition`). Raises the target's refusal (a harness that
+    is not on the child's `PATH`); starts and writes nothing."""
+    caller = dict(os.environ if env is None else env)
+    child, _ = _child_base(request, caller)
+    launch_env = common.child_env(child, composition, moxi_modules.session_env())
+    return targets.get(composition.target).prepare(composition, launch_env)
 
 
 def exit_code(error: BaseException) -> int:
@@ -551,7 +571,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
         scratch=bool(values.get("scratch")), project_key=row.project_key, agents=(),
         identity=identity, scope=scope, posture=str(posture or ""), target=target,
         off_posture=bool(stored.get("off_posture", False)), links=frozenset(links),
-        warnings=tuple(warnings), hold=request.hold, model_pin=model_pin)
+        warnings=tuple(warnings), hold=request.hold, model_pin=model_pin,
+        replacing=request.replacing,
+        replacing_pane=row.pane_id if request.replacing else None)
 
 
 def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
@@ -651,16 +673,18 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
                     "and only a slot launch takes a slot",
             "launch with --target slot, or name no slot"))
     if resolved.identity:
-        taken = _identity_taken(resolved.identity, resolved.scope)
+        taken = _identity_taken(resolved.identity, resolved.scope,
+                                replacing=getattr(resolved, "replacing", None))
         if taken is not None:
             found.append(taken)
     found += targets.get(resolved.target).check(resolved)
     return found
 
 
-def _identity_taken(name: str, scope: str | None) -> Refusal | None:
+def _identity_taken(name: str, scope: str | None, *,
+                    replacing: str | None = None) -> Refusal | None:
     """comms' word on whether `name` is free for this launch (`identity.check`)."""
-    return identity.check(name, scope, _comms_api())
+    return identity.check(name, scope, _comms_api(), replacing=replacing)
 
 
 def _comms_api():
@@ -854,5 +878,5 @@ __all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_E
            "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",
-           "launch", "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold",
+           "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview", "release_hold",
            "running"]

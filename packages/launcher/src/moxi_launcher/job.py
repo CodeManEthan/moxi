@@ -28,6 +28,11 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    model the relaunch comes back on (`pin.choose`), read on each pass, a `model` event
    when it changed.
 2. Hold the slot for the run (`slots.hold`, holder the run id). Refused: `not-held`.
+   A director's run then reads the session's cache again: warm or fresh ends it `held`,
+   word `warm`. Then the launch check (`launch_check`): the relaunch's own launch, on its
+   pin, would be accepted now, the session's own name and slot not counted against it;
+   one that would be refused ends the run `refused`, word the refusal's code, with the
+   session untouched.
 3. Exit, through turns, with the turn number the last quiet read saw. turns checks the
    launch's consent, idleness and the number again. `Ran`, any `Failed` and turns' `gone`
    go on to the pane; a refusal that clears by itself (`busy-turn`, `draft`,
@@ -74,7 +79,9 @@ when it is occupied by the launch chain's own session (the original died after i
 respawn); otherwise (held or occupied by anyone outside the chain, or missing) the launch
 goes to the lowest launchable slot. Slots that don't answer about the recorded slot's hold
 are asked again a few times, then the repair ends `relaunch-failed` (`slots-busy`) with
-nothing launched, so it can be repeated. Its posture, first turn and model pin are the
+nothing launched, so it can be repeated. Its launch is checked before it is made, as
+step 2's is: one that would be refused ends the repair `refused`, nothing launched. Its
+posture, first turn and model pin are the
 original run's: the pin from the original's last `model` event, or read from the old
 session's transcript when it wrote none.
 
@@ -291,6 +298,66 @@ def choose_slot(api: Any, slot: str | None, holder: str, chain: str) -> Choice:
     return Choice("", why=f"slot {slot} is {found.state}")
 
 
+def replay_request(row: store.LaunchRow, run_id: str, *, mode: str, handoff: str | None,
+                   by: str, slot: str | None, hold: str | None, respawn: bool,
+                   director: bool = False, model_pin: str | None = None) -> Any:
+    """The replay a relaunch or repair run launches: `row` made again as its relaunch,
+    with a self run's handoff as its first turn (a director's run carries none and the
+    posture `with:<director>`), into `slot` under `hold`, on `model_pin`."""
+    from . import api
+    from .compose import common
+
+    handoff = handoff if mode == "self" else None
+    posture = (common.RELAUNCHED.format(path=handoff) if handoff
+               else f"with:{by}")
+    return api.ReplayRequest(
+        row, relaunch_of=row.request_id, request_id=str(uuid.uuid4()),
+        actor=by, posture=posture, handoff=handoff, run=run_id,
+        slot=slot, hold=hold, respawn=respawn, director=director, model_pin=model_pin)
+
+
+def recorded_pin(conn: sqlite3.Connection, original: store.Run, row: store.LaunchRow, *,
+                 sessions: Any = LOOK) -> Any:
+    """A repair's model pin: the root run's, from its last `model` event; read from the
+    old session's transcript, which outlives it, when the root run wrote none."""
+    from . import pin
+
+    recorded = [event for event in store.run_events(conn, original.run_id)
+                if event.kind == "model"]
+    if recorded:
+        return pin.Pin.of(recorded[-1].detail)
+    return pin.choose(row, original.session_id,
+                      sessions=pin.LOOK if sessions is LOOK else sessions)
+
+
+class LaunchCheckFailed(catalog.Refused):
+    """A launch check that broke on something other than a refusal."""
+
+    code = "launch-check"
+
+
+def launch_check(request: Any, env: Mapping[str, str] | None = None) -> catalog.Refused | None:
+    """Whether the launch `request` makes would be accepted now: `api.check`, then
+    `api.preview`, then its target's `prepare` (the harness command found on the child's
+    `PATH`). None when it would; else the first refusal. Starts and writes nothing. A
+    request whose `replacing` names the session it takes over is not refused for that
+    session's own comms name or slot."""
+    from . import api
+
+    try:
+        refusals = api.check(request, env=env)
+        if refusals:
+            return refusals[0]
+        composition = api.preview(request, env=env)
+        api.prepare(request, composition, env=env)
+    except catalog.Refused as refused_exc:
+        return refused_exc
+    except Exception as exc:  # noqa: BLE001  (a check that breaks refuses the launch)
+        return LaunchCheckFailed(None, f"the launch could not be checked: {_words(exc)}",
+                                 "check moxi doctor, then try again")
+    return None
+
+
 # -- the runs ---------------------------------------------------------------------------
 
 
@@ -304,14 +371,16 @@ class RelaunchJob:
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
                  slots_api: Any = LOOK, comms: Any = LOOK, sessions: Any = LOOK,
-                 launch: Callable[..., Any] | None = None,
+                 cache: Any = LOOK, launch: Callable[..., Any] | None = None,
+                 check: Callable[[Any], Any] | None = None,
                  settings: Mapping[str, Any] | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] = time.sleep):
         self.conn, self.run_id = conn, run_id
         self._turns, self._slots, self._comms = turns, slots_api, comms
-        self._sessions = sessions
+        self._sessions, self._cache = sessions, cache
+        self._check = check
         self.pin: Any | None = None
         self._launch = launch
         self._settings = settings
@@ -436,6 +505,9 @@ class RelaunchJob:
             try:
                 self.hold()
                 self.check_stop()
+                if run.mode == "director":
+                    self.still_cold()
+                self.check_launch(self.request())
                 self.guard()
                 self.acting = True
                 self.exit(number)
@@ -577,6 +649,32 @@ class RelaunchJob:
         if found != self.pin:
             self.event("model", found.detail())
         self.pin = found
+
+    def check_launch(self, request: Any) -> None:
+        """The launch check before an act: a launch that would be refused ends the run
+        `refused`, its word the refusal's code, with the session untouched."""
+        import dataclasses
+
+        check = self._check or launch_check
+        refused = check(dataclasses.replace(request, replacing=self.replacing))
+        if refused is not None:
+            self.end("refused", refused.code, str(refused.problem))
+
+    @property
+    def replacing(self) -> str | None:
+        """The session the replay takes over: the run's, still live before the exit."""
+        return self.run.session_id
+
+    def still_cold(self) -> None:
+        """A director's run reads the session's cache again after its hold: one warm or
+        fresh can take a message, and ends the run `held`, word `warm`."""
+        from . import relaunch
+
+        try:
+            relaunch.not_warm(self.row, self.run.session_id,
+                              relaunch.LOOK if self._cache is LOOK else self._cache)
+        except relaunch.Refused as refused_exc:
+            self.end("held", refused_exc.code, refused_exc.problem)
 
     def hold(self) -> None:
         """Step 2: hold the slot for the run."""
@@ -738,16 +836,9 @@ class RelaunchJob:
     def _replay(self, *, mode: str, handoff: str | None, by: str, slot: str | None,
                 respawn: bool, hold: str | None, director: bool = False) -> Any:
         """The replay of the run's launch, on the run's model pin."""
-        from . import api
-        from .compose import common
-
-        handoff = handoff if mode == "self" else None
-        posture = (common.RELAUNCHED.format(path=handoff) if handoff
-                   else f"with:{by}")
-        return api.ReplayRequest(
-            self.row, relaunch_of=self.row.request_id, request_id=str(uuid.uuid4()),
-            actor=by, posture=posture, handoff=handoff, run=self.run_id,
-            slot=slot, hold=hold, respawn=respawn, director=director,
+        return replay_request(
+            self.row, self.run_id, mode=mode, handoff=handoff, by=by, slot=slot, hold=hold,
+            respawn=respawn, director=director,
             model_pin=self.pin.model if self.pin is not None and self.pin.pinned else None)
 
     def respawn(self, request: Any) -> None:
@@ -809,9 +900,7 @@ class RelaunchJob:
         if run is None or outcome is None:
             return
         told = notices.settings_of(self.settings)
-        if outcome in notices.NOTE_OUTCOMES:
-            if run.mode != "self":
-                return
+        if outcome in notices.NOTE_OUTCOMES and run.mode == "self":
             session = self.target.session if self.target is not None else None
             if session is not None and notices.note(
                     self.conn, run, session, wait_s=float(self.setting("relaunch.wait_s"))):
@@ -870,21 +959,20 @@ class RepairJob(RelaunchJob):
                             "holder": self.holder, "why": choice.why or None})
         self.note_pin(self.recorded_pin(original))
         self.name()
-        self.respawn(self._replay(
+        request = self._replay(
             mode=original.mode, handoff=original.handoff_path, by=original.actor,
             slot=choice.slot, respawn=choice.respawn,
-            hold=self.holder if choice.recorded else None))
+            hold=self.holder if choice.recorded else None)
+        self.check_launch(request)
+        self.respawn(request)
+
+    @property
+    def replacing(self) -> str | None:
+        """A repair's session is down already: it replaces none."""
+        return None
 
     def recorded_pin(self, original: store.Run) -> Any:
-        """The root run's model pin, from its last `model` event; read from the old
-        session's transcript, which outlives it, when the root run wrote none."""
-        from . import pin
-
-        recorded = [event for event in store.run_events(self.conn, original.run_id)
-                    if event.kind == "model"]
-        if recorded:
-            return pin.Pin.of(recorded[-1].detail)
-        return pin.choose(self.row, original.session_id, sessions=self.sessions)
+        return recorded_pin(self.conn, original, self.row, sessions=self.sessions)
 
     def _hold_recorded(self, api: Any, choice: Choice) -> Choice:
         """Hold the recorded slot under the original run's id. Slots that don't answer
@@ -1261,9 +1349,10 @@ def _words(error: BaseException) -> str:
 __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED", "LOOK",
            "NOT_SETTLED", "OFF_POSTURE_HINT", "PAGE", "POLL_S", "REPAIRABLE", "RETRY_S",
            "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
-           "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of", "choose_slot", "gone",
-           "job_name", "launch_request", "main", "placed", "record_refused", "refused_detail",
-           "repairable", "resume_request", "root_run", "run", "run_request", "write_request"]
+           "LaunchCheckFailed", "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of",
+           "choose_slot", "gone", "job_name", "launch_check", "launch_request", "main",
+           "placed", "recorded_pin", "record_refused", "refused_detail", "repairable", "replay_request",
+           "resume_request", "root_run", "run", "run_request", "write_request"]
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

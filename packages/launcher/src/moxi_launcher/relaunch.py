@@ -16,6 +16,13 @@ A launch that names no model comes back on the model its session last used (`pin
 arm and the call read it and put it in their `--json` (`model`, `model_how`), and the job
 reads it again before the exit.
 
+**The launch check.** The arm, the call and a repair check that the relaunch's own launch,
+on its pin, would be accepted now (`job.launch_check`: the launch's live checks, its
+composition, and its harness found on the child's `PATH`), and refuse `launch-check`
+with its words when it would not, the session untouched. The session's own comms name
+and slot are not counted against it. A dry run runs the check too and prints the model
+and the verdict. The job checks again before the exit, and a repair before its launch.
+
 Each verb refuses (exit 3) with nothing written until its last step, which writes the run
 (`runs`, one open run per launch, so a second arm or call loses at insert, naming the
 open run) with its job's name and then starts the job, `moxi-launcher-job`, as a slots
@@ -116,10 +123,12 @@ def arm_self(handoff: str, *, dry_run: bool = False,
              caller_env: Mapping[str, str] | None = None, pid: int | None = None,
              turns: Any | None = None, slots_api: Any | None = None,
              settings: Mapping[str, Any] | None = None,
-             conn: sqlite3.Connection | None = None, sessions: Any = LOOK) -> Result:
+             conn: sqlite3.Connection | None = None, sessions: Any = LOOK,
+             check: Callable[[Any], Any] | None = None) -> Result:
     """Arm a relaunch of the session this process runs in, with `handoff` as the new
     session's first turn. Raises a refusal with nothing written. `sessions` stands in for
-    sessions' API, which the model pin reads through (None: not installed)."""
+    sessions' API, which the model pin reads through (None: not installed), and `check`
+    for the launch check (`job.launch_check`)."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
@@ -135,10 +144,13 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot,
                     "handoff": str(path), "turn_number": number,
                     "model": chosen.model, "model_how": chosen.how}
+            _launch_check(row, sid, chosen, check, mode="self", handoff=str(path),
+                          by=first.actor(env), env=env)
             if dry_run:
                 return Result(exits.OK, (f"would arm a relaunch of session {sid} in slot "
-                                         f"{row.slot}, handoff {path}",),
-                              data={**data, "outcome": "dry-run"})
+                                         f"{row.slot}, handoff {path}",
+                                         _would(chosen)),
+                              data={**data, "outcome": "dry-run", "launch_check": "passes"})
             run_id = store.new_run_id()
             run = store.insert_run(
                 c, kind="relaunch", mode="self", request_id=row.request_id, session_id=sid,
@@ -246,10 +258,11 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                   conn: sqlite3.Connection | None = None,
                   clock: Callable[[], float] = time.monotonic,
                   sleep: Callable[[float], None] = time.sleep,
-                  sessions: Any = LOOK) -> Result:
+                  sessions: Any = LOOK, check: Callable[[Any], Any] | None = None) -> Result:
     """Relaunch the session `which` (a session id or a bound comms name) as one of its
     directors. Raises a refusal with nothing written; a hold now is a result, exit 75.
-    `sessions` stands in for sessions' API, which the model pin reads through."""
+    `sessions` stands in for sessions' API, which the model pin reads through, and
+    `check` for the launch check (`job.launch_check`)."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     if comms is LOOK:
@@ -274,7 +287,7 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                 raise Refused("self", f"session {sid} is your own",
                               "relaunch it with --self --handoff FILE")
             _check_director(comms, caller, row)
-            _not_warm(row, sid, cache)
+            not_warm(row, sid, cache)
             _no_open_run(c, row, api)
             reading = quiet.read(found.session, slot=row.slot, slots_api=api,
                                  person_s=float(current["relaunch.person_s"]))
@@ -287,10 +300,12 @@ def call_director(which: str, *, dry_run: bool = False, follow: bool = True,
                                                "later",),
                               data={**data, "outcome": "held", "word": hold.word,
                                     "detail": hold.detail})
+            _launch_check(row, sid, chosen, check, mode="director", handoff=None, by=caller,
+                          env=env)
             if dry_run:
                 return Result(exits.OK, (f"would relaunch session {sid} in slot {row.slot} "
-                                         f"for {caller}",),
-                              data={**data, "outcome": "dry-run"})
+                                         f"for {caller}", _would(chosen)),
+                              data={**data, "outcome": "dry-run", "launch_check": "passes"})
             run_id = store.new_run_id()
             run = store.insert_run(
                 c, kind="relaunch", mode="director", request_id=row.request_id,
@@ -390,7 +405,7 @@ def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
                   "only a director the launch named may relaunch it; mail its session")
 
 
-def _not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
+def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
     """With cache installed, refuse `warm` for a session whose cache is warm or fresh."""
     try:
         clock = recycle.cache_read(recycle.LOOK if cache is LOOK else cache, row,
@@ -500,7 +515,8 @@ def from_record(run_id: str, *, follow: bool = True,
                 turns: Any = LOOK, settings: Mapping[str, Any] | None = None,
                 conn: sqlite3.Connection | None = None,
                 clock: Callable[[], float] = time.monotonic,
-                sleep: Callable[[float], None] = time.sleep) -> Result:
+                sleep: Callable[[float], None] = time.sleep, sessions: Any = LOOK,
+                check: Callable[[Any], Any] | None = None) -> Result:
     """Launch the session of a run that exited it and did not relaunch it, again, from
     the run's record, as the job `repair-<run>`. Raises a refusal with nothing written.
 
@@ -508,7 +524,10 @@ def from_record(run_id: str, *, follow: bool = True,
     end the repair's own insert writes for it. A run's session that is live after all (a
     refused exit, or a watch that broke while the session ran) is refused `live`, and one
     whose liveness can't be read `liveness-unread`: a repair never starts a second copy
-    of the seat. `turns` stands in for turns' API (None: not installed)."""
+    of the seat. Its launch, on the original run's model pin, is checked before anything
+    is written, and refused `launch-check` when it would be refused. `turns` stands in
+    for turns' API (None: not installed), `sessions` for sessions' and `check` for the
+    launch check."""
     env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
@@ -561,6 +580,20 @@ def from_record(run_id: str, *, follow: bool = True,
         if choice.chain:
             raise Refused("occupied-by-chain", f"{choice.why}: the seat already runs there",
                           f"attach to slot {recorded}; nothing was launched")
+        chosen = job.recorded_pin(c, root, row,
+                                  sessions=job.LOOK if sessions is LOOK else sessions)
+        request = job.replay_request(
+            row, run_id, mode=root.mode, handoff=root.handoff_path, by=root.actor,
+            slot=choice.slot, respawn=choice.respawn,
+            hold=root.run_id if choice.recorded else None,
+            model_pin=chosen.model if chosen.pinned else None)
+        refused = (check(request) if check is not None
+                   else job.launch_check(request, env=env))
+        if refused is not None:
+            raise Refused("launch-check", f"the repair's launch would be refused "
+                                          f"({refused.code}): {refused.problem}",
+                          f"{refused.hint or 'fix that'}; nothing was launched, and the "
+                          "repair can be repeated")
         repair_id = store.new_run_id()
         repair = store.insert_run(
             c, kind="relaunch", mode="repair", request_id=run.request_id,
@@ -618,6 +651,30 @@ def _pin(row: store.LaunchRow, session_id: str, sessions: Any,
     """The model a relaunch of the session would come back on, as the job reads it."""
     return pin.choose(row, session_id, sessions=pin.LOOK if sessions is LOOK else sessions,
                       env=env)
+
+
+def _launch_check(row: store.LaunchRow, session_id: str, chosen: pin.Pin,
+                  check: Callable[[Any], Any] | None, *, mode: str, handoff: str | None,
+                  by: str, env: Mapping[str, str]) -> None:
+    """Refuse `launch-check` when the relaunch's own launch, on its pin, would be
+    refused now; the session's own comms name and slot are not counted against it."""
+    request = job.replay_request(
+        row, "check", mode=mode, handoff=handoff, by=by, slot=row.slot, hold=None,
+        respawn=True, director=mode == "director",
+        model_pin=chosen.model if chosen.pinned else None)
+    request = replace(request, replacing=session_id)
+    refused = (check(request) if check is not None
+               else job.launch_check(request, env=env))
+    if refused is not None:
+        raise Refused("launch-check", f"the relaunch's launch would be refused "
+                                      f"({refused.code}): {refused.problem}",
+                      str(refused.hint or "fix that, then try again"))
+
+
+def _would(chosen: pin.Pin) -> str:
+    """A dry run's line on the model and the launch check."""
+    model = chosen.model or "the harness's default model"
+    return f"it would come back on {model} ({chosen.how}); its launch check passes"
 
 
 def _no_open_run(conn: sqlite3.Connection, row: store.LaunchRow, api: Any) -> None:
@@ -693,5 +750,5 @@ def _span(seconds: float) -> str:
 
 __all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "Refused", "Result",
            "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
-           "is_director", "job_argv", "may_recycle", "offered", "outcome_result", "run_line",
+           "is_director", "job_argv", "may_recycle", "not_warm", "offered", "outcome_result", "run_line",
            "start_job", "status"]

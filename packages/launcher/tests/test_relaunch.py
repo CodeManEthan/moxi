@@ -14,6 +14,7 @@ import pytest
 from moxi import modules, proc
 from moxi.paths import Layout
 
+from moxi_launcher import job as job_module
 from moxi_launcher import relaunch, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -167,6 +168,26 @@ def without_notes(monkeypatch):
     the test that means notes installed says so itself."""
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+class Checks:
+    """The launch check stood in for: every request it is asked about, and the refusal
+    it answers (None: the launch would be accepted)."""
+
+    def __init__(self):
+        self.asked, self.refusal = [], None
+
+    def __call__(self, request, env=None):
+        self.asked.append(request)
+        return self.refusal
+
+
+@pytest.fixture(autouse=True)
+def checks(monkeypatch):
+    """The launch check passes, unless a test says otherwise."""
+    found = Checks()
+    monkeypatch.setattr(job_module, "launch_check", found)
+    return found
 
 
 @pytest.fixture(autouse=True)
@@ -399,6 +420,78 @@ def test_the_call_says_the_model_the_relaunch_comes_back_on(conn, dry_run):
     drop_model(conn)
     result = call(conn, follow=False, dry_run=dry_run, sessions=None)
     assert (result.data["model"], result.data["model_how"]) == (None, "default:no-sessions")
+
+
+# -- the launch check ---------------------------------------------------------------------
+
+
+def refusing(checks):
+    checks.refusal = SimpleNamespace(code="identity-taken", problem="identity planner is "
+                                     "held by claude session x", hint="pick another")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_self_arm_whose_launch_would_be_refused_touches_nothing(conn, tmp_path, checks,
+                                                                  dry_run):
+    refusing(checks)
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as refused:
+        arm(conn, handoff(tmp_path), slots_api=slots_api, dry_run=dry_run)
+    assert refused.value.code == "launch-check" and refused.value.exit_code == 3
+    assert "(identity-taken): identity planner is held" in refused.value.problem
+    nothing_written(conn, slots_api)
+
+
+def test_the_arm_checks_its_own_launch_replacing_its_session_on_its_pin(conn, tmp_path,
+                                                                        checks):
+    drop_model(conn)
+    arm(conn, handoff(tmp_path), sessions=PinSessions("claude-fable-5-2"))
+    [asked] = checks.asked
+    assert asked.replacing == SID and asked.model_pin == "claude-fable-5-2"
+    assert asked.respawn and asked.slot == "3" and asked.relaunch_of == "r1"
+    assert asked.handoff == str(handoff(tmp_path))
+
+
+def test_a_dry_run_prints_the_model_and_the_checks_verdict(conn, tmp_path):
+    result = arm(conn, handoff(tmp_path), dry_run=True)
+    assert result.lines[1] == "it would come back on opus (row); its launch check passes"
+    assert result.data["launch_check"] == "passes"
+    called = call(conn, dry_run=True)
+    assert called.lines[1] == "it would come back on opus (row); its launch check passes"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_directors_call_whose_launch_would_be_refused_touches_nothing(conn, checks,
+                                                                        dry_run):
+    refusing(checks)
+    slots_api = FakeSlots()
+    with pytest.raises(relaunch.Refused) as refused:
+        call(conn, slots_api=slots_api, dry_run=dry_run)
+    assert refused.value.code == "launch-check"
+    assert checks.asked[0].director and checks.asked[0].posture == "with:boss"
+    nothing_written(conn, slots_api)
+
+
+def test_a_repair_whose_launch_would_be_refused_writes_nothing(conn, checks):
+    failed = ended(conn, "relaunch-failed", events=("exit",))
+    refusing(checks)
+    slots_api = FakeSlots(shown=slot_view())
+    with pytest.raises(relaunch.Refused) as refused:
+        repair(conn, failed.run_id, slots_api=slots_api)
+    assert refused.value.code == "launch-check"
+    assert "repair can be repeated" in refused.value.hint
+    assert len(runs(conn)) == 1 and slots_api.started == []
+    [asked] = checks.asked
+    assert asked.replacing is None and asked.hold == failed.run_id
+
+
+def test_a_repair_checks_its_launch_on_the_original_runs_pin(conn, checks):
+    drop_model(conn)
+    failed = ended(conn, "relaunch-failed", events=("exit",))
+    store.add_run_event(conn, failed.run_id, "model", {"model": "claude-fable-5-2",
+                                                       "how": "pinned", "read": None})
+    repair(conn, failed.run_id)
+    assert checks.asked[0].model_pin == "claude-fable-5-2"
 
 
 # -- the handoff --------------------------------------------------------------------------
