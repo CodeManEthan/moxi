@@ -289,7 +289,11 @@ A launch has one act open at a time. A second one is refused (`run-open`, exit 3
 the open run. Each act is a run in the launch log, with its events and its outcome.
 
 **Relaunch** puts a fresh session in the same slot. It needs turns and slots, and a
-Claude Code launch in a slot; comms is needed only for a director's relaunch.
+launch in a slot whose turns session offers exit; comms is needed only for a director's
+relaunch. A session relaunches itself only when its launch was made with
+`--recycle-at-limit relaunch`; any other launch is refused (`no-self-recycle`, exit 3).
+A launch that names no model comes back on the model its transcript last used; a resume
+of it runs the row's own model.
 
     moxi launcher relaunch --self --handoff FILE
 
@@ -307,6 +311,22 @@ A relaunch that can't go ahead (the session never goes quiet within
 `relaunch.wait_s`, the slot can't be held) leaves the session alone and tells it so in
 one turn.
 
+Before it touches the session, a relaunch checks that its own launch, on the model it
+comes back on, would be accepted now: at the arm, at a director's call, again in the job
+just before the exit, and in a repair before it launches. The session's own comms name
+and slot don't count against it. A launch that would be refused (its directory gone, its
+harness not found, its name held by another session) refuses the relaunch, `launch-check`
+at the command or `refused` in the job, with the session left as it was. `--dry-run`
+prints the model and the check's verdict. The armed text names the model too, and tells
+the agent to end its turn and make no further tool call. When a self relaunch ends with
+the session still running (it was not exited, it stopped with an error before the exit,
+or the session's id changed after a `/clear`, which ends the run `changed`), the session
+is told in one turn; its directors hear only when that turn can't be delivered. A run
+refused by turns' pace waits it out before it tries again, and the slot hold it takes for
+the exit and the respawn lasts 510 s. A hold left by a dead run of the same launch is let
+go and taken again. The handoff must be UTF-8 text and not blank; when the session's
+start was never seen, it must be written since the launch was made.
+
     moxi launcher relaunch SESSION_ID
     moxi launcher relaunch IDENTITY
 
@@ -316,17 +336,28 @@ a session whose cache is still warm is refused (`warm`: send it a message instea
 session that isn't quiet now is held (exit 75). The new session starts with the `with:`
 posture of its director and no first turn. The call follows the run for
 `relaunch.follow_s` and prints how it ended; past that it exits 75 and names the run.
+An agent making the call gives Bash a timeout of at least `relaunch.follow_s` plus 30 s,
+since Bash's own default is shorter. The job reads the session's cache again just before
+the exit, so a session that warmed up since the call is left alone (`held`, `warm`). A
+relaunch that came back names its identity, slot, new session, posture and model, and
+whether comms has bound the name. A director named without a scope is read in the
+launch's own scope.
 
     moxi launcher relaunch --status RUN
+    moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
 
-`--status` shows a run and its events, what it waits on first. A relaunch that exited the
+`--status` shows a run and its events, what it waits on first, and exits as the run
+ended: 0 relaunched, 75 held or still running, 1 any other end. `--stop` stops an armed run:
+before the exit the run ends `stopped` and a self run's session is told; from the exit
+on, the run ends once the relaunch has been tried. A relaunch that exited the
 session and failed to start the new one tells the session's directors (or the comms
 identity in `relaunch.fallback`) through comms, naming the command that repairs it:
 `--from-record` starts the session again from the run's record, in its slot, or the
 lowest free one when someone outside the session's own line of launches has taken it. It
 refuses when the slot already runs the relaunched session, and when the session itself is
-still live.
+still live. A run left at the exit dialog (`exit-pending`) can be repaired too, once a
+person has answered the dialog and the session has exited.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
 exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,
@@ -359,9 +390,13 @@ own reads:
   a named hold is open (below). A session idle for an hour has its background shells
   stopped by the clear.
 - `--recycle-at-limit relaunch|compact` with `--limit-at 1x|1.5x|2x` (needs turns and
-  usage): once the context passes the mark, tell the agent to relaunch itself with a
-  handoff (`relaunch` also needs slots and a slot launch), or compact it once it is idle,
-  waiting up to `recycle.limit_wait_s`.
+  usage): once the context passes the mark, tell the agent it may relaunch itself with a
+  handoff, or compact it once it is idle, waiting up to `recycle.limit_wait_s`.
+  `relaunch` is what lets a session recycle itself (it also needs slots and a slot
+  launch); its line opens "This launch lets you recycle yourself". A scratch launch has
+  no notes directory to keep a handoff in, so it can't take `relaunch`
+  (`scratch-recycle`, exit 3); `compact` is open to it. With `--limit-at` unset the mark
+  is the launch's `warn_at`, or `1x` when it warns at none.
 
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out: running subagents, or
@@ -575,6 +610,7 @@ nothing has used it for a while.
 | `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
 | `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |
 | `moxi launcher relaunch --status RUN [--json]` | a run and its events |
+| `moxi launcher relaunch --stop RUN [--json]` | stop an armed relaunch run |
 | `moxi launcher relaunch --from-record RUN [--json]` | start again the session a failed relaunch exited |
 | `moxi launcher exit-session SESSION_ID [--dry-run] [--json]` | exit a launched session |
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
