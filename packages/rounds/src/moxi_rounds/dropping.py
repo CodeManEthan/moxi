@@ -38,6 +38,10 @@ none); the operator, any build, and one git can't read. One `build.dropped` even
 the whole drop: who, the pointer, and the branch's tip. It changes no question and no
 hold, and the stage stays owed: it is commissioned again, or taken out of the plan.
 
+**The scratch gate.** A drop is refused while a process uses the scratch folder of a
+build it would end (`sweeping.scratch_gate`), naming the folder and the process; where
+the processes can't be read, the gate is not run and the drop says so.
+
 **What goes.** A drop deletes no branch, so the work can be commissioned again. Once
 its event is on the log, the worktree and scratch folder of each build it ended are
 removed under the removal rule (`removal`), and those the rule keeps are named with
@@ -86,7 +90,8 @@ class Dropped:
     written. `finished` says the call completed a drop that an earlier call was stopped
     in the middle of. `removed` and `kept` hold the folders of the builds that ended
     with it that the removal rule took and kept, and `refs` what became of CI's own
-    refs they pushed.
+    refs they pushed. `unscanned` says the scratch gate was not run, where the
+    processes could not be read.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -100,6 +105,7 @@ class Dropped:
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
     refs: tuple[ci_refs.Ref, ...] = ()
+    unscanned: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,7 +113,9 @@ class BuildDropped:
     """One build as it was dropped: the round's `name`, the `stage`, who it was `by`
     and the `record` given, the `event` written, the build's folders the removal
     rule `removed` and `kept`, and what became of CI's own `refs` it pushed.
-    `failed` pairs each after-append callback that raised with what it raised."""
+    `failed` pairs each after-append callback that raised with what it raised.
+    `unscanned` says the scratch gate was not run, where the processes could not be
+    read."""
 
     name: str
     stage: str
@@ -118,6 +126,7 @@ class BuildDropped:
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
     refs: tuple[ci_refs.Ref, ...] = ()
+    unscanned: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -214,6 +223,13 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
                      f"moxi rounds drop {name} --by {by} --record PTR")
 
     finished = [False]
+    unscanned: list[str] = []
+
+    def has_no_scratch_in_use(view):
+        in_use, unscanned[:] = sweeping.scratch_gate(
+            view.state, [one for one in builds.builds(view.state) if one.ended is None],
+            again=again)
+        return in_use
 
     def dropped(view, result):
         entries = []
@@ -242,7 +258,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
         written = write.record(
             write.Where(home.project, home.rounds_dir, slug), by=run_by,
             gates=[has_not_ended, has_a_pointer, is_the_leads_to_drop,
-                   withdrawing_is_his, finishes_as_it_began],
+                   withdrawing_is_his, finishes_as_it_began, has_no_scratch_in_use],
             event=dropped, with_project=True, wait_s=wait_s, at=at)
     except NoLog:
         # Only a round's log can be missing here: a project's reads as empty.
@@ -256,7 +272,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
                    went=tuple(event["questions"].items()), event=event,
                    events=written.events, finished=finished[0],
                    removed=cleaned.removed, kept=cleaned.kept,
-                   failed=written.failed, refs=refs)
+                   failed=written.failed, refs=refs, unscanned=tuple(unscanned))
 
 
 def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by: str,
@@ -320,6 +336,15 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by:
         return Unmet(f"{stage_id}'s build {why}, so it is the operator's to drop and not "
                      "the lead's. PTR below is the pointer to where he dropped it", his)
 
+    unscanned: list[str] = []
+
+    def has_no_scratch_in_use(view):
+        build = builds.current(view.state, stage_id)
+        if build is None or build.ended is not None:
+            return None
+        in_use, unscanned[:] = sweeping.scratch_gate(view.state, [build], again=again)
+        return in_use
+
     def dropped(view, result):
         build = builds.current(view.state, stage_id)
         # One event is the whole of the drop: no question or hold changes with it.
@@ -330,7 +355,7 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by:
         written = write.record(
             write.Where(home.project, home.rounds_dir, slug), by=run_by,
             gates=[ending.takes_new_work(name, "a drop of a build"), has_a_pointer,
-                   has_an_open_build, is_the_leads_to_drop],
+                   has_an_open_build, is_the_leads_to_drop, has_no_scratch_in_use],
             event=dropped, wait_s=wait_s, at=at)
     except NoLog:
         raise NoRound(name) from None
@@ -339,7 +364,8 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by:
     return BuildDropped(name=name, stage=stage_id, by=by, record=record,
                         event=written.events[0], removed=cleaned.removed,
                         kept=cleaned.kept, failed=written.failed,
-                        refs=ci_refs.remove(written.view.state, build, settings))
+                        refs=ci_refs.remove(written.view.state, build, settings),
+                        unscanned=tuple(unscanned))
 
 
 def _remove_dirs(state: states.State, name: str, ended, settings) -> removal.Removed:

@@ -495,6 +495,30 @@ def test_the_cleanup_removes_both_dirs_and_deletes_the_merged_branch(ready, repo
     assert repo.git("branch", "--list", "work") == ""
 
 
+def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written(
+        ready, repo):
+    # Core refused to land a build while a live process used its scratch folder.
+    path, _tree = ready
+    scratch = Path(checking.commission_of(states.fold(events(path)),
+                                          build_of(path))["scratch"])
+    before = events(path)
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                            cwd=scratch, stdin=subprocess.PIPE)
+    try:
+        with pytest.raises(Refused) as caught:
+            finishing.finish(ROUND, "B1", by="coder")
+    finally:
+        proc.communicate(timeout=30)
+
+    [unmet] = caught.value.unmet
+    assert unmet.reason.startswith(
+        f"B1's scratch folder {scratch} is in use by pid {proc.pid} (")
+    assert unmet.fix == ("end that process or leave the folder, then: moxi rounds "
+                         f"finish {ROUND} B1")
+    assert events(path) == before and lock_ref(repo) is None
+    assert finishing.finish(ROUND, "B1", by="coder").event is not None
+
+
 def test_the_cleanup_writes_the_scratch_dirs_trash_entry_to_the_sweeps_log(ready):
     path, _tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))

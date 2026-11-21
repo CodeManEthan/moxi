@@ -4,8 +4,11 @@
 tip as read (its head, once the branch is gone), in this order:
 
 1. Under the round's lock, read the round and evaluate every gate of `finish_gates` at
-   `T`. Refuse with every unmet one. A build already finished or dropped is refused
-   before any gate: nothing is left to do, and no second `finish.done` is written.
+   `T`, and the scratch gate (`sweeping.scratch_gate`): no process uses the build's
+   scratch folder. Refuse with every unmet one. A build already finished or dropped is
+   refused before any gate: nothing is left to do, and no second `finish.done` is
+   written. Where the processes can't be read, the scratch gate is not run, and
+   `Finished` says so.
 2. Take the repo's finish lock (`finish_lock`), recording `lock.cleared` when the take
    swapped out a dead holder.
 3. Read the round, the target's head `M` and the branch's tip again. Refuse when the
@@ -185,8 +188,9 @@ class Finished:
     the log already held one), the after-append callbacks that failed, and what the
     cleanup did: the folders it `removed`, those it `kept` with why, and the branch:
     `deleted`, or why it stayed (None when the repo keeps its branches or no merge put
-    the work on the target); and what became of each of CI's own `refs` the build
-    pushed."""
+    the work on the target); what became of each of CI's own `refs` the build
+    pushed; and `unscanned`, a line saying the scratch gate was not run, where the
+    processes could not be read."""
 
     name: str
     stage: str
@@ -200,6 +204,7 @@ class Finished:
     kept: tuple[removal.Kept, ...] = ()
     branch: str | None = None
     refs: tuple = ()
+    unscanned: tuple[str, ...] = ()
 
 
 def finish(name: str, stage: str, *, by: str, settings=None,
@@ -240,6 +245,9 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                                               name=name, repo=build.repo)
     found += finish_actions.blocked(view.state, build, tip, actions, name=name,
                                     worktree_gone=seen.tree is None, again=again)
+    in_use, unscanned = sweeping.scratch_gate(view.state, [build], again=rerun)
+    if in_use is not None:
+        found.append(in_use)
     if found:
         raise Refused(found)
 
@@ -351,7 +359,8 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
                     released=released, failed=written.failed, removed=cleaned.removed,
-                    kept=cleaned.kept, branch=cleaned.branch, refs=refs)
+                    kept=cleaned.kept, branch=cleaned.branch, refs=refs,
+                    unscanned=unscanned)
 
 
 def _acts(recorded: list[str], done: list[Action], build: builds.Build,

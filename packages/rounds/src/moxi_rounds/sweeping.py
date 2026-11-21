@@ -48,6 +48,12 @@ trash is reported and left. `finish` and `drop` write the same two lines for the
 folder of the build they end (`trash_log`), naming A and B as proven, so an entry one of
 them left when stopped is the sweep's to delete too.
 
+**The scratch gate.** `finish` and `drop` read D for the scratch folder of each build
+they end before they write anything (`scratch_users`), and refuse while a process uses
+it. Mapped files are not read there, and the verb's own process and those it runs
+under are not counted. Where the processes can't be read the verb says the gate was not
+run and goes on.
+
 **What it records.** Nothing in any round's log, which machines share. Each removal, each
 trash rename and each trash delete is one line of `sweep.jsonl` in rounds' state
 directory, the store `sweeps`: the time, the act, the place, the build (round, stage,
@@ -71,7 +77,7 @@ from moxi import files
 from . import builds, checking, folders, log, paths, places, removal
 from . import settings as own
 from . import state as states
-from .errors import NoLog, RoundsError, SharedFolder, Unreadable
+from .errors import NoLog, RoundsError, SharedFolder, Unmet, Unreadable
 from .gitreads import Git, GitError
 
 #: The command that removes what the dry run says would go.
@@ -575,12 +581,75 @@ def _latest(found: os.stat_result) -> float:
     return max(found.st_mtime, found.st_ctime)
 
 
+@dataclass(frozen=True)
+class ScratchUsers:
+    """Who uses a build's scratch folder, as `scratch_users` read it: the folder
+    (`place`), each process with a path at or under it (`users`, as `pid <n> (<name>):
+    <path>`), and why the processes could not be read (`unread`, None when they were;
+    `users` is then empty)."""
+
+    place: Path
+    users: tuple[str, ...] = ()
+    unread: str | None = None
+
+
+def scratch_users(commissioned: Mapping) -> ScratchUsers | None:
+    """The processes that use the scratch folder a build's commission record
+    (`commissioned`) names; None where it names none or no folder is there. `finish`
+    and `drop` read it before they move the folder, and refuse while a process uses
+    it. The processes are read as D reads them, apart from mapped files, and apart
+    from this process and every one it runs under, so the shell or the wrapper that
+    runs the verb is not named."""
+    named = commissioned.get(removal.SCRATCH)
+    if not named or not Path(str(named)).is_dir():
+        return None
+    place = Path(str(named))
+    import psutil
+
+    try:
+        lineage = frozenset(one.pid for one in psutil.Process().parents())
+        processes = _Processes(skip=lineage, reads=_GATE_READS)
+        users = processes.using((place, Path(os.path.realpath(place))))
+    except (psutil.Error, OSError) as exc:
+        return ScratchUsers(place, unread=f"the processes could not be read: {exc}")
+    return ScratchUsers(place, tuple(users))
+
+
+def scratch_gate(state: states.State, ended: Iterable[builds.Build], *, again: str
+                 ) -> tuple[Unmet | None, tuple[str, ...]]:
+    """The scratch gate of `finish` and `drop` for the builds the verb ends (`ended`,
+    of the round `state` gives): an `Unmet` naming each scratch folder a process uses
+    and the first process that uses it, None when no process uses one; and a line for
+    each folder whose processes could not be read, saying the gate was not run on it.
+    `again` is the command that runs the verb again."""
+    used, unread = [], []
+    for build in ended:
+        found = scratch_users(checking.commission_of(state, build))
+        if found is None:
+            continue
+        if found.unread is not None:
+            unread.append(f"the scratch gate was not run on {build.stage}'s scratch "
+                          f"folder {found.place}: {found.unread}")
+        elif found.users:
+            more = (f", and {len(found.users) - 1} more" if len(found.users) > 1
+                    else "")
+            used.append(f"{build.stage}'s scratch folder {found.place} is in use by "
+                        f"{found.users[0]}{more}")
+    if not used:
+        return None, tuple(unread)
+    return (Unmet("; ".join(used), f"end that process or leave the folder, then: {again}"),
+            tuple(unread))
+
+
 class _Processes:
     """The user's processes and the paths each uses, read through psutil once, at the
-    first look."""
+    first look: every one but this process and those in `skip`, each read for the
+    fields `reads` names (every field D reads when left out)."""
 
-    def __init__(self):
+    def __init__(self, *, skip: frozenset[int] = frozenset(), reads=None):
         self._table: list[tuple[int, str, tuple[str, ...]]] | None = None
+        self._skip = skip
+        self._reads = reads
 
     def using(self, at: Iterable[Path]) -> list[str]:
         """Each process with a path at or under one of `at`, as `pid <n> (<name>):
@@ -596,7 +665,7 @@ class _Processes:
 
     def _read(self) -> list[tuple[int, str, tuple[str, ...]]]:
         if self._table is None:
-            self._table = _process_table()
+            self._table = _process_table(skip=self._skip, reads=self._reads)
         return self._table
 
 
@@ -609,20 +678,23 @@ def _under(path: str, parent_dir: str) -> bool:
     return path == parent_dir or path.startswith(parent_dir + os.sep)
 
 
-def _process_table() -> list[tuple[int, str, tuple[str, ...]]]:
-    """Each process of the user's but this one: its pid, its name, and the paths its
-    working folder, open files, mapped files, argument words and environment values
-    name. A field that can't be read gives nothing."""
+def _process_table(*, skip: frozenset[int] = frozenset(), reads=None
+                   ) -> list[tuple[int, str, tuple[str, ...]]]:
+    """Each process of the user's but this one and those in `skip`: its pid, its name,
+    and the paths its working folder, open files, mapped files, argument words and
+    environment values name, or those of the fields `reads` gives. A field that can't
+    be read gives nothing."""
     import psutil
 
     me = os.getpid()
+    reads = _READS if reads is None else reads
     try:
         user = psutil.Process(me).username()
     except (psutil.Error, OSError):
         user = None
     table = []
     for process in psutil.process_iter():
-        if process.pid == me:
+        if process.pid == me or process.pid in skip:
             continue
         try:
             if user is not None and process.username() != user:
@@ -631,7 +703,7 @@ def _process_table() -> list[tuple[int, str, tuple[str, ...]]]:
         except (psutil.Error, OSError):
             continue
         used: list[str] = []
-        for read in (_cwd, _open_files, _mapped, _words, _env_parts):
+        for read in reads:
             try:
                 used += read(process)
             except (psutil.Error, OSError, AttributeError, NotImplementedError,
@@ -660,6 +732,12 @@ def _words(process) -> list[str]:
 
 def _env_parts(process) -> list[str]:
     return [part for value in process.environ().values() for part in _parts(value)]
+
+
+#: The fields D reads of a process, and those the scratch gate of `finish` and `drop`
+#: reads: all but the mapped files, whose read takes about a second.
+_READS = (_cwd, _open_files, _mapped, _words, _env_parts)
+_GATE_READS = (_cwd, _open_files, _words, _env_parts)
 
 
 def _parts(word: str) -> list[str]:
@@ -735,4 +813,4 @@ __all__ = ["REMOVE", "DRY_RUN", "TIME_LIMIT_S", "LOCK_FILE", "STARTED_FILE", "LO
            "LOG_MAX_BYTES", "WOULD_GO", "REMOVED", "KEPT", "LEFT", "WOULD_DELETE",
            "DELETED", "RENAMED", "PROVEN", "FINISH_PROVEN", "Running", "Candidate",
            "Leftover", "TrashEntry", "Swept", "lock_file", "started_file", "log_file",
-           "account", "run", "trash_log"]
+           "account", "run", "trash_log", "ScratchUsers", "scratch_users", "scratch_gate"]

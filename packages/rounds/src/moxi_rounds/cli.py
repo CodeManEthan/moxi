@@ -1339,7 +1339,7 @@ def _finish(args, out) -> int:
             print(f"{one.id}: kept the checkout it added, {one.kept}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
-    _cleanup_lines(done.removed, done.kept, out)
+    _cleanup_lines(done.removed, done.kept, out, done.unscanned)
     if done.branch is not None:
         print(f"branch: {done.branch}", file=out)
     _ref_lines(done.refs, out)
@@ -1493,7 +1493,7 @@ def _drop(args, out) -> int:
         print(f"ended {one['stage']}: {one['branch']} at "
               f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
               file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1515,7 +1515,7 @@ def _drop_build(args, out) -> int:
           f"{'no branch' if tip['tip'] is None else tip['tip'][:12]}, kept in git; "
           f"the stage stays owed: commission it again, or take it out of the plan",
           file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1610,9 +1610,11 @@ def _ref_account_lines(refs, swept, out) -> None:
         print(f"then: {arm}{ci_refs.REMOVE}", file=out)
 
 
-def _cleanup_lines(removed, kept, out) -> None:
-    """Say which of an ended build's folders were removed, and which the removal rule
-    kept, with the check that kept each."""
+def _cleanup_lines(removed, kept, out, unscanned=()) -> None:
+    """Say where the scratch gate was not run, which of an ended build's folders were
+    removed, and which the removal rule kept, with the check that kept each."""
+    for line in unscanned:
+        print(line, file=out)
     for removed_dir in removed:
         print(f"removed {removed_dir}", file=out)
     for one in kept:
