@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import itertools
+import os
 from importlib import metadata
 from pathlib import Path
 
@@ -29,11 +30,16 @@ _keys = itertools.count()
 
 class Secrets:
     """secrets' API with a chat redaction that hides `HIDDEN` and `TOKEN`, and answers
-    unscanned for a text holding `unscannable`."""
+    unscanned for a text holding `unscannable`. `between` runs between its two passes."""
 
-    def chat_redact(self, text):
+    def chat_redact(self, text, *, between=None):
         if "unscannable" in text:
             return "[REDACTED:unscanned]"
+        out = self._hide(text)
+        return out if between is None else self._hide(between(out))
+
+    @staticmethod
+    def _hide(text):
         return text.replace(HIDDEN, "[REDACTED:fake]").replace(TOKEN, "[REDACTED:pat]")
 
 
@@ -41,7 +47,7 @@ class Broken:
     def __init__(self, exc):
         self.exc = exc
 
-    def chat_redact(self, text):
+    def chat_redact(self, text, *, between=None):
         raise self.exc
 
 
@@ -59,9 +65,15 @@ class Ctx:
         return self.real._fields
 
 
+def started(memory_prov):
+    """`(memory, provider)` once the provider has started with the test's environment."""
+    asyncio.run(memory_prov[0].start(dict(os.environ)))
+    return memory_prov
+
+
 def provider(secrets=None, **kw):
     gate = Gate(load=lambda: secrets or Secrets())
-    return connector.build(gate=gate, **kw)
+    return started(connector.build(gate=gate, **kw))
 
 
 def search(args, *, secrets=None, **kw):
@@ -174,16 +186,23 @@ class NoChat:
 
 
 class Unscanned:
-    def chat_redact(self, text):
+    def chat_redact(self, text, *, between=None):
         return "[REDACTED:unscanned]"
+
+
+class NoBetween:
+    """A secrets from before `chat_redact` took `between`."""
+
+    def chat_redact(self, text):
+        return text
 
 
 @pytest.mark.parametrize("load", [_no_secrets, lambda: NoChat(),
                                   lambda: Broken(RuntimeError("set gone")),
-                                  lambda: Unscanned()])
+                                  lambda: Unscanned(), lambda: NoBetween()])
 def test_every_call_refuses_redaction_off_with_no_text_and_the_row_fails(db, load):
     put(db, "deploy the widgets")
-    memory, prov = connector.build(gate=Gate(load=load))
+    memory, prov = started(connector.build(gate=Gate(load=load)))
     ctx = Ctx()
     result = asyncio.run(prov.tools[0].call({"words": "deploy"}, ctx))
     assert result.refusal == "redaction-off" and "deploy" not in result.text
@@ -275,6 +294,14 @@ def test_a_row_with_no_writer_is_never_a_hit_and_takes_no_place(db):
     ("\x00<x>deploy", "unknown", False),
     ("\x00deploy after a nul", "unknown", True),
     ("<​x>deploy, a tag split by a format character", "unknown", True),
+    ("<été>deploy", "unknown", False),
+    ("<É>deploy", "unknown", False),
+    ("<日本>deploy", "unknown", False),
+    ("<été>deploy typed", "person", True),
+    (" ​<é>deploy", "unknown", False),
+    ("\x00<é>deploy", "unknown", False),
+    ("< deploy after a no-break space", "unknown", True),
+    ("<½ deploy after a fraction", "unknown", True),
 ])
 def test_only_a_person_model_or_untagged_unknown_row_is_a_hit(db, text, writer, shown):
     put(db, text, writer=writer)
@@ -357,6 +384,56 @@ def test_a_snippet_is_cut_after_the_redaction_and_holds_no_part_of_a_secret(db):
     assert TOKEN[:8] not in snippet
 
 
+#: A made-up value too short and too plain for any rule but one that reads a key before it.
+KEYED = "Qm7vXk2pLr9sTb4w"
+
+
+@pytest.mark.parametrize("text", [
+    f"restart the service api_key\n\n\n\n= {KEYED} then",
+    f"restart the service api_key\n\n\n\n\n\n= {KEYED} then",
+    f"restart the service api_key=      {KEYED} then",
+    f"restart the service api_key=\t\t\t\t\t\t{KEYED} then",
+    f"restart: export API_KEY= {KEYED} then",
+    f"restart: export API_KEY=      {KEYED} then",
+    f"restart the service api_key    = {KEYED} then",
+])
+def test_a_key_the_snippet_s_one_spaces_would_glue_to_its_value_comes_back_redacted(db, text):
+    put(db, text)
+    result, fields = search({"words": "restart"}, secrets=_real_secrets())
+    (snippet,) = snippets(result)
+    assert KEYED not in snippet and "[REDACTED:" in snippet, snippet
+    assert KEYED not in result.text
+    assert "  " not in snippet and "\n" not in snippet
+    assert fields["redactions"] >= 1
+
+
+def test_a_label_and_snippet_joined_into_a_keyed_line_come_back_redacted(db):
+    put(db, f"{KEYED} deploy notes", label="keycloak", kind="user")
+    result, _ = search({"words": "deploy"}, secrets=_real_secrets())
+    (hit,) = result.structured["hits"]
+    assert hit["project"] == "keycloak"
+    line = next(x for x in result.text.splitlines() if x.startswith("1. "))
+    assert KEYED not in line and "keycloak user: [REDACTED:" in line, line
+
+
+def test_a_text_part_that_comes_back_unscanned_shows_no_hit_line(db):
+    class JoinedUnscanned(Secrets):
+        def chat_redact(self, text, *, between=None):
+            if text.startswith(tool.SOURCE_LINE):
+                return "[REDACTED:unscanned]"
+            return super().chat_redact(text, between=between)
+
+    put(db, "deploy the widgets")
+    result, _ = search({"words": "deploy"}, secrets=JoinedUnscanned())
+    assert result.text == f"{tool.SOURCE_LINE}\n{tool.UNSCANNED_TEXT}"
+    assert snippets(result) == ["deploy the widgets"]
+
+
+def test_a_snippet_is_only_cut_after_the_redaction():
+    assert walk.cut_snippet("a  b\n\nc") == "a  b\n\nc"
+    assert walk.squeeze(" a   b\n\n\tc ") == "a b c"
+
+
 def test_a_long_snippet_is_cut_at_300_characters_at_a_space():
     text = " ".join(["alpha"] * 80)
     out = walk.cut_snippet(text)
@@ -375,6 +452,42 @@ def test_a_value_split_by_a_stored_cut_never_shows_in_part(db, cut):
     (snippet,) = snippets(result)
     assert card[:10] not in snippet and card[6:] not in snippet
     assert "[REDACTED:cut-edge]" in snippet
+
+
+#: A made-up base64 key holding `/`, of the shape the slash rule catches whole.
+SLASH_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzq8Lm3Vb9Rk4"
+
+
+def _stored(cut, kept):
+    """A stored text whose `cut` ("message", "tool" or "tail") split `SLASH_KEY`,
+    keeping `kept` of it next to the marker."""
+    if cut == "tail":
+        return "[... 4000 earlier characters cut] " + kept + " " + "y " * 60 + "deploy notes"
+    if cut == "message":
+        return "deploy notes " + "x " * 60 + kept + " [... 4000 more characters cut]"
+    head = "Bash(deploy the build)\nexport KEYS=" + kept
+    body = head.rjust(rows.TOOL_CHARS, "z")
+    body = "deploy notes " + body[len("deploy notes "):]
+    assert len(body) == rows.TOOL_CHARS
+    return body + " [... 4000 more characters cut]"
+
+
+@pytest.mark.parametrize("cut", ["message", "tool", "tail"])
+@pytest.mark.parametrize("split", [12, 20, 28])
+def test_a_slash_holding_key_split_by_a_stored_cut_never_shows_in_part(db, cut, split):
+    kept = SLASH_KEY[split:] if cut == "tail" else SLASH_KEY[:split]
+    text = _stored(cut, kept)
+    if cut == "tail":
+        put(db, text, table="tails")
+    else:
+        put(db, text, kind="tool" if cut == "tool" else "user",
+            writer="model" if cut == "tool" else "person")
+    result, _ = search({"words": "deploy", "results": True}, secrets=_real_secrets())
+    (snippet,) = snippets(result)
+    assert "[REDACTED:cut-edge]" in snippet
+    for n in range(len(kept) - 5):
+        assert kept[n:n + 6] not in snippet, (kept[n:n + 6], snippet)
+    assert kept[:6] not in result.text and kept[-6:] not in result.text
 
 
 def test_only_a_marker_at_the_very_end_or_start_drops_an_edge():
@@ -437,14 +550,14 @@ def test_a_rebuild_that_switches_generations_leaves_the_search_its_reader(db):
     switched = []
 
     class Switching(Secrets):
-        def chat_redact(self, text):
+        def chat_redact(self, text, *, between=None):
             if text and not switched:
                 with index.writer() as w:
                     n, conn = w.new_generation()
                     conn.close()
                     w.switch(n)
                 switched.append(n)
-            return super().chat_redact(text)
+            return super().chat_redact(text, between=between)
 
     result, _ = search({"words": "deploy"}, secrets=Switching())
     assert switched and index.current() == switched[0]
@@ -470,6 +583,31 @@ def test_the_call_log_takes_every_field_and_holds_no_words_or_ids(db):
                            "redactions", "cut"}
     assert fields["words"] == 2 and fields["hits"] == 1 and fields["refusal"] is None
     assert not any(isinstance(v, str) for v in fields.values())
+
+
+def test_a_sessions_without_interface_seven_refuses_and_the_search_row_says_why(db):
+    def old_sessions():
+        raise RuntimeError("memory reads sessions at interface 7: sessions offers 1-6")
+
+    put(db, "deploy the widgets")
+    result, fields = search({"words": "deploy"}, sessions=old_sessions)
+    assert result.refusal == "no-sessions" and result.text == tool.NO_SESSIONS
+    assert "deploy" not in result.text and fields["refusal"] == "no-sessions"
+    memory, _ = provider(sessions=old_sessions)
+    row = {r.name: r for r in memory.status()}["search"]
+    assert row.level == "fail"
+    assert "interface 7: sessions offers 1-6" in row.text and "no-sessions" in row.text
+
+
+def test_before_start_the_tool_refuses_and_the_search_row_reads_nothing(db):
+    put(db, "deploy the widgets")
+    memory, prov = connector.build(gate=Gate(load=Secrets))
+    assert memory.env is None and connector.MEMORY.env is None
+    ctx = Ctx()
+    result = asyncio.run(prov.tools[0].call({"words": "deploy"}, ctx))
+    assert result.refusal == "not-started" and result.text == tool.NOT_STARTED
+    row = {r.name: r for r in memory.status()}["search"]
+    assert (row.level, row.text) == ("warn", "not checked yet: the provider hasn't started")
 
 
 def test_the_real_search_needs_sessions_at_interface_seven():

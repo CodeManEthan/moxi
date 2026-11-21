@@ -31,10 +31,11 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # its `Limit`, which no released connector carries yet, and python-stdnum, which the chat
 # redaction's personal-data set needs. Only the host loads the provider
 # `moxi_notes.connector`, which reaches it through moxi.modules.load("connector",
-# interface=1). Install it with `secrets` beside it, `moxi-notes[connector,secrets]`.
+# interface=1). The install line names `secrets` beside it, `moxi-notes[connector,secrets]`.
 connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
-# secrets with its personal-data set, every set the tools' chat redaction uses, and its
-# `chat_redact`, which no released secrets carries yet. Without them every tool refuses
+# secrets' personal-data set by name. secrets is already a dependency and `connector`
+# brings the set's python-stdnum, so this adds nothing today. The tools need secrets'
+# `chat_redact`, which no released secrets carries yet; without it every tool refuses
 # redaction-off, and the redaction status row says why.
 secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 

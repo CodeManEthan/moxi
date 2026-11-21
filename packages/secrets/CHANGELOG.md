@@ -29,8 +29,11 @@
   walker memory's ingest used, moved here unchanged.
 - broad gains `high-entropy-slash-run`: a run of 40 or more base64 characters, up to two
   `=` after it, holding a `/` or `+`, an upper-case letter, a lower-case letter and a
-  digit, no `//`, and entropy above 4.5. It finds a bare secret holding `/`, such as an
-  AWS secret access key with no name before it, which `high-entropy-run` leaves out. Its
+  digit, no `//`, and entropy above 4.5, starting at the text's start or right after
+  whitespace, a quote, a backtick, `=`, `:`, `(`, `[`, `{`, `,`, `<` or `>`. It finds a
+  bare secret holding `/`, such as an AWS secret access key with no name before it,
+  which `high-entropy-run` leaves out, and leaves URLs, paths and page hashes alone,
+  since their runs start after a `.` or a `-`. Its
   conditions are a rule field of Moxi's own, `requires`, which only `broad.toml` may use.
   Text stored redacted before this release gets the rule only when redacted again.
 - `redact` no longer lets text beside a secret keep it: a `gitleaks:allow` mark, or a

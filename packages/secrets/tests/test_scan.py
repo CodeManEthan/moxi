@@ -132,6 +132,63 @@ def test_the_slash_run_leaves_paths_urls_digests_and_uuids_alone(engine_name):
                     if h.rule == "high-entropy-slash-run"], text
 
 
+def slash_hits(text, *, strict):
+    return [text[h.start:h.end] for h in scan(text, ("broad",), strict=strict)
+            if h.rule == "high-entropy-slash-run"]
+
+
+# Each character a run may start after, beside the text's start: whitespace (ASCII and
+# Unicode's), quotes, a backtick, = : ( [ { , < and >.
+SLASH_LEADS = [" ", "\t", "\n", "\r", "\x0b", "\x0c", "\x85", "\xa0", " ", " ",
+               " ", " ", " ", " ", " ", "　",
+               '"', "'", "`", "=", ":", "(", "[", "{", ",", "<", ">"]
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_hits_alone_and_after_each_listed_character(engine_name, strict):
+    r = corpus.rng(14)
+    value = slash_secret(r)
+    assert slash_hits(value, strict=strict) == [value]
+    for lead in SLASH_LEADS:
+        text = f"x{lead}{value} end"
+        assert value in "".join(slash_hits(text, strict=strict)), repr(lead)
+    for text in (f"FOO={value}", f"FOO={value}\n", f"https://example.test/p?a=1&sig={value}&b=2",
+                 f'{{"k": "{value}"}}', f"key: {value}", f"<{value}>"):
+        assert value in "".join(slash_hits(text, strict=strict)), text
+        assert value not in redact(text, ("broad",), strict=strict), text
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_misses_a_value_after_a_dot_a_dash_or_an_underscore(engine_name, strict):
+    r = corpus.rng(15)
+    value = slash_secret(r)
+    for lead in (".", "-", "_"):
+        assert slash_hits(f"x{lead}{value} end", strict=strict) == [], lead
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_slash_run_leaves_ci_links_document_links_hosts_and_hashes_alone(engine_name,
+                                                                            strict):
+    r = corpus.rng(16)
+    sri = slash_secret(r, 64)
+    # Each path mixes upper case, lower case and digits, so the same run written after a
+    # space hits; only the character before it keeps the link or hash quiet.
+    cases = [
+        ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501/job/54928374651",
+         "com/CodeOwner7/moxi/actions/runs/19283746501/job/54928374651"),
+        ("https://github.com/CodeOwner7/moxi/actions/runs/19283746501",
+         "com/CodeOwner7/moxi/actions/runs/19283746501"),
+        ("https://docs.google.com/document/d/1Xk9QzB7vLmN3pRtY5wA2sDfGhJ8kLzXcVbNm4QwErTy/edit",
+         "com/document/d/1Xk9QzB7vLmN3pRtY5wA2sDfGhJ8kLzXcVbNm4QwErTy/edit"),
+        ("see https://ci-runner/Kx9mQ2vL7pR4tY8wB3nZ/Fj6hD1sA5gC0eU2iO9 now",
+         "runner/Kx9mQ2vL7pR4tY8wB3nZ/Fj6hD1sA5gC0eU2iO9"),
+        (f'<script integrity="sha384-{sri}"></script>', sri),
+    ]
+    for text, run in cases:
+        assert slash_hits(f"x {run} end", strict=strict), run
+        assert slash_hits(text, strict=strict) == [], text
+
+
 # -- no-hit cases ---------------------------------------------------------------------------
 
 def every_placeholder():

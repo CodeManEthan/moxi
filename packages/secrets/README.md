@@ -38,11 +38,19 @@ A caller always names the sets it wants. There is no default set.
   like a password or secret); `high-entropy-run` (a run of 40 or more letters, digits,
   `+`, `_` and `-` with entropy above 4.3, which keeps hex digests and UUIDs out); and
   `high-entropy-slash-run`, for the base64 runs the first leaves out: 40 or more
-  characters of `A-Za-z0-9+/`, up to two `=` after them, bounded by characters outside
-  that alphabet, holding a `/` or `+`, an upper-case letter, a lower-case letter and a
-  digit, no `//`, and entropy above 4.5. That finds a bare AWS secret access key; paths
-  of plain words, URLs, digests and UUIDs stay quiet, and so, by chance, do about 2 in
-  100 random 40-character base64 runs.
+  characters of `A-Za-z0-9+/`, up to two `=` after them and no character of that
+  alphabet after those, holding a `/` or `+`, an upper-case letter, a lower-case letter
+  and a digit, no `//`, and entropy above 4.5. The run starts only where a value is
+  written: at the text's start, or right after whitespace, `"`, `'`, `` ` ``, `=`, `:`,
+  `(`, `[`, `{`, `,`, `<` or `>`. That finds a bare AWS secret access key, alone, quoted,
+  after `FOO=` or in a URL's query. A URL's or a file's path starts after a `.` or a
+  hyphenated host's `-`, and a page-integrity hash after its `sha384-`, so CI links,
+  document links, paths, digests and UUIDs stay quiet. What it misses: a secret glued
+  after any other character (`.`, `-`, `_`, `@`, `&`, a letter), and, by chance, about 2
+  in 100 random 40-character base64 runs that fall under the floor, and about 1 in 100
+  that hold a `//`. What it hits that isn't a secret: a URL path after a port's `:` and
+  a path of id-like segments after a space, when either is random enough, and a base64
+  digest after `=` or a quote.
 - **private-names** matches plain text, never a regex. A `words` entry hits unless a letter
   or digit stands right next to one of its letter-or-digit ends, so `alexa` hits
   `alexa-quill` and `Alexa's`, not `alexa2000`. Case is ignored: each letter matches the

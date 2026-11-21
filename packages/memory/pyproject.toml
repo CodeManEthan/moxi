@@ -40,9 +40,10 @@ launcher = ["moxi-launcher>=0.1.1,<0.2"]
 # personal-data's validators for the chat redaction. memory reaches the host only
 # through moxi.modules.load("connector", interface=1).
 connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
-# The chat redaction's personal-data set, which search_memory needs beside the sets
-# memory stores with, and secrets' `chat_redact`, which no released secrets carries yet;
-# without them the tool refuses.
+# secrets' personal-data set by name, beside the sets memory stores with. secrets is
+# already a dependency and `connector` brings the set's python-stdnum, so this adds
+# nothing today. search_memory needs secrets' `chat_redact`, which no released secrets
+# carries yet; without it the tool refuses.
 secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 
 [project.urls]

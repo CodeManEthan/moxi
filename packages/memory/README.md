@@ -566,9 +566,11 @@ With its `connector` and `secrets` extras, memory serves one read-only tool,
 moxi install memory --with connector,secrets
 ```
 
-That installs `moxi-memory[connector,secrets]`. The `connector` extra brings the host;
-the `secrets` extra brings secrets' personal-data set, which the chat redaction needs.
-Install both: while secrets or one of its chat sets can't run, the tool refuses
+That installs `moxi-memory[connector,secrets]`. The `connector` extra brings the host
+and python-stdnum, the validators secrets' personal-data set runs with. secrets itself is
+one of memory's dependencies, so with `connector` alone the tool redacts with every chat
+set; the `secrets` extra names the personal-data set and adds nothing more. While secrets
+or one of its chat sets can't run (python-stdnum removed, say), the tool refuses
 `redaction-off` and the `memory redaction` row of `moxi doctor connector` says why.
 
 **`search_memory`** searches past sessions in memory's index. Inputs: `words` (required,
@@ -588,11 +590,13 @@ limit.
 `writer`: `person` (typed at the prompt), `model` (the model's own turn or tool call),
 `unknown` (a user message whose harness doesn't say who submitted it), or the kind of
 message something else wrote, such as `summary`. A row stored before memory recorded
-writers has none, and the tool never returns it. One `moxi memory reindex` writes every
-row again with its writer, but for a session the rebuild keeps without reading it (one in
-a folder that didn't answer, or a compressed Codex rollout); until then the `memory search` row of `moxi doctor connector`
-warns and counts the rows with none. An index from before the writer column is migrated
-the next time memory writes to it, and the tool refuses `index-unreadable` until then.
+writers has none, and the tool never returns it; while any row has none, the `memory
+search` row of `moxi doctor connector` warns and counts them. One `moxi memory reindex`
+writes every row again with its writer, except the rows of a session the rebuild keeps
+without reading it: those keep no writer, so the chat doesn't find them. For a session
+in a folder that didn't answer, a reindex run while the folder answers gives them one;
+memory never reads a compressed Codex rollout, so its rows never get one. An index from
+before the writer column is migrated the next time memory writes to it, and the tool refuses `index-unreadable` until then.
 
 **What it returns.** Only what `read_session` would show as text: a row whose writer is
 the person or the model, or `unknown` with a text that opens neither with `<` and a
@@ -622,14 +626,20 @@ past the newest 500 that do, isn't found; `moxi memory search` at the machine fi
 texts cut, redacted only with its own `redact.sets`, so the text within 64 characters of
 a stored cut, widened to the next whitespace, shows as `[REDACTED:cut-edge]`: a secret
 the cut split could leave a part no rule matches. Then the whole text goes through the
-chat redaction. Then the snippet is taken from the redacted text around the words, at
-most 64 tokens and 300 characters, cut at a space, with `…` where it leaves text out and
-no marks around the words.
+chat redaction, which makes each run of spaces, tabs and newlines one space between its
+two passes, so its last pass sees the text as the snippet shows it: a key and a value
+blank lines apart, which one space would join, are redacted. Then the snippet is taken
+from the redacted text around the words, at most 64 tokens and 300 characters, cut at a
+space, with `…` where it leaves text out and no marks around the words. Nothing else
+changes it.
 
 **Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
 redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
 snippets, project labels, notes, and an id that isn't in a session id's shape. Session
-ids, harness names, kinds, writers, times, counts and flags go as they are. A row that
+ids, harness names, kinds, writers, times, counts and flags go as they are. The text part
+joins a hit's project label and snippet into a line, so it goes through `chat_redact`
+again whole: a label such as `keycloak` before `user: <value>` makes a keyed shape that
+neither piece held. A row that
 comes back unscanned is dropped. The tool also refuses `redaction-off` while memory's own
 `redact.sets` lacks `credentials` or `broad`, since a stored cut could then split one of
 their values where the cut-edge step can't see it.
@@ -638,7 +648,10 @@ their values where the cut-edge step can't see it.
 has and says `cut`. At most two calls of the tool run at once; a third waits up to 5
 seconds and then refuses `busy`, and a call still running at 20 seconds refuses
 `timeout`. Refusals: `no-index` (run `moxi memory reindex` at the machine),
-`index-unreadable`, `bad-since`, `redaction-off`, `busy` and `timeout`.
+`index-unreadable`, `bad-since`, `redaction-off`, `no-sessions` (the sessions installed
+is missing, broken or too old to say who wrote each message; the `memory search` row
+says which), `busy`, `timeout`, and `not-started` for a call before the host has
+started the provider, which the host never makes.
 
 **Status.** `moxi connector status` and `moxi doctor connector` show a `memory search`
 row (the index's generation and rows, with a warning while it fills, at an old schema or
@@ -677,9 +690,10 @@ turns' own setup: see
 the ingest trigger; `moxi-sessions`, through which memory reads every transcript and each
 harness's retention, and whose `moxi sessions read` opens a session; and `moxi-secrets`,
 the redaction sets. The extras `comms` and `launcher` add the two links above. The extra
-`connector` adds `moxi-connector`, the public MCP host, and python-stdnum, and serves
-`search_memory` ("In the Claude apps"); it needs the extra `secrets` beside it, which
-adds secrets' personal-data set. memory parses no harness's transcript format itself.
+`connector` adds `moxi-connector`, the public MCP host, and python-stdnum, which
+secrets' personal-data set runs with, and serves `search_memory` ("In the Claude apps").
+The extra `secrets` names that set, `moxi-secrets[personal-data]`, and adds nothing
+`connector` doesn't. memory parses no harness's transcript format itself.
 
 ## License
 

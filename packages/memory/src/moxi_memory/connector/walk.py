@@ -4,12 +4,14 @@ index, that never lets text the chat can't see choose, place or count a hit.
 **Which rows.** A row is a candidate only when its writer is `person`, `model` or
 `unknown` (`SHOWN_WRITERS`), and a row with no writer never is. Its stored text, after
 the opening characters, must not open with an output wrapper, and an `unknown` row's
-must not open with `<` and an ASCII letter or with a placeholder. These are clauses of
-the query: the opening characters are skipped with `ltrim(text, ?)` and sessions'
-`OPENING` bound, less U+0000, which a bound string can't hold. A row whose text, so
-trimmed, opens with U+0000 is judged again with sessions' `opening` and skipped when
-that judgment hides it (SQLite's `substr` reads a text only up to a U+0000, so SQL's
-own tests see nothing there and keep the row). Tails (with `results`) are output and take none of these
+must not open with `<` and a letter (any Unicode letter, as `str.isalpha` says) or with a
+placeholder. These are clauses of the query: the opening characters are skipped with
+`ltrim(text, ?)` and sessions' `OPENING` bound, less U+0000, which a bound string can't
+hold, and SQL's tag test knows only the ASCII letters. A row whose text, so trimmed,
+opens with U+0000, or with `<` and a character past ASCII, is judged again in Python
+with sessions' `opening` and skipped when that judgment hides it (SQLite's `substr`
+reads a text only up to a U+0000, so SQL's own tests see nothing there and keep the
+row). Tails (with `results`) are output and take none of these
 clauses. The filters of memory's own search apply: project, time, harness, subagents,
 scratch.
 
@@ -23,11 +25,13 @@ full or `deadline` passes, when the walk stops, ranks what it kept and says `cut
 
 1. The text within `rows.EDGE_CHARS` of a stored cut, widened to whitespace, becomes
    `CUT_EDGE` (`rows.hide_cut_edges`).
-2. The chat redaction runs over the whole result. A text it couldn't scan drops the
-   row.
+2. The chat redaction runs over the whole result, with each whitespace run made one
+   space between its two passes (`squeeze`), so its last pass sees the text exactly as
+   a snippet shows it. A text it couldn't scan drops the row.
 3. The redacted text goes into an in-memory FTS5 table with memory's tokenizer, and the
    snippet is FTS5's `snippet()` of it for the words, with no match marks, `…` at a cut
    edge and at most `SNIPPET_TOKENS` tokens, then cut to `SNIPPET_CHARS` at a space.
+   Nothing but those cuts changes the redacted text.
 4. A row whose redacted text doesn't match as its window needs is dropped. The count of
    dropped rows goes to the call log only.
 
@@ -142,10 +146,15 @@ def match_every(tokens: tuple[str, ...]) -> str:
     return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
 
 
+def squeeze(text: str) -> str:
+    """`text` with each whitespace run made one space and none at either end."""
+    return " ".join(text.split())
+
+
 def cut_snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
-    """`text` with its whitespace runs made single spaces, cut to at most `limit`
-    characters at the last space before, `…` closing a cut."""
-    text = " ".join(text.split())
+    """`text` cut to at most `limit` characters at the last space before, `…` closing a
+    cut. It only cuts, so the snippet is a slice of the text the redaction last saw."""
+    text = text.strip()
     if len(text) <= limit:
         return text
     head = text[:limit - len(SNIPPET_CUT)]
@@ -154,8 +163,8 @@ def cut_snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
 
 
 class _Hidden:
-    """The writer clauses, in SQL and, for a text that opens with U+0000 once SQL's
-    trim is done, in Python."""
+    """The writer clauses, in SQL and, for a text that opens with U+0000, or with `<`
+    and a character past ASCII, once SQL's trim is done, in Python."""
 
     def __init__(self, sessions: Any):
         self.sessions = sessions
@@ -174,17 +183,27 @@ class _Hidden:
         return sql, params
 
     def needs_python(self, text: str) -> bool:
-        """Whether SQL's trim of `text` stops at a U+0000, so its verdict is judged
-        again."""
-        return text.lstrip(self.bound).startswith("\x00")
+        """Whether SQL's verdict on `text` is judged again: its trim stops at a U+0000,
+        or the text opens with `<` and a character past ASCII, which SQL's tag test
+        can't judge a letter."""
+        trimmed = text.lstrip(self.bound)
+        return trimmed.startswith("\x00") or (
+            trimmed[:1] == "<" and len(trimmed) > 1 and not trimmed[1].isascii())
 
     def hides(self, writer: str | None, text: str) -> bool:
         """Python's verdict, over every opening character."""
         s = self.sessions
         if s.opens_with_output(text):
             return True
-        return writer == "unknown" and (s.opens_with_tag(text)
-                                        or s.opening(text).startswith(PLACEHOLDER))
+        opened = s.opening(text)
+        return writer == "unknown" and (opens_with_tag(opened)
+                                        or opened.startswith(PLACEHOLDER))
+
+
+def opens_with_tag(opened: str) -> bool:
+    """Whether `opened`, a text past its opening characters, opens with `<` and a
+    letter, any Unicode letter."""
+    return len(opened) > 1 and opened[0] == "<" and opened[1].isalpha()
 
 
 def _filters(query: Query, *, table: str, with_state: bool,
@@ -223,10 +242,12 @@ def _candidates(conn, expr: str, filters: Mapping[str, search._Filters]):
 def _count(conn, filters: Mapping[str, search._Filters], hidden: _Hidden) -> int:
     total = sum(search._count(conn, table, filt) for table, filt in filters.items())
     rows_filter = filters["rows"]
+    trimmed = "ltrim(r.text, ?)"
     for writer, text in conn.execute(
             f"SELECT r.writer, r.text FROM rows AS r WHERE {rows_filter.where()} "
-            f"AND substr(CAST(ltrim(r.text, ?) AS BLOB), 1, 1) = x'00'",
-            [*rows_filter.params, hidden.bound]):
+            f"AND (substr(CAST({trimmed} AS BLOB), 1, 1) = x'00' OR "
+            f"(substr({trimmed}, 1, 1) = '<' AND unicode(substr({trimmed}, 2, 1)) > 127))",
+            [*rows_filter.params, hidden.bound, hidden.bound, hidden.bound]):
         if hidden.hides(writer, text or ""):
             total -= 1
     return total
@@ -267,7 +288,7 @@ class _Probe:
 
 
 class _Walk:
-    def __init__(self, query: Query, redact: Callable[[str], str], deadline: float,
+    def __init__(self, query: Query, redact: Callable[..., str], deadline: float,
                  clock: Callable[[], float]):
         self.query = query
         self.redact = redact
@@ -283,7 +304,7 @@ class _Walk:
         if key in self.read:
             return self.read[key]
         text = rows.hide_cut_edges(cand.text, CUT_EDGE)
-        clean = self.redact(text)
+        clean = self.redact(text, between=squeeze)
         if clean == UNSCANNED and text != UNSCANNED:
             self.unscanned += 1
             got = None

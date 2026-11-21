@@ -21,8 +21,9 @@ OPTIONAL = {
                 "search and out of the start lists.",
     "connector": "search_memory in the Claude apps, through the connector's MCP host, "
                  "each hit redacted for a chat.",
-    "secrets": "The chat redaction's personal-data set, without which search_memory "
-               "refuses to answer.",
+    "secrets": "secrets' personal-data set, by name. secrets is already one of memory's "
+               "dependencies and the connector extra brings the set's validators, so "
+               "search_memory redacts with every chat set without this extra.",
 }
 GATED = {}
 INTERNAL_ENV = {}
