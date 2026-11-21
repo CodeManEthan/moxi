@@ -192,30 +192,44 @@ def scratch_in_use(a_round, git_repo, tmp_path):
 
 
 @pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])
-def test_a_drop_is_refused_while_a_process_uses_the_builds_scratch(
+def test_a_drop_goes_through_while_a_process_uses_the_builds_scratch_and_leaves_it(
         a_round, scratch_in_use, whole):
-    # Core refused to land a build while a live process used its scratch folder.
+    # Core never refused an abandon for its scratch folder: the folder in use stayed
+    # for the sweep, with one line naming the process.
     scratch, proc = scratch_in_use
-    before = log.read(a_round)
 
-    with pytest.raises(Refused) as caught:
-        if whole:
-            dropping.drop(ROUND, by="operator", record="comms:7654321", run_by="planner")
-        else:
-            operator_drops()
+    if whole:
+        dropped = dropping.drop(ROUND, by="operator", record="comms:7654321",
+                                run_by="planner")
+    else:
+        dropped = operator_drops()
 
-    [unmet] = caught.value.unmet
-    assert unmet.reason.startswith(
-        f"B1's scratch folder {scratch} is in use by pid {proc.pid} (")
-    assert unmet.fix.startswith("end that process or leave the folder, then: moxi "
-                                "rounds drop proj-a/a-round")
-    assert log.read(a_round) == before
+    assert dropped.event["type"] == ("round.dropped" if whole else "build.dropped")
+    [kept] = [one for one in dropped.kept if one.kind == "scratch"]
+    assert (kept.place, kept.check, kept.why) == (scratch, "D",
+                                                  "a running process uses it")
+    assert kept.work[0].startswith(f"pid {proc.pid} (")
     assert scratch.is_dir()
+
+
+def test_the_command_names_the_process_that_keeps_a_dropped_builds_scratch(
+        a_round, scratch_in_use, capsys):
+    scratch, proc = scratch_in_use
+
+    assert main(["drop", ROUND, "B1", "--by", "operator", "--record",
+                 "comms:7654321"]) == 0
+
+    [line] = [one for one in capsys.readouterr().out.splitlines()
+              if one.startswith(f"kept {scratch}:")]
+    assert line.startswith(f"kept {scratch}: D: a running process uses it (pid "
+                           f"{proc.pid} (")
+    assert line.endswith("; it is left for the sweep of leftover folders")
 
 
 def test_where_the_processes_cant_be_read_the_drop_says_the_gate_was_not_run(
         a_round, scratch_in_use, monkeypatch):
-    # Core noted the scratch gate as not run and went on.
+    # Core noted the scratch gate as not run and went on; the drop does the same
+    # before it moves the folder.
     def unreadable(**_how):
         raise OSError("no /proc")
 

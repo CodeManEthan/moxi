@@ -10,6 +10,10 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- `moxi rounds finish` is refused while a process uses the build's scratch folder,
+  naming the process. `finish` and `drop` don't move a scratch folder a process uses:
+  it stays for the sweep of leftover folders, named with the process, and a drop goes
+  through.
 - `moxi rounds check` holds the machine's check lock while its command runs, so one
   check runs at a time on the machine; another run waits for it, or with `--no-wait`
   is refused. A run with no `timeout_s` from the call, the check or the step stops at

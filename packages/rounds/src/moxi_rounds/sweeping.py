@@ -48,11 +48,13 @@ trash is reported and left. `finish` and `drop` write the same two lines for the
 folder of the build they end (`trash_log`), naming A and B as proven, so an entry one of
 them left when stopped is the sweep's to delete too.
 
-**The scratch gate.** `finish` and `drop` read D for the scratch folder of each build
-they end before they write anything (`scratch_users`), and refuse while a process uses
-it. Mapped files are not read there, and the verb's own process and those it runs
-under are not counted. Where the processes can't be read the verb says the gate was not
-run and goes on.
+**The scratch gate.** `finish` reads D for the build's scratch folder before it writes
+anything (`scratch_users`), and refuses while a process uses it. `finish` and `drop`
+read D again just before they move a scratch folder (`remove_build_dirs`): one a process
+uses is not moved, and stays for the sweep with one line naming the process. A drop is
+never refused for it. Mapped files are not read there, and the verb's own process and
+those it runs under are not counted. Where the processes can't be read the verb says
+the gate was not run and goes on.
 
 **What it records.** Nothing in any round's log, which machines share. Each removal, each
 trash rename and each trash delete is one line of `sweep.jsonl` in rounds' state
@@ -596,8 +598,8 @@ class ScratchUsers:
 def scratch_users(commissioned: Mapping) -> ScratchUsers | None:
     """The processes that use the scratch folder a build's commission record
     (`commissioned`) names; None where it names none or no folder is there. `finish`
-    and `drop` read it before they move the folder, and refuse while a process uses
-    it. The processes are read as D reads them, apart from mapped files, and apart
+    reads it at its gate, and `finish` and `drop` again before they move the folder.
+    The processes are read as D reads them, apart from mapped files, and apart
     from this process and every one it runs under, so the shell or the wrapper that
     runs the verb is not named."""
     named = commissioned.get(removal.SCRATCH)
@@ -617,19 +619,18 @@ def scratch_users(commissioned: Mapping) -> ScratchUsers | None:
 
 def scratch_gate(state: states.State, ended: Iterable[builds.Build], *, again: str
                  ) -> tuple[Unmet | None, tuple[str, ...]]:
-    """The scratch gate of `finish` and `drop` for the builds the verb ends (`ended`,
-    of the round `state` gives): an `Unmet` naming each scratch folder a process uses
-    and the first process that uses it, None when no process uses one; and a line for
-    each folder whose processes could not be read, saying the gate was not run on it.
-    `again` is the command that runs the verb again."""
+    """The scratch gate of `finish` for the builds it ends (`ended`, of the round
+    `state` gives): an `Unmet` naming each scratch folder a process uses and the first
+    process that uses it, None when no process uses one; and a line for each folder
+    whose processes could not be read, saying the gate was not run on it. `again` is
+    the command that runs the verb again."""
     used, unread = [], []
     for build in ended:
         found = scratch_users(checking.commission_of(state, build))
         if found is None:
             continue
         if found.unread is not None:
-            unread.append(f"the scratch gate was not run on {build.stage}'s scratch "
-                          f"folder {found.place}: {found.unread}")
+            unread.append(_unread_line(build.stage, found))
         elif found.users:
             more = (f", and {len(found.users) - 1} more" if len(found.users) > 1
                     else "")
@@ -639,6 +640,44 @@ def scratch_gate(state: states.State, ended: Iterable[builds.Build], *, again: s
         return None, tuple(unread)
     return (Unmet("; ".join(used), f"end that process or leave the folder, then: {again}"),
             tuple(unread))
+
+
+
+def remove_build_dirs(name: str, commissioned: Mapping,
+                      kinds: Iterable[str] = (removal.WORKTREE, removal.SCRATCH), *,
+                      stage: str, settings, env=None, deletes: str | None = None,
+                      after_gate: bool = False
+                      ) -> tuple[removal.Removed, tuple[str, ...]]:
+    """`removal.removes` for the folders of the build `commissioned` that `finish` or
+    `drop` of the round `name` just ended (`stage` its stage), each scratch folder's
+    trash entry written to this log (`trash_log`). D is read for the scratch folder
+    first: one a process uses is not moved and is kept under D, left for the sweep,
+    which takes it once it is free. `after_gate` says the verb's gate found it free, so
+    the process came after. Gives what was removed and kept, and the line saying D
+    was not read where the processes could not be read; the folder then goes as the
+    removal rule allows."""
+    kinds = tuple(kinds)
+    used, unread = None, ()
+    if removal.SCRATCH in kinds:
+        found = scratch_users(commissioned)
+        if found is not None and found.unread is not None:
+            unread = (_unread_line(stage, found),)
+        elif found is not None and found.users:
+            why = ("a running process came to use it after the scratch gate"
+                   if after_gate else "a running process uses it")
+            used = removal.Kept(found.place, "D", why, found.users,
+                                kind=removal.SCRATCH)
+            kinds = tuple(kind for kind in kinds if kind != removal.SCRATCH)
+    done = removal.removes(name, commissioned, kinds, settings=settings, env=env,
+                           deletes=deletes, **trash_log(name, commissioned, env=env))
+    if used is None:
+        return done, unread
+    return removal.Removed(done.removed, (*done.kept, used)), unread
+
+
+def _unread_line(stage: str, found: ScratchUsers) -> str:
+    return (f"the scratch gate was not run on {stage}'s scratch folder {found.place}: "
+            f"{found.unread}")
 
 
 class _Processes:
@@ -813,4 +852,5 @@ __all__ = ["REMOVE", "DRY_RUN", "TIME_LIMIT_S", "LOCK_FILE", "STARTED_FILE", "LO
            "LOG_MAX_BYTES", "WOULD_GO", "REMOVED", "KEPT", "LEFT", "WOULD_DELETE",
            "DELETED", "RENAMED", "PROVEN", "FINISH_PROVEN", "Running", "Candidate",
            "Leftover", "TrashEntry", "Swept", "lock_file", "started_file", "log_file",
-           "account", "run", "trash_log", "ScratchUsers", "scratch_users", "scratch_gate"]
+           "account", "run", "trash_log", "ScratchUsers", "scratch_users", "scratch_gate",
+           "remove_build_dirs"]

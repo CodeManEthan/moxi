@@ -519,6 +519,38 @@ def test_a_process_in_the_builds_scratch_refuses_the_finish_with_nothing_written
     assert finishing.finish(ROUND, "B1", by="coder").event is not None
 
 
+def test_a_scratch_that_came_into_use_after_the_gate_stays_for_the_sweep(
+        ready, repo, monkeypatch, capsys):
+    # Core's land, once past its gate, left a scratch folder that came into use for the
+    # sweep and said so; the worktree and the branch went as before.
+    path, _tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    worktree, scratch = Path(made["worktree"]), Path(made["scratch"])
+    gate, started = sweeping.scratch_gate, []
+
+    def gate_then_use(*args, **kwargs):
+        found = gate(*args, **kwargs)
+        started.append(subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()"], cwd=scratch,
+            stdin=subprocess.PIPE))
+        return found
+
+    monkeypatch.setattr(sweeping, "scratch_gate", gate_then_use)
+    try:
+        assert main(["finish", ROUND, "B1"]) == 0
+    finally:
+        for proc in started:
+            proc.communicate(timeout=30)
+
+    [proc] = started
+    assert not worktree.exists() and scratch.is_dir()
+    assert repo.git("branch", "--list", "work") == ""
+    [line] = [one for one in capsys.readouterr().out.splitlines()
+              if one.startswith(f"kept {scratch}:")]
+    assert line.startswith(f"kept {scratch}: D: a running process came to use it after "
+                           f"the scratch gate (pid {proc.pid} (")
+
+
 def test_the_cleanup_writes_the_scratch_dirs_trash_entry_to_the_sweeps_log(ready):
     path, _tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
