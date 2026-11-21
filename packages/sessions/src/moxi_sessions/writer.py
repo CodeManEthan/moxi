@@ -33,7 +33,7 @@ first asked for; `opening` needs no such build.
 message: Claude Code's (`claude.WRAPPER_TAGS`), Codex's (`codex.WRAPPER_TAGS`) and
 `SHARED_WRAPPERS`. `opens_with_output(text)` says whether a text opens with one after
 the opening characters, and `opens_with_tag(text)` whether it opens with `<` followed by
-an ASCII letter.
+a letter of any script (`str.isalpha`).
 """
 
 from __future__ import annotations
@@ -132,10 +132,10 @@ def opens_with_output(text: str) -> bool:
 
 
 def opens_with_tag(text: str) -> bool:
-    """Whether `text` opens, after the opening characters, with `<` and an ASCII
-    letter."""
+    """Whether `text` opens, after the opening characters, with `<` and a letter of any
+    script (`str.isalpha`)."""
     head = opening(text)[:2]
-    return len(head) == 2 and head[0] == "<" and head[1].isascii() and head[1].isalpha()
+    return len(head) == 2 and head[0] == "<" and head[1].isalpha()
 
 
 def output_wrappers() -> tuple[str, ...]:

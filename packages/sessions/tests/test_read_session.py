@@ -180,6 +180,8 @@ def test_a_claude_line_with_no_origin_shows_only_when_it_opens_with_no_tag(trans
     assert plain["text"] == "fix the build"
     tagged = one_message(transcript, "​<command-name>/x</command-name>")
     assert tagged["kind"] == "unknown writer" and "text" not in tagged
+    lettered = one_message(transcript, "<été>x</été>")      # a letter of any script
+    assert lettered["kind"] == "unknown writer" and "text" not in lettered
 
 
 def test_a_user_type_of_peer_with_no_origin_object_is_not_peer_mail(transcript):

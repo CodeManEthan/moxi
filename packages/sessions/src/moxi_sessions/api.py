@@ -114,8 +114,8 @@ Who wrote a message (interface 7; `moxi_sessions.writer` says each value):
   U+202F, U+205F, U+3000 and every Cf character), and `opening(text)`, the text without
   them at its front. Claude Code's and Codex's wrapper tests skip exactly these.
 * `OUTPUT_WRAPPERS`: the tags a harness or a fleet tool puts around output in a user
-  message; `opens_with_output(text)` and `opens_with_tag(text)` (`<` and an ASCII letter),
-  each after the opening characters.
+  message; `opens_with_output(text)` and `opens_with_tag(text)` (`<` and a letter of
+  any script), each after the opening characters.
 * `cut_local(text, env=None)`: the text with each loopback origin made `local` and each
   local path (under the home folder `env` names, `~/`, `$HOME/`, `/home/`, `/tmp/`,
   `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`, `/mnt/`, `/media/`, `/run/` or `/srv/`)

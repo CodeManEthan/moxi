@@ -102,9 +102,10 @@ def test_opening_skips_what_str_lstrip_and_sqlite_ltrim_leave():
     assert api.opening("\U000e0041<x") == "<x"          # a tag character
 
 
-def test_a_tag_is_lt_and_an_ascii_letter_after_the_opening_characters():
+def test_a_tag_is_lt_and_a_letter_after_the_opening_characters():
     assert api.opens_with_tag("​\n<command-name>/clear")
     assert api.opens_with_tag("<A")
+    assert api.opens_with_tag("<é") and api.opens_with_tag("<Ж") and api.opens_with_tag("<中")
     assert not api.opens_with_tag("< a")
     assert not api.opens_with_tag("<​a")       # a character inside the tag
     assert not api.opens_with_tag("<1")
