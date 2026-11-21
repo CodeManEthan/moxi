@@ -162,6 +162,15 @@ class Part:
         return next((one for one in self.every if not one.settled), None)
 
 
+def step_of(part_: Part) -> dict | None:
+    """The step the round is at as data, `{"step", "stage", "state"}`, as `next` reads
+    it, with git and the design read; None for a round at no step and one that ended.
+    On a round whose `design.md` changed since its version was frozen, `moxi rounds
+    list` keeps the step its log alone gives, and this one says the commission waits."""
+    at = part_.at()
+    return None if at is None else {"step": at.step, "stage": at.stage, "state": at.state}
+
+
 def part(found: showing.Shown, seen: Mapping, *, models: Mapping | None = None) -> Part:
     """The part of the round `found`, readable, with `seen` as `checking.seen_of`
     read it: its steps, read once, and its groups made from them without any step's
@@ -1001,8 +1010,10 @@ def record(part_: Part, column: str, stage: str | None, items: Items, *,
     round and the cell's state), and each section, empty or None when it has nothing.
     `now` holds the round's open builds as the newest gather read them, by stage."""
     step = part_.step(column, stage) if column != CLOSE else None
-    found = cells(part_, items).get((column, stage if column not in ROUND_STEPS
-                                     and column not in END_STEPS else None))
+    # Only this marker's cell is made: a round of many stages has many cells.
+    own = part_.step(column, None if column in (*ROUND_STEPS, *END_STEPS) else stage)
+    found = (close_cell(part_, items) if column == CLOSE
+             else None if own is None else cell(part_, own, items))
     state = part_.state
     made = {"round": part_.name, "column": column, "stage": stage,
             "state": None if found is None else found["state"],
@@ -1135,7 +1146,7 @@ def passage(round_dir: Path | str, pointer: str | None, question_id: str, *,
 
 __all__ = ["ROUND_PART", "STAGE_PART", "END_PART", "CLOSE", "STATES", "YOURS", "NONE",
            "DONE", "FAILED", "OWED", "WAITING", "CHILD", "TODO", "BY", "GROUPS", "STUCK",
-           "WRAPPING", "MOVING", "Part", "part", "Items", "items_of", "is_job",
+           "WRAPPING", "MOVING", "Part", "part", "step_of", "Items", "items_of", "is_job",
            "fixes_owed", "columns", "cell", "close_cell", "cells", "lead_stage", "lines",
            "group", "phrase", "round_value", "ordered", "acts", "act_words", "strip",
            "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record", "item_record",
