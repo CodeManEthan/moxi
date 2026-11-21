@@ -644,7 +644,9 @@ their values where the cut-edge step can't see it.
 has and says `cut`. At most two calls of the tool run at once; a third waits up to 5
 seconds and then refuses `busy`, and a call still running at 20 seconds refuses
 `timeout`. Refusals: `no-index` (run `moxi memory reindex` at the machine),
-`index-unreadable`, `bad-since`, `redaction-off`, `busy` and `timeout`.
+`index-unreadable`, `bad-since`, `redaction-off`, `no-sessions` (the sessions installed
+is missing, broken or too old to say who wrote each message; the `memory search` row
+says which), `busy` and `timeout`.
 
 **Status.** `moxi connector status` and `moxi doctor connector` show a `memory search`
 row (the index's generation and rows, with a warning while it fills, at an old schema or

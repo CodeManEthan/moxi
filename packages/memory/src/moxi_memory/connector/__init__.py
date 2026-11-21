@@ -18,14 +18,16 @@ memory names the host's package. When that load fails, importing this package ra
   began (`tool.WALK_S`).
 * `start(env)` keeps the environment memory's config and index are read with, and never
   raises: a missing index or set shows in `status()`, and the tool refuses per call.
-* `status()` gives the `search` row and the `redaction` row.
+* `status()` gives the `search` row and the `redaction` row. The tool refuses
+  `no-sessions`, and the `search` row fails saying why, when the sessions installed
+  doesn't offer the interface memory reads it at.
 """
 
 from __future__ import annotations
 
 import functools
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from moxi import modules
@@ -69,7 +71,7 @@ class Memory:
         return None
 
     def status(self):
-        return [self.api.StatusRow(*search_row(self.env)),
+        return [self.api.StatusRow(*search_row(self.env, sessions=self.searcher.sessions)),
                 self.api.StatusRow(*self.gate.row())]
 
     async def search_memory(self, args: Mapping[str, Any], ctx) -> Any:
@@ -88,14 +90,20 @@ class Memory:
                             status=self.status)
 
 
-def search_row(env: Mapping[str, str] | None) -> tuple[str, str, str]:
+def search_row(env: Mapping[str, str] | None, *,
+               sessions: Callable[[], Any] = tool_mod._sessions) -> tuple[str, str, str]:
     """The `search` status row: the index's generation and rows; `warn` with no index
     yet, while the first read fills it, at schema 1, or with rows that record no writer;
-    `fail` when the index or the state store can't be read, or `redact.sets` lacks a set
-    the stored cuts rely on."""
+    `fail` when the index or the state store can't be read, `redact.sets` lacks a set
+    the stored cuts rely on, or `sessions` (sessions' API at the interface memory reads
+    it at) raises `RuntimeError`, the installed sessions not offering it."""
     from .. import index, search
     from .tool import _sets
 
+    try:
+        sessions()
+    except RuntimeError as exc:
+        return ("search", "fail", f"{exc}; the tool refuses no-sessions")
     sets = _sets(env or {})
     if sets is None:
         return ("search", "fail", "memory's config can't be read; the tool refuses")

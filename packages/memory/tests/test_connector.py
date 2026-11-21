@@ -542,6 +542,20 @@ def test_the_call_log_takes_every_field_and_holds_no_words_or_ids(db):
     assert not any(isinstance(v, str) for v in fields.values())
 
 
+def test_a_sessions_without_interface_seven_refuses_and_the_search_row_says_why(db):
+    def old_sessions():
+        raise RuntimeError("memory reads sessions at interface 7: sessions offers 1-6")
+
+    put(db, "deploy the widgets")
+    result, fields = search({"words": "deploy"}, sessions=old_sessions)
+    assert result.refusal == "no-sessions" and result.text == tool.NO_SESSIONS
+    assert "deploy" not in result.text and fields["refusal"] == "no-sessions"
+    memory, _ = provider(sessions=old_sessions)
+    row = {r.name: r for r in memory.status()}["search"]
+    assert row.level == "fail"
+    assert "interface 7: sessions offers 1-6" in row.text and "no-sessions" in row.text
+
+
 def test_the_real_search_needs_sessions_at_interface_seven():
     assert tool._sessions().OPENING
     assert sessions_api.writer
