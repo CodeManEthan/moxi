@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4 (2026-11-20)
+
 - On the Modules view the Page servers block now sits last, under the Installed list, and
   its list is mostly drawn with the rest of the page. When the list arrives late it no
   longer pushes the blocks and links already on the page down by a few hundred pixels, so
@@ -204,6 +206,23 @@
   beside line one's button, not inside it, and is never cut; a click or key in it sends
   no `moxi-row-toggle`, as for `acts`. A page that leaves it empty draws as before. A page
   that fills it needs a ui with this slot.
+- New element `<moxi-ui-rail>`, defined by `client.js`: a line of step markers, each
+  `<moxi-ui-mark>` child one cell. A mark's `state` is one of eight shapes (`done`,
+  `none`, `yours`, `failed`, `owed`, `waiting`, `todo`, `child`), with a `word` under it,
+  a `count`, a `label` for its accessible name and an opaque `key`; the flags `settled`,
+  `here`, `open`, `quiet` and `wide`. The line is solid from the first marker through
+  each settled one up to and including the first not settled, and dashed after. A click,
+  Enter or Space on a marker sends `moxi-rail-mark` from the rail with `{key}`; the page
+  sets `open`. `size="small"` draws a picture with no buttons, and `vertical` stacks the
+  marks with their labels and words. Cells take `--moxi-rail-cell` (56 px) and
+  `--moxi-rail-label` (132 px). `docs/rail.md` has the list. `client.d.ts` gains
+  `RailElement`, `MarkElement` and `RailMark`.
+- New colour tokens `state-done`, `state-yours`, `state-yours-soft` and `state-failed`:
+  a green, an amber, an amber tint and a red in every colour set, `plain` included, for
+  a step's state on the rail. In calm-workbench and midnight-neon they are those sets'
+  `ok`, `attention`, `attention-soft` and `error`; in `plain`, where those are the text
+  colour and a grey, they are colours of their own. The two `plain` sets' descriptions
+  say so. Each is held to the text floor, 4.5:1, on every background.
 
 ## 0.2.3 (2026-11-08)
 
