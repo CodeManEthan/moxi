@@ -63,9 +63,10 @@ def redaction_problem() -> str | None:
 def _engine() -> str:
     """The engine secrets runs on: `RE2`, or `fallback`."""
     try:
-        from moxi_secrets import engine
+        import moxi_secrets
 
-        return "fallback" if engine.re2_module() is None else "RE2"
+        # Through the API module's attribute: secrets publishes no engine name.
+        return "fallback" if moxi_secrets.engine.re2_module() is None else "RE2"
     except Exception:  # noqa: BLE001 - shown, never raised
         return "unknown"
 

@@ -91,14 +91,14 @@ def _rows(provider):
 
 def test_the_status_rows_name_the_root_and_the_chat_sets(tmp_path, monkeypatch):
     root = make_root(tmp_path)
-    from moxi_secrets import engine
+    import moxi_secrets
     _, provider = _started()
     # Only the row reads which engine runs; the redaction itself keeps the real one.
-    monkeypatch.setattr(engine, "re2_module", lambda: object())
+    monkeypatch.setattr(moxi_secrets.engine, "re2_module", lambda: object())
     rows = _rows(provider)
     assert rows["root"] == ("ok", str(root))
     assert rows["redaction"] == ("ok", "the chat sets load, on RE2")
-    monkeypatch.setattr(engine, "re2_module", lambda: None)
+    monkeypatch.setattr(moxi_secrets.engine, "re2_module", lambda: None)
     assert _rows(provider)["redaction"][0] == "warn"
     assert "fallback" in _rows(provider)["redaction"][1]
 
