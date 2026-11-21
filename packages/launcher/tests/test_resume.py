@@ -798,6 +798,33 @@ def test_the_session_a_go_launch_relaunched_itself_into_resumes_only_with_a_brie
     assert turn.endswith("\n\nCarry on.")
 
 
+@pytest.mark.parametrize("shown", ["relaunched (handoff: {path})", "with:lead"])
+def test_the_session_a_go_launch_was_relaunched_into_resumes_showing_go(
+        work, harness, no_exec, tmp_path, shown):
+    """The resumed launch's row and identity block show the posture the launch was
+    configured with, not the one its relaunch started on; the relaunch's row keeps its
+    own."""
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("where the work stands\n")
+    first_launch(work, posture="go", brief="Build it.")
+    shown = shown.format(path=handoff)
+    api.launch(api.ReplayRequest(with_store(lambda c: store.get(c, "r1")), relaunch_of="r1",
+                                 request_id="r2", actor="ann", posture=shown,
+                                 handoff=str(handoff) if shown.startswith("relaunched")
+                                 else None))
+    ended("r2")
+    relaunched = with_store(lambda c: store.get(c, "r2"))
+    assert relaunched.posture == shown
+    resume.resume(relaunched.session_id, request_id="r3", brief="Carry on.", turns=None,
+                  slots_api=None)
+    assert with_store(lambda c: store.get(c, "r2")).posture == shown
+    row = with_store(lambda c: store.get(c, "r3"))
+    assert (row.resume_of, row.posture) == ("r2", "go")
+    argv = no_exec[-1]["argv"]
+    block = Path(argv[argv.index("--append-system-prompt-file") + 1]).read_text()
+    assert "start posture: go" in block and shown not in block, block
+
+
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})
     first_launch(work, target="slot", slot="3")

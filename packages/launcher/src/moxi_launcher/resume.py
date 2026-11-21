@@ -13,8 +13,9 @@ process (`moxi.proc.alive` on the pid and start time the row recorded). A read t
 marks only its own entry: its liveness is unread, and it is not offered for resume.
 
 **A resume** launches the row again from its stored values (`api.ReplayRequest`, no
-preset read), with the row's own environment rule, `resume_of` naming the launch it
-resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
+preset read), with the row's own environment rule and the posture the launch was
+configured with (a relaunch's row shows its own in its `posture` column, which the resumed
+launch does not take), `resume_of` naming the launch it resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
 Codex host's `--resume <thread id>`. It sends no first turn of the row's: the row's brief
 is not sent again. A brief given to the resume (`--brief` or `--brief-file`, one of them) is
 its first turn, sent as a launch sends its own (`first`). The start posture rules it as it

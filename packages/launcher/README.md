@@ -390,7 +390,8 @@ is) is sent as the resumed session's first turn, the way a launch sends its brie
 start posture rules it as it rules a launch's: a resume of a `go` launch with neither is
 refused before anything starts (`posture-brief`), and so is a brief under
 `with:<identity>`. The posture is the one the launch was configured with, so a `go`
-launch's relaunch resumes as `go`. Under any other posture the brief is optional. Liveness is checked again
+launch's relaunch resumes as `go`, and the resumed launch shows `go` as its posture, not
+the `relaunched` or `with:` one its relaunch started on. Under any other posture the brief is optional. Liveness is checked again
 as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the

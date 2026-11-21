@@ -186,7 +186,9 @@ class ReplayRequest:
 
     `posture` is the start posture the identity block shows in place of the row's
     (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
-    in the new row's `posture` and never in its `values_json`. `handoff` is the handoff a
+    in the new row's `posture` and never in its `values_json`. A resume, which gives none,
+    shows the posture the launch was configured with, from the row's values, so a resume of
+    a relaunch's row shows that one, not the relaunch's. `handoff` is the handoff a
     self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
     `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
     relaunch, whose credentials come from `relaunch.director_pass_env`. `brief` and
@@ -522,7 +524,14 @@ def _replayed(request: ReplayRequest) -> Replayed:
             warnings.append(dropped)
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
-    posture = row.posture if request.posture is None else request.posture
+    if request.posture is not None:
+        posture = request.posture
+    elif request.resume_of:
+        # The posture the launch was configured with, which its values keep: a relaunch's
+        # row shows its own start posture in the column.
+        posture = str(stored.get("posture") or "")
+    else:
+        posture = row.posture
     links = {name for name, on in (
         ("turns", turns), ("comms", identity is not None),
         ("projects", bool(row.project_key)), ("slots", target == "slot"),
