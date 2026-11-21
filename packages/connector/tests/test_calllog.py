@@ -292,8 +292,8 @@ def test_a_flood_of_metadata_fetches_without_a_token_stays_bounded(logdir):
 #: note's path, never words searched for, text read or a session id. The host's own
 #: `dropped` marks a caller that hung up, so no tool may log a field of that name.
 READ_TOOL_FIELDS = {
-    "search_memory": {"words": 2, "hits": 5, "unscanned": 0, "redactions": 3, "cut": False,
-                      "refusal": None},
+    "search_memory": {"words": 2, "hits": 5, "hits_dropped": 1, "unscanned": 0,
+                      "redactions": 3, "cut": False, "refusal": None},
     "list_sessions": {"rows": 12, "refusal": None},
     "read_session": {"harness": "claude", "turns": 4, "rows": 40, "cut": True,
                      "redactions": 1, "refusal": None},

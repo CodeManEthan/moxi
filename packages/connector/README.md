@@ -32,8 +32,15 @@ Its settings are `enabled`, `port` (the loopback port, 8452 by default), `public
 `tools.withheld` lists tools the door serves to no sign-in, whichever module gives them:
 Claude doesn't see them in the tool list, and a call to one answers that no such tool
 exists. `moxi connector status` and the doctor name each one. The connector reads the
-list when it starts, so restart it after a change (`moxi connector disable`, then
-`moxi connector enable`).
+list when it starts, so restart its server unit after a change; on Linux:
+
+```sh
+systemctl --user restart moxi-connector-server
+```
+
+That keeps every sign-in. Don't use `moxi connector disable` and `enable` for it:
+`disable` revokes every grant, so the Claude apps are signed out and each needs a fresh
+code to sign in again.
 
 ## Setting it up
 
