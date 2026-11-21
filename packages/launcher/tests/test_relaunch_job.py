@@ -1139,6 +1139,12 @@ def test_a_repair_whose_launch_would_be_refused_launches_nothing(conn, checks):
     assert (got.outcome, got.run.word) == ("refused", "no-cwd")
     assert got.requests == [] and checks.asked[0].replacing is None
     assert [s[2] for s in comms.sent] == [["boss"]]
+    said = comms.sent[0][3]
+    assert "Nothing was exited" not in said
+    assert ("The session is down and nothing was launched: the repair's launch would have "
+            "been refused.") in said
+    assert said.endswith("Once the launch's problem is fixed, to try the repair again: moxi "
+                         f"launcher relaunch --from-record {original.run_id}")
 
 
 def test_repairable_runs():

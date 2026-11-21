@@ -33,9 +33,10 @@
 - A relaunch checks that its own launch would be accepted before it touches the session:
   at the arm, at a director's call, in the job just before the exit, and in a repair
   before it launches. A launch that would be refused refuses the relaunch (`launch-check`,
-  exit 3) or ends its run `refused`, with the session left as it was. The session's own
-  comms name and slot don't count against it. `--dry-run` prints the model and the
-  check's verdict.
+  exit 3) or ends its run `refused`, with the session left as it was. A repair refused so
+  launches nothing, and its notice says the session is down and names the `--from-record`
+  command that tries it again. The session's own comms name and slot don't count against
+  it. `--dry-run` prints the model and the check's verdict.
 - A director's relaunch reads the session's cache again just before the exit, and a
   session that warmed up since the call ends the run `held`, word `warm`.
 - A self relaunch that ends with its session still running tells the session in one
@@ -44,7 +45,8 @@
   exited. The directors hear only when that turn can't be delivered.
 - `moxi launcher relaunch --stop RUN` stops an open relaunch or repair run by signalling
   its job: before the exit the run ends `stopped` and a self run's session is told; from
-  the exit on, the run ends once the relaunch has been tried. It is refused for an unknown
+  the exit on, the run ends once the relaunch has been tried. A repair's session is down
+  already, so its stop is recorded and its line says so. It is refused for an unknown
   run, one that is not a relaunch, one that has ended, and one whose job is gone.
 - A self relaunch refused by turns' pace (`rate`, `in-flight`) waits 60 s before it
   tries again, and every retry waits 2 s, so the run no longer loops at once.

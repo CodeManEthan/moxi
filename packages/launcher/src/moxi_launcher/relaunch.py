@@ -477,7 +477,9 @@ def stop_run(run_id: str, *, conn: sqlite3.Connection | None = None,
     """Send the job of the open relaunch or repair run `run_id` SIGTERM, and say what that
     does. Refused, with nothing sent: no such run (`no-run`), a run of another kind
     (`not-relaunch`), an ended run (`not-open`), and a run whose job is gone or can't be
-    read (`job-gone`). `kill` stands in for `os.kill`."""
+    read (`job-gone`). A repair's session is down already, so its job only records the
+    stop and ends after the launch is tried; the line says so. `kill` stands in for
+    `os.kill`."""
     from moxi import proc
 
     with _store(conn) as c:
@@ -508,8 +510,11 @@ def stop_run(run_id: str, *, conn: sqlite3.Connection | None = None,
     except ProcessLookupError:
         raise Refused("job-gone", f"run {run_id}'s job ended before the stop reached it",
                       f"moxi launcher relaunch --status {run_id} shows the run") from None
-    return Result(exits.OK, (f"stop sent to run {run_id}: it ends stopped before the exit; "
-                             "from the exit on, it ends after the relaunch is tried",), run,
+    said = ("its session is down already, so the stop is recorded and the run ends after "
+            "the launch is tried" if run.mode == "repair"
+            else "it ends stopped before the exit; from the exit on, it ends after the "
+                 "relaunch is tried")
+    return Result(exits.OK, (f"stop sent to run {run_id}: {said}",), run,
                   {"run_id": run_id, "outcome": "stop-sent", "pid": pid})
 
 

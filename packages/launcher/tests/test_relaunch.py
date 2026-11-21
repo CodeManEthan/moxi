@@ -1180,9 +1180,13 @@ def test_a_stop_sends_the_runs_job_sigterm_and_says_what_it_does(conn, child):
 def test_a_repair_run_is_stopped_too(conn, child):
     run = open_relaunch(conn, mode="repair", job="slots:repair-x")
     sent = []
-    relaunch.stop_run(run.run_id, conn=conn, slots_api=JobSlots(running_job(child.pid)),
-                      kill=lambda pid, sig: sent.append((pid, sig)))
+    result = relaunch.stop_run(run.run_id, conn=conn,
+                               slots_api=JobSlots(running_job(child.pid)),
+                               kill=lambda pid, sig: sent.append((pid, sig)))
     assert sent == [(child.pid, relaunch.STOP_SIGNAL)]
+    assert result.lines == (f"stop sent to run {run.run_id}: its session is down already, "
+                            "so the stop is recorded and the run ends after the launch is "
+                            "tried",)
 
 
 def test_a_stop_of_no_run_another_kind_or_an_ended_run_is_refused(conn):

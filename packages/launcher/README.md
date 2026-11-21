@@ -316,8 +316,10 @@ comes back on, would be accepted now: at the arm, at a director's call, again in
 just before the exit, and in a repair before it launches. The session's own comms name
 and slot don't count against it. A launch that would be refused (its directory gone, its
 harness not found, its name held by another session) refuses the relaunch, `launch-check`
-at the command or `refused` in the job, with the session left as it was. `--dry-run`
-prints the model and the check's verdict. The armed text names the model too, and tells
+at the command or `refused` in the job, with the session left as it was. A repair's
+session is down already: a repair refused so launches nothing, and its notice says the
+session is down and names the `--from-record` command that tries the repair again.
+`--dry-run` prints the model and the check's verdict. The armed text names the model too, and tells
 the agent to end its turn and make no further tool call. When a self relaunch ends with
 the session still running (it was not exited, it stopped with an error before the exit,
 or the session's id changed after a `/clear`, which ends the run `changed`), the session
@@ -350,12 +352,13 @@ launch's own scope.
 `--status` shows a run and its events, what it waits on first, and exits as the run
 ended: 0 relaunched, 75 held or still running, 1 any other end. `--stop` stops an armed run:
 before the exit the run ends `stopped` and a self run's session is told; from the exit
-on, the run ends once the relaunch has been tried. A relaunch that exited the
-session and failed to start the new one tells the session's directors (or the comms
-identity in `relaunch.fallback`) through comms, naming the command that repairs it:
-`--from-record` starts the session again from the run's record, in its slot, or the
-lowest free one when someone outside the session's own line of launches has taken it. It
-refuses when the slot already runs the relaunched session, and when the session itself is
+on, the run ends once the relaunch has been tried. A repair's session is down already,
+so a stop of a repair is recorded and the run ends once its launch has been tried. A
+relaunch that exited the session and failed to start the new one tells the session's
+directors (or the comms identity in `relaunch.fallback`) through comms, naming the
+command that repairs it: `--from-record` starts the session again from the run's record,
+in its slot, or the lowest free one when someone outside the session's own line of
+launches has taken it. It refuses when the slot already runs the relaunched session, and when the session itself is
 still live. A run left at the exit dialog (`exit-pending`) can be repaired too, once a
 person has answered the dialog and the session has exited.
 
