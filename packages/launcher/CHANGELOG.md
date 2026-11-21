@@ -39,11 +39,11 @@
   field) don't count. A brief under `operator` is sent.
 - A scratch launch works in `/tmp/scratch-<uid>/<session name>`, a folder named by its
   session name under a parent of the user's own, by the numeric uid, made 0700 if missing;
-  `TMPDIR` is no longer read. A later launch under the same name works in the same folder.
-  A session name that is not a plain name names the folder folded to lowercase letters,
-  digits and single dashes (`My spike` works in `my-spike`), so the folder stays in the
-  parent. On Windows the parent is `scratch-<user name>` in the
-  user's own temporary folder.
+  `TMPDIR` is no longer read. The folder's name is the session name folded to lowercase
+  letters, digits and single dashes (`Foo_Bar` works in `foo-bar`, `My spike` in
+  `my-spike`), so the folder stays in the parent. A later launch under the same name works
+  in the same folder. On Windows the parent is `scratch-<user name>` in the user's own
+  temporary folder.
 - A scratch launch keeps no notes: a `notes_dir` typed or set by its preset
   is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
   folder notes would keep notes for is refused at preview and launch, with a hint that

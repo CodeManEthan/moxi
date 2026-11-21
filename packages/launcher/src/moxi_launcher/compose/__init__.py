@@ -200,8 +200,8 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
 
     `request` gives `request_id`, `session_id` and `actor`, each read as None when it is
     missing (an id is then minted, the actor read from the environment). A scratch launch
-    works in `common.scratch_dir(name)`, named by the launch's session name (folded to a
-    folder name when it is not a plain one), which the launch makes; this only names it.
+    works in `common.scratch_dir(name)`, named by the launch's session name (folded to
+    lowercase letters, digits and dashes), which the launch makes; this only names it.
     It raises `presets.ScratchNotes` when notes would give that folder a notes home.
     `preview` and the launch both come here, so the same request, its ids given, composes
     the same argv.

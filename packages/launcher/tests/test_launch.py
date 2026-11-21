@@ -996,8 +996,9 @@ def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_i
 @POSIX
 @pytest.mark.parametrize(("name", "dir_name"), [
     ("my spike", "my-spike"), ("../x", "x"), ("a/b", "a-b"), ("..", "launch"),
-    (".", "launch"), ("Fix: the  pager!", "fix-the-pager")])
-def test_a_scratch_launch_under_a_name_that_is_not_a_plain_name_folds_it_for_its_dir(
+    (".", "launch"), ("Fix: the  pager!", "fix-the-pager"), ("Foo_Bar", "foo-bar"),
+    ("v1.2", "v1-2")])
+def test_a_scratch_launch_folds_its_session_name_for_its_dir(
         harness, tmp_path, name, dir_name):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF, "name": name}, cwd=str(tmp_path),
@@ -1194,14 +1195,15 @@ def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
     assert not common.scratch_root().exists()
 
 
-def test_the_scratch_dir_of_a_name_that_is_not_a_plain_name_is_folded_into_the_parent():
+def test_the_scratch_dir_of_any_name_is_folded_into_the_parent():
     root = common.scratch_root()
     for name, dir_name in (("../x", "x"), ("a/b", "a-b"), ("a\\b", "a-b"),
                            ("..", "launch"), (".", "launch"), ("", "launch"),
                            ("-/-", "launch"), ("My Spike", "my-spike"),
-                           ("x" * 70 + " y", "x" * 63)):
+                           ("x" * 70 + " y", "x" * 63), ("r-1.a_b", "r-1-a-b"),
+                           ("Foo_Bar", "foo-bar"), ("_", "launch"),
+                           ("planner-1", "planner-1")):
         assert common.scratch_dir(name) == root / dir_name
-    assert common.scratch_dir("r-1.a_b") == root / "r-1.a_b"
 
 
 def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tmp_path):
