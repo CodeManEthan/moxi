@@ -562,14 +562,12 @@ def session_of(key: str, env: dict):
     return session
 
 
-__all__ = ["CLAUDE_KIND", "CannotRespawn", "FIND", "GONE_POLL_S", "GONE_WAIT_S",
-           "LOCK_PREFIX", "NOTE", "RESPAWN_CAP", "RESPAWN_WINDOW_S", "Respawner",
-           "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S",
-           "BUS_ENV", "RUNTIME_DIR_ENV",
-           "claude_root", "in_service",
-           "lock_path", "main", "note_writer", "respawn_adapter", "session_dir",
-           "session_env", "session_of", "starter_argv", "unit_name", "with_user_manager",
-           "write_note"]
+__all__ = ["BUS_ENV", "CLAUDE_KIND", "CannotRespawn", "FIND", "GONE_POLL_S",
+           "GONE_WAIT_S", "LOCK_PREFIX", "NOTE", "RESPAWN_CAP", "RESPAWN_WINDOW_S",
+           "RUNTIME_DIR_ENV", "Respawner", "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX",
+           "USER_MANAGER_ENV", "WORD_WAIT_S", "claude_root", "in_service", "lock_path",
+           "main", "note_writer", "respawn_adapter", "session_dir", "session_env",
+           "session_of", "starter_argv", "unit_name", "with_user_manager", "write_note"]
 
 
 if __name__ == "__main__":                                 # pragma: no cover
