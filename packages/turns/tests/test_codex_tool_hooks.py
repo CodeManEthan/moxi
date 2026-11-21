@@ -716,21 +716,26 @@ def test_a_prompt_the_host_handed_in_carries_no_origin_and_a_typed_one_is_compos
             ping(monkeypatch, harness, "UserPromptSubmit", {
                 "session_id": "thread-1", "turn_id": turn_id, "prompt": text})
 
-        harness._pending_delivery = "d-1"          # the host's turn/start is out
+        with endpoint._lock:                       # recorded, never handed on
+            digest = endpoint._new("deliver", "a digest", by="comms", senders=("ann",))
+            other = endpoint._new("steer", "other", by="comms")
+            steer = endpoint._new("steer", "steered text", by="memory")
+        harness._pending_delivery = digest.id      # the host's turn/start is out
         submit("turn-4", "a digest")
         harness._pending_delivery = None
         submit("turn-4", "typed in the window")    # joins the turn; no steer handed in
-        monkeypatch.setattr(endpoint, "delivery_text",
-                            {"d-2": "other", "d-3": "steered text"}.get)
-        harness._steering.update({"d-2", "d-3"})
+        harness._steering.update({other.id, steer.id})
         submit("turn-4", "steered text")           # the steer whose text it is
         submit("turn-4", "neither")                # two steers out, no text matches
         harness._steering.clear()
         submit("turn-5", "a new turn")             # no delivery opened it
-        assert [(e.text, e.origin, e.own) for e in events] == [
-            ("a digest", None, False), ("typed in the window", "composer", True),
-            ("steered text", None, False), ("neither", "composer", True),
-            ("a new turn", "composer", True)]
+        assert [(e.text, e.origin, e.own, e.delivery_by, e.delivery_senders, e.opens)
+                for e in events] == [
+            ("a digest", None, False, "comms", ("ann",), True),
+            ("typed in the window", "composer", True, None, None, False),
+            ("steered text", None, False, "memory", (), False),
+            ("neither", "composer", True, None, None, False),
+            ("a new turn", "composer", True, None, None, True)]
     finally:
         end_endpoint(endpoint)
 

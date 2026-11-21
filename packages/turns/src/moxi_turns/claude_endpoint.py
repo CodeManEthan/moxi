@@ -68,8 +68,10 @@ the floors let through on the main loop (every row for an agent's call), and the
 endpoint asks those rows (`Endpoint.after_tool`), with the call's `record_path`: the
 `transcript_path` of the last `ready`. It posts `/report/usage` with each
 `session.measure` that moved the context or the rate limits and at each main turn's end;
-the endpoint hands the reading to the `usage` rows. A prompt's ask carries its text and
-its origin's kind, which go on the `prompt` event.
+the endpoint hands the reading to the `usage` rows. A prompt's ask carries its text, its
+origin's kind and `opens` (no main-loop turn was open in the runner), which go on the
+`prompt` event. A prompt with no origin asked while a window's prompt is admitted is that
+window's delivery, whose `by` and `senders` the event carries.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
@@ -490,9 +492,22 @@ class ClaudeHarness(Harness):
             return context
         if event == "prompt":
             text = body.get("text")
-            return self.endpoint.prompt(text if isinstance(text, str) else None,
-                                        _opt_str(body, "origin"))
+            origin = _opt_str(body, "origin")
+            opens = body.get("opens")
+            return self.endpoint.prompt(text if isinstance(text, str) else None, origin,
+                                        delivery_id=self._prompt_delivery(origin),
+                                        opens=opens if isinstance(opens, bool) else None)
         raise leg.BadRequest(f"unknown context event {event!r}")
+
+    def _prompt_delivery(self, origin: str | None) -> str | None:
+        """The delivery a prompt with `origin` is: the open window's, once the gate
+        admitted its prompt, for a prompt with no origin (the runner's own submits reach
+        the ask with none). A prompt with an origin is never a delivery."""
+        if origin is not None:
+            return None
+        with self._lock:
+            w = self._window
+            return w.delivery if w is not None and w.admitted else None
 
     def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
         """`/ask/guard`: judge one tool call, or at `step` `ask` one permission ask, by the

@@ -518,6 +518,17 @@ describe('the context asks', () => {
     await w.clock.advance(1)
     expect((await r).additionalContext ?? []).toEqual([])
   })
+
+  test('a prompt ask says whether it opens a turn or joins the running one', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.answers['/ask/context'] = { context: null }
+    await $.classic.UserPromptSubmit({ prompt: 'idle' })
+    await turnStart($, 't1')
+    await $.classic.UserPromptSubmit({ prompt: 'mid-turn' })
+    const asked = w.got.filter(g => g.path === '/ask/context' && g.body.event === 'prompt').map(g => [g.body.text, g.body.opens])
+    expect(asked).toEqual([['idle', true], ['mid-turn', false]])
+  })
 })
 
 describe('the Stop ask', () => {

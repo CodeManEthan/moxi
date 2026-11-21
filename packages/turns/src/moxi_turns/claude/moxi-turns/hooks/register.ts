@@ -54,7 +54,8 @@
 //                             shells: {stopped: [id], left: [{id, why}], complete}
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
 //                a ready adds `transcript_path` (the hook input's); a prompt adds `text` (the
-//                hook input's `prompt`) and `origin` (below)
+//                hook input's `prompt`), `origin` (below) and `opens`, true when no
+//                main-loop turn is open as the hook runs (false: it joins the running turn)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
 //   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
@@ -1448,7 +1449,7 @@ export const register: Register = on => {
       const w = win
       // turns' own entry hook: the bound is raised by this ask's bound while it runs.
       if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt) }, hello.listenWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt), opens: turnOpen === null }, hello.listenWaitMs + MARGIN_MS)
       if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {

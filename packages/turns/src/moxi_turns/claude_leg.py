@@ -144,9 +144,10 @@ open (`block`), null lets it end. The endpoint answers within `stop_handler.wait
 `/ask/context` — `{event: "ready" | "prompt", source, session_id}` at
 `classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). A `ready` also
 carries `transcript_path`, the file Claude writes the session's records to (the hook
-input's); a `prompt` carries `text`, the prompt as the hook got it, and `origin`, its
+input's); a `prompt` carries `text`, the prompt as the hook got it, `origin`, its
 origin's kind as the runner's `prompt.submit` hook recorded it, or null when the runner
-can't tie the two. Answer `{"ok": true, "context": "<text>" | null}`, the event's
+can't tie the two, and `opens`, true when no main-loop turn was open in the runner as the
+hook ran. Answer `{"ok": true, "context": "<text>" | null}`, the event's
 `additionalContext`. The endpoint answers within `listen.wait_ms`.
 
 `/ask/after-tool` — `{call: {tool, tool_use_id, agentId, is_error}, rows: [id, ...]}` after

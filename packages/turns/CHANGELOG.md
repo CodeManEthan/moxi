@@ -8,6 +8,11 @@
   reminder reads it. A config file that still sets the old key is told to set the new one.
   On Codex a prompt typed in the window now carries the origin `composer`, and one the
   host handed in for a delivery carries none.
+- `deliver` and `steer` take `by`, the module that asked, and `senders`, the names the
+  text speaks for (the client's `deliver(..., by=, senders=)` and `steer(...)` too). A
+  `prompt` event carries `delivery_by` and `delivery_senders` from the delivery that is
+  the prompt, both None for a prompt turns did not hand in, and `opens`, false when the
+  prompt joins a main-loop turn already running.
 - Question mode's prompt reminder leaves the agent to judge whether the questions are
   wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
   end of its output once they are answered. "pros", as voice input spells "prose", now

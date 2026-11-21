@@ -257,13 +257,15 @@ def test_a_listener_written_for_the_first_events_reads_the_longer_event():
     ev = event("prompt")
     assert (ev.cwd, ev.text, ev.origin, ev.agent_id, ev.record_path, ev.usage,
             ev.received_at, ev.payload, ev.kind, ev.is_error, ev.point, ev.tool,
-            ev.tool_use_id, ev.own) == (None,) * 14
+            ev.tool_use_id, ev.own, ev.delivery_by, ev.delivery_senders,
+            ev.opens) == (None,) * 17
     names = [f.name for f in dataclasses.fields(turns.SessionEvent)]
     assert names[:8] == ["event", "harness", "session_id", "env", "source", "turn_id",
                          "outcome", "reason"]
     assert names[8:] == ["cwd", "agent_id", "tool", "tool_use_id", "is_error", "point",
                          "record_path", "text", "origin", "usage", "received_at",
-                         "payload", "kind", "own"]
+                         "payload", "kind", "own", "delivery_by", "delivery_senders",
+                         "opens"]
     full = turns.SessionEvent("after-tool", "claude", "s-1", {}, None, None, None, None,
                               "/w", "a-1", "Bash", "tu-1", is_error=False, point="after", record_path="/r.jsonl")
     assert (full.cwd, full.agent_id, full.point, full.record_path) == (

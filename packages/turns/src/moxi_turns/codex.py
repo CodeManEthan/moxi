@@ -418,9 +418,10 @@ class CodexHarness(Harness):
                 prompts = ()
             self._prompts = (turn_id, (*prompts, Prompt(origin, text)))
 
-    def prompt_delivery(self, turn_id, text: str | None) -> str | None:
-        """The delivery a main-loop UserPromptSubmit is the text of, or None for a prompt
-        typed in the window.
+    def prompt_delivery(self, turn_id, text: str | None) -> tuple[str | None, bool]:
+        """`(delivery, opens)` for a main-loop UserPromptSubmit: the delivery it is the
+        text of, or None for a prompt typed in the window, and whether it opens its turn
+        (false: it joins a turn an earlier prompt named; a hook with no turn id opens).
 
         A turn's first prompt is a delivery's when the host has a `turn/start` out for
         one (it waits to be tied), or when the turn it names is the open turn a delivery
@@ -436,14 +437,14 @@ class CodexHarness(Harness):
         endpoint = self.endpoint
         if first:
             if pending is not None:
-                return pending
-            return endpoint.opened_by(turn_id) if turn_id is not None else None
+                return pending, True
+            return (endpoint.opened_by(turn_id) if turn_id is not None else None), True
         if not steering:
-            return None
+            return None, False
         same = [i for i in steering if endpoint.delivery_text(i) == text]
         if same:
-            return same[0]
-        return steering[0] if len(steering) == 1 else None
+            return same[0], False
+        return (steering[0] if len(steering) == 1 else None), False
 
     def context_tokens(self) -> int | None:
         """The main thread's context, in tokens, from its last token reading; None
