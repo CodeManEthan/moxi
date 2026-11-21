@@ -16279,11 +16279,9 @@ usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b2", "folder": "proj-a", "model": SONNET, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b3", "folder": "proj-b", "model": HAIKU, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b4", "folder": "loose", "model": SONNET, "requests": 1},	keep	folder	folder
-usage	packages/usage/tests/test_browser_sessions.py	"Cost"} <= set(heads), heads	keep	set	set
 usage	packages/usage/tests/test_browser_sessions.py	EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days, "today": False,	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	WEEK = [{"session": session_id(n), "folder": "proj-a" if n % 2 == 0 else "proj-b",	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	t.assistant("Done.", usage=T.usage(input=200, output=1000),	use	input=	input_tokens=
-usage	packages/usage/tests/test_browser_sessions.py	"Output", "Tokens", "Est. cost ↓", "Context"} <= set(heads), heads	keep	set	set
 usage	packages/usage/tests/test_browser_whole.py	("folders", place, f"section[data-group={place}] [data-part=rows] .tr2"),	keep	folders	folders
 usage	packages/usage/tests/test_browser_whole.py	-	name	NOT_A_FOLDER	NOT_A_DIR
 usage	packages/usage/tests/test_browser_whole.py	-	name	test_without_projects_folders_and_the_folder_menu_fit_a_phone	test_without_projects_dirs_and_the_dir_menu_fit_a_phone
