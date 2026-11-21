@@ -352,10 +352,10 @@ def test_a_session_a_list_read_first_is_named_with_no_further_read(roots, turns_
 # --- the name other modules call -----------------------------------------------------------------
 
 def test_interface_5_adds_session_facts_and_nothing_it_is_built_from():
-    assert module.INTERFACES == frozenset({2, 3, 4, 5, 6})
+    assert module.INTERFACES == frozenset({2, 3, 4, 5, 6, 7})
     modules.reset()
     assert modules.load("sessions", interface=5).ok
-    assert not modules.load("sessions", interface=7).ok
+    assert not modules.load("sessions", interface=8).ok
     assert "session_facts" in api.__all__
     assert api.session_facts is lists.session_facts
     assert list(inspect.signature(api.session_facts).parameters) == ["keys"]
