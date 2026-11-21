@@ -393,10 +393,14 @@ not stored and its result gives no tail. The path is the one word that matched, 
 in it shows only its last part. The call stays findable; the file's content is not in the
 index. An `echo .env` is a false hit that costs that call's input.
 
-**What the default sets let through.** `broad` finds random-looking runs only when they
-hold no `/`. A secret that holds a `/`, such as an AWS secret access key, can reach the
-index under the default sets. Your own names and personal data are not redacted by
-default; the `private-names` and `personal-data` sets are a `redact.sets` change away.
+**What the default sets let through.** `broad` finds a random-looking run that holds a
+`/` or `+`, such as an AWS secret access key, but about 2 in 100 random 40-character
+base64 runs pass it by chance (secrets' README gives the rule). Rows stored before
+secrets had that rule keep such a run as it was until the next `moxi memory reindex`,
+which reads every transcript again from its start; a session the rebuild keeps without
+reading it (one in a folder that didn't answer, or a compressed Codex rollout) keeps its
+rows as they were stored. Your own names and personal data are not redacted by default;
+the `private-names` and `personal-data` sets are a `redact.sets` change away.
 
 `moxi sessions read`, which opens a session, reads the transcript itself, not the index,
 and redacts with its own fixed sets, `credentials` and `broad`: changing `redact.sets`
@@ -553,6 +557,103 @@ failed ingest child.
 A search only reads: it never takes the lock an ingest writes under, and a rebuild that
 switches the index under it leaves the old one for it to read to the end.
 
+## In the Claude apps
+
+With its `connector` and `secrets` extras, memory serves one read-only tool,
+`search_memory`, to the Claude apps through the connector, Moxi's public MCP host:
+
+```sh
+moxi install memory --with connector,secrets
+```
+
+That installs `moxi-memory[connector,secrets]`. The `connector` extra brings the host;
+the `secrets` extra brings secrets' personal-data set, which the chat redaction needs.
+Install both: while secrets or one of its chat sets can't run, the tool refuses
+`redaction-off` and the `memory redaction` row of `moxi doctor connector` says why.
+
+**`search_memory`** searches past sessions in memory's index. Inputs: `words` (required,
+1 to 500 characters, cut into at most 64 tokens as `moxi memory search` cuts them),
+`project` (a project label), `since` (an age such as `7d` or `12h`, or an ISO 8601 time),
+`harness` (`claude`, `codex` or `opencode`), `results`, `subagents` and `scratch` (each
+off by default, as the flags of `moxi memory search`), and `limit` (1 to 20, default 8).
+Each hit gives `session` (the main session's id, which `read_session` opens), `agent`
+(the subagent's id, or null), `harness`, `at` in UTC, `project`, `kind` (`user`,
+`assistant`, `tool` or `result`), `writer`, `failed` and `snippet`. Beside the hits,
+`rows` counts the rows the search looked through after its filters, whatever the words;
+`notes` holds memory's lines for an incomplete answer (the index still filling, a rebuild
+running, archive folders not read whole); and `cut` says the search stopped at its time
+limit.
+
+**Rows record their writer.** Each row memory stores names who wrote it, from sessions'
+`writer`: `person` (typed at the prompt), `model` (the model's own turn or tool call),
+`unknown` (a user message whose harness doesn't say who submitted it), or the kind of
+message something else wrote, such as `summary`. A row stored before memory recorded
+writers has none, and the tool never returns it. One `moxi memory reindex` writes every
+row again with its writer, but for a session the rebuild keeps without reading it (one in
+a folder that didn't answer, or a compressed Codex rollout); until then the `memory search` row of `moxi doctor connector`
+warns and counts the rows with none. An index from before the writer column is migrated
+the next time memory writes to it, and the tool refuses `index-unreadable` until then.
+
+**What it returns.** Only what `read_session` would show as text: a row whose writer is
+the person or the model, or `unknown` with a text that opens neither with `<` and a
+letter nor with a redaction placeholder. A text that opens with one of sessions' output
+wrappers (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>` and the
+rest) is never a hit, nor is any other writer's row. These are clauses of the search
+itself, so a hidden row takes no place and changes no count. Leading spaces, no-break
+spaces and invisible characters don't hide a wrapper. Mail from other sessions (`peer`
+and `coordinator` messages) is never a hit, nor are channel, plugin and task-notification
+messages, since memory stores none of them; `read_session` shows that mail, named, in its
+session. With `results`, the ends of tool results are searched too, each a `result` hit
+with no writer.
+
+**How it picks and ranks.** The tool doesn't take `moxi memory search`'s ranking, which
+is computed over the stored text and so over what the chat redaction hides. It reads the
+newest 500 rows holding every word and the newest 500 holding any word, newest first,
+and puts each through the chat redaction. A row from the first group stays only when
+every word still matches its redacted text, a row from the second when at least one
+does, and a row in both counts once. The rows that stay are ranked together by BM25 over
+their redacted text, a tie going to the newer, and the first `limit` are the hits. So a
+word that sits only inside a redacted value neither makes a hit nor moves one, and which
+hits come back, their order and the counts are the same whether a guessed value is in a
+hidden span or in no row. What it costs: an older row holding only some of the words,
+past the newest 500 that do, isn't found; `moxi memory search` at the machine finds it.
+
+**Snippets.** Each row's text goes through three steps, in order. memory stored long
+texts cut, redacted only with its own `redact.sets`, so the text within 64 characters of
+a stored cut, widened to the next whitespace, shows as `[REDACTED:cut-edge]`: a secret
+the cut split could leave a part no rule matches. Then the whole text goes through the
+chat redaction. Then the snippet is taken from the redacted text around the words, at
+most 64 tokens and 300 characters, cut at a space, with `…` where it leaves text out and
+no marks around the words.
+
+**Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
+snippets, project labels, notes, and an id that isn't in a session id's shape. Session
+ids, harness names, kinds, writers, times, counts and flags go as they are. A row that
+comes back unscanned is dropped. The tool also refuses `redaction-off` while memory's own
+`redact.sets` lacks `credentials` or `broad`, since a stored cut could then split one of
+their values where the cut-edge step can't see it.
+
+**Limits and refusals.** The search stops 16 seconds after the call began, ranks what it
+has and says `cut`. At most two calls of the tool run at once; a third waits up to 5
+seconds and then refuses `busy`, and a call still running at 20 seconds refuses
+`timeout`. Refusals: `no-index` (run `moxi memory reindex` at the machine),
+`index-unreadable`, `bad-since`, `redaction-off`, `busy` and `timeout`.
+
+**Status.** `moxi connector status` and `moxi doctor connector` show a `memory search`
+row (the index's generation and rows, with a warning while it fills, at an old schema or
+with rows that record no writer, and a failure when it or memory's sets can't be used)
+and a `memory redaction` row (whether the chat sets load, and secrets' engine).
+
+**The call log** records `words` (how many), `hits`, `hits_dropped` (rows whose words
+matched only text the redaction hid), `unscanned`, `redactions`, `cut` and `refusal`. It
+never holds the words searched for, text read or a session id.
+
+What a chat that reads this tool can do with what it read, and what redaction doesn't
+catch, is in the connector's
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-memory-v0.1.0/packages/connector/docs/security.md).
+Read it before you turn the tool on.
+
 ## Install
 
 Linux, Python 3.12 or later with an `sqlite3` module that has FTS5, and
@@ -575,8 +676,10 @@ turns' own setup: see
 `moxi`, Moxi's core; `moxi-turns`, which calls the start line, the lists, the reminder and
 the ingest trigger; `moxi-sessions`, through which memory reads every transcript and each
 harness's retention, and whose `moxi sessions read` opens a session; and `moxi-secrets`,
-the redaction sets. The extras `comms` and `launcher` add the two links above. memory
-parses no harness's transcript format itself.
+the redaction sets. The extras `comms` and `launcher` add the two links above. The extra
+`connector` adds `moxi-connector`, the public MCP host, and python-stdnum, and serves
+`search_memory` ("In the Claude apps"); it needs the extra `secrets` beside it, which
+adds secrets' personal-data set. memory parses no harness's transcript format itself.
 
 ## License
 
