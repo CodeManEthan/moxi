@@ -95,6 +95,61 @@ def key_header(kind: str = "RSA", tail: str = "") -> str:
     return "".join(("-----BEGIN ", kind, " PRIV", "ATE KEY", tail, "-----"))
 
 
+def generic_value(r) -> str:
+    """An assignment broad's generic-api-key finds on its own: the value is the secret.
+    Draws until one does, since a random value may hold one of the rule's stopwords."""
+    from moxi_secrets import scan
+
+    while True:
+        value = "".join(("api", "_key=")) + chars(r, 24)
+        if any(h.rule == "generic-api-key" for h in scan(value, ("broad",))):
+            return value
+
+
+#: Lines on which generic-api-key's line allowlists keep its hit out of `scan`, each
+#: with the path that turns its allowlist on: a secret mount, a JavaScript import, and a
+#: BitBake recipe's checksum line.
+LINE_ALLOWED = (("RUN --mount=type=secret,id=a {value}", None),
+                ("import {{ a }} from 'b'; {value}", None),
+                ('LIC_FILES_CHKSUM = "{value}"', "meta/x.bb"))
+
+#: Unicode 17.0's Default_Ignorable_Code_Point, as (first, last) with adjacent ranges
+#: joined: written here from the Unicode file, apart from secrets' own table.
+DEFAULT_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
+                     (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
+                     (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+                     (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+                     (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+
+_seen: list = []
+
+
+def see_through() -> str:
+    """Every character the scan reads past: each C0 control but tab and newline, DEL,
+    each C1 control, every Cf character of the running Python, and every
+    default-ignorable code point."""
+    if not _seen:
+        import unicodedata
+
+        codes = {*range(0x20), *range(0x7F, 0xA0)} - {0x09, 0x0A}
+        codes |= {c for c in range(0x110000) if unicodedata.category(chr(c)) == "Cf"}
+        for first, last in DEFAULT_IGNORABLE:
+            codes |= set(range(first, last + 1))
+        _seen.append("".join(chr(c) for c in sorted(codes)))
+    return _seen[0]
+
+
+#: Characters the scan does not read past: tab, newline and the Unicode space
+#: separators.
+NOT_SEEN = "\t\n \u00a0\u1680" + "".join(chr(c) for c in range(0x2000, 0x200B)) + \
+    "\u202f\u205f\u3000"
+
+
+def split(value: str, c: str, at: int = 10) -> str:
+    """`value` with `c` inside it."""
+    return value[:at] + c + value[at:]
+
+
 def curl_user(r) -> str:
     user = chars(r, 6, string.ascii_lowercase) + ":" + chars(r, 12)
     return " ".join(("curl", "-u", user, "https://api.example.test"))

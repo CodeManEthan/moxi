@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Each index records which secrets `redact` stored its rows (`redact_version` in its
+  meta; an index without it counts as 1). A typed `moxi memory reindex` over an index
+  below the installed secrets' `REDACT_VERSION` is a version rebuild: it reads every
+  source again and keeps, per source, everything of each source it didn't read to its
+  end, redacted again and trimmed at a stored cut to the first whitespace at least 64
+  characters away. It drops no session. No ingest starts it. The doctor's `index` row
+  shows the redact version and warns while it is below secrets', and `reindex` says first
+  what a version rebuild keeps. With this secrets, a secret on a line marked
+  `gitleaks:allow` and a token split by an invisible character are redacted in new rows,
+  and in old ones after that reindex.
 - Archive folders: memory reads every folder sessions names for a harness, its live root
   and then its archive folders (`claude.archives`, `codex.archives`), each from its own
   last walk. A folder that is offline, fails at any depth during a run, or fails the test
