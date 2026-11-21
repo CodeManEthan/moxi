@@ -592,9 +592,24 @@ def test_an_event_belongs_to_the_step_its_fields_say(event, expected):
     ({"type": "build.commissioned"}, "commissioned"),
     ({"type": "finding.marked", "id": "B1.L2", "state": "fixed"}, "B1.L2 marked fixed"),
     ({"type": "build.dropped"}, "dropped"),
+    ({"type": "verdict.recorded", "stage": "B1", "verdict": "publishable",
+      "pass": "full"}, "verify passed"),
+    ({"type": "brief.sized", "stage": "B1", "slice": 2}, "brief sized"),
+    ({"type": "ruling.recorded", "id": "B1.M2", "rules": "B1.M2"}, "ruling recorded"),
+    ({"type": "ci.read", "reading": "green"}, "CI green"),
+    ({"type": "wait.marked", "id": "B1.W1", "state": "done"}, "job marked done"),
+    ({"type": "finish.action", "stage": "B1", "id": "merge", "kind": "merge",
+      "state": "ok"}, "finish: merge ok"),
+    ({"type": "later.type_of_event", "stage": "B1"}, "later type of event"),
 ])
 def test_an_act_is_said_in_words(event, words):
     assert board.act_words(event) == words
+
+
+@pytest.mark.parametrize("kind", sorted(events.TYPES))
+def test_no_type_of_event_is_said_by_its_name(kind):
+    words = board.act_words({"type": kind, "stage": "B1"})
+    assert words and words != kind and "." not in words and "_" not in words
 
 
 def test_the_strip_holds_the_newest_acts_and_the_stage_as_it_reads_now(kit):

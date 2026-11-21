@@ -60,8 +60,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import (builds, checking, ci, closing, decisions, drift, findings, flows, holds,
-               next_step, pointers, questions, report_block, showing, skips, stages,
+from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
+               flows, holds, next_step, pointers, questions, report_block, showing, skips, stages,
                steps, versions, waits)
 from . import state as states
 
@@ -710,18 +710,31 @@ def acts(part_: Part) -> list[dict]:
     return made
 
 
+#: Each type of event in a few words, as the strip says it when the type's fields add
+#: nothing; `act_words` adds them for the types whose fields say more. A card's act is
+#: always words, never the event's name.
+ACT_WORDS: dict[str, str] = {
+    "round.opened": "round opened", "flow.changed": "flow changed",
+    "design.frozen": "design frozen", "verdict.recorded": "verdict recorded",
+    "question.asked": "question asked", "question.changed": "question changed",
+    "stage.declared": "stage declared", "stage.changed": "stage changed",
+    "ruling.recorded": "ruling recorded", "ruling.shown": "rulings shown",
+    "build.commissioned": "commissioned", "check.ran": "check ran", "ci.read": "CI read",
+    "finding.marked": "finding marked", "wait.marked": "job marked",
+    "brief.sized": "brief sized", "finish.action": "finish step run",
+    "finish.done": "landed", "lock.cleared": "finish lock cleared",
+    "build.dropped": "dropped", "round.dropped": "round dropped",
+    "thread.decided": "thread decided", "repair": "record repaired",
+    "round.closed": "round closed"}
+
+
 def act_words(event: Mapping) -> str:
-    """An act in words: `landed`, `CI red`, `local check passed`, `re-check passed`,
-    `drift re-check passed`, `sent back`, `commissioned`, `<id> marked fixed`,
-    `dropped`, or the event's own words."""
-    kind = event.get("type")
-    if kind == "finish.done":
-        return "landed"
-    if kind == "build.commissioned":
-        return "commissioned"
-    if kind == "build.dropped":
-        return "dropped"
-    if kind == ci.READ:
+    """An act in words: `landed`, `CI red`, `local check passed`, `verify passed`,
+    `re-check passed`, `drift re-check passed`, `sent back`, `<id> marked fixed`,
+    `job marked done`, `finish: merge ok`, `brief sized`, `ruling recorded`, and so on
+    from `ACT_WORDS`; a type it has no words for reads as its name in words."""
+    kind = str(event.get("type"))
+    if kind == ci.READ and event.get("reading"):
         return f"CI {event.get('reading')}"
     if kind == checking.RAN:
         step = event.get("step") or checking.CHECK
@@ -736,10 +749,15 @@ def act_words(event: Mapping) -> str:
                 return "re-check passed"
             if event.get("pass") == report_block.DRIFT:
                 return "drift re-check passed"
-    if kind == findings.MARKED:
+            return "verify passed"
+    if kind == findings.MARKED and event.get("id") and event.get("state"):
         return f"{event.get('id')} marked {event.get('state')}"
-    of = showing.history_of(dict(event))
-    return f"{kind} {of}" if of else str(kind)
+    if kind == "wait.marked" and event.get("state"):
+        return f"job marked {event.get('state')}"
+    if kind == finish_actions.ACTION and event.get("kind") and event.get("state"):
+        return f"finish: {event.get('kind')} {event.get('state')}"
+    words = ACT_WORDS.get(kind)
+    return words if words is not None else kind.replace(".", " ").replace("_", " ")
 
 
 def strip(parts: Iterable[Part], *, size: int = STRIP_SIZE) -> list[dict]:
@@ -1157,7 +1175,7 @@ __all__ = ["ROUND_PART", "STAGE_PART", "END_PART", "CLOSE", "STATES", "YOURS", "
            "DONE", "FAILED", "OWED", "WAITING", "CHILD", "TODO", "BY", "GROUPS", "STUCK",
            "WRAPPING", "MOVING", "Part", "part", "step_of", "Items", "items_of", "is_job",
            "fixes_owed", "columns", "cell", "close_cell", "cells", "lead_stage", "lines",
-           "group", "phrase", "round_value", "ordered", "acts", "act_words", "strip",
-           "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record", "item_record",
-           "answer_line", "card", "passage", "by_of", "design_moved", "last_at", "rev",
+           "group", "phrase", "round_value", "ordered", "acts", "ACT_WORDS", "act_words",
+           "strip", "tenth_act", "EVENT_STEPS", "event_step", "events_of", "record",
+           "item_record", "answer_line", "card", "passage", "by_of", "design_moved", "last_at", "rev",
            "WHATS"]
