@@ -245,7 +245,7 @@ def test_an_agent_past_its_mark_while_the_parent_is_below_the_floor_is_warned_an
     assert mark.on_tool(agent_event) == own
     assert mark.floor(agent_event) == 0         # the parent's next call must come
     assert mark.floor(s.event()) == 0           # a line waits
-    assert mark.on_tool(s.event()) == f"subagent agent-a0190b00... {own}"
+    assert mark.on_tool(s.event()) == f"subagent agent-a0190b00… {own}"
     assert mark.on_tool(s.event()) is None      # drained once
     assert mark.floor(s.event()) == ONE_X
 

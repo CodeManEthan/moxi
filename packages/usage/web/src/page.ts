@@ -27,10 +27,17 @@
 //   div[data-part=filters]      the filter line: Range, Project (or Folder), Harness,
 //                               Model, each a menu, and Cost / Tokens
 //   div[data-part=below]        the groups under the filter line:
-//     section[data-group=chart]    one bar a day or a month, its sentence and its table
+//     section[data-group=chart]    one bar a day or a month, stacked by token class by cost;
+//                                  by tokens the cache reads and the billable work as two
+//                                  charts; its sentence and its table
+//     section[data-group=heat]     each day's cost over the 53 weeks to today, whatever the
+//                                  range, under the place filter; a day is a button that
+//                                  sets the range to it
 //     section[data-group=sessions] the range's dearest session and the count, and opened
-//                                  the week's dearest as two-line rows (moxi-ui-row), what
-//                                  they leave out, the earlier days, and the table; an
+//                                  the table of every session, sorted by a column and
+//                                  read a page at a time, a row opening its session
+//                                  first in the section as its address does, as a
+//                                  two-line row (moxi-ui-row); an
 //                                  opened row holds its session (div[data-part=session]):
 //                                  its lines, its chart and its acts; shown, its
 //                                  subagents (div[data-part=agents]): a map and a row
@@ -63,8 +70,8 @@ import {
   addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
-import { chartDraw, chartGroup } from "./chart-model.ts";
-import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
+import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
+import type { ChartDraw, ChartGroup, ChartModel, Series, Table } from "./chart-model.ts";
 import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
@@ -77,10 +84,12 @@ import type {
   RestartPoint, SessionRow, Status, TermsRow, TermsTotal,
 } from "./feed.ts";
 import {
-  allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
+  allTimePath, chartPath, chartTermsPath, customRange, figuresPath, filterLine, heatPath, heldState, holdState, modelsPath,
   modelsSectionPath, placesPath, placesSectionPath, START, termsSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
+import { HEAT_LABEL, HEAT_SIZE, heatDraw, heatModel, LESS, MORE } from "./heat-model.ts";
+import type { HeatModel } from "./heat-model.ts";
 import {
   COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, READING, shouldPass,
 } from "./frame-model.ts";
@@ -93,12 +102,11 @@ import {
   BILL, DETAILS, FIND, KINDS_LABEL, PRICE_HEADS, PRICES_LABEL, pricesFor, pricesLeft, pricesSection, kindsSection,
 } from "./terms-model.ts";
 import type { Kinds, PricesModel, PricesPart } from "./terms-model.ts";
-import { OPEN, SessionList, sessionLine, sessionsClosed, sessionsTable, SESSIONS_LABEL, SHOW } from "./sessions-section.ts";
-import type { SessionLine, SessionsClosed, TablePart } from "./sessions-section.ts";
 import {
-  earlierLine, FIRST_TOP, firstHeading, PAGE, remainder, sessionLists, sessionName, sessionsPath,
-} from "./sessions-model.ts";
-import type { ListLine, SessionLists } from "./sessions-model.ts";
+  BOARD_PAGE, BOARD_ROW, BOARD_START, boardWindow, LOAD_MORE, moveCursor, nextOrder, OPEN, SessionList, SPARKBAR_WIDTH, sessionLine, sessionsBoard, sessionsClosed, SESSIONS_LABEL, SHOW,
+} from "./sessions-section.ts";
+import type { Board, BoardOrder, BoardSort, SessionLine, SessionsClosed, Sparkbar } from "./sessions-section.ts";
+import { boardPath, sessionName, sessionsPath } from "./sessions-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
 import {
   BARS_NAME, COPY_ID, newestModel, OPEN_IN_SESSIONS, openedKeys, openedPaths, openedSession, placedRow, restartPath,
@@ -119,6 +127,13 @@ const METER = { width: 96, height: 9 };
 const SEARCH_MS = 200;
 /** The fewest characters a search of the model table takes. */
 const SEARCH_MIN = 2;
+/** The two line fills a stacked bar's fifth and sixth parts are drawn in, set in each
+ * svg that draws them. */
+const SEG_LINES = svg`<defs>
+  <pattern id="seg-lines-a" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <path d="M1 0V4"></path></pattern>
+  <pattern id="seg-lines-b" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(135)">
+    <path d="M1 0V4"></path></pattern></defs>`;
 
 // When this document last asked for a pass as a page opened, in epoch seconds.
 let askedAt = 0;
@@ -197,6 +212,9 @@ const STYLES = css`
   .filt button.set, .filt .tog button[aria-pressed="true"] { color: var(--moxi-text); }
   .filt .v { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; color: var(--moxi-text-dim); }
   .filt .tog button { margin-left: 14px; }
+  .filt .tog button:disabled { color: var(--moxi-text-dim); cursor: default; }
+  .filt .togs { display: flex; flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+  .filt .tog + .tog { margin-left: 10px; }
   .anchor { position: relative; display: inline-block; }
   .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); width: max-content; min-width: 240px;
           max-width: 400px;
@@ -224,6 +242,35 @@ const STYLES = css`
   svg.ch text.v { fill: var(--moxi-text); }
   svg.ch .bar { fill: var(--moxi-text); fill-opacity: 0.36; }
   svg.ch .bar.now { fill-opacity: 1; }
+  /* A stacked bar's parts: four shades of the text colour, then lines of it at two
+     angles, then the border's shade; today's at full weight and the other periods' at
+     about half. */
+  svg .seg { fill: var(--moxi-text); }
+  svg .seg.s1 { fill-opacity: 0.55; } svg .seg.s1.now { fill-opacity: 1; }
+  svg .seg.s2 { fill-opacity: 0.4; } svg .seg.s2.now { fill-opacity: 0.72; }
+  svg .seg.s3 { fill-opacity: 0.25; } svg .seg.s3.now { fill-opacity: 0.46; }
+  svg .seg.s4 { fill-opacity: 0.13; } svg .seg.s4.now { fill-opacity: 0.24; }
+  svg .seg.s5 { fill: url(#seg-lines-a); fill-opacity: 0.55; } svg .seg.s5.now { fill-opacity: 1; }
+  svg .seg.s6 { fill: url(#seg-lines-b); fill-opacity: 0.55; } svg .seg.s6.now { fill-opacity: 1; }
+  svg .seg.s7 { fill: var(--moxi-border-strong); fill-opacity: 0.55; } svg .seg.s7.now { fill-opacity: 1; }
+  svg pattern path { stroke: var(--moxi-text); stroke-width: 1.5; }
+  /* The heat map's five steps: the text colour from faint to full; an unused day is a
+     border's shade. */
+  svg .hc { fill: var(--moxi-text); }
+  svg .hc.h0 { fill: var(--moxi-border); fill-opacity: 1; }
+  svg .hc.h1 { fill-opacity: 0.16; } svg .hc.h2 { fill-opacity: 0.32; } svg .hc.h3 { fill-opacity: 0.5; }
+  svg .hc.h4 { fill-opacity: 0.72; } svg .hc.h5 { fill-opacity: 1; }
+  svg.ch.hm { margin: 6px 0 2px; }
+  svg.ch.hm rect[role=button] { cursor: pointer; }
+  .scroll.heat { padding: 0; }
+  .scale { display: flex; align-items: center; gap: 3px; padding: 0 0 8px; font-size: var(--moxi-font-size-sm);
+           line-height: 18px; color: var(--moxi-text-dim); }
+  .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
+  .chartn { padding: 10px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text); }
+  .chartc { padding: 0 0 4px; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0 0 6px; list-style: none;
+            font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .legend svg { display: inline-block; margin-right: 6px; vertical-align: -1px; }
   svg.ch .ax { stroke: var(--moxi-border-strong); stroke-width: 1; }
   svg.ch .gr { stroke: var(--moxi-border); stroke-width: 1; }
   svg.ch .dash { fill: none; stroke: var(--moxi-text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -249,6 +296,24 @@ const STYLES = css`
   .tbl th:first-child, .tbl td:first-child { padding-left: 0; }
   .tbl th { color: var(--moxi-text-dim); }
   .tbl .n { text-align: right; }
+  .tbl th button.sort { color: inherit; }
+  .tbl th[aria-sort=ascending] button.sort, .tbl th[aria-sort=descending] button.sort { color: var(--moxi-text); }
+  .tbl tr[data-opens] { cursor: pointer; }
+  /* The Sessions table: its rows in a box of their own, a fixed height each, the head
+     kept in view. */
+  .scroll.board { max-height: 480px; overflow: auto; }
+  .scroll.board thead th { position: sticky; top: 0; z-index: 1; background: var(--moxi-bg); }
+  .scroll.board tbody tr { height: ${BOARD_ROW.height}px; white-space: nowrap; }
+  .scroll.board tbody tr.on:focus-visible { outline: 1px solid var(--moxi-border-strong); outline-offset: -1px; }
+  .sm { display: inline-block; width: 56px; height: 9px; vertical-align: middle; }
+  .sm .base { fill: var(--moxi-border-strong); }
+  .sm .fill { fill: var(--moxi-text); }
+  .sb { display: inline-block; width: ${SPARKBAR_WIDTH}px; height: 9px; vertical-align: middle; }
+  .sb .base { fill: var(--moxi-border-strong); }
+  .badge { font-size: var(--moxi-font-size-sm); padding: 0 4px; border: 1px solid var(--moxi-border-strong); border-radius: 3px;
+           color: var(--moxi-text-dim); }
+  .tbl td a.go { color: var(--moxi-text); text-decoration: none; }
+  .tbl tr[data-opens]:hover a.go, .tbl td a.go:focus-visible { text-decoration: underline; }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
                letter-spacing: -0.005em; }
   .grp.is-open .gk { color: var(--moxi-text); }
@@ -277,6 +342,11 @@ const STYLES = css`
   .tr2.th { color: var(--moxi-text-dim); align-items: end; }
   .tr2.th span { white-space: normal; }
   .tbl .d { color: var(--moxi-text-dim); }
+  /* A cost that is not whole: a dim mark after it, its reason on hover and, for a screen
+     reader, in the cell's text. */
+  .nw { margin-left: 2px; color: var(--moxi-text-dim); cursor: help; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; border: 0; }
   .tbl td.wrap { min-width: 8em; white-space: normal; overflow-wrap: anywhere; }
   .tbl tr[data-line="subtotal"] td, .tbl tr[data-line="total"] td { font-weight: 600; }
   /* The bill and the rates keep every column and scroll inside their wrapper; the Model
@@ -313,6 +383,9 @@ const STYLES = css`
     .one > span:first-child { display: block; padding-right: 0; white-space: normal; }
     .one .t { display: block; padding-left: 64px; font-size: var(--moxi-font-size-sm); line-height: 18px; }
     .one2 { margin-top: 0; white-space: normal; }
+    .filt { flex-wrap: wrap; row-gap: 4px; }
+    .filt .togs { justify-content: flex-start; }
+    .filt .togs .tog:first-child button:first-child { margin-left: 0; }
     .filt .fl { column-gap: 18px; }
     .filt .fl .sep { display: none; }
     .filt .anchor { position: static; }
@@ -338,7 +411,11 @@ export class UsagePage extends LitElement {
     menu: { state: true },
     custom: { state: true },
     asTable: { state: true },
+    heatTable: { state: true },
     sectionTable: { state: true },
+    boardBy: { state: true },
+    boardTop: { state: true },
+    boardCursor: { state: true },
     pricesPart: { state: true },
     searchText: { state: true },
     sessionPart: { state: true },
@@ -358,8 +435,17 @@ export class UsagePage extends LitElement {
   custom = false;
   /** The chart's table stands in its place. */
   asTable = false;
+  /** The heat map's table stands in its place. */
+  heatTable = false;
   /** The opened section whose table is shown under its rows. */
-  sectionTable: SectionKey | "sessions" | null = null;
+  sectionTable: SectionKey | null = null;
+  /** The Sessions table's order. */
+  boardBy: BoardOrder = BOARD_START;
+  /** How far the Sessions table's box is scrolled, in px, and how tall it is. */
+  boardTop = 0;
+  #boardHeight = 0;
+  /** The table row the arrow keys move and Enter opens. */
+  boardCursor = 0;
   /** What is open under the price table. */
   pricesPart: PricesPart | null = null;
   /** What `Find a model` searches for. */
@@ -387,6 +473,10 @@ export class UsagePage extends LitElement {
   #pass: string | null = null;
   /** The reads under the filter line, opened for the state they were asked with. */
   #chart: Feed<Report<DayRow>> | null = null;
+  /** The chart's cost terms by period, which stack its bars by class. */
+  #chartTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
+  /** The heat map's days: the 53 weeks to today under every filter but the range. */
+  #heat: Feed<Report<DayRow>> | null = null;
   #figures: Feed<Report<DayRow>> | null = null;
   #allTime: Feed<Report<DayRow>> | null = null;
   #places: Feed<Report<ProjectRow>> | null = null;
@@ -397,18 +487,13 @@ export class UsagePage extends LitElement {
   #modelsSection: Feed<Report<ModelRow>> | null = null;
   /** The Sessions section's closed row: the range's dearest session and the count. */
   #sessionsTop: Feed<Report<SessionRow>> | null = null;
-  /** The opened section's lists: the first list, the earlier days' count and total from
-   * one row, and their rows once shown; each for the days and filters in `#listsKey`. */
-  #lists: SessionLists | null = null;
-  #listsKey: string | null = null;
-  #firstList: SessionList | null = null;
-  #earlierTop: Feed<Report<SessionRow>> | null = null;
-  #earlierList: SessionList | null = null;
+  /** The Sessions table's read, every session of the range in `boardBy`'s order, with
+   * the path of its first page. */
+  #board: SessionList | null = null;
+  #boardKey: string | null = null;
   /** The session the address named as the page was placed: its row comes first in the
    * section, read over the session's whole life. */
   #placed: { harness: string; id: string } | null = null;
-  /** The list the opened session was opened from; null when the address named it. */
-  #openedIn: "first" | "earlier" | null = null;
   /** The opened session's reads, each with the query its row was read with, and the
    * restart point for the model of its newest request. */
   #openedReads: { requests: Feed<Report<RequestRow, RequestsTotal>>; terms: Feed<Report<TermsRow, TermsTotal>>;
@@ -499,7 +584,7 @@ export class UsagePage extends LitElement {
     for (const feed of [this.#limits, this.#status, this.#daily, this.#mostToday]) feed?.close();
     this.#limits = this.#status = this.#daily = this.#mostToday = null;
     this.#mostPath = null;
-    this.#closeLists();
+    this.#closeBoard();
     this.#closeOpened();
     this.#placedRead?.close();
     this.#placedRead = null;
@@ -549,7 +634,6 @@ export class UsagePage extends LitElement {
     }
     this.agentPart = null;
     if (next.piece !== "sessions") this.#placed = null;
-    if (next.piece !== "sessions" || next.session === null) this.#openedIn = null;
     this.#closePart();
     this.#setAt(next);
     this.requestUpdate();
@@ -619,16 +703,16 @@ export class UsagePage extends LitElement {
 
   /** Every read under the filter line that is open, each once. */
   #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
-    return [...new Set([this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
+    return [...new Set([this.#chart, this.#chartTerms, this.#heat, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
                         this.#modelsSection, this.#terms, this.#prices, this.#sessionsTop])].filter((feed) => feed !== null);
   }
 
   #closeBelow(): void {
     for (const feed of this.#belowFeeds()) feed.close();
-    this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
+    this.#chart = this.#chartTerms = this.#heat = this.#figures = this.#allTime = this.#places = this.#models = null;
     this.#placesSection = this.#modelsSection = this.#terms = this.#prices = this.#sessionsTop = null;
     this.#pricesPath = null;
-    this.#closeLists();
+    this.#closeBoard();
     this.#closePart();
     this.#asked = this.#askedFilters = this.#askedAllTime = null;
   }
@@ -647,7 +731,6 @@ export class UsagePage extends LitElement {
       if (sameAddress(at, named)) this.#at = at;
       else this.#setAt(at);
       if (at.piece !== "none") refusedWindow = null;
-      this.#openedIn = null;
       this.agentsShown = 0;
       this.agentPart = null;
       this.#placed = at.piece === "sessions" && at.session !== null && at.harness !== null
@@ -659,7 +742,7 @@ export class UsagePage extends LitElement {
     const update = () => this.requestUpdate();
     const state = heldState();
     const today = this.#today();
-    const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
+    const paths = { chart: chartPath(state, today), chartTerms: chartTermsPath(state, today), heat: heatPath(state, today), figures: figuresPath(state, today),
                     places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
                     placesSection: placesSectionPath(state, today, this.#folders()),
                     modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today),
@@ -678,6 +761,8 @@ export class UsagePage extends LitElement {
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
+      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -692,7 +777,7 @@ export class UsagePage extends LitElement {
       this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update);
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
     }
-    this.#followLists(state, today);
+    this.#followBoard(state, today);
     this.#followOpened(state, today);
     // Today's two dearest sessions, for the Cost row, under no filter.
     const mostPath = sessionsPath(START, today, { since: today, until: today }, 2);
@@ -721,36 +806,28 @@ export class UsagePage extends LitElement {
     }
   }
 
-  /** The opened Sessions section's lists follow the address, the range and the filters:
-   * read when the section opens, again under new ones, and closed with the section. */
-  #followLists(state: PageState, today: string): void {
-    const lists = this.#at.piece === "sessions" ? sessionLists(state.range, today) : null;
-    if (lists === null) {
-      this.#closeLists();
+  /** The Sessions table is read while the section is open, again in a new order or
+   * under new filters, and closed with the section. */
+  #followBoard(state: PageState, today: string): void {
+    if (this.#at.piece !== "sessions") {
+      this.#closeBoard();
       return;
     }
-    const firstPath = (top: number, skip: number): string => sessionsPath(state, today, lists.first, top, skip);
-    const earlier = lists.earlier;
-    const key = JSON.stringify([firstPath(1, 0), earlier === null ? null : sessionsPath(state, today, earlier, 1)]);
-    if (key === this.#listsKey) return;
-    this.#closeLists();
-    const update = () => this.requestUpdate();
-    const ask = (path: string) => api("usage", path);
-    this.#lists = lists;
-    this.#listsKey = key;
-    this.#firstList = new SessionList(ask, firstPath, FIRST_TOP, update);
-    void this.#firstList.refresh();
-    if (earlier !== null) {
-      const top = sessionsPath(state, today, earlier, 1);
-      this.#earlierTop = new Feed<Report<SessionRow>>(() => api("usage", top), parseReport, update);
-      void this.#earlierTop.refresh();
-    }
+    const by = this.boardBy;
+    const path = (top: number, skip: number): string => boardPath(state, today, by, top, skip);
+    const key = path(BOARD_PAGE, 0);
+    if (key === this.#boardKey) return;
+    this.#closeBoard();
+    this.#boardKey = key;
+    this.#board = new SessionList((asked: string) => api("usage", asked), path, BOARD_PAGE, () => this.requestUpdate(),
+                                  BOARD_PAGE);
+    void this.#board.refresh();
   }
 
-  #closeLists(): void {
-    for (const feed of [this.#firstList, this.#earlierTop, this.#earlierList]) feed?.close();
-    this.#firstList = this.#earlierTop = this.#earlierList = null;
-    this.#lists = this.#listsKey = null;
+  #closeBoard(): void {
+    this.#board?.close();
+    this.#board = null;
+    this.#boardKey = null;
   }
 
   /** The opened session's reads follow the address, the list it was opened from, the
@@ -772,13 +849,7 @@ export class UsagePage extends LitElement {
       this.#closeOpened();
       return;
     }
-    const from = this.#openedIn;
-    const days = from === null ? null : from === "first" ? this.#lists?.first ?? null : this.#lists?.earlier ?? null;
-    if (from !== null && days === null) {
-      this.#closeOpened();
-      return;
-    }
-    const keys = openedKeys(state, today, days, at.harness);
+    const keys = openedKeys(state, today, null, at.harness);
     const paths = openedPaths(at.session, keys);
     const key = JSON.stringify(paths);
     const update = () => this.requestUpdate();
@@ -835,19 +906,6 @@ export class UsagePage extends LitElement {
     this.#closeAgent();
   }
 
-  /** `Show` under the earlier line: its rows, thirty at a time. */
-  #showEarlier(): void {
-    const lists = this.#lists;
-    const earlier = lists?.earlier ?? null;
-    if (earlier === null || this.#earlierList !== null) return;
-    const state = heldState();
-    const today = lists?.today ?? this.#today();
-    this.#earlierList = new SessionList((path) => api("usage", path),
-      (top, skip) => sessionsPath(state, today, earlier, top, skip), PAGE, () => this.requestUpdate());
-    void this.#earlierList.refresh();
-    this.requestUpdate();
-  }
-
   #indexEvent(data: unknown): void {
     const event = parseIndexEvent(data);
     if (event === null) return;
@@ -856,8 +914,8 @@ export class UsagePage extends LitElement {
     if (!event.running) {
       void this.#status?.refresh();
       void this.#daily?.refresh();
-      for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#firstList, this.#earlierTop,
-                          this.#earlierList, ...this.#openedFeeds()]) void feed?.refresh();
+      for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#board,
+                          ...this.#openedFeeds()]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -911,6 +969,8 @@ export class UsagePage extends LitElement {
       if (read !== null) others.push({ what, read, report: true });
     };
     other("The chart", chart);
+    other("The chart's token classes", this.#chartTerms);
+    other("The heat map", this.#heat);
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
@@ -920,9 +980,7 @@ export class UsagePage extends LitElement {
     if (this.#modelsSection !== this.#models) other("The Models section", this.#modelsSection);
     other("Token kinds and Prices", this.#terms);
     other("The Sessions section", this.#sessionsTop);
-    other("The sessions listed", this.#firstList?.feed ?? null);
-    other("The earlier sessions", this.#earlierTop);
-    other("The earlier sessions listed", this.#earlierList?.feed ?? null);
+    other("The Sessions table", this.#board?.feed ?? null);
     other("Today's dearest sessions", this.#mostToday);
     other("The opened session's requests", this.#openedReads?.requests ?? null);
     other("The opened session's cost terms", this.#openedReads?.terms ?? null);
@@ -952,7 +1010,7 @@ export class UsagePage extends LitElement {
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.asTable);
+      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -962,6 +1020,9 @@ export class UsagePage extends LitElement {
       this.#kinds(kindsSection(this.#terms?.value ?? null)),
       this.#pricesGroup(pricesSection(this.#terms?.value ?? null, this.#prices?.value ?? null, today)),
     ].filter((drawn) => drawn !== nothing);
+    // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
+    const heatReport = frame.below ? this.#heat?.value ?? null : null;
+    const heat = heatReport === null ? null : heatModel(heatReport, today, state.range);
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -971,8 +1032,8 @@ export class UsagePage extends LitElement {
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
-      ${group === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
-        group === null ? nothing : this.#chartGroup(group)}${sections}</div>`}
+      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
+        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat)}${sections}</div>`}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1083,9 +1144,12 @@ export class UsagePage extends LitElement {
     }}>
       <span class="fl">${repeat(menus, (menu) => menu.key, (menu, i) => html`${i ? html`<span class="sep">·</span>` : nothing}${
         this.#filter(menu, line)}`)}</span>
-      <span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
+      <span class="togs"><span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
         data-measure=${measure.key} aria-pressed=${String(measure.picked)}
         @click=${() => { holdState({ measure: measure.key }); }}>${measure.label}</button>`)}</span>
+      <span class="tog" role="group" aria-label="Split" data-part="split">${line.splits.map((split) => html`<button
+        type="button" data-split=${split.key} aria-pressed=${String(split.picked)} ?disabled=${split.off !== null}
+        title=${split.off ?? nothing} @click=${() => { holdState({ split: split.key }); }}>${split.label}</button>`)}</span></span>
     </div>`;
   }
 
@@ -1102,12 +1166,13 @@ export class UsagePage extends LitElement {
       </div>` : nothing}</span></span>`;
   }
 
+  /** One entry of a menu. Picking one of several leaves the menu open. */
   #item(item: MenuItem) {
     const patch = item.patch;
-    return html`<button type="button" class="it" role="menuitemradio" aria-checked=${String(item.picked)}
-      data-item=${item.key} @click=${() => {
+    return html`<button type="button" class="it" role=${item.several ? "menuitemcheckbox" : "menuitemradio"}
+      aria-checked=${String(item.picked)} data-item=${item.key} @click=${() => {
         if (patch === null) { this.custom = !this.custom; return; }
-        this.#closeMenu();
+        if (!item.several) this.#closeMenu();
         holdState(patch);
       }}><span aria-hidden="true">${item.picked ? "✓" : nothing}</span><span>${item.label}</span>${
       item.figure === null ? html`<span></span>` : html`<span class="t">${item.figure}</span>`}</button>`;
@@ -1148,20 +1213,73 @@ export class UsagePage extends LitElement {
           <span data-part="sentence">${group.sentence ?? nothing}</span>
           ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
-        ${group.chart === null ? nothing : this.#chartSvg(chartDraw(group.chart, width, hang), group.chart.aria)}
+        ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
         ${group.table === null ? nothing : this.#table(group.table)}
       </div>
     </section>`;
   }
 
+  /** The heat map's group: its name, its sentence and the map, or its table in the
+   * map's place. */
+  #heatGroup(model: HeatModel) {
+    const draw = heatDraw(model);
+    const pick = (day: string) => {
+      const range = customRange(day, day);
+      if (range !== null) holdState({ range });
+    };
+    const keyed = (event: KeyboardEvent, day: string) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      pick(day);
+    };
+    return html`<section class="grp" data-group="heat">
+      <div class="gk">${HEAT_LABEL}</div>
+      <div class="gl">
+        <p class="chartn" data-part="chart-name">${model.title}</p>
+        <div class="chartl"><span data-part="sentence">${model.sentence}</span>
+          <button type="button" class="act" data-part="table-toggle"
+            @click=${() => { this.heatTable = !this.heatTable; }}>${this.heatTable ? CHART : TABLE}</button></div>
+        ${this.heatTable ? this.#table(model.table) : html`<div class="scroll heat">
+          <svg class="ch hm" data-part="heat" role="group" aria-label=${model.aria} width=${draw.width}
+            height=${draw.height} viewBox="0 0 ${draw.width} ${draw.height}">${svg`
+            ${draw.months.map((month) => svg`<text x=${month.x} y=${HEAT_SIZE.months - 3}>${month.text}</text>`)}
+            ${draw.weekdays.map((weekday) => svg`<text x="0" y=${weekday.y} dominant-baseline="middle">${weekday.text}</text>`)}
+            ${draw.cells.map((cell) => svg`<rect class="hc h${cell.step}" data-day=${cell.day} data-used=${String(cell.used)}
+                x=${cell.x} y=${cell.y} width=${draw.cell} height=${draw.cell} rx="2" tabindex="0" role="button"
+                aria-label=${cell.aria} @click=${() => pick(cell.day)}
+                @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
+          <p class="scale" data-part="scale" aria-hidden="true">${LESS}${[1, 2, 3, 4, 5].map((step) =>
+            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`}
+      </div>
+    </section>`;
+  }
+
+  /** One chart of the group: its name and caption where it has them, the chart, and the
+   * legend of what its bars are stacked by. */
+  #oneChart(chart: ChartModel, width: number, hang: number) {
+    return html`${chart.name === null ? nothing : html`<p class="chartn" data-part="chart-name">${chart.name}</p>`}
+      ${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
+      ${chart.caption === null ? nothing : html`<p class="chartc" data-part="caption">${chart.caption}</p>`}
+      ${chart.series.length === 0 ? nothing : this.#legend(chart.series)}`;
+  }
+
+  #legend(series: Series[]) {
+    return html`<ul class="legend" data-part="legend">${series.map((item) => html`<li data-key=${item.key}>
+      <svg width="9" height="9" aria-hidden="true">${SEG_LINES}<rect class="seg s${item.shade} now" width="9" height="9"
+        rx="1"></rect></svg>${item.label}</li>`)}</ul>`;
+  }
+
   #chartSvg(draw: ChartDraw, aria: string) {
     return html`<svg class="ch" data-part="chart" role="img" aria-label=${aria} width=${draw.width} height=${draw.height}
-      viewBox="0 0 ${draw.width} ${draw.height}">${svg`
+      viewBox="0 0 ${draw.width} ${draw.height}">${svg`${SEG_LINES}
       ${draw.grid === null ? nothing : svg`<line class="gr" x1="0" x2=${draw.width} y1=${draw.grid.y} y2=${draw.grid.y}></line>
         <text data-part="top" x="0" y="4">${draw.grid.words}</text>`}
       ${draw.bars.map((bar) => svg`<g data-period=${bar.period} data-whole=${String(bar.outline === null)}>
         <title>${bar.hover}</title>
-        <rect class=${bar.now ? "bar now" : "bar"} x=${bar.x} y=${bar.y} width=${bar.width} height=${bar.height} rx="1"></rect>
+        ${bar.parts.length === 0
+          ? svg`<rect class=${bar.now ? "bar now" : "bar"} x=${bar.x} y=${bar.y} width=${bar.width} height=${bar.height} rx="1"></rect>`
+          : bar.parts.map((part) => svg`<rect class="seg s${part.shade}${bar.now ? " now" : ""}" data-key=${part.key}
+              x=${bar.x} y=${part.y} width=${bar.width} height=${part.height}></rect>`)}
         ${bar.outline === null ? nothing : svg`<rect class="dash" x=${bar.outline.x} y=${bar.outline.y}
           width=${bar.outline.width} height=${bar.outline.height}></rect>`}
         <rect class="hit" x=${bar.slot.x} y="0" width=${bar.slot.width} height=${draw.axis}></rect>
@@ -1177,8 +1295,15 @@ export class UsagePage extends LitElement {
     return html`<div class="scroll"><table class="tbl" data-part="table">
       <thead><tr>${table.columns.map((column) => html`<th class=${column.num ? "n" : ""}>${column.label}</th>`)}</tr></thead>
       <tbody>${table.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
-        html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
+        html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}${i === table.markAt ? this.#notWhole(row.why) : nothing}</td>`)}</tr>`)}</tbody>
     </table></div>`;
+  }
+
+  /** The mark after a figure that is not whole: `*`, `why` on hover, and `, not whole:
+   * <why>` in the cell's text for a screen reader. Nothing for a whole figure. */
+  #notWhole(why: string | null | undefined) {
+    return why ? html`<span class="nw" data-part="not-whole" title=${`Not whole: ${why}`}><span aria-hidden="true">*</span><span
+      class="vh">, not whole: ${why}</span></span>` : nothing;
   }
 
   /** Whether the address opens this section. */
@@ -1230,8 +1355,8 @@ export class UsagePage extends LitElement {
     return mostTo(rows.map((row) => ({ name: sessionName(row, today).name, cost: row.cost })));
   }
 
-  /** Sessions: the range's dearest session and how many there are; opened, the range's
-   * last seven days dearest first, what they leave out, the earlier days, and the table. */
+  /** Sessions: the range's dearest session and how many there are; opened, the session
+   * the address named first, then the table of every session of the range. */
   #sessions(model: SessionsClosed | null, today: string) {
     const open = this.#at.piece === "sessions";
     if (model === null && open && this.#placed !== null && !(this.#sessionsTop?.loading ?? false)) {
@@ -1260,7 +1385,7 @@ export class UsagePage extends LitElement {
         <div class="one"><span data-part="closed">${model.closed ?? nothing}</span><a class="t" data-part="count"
           href=${addressPath(target)} aria-expanded=${String(open)}
           @click=${(event: MouseEvent) => this.#follow(event, target)}>${open ? CLOSE : model.count}</a></div>
-        ${open ? this.#sessionLists(today) : nothing}
+        ${open ? this.#sessionsBody(today) : nothing}
       </div>
     </section>`;
   }
@@ -1273,70 +1398,132 @@ export class UsagePage extends LitElement {
     if (placed === null || session === null) return nothing;
     if (session.value === null) return session.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing;
     // The models of its requests are known when it is the session opened from it.
-    const own = this.#at.piece === "sessions" && this.#at.session === placed.id && this.#openedIn === null;
+    const own = this.#at.piece === "sessions" && this.#at.session === placed.id;
     const row = placedRow(session.value, own ? this.#openedReads?.requests.value?.rows ?? null : null);
     if (row === null) return nothing;
-    return html`<div class="ses" data-list="placed">${this.#sessionRow(sessionLine(row, today, !this.#folders()), "placed")}</div>`;
+    return html`<div class="ses" data-list="placed">${this.#sessionRow(sessionLine(row, today, !this.#folders()))}</div>`;
   }
 
-  #sessionLists(today: string) {
-    const lists = this.#lists;
-    const first = this.#firstList?.feed ?? null;
-    const placedRow = this.#placedRow(today);
-    if (lists === null || first === null) return placedRow;
-    if (first.value === null) {
-      return html`${placedRow}${first.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing}`;
-    }
-    const projects = !this.#folders();
-    // The session the address named shows once, first.
-    const placed = this.#placed;
-    const other = (row: SessionRow): boolean => placed === null || row.harness !== placed.harness
-      || row.session_id !== placed.id;
-    const firstRows = first.value.rows.filter(other);
-    const earlier = earlierLine(lists, this.#earlierTop?.value ?? null);
-    const shown = this.#earlierList?.feed ?? null;
-    const heading = firstHeading(lists);
-    const earlierRows = (shown?.value?.rows ?? []).filter(other);
-    const parts: TablePart[] = [{ label: heading.replace(/, dearest first$/, ""), rows: firstRows },
-                                { label: "Earlier", rows: earlierRows }];
-    const table = this.sectionTable === "sessions";
+  /** The opened section: the session the address named, then the table. */
+  #sessionsBody(today: string) {
+    const board = this.#board?.feed ?? null;
     return html`
-      ${placedRow}
-      ${firstRows.length ? html`<div class="sub1" data-part="heading">${heading}</div>` : nothing}
-      <div class="ses" data-list="first">${firstRows.map((row) => this.#sessionRow(sessionLine(row, today, projects), "first"))}</div>
-      ${this.#more(remainder(first.value, lists.week), "first", () => { void this.#firstList?.show(); })}
-      ${earlier === null ? nothing : this.#more(earlier, "earlier", shown === null ? () => this.#showEarlier() : null)}
-      ${shown === null ? nothing : shown.value === null
-        ? (shown.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
-        : html`<div class="ses" data-list="earlier">${earlierRows.map((row) =>
-            this.#sessionRow(sessionLine(row, today, projects), "earlier"))}</div>
-          ${this.#more(remainder(shown.value, false), "earlier-more", () => { void this.#earlierList?.show(); })}`}
-      <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(table)}
-        @click=${() => { this.sectionTable = table ? null : "sessions"; }}>${table ? HIDE_TABLE : SECTION_TABLE}</button></p>
-      ${table ? this.#table(sessionsTable(parts, today, projects,
-        this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null)) : nothing}`;
+      ${this.#placedRow(today)}
+      ${board === null ? nothing : board.value === null
+        ? (board.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
+        : this.#boardTable(sessionsBoard(board.value, this.boardBy, today, !this.#folders(),
+                                         this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null))}`;
   }
 
-  /** A line under a list: what it leaves out, and `Show`; with no act, the line alone. */
-  #more(line: ListLine | null, key: string, show: (() => void) | null) {
-    if (line === null) return nothing;
-    return html`<div class="more" data-part="more" data-more=${key}><span>${line.text}</span>${show === null ? nothing
-      : html`<button type="button" class="act" data-act="show" @click=${show}>${SHOW}</button>`}</div>`;
+  /** The Sessions table: a header button per column it sorts by, the rows read, and the
+   * line that counts them with `Load more` for the next page, which is read too once the
+   * rows drawn near the end. A next page that failed is read again only on a scroll that
+   * moves the drawn rows, or a press of `Load more`. The rows sit in a box of their own and only those in view
+   * are drawn. A row with a session opens it: a plain press anywhere on it, Enter or
+   * Space on the row, or its name, a link to the session's address. The arrow keys move
+   * the row cursor. */
+  #boardTable(board: Board) {
+    const sortBy = (sort: BoardSort) => {
+      this.boardBy = nextOrder(this.boardBy, sort);
+      this.boardCursor = 0;
+      this.boardTop = 0;
+    };
+    const plain = (event: MouseEvent): boolean => event.button === 0 && !event.metaKey && !event.ctrlKey
+      && !event.shiftKey && !event.altKey;
+    const count = board.rows.length;
+    const cursor = Math.min(this.boardCursor, Math.max(0, count - 1));
+    const win = boardWindow(count, this.boardTop, this.#boardHeight);
+    if (win.near && board.more) queueMicrotask(() => { void this.#board?.showNear(); });
+    const scrolled = (event: Event) => {
+      const box = event.currentTarget as HTMLElement;
+      this.#boardHeight = box.clientHeight;
+      this.boardTop = box.scrollTop;
+      const moved = boardWindow(count, box.scrollTop, box.clientHeight);
+      if (board.more && moved.near && (moved.start !== win.start || moved.end !== win.end)) {
+        void this.#board?.show();
+      }
+    };
+    const keyed = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      this.boardCursor = moveCursor(cursor, event.key, count);
+      void this.updateComplete.then(() => {
+        const row = this.renderRoot.querySelector<HTMLElement>(`tr[data-index="${this.boardCursor}"]`);
+        row?.scrollIntoView({ block: "nearest" });
+        row?.focus();
+      });
+    };
+    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" style="height: ${px}px"></tr>` : nothing);
+    return html`<div class="scroll board" data-part="board" @scroll=${scrolled}><table class="tbl" data-part="table"
+      data-table="sessions" aria-rowcount=${count + 1}>
+      <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}
+        aria-sort=${column.aria ?? nothing} title=${column.title ?? nothing}>${column.sort === null ? column.label : html`<button type="button"
+          class="act sort" data-sort=${column.sort} @click=${() => sortBy(column.sort as BoardSort)}>${column.label}${
+          column.arrow === null ? nothing : html`<span aria-hidden="true"> ${column.arrow}</span>`}</button>`}</th>`)}</tr></thead>
+      <tbody @keydown=${keyed}>${pad(win.above)}${repeat(board.rows.slice(win.start, win.end), (row) => row.key, (row, at) => {
+        const index = win.start + at;
+        const session = row.session;
+        const go = (event: MouseEvent): void => {
+          this.boardCursor = index;
+          if (session === null || !plain(event)) return;
+          event.preventDefault();
+          this.#openFromTable(session);
+        };
+        const pressed = (event: KeyboardEvent): void => {
+          if (session === null || (event.key !== "Enter" && event.key !== " ") || event.target !== event.currentTarget) return;
+          event.preventDefault();
+          this.#openFromTable(session);
+        };
+        return html`<tr data-row=${row.key} data-index=${index} aria-rowindex=${index + 2}
+          tabindex=${index === cursor ? 0 : -1} class=${index === cursor ? "on" : ""}
+          data-opens=${session === null ? nothing : ""} @click=${go} @keydown=${pressed}>${row.cells.map((cell, i) =>
+          html`<td class=${board.columns[i]?.num ? "n" : ""}>${i === board.nameAt
+            ? html`${session === null ? cell : html`<a class="go" href=${addressPath(sessionAddress(session.harness, session.id))}
+                @click=${(event: MouseEvent) => { if (!plain(event)) event.stopPropagation(); }}>${cell}</a>`}${row.badge === null
+                ? nothing : html` <span class="badge" data-part="badge" title=${row.badge.title}>${row.badge.text}</span>`}`
+            : row.bars[i] ? html`${cell} ${this.#sparkbar(row.bars[i] as Sparkbar)}`
+            : board.columns[i]?.sort === "subagent_share" && row.share !== null
+              ? html`<svg class="sm" role="img" aria-label=${row.share.label} viewBox="0 0 56 9"><title>${row.share.label}</title>
+                  <rect class="base" x="0" y="4" width="56" height="1"></rect>
+                  <rect class="fill" x="0" y="3" width=${56 * Math.max(0, Math.min(1, row.share.value))} height="3"></rect></svg>`
+              : board.columns[i]?.sort === "cost" ? html`${cell}${this.#notWhole(row.why)}` : cell}</td>`)}</tr>`;
+      })}${pad(win.below)}</tbody>
+    </table></div>
+    <div class="more" data-part="more" data-more="table"><span>${board.line}</span>${board.more
+      ? html`<button type="button" class="act" data-act="show" @click=${() => { void this.#board?.show(); }}>${LOAD_MORE}</button>`
+      : nothing}</div>`;
   }
 
-  /** One session as a two-line row. A row with a session opens it under its lines and
-   * its act says so; a row with no session id has no act and does not open. A session in
-   * both lists opens in the one it was opened from, and reads that list's days. */
-  #sessionRow(line: SessionLine, list: "first" | "earlier" | "placed") {
+  /** A token class cell's bar: the class's shade over the share of the column's most. */
+  #sparkbar(bar: Sparkbar) {
+    return html`<svg class="sb" aria-hidden="true" viewBox="0 0 ${SPARKBAR_WIDTH} 9">
+      <rect class="base" x="0" y="4" width=${SPARKBAR_WIDTH} height="1"></rect>
+      <rect class="seg s${bar.shade} now" data-part="sparkbar" x="0" y="2" width=${SPARKBAR_WIDTH * bar.fraction}
+        height="5"></rect></svg>`;
+  }
+
+  /** A table row's session opens as its address opens it: first in the section, over
+   * the table, with its whole figures whatever the range, the section scrolled to. */
+  #openFromTable(session: { harness: string; id: string }): void {
+    this.#placed = session;
+    this.open(sessionAddress(session.harness, session.id));
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector("section[data-group=sessions]")?.scrollIntoView({ block: "start" });
+    });
+  }
+
+  /** The session the address named as a two-line row. It opens the session under its
+   * lines and its act says so; a row with no session id has no act and does not open. */
+  #sessionRow(line: SessionLine) {
     const at = this.#at;
     const session = line.session;
     const open = session !== null && at.piece === "sessions" && at.harness === session.harness
-      && at.session === session.id && (this.#openedIn ?? "placed") === list;
+      && at.session === session.id;
     const target = session === null ? null : open ? SESSIONS : sessionAddress(session.harness, session.id);
     const go = (): void => {
       if (target === null) return;
       this.open(target);
-      if (!open) this.#openedIn = list === "placed" ? null : list;
       this.requestUpdate();
     };
     return html`<moxi-ui-row ?toggles=${target !== null} ?open=${open} data-key=${line.key} name=${line.name}
@@ -1658,16 +1845,14 @@ export class UsagePage extends LitElement {
 
   #billOf(report: Report<TermsRow, TermsTotal>) {
     const lines = reconcileLines(report);
-    const flagged = lines.some((line) => line.flags.length > 0);
     return html`<div class="under" data-part="bill">
       <div class="scroll"><table class="tbl bill" data-part="bill-lines">
-        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Cost</th>${
-          flagged ? html`<th>Not whole</th>` : nothing}</tr></thead>
+        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Est. cost</th></tr></thead>
         <tbody>${lines.map((line) => html`<tr data-line=${line.kind} data-model=${line.model}>
           <td>${line.model}</td><td class="wrap">${line.pricedBy}</td>
           ${line.cells.map((cell) => html`<td class="n" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
-          <td class="n" data-cost=${line.cost === null ? "" : String(line.cost)}>${line.cost === null ? "no price" : fmtCost(line.cost)}</td>
-          ${flagged ? html`<td class="wrap">${line.flags.join("; ")}</td>` : nothing}
+          <td class="n" data-cost=${line.cost === null ? "" : String(line.cost)}>${line.cost === null ? "no price" : fmtCost(line.cost)}${
+            this.#notWhole(line.flags.join("; "))}</td>
         </tr>`)}</tbody>
       </table></div>
       <p>The terms on each line add up to its cost. Point at a figure for its tokens times its price.</p>
@@ -1719,7 +1904,7 @@ export class UsagePage extends LitElement {
         @click=${() => { this.sectionTable = key; }}>${part.text}</button>`;
     }
     const patch = part.patch;
-    return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.folder ?? ""}
+    return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.paths?.[0] ?? ""}
       @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${part.text}</a>`;
   }
 

@@ -109,7 +109,7 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
     assert (got.state, got.pid, got.target) == ("started", run["pid"], "terminal")
     assert got.pid_started is not None and got.session_id == SID
     assert got.argv == seen["preview"]
-    assert got.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert got.env == {"MOXI_USAGE_WARN_AT": "2x", "MOXI_LAUNCHER_REQUEST": "r1"}
     prompt = common.prompt_path(targets.runs_dir(), "r1")
     assert Path(prompt).exists() and "--append-system-prompt-file" in run["argv"]
     assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600

@@ -132,11 +132,12 @@ def test_projects_closed_names_the_dearest_three_and_its_count_opens_it(page):
     count = section.locator("[data-part=count]")
     expect(count).to_have_text("3 projects")
     expect(rows_of(section)).to_have_count(0)
-    # The sections follow the chart: Projects, Models, Token kinds, Prices.
+    # The sections follow the chart and the heat map: Sessions, Projects, Models, Token
+    # kinds, Prices.
     below = panel.locator("[data-part=below] > section")
-    expect(below).to_have_count(6)
+    expect(below).to_have_count(7)
     order = below.evaluate_all("nodes => nodes.map((node) => node.dataset.group)")
-    assert order == ["chart", "sessions", "projects", "models", "kinds", "prices"], order
+    assert order == ["chart", "heat", "sessions", "projects", "models", "kinds", "prices"], order
 
     count.click()
     expect(page).to_have_url(re.compile(r"/m/usage/projects$"))
@@ -164,8 +165,8 @@ def test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir(page
         '"no project" is ~/work/loose. A project row opens the Sessions section above, filtered to it.')
     section.locator("[data-part=sentence] a", has_text="~/work/loose").click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
-    expect(place_button(panel)).to_have_text("~/work/loose▾")
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
+    expect(place_button(panel)).to_have_text("1 folder▾")
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(1)
 
 
 def test_with_hundreds_of_dirs_of_no_project_the_sentence_names_three_and_more_opens_the_table(page):
@@ -197,8 +198,8 @@ def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
                              and "project=proj-b" in request.url):
         section.locator('a[data-row="project:proj-b"]').click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
-    expect(place_button(panel)).to_have_text("proj-b▾")
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
+    expect(place_button(panel)).to_have_text("1 project▾")
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(1)
     # Sessions is open, so Projects is closed again.
     expect(rows_of(section)).to_have_count(0)
     # Under the filter Projects holds that project alone, the whole of what is shown.
@@ -214,7 +215,7 @@ def test_the_projects_table_has_every_row_with_its_dir_and_figures(page):
     expect(toggle).to_have_text("Table")
     toggle.click()
     table = section.locator("table[data-part=table]")
-    expect(table.locator("th")).to_have_text(["Project", "Folder", "Models", "Requests", "Tokens", "Cost"])
+    expect(table.locator("th")).to_have_text(["Project", "Folder", "Models", "Requests", "Tokens", "Est. cost"])
     expect(table.locator("tbody tr")).to_have_count(3)
     loose = table.locator("tbody tr").filter(has_text="no project")
     expect(loose.locator("td")).to_have_text(["no project", "~/work/loose", SONNET, "1", re.compile(r"\S"),
@@ -241,7 +242,7 @@ def test_models_closed_names_the_dearest_two_and_opened_has_plain_rows(page):
     expect(section.locator("[data-part=sentence]")).to_have_count(0)
     section.locator("[data-part=table-toggle]").click()
     expect(section.locator("table[data-part=table] th")).to_have_text(
-        ["Model", "Priced by", "Requests", "Tokens", "Cost"])
+        ["Model", "Priced by", "Requests", "Tokens", "Est. cost"])
     # One section is open at a time.
     expect(rows_of(section_of(panel, "projects"))).to_have_count(0)
 
@@ -395,8 +396,8 @@ def test_without_projects_dirs_are_written_whole_with_no_row_for_no_project(smal
         rows_of(section).nth(1).click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
     expect(panel.locator("[data-part=filters] [data-filter=place] .k")).to_have_text("Folder")
-    expect(place_button(panel)).to_have_text("~/work/proj-b▾")
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
+    expect(place_button(panel)).to_have_text("1 folder▾")
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(1)
 
 
 def test_the_dirs_table_has_no_project_column(small, ui_contexts):
@@ -405,4 +406,4 @@ def test_the_dirs_table_has_no_project_column(small, ui_contexts):
     section = section_of(panel, "folders")
     section.locator("[data-part=table-toggle]").click()
     expect(section.locator("table[data-part=table] th")).to_have_text(
-        ["Folder", "Models", "Requests", "Tokens", "Cost"])
+        ["Folder", "Models", "Requests", "Tokens", "Est. cost"])
