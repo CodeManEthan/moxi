@@ -91,7 +91,8 @@ class WindowSession:
     on it, and act on how the window ended.
 
     A wrapper for another CLI subclasses it with its own window command (`argv`) and
-    its own wording (the class attributes below); the lifecycle is the same."""
+    its own wording (the class attributes below); the lifecycle is the same. `prog`, when
+    given, names the wrapper as it was run, in place of `PROG`."""
 
     #: What the wrapper says to the terminal, each formatted with `prog` (the
     #: wrapper's name), `identity`, `wait`, `status` and `log_path`.
@@ -108,7 +109,9 @@ class WindowSession:
 
     def __init__(self, adapter, *, binary: str, terminal: Terminal, log_path,
                  stopping: threading.Event, hangup: threading.Event,
-                 ready_wait: float = READY_WAIT, say=None, env=None):
+                 ready_wait: float = READY_WAIT, say=None, env=None, prog=None):
+        if prog is not None:
+            self.PROG = prog
         self.adapter = adapter
         self.agent = adapter.agent
         self.binary = binary
