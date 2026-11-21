@@ -60,13 +60,18 @@ def standing_row(conn, name: str, scope: str):
 
 def retired(conn, name: str, scope: str) -> bool:
     """Is (name, scope) retired: an `identities` row at exactly (name, scope) whose status is
-    `retired`? A retired identity is one comms no longer binds, routes to or queues for;
-    its binding history rows, its messages in the record, its cursor and its card stay. Read
-    per call, like every directory fact the daemon uses."""
-    return conn.execute(
+    `retired`, or a row the archive's identities file retired (`archive.retired`)? A retired
+    identity is one comms no longer binds, routes to or queues for; its binding history
+    rows, its messages in the record, its cursor and its card stay. comms.db is read per
+    call, like every directory fact the daemon uses."""
+    if conn.execute(
         "SELECT 1 FROM identities WHERE name = ? AND scope = ? AND status = 'retired'",
         (name, scope),
-    ).fetchone() is not None
+    ).fetchone() is not None:
+        return True
+    from . import archive
+
+    return archive.retired(name, scope)
 
 
 #: The refusals for a retired identity, word for word: the register's, and resolution's
