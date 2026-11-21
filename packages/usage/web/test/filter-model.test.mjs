@@ -71,9 +71,10 @@ test("the chart's token classes are asked of the terms by the chart's own period
   assert.equal(chartTermsPath(state({ range: { kind: "all" } }), TODAY), "api/terms?by=month");
 });
 
-test("the heat map is asked for the 53 weeks to today whatever the range, under the other filters", () => {
-  assert.equal(heatPath(state({ range: { kind: "7d" }, harness: "claude" }), TODAY),
-               "api/daily?by=day&since=2025-11-03&until=2026-11-08&harness=claude");
+test("the heat map is asked for the 53 weeks to today whatever the range, under the place filter alone", () => {
+  // The heat map follows the place filter alone.
+  assert.equal(heatPath(state({ range: { kind: "7d" }, harness: "claude", model: "m-a", projects: ["atlas"] }), TODAY),
+               "api/daily?by=day&since=2025-11-03&until=2026-11-08&project=atlas");
   assert.equal(heatPath(state({ range: { kind: "all" } }), TODAY), "api/daily?by=day&since=2025-11-03&until=2026-11-08");
 });
 

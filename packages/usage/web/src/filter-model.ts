@@ -96,11 +96,11 @@ export function chartTermsPath(state: PageState, today: string): string {
   return withQuery("api/terms", [["by", rangeBy(state.range, today)], ...stateKeys(state, today)]);
 }
 
-/** The heat map's report: each day of the 53 weeks to today, under every filter but
- * the range. */
+/** The heat map's report: each day of the 53 weeks to today, under the project (or
+ * folder) filter alone. */
 export function heatPath(state: PageState, today: string): string {
   return withQuery("api/daily", [["by", "day"], ["since", heatSince(today)], ["until", today],
-                                 ...stateKeys(state, today, ["since", "until"])]);
+                                 ...stateKeys(state, today, ["since", "until", "harness", "model"])]);
 }
 
 /** The report the Range menu's preset figures are summed from while a filter is set:

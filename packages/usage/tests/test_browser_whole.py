@@ -280,6 +280,9 @@ def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_bo
 def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(installs, ui_contexts):
     page = ui_contexts(installs["full"]).pages[0]
     panel = settled_page(page)
+    used = section(panel, "heat").locator("svg[data-part=heat] rect[data-used=true]")
+    expect(used.first).to_be_attached()
+    every = used.count()
     pick(panel, "harness", "Codex")
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     pick(panel, "range", "Today")
@@ -287,12 +290,12 @@ def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(inst
     # The thread is three days old: nothing of Codex today.
     expect(chart.locator("[data-part=none]")).to_have_text("Nothing was used in this range.")
     expect(chart.locator("svg[data-part=chart]")).to_have_count(0)
-    # No section is drawn; the heat map, which does not follow the range, still holds
-    # the thread's day.
+    # No section is drawn; the heat map, which follows neither the range nor the
+    # harness, still holds every used day.
     groups = panel.locator("[data-part=below] section[data-group]")
     expect(groups).to_have_count(2)
     assert groups.evaluate_all("nodes => nodes.map((node) => node.dataset.group)") == ["chart", "heat"]
-    expect(section(panel, "heat").locator("svg[data-part=heat]").get_by_role("button")).to_have_count(1)
+    expect(used).to_have_count(every)
     expect(panel.locator("[data-group=cost] [data-cost]")).to_have_count(3)
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     expect(panel.locator("[data-part=foot]")).to_be_visible()

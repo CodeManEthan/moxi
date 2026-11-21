@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The page's heat map follows only the project (or folder) filter, no longer Harness and
+  Model, and is drawn even when no day of the 53 weeks was used. Every day is a button,
+  not only the used ones; weeks are a fixed 13 px apart, where the pitch shrank to fit;
+  every month is named; a used day's hover gives its token classes only when the day is in
+  the range; its table lists the used days oldest first. It is named `Daily estimated
+  cost — trailing 53 weeks`, and its line names the time zone of its days.
 - The page's filter line has By class / By model beside Cost / Tokens. By model the chart
   by cost is stacked by model, the six that cost most in the range in four shades and two
   line fills of the text colour and the rest as one `Other` part. The chart's table

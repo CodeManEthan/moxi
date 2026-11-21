@@ -31,7 +31,8 @@
 //                                  by tokens the cache reads and the billable work as two
 //                                  charts; its sentence and its table
 //     section[data-group=heat]     each day's cost over the 53 weeks to today, whatever the
-//                                  range; a used day is a button that sets the range to it
+//                                  range, under the place filter; a day is a button that
+//                                  sets the range to it
 //     section[data-group=sessions] the range's dearest session and the count, and opened
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
 //                                  they leave out, the earlier days, and the table of
@@ -1066,7 +1067,7 @@ export class UsagePage extends LitElement {
     ].filter((drawn) => drawn !== nothing);
     // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
     const heatReport = frame.below ? this.#heat?.value ?? null : null;
-    const heat = heatReport === null ? null : heatModel(heatReport, today);
+    const heat = heatReport === null ? null : heatModel(heatReport, today, state.range);
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -1263,10 +1264,10 @@ export class UsagePage extends LitElement {
     </section>`;
   }
 
-  /** The heat map's group: its sentence and the map, or its table in the map's place. */
+  /** The heat map's group: its name, its sentence and the map, or its table in the
+   * map's place. */
   #heatGroup(model: HeatModel) {
-    const wide = !window.matchMedia("(max-width: 720px)").matches;
-    const draw = heatDraw(model, Math.max(120, this.width - (wide ? 100 : 0)));
+    const draw = heatDraw(model);
     const pick = (day: string) => {
       const range = customRange(day, day);
       if (range !== null) holdState({ range });
@@ -1279,6 +1280,7 @@ export class UsagePage extends LitElement {
     return html`<section class="grp" data-group="heat">
       <div class="gk">${HEAT_LABEL}</div>
       <div class="gl">
+        <p class="chartn" data-part="chart-name">${model.title}</p>
         <div class="chartl"><span data-part="sentence">${model.sentence}</span>
           <button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.heatTable = !this.heatTable; }}>${this.heatTable ? CHART : TABLE}</button></div>
@@ -1287,13 +1289,10 @@ export class UsagePage extends LitElement {
             height=${draw.height} viewBox="0 0 ${draw.width} ${draw.height}">${svg`
             ${draw.months.map((month) => svg`<text x=${month.x} y=${HEAT_SIZE.months - 3}>${month.text}</text>`)}
             ${draw.weekdays.map((weekday) => svg`<text x="0" y=${weekday.y} dominant-baseline="middle">${weekday.text}</text>`)}
-            ${draw.cells.map((cell) => cell.used
-              ? svg`<rect class="hc h${cell.step}" data-day=${cell.day} x=${cell.x} y=${cell.y} width=${draw.cell}
-                  height=${draw.cell} rx="2" tabindex="0" role="button" aria-label=${cell.aria}
-                  @click=${() => pick(cell.day)} @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}
-                  ><title>${cell.hover}</title></rect>`
-              : svg`<rect class="hc h0" data-day=${cell.day} x=${cell.x} y=${cell.y} width=${draw.cell}
-                  height=${draw.cell} rx="2"><title>${cell.hover}</title></rect>`)}`}</svg></div>
+            ${draw.cells.map((cell) => svg`<rect class="hc h${cell.step}" data-day=${cell.day} data-used=${String(cell.used)}
+                x=${cell.x} y=${cell.y} width=${draw.cell} height=${draw.cell} rx="2" tabindex="0" role="button"
+                aria-label=${cell.aria} @click=${() => pick(cell.day)}
+                @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
           <p class="scale" data-part="scale" aria-hidden="true">${LESS}${[1, 2, 3, 4, 5].map((step) =>
             html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`}
       </div>

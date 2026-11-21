@@ -4,7 +4,7 @@ the chart and leaves alone in Cost, the two days of a range of one's own, the Ha
 and Model filters, the folder filter on a shell without projects, the chart's bars,
 sentence, today's value, dashed outline and table by cost and by tokens, its bars by
 cost stacked by token class or by model with the table following the split, the two
-charts by tokens, the 53 weeks' heat map, a range that
+charts by tokens, the 53 weeks' heat map under the place filter alone, a range that
 holds nothing, a range whose total is not whole with its line at the foot, the sections
 reading under the same range, and all of it at a phone's width.
 
@@ -562,26 +562,34 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     panel = open_page(page)
     heat = heat_of(panel)
     expect(heat.locator(".gk")).to_have_text("53 weeks")
-    expect(heat.locator("[data-part=sentence]")).to_have_text(
-        "Each day's estimated cost over the last 53 weeks, whatever the range. Pick a day to see it alone.")
+    expect(heat.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — trailing 53 weeks")
+    expect(heat.locator("[data-part=sentence]")).to_have_text(re.compile(
+        r"^Trailing 53 weeks, independent of the range filter · days in \S+\. Click a day to filter to it\.$"))
     grid = heat.locator("svg[data-part=heat]")
-    expect(grid).to_have_attribute("aria-label", "Estimated cost each day, last 53 weeks")
-    expect(grid.locator("rect.hc")).to_have_count(371)
-    # The five sessions fall on five days, 200 days ago the oldest; each is a button.
+    expect(grid).to_have_attribute("aria-label", "Estimated cost per day, trailing 53 weeks")
+    # Every one of the 371 days is a button, 11 px cells 13 px apart whatever the width;
+    # the five sessions fall on five of them.
     days = grid.get_by_role("button")
-    expect(days).to_have_count(5)
+    expect(days).to_have_count(371)
+    assert {days.first.get_attribute("width"), days.last.get_attribute("width")} == {"11"}
+    assert grid.get_attribute("width") in {str(22 + 53 * 13), str(22 + 54 * 13)}
+    used = grid.locator("rect[data-used=true]")
+    expect(used).to_have_count(5)
     expect(grid.locator("text")).to_contain_text(["M", "W", "F"])
     expect(heat.locator("[data-part=scale]")).to_have_text("lessmore")
     # It does not follow the range.
     pick(panel, "range", "Last 7 days")
     expect(chart_of(panel).locator("g[data-period]")).to_have_count(2)
-    expect(days).to_have_count(5)
-    # The oldest day says its cost and tokens, and picking it sets the range to it.
-    oldest = days.first
-    expect(oldest).to_have_attribute("aria-label", re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}$"))
-    expect(oldest.locator("title")).to_have_text(
+    expect(used).to_have_count(5)
+    # A day in the range names its classes on hover; one outside it, its cost and tokens.
+    expect(used.last.locator("title")).to_have_text(
         re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens\nInput 600\nCache create 0\n"
                    r"Cache read 30\nOutput 4\.50k$"))
+    oldest = used.first
+    expect(oldest).to_have_attribute("aria-label", re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}$"))
+    expect(oldest.locator("title")).to_have_text(
+        re.compile(rf"^\w{{3}} \d{{1,2}} \d{{4}}: {MONEY}, [\d.]+k tokens$"))
+    # Picking a day sets the range to it.
     date, year = oldest.get_attribute("aria-label").split(":")[0].rsplit(" ", 1)
     oldest.click()
     # The range names the day's year only when it is not this year.
@@ -591,27 +599,41 @@ def test_the_heat_map_holds_53_weeks_whatever_the_range_and_a_day_picks_its_rang
     expect(chart_of(panel).locator("g[data-period]")).to_have_attribute(
         "data-period", oldest.get_attribute("data-day"))
     # A day is reached by the keyboard too: Enter on the newest sets the range to it.
-    newest = days.last.get_attribute("data-day")
-    days.last.focus()
+    newest = used.last.get_attribute("data-day")
+    used.last.focus()
     page.keyboard.press("Enter")
     expect(chart_of(panel).locator("g[data-period]")).to_have_attribute("data-period", newest)
-    expect(days).to_have_count(5)
+    # A day nothing was used on is a button as well.
+    days.first.click()
+    expect(panel.locator("[data-group=chart] [data-part=none]")).to_have_text("Nothing was used in this range.")
+    expect(used).to_have_count(5)
 
 
-def test_the_heat_map_follows_the_other_filters_and_its_table_lists_the_used_days(page):
+def test_the_heat_map_follows_only_the_place_filter_and_its_table_lists_the_used_days(small, ui_contexts):
+    page = ui_contexts(small).pages[0]
     panel = open_page(page)
     heat = heat_of(panel)
-    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_count(5)
+    used = heat.locator("svg[data-part=heat] rect[data-used=true]")
+    expect(used).to_have_count(5)
+    # Harness and Model leave it as it is.
     pick(panel, "harness", "Codex")
-    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_count(1)
-    expect(heat.locator("svg[data-part=heat]").get_by_role("button")).to_have_attribute(
-        "aria-label", re.compile(r": no price$"))
+    expect(panel.locator("[data-group=chart] [data-part=none]")).to_have_text("Nothing was used in this range.")
+    expect(used).to_have_count(5)
     pick(panel, "harness", "all")
+    # A folder filters it: proj-b's two sessions, two days and fifty days ago.
+    box = filter_of(panel, "place")
+    box.locator("button.pick").click()
+    box.get_by_role("menuitemcheckbox", name="/work/proj-b").click()
+    expect(box.locator("button.pick")).to_have_text("1 folder▾")
+    expect(used).to_have_count(2)
+    page.keyboard.press("Escape")
     heat.get_by_role("button", name="Table").click()
     expect(heat.locator("svg[data-part=heat]")).to_have_count(0)
     table = heat.get_by_role("table")
     expect(table.locator("thead th")).to_have_text(["Day", "Est. cost", "Tokens"])
-    expect(table.locator("tbody tr")).to_have_count(5)
+    expect(table.locator("tbody tr")).to_have_count(2)
+    # Oldest first: the Codex thread, whose model has no price, then the Haiku session.
+    expect(table.locator("tbody tr").first.locator("td").nth(1)).to_have_text("no price")
     expect(table.locator("tbody tr").last.locator("td").nth(1)).to_have_text(re.compile(rf"^{MONEY}$"))
     heat.get_by_role("button", name="Chart").click()
     expect(heat.locator("svg[data-part=heat]")).to_be_visible()

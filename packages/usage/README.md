@@ -423,10 +423,13 @@ sessions module. Top to bottom:
   there are two charts: `Cache reads` alone, with its share of all tokens, and `Billable
   work`, input, cache writes and output stacked. A table's column of dollars reads
   `Est. cost`.
-- **The heat map.** Each day's estimated cost over the 53 weeks to today, whatever the
-  range, under the other filters: weeks as columns, five shades on the quantiles of the
-  days that cost something. A used day says its cost, tokens and classes on hover, and a
-  click or Enter sets the range to that day. `Table` lists the used days.
+- **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
+  over the 53 weeks to today, whatever the range, under the project (or folder) filter
+  alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
+  narrow page its box scrolls), each month is named over its first column, and the five
+  shades sit on the quantiles of the days that cost something. Every day is a button: a
+  click or Enter sets the range to it. A used day says its cost and tokens on hover, and
+  its token classes when it is in the range. `Table` lists the used days, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
     `Show` for thirty more, and the days before them as `Earlier`. Its `Table` is every
