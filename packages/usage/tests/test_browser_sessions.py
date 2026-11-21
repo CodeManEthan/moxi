@@ -2,9 +2,9 @@
 usage's real page server: the closed row naming the range's dearest session with the
 count that opens it; opened, the table of every session of the range at once, dearest
 first, sorted by a column, with its turns, its token classes each with a bar, its
-subagent share and its cost, its rows in a box with a row cursor on the arrow keys; a
-table row opening its session first in the section, and the opened row's `Close` and the
-address it writes; a range of seven days or one holding only its own sessions; Cost's
+subagent share and its cost, its rows in a box with a row cursor on the arrow keys, a
+next page that failed read again only on `Load more`; a table row opening its session
+first in the section, and the opened row's `Close` and the address it writes; a range of seven days or one holding only its own sessions; Cost's
 `most to` naming today's two dearest; and the section at a phone's width.
 The transcripts are written and the index built in the shell's own environment. No test
 changes what the index holds, so the tests hold under pytest-xdist in any order.
@@ -304,6 +304,44 @@ def test_the_tables_rows_sit_in_a_box_and_the_arrow_keys_move_a_row_cursor_enter
     assert path_of(page) == f"/m/usage/sessions/{key}"
     expect(section.locator(f'[data-list=placed] moxi-ui-row[data-key="{key}"]')).to_have_attribute("open", "")
     expect(table).to_be_visible()
+
+
+#: Twenty frames of the page, long enough for a read asked on every draw to go out many times.
+FRAMES = """new Promise((done) => {
+  let n = 0;
+  const step = () => (++n < 20 ? requestAnimationFrame(step) : done());
+  requestAnimationFrame(step);
+})"""
+
+
+def test_a_next_page_that_failed_is_read_again_only_on_load_more(page):
+    failed = []
+
+    def answer(route):
+        if "skip=" in route.request.url:
+            failed.append(route.request.url)
+            route.fulfill(status=500, json={"error": "down"})
+            return
+        # The first page says 600 more sessions wait, so the rows drawn are near the end.
+        response = route.fetch()
+        body = response.json()
+        body.update(count=body["count"] + 600, more=600)
+        route.fulfill(response=response, json=body)
+
+    page.route("**/m/usage/api/sessions?*", answer)
+    with page.expect_request(lambda request: "skip=16" in request.url):
+        section = sessions_of(opened_sessions(page))
+    more = section.locator("[data-more=table]")
+    expect(more).to_contain_text("616 sessions · showing 16")
+    page.evaluate(FRAMES)
+    assert len(failed) == 1, failed
+    # A press reads the page again; once the server answers, the line counts what it holds.
+    page.unroute("**/m/usage/api/sessions?*")
+    with page.expect_request(lambda request: "skip=16" in request.url):
+        more.get_by_role("button", name="Load more").click()
+    expect(more).to_have_text("16 sessions · showing 16")
+    expect(rows_of(section)).to_have_count(16)
+
 
 def test_a_rows_open_writes_its_address_and_reads_as_close(page):
     section = sessions_of(opened_sessions(page))

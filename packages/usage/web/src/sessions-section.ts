@@ -310,6 +310,7 @@ export class SessionList {
   async #read(ask: (path: string) => Promise<ApiResult>, path: ListPath): Promise<ApiResult> {
     const held = this.feed.value;
     const show = this.#show && held !== null;
+    this.#show = false;
     const pages = show ? [{ top: this.#page, skip: held.read }] : depthPages(held?.read ?? 0, this.#first);
     const answers: unknown[] = [];
     for (const page of pages) {
@@ -328,7 +329,6 @@ export class SessionList {
       if (answer === null) return null;
       list = list === null ? listRead(answer) : addPage(list, answer);
     }
-    if (base !== null) this.#show = false;
     return list;
   }
 
@@ -337,6 +337,14 @@ export class SessionList {
     if (this.feed.reading || this.feed.value === null) return Promise.resolve();
     this.#show = true;
     return this.feed.refresh();
+  }
+
+  /** A page more as the rows drawn near the end, as `show`, but nothing while the last read
+   * failed or found the route gone: a failed page is read again only by `show`, on a
+   * scroll or a press. */
+  showNear(): Promise<void> {
+    if (this.feed.failure !== null || this.feed.gone) return Promise.resolve();
+    return this.show();
   }
 
   refresh(): Promise<void> {

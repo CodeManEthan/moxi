@@ -19,7 +19,8 @@
   its table, where it wrote `Nov 3 2026` and `nothing used`.
 - The Sessions table reads 500 sessions at a time (`/api/sessions` takes `top` up to
   500) and reads the next 500 as the rows drawn near the end, or on `Load more`, where it
-  read 200 on `Show`. Its rows sit in a box of their own, 40 px each, only those in view
+  read 200 on `Show`. A next page that failed is read again only on a scroll that moves
+  the rows drawn or on `Load more`. Its rows sit in a box of their own, 40 px each, only those in view
   drawn, and the arrow keys move a row cursor; Enter on a row opens its session. Rows of
   one value sort by session id then harness in either direction, where they kept the
   order by cost (then tokens). A session with no turn id counts 0 turns, where its cell

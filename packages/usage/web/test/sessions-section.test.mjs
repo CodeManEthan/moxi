@@ -273,3 +273,35 @@ test("a list read again after a pass keeps its depth, and a failed Show keeps it
   assert.equal(failing.feed.value.rows.length, 10);
   assert.notEqual(failing.feed.failure, null);
 });
+
+test("a failed next page is read again only by a scroll or a press, never as the rows are drawn", async () => {
+  const { ask } = server(many(1100));
+  const asked = [];
+  let fail = true;
+  const failing = async (path) => {
+    asked.push(path);
+    return fail && path.includes("skip") ? { status: 500, data: null } : ask(path);
+  };
+  const board = new SessionList(failing, (top, skip) => boardPath(START, TODAY, BOARD_START, top, skip), BOARD_PAGE,
+                                () => {}, BOARD_PAGE);
+  await board.refresh();
+  await board.showNear();
+  assert.equal(asked.length, 2);
+  assert.notEqual(board.feed.failure, null);
+  // Each draw near the end asks nothing more while the last read failed.
+  await board.showNear();
+  await board.showNear();
+  assert.equal(asked.length, 2);
+  // A refresh reads the rows held again, not the next page.
+  await board.refresh();
+  assert.deepEqual(asked.slice(2).map((item) => item.replace(/^.*&sort/, "sort")), ["sort=cost&order=desc&top=500"]);
+  // A scroll or a press reads the page again; once it answers, a draw near the end reads on.
+  await board.show();
+  assert.equal(asked.length, 4);
+  fail = false;
+  await board.show();
+  assert.equal(board.feed.value.rows.length, 1000);
+  assert.equal(board.feed.failure, null);
+  await board.showNear();
+  assert.equal(board.feed.value.rows.length, 1100);
+});

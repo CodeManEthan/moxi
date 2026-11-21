@@ -1405,7 +1405,8 @@ export class UsagePage extends LitElement {
 
   /** The Sessions table: a header button per column it sorts by, the rows read, and the
    * line that counts them with `Load more` for the next page, which is read too once the
-   * rows drawn near the end. The rows sit in a box of their own and only those in view
+   * rows drawn near the end. A next page that failed is read again only on a scroll that
+   * moves the drawn rows, or a press of `Load more`. The rows sit in a box of their own and only those in view
    * are drawn. A row with a session opens it: a plain press anywhere on it, Enter or
    * Space on the row, or its name, a link to the session's address. The arrow keys move
    * the row cursor. */
@@ -1420,11 +1421,15 @@ export class UsagePage extends LitElement {
     const count = board.rows.length;
     const cursor = Math.min(this.boardCursor, Math.max(0, count - 1));
     const win = boardWindow(count, this.boardTop, this.#boardHeight);
-    if (win.near && board.more) queueMicrotask(() => { void this.#board?.show(); });
+    if (win.near && board.more) queueMicrotask(() => { void this.#board?.showNear(); });
     const scrolled = (event: Event) => {
       const box = event.currentTarget as HTMLElement;
       this.#boardHeight = box.clientHeight;
       this.boardTop = box.scrollTop;
+      const moved = boardWindow(count, box.scrollTop, box.clientHeight);
+      if (board.more && moved.near && (moved.start !== win.start || moved.end !== win.end)) {
+        void this.#board?.show();
+      }
     };
     const keyed = (event: KeyboardEvent) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

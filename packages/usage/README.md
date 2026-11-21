@@ -433,9 +433,10 @@ sessions module. Top to bottom:
   in the range. `Table` lists the used days by date, oldest first.
 - **The sections**, each one row stating its answer, with the count that opens it:
   - Sessions. Opened, a table of every session of the range, dearest first, read 500 at
-    a time, the next 500 read as the rows drawn near the end or on `Load more`. Its
-    columns are the project (or the folder, without the projects module), the session's
-    name (with a `codex` badge on a Codex session), its start, how long it was active,
+    a time, the next 500 read as the rows drawn near the end or on `Load more` (a next
+    page that failed is read again only on a scroll that moves the rows drawn, or on
+    `Load more`). Its columns are the project (or the folder, without the projects
+    module), the session's name (with a `codex` badge on a Codex session), its start, how long it was active,
     its turns (0 where none is recorded), its Input, Cache create, Cache read and Output
     tokens, each with a bar against the most of its column among the rows read, its
     subagents' share of its cost as a meter, and its estimated cost. A click on a header
