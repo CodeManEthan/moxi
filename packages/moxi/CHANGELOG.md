@@ -2,6 +2,10 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.proc.run` takes `first_signal` and `grace_s`: on POSIX a timed-out run sends its
+  group that signal first (`"SIGINT"`, which test runners stop cleanly on) and waits
+  `grace_s` seconds before the SIGKILL. The defaults, SIGTERM and `KILL_GRACE`, are
+  unchanged. A module that passes them needs `moxi>=0.1.11`.
 - On Windows `moxi doctor --costs` shows a module's daemons' open handles in a row of its
   own, `cost handles`, as `N open handles`, and never compares them with the module's
   `fds` budget, a POSIX fd limit: a handle count also holds events, threads and registry
