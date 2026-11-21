@@ -563,7 +563,8 @@ def session_of(key: str, env: dict):
 
 __all__ = ["CLAUDE_KIND", "CannotRespawn", "FIND", "GONE_POLL_S", "GONE_WAIT_S",
            "LOCK_PREFIX", "NOTE", "RESPAWN_CAP", "RESPAWN_WINDOW_S", "Respawner",
-           "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S", "claude_root", "in_service",
+           "SYSTEMD_RUN_STDERR_CHARS", "UNIT_PREFIX", "USER_MANAGER_ENV", "WORD_WAIT_S",
+           "claude_root", "in_service",
            "lock_path", "main", "note_writer", "respawn_adapter", "session_dir",
            "session_env", "session_of", "starter_argv", "unit_name", "with_user_manager",
            "write_note"]
