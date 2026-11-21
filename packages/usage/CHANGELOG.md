@@ -19,6 +19,9 @@
 - Under Tokens each chart has its own table: `Cache reads` with a Cache read column, and
   `Billable work` with Input, Cache create and Output, in the order its chart stacks
   them. One table held all four classes.
+- Each chart has its own `Table` beside its name, which switches that chart alone; the
+  chart by cost keeps its name over its table. One `Table` beside the sentence switched
+  every chart of the group.
 - A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
   hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
   that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's

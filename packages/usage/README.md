@@ -427,7 +427,8 @@ sessions module. Top to bottom:
   and is off under Tokens. Everything under it follows them.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
-  are not whole, and `Table`, its rows as a table. By cost and By class each bar is
+  are not whole, and `Table` beside its name, its rows as a table under the name, and
+  `Chart` back. By cost and By class each bar is
   stacked by token class (Input, Cache create, Cache read, Output), each part that class's
   own dollars from the cost terms; By model it is stacked by model, the six that cost most
   in the range each in a shade or a line fill of its own and the rest as one, `Other`.
@@ -437,8 +438,10 @@ sessions module. Top to bottom:
   (`Monthly` where its bars are months), and By model the line under it says `Per-model
   dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
   with its share of all tokens, and `Billable work`, input, cache writes and output
-  stacked; `Table` gives each its own table under its name, `Cache reads` with a `Cache
-  read` column and `Billable work` with `Input`, `Cache create` and `Output`. A table's
+  stacked; each has its own `Table` beside its name, which switches that chart alone to its
+  table, `Cache reads` with a `Cache read` column and `Billable work` with `Input`, `Cache
+  create` and `Output`. Each chart keeps its choice of Table or Chart while the page is
+  open. A table's
   column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter

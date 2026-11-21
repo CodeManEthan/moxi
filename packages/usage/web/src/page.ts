@@ -29,7 +29,7 @@
 //   div[data-part=below]        the groups under the filter line:
 //     section[data-group=chart]    one bar a day or a month, stacked by token class by cost;
 //                                  by tokens the cache reads and the billable work as two
-//                                  charts; its sentence and its table
+//                                  charts; its sentence, and each chart's own table
 //     section[data-group=heat]     each day's cost over the 53 weeks to today, whatever the
 //                                  range, under the place filter; a day is a button that
 //                                  sets the range to it
@@ -80,7 +80,7 @@ import {
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
-import type { ChartDraw, ChartGroup, ChartModel, Series, Table } from "./chart-model.ts";
+import type { ChartDraw, ChartGroup, ChartModel, ChartPart, Series, Table } from "./chart-model.ts";
 import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
@@ -278,6 +278,10 @@ const STYLES = css`
            line-height: 18px; color: var(--moxi-text-dim); }
   .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
   .chartn { padding: 10px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text); }
+  .charth { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; padding: 10px 0 0;
+            font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .charth .chartn { padding: 0; }
+  .charth button.act { flex: none; color: inherit; }
   .chartc { padding: 0 0 4px; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
   .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0 0 6px; list-style: none;
             font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
@@ -442,7 +446,7 @@ export class UsagePage extends LitElement {
     copied: { state: true },
     menu: { state: true },
     custom: { state: true },
-    asTable: { state: true },
+    tabled: { state: true },
     heatTable: { state: true },
     sectionTable: { state: true },
     boardBy: { state: true },
@@ -465,8 +469,8 @@ export class UsagePage extends LitElement {
   menu: Menu["key"] | null = null;
   /** The Range menu shows the two days of `From … to …`. */
   custom = false;
-  /** The chart's table stands in its place. */
-  asTable = false;
+  /** The charts whose tables stand in their place, by `ChartPart` key. */
+  tabled: ReadonlySet<string> = new Set();
   /** The heat map's table stands in its place. */
   heatTable = false;
   /** The opened section whose table is shown under its rows. */
@@ -1049,7 +1053,7 @@ export class UsagePage extends LitElement {
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null, state.split);
+      : chartGroup(report, state.range, state.measure, today, this.tabled, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -1238,8 +1242,8 @@ export class UsagePage extends LitElement {
     </form>`;
   }
 
-  /** The chart's group: its sentence and its charts, their tables, each under its chart's
-   * name where it has one, or the sentence that nothing was used. */
+  /** The chart's group: its sentence and its charts, each under its name with its own
+   * Table or Chart, or the sentence that nothing was used. */
   #chartGroup(group: ChartGroup) {
     // The group's label column is beside the chart only on a wide page.
     const wide = !window.matchMedia("(max-width: 720px)").matches;
@@ -1250,15 +1254,27 @@ export class UsagePage extends LitElement {
       <div class="gk">${group.label}</div>
       <div class="gl">
         ${group.nothing === null ? nothing : html`<p class="none" data-part="none">${group.nothing}</p>`}
-        ${group.sentence === null && group.toggle === null ? nothing : html`<div class="chartl">
-          <span data-part="sentence">${group.sentence ?? nothing}</span>
-          ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
-            @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
-        ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
-        ${group.tables.map(({ name, table }) => html`${name === null ? nothing
-          : html`<p class="chartn" data-part="chart-name">${name}</p>`}${this.#table(table)}`)}
+        ${group.sentence === null ? nothing : html`<div class="chartl"><span data-part="sentence">${group.sentence}</span></div>`}
+        ${group.parts.map((part) => this.#chartPart(part, width, hang))}
       </div>
     </section>`;
+  }
+
+  /** One chart of the group: its name and its Table or Chart, which switches it alone,
+   * then the chart or its table. */
+  #chartPart(part: ChartPart, width: number, hang: number) {
+    const flip = () => {
+      const tabled = new Set(this.tabled);
+      if (!tabled.delete(part.key)) tabled.add(part.key);
+      this.tabled = tabled;
+    };
+    const head = part.name === null && part.toggle === null ? nothing
+      : html`<div class="charth" data-chart=${part.key}>${part.name === null ? html`<span></span>`
+        : html`<p class="chartn" data-part="chart-name">${part.name}</p>`}${part.toggle === null ? nothing
+        : html`<button type="button" class="act" data-part="table-toggle" @click=${flip}>${part.toggle}</button>`}</div>`;
+    return html`${head}
+      ${part.chart === null ? nothing : this.#oneChart(part.chart, width, hang)}
+      ${part.table === null ? nothing : this.#table(part.table)}`;
   }
 
   /** The heat map's group: its name, its sentence and the map, or its table in the
@@ -1297,11 +1313,10 @@ export class UsagePage extends LitElement {
     </section>`;
   }
 
-  /** One chart of the group: its name and caption where it has them, the chart, and the
-   * legend of what its bars are stacked by. */
+  /** One chart of the group: the chart, its caption where it has one, and the legend of
+   * what its bars are stacked by. */
   #oneChart(chart: ChartModel, width: number, hang: number) {
-    return html`${chart.name === null ? nothing : html`<p class="chartn" data-part="chart-name">${chart.name}</p>`}
-      ${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
+    return html`${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
       ${chart.caption === null ? nothing : html`<p class="chartc" data-part="caption">${chart.caption}</p>`}
       ${chart.series.length === 0 ? nothing : this.#legend(chart.series)}`;
   }

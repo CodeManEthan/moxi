@@ -352,8 +352,8 @@ export interface Table {
   markAt?: number;
 }
 
-/** A table under the name of the chart it stands for; the name is null where the group
- * has one chart. */
+/** A table under the name of the chart it stands for; the name is null for the chart by
+ * cost's. */
 export interface NamedTable {
   name: string | null;
   table: Table;
@@ -421,52 +421,76 @@ export function chartTables(report: Report<DayRow>, measure: Measure, by: "day" 
 
 // --- the group the chart stands in --------------------------------------------------------
 
-/** The link that shows the chart's rows as a table in its place, and the one back. */
+/** The link that shows a chart's rows as a table in its place, and the one back. */
 export const TABLE = "Table";
 export const CHART = "Chart";
 
-/** The chart's group as the view places it: its charts, their tables, or the sentence
- * that nothing was used. */
+/** The key the chart by cost keeps its Table or Chart under, whatever its split. Each
+ * chart by tokens keeps it under its name. */
+export const COST_CHART = "cost";
+
+/** One chart of the group as the view places it: its name, with its own `Table` or
+ * `Chart` beside it, and the chart or its table under them. */
+export interface ChartPart {
+  /** What the view keeps this chart's Table or Chart under: `COST_CHART`, or by tokens
+   * the chart's name. */
+  key: string;
+  /** The chart's name; null for the table alone of the chart by cost. */
+  name: string | null;
+  /** `Table` while the chart shows, `Chart` while its table does; null where there is
+   * only the table to show. */
+  toggle: string | null;
+  /** The chart; null while its table stands in its place. */
+  chart: ChartModel | null;
+  /** The chart's table (`chartTables`); null while the chart shows. */
+  table: Table | null;
+}
+
+/** The chart's group as the view places it: its charts, each or its table, or the
+ * sentence that nothing was used. */
 export interface ChartGroup {
   /** The group's name at its left: `Each day`, `Each month`. */
   label: string;
-  /** The line above the charts or the tables. */
+  /** The line above the charts. */
   sentence: string | null;
-  /** `Table` beside the sentence while the chart shows, `Chart` while the table does;
-   * null where there is only one of them to show. */
-  toggle: string | null;
   /** `Nothing was used in this range.`, in the chart's place. */
   nothing: string | null;
-  /** One chart by cost; by tokens the cache reads, then the billable work. Empty while
-   * the tables or the sentence stand in their place. */
-  charts: ChartModel[];
-  /** The charts' tables (`chartTables`), in their place; empty while they show. */
-  tables: NamedTable[];
+  /** One chart by cost; by tokens the cache reads, then the billable work. Empty where
+   * the sentence that nothing was used stands in their place. */
+  parts: ChartPart[];
 }
 
 /**
  * The chart's group over a daily report of the range, its bars by cost stacked as `split`
- * says: by class from `terms` where they have answered, or by model. With no row the range holds nothing, and the
- * group says so. Rows that all have no time have no bar to stand on, so only their tables
- * show.
+ * says: by class from `terms` where they have answered, or by model. With no row the
+ * range holds nothing, and the group says so. Rows that all have no time have no bar to
+ * stand on, so only their tables show. Each chart whose key `tabled` holds shows as its
+ * table, the others as charts.
  */
 export function chartGroup(report: Report<DayRow>, range: Range, measure: Measure, today: string,
-                           asTable: boolean, terms: Report<TermsRow> | null = null, split: Split = "class"): ChartGroup {
+                           tabled: ReadonlySet<string>, terms: Report<TermsRow> | null = null,
+                           split: Split = "class"): ChartGroup {
   const by = rangeBy(range, today);
   const label = by === "day" ? "Each day" : "Each month";
   if (report.rows.length === 0) {
-    return { label, sentence: null, toggle: null, nothing: NOTHING_USED, charts: [], tables: [] };
+    return { label, sentence: null, nothing: NOTHING_USED, parts: [] };
   }
   const chart = chartModel(report, range, measure, today, terms, split);
-  const tables = () => chartTables(report, measure, by, split, terms);
+  let tables: NamedTable[] | null = null;
+  const tableAt = (at: number) => (tables ??= chartTables(report, measure, by, split, terms))[at];
   if (chart === null) {
-    return { label, sentence: null, toggle: null, nothing: null, charts: [], tables: tables() };
-  }
-  if (asTable) {
-    return { label, sentence: chart.sentence, toggle: CHART, nothing: null, charts: [], tables: tables() };
+    const parts = chartTables(report, measure, by, split, terms).map(({ name, table }) =>
+      ({ key: name ?? COST_CHART, name, toggle: null, chart: null, table }));
+    return { label, sentence: null, nothing: null, parts };
   }
   const charts = measure === "tokens" ? tokenCharts(report, range, today) ?? [] : [chart];
-  return { label, sentence: chart.sentence, toggle: TABLE, nothing: null, charts, tables: [] };
+  const parts = charts.map((one, at) => {
+    const key = measure === "tokens" && one.name !== null ? one.name : COST_CHART;
+    const shown = tabled.has(key);
+    return { key, name: one.name, toggle: shown ? CHART : TABLE, chart: shown ? null : one,
+             table: shown ? tableAt(at).table : null };
+  });
+  return { label, sentence: chart.sentence, nothing: null, parts };
 }
 
 // --- the chart, placed --------------------------------------------------------------------

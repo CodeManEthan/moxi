@@ -212,7 +212,7 @@ def test_each_range_redraws_the_chart_and_leaves_cost_as_it_was(page):
     pick(panel, "range", "Today")
     expect(bars_of(panel)).to_have_count(1)
     # One bar says its own value, so there is no sentence to compare it in.
-    expect(sentence_of(panel)).to_have_text("")
+    expect(sentence_of(panel)).to_have_count(0)
     expect(chart_of(panel).locator("[data-part=value]")).to_have_text(re.compile(rf"^{MONEY}$"))
 
     pick(panel, "range", "Last 90 days")
@@ -371,7 +371,7 @@ def test_tokens_draws_the_cache_reads_alone_and_the_billable_work_stacked(page):
     expect(group.locator("[data-part=legend] li")).to_have_text(["Input", "Cache create", "Output"])
 
 
-def test_table_shows_every_figure_of_the_chart_in_its_place(page):
+def test_each_chart_has_its_own_table_with_every_figure_in_its_place(page):
     panel = open_page(page)
     group = panel.locator("[data-group=chart]")
     expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by class")
@@ -390,12 +390,29 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     expect(last.nth(1)).to_have_text(re.compile(MONEY))
     expect(sentence_of(panel)).to_have_text(re.compile(r"^The most in these 30 days"))
 
+    # The cost chart's table keeps its name.
+    expect(group.locator("[data-part=chart-name]")).to_have_text("Daily estimated cost — by class")
+
     panel.get_by_role("button", name="Tokens", exact=True).click()
-    # A table for each chart, under its name: the cache reads, then the billable work's
-    # classes in the order its chart stacks them.
+    # Each chart has its own Table under its name, and the charts by tokens are drawn
+    # whatever the chart by cost showed.
     expect(group.locator("[data-part=chart-name]")).to_have_text(["Cache reads", "Billable work"])
+    expect(chart_of(panel)).to_have_count(2)
+    expect(group.get_by_role("table")).to_have_count(0)
+    reads_head, billable_head = group.locator('[data-chart="Cache reads"]'), group.locator('[data-chart="Billable work"]')
+    expect(reads_head.get_by_role("button")).to_have_text("Table")
+    expect(billable_head.get_by_role("button")).to_have_text("Table")
+    # The cache reads' Table switches it alone.
+    reads_head.get_by_role("button", name="Table").click()
     tables = group.get_by_role("table")
+    expect(tables).to_have_count(1)
+    expect(chart_of(panel)).to_have_count(1)
+    expect(chart_of(panel)).to_have_attribute("aria-label", "Billable tokens each day, last 30 days")
+    expect(tables.locator("thead th")).to_have_text(["Day", "Cache read"])
+    expect(billable_head.get_by_role("button")).to_have_text("Table")
+    billable_head.get_by_role("button", name="Table").click()
     expect(tables).to_have_count(2)
+    expect(chart_of(panel)).to_have_count(0)
     reads, billable = tables.nth(0), tables.nth(1)
     expect(reads.locator("thead th")).to_have_text(["Day", "Cache read"])
     expect(billable.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
@@ -406,9 +423,17 @@ def test_table_shows_every_figure_of_the_chart_in_its_place(page):
     expect(reads.locator("tbody tr").last.locator("td")).to_have_text([re.compile(r"^\d{4}-\d{2}-\d{2}$"), "30"])
     expect(billable.locator("tbody tr").last.locator("td").nth(3)).to_have_text("4.50k")
 
-    group.get_by_role("button", name="Chart").click()
-    expect(group.get_by_role("table")).to_have_count(0)
-    expect(chart_of(panel).nth(1).locator("g[data-period]")).to_have_count(3)
+    # Chart brings the cache reads back and leaves the billable work's table.
+    reads_head.get_by_role("button", name="Chart").click()
+    expect(tables).to_have_count(1)
+    expect(tables.locator("thead th")).to_have_text(["Day", "Input", "Cache create", "Output"])
+    expect(chart_of(panel)).to_have_attribute("aria-label", "Cache read tokens each day, last 30 days")
+    expect(chart_of(panel).locator("g[data-period]")).to_have_count(3)
+    # Back by cost the chart's table is as it was left.
+    panel.get_by_role("button", name="Cost", exact=True).click()
+    expect(chart_of(panel)).to_have_count(0)
+    expect(group.get_by_role("table").locator("thead th")).to_have_text(
+        ["Day", "Input", "Cache create", "Cache read", "Output"])
 
 
 def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_foot(page):
