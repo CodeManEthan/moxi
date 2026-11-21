@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- `search_memory` cuts every local path in what it shows to its last segment and every
+  loopback address to `local`, as `read_session` does: sessions' `cut_local` runs inside
+  `chat_redact`, after the whitespace squeeze, for snippets, project labels, notes and
+  the text part. The words must match the text after the cut, so a row whose only match
+  was inside a path is no hit and counts in `hits_dropped`.
+- A source a rebuild or a walk couldn't read because its folder raised (an archive folder
+  offline, a permission or read error) waits on that folder, in a new `waiting` table of
+  the state store (its schema step 3). Every later walk reads it again from its start,
+  whatever its time, until a read reaches its end or the file is gone, so a session a
+  reindex kept without reading gets its rows' writers. A rebuild with a folder that
+  didn't answer lists and reads that harness once more before it decides. The doctor's
+  `index` row and the connector's `search` row count the sessions waiting.
+- The rows with no writer are told apart in the doctor's `index` row and the `search`
+  row: those a `moxi memory reindex` writes again, which alone get that advice, and those
+  of compressed Codex rollouts, which sessions can't read, so no reindex gives them a
+  writer and `search_memory` never finds them.
+- A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
+  `search_memory` to the Claude apps. It searches in one reader of the index and returns
+  only rows whose writer is the person, the model, or unknown with no tag at the start
+  (after the opening characters sessions publishes), never a row with no writer and no
+  mail from other sessions. The rows it ranks are the newest 500 holding every word and
+  the newest 500 holding any, each still matching once secrets' `chat_redact` has run
+  over the whole row, with the text within 64 characters of a stored cut dropped first;
+  they are ranked by bm25 over the redacted text, and each snippet is cut from it, at
+  most 300 characters, with no marks. `results`, `subagents` and `scratch` are off by
+  default. The walk stops 16 seconds after the call began, and the host's shared limit
+  runs two calls at once. It refuses `redaction-off` when secrets or a chat set can't
+  run or `redact.sets` lacks `credentials` or `broad`, `no-index`, `index-unreadable`
+  (a generation still at schema 1 among them), `bad-since`, and `no-sessions` when the
+  sessions installed doesn't offer interface 7, which the `search` row then names. The provider's status
+  gives the `search` and `redaction` rows. The `connector` extra brings python-stdnum,
+  which secrets' personal-data set runs with; the `secrets` extra names that set and adds
+  nothing more.
+- Each row records its writer (schema 2): who the record's harness says wrote it, from
+  sessions' `writer` at interface 7, which memory now reads sessions at. A generation
+  still at schema 1 gains the column when memory next writes to it; its rows, like every
+  row stored before, have no writer until `moxi memory reindex` reads them again, and a
+  rebuild's copy keeps the writer a row was stored with. The doctor's `index` row says
+  how many rows have none.
 - Each index records which secrets `redact` stored its rows (`redact_version` in its
   meta; an index without it counts as 1). A typed `moxi memory reindex` over an index
   below the installed secrets' `REDACT_VERSION` is a version rebuild: it reads every
@@ -12,6 +51,10 @@
   what a version rebuild keeps. With this secrets, a secret on a line marked
   `gitleaks:allow` and a token split by an invisible character are redacted in new rows,
   and in old ones after that reindex.
+- An index stored under secrets' redact version 2 asks for one `moxi memory reindex`.
+  secrets' version 3 redacts a key followed by an escaped quote (`\"`), which a tool
+  call's input holds when a command quotes a key inside a string; version 2 stored it
+  whole. The reindex redacts every stored row again.
 - Archive folders: memory reads every folder sessions names for a harness, its live root
   and then its archive folders (`claude.archives`, `codex.archives`), each from its own
   last walk. A folder that is offline, fails at any depth during a run, or fails the test
@@ -29,6 +72,10 @@
   says what the last rebuild kept. Callers that compared those documents whole
   must allow the new keys. memory needs the sessions release with archive folders
   (interface 6).
+- memory needs the sessions release with interface 7 (`writer` and `opening`), and
+  `search_memory` needs the secrets release with `chat_redact` and the connector release
+  with `Limit`. No released version of the three carries them yet; memory's floors on
+  them rise when they are released.
 
 ## 0.1.0 (2026-11-08)
 

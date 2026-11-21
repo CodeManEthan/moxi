@@ -15,7 +15,7 @@ import pytest
 import moxi_turns as turns
 from conftest import bare, write_config
 from fake_harness import FakeHarness
-from moxi_turns import procs, protocol
+from moxi_turns import listeners, procs, protocol
 from moxi_turns.endpoint import Endpoint
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
@@ -201,6 +201,22 @@ def test_deliver_waits_for_the_running_turn_and_two_are_two_turns(make_endpoint)
     assert idle_start(s) == turns.Refused("busy-turn")
 
 
+def test_a_deliverys_end_carries_the_turns_final_text(make_endpoint):
+    ep, fake = make_endpoint()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("a")
+    assert bare(d.wait_started(1)) == turns.Started("t1")
+    st = s.steer("b")
+    st.wait_started(1)
+    fake.end_turn(answer="NOTHING")
+    assert bare(d.wait_ended(1)) == turns.Ended("t1", "answer", answer="NOTHING")
+    assert bare(st.wait_ended(1)).answer == "NOTHING"
+    e = s.deliver("c")
+    e.wait_started(1)
+    fake.end_turn()                           # a harness that gives no final text
+    assert bare(e.wait_ended(1)).answer is None
+
+
 def test_steer(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
@@ -211,6 +227,40 @@ def test_steer(make_endpoint):
     assert [x.text for x in fake.appended] == ["now"]
     fake.end_turn()
     assert bare(d.wait_ended(1)) == turns.Ended(turn, "answer")
+
+
+def test_a_deliverys_by_and_senders_reach_the_adapter_and_its_prompt_event(make_endpoint):
+    events = []
+
+    def answer(event):
+        events.append(event)
+
+    row = listeners.Listener("sample", frozenset({"prompt"}), "sample.module:answer",
+                             _fn=answer)
+    ep, fake = make_endpoint(registry=listeners.Registry((row,)))
+    s = turns.find(session_id="s-1")
+    d = s.deliver("digest", by="comms", senders=["ann", "subconscious"])
+    d.wait_started(1)
+    assert (fake.submitted[-1].by, fake.submitted[-1].senders) == (
+        "comms", ("ann", "subconscious"))
+    ep.prompt("digest", None, delivery_id=d.id, opens=True)
+    ep.prompt("typed", "composer")                 # the turn is open: it joins it
+    st = s.steer("more", by="memory")
+    st.wait_started(1)
+    assert (fake.appended[-1].by, fake.appended[-1].senders) == ("memory", ())
+    ep.prompt("more", None, delivery_id=st.id)
+    fake.end_turn()
+    ep.prompt("next", "composer")                  # no turn open: it opens one
+    assert [(e.text, e.origin, e.own, e.delivery_by, e.delivery_senders, e.opens)
+            for e in events] == [
+        ("digest", None, False, "comms", ("ann", "subconscious"), True),
+        ("typed", "composer", True, None, None, False),
+        ("more", None, False, "memory", (), False),
+        ("next", "composer", True, None, None, True)]
+    with pytest.raises(ValueError):
+        s.deliver("x", senders="ann")
+    with pytest.raises(ValueError):
+        s.steer("x", by="")
 
 
 def test_what_the_session_lacks_is_an_error_and_gone_is_refused(make_endpoint):

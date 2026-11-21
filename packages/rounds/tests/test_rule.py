@@ -237,13 +237,27 @@ def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
 
 @pytest.mark.parametrize("pointer", [
     "comms:1234567", "0a1b2c3d@2026-01-02T03:04Z",
-    "https://example.com/pages/7#answers", "file:design.md#rulings"])
+    "https://example.com/pages/7#answers", "file:design.md#rulings",
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z"])
 def test_a_pointer_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert run("proj-a/a-round", record=pointer) == 0
     assert run("proj-a", record=pointer) == 0
 
     assert rulings(round_log(rounds))[0]["record"] == pointer
     assert rulings(log.project_log(rounds))[0]["record"] == pointer
+
+
+def test_an_answer_picked_on_a_page_is_recorded_with_the_pages_pointer(rounds, capsys):
+    asking.ask("proj-a/a-round", "Do agent-read times follow the settings?",
+               by="scout", origin="comms:11",
+               options=["a=prose yes, parsed rows no", "b=both follow the settings"])
+    pointer = "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z"
+
+    assert main(["rule", "proj-a/a-round", "Q1", "--chose", "b", "--record",
+                 pointer]) == 0
+
+    [made] = rulings(round_log(rounds))
+    assert (made["rules"], made["chose"], made["record"]) == ("Q1", "b", pointer)
 
 
 @pytest.mark.parametrize("pointer", ["he said so in chat", "comms:twelve",

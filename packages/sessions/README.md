@@ -93,7 +93,9 @@ records with the session's header, all from one snapshot of the source:
   a subagent's. Its input tokens are the size of the session's current prompt.
 - `records_since` reads what was written since a cursor it handed back last time.
   sessions stores nothing; the caller keeps the cursor. A cursor it cannot trust starts
-  the read over, and says so.
+  the read over, and says so. A Claude batch also names the prompt ids its lines moved
+  the turn to (`prompt_ids`), a prompt that drew no request included, whatever kinds it
+  keeps.
 - `window` reads the last few turns, and pages back from there.
 
 A read that cannot open or read its source raises `Unreadable`, never an empty read. A
@@ -645,6 +647,99 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - The phone: the shell's phone view does not offer this page. It needs sessions' reads
   opened to the phone.
 
+## In the Claude apps
+
+With its `connector` and `secrets` extras, sessions serves two read-only tools to the
+Claude apps through the connector, Moxi's public MCP host:
+
+```sh
+moxi install sessions --with connector,secrets
+```
+
+That installs `moxi-sessions[connector,secrets]`. The `connector` extra brings the host;
+the `secrets` extra brings secrets, whose redaction every tool needs. Install both: while
+secrets is missing, or one of its chat sets can't run, every tool refuses `redaction-off`
+and the `sessions redaction` row of `moxi doctor connector` says why.
+
+**`list_sessions`** lists recent sessions, newest change first. Inputs: `harness`
+(`claude`, `codex` or `opencode`), `since` (an age such as `7d` or `12h`, or an ISO 8601
+time) and `limit` (1 to 30, default 10). Each row gives `session`, `harness`, `kind`
+(`main`, or `program` for one a program started), `started` and `changed` in UTC, `name`
+and `folder`. `folder` is the last part of the session's folder only, never its full
+path. Roots that couldn't be listed are named in `unlisted`, by their last part too.
+
+**`read_session`** reads part of one session's transcript. Inputs: `session` (required),
+`harness` (needed only when more than one harness holds the id), `agent` (a subagent's
+id at any depth, as `search_memory` gives it, to read that subagent's own transcript; a
+Codex or OpenCode subagent's subagent is found down the session's tree), `around` (an
+ISO 8601 time or epoch seconds; left out, the last turns), `turns` (1 to 10, default 3)
+and `thoughts` (default false).
+It finds a session as `moxi sessions read` does, archive folders included, and reads the
+records, since only a record says who wrote a message (`writer`, under Interfaces):
+
+- A message's text shows when its writer is the person at the prompt, the model writing
+  its own turn, or another agent's session (`peer` or `coordinator` mail, named on the
+  row). A message whose writer sessions doesn't know shows when its text doesn't open
+  with `<` and a letter. In each case a text that opens with an output wrapper
+  (`OUTPUT_WRAPPERS`) shows as one line instead. The text goes through the chat
+  redaction whole, then is cut at 4,000 characters, the cut said.
+- Every other message is one line of its kind and its size in characters: `unknown
+  writer`, `channel`, `hook`, `task`, `harness`, `summary` (a compaction summary) or
+  `command output`.
+- The model's thoughts show only with `thoughts`.
+- A tool call is its one-line summary, redacted before its cut. A call whose input names
+  a secret path shows as its tool and that path only: `cat ~/.env` shows `Bash(.env)`.
+- A tool result is its size and whether it failed. No tool output shows.
+
+The header gives `session`, `harness`, `kind`, `title` and `folder` (its last part), and
+`earlier` and `later` say whether turns were left out on either side. An answer holds at
+most 40,000 characters of text: the oldest turns go first, so the turn around `around`
+(or the last turn) always stays, and inside one turn too long by itself, the rows
+farthest from that point go first. Refusals: `bad-session`, `unknown-session` (naming an
+archive folder that didn't answer, by its last part), `ambiguous`, `unknown-agent`,
+`unreadable`, `bad-around`, `redaction-off`, `busy` and `timeout`.
+
+**Local paths.** No full local path leaves through `read_session`. In every string it
+shows (message text, tool-call lines, the title, the folder, refusal texts), each path
+under a root is cut to its last segment, so `Read(/home/you/notes/x.md)` shows as
+`Read(x.md)`, and each loopback origin (`localhost`, `127.0.0.1`, `[::1]` and the like,
+with any scheme, port and path) shows as `local`. The roots are your home folder, `~/`,
+`$HOME/`, `/home/`, `/tmp/`, `/root/`, `/etc/`, `/var/`, `/usr/`, `/opt/`, `/mnt/`,
+`/media/`, `/run/` and `/srv/`, in any case; a path runs to the first space, quote,
+backtick or one of `<>|,;(){}[]`, and takes a redaction placeholder in it whole, so
+`/home/you/[REDACTED:github-pat]/x.md` shows as `x.md`. A bare root shows its own name
+(`/home/` shows `home`, `~/` shows `~`). The cut runs inside `chat_redact`, between its
+two passes, and so do the folder's cut and the squeeze that puts a tool call's argument on
+one line (before the path cut). Only a cut to length comes after, so the last redaction
+sees exactly the text sent. A path outside the roots in a message stays whole;
+the `folder` is always its last part. A refusal or `unlisted` reason that names a path
+sessions holds (a root, an archive folder, the session's file and its folder) cuts that
+path to its last part wherever it occurs, under any root or none, and a path under the
+same top folder (`/data/` for `/data/sessions`) too.
+
+**Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
+message text, tool-call lines, names, titles, folders, and refusal texts that name a
+folder. Session ids, harness names, kinds, times, counts and flags come from a fixed
+vocabulary or format and go as they are. `moxi sessions read` keeps its own redaction and
+shows more than these tools do.
+
+**Limits.** At most two calls of sessions' tools run at once; a third waits up to 5
+seconds and then refuses `busy`. A call still running at 20 seconds refuses `timeout`.
+
+**Status.** `moxi connector status` and `moxi doctor connector` show a `redaction` row
+(whether the chat sets load, and secrets' engine) and a `roots` row (each harness's root,
+and any that can't be listed).
+
+**The call log** records `rows` for `list_sessions`, and `harness`, `turns`, `rows`,
+`cut` and `redactions` for `read_session`, each with `refusal`. It never holds a session
+id or text read.
+
+What a chat that reads these tools can do with what it read, and what redaction doesn't
+catch, is in the connector's
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.10/packages/connector/docs/security.md).
+Read it before you turn the tools on.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
@@ -663,15 +758,19 @@ modules.
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
 UI shell, whose page-server base sessions' page server runs on. The optional extra
-`secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with. The optional
+`secrets` adds `moxi-secrets`, which `moxi sessions read` and the tools in the Claude
+apps redact with. The optional
 extra `turns` adds `moxi-turns`, which enforces the transcript-read guard. The optional
 extra `projects` adds `moxi-projects`, whose read API (interface 2, `for_paths`) says which
 project holds each folder, for the facts on the Projects page; a projects that doesn't
 offer it reads as absent.
+The optional extra `connector` adds `moxi-connector`, the public MCP host, and
+python-stdnum for the chat redaction: it serves the tools of "In the Claude apps", and
+needs the `secrets` extra beside it.
 
 ## Interfaces
 
-`moxi_sessions.api` offers interfaces 2 to 6. Interface 3 is interface 2 plus
+`moxi_sessions.api` offers interfaces 2 to 7. Interface 3 is interface 2 plus
 `retention()` and `Retention`; a module that calls them loads sessions with
 `interface=3`. Interface 4 is interface 3 plus the list's reads: `sessions_list`,
 `sessions_more`, `sessions_newest`, `session_dirs` and `session_opened`; a module
@@ -680,9 +779,30 @@ that calls them loads sessions with `interface=4`. Interface 5 is interface 4 pl
 is interface 5 plus the archive folders: `corpus`, `find`'s `include_archives`,
 `Found.unknown`, a listing's `is_archive`, `absent`, `empty` and `shadowed`,
 `archive_dirs`, `archive_answers`, `ArchiveAnswer`, and `Retention`'s `archive_dirs`; a
-module that calls them loads sessions with `interface=6`. Every call of interface 5
-behaves as it did.
+module that calls them loads sessions with `interface=6`. Interface 7 is interface 6
+plus who wrote a message and what it opens with: `writer`, `WRITERS`, `OPENING`,
+`opening`, `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`, and the local-path
+cut `cut_local`; a module that calls them loads sessions with `interface=7`. Every call of interface 6 behaves as it
+did.
+
+`writer(record)` names who a message or tool call's harness says wrote it, from the
+record's role, `injected`, `origin_kind` and flags, never its text: `person` (typed at
+the prompt), `model` (the model's own turn or call), `peer` and `coordinator` (mail
+another agent's session sent, named only by the line's own `origin` object), `unknown`
+(a user message whose submitter the harness doesn't say), or the kind of a message
+something else wrote: `channel`, `hook`, `task`, `harness` or `summary`. `OPENING` is the
+characters every test of what a message opens with skips first (U+0000 to U+0020,
+U+007F to U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and
+every Cf character), and `opening(text)` drops them from a text's front. Claude Code's
+and Codex's wrapper tests skip exactly that set, so a wrapper after a zero-width space or
+a no-break space still marks a message injected.
+
+`cut_local(text, env=None)` makes each loopback origin in a text `local` and cuts each
+local path under a root (the home folder `env` names, `~/`, `$HOME/` and the system roots
+above) to its last segment; a redaction placeholder (`[REDACTED:<rule>]`) inside a path
+counts as part of it. It changes text, so a caller that redacts runs it as
+`chat_redact`'s `between`, never before or after the redaction.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/sessions/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.10/packages/sessions/LICENSE).

@@ -3,7 +3,7 @@ something that mentions a question, at this terminal or from the Claude apps.
 
 The judge reads the turn's prompts the runner hands it (the guard `wants` them), each with
 its origin as the harness stamped it. It allows the call when a prompt whose origin is in
-`question_mode.origins` (by default `composer`, the person's Enter at this terminal, and
+`prompt.own_origins` (by default `composer`, the person's Enter at this terminal, and
 `bridge`, a prompt the person sent from the Claude apps through Remote Control) contains
 "question", case-folded, anywhere, and that prompt is not the one the session was
 launched with. A subagent's call is always refused: a subagent can't reach the person.
@@ -21,7 +21,8 @@ judge runs in the session's endpoint, whose parent is that process.
 
 The reminder: `on_prompt`, a `prompt` listener, adds one line to a prompt that asks to go
 through or answer open questions, and not in prose, when question mode is on and the
-prompt's origin is one the judge counts. A prompt asks for prose when it holds a word on
+prompt is the person's own (the `prompt` event's `own`: its origin is one the judge
+counts). A prompt asks for prose when it holds a word on
 `question_mode.prose_words`, case-folded (by default "prose" and "pros", how voice input
 spells it). So a message delivered by another module that says "go through the open
 questions" gets no reminder, since the judge would refuse the call it asks for. A prompt
@@ -42,7 +43,7 @@ GUARD_ID = "turns.question-mode"
 #: The guard's switch in turns' settings.
 SWITCH = "guards.question_mode"
 #: turns' setting: the prompt origins that count as the person's own.
-ORIGINS_KEY = "question_mode.origins"
+ORIGINS_KEY = "prompt.own_origins"
 #: turns' setting: the words that ask for prose, so a prompt holding one gets no reminder.
 PROSE_KEY = "question_mode.prose_words"
 #: The word a prompt must hold.
@@ -110,7 +111,7 @@ def is_launch_prompt(text: str, args: Iterable[str]) -> bool:
 
 
 def origins(env: Mapping[str, str] | None) -> frozenset[str]:
-    """`question_mode.origins` from turns' config. Raises when the config doesn't load."""
+    """`prompt.own_origins` from turns' config. Raises when the config doesn't load."""
     from .. import config
 
     value = config.load(env)[ORIGINS_KEY]
@@ -175,7 +176,7 @@ def on_prompt(event) -> str | None:
     prose = [w.casefold() for w in settings[PROSE_KEY] or () if isinstance(w, str)]
     if not nudges(text, prose):
         return None
-    if event.origin not in frozenset(o for o in settings[ORIGINS_KEY] if isinstance(o, str)):
+    if getattr(event, "own", None) is not True:
         return None
     return REMINDER
 

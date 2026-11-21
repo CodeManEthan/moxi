@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- The comms daemon replaces a Claude Code session's adapter that died while the session
+  runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
+  for its claim socket to stop answering, and starts a new adapter with the environment
+  `claude` started with, so mail that waited is delivered and starts a turn in an idle
+  session. At its start the daemon does the same for adapters that died while it was
+  down. Run as a systemd service, it starts the adapter in a scope of its own
+  (`systemd-run --user --scope`), outside the service's cgroup. It replaces one session's
+  adapter at most 3 times in 10 minutes. The session's next start or prompt says once
+  that its adapter had stopped, at what time, and that a new one bound it; the listener's
+  own replacement at a start or prompt stays as the fallback.
+- A Claude Code session whose comms adapter dies while the session runs gets a new one
+  with no relaunch: at its next start or prompt, comms' listener starts an adapter that
+  watches the same `claude`, reads the claim file and binds the same name, and says so
+  in one line before the start's layer one and roster or the prompt's roster changes,
+  which the session still gets. When none can be started or its bind is refused, the
+  line is `comms: mail has stopped for <name>` with why. `moxi comms doctor` prints an `adapter` line and
+  `moxi doctor` a fail row for each session whose adapter is gone. An adapter whose
+  watch on `claude` fails keeps its claim file, so it is replaced too.
+- `[archive] record` and `[archive] identities` name an older comms' record and
+  identities files, which comms reads in place and never writes. `moxi comms history`
+  and a session's `history` tool list the older record's messages before comms.db's, the
+  tool with the state `archived` and a `skip` to page back past the newest messages it
+  reads at once; `explain <name> <id>` of an older message says whether the older queue
+  still held it for that name and whether that name's older cursor file stood at or past
+  it, and that the rest of its delivery is not read; `reply` and every read by id find
+  an older message by its own id, because the daemon moves comms.db's counter past the
+  older ids once at its start (an older id comms.db had already used stays comms.db's
+  message by id, and the older message under it is reached through `history`); and every
+  name the older identities file retired is refused at bind and as a recipient again.
+- `moxi comms opencode <identity>` launches an OpenCode session with comms mail, as
+  `moxi comms claude` and `moxi comms codex` launch theirs. It runs the OpenCode wrapper
+  `moxi-comms-opencode`, whose script is not on PATH, and names itself as typed.
+- comms declares the `speech` adapter kind again, as a person kind: a binding of it (voice
+  binds the operator's name as `speech`) has its mail delivered live, never held for a
+  cold cache, and its cache is never read.
 - The connector's `send` and `send_and_wait` are no longer refused while an agent waits on
   a single reply from the Claude app. The message posts, and the answer ends with a note
   listing the asks still open from its recipients: newest first, at most three and a

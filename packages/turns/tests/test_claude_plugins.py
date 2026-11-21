@@ -49,7 +49,7 @@ def test_the_runner_reports_the_version_its_manifest_names():
 #: The runner version that speaks each leg. Claude Code runs a user-scope plugin from a
 #: cache kept per version, so a runner on a new leg needs a new version, or an install
 #: made before it keeps running the old leg.
-RUNNER_VERSION_OF_LEG = {4: "0.2.1"}
+RUNNER_VERSION_OF_LEG = {4: "0.2.2"}
 
 
 def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():

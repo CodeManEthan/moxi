@@ -76,6 +76,11 @@ export interface SessionRow extends RowSums, SessionRef {
   models: string[];
   first_ts: number | null;
   last_ts: number | null;
+  /** How many turns the main session's file holds, whatever the range; 0 when none of
+   * its requests says its turn. */
+  turns: number;
+  /** The part of the cost its subagents ran up, 0 to 1; null when a cost is not known. */
+  subagent_share: number | null;
   /** The newest request's whole prompt against its window; null when it was not read. */
   context: Context | null;
 }
@@ -572,6 +577,9 @@ export class Feed<V> {
   loading = true;
   /** A read is running. */
   reading = false;
+  /** A read is out while the feed shows a value from before it: its last value, or one
+   * `hold` gave. False once the read answers, whatever it answers. */
+  stale = false;
   /** The server's clock minus this browser's, in seconds; null until a body gave `now`. */
   offset: number | null = null;
 
@@ -649,6 +657,7 @@ export class Feed<V> {
   }
 
   async #once(): Promise<void> {
+    this.stale = this.value !== null;
     let answer = await this.#read();
     for (let tries = 0; answer.status === 503 && tries < RETRIES && !this.#closed; tries += 1) {
       await this.#wait(RETRY_MS);
@@ -658,6 +667,7 @@ export class Feed<V> {
     if (this.#closed) return;
     const at = this.#clock();
     this.loading = false;
+    this.stale = false;
     const data = answer.data as Record<string, unknown> | null;
     const value = answer.status === 200 ? this.#parse(data) : null;
     if (value !== null) {

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.2 (2026-11-21)
+
+- The rounds page, with the `ui` extra (`moxi-ui` 0.2.4 or later): at `/m/rounds/` in the
+  browser UI shell, every open round as one line of its steps, the steps in columns lined
+  up across rounds, with a line for each build in flight. It shows what waits on the
+  operator with `Go through in order`, the ten builds last acted on, the rounds grouped
+  as `Your turn`, `Stuck or red`, `Moving` and `Wrapping up`, the closed rounds folded,
+  and the key. A marker opens its step's record, a question, decision or job in place,
+  and the address keeps what is open. It reads only and writes nothing. At 720 px and
+  under it is a column of rounds, each opening a sheet with a vertical rail. Its routes
+  are `/api/rounds`, `/api/record` and the stream `/api/events`, none open to the phone
+  gateway.
+
+## 0.1.1 (2026-11-21)
+
+- A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
+  ROUND --lead NAME` names a new one, written as `lead.changed` with the one before. A
+  name is checked for its shape only. A round with no lead of its own reads its
+  project's. `show` gives it in a line and in its `--json` head, each row of `list
+  --json` and of the read API's `rounds()` carries it, and the round note has a line for
+  it. The index gains a column for it, so rows written before read as stale and are
+  answered from the logs.
+- A page's act as a pointer: `page:<page>/<act id>@<UTC time>`, taken wherever a pointer
+  is. `mark --shown` refuses a page's act from before a ruling it marks was recorded.
+- `moxi_rounds.actors.default()`: the OS user an act is recorded as done by when no
+  name is given, one answer for the command line and for a page that calls the verbs'
+  functions in process.
+
 ## 0.1.0 (unreleased)
 
 The first version. It keeps the record of a round and takes it from its design through
@@ -10,6 +38,15 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- `moxi rounds finish` is refused while a process uses the build's scratch folder,
+  naming the process. `finish` and `drop` don't move a scratch folder a process uses:
+  it stays for the sweep of leftover folders, named with the process, and a drop goes
+  through.
+- `moxi rounds check` holds the machine's check lock while its command runs, so one
+  check runs at a time on the machine; another run waits for it, or with `--no-wait`
+  is refused. A run with no `timeout_s` from the call, the check or the step stops at
+  3600 s, and a run at its limit gets SIGINT and 30 s later SIGKILL. rounds needs moxi
+  0.1.11 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,
@@ -235,17 +272,7 @@ decisions and the round's close.
   `tiers`, `models` and per-project tables. `defaults.dormant_days` and
   `defaults.sitting_at`, for parts not built yet, are declared and checked, and nothing
   reads them.
-- The rounds page, with the `ui` extra (`moxi-ui` 0.2.4 or later): at `/m/rounds/` in the
-  browser UI shell, every open round as one line of its steps, the steps in columns lined
-  up across rounds, with a line for each build in flight. It shows what waits on the
-  operator with `Go through in order`, the ten builds last acted on, the rounds grouped
-  as `Your turn`, `Stuck or red`, `Moving` and `Wrapping up`, the closed rounds folded,
-  and the key. A marker opens its step's record, a question, decision or job in place,
-  and the address keeps what is open. It reads only and writes nothing. At 720 px and
-  under it is a column of rounds, each opening a sheet with a vertical rail. Its routes
-  are `/api/rounds`, `/api/record` and the stream `/api/events`, none open to the phone
-  gateway.
 - Not in this version: prepared answers, the suggestion of a sitting, parent and child
-  rounds, `list --dormant`, and acting from the page.
+  rounds, and `list --dormant`.
 - rounds needs moxi 0.1.7 or later and moxi-projects 0.1.4 or later. The `notes` extra
   gives a project that names no notes folder notes' default one.

@@ -9,6 +9,7 @@ import time
 
 import pytest
 from moxi_dev.testing import wait_for
+from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import index, ingest, links, rows, start, state, table
@@ -341,15 +342,6 @@ def test_a_patch_to_an_env_file_keeps_only_the_path():
     r.write()
     run()
     assert texts() == ["apply_patch(/work/app/.env)"] and texts("tails") == []
-
-
-@pytest.mark.parametrize("value", [
-    "cat > /x/.env <<EOF\nA=1\nEOF", "cat ~/.ssh/id_rsa && echo done",
-    ["bash", "-lc", "cat /x/.env | head -n 3"], "*** Update File: /x/.env\n+A=1",
-    {"a": ["not this", {"b": "then /x/.env with words"}]}])
-def test_the_path_found_is_one_word(value):
-    found = rows.secret_path(value)
-    assert found is not None and found.split() == [found]
 
 
 def _runs(count, size, seed):
@@ -848,7 +840,7 @@ def redacted_again(report, before, words):
 
     assert report.dropped == 0
     with index.open_read() as rd:
-        assert index.stored_redact_version(rd.conn) == rows.redact_version() == 2
+        assert index.stored_redact_version(rd.conn) == rows.redact_version() == REDACT_VERSION
         assert index.meta_get(rd.conn, ingest.REPLACED_KEY) == "1"
     assert before <= sources()
     stored = texts() + texts("tails")
@@ -1110,4 +1102,4 @@ def test_the_version_rebuild_runs_once_and_a_failed_one_leaves_the_old_generatio
     assert row_of("pelican") == read_once
     with index.open_read() as rd:
         assert index.meta_get(rd.conn, ingest.REPLACED_KEY) is None
-        assert index.stored_redact_version(rd.conn) == 2
+        assert index.stored_redact_version(rd.conn) == REDACT_VERSION

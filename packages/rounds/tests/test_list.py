@@ -115,18 +115,18 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["unreadable"] == [] and found["no_folder"] == []
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
-         "status": "open", "flow": "fix",
+         "status": "open", "flow": "fix", "lead": None,
          "step": {"step": "commission", "stage": "B1", "state": "waiting"},
          "counts": {"open": 1, "parked": 0, "not_shown": 1}, "standing": None,
          "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
-         "status": "open", "flow": "fix",
+         "status": "open", "flow": "fix", "lead": None,
          "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
-         "status": "open", "flow": "fix",
+         "status": "open", "flow": "fix", "lead": None,
          "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None}]
@@ -740,3 +740,29 @@ def test_what_waits_without_git_lists_no_build_and_reads_none(rounds, monkeypatc
     whole = listing.waiting(refresh=False).data()
     assert {key: value for key, value in found.items() if key != "builds"} == {
         key: value for key, value in whole.items() if key != "builds"}
+
+
+# -- the lead ----------------------------------------------------------------------------
+
+def test_each_round_listed_as_data_carries_its_lead(rounds, capsys):
+    from moxi_rounds import leads
+
+    leads.mark(A, "atlas-lead", by="planner")
+    assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0
+    capsys.readouterr()
+
+    assert main(["list", "--json"]) == 0
+    found = {one["name"]: one["lead"] for one in json.loads(capsys.readouterr().out)[
+        "rounds"]}
+    assert found == {A: {"name": "atlas-lead", "from": "round"},
+                     B: {"name": "kestrel", "from": "project"}, C: None}
+
+
+def test_the_rounds_as_lines_say_no_lead(rounds, capsys):
+    from moxi_rounds import leads
+
+    leads.mark(A, "atlas-lead", by="planner")
+    capsys.readouterr()
+
+    assert main(["list"]) == 0
+    assert "atlas-lead" not in capsys.readouterr().out

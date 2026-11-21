@@ -162,6 +162,15 @@ def test_hook_commands_carry_the_endpoints_event_budget():
     assert "--wait-s 7 UserPromptSubmit" in joined
     assert "--wait-s 7 PostCompact" in joined
     assert "--wait-s 3 Interrupt" in joined
+    # The session's prompt bound is baked into UserPromptSubmit's command alone.
+    argv, keys = codex_hooks.session_flags(
+        ["/env/bin/moxi-turns-ping"], "/run/hooks.sock",
+        hold_wait_s=4, listen_wait_s=6, prompt_wait_s=9,
+    )
+    joined = "\n".join(argv[index + 1] for index, value in enumerate(argv[:-1])
+                       if value == "-c")
+    assert "--wait-s 10 UserPromptSubmit" in joined
+    assert "--wait-s 7 SessionStart" in joined
     assert shlex.split(codex_hooks.command(
         ["ping"], "/run/hooks.sock", codex_hooks.EVENTS[0], 5,
     )) == ["ping", "--socket", "/run/hooks.sock", "--wait-s", "5",

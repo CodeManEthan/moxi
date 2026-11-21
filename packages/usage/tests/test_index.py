@@ -2,6 +2,7 @@
 the lock, rebuilds and cancellation. After every pass a test makes, the stored claims
 agree with the `claimed` view."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -981,6 +982,7 @@ def test_the_config_check_refuses_an_archive_root_usage_could_not_read(rows, pro
 
 def to_version_1():
     """Take the index back to version 1, as usage 0.1.0 left it."""
+    to_version_2()
     conn = store.connect()
     try:
         conn.execute("DROP TABLE marks")
@@ -1052,7 +1054,7 @@ def test_a_version_1_index_migrates_in_a_pass_that_runs_as_a_rebuild(readings, r
     to_version_1()
     conn = store.connect()
     try:
-        assert store.migrate(conn).after == 2      # the step alone: no row lost
+        assert store.migrate(conn).after == store.INDEX_VERSION   # no row lost
         assert flags("codex") == {(path, ""): int(row["excluded"] is not None)
                                   for path, row in ((r["path"], r) for r in files("codex"))}
         assert set(flags("claude").values()) == {0} and marks() == []
@@ -1064,7 +1066,7 @@ def test_a_version_1_index_migrates_in_a_pass_that_runs_as_a_rebuild(readings, r
     monkeypatch.setattr(sessions, "records_since", lambda source, cursor, **kw: (
         reads.append((harness_of(source), cursor)), real(source, cursor, **kw))[1])
     result = run(readings)
-    assert result.migrated == (1, 2) and result.rebuild
+    assert result.migrated == (1, store.INDEX_VERSION) and result.rebuild
     assert [f["path"] for f in files()] == [f["path"] for f in before[0]]
     assert requests() == before[1]
     assert {lane: set(flags(lane).values()) for lane in ("claude", "codex", "opencode")} == {
@@ -1191,7 +1193,7 @@ def test_a_reset_drops_a_files_marks_and_a_reset_batch_drops_those_read_before_i
     class Batch:
         def __init__(self, records, *, reset, complete):
             self.records, self.reset, self.complete = records, reset, complete
-            self.header, self.cursor = None, "c"
+            self.header, self.cursor, self.prompt_ids = None, "c", ()
 
     def marker(line):
         return sessions.Marker(harness="claude", at={"line": line}, time=1.0,
@@ -1236,3 +1238,95 @@ def test_a_held_archive_file_keeps_0_and_its_marks_are_not_known(readings, tmp_p
     finally:
         conn.close()
     assert cli.main(["index", "--check", "--no-wait"]) == 0
+
+
+# --- index version 3: prompts -------------------------------------------------------------
+
+def to_version_2():
+    """Take the index back to version 2, before it kept prompts."""
+    conn = store.connect()
+    try:
+        conn.execute("DROP TABLE prompts")
+        conn.execute("ALTER TABLE files DROP COLUMN prompts_read")
+        conn.execute("UPDATE meta SET value = '2' WHERE key = 'index_version'")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def prompts(path):
+    return [row["turn_id"] for row in rows(
+        "SELECT p.turn_id FROM prompts p JOIN files f ON f.id = p.file_id"
+        " WHERE f.path = ? ORDER BY p.turn_id", str(path))]
+
+
+def session_turns(session):
+    from moxi_usage import reports
+
+    conn = store.connect()
+    try:
+        report = reports.sessions(conn)
+    finally:
+        conn.close()
+    return {row["session_id"]: row["turns"] for row in report.rows}.get(session)
+
+
+def test_a_last_prompt_that_drew_no_request_is_a_turn(readings, roots):
+    t = transcript(roots["claude"], SESSION_A)     # two prompts, each with a request
+    t.user("/exit")                                # a local command: no request
+    t.write()
+    run(readings)
+    assert len(prompts(t.path)) == 3 and session_turns(SESSION_A) == 3
+    r = rollout(roots["codex"], THREAD_A)          # Codex counts its requests' turn ids
+    r.turn()
+    r.user("idle")
+    r.write()
+    run(readings)
+    assert prompts(r.path) == [] and session_turns(THREAD_A) == 1
+
+
+def test_a_prompt_split_across_two_reads_is_one_turn(readings, roots, monkeypatch):
+    t = transcript(roots["claude"], SESSION_A)
+    t.write()
+    run(readings)
+    first = prompts(t.path)
+    t.tool_result("toolu_late", "more of the last prompt")
+    t.assistant("three", usage=usage(output=33))
+    t.flush()
+    reads = []
+    real = sessions.records_since
+    monkeypatch.setattr(sessions, "records_since", lambda source, cursor, **kw: (
+        reads.append(cursor), real(source, cursor, **kw))[1])
+    run(readings)
+    assert reads and all(cursor is not None for cursor in reads)   # read from its cursor
+    assert prompts(t.path) == first and session_turns(SESSION_A) == 2
+
+
+def test_a_version_2_index_migrates_and_reads_each_claude_file_once_more(readings, roots,
+                                                                         monkeypatch):
+    t, r, db, session = three_lanes(roots)
+    t.user("/clear")                               # drew no request
+    t.write()
+    run(readings)
+    before = (files(), requests(), marks())
+    to_version_2()
+    reads = []
+    real = sessions.records_since
+    monkeypatch.setattr(sessions, "records_since", lambda source, cursor, **kw: (
+        reads.append((harness_of(source), cursor)), real(source, cursor, **kw))[1])
+    result = run(readings)
+    assert result.migrated == (2, 3) and not result.rebuild
+    # the transcript from no cursor; the rollouts reused, the database from its cursor
+    assert sorted((harness, cursor is None) for harness, cursor in reads) == [
+        ("claude", True), ("opencode", False)]
+    assert result.reused == 2
+    assert requests() == before[1] and marks() == before[2]
+    assert [f["path"] for f in files()] == [f["path"] for f in before[0]]
+    assert {row["prompts_read"] for row in files()} == {1}
+    wrote = sorted({line["promptId"] for line in map(json.loads, t.text().splitlines())
+                    if line.get("promptId")})
+    assert prompts(t.path) == wrote and session_turns(SESSION_A) == len(wrote)
+    reads.clear()
+    assert run(readings).read == 0
+    assert [(harness, cursor is None) for harness, cursor in reads] == [("opencode", False)]

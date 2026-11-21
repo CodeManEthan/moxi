@@ -184,6 +184,56 @@ def test_a_plain_launch_takes_the_shipped_defaults():
     assert got.target == "terminal"
 
 
+def test_a_launch_with_usage_warns_at_2x_unless_it_sets_another_mark(monkeypatch):
+    """Every launch with usage installed is stamped with a mark: its own, else the shipped
+    default of 2x. An install without usage neither offers the row nor stamps it."""
+    from moxi_launcher import compose
+    from moxi_launcher.compose import Context
+
+    def stamped(got):
+        ctx = Context(request_id="r1", session_id="5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f",
+                      actor="ann", runs_dir="/runs", windows=False)
+        return compose.compose(dict(got.values), ctx).env.get("MOXI_USAGE_WARN_AT")
+
+    with_usage = only("usage")
+    got = resolve(available=with_usage)
+    assert got.values["warn_at"] == "2x" and got.sources["warn_at"] == presets.SHIPPED
+    assert "usage" in got.links and stamped(got) == "2x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "1.5x"})) == "1.5x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "off"})) == "off"
+
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "usage" else real(name, **kw)))
+    got = resolve()
+    assert "warn_at" not in catalog.offered("claude", NONE)
+    assert "warn_at" not in got.values and "usage" not in got.links
+    assert stamped(got) is None
+
+
+def test_a_seat_or_codex_launch_warns_only_at_a_mark_it_sets():
+    """The 2x default reaches one-off, project and scratch launches only. A seat outside
+    a scratch folder, or a Codex launch, holds no mark unless `[defaults]`, its preset or
+    a flag sets one; then it holds that mark."""
+    with_usage = only("usage")
+    seat = '[seat.s]\nmodel = "opus"\n'
+
+    def mark(text="", **request):
+        got = resolve(text, available=with_usage, **request)
+        return got.values["warn_at"], "usage" in got.links
+
+    assert mark(seat, seat="s") == ("", False)
+    assert mark(seat, seat="s", left_out=["warn_at"]) == ("", False)
+    assert mark(typed={"harness": "codex"}) == ("", False)
+    assert mark('[seat.s]\nwarn_at = "1x"\n', seat="s") == ("1x", True)
+    assert mark(seat, seat="s", typed={"warn_at": "1.5x"}) == ("1.5x", True)
+    assert mark('[defaults]\nwarn_at = "off"\n' + seat, seat="s") == ("off", True)
+    assert mark(typed={"harness": "codex", "warn_at": "2x"}) == ("2x", True)
+    assert mark() == ("2x", True)
+    assert mark('[project.p]\nmodel = "opus"\n', project_preset="p") == ("2x", True)
+    assert mark('[seat.s]\nscratch = true\n', seat="s") == ("2x", True)
+
+
 def test_each_later_layer_wins():
     text = ('[defaults]\nmodel = "sonnet"\neffort = "low"\nnative_name = "d"\n'
             '[seat.planner]\nmodel = "opus"\neffort = "high"\n')
@@ -1257,5 +1307,83 @@ def test_a_word_enum_left_out_ends_a_seats_recycling():
         resolve(text, available, seat="s", typed={"recycle_at_limit": "off"})
     got = resolve(text, available, seat="s", typed={"recycle_at_limit": "off"},
                   left_out=("limit_at",))
-    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == "1x"
+    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == ""
     assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
+
+
+# -- a scratch launch can't recycle itself --------------------------------------------------
+
+RECYCLES = only("turns", "usage")
+
+
+def test_a_preset_that_sets_scratch_and_relaunch_is_flagged():
+    found = errors('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                   RECYCLES)
+    assert [(p.where, p.key, p.code) for p in found] == [
+        ("seat.scratchy", "recycle_at_limit", "scratch-recycle")]
+    assert found[0].problem == "a scratch launch can't recycle itself"
+    assert found[0].hint == "recycle with compact, or launch in a directory"
+
+
+def test_a_defaults_relaunch_is_not_flagged_on_a_scratch():
+    # `[defaults]` reaches every launch, so its relaunch holds off on a scratch one.
+    for text in ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'
+                 '[seat.s]\nposture = "go"\n'):
+        assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_a_preset_place_replaces_the_defaults_scratch_in_the_check():
+    text = ('[defaults]\nscratch = true\n'
+            '[seat.s]\ncwd = "/work"\nrecycle_at_limit = "relaunch"\n')
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_a_preset_meeting_the_defaults_in_the_pair_is_flagged():
+    text = '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'
+    assert [(p.where, p.code) for p in errors(text, RECYCLES)] == [
+        ("seat.s", "scratch-recycle")]
+
+
+@pytest.mark.parametrize("text", [
+    '[seat.s]\nscratch = true\nrecycle_at_limit = "compact"\n',
+    '[seat.s]\nrecycle_at_limit = "relaunch"\n',
+    '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = false\n'])
+def test_compact_on_a_scratch_and_relaunch_elsewhere_are_not_flagged(text):
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_resolve_refuses_a_scratch_set_to_relaunch():
+    with pytest.raises(catalog.ScratchRecycle) as caught:
+        resolve('[seat.s]\nscratch = true\n', RECYCLES, seat="s",
+                typed={"recycle_at_limit": "relaunch"})
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+
+
+def test_resolve_refuses_a_scratch_whose_preset_sets_relaunch():
+    for text in ('[seat.s]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'):
+        with pytest.raises(catalog.ScratchRecycle):
+            resolve(text, RECYCLES, seat="s")
+
+
+@pytest.mark.parametrize("text, asked", [
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+     {"seat": "s"}),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n', {"typed": {"scratch": True}}),
+    ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n', {})])
+def test_a_defaults_relaunch_holds_off_on_a_scratch_with_a_warning(text, asked):
+    got = resolve(text, RECYCLES, **asked)
+    assert got.scratch and got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert presets.SCRATCH_RECYCLE_OFF in got.warnings
+    assert "recycle_at_limit" not in got.chosen
+
+
+def test_a_defaults_relaunch_stays_outside_a_scratch(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    got = resolve('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"), typed={"target": "slot"})
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert presets.SCRATCH_RECYCLE_OFF not in got.warnings

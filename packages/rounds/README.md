@@ -70,7 +70,7 @@ lower-case letters, digits and `-`.
 
 | Command | Does |
 |---|---|
-| `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, and `--inherits` names the standing rulings it starts from |
+| `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]] [--lead NAME]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, `--inherits` names the standing rulings it starts from, and `--lead` the agent who leads it (see A round's lead) |
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
@@ -100,6 +100,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds rule ROUND unafter:B<n>=B<m> --record PTR` | make a stage wait for one stage fewer |
 | `moxi rounds mark ROUND Q<n> --blocks B<n>[,...]\|all`, `mark ROUND Q<n> --reopen` | make a question hold up more stages, or reopen a parked one |
 | `moxi rounds mark ROUND --flow NAME` | move the round up to a heavier flow, or to its own flow's steps as the config has them now |
+| `moxi rounds mark ROUND --lead NAME` | record the agent who leads the round now; naming the lead it has already writes nothing |
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
 | `moxi rounds mark ROUND B<n> --brief FILE` | size a worker's brief before the worker gets it: one slice of the stage within `slice_minutes`, or one verification, or the whole of a stage that declares no slices |
 | `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix; run again with the same commits, it writes nothing |
@@ -110,10 +111,10 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND REPORT.md --reread` | read a recorded report again and add the findings, waiting items and decisions its verdict's record lacks; never removes or changes one |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
-| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
-| `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
-| `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
+| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group gets SIGINT and 30 s later SIGKILL. One check runs at a time on the machine: a run waits for the check lock (`check.lock` in rounds' folder of lock files) while another holds it, or with `--no-wait` is refused. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
+| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Before anything is written, finish is refused while a process of yours uses the build's scratch folder (its working folder, an open file, an argument or an environment value), naming the process: end it or leave the folder, then finish again. A scratch folder a process came to use after that read is not moved and is left for the sweep, named with the process. Where the processes can't be read, finish says the scratch gate was not run and goes on. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
+| `moxi rounds show ROUND [--json]` | one round: status, lead, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
+| `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended; each row of `--json` also has the round's `lead` |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
 | `moxi rounds list [PROJECT] --numbers [--json]` | the numbers of the closed rounds, summed key by key; a dropped round's are not summed |
 | `moxi rounds list ROUND\|PROJECT --questions [--view docket\|ratify] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR; a round's two views are both given when `--view` is left out |
@@ -142,12 +143,48 @@ one token:
   `2026-01-02T03:04Z`;
 - an `https://` URL;
 - `file:<path in the round's folder>#<anchor>`, as `file:design.md#index` for a section
-  of the design.
+  of the design;
+- `page:<page>/<act id>@<UTC time>`, one act of the operator's on a module's page, as
+  `page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z`: the module whose page it was
+  (lower-case letters, digits and `-`, from a letter), the id the page gave that one act
+  (8 to 64 letters, digits, `_` and `-`) and the time to the second. A page on this
+  machine has no `https://` address, so what it records points at the act itself, and
+  the act id keeps two acts in one second apart.
 
-A question with no `--from` and a ruling with no `--record` are refused. A question that
-is the operator's own takes `--record` in place of `--from`. `mark --shown` takes a
-message, a session or a URL, and never a file, the pointer of one of the rulings it
-marks, or a message from before one of them was said.
+Only the shape is checked. A question with no `--from` and a ruling with no `--record`
+are refused. A question that is the operator's own takes `--record` in place of
+`--from`. `mark --shown` takes a message, a session, a URL or a page's act, and never a
+file, the pointer of one of the rulings it marks, a message from before one of them was
+said, or a page's act whose time is before one of them was recorded: a page can only
+show a ruling on record.
+
+## A round's lead
+
+A round's lead is the agent who runs it, the one a page tells what the operator did and
+asks to explain. `open --lead NAME` names it, and `mark ROUND --lead NAME` names a new one
+later; the log keeps the one before, and `show`'s history gives the change as `WAS to
+NEW`. Anyone may name it: it is a record the leads keep, not a ruling of the operator's,
+so it takes no pointer. A name is letters, digits, `.`, `_` and `-`, with at most one
+`@scope` of the same letters; only that shape is checked, so a lead may be named before
+its session starts. A round that has ended refuses a new lead.
+
+A round with no lead of its own reads its project's, the lead its record in `moxi
+projects` names, and a round opened before rounds kept a lead reads it that way too.
+`show` gives it in one line under the description, one of:
+
+```text
+lead: search-lead
+lead: alpha-lead (the project's; moxi rounds mark alpha/search --lead NAME records the round's own)
+lead: none
+```
+
+The round note has the same under its status, one of `- lead: NAME`, `- lead: NAME (the
+project's)`, `- lead: none`, or `- lead: not known (REASON)` when the project's record
+can't be read. The note gives the project's lead as it was when the note was last
+written: after `moxi projects set PROJECT --lead NAME`, `show` and `list` give the new
+lead at once, and the note gives it at the round's next write. In `show --json` and each row of `list --json`, `lead` is `{"name": NAME,
+"from": "round"}` or `"from": "project"`, or null when neither names one. `list` prints
+no lead in its text.
 
 ## Flows and steps
 
@@ -680,6 +717,8 @@ and one git can't read, is the operator's. `show` and `list --waiting` name, for
 build to look at, who drops it and the command. The drop records the branch's tip and
 deletes no branch, so the work can be commissioned again. The build's worktree and
 scratch folder are removed under the removal rule below, and one it keeps is named.
+A drop is never refused for a process that uses a scratch folder: a scratch folder a
+process of yours uses is not moved, and stays for the sweep, named with the process.
 CI's own refs on the remote of each ended build are removed too, as at a finish (see
 `ref` and `full_ref` under Config). No question or hold changes, and the stage stays
 owed.
@@ -1012,7 +1051,7 @@ its command prints with `--json`:
 | Call | Gives |
 |---|---|
 | `rounds(project=None, status="open")` | the rounds of every project or of one, open or `"closed"`: `moxi rounds list --json` |
-| `round(name)` | one round's whole state: `moxi rounds show ROUND --json` |
+| `round_data(name)` | one round's whole state: `moxi rounds show ROUND --json` |
 | `waiting()` | what waits on the operator: `moxi rounds list --waiting --json` |
 | `questions(name, view=None)` | the questions of a round or a project: `moxi rounds list NAME --questions --json` |
 | `builds(repo=None)` | the open builds of every project or of one repo, each with its state read from git now, whether it is idle, and the builds it shares commits with; no command prints it |
@@ -1067,4 +1106,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.0/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.1/packages/rounds/LICENSE).

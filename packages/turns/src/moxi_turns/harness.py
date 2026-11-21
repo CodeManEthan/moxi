@@ -43,7 +43,11 @@ through the endpoint's adapter-side calls:
                                           a Ready event; updates addressing, and with
                                           `ready` raises Ready with that source and
                                           asks no listener (an accepted load)
-    endpoint.prompt() -> str | None       a UserPromptSubmit; returns the added context
+    endpoint.prompt(text, origin, delivery_id=None, opens=None) -> str | None
+                                          a UserPromptSubmit; returns the added context.
+                                          `delivery_id` names the delivery the adapter
+                                          handed in as this prompt; `opens` says whether
+                                          it opens a turn (None: no turn is open now)
     endpoint.turn_started(turn_id, delivery_id=None)
                                           a main-loop turn started; the adapter's tie
                                           names the delivery that took it
@@ -195,7 +199,8 @@ class Delivery:
     `submit`) or "steer" (into the running turn, handed to `append`). `only_if_idle`: the
     caller asked for a new turn only if none is open, so `entering` re-checks it, and the
     refusal flags apply. `ref` is the caller's, carried for the adapter's logs; turns never
-    acts on it."""
+    acts on it. `by` is the module that asked and `senders` the names the text speaks
+    for, as the caller gave them; the `prompt` event the delivery raises carries both."""
 
     id: str
     text: str
@@ -204,6 +209,8 @@ class Delivery:
     refuse_draft: bool = False
     refuse_agents: bool = False
     ref: str | None = None
+    by: str | None = None
+    senders: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

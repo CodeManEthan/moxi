@@ -1,7 +1,8 @@
 """The scan: the named sets, hits, redaction and line batches.
 
-Every scan reads past the see-through characters (`seen_through`): it scans the text as
-given, and, when it holds any, a copy without them whose hits it maps back.
+Every scan reads past the see-through characters (`seen_through`) and the backslashes
+that escape a quote: it scans the text as given, and, when it holds any, a copy without
+them whose hits it maps back.
 
 `sets.json` is read once per process. A gitleaks-format rule is compiled the first time
 its keyword appears. On RE2 the credentials and broad sets run here; without RE2 they run
@@ -37,9 +38,9 @@ _RULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules")
 #: Which `redact` this is. It rises with a release in which `redact`, called with its
 #: default keywords, redacts in some text a span the release before returned whole,
 #: because of how it reads text (a suppression it stops applying, characters it newly
-#: sees through). A change of rule data alone (a rule, regex, keyword, allowlist or
+#: reads past). A change of rule data alone (a rule, regex, keyword, allowlist or
 #: stopword in sets.json or the private-names lists) leaves it as it is.
-REDACT_VERSION = 2
+REDACT_VERSION = 3
 
 #: Unicode 17.0's Default_Ignorable_Code_Point: the 27 ranges DerivedCoreProperties.txt
 #: lists, unassigned code points included, as (first, last).
@@ -55,6 +56,20 @@ _IGNORABLE_FIRSTS = tuple(first for first, _ in _DEFAULT_IGNORABLE)
 #: The see-through characters ASCII holds.
 _ASCII_SEEN = "".join(chr(c) for c in (*range(0x20), 0x7F) if chr(c) not in "\t\n")
 _ASCII_SEEN_RX = re.compile("[" + "".join("\\x%02x" % ord(c) for c in _ASCII_SEEN) + "]")
+#: One backslash of a run that stands directly before a quote (`"` or `'`): the escape
+#: a quote inside a string takes (JSON's `\"`, Python's `\'`), once per level of
+#: nesting. It matches one character, so each removed character is one match.
+_ESCAPE = r"\\(?=\\*[\"'])"
+
+
+#: Strict mode: the rules whose shape is randomness alone. They keep their entropy floor,
+#: judged on the value's most random stretch; every other rule has none.
+RANDOM_RULES = ("high-entropy-run", "high-entropy-slash-run")
+#: Strict mode: at most this many steps of the most-random-stretch search per text; a
+#: text that needs more comes back unscanned.
+STRETCH_STEPS = 2_000_000
+#: Strict mode: the longest stretch the search reads.
+STRETCH_MAX_CHARS = 512
 
 
 class SetUnavailable(Exception):
@@ -252,20 +267,27 @@ def _unlined(allowlists) -> tuple:
 
 
 class _Rule:
-    __slots__ = ("set", "id", "description", "regex", "group", "entropy", "keywords",
-                 "path", "allowlists", "unlined")
+    __slots__ = ("set", "id", "description", "regex", "strict_regex", "group", "entropy",
+                 "keywords", "path", "allowlists", "unlined", "requires")
 
     def __init__(self, set_name, raw):
         self.set = set_name
         self.id = raw["id"]
         self.description = raw["description"]
         self.regex = raw["regex"]
+        self.strict_regex = raw.get("strictRegex")
         self.group = raw["secretGroup"]
         self.entropy = raw["entropy"]
         self.keywords = tuple(raw["keywords"])
         self.path = raw["path"]
         self.allowlists = tuple(_Allowlist(a) for a in raw["allowlists"])
         self.unlined = _unlined(self.allowlists)
+        self.requires = tuple(raw.get("requires", ()))
+
+    def shaped(self, secret, eng) -> bool:
+        """Whether `secret` matches each of the rule's `requires` regexes."""
+        key = eng.key
+        return all(eng.compile(p[key]).search(secret) for p in self.requires)
 
 
 class Sets:
@@ -353,6 +375,74 @@ def _entropy(secret: str) -> float:
         freq = count * inv
         total -= freq * log2(freq)
     return total
+
+
+class _OverBudget(Exception):
+    """The most-random-stretch search of one text ran past `STRETCH_STEPS`."""
+
+
+class _Budget:
+    """The steps one text's stretch searches have left."""
+
+    __slots__ = ("left",)
+
+    def __init__(self, steps: int):
+        self.left = steps
+
+
+_XLOGX: list = []
+
+
+def _xlogx(k: int) -> float:
+    """k * log2(k), 0 for 0, from a table."""
+    if k >= len(_XLOGX):
+        from math import log2
+
+        _XLOGX.extend(n * log2(n) if n else 0.0
+                      for n in range(len(_XLOGX), max(k + 1, STRETCH_MAX_CHARS + 2)))
+    return _XLOGX[k]
+
+
+def random_enough(secret: str, floor: float, budget) -> bool:
+    """Whether `secret` passes the entropy floor `floor` on its most random stretch.
+
+    The value passes when it, or any stretch of it at least 2 ** ceil(floor) characters
+    and at most `STRETCH_MAX_CHARS` long, has entropy above `floor` as `_entropy`
+    computes it. Text glued to a value only adds stretches, so padding can't pull a value
+    under. No stretch's entropy exceeds the log of how many distinct characters the value
+    holds, so a value with fewer than 2 ** floor of them fails without a search. Each
+    character a stretch reads is a step taken from `budget`; past its end the search
+    raises `_OverBudget`.
+    """
+    from math import ceil, log2
+
+    if _entropy(secret) > floor:
+        return True
+    if len(set(secret)) < 2 ** floor:
+        return False
+    least = 2 ** ceil(floor)
+    size = len(secret)
+    if size <= least:
+        return False
+    ascii_only = secret.isascii()
+    for i in range(size - least + 1):
+        counts: dict = {}
+        weight = 0.0
+        nbytes = 0
+        stop = min(size, i + STRETCH_MAX_CHARS)
+        budget.left -= stop - i
+        if budget.left < 0:
+            raise _OverBudget
+        for j in range(i, stop):
+            c = secret[j]
+            k = counts.get(c, 0)
+            counts[c] = k + 1
+            weight += _xlogx(k + 1) - _xlogx(k)
+            nbytes += 1 if ascii_only else _utf8_size(c)
+            n = j - i + 1
+            if n >= least and n / nbytes * log2(nbytes) - weight / nbytes > floor:
+                return True
+    return False
 
 
 def path_skipped(path, eng, sets: Sets | None = None) -> bool:
@@ -487,18 +577,36 @@ def line_text(t, bounds) -> str:
     return t.etext[lo:hi - 1] + "\ufffd" * cut
 
 
-def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
+def run_gitleaks(t, set_names, path, eng, *, keep_marked=True, strict=False) -> dict:
     """The gitleaks-format sets' hits on `t`, as gitleaks' detector finds them.
 
     Returns {set: [(rule id, start, end), ...]} in `str` offsets; a path-only hit spans
     the whole text. No decoding passes run. With `keep_marked` false, a line that holds
     `gitleaks:allow` and an allowlist that reads the finding's line keep no hit out.
+
+    With `strict`, nothing beside a value keeps it whole: no mark and no allowlist (global
+    or per rule, whatever it reads) is consulted; each rule runs its regex without
+    gitleaks' end condition where it has one (`strictRegex`); a rule in `RANDOM_RULES`
+    judges its floor on the value's most random stretch (`random_enough`) and every other
+    rule has no floor. A rule's `requires` still holds. When the stretch searches need
+    more than `STRETCH_STEPS` steps, every set comes back None: the text is unscanned.
     """
     sets = load_sets()
+    if strict:
+        try:
+            return _run_gitleaks(t, set_names, path, eng, keep_marked=False, strict=True,
+                                 budget=_Budget(STRETCH_STEPS), sets=sets)
+        except _OverBudget:
+            return {name: None for name in set_names}
+    return _run_gitleaks(t, set_names, path, eng, keep_marked=keep_marked, strict=False,
+                         budget=None, sets=sets)
+
+
+def _run_gitleaks(t, set_names, path, eng, *, keep_marked, strict, budget, sets) -> dict:
     out = {name: [] for name in set_names}
     # Every path pattern searches the path as the engine sees it, mapped as the text is.
     path = eng.path_target(path) if path else None
-    if path and _path_allowance(sets.allowlists, path, eng):
+    if path and not strict and _path_allowance(sets.allowlists, path, eng):
         return out
     keywords = sets.keywords_in(t, eng)
     target = eng.target(t)
@@ -513,17 +621,18 @@ def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
                 # A path-only rule reads no keyword, entropy or marker.
                 if (path and rule.path is not None
                         and eng.compile(rule.path[eng.key]).search(path)
-                        and not _path_allowance(rule.allowlists, path, eng)):
+                        and (strict or not _path_allowance(rule.allowlists, path, eng))):
                     found.append((rule.id, 0, len(etext)))
                 continue
             if rule.keywords and not any(k in keywords for k in rule.keywords):
                 continue
-            if path and _path_allowance(rule.allowlists, path, eng):
+            if path and not strict and _path_allowance(rule.allowlists, path, eng):
                 continue
             if rule.path is not None and not (
                     path and eng.compile(rule.path[eng.key]).search(path)):
                 continue
-            rx = eng.compile(rule.regex[eng.key])
+            regex = rule.strict_regex if strict and rule.strict_regex else rule.regex
+            rx = eng.compile(regex[eng.key])
             rule_lists = rule.allowlists if keep_marked else rule.unlined
             for m in rx.finditer(target):
                 bs, be = trimmed(target, *m.span())
@@ -545,6 +654,14 @@ def run_gitleaks(t, set_names, path, eng, *, keep_marked=True) -> dict:
                     continue
                 ss, se = conv(t, span[0]), conv(t, span[1])
                 secret = etext[ss:se]
+                if rule.requires and not rule.shaped(secret, eng):
+                    continue
+                if strict:
+                    if (rule.entropy and rule.id in RANDOM_RULES
+                            and not random_enough(secret, rule.entropy, budget)):
+                        continue
+                    found.append((rule.id, ss, se))
+                    continue
                 if rule.entropy and _entropy(secret) <= rule.entropy:
                     continue
                 match = etext[s:e]
@@ -589,18 +706,19 @@ def _known_spans(text, known) -> list:
     return out
 
 
-def _gitleaks_spans(t, names, path, *, keep_marked) -> list:
+def _gitleaks_spans(t, names, path, *, keep_marked, strict) -> list:
     sets = load_sets()
     eng = _engine.active()
     out = []
-    if path and path_skipped(path, eng if eng.name == "re2" else _engine.python(), sets):
+    if path and not strict and path_skipped(
+            path, eng if eng.name == "re2" else _engine.python(), sets):
         return out
     if eng.name == "re2":
-        results = run_gitleaks(t, names, path, eng, keep_marked=keep_marked)
+        results = run_gitleaks(t, names, path, eng, keep_marked=keep_marked, strict=strict)
     else:
         from . import fallback
 
-        results = fallback.scan(t, names, path, keep_marked=keep_marked)
+        results = fallback.scan(t, names, path, keep_marked=keep_marked, strict=strict)
     whole = len(t.text)
     for name in names:
         found = results.get(name)
@@ -642,7 +760,8 @@ def _opaque(start, end, regions, starts) -> bool:
     return k >= 0 and end <= regions[k][1]
 
 
-def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> list:
+def scan(text: str, sets, *, path: str | None = None, allow=None, known=(),
+         strict: bool = False) -> list:
     """The hits of the named sets in `text`, sorted by start.
 
     `path`, repo-relative with `/`, turns on the path parts of the rules. `allow` keeps
@@ -652,14 +771,24 @@ def scan(text: str, sets, *, path: str | None = None, allow=None, known=()) -> l
 
     The scan reads past see-through characters (`seen_through`): it also finds what the
     text holds with them removed, so a token a zero-width space or a soft hyphen splits
-    is a hit, spanning the characters that split it.
+    is a hit, spanning the characters that split it. It reads past a run of backslashes
+    directly before a quote the same way, so a key followed by an escaped quote (`\\"`,
+    as JSON writes a quote inside a string) is a hit, the backslashes left outside it.
+
+    With `strict`, nothing beside a value keeps it whole: no mark, allowlist or stopword
+    is read, a rule's regex runs without gitleaks' end condition, only the rules in
+    `RANDOM_RULES` keep an entropy floor (judged on the value's most random stretch), and
+    private names drop their `allowed` entries and the author's name and email. A text
+    whose floor search runs past `STRETCH_STEPS` steps comes back unscanned. `allow` and
+    `known` still apply as given.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    return _seen_hits(text, names, path, allow, tuple(known), keep_marked=True)
+    return _seen_hits(text, names, path, allow, tuple(known), keep_marked=not strict,
+                      strict=strict)
 
 
 #: The see-through characters a rule may read as whitespace, as `str.isspace` does: VT,
@@ -669,7 +798,8 @@ _SPACED_RX = re.compile("[\x0b\x0c\x1c-\x1f\x85]|\r(?!\n)")
 
 def _spaced_copy(text, rx, names) -> str | None:
     """The third copy `_seen_hits` scans, as long as `text`, or None when it would equal
-    the copy without the see-through characters (the characters `rx` matches).
+    the copy without the characters `rx` matches (the see-through characters, and the
+    backslashes that escape a quote when `text` holds any).
 
     Each character `_SPACED_RX` matches becomes a space. A run of see-through characters
     that holds none of those, and that stands directly before a keyword of a rule in the
@@ -678,7 +808,8 @@ def _spaced_copy(text, rx, names) -> str | None:
     unless a keyword of that copy runs across the place (starts before it and ends past
     it): a run that splits a keyword, such as `sk_` and `live_` in a Stripe key's
     `sk_live`, stays removed. The copy's scan removes the rest, so a word before such a
-    run stays apart from the token after it.
+    run stays apart from the token after it. A run that ends in a backslash stands
+    before a quote, which starts no keyword, so it is never one of those.
     """
     spaced = _SPACED_RX.search(text) is not None
     found = load_sets().keyword_start([n for n in names if n in GITLEAKS_SETS])
@@ -696,10 +827,12 @@ def _spaced_copy(text, rx, names) -> str | None:
             return len(m.group()) if m else 0
 
         removed = 0
-        for m in re.finditer(rx.pattern + "+", text):
+        for m in re.finditer("(?:" + rx.pattern + ")+", text):
             run_start, run_end = m.span()
             position = run_start - removed
             removed += run_end - run_start
+            if text[run_end - 1] == "\\":
+                continue
             # One character past the run, so a carriage return at its end sees the
             # newline after it; that character is not see-through, so no match starts there.
             if spaced and _SPACED_RX.search(text, run_start, run_end + 1):
@@ -718,14 +851,19 @@ def _spaced_copy(text, rx, names) -> str | None:
     return "".join(out)
 
 
-def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
-    """The hits of `text` and of a copy of it without its see-through characters, the
-    copy's mapped back to `text`, sorted by start. When `text` holds a see-through
-    character a rule may read as whitespace (`_SPACED_RX`), or a run of see-through
-    characters just before a rule's keyword, a third copy (`_spaced_copy`) holds a space
-    for each of those and none of the others, so a boundary one gave, or the boundary
-    a word needs from the token after it, survives; its hits are mapped back the same
-    way.
+def _seen_hits(text, names, path, allow, known, *, keep_marked, strict=False) -> list:
+    """The hits of `text` and of a copy of it without its see-through characters and
+    without each run of backslashes directly before a quote (`_ESCAPE`), the copy's
+    mapped back to `text`, sorted by start. One copy removes both kinds; there is none
+    when `text` holds neither. A text holding both is also scanned as a copy without
+    its see-through characters alone, so the copy finds every hit it found before
+    escapes were removed: a rule that takes a boundary character on each side can lose
+    a run to the run before it once a backslash between them is gone. When `text` holds a see-through character a rule may read
+    as whitespace (`_SPACED_RX`), or a run of see-through characters just before a
+    rule's keyword, a third copy (`_spaced_copy`) holds a space for each of those and
+    none of the others, so a boundary one gave, or the boundary a word needs from the
+    token after it, survives; it drops the escaping backslashes too, and its hits are
+    mapped back the same way.
 
     A copy hit's start and end map to the characters of `text` they came from, except
     that one at the copy's start starts at 0 and one at its end ends at `len(text)`, so
@@ -736,25 +874,46 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     of see-through characters at both ends. So a text gets the hits it has without the
     copies when no see-through character splits or borders a secret, or sits in the text
     a rule matches around one (the keyword of an assignment); where one does, a copy may
-    add a hit, such as a token whose end a following byte order mark broke.
+    add a hit, such as a token whose end a following byte order mark broke. An escaped
+    quote does the same: a key a rule needs a quote after is a hit when `\\"` follows it.
+    The trim reads see-through characters only; a hit never starts or ends on a removed
+    backslash, since a quote follows each.
+
+    A set the text scan left unscanned (the fallback ran out of time or its worker
+    failed) already has a hit over the whole text, so the copies don't scan it.
+
+    `keep_marked` and `strict` reach the scan of every copy.
     """
-    hits = _hits(text, names, path, allow, known, keep_marked=keep_marked)
+    hits = _hits(text, names, path, allow, known, keep_marked=keep_marked, strict=strict)
     chars = _seen_in(text)
-    if not chars:
+    escaped = '\\"' in text or "\\'" in text
+    if not chars and not escaped:
         return hits
-    rx = re.compile("[" + "".join("\\U%08x" % ord(c) for c in chars) + "]")
-    bases = [text]
-    spaced = _spaced_copy(text, rx, names)
-    if spaced is not None:
-        bases.append(spaced)
+    unscanned = {h.set for h in hits if h.rule == UNSCANNED}
+    if unscanned:
+        names = tuple(n for n in names if n not in unscanned)
+    parts = ["[" + "".join("\\U%08x" % ord(c) for c in chars) + "]"] if chars else []
+    if escaped:
+        parts.append(_ESCAPE)
+    rx = re.compile("|".join(parts))
+    bases = [(text, rx)]
+    if chars:
+        spaced = _spaced_copy(text, rx, names)
+        if spaced is not None:
+            bases.append((spaced, rx))
+        if escaped:
+            # The see-through characters alone: a rule that takes a boundary character
+            # on each side can find in it a run the escape's removal joins to another.
+            bases.append((text, re.compile(parts[0])))
     spans = {(h.set, h.rule, h.start, h.end) for h in hits}
     by_secret: dict = {}
     for h in hits:
         by_secret.setdefault((h.set, h.rule, h.fingerprint), []).append((h.start, h.end))
     out = list(hits)
-    for base in bases:
+    for base, removed in bases:
         taken = []
-        for h in _copy_hits(base, rx, names, path, allow, known, keep_marked=keep_marked):
+        for h in _copy_hits(base, removed, names, path, allow, known,
+                            keep_marked=keep_marked, strict=strict):
             inner_start, inner_end = h.start, h.end
             while inner_start < inner_end and seen_through(text[inner_start]):
                 inner_start += 1
@@ -774,9 +933,10 @@ def _seen_hits(text, names, path, allow, known, *, keep_marked) -> list:
     return out
 
 
-def _copy_hits(base, rx, names, path, allow, known, *, keep_marked) -> list:
+def _copy_hits(base, rx, names, path, allow, known, *, keep_marked, strict) -> list:
     """The hits of `base` without the characters `rx` matches, mapped back to `base`:
-    a hit at the copy's start starts at 0, and one at its end ends at `len(base)`."""
+    a hit at the copy's start starts at 0, and one at its end ends at `len(base)`. Each
+    match of `rx` is one character."""
     copy = rx.sub("", base)
     if not copy:
         return []
@@ -785,25 +945,25 @@ def _copy_hits(base, rx, names, path, allow, known, *, keep_marked) -> list:
     shifted = [m.start() - i for i, m in enumerate(rx.finditer(base))]
     size = len(copy)
     out = []
-    for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked):
+    for h in _hits(copy, names, path, allow, known, keep_marked=keep_marked, strict=strict):
         start = h.start + bisect_right(shifted, h.start) if h.start else 0
         end = h.end + bisect_right(shifted, h.end - 1) if h.end < size else len(base)
         out.append(Hit(h.set, h.rule, h.description, start, end, h.line, h.fingerprint))
     return out
 
 
-def _hits(text, names, path, allow, known, *, keep_marked) -> list:
+def _hits(text, names, path, allow, known, *, keep_marked, strict) -> list:
     """`scan`'s hits for checked arguments. With `keep_marked` false, neither the mark
-    nor a line allowlist keeps a hit out."""
+    nor a line allowlist keeps a hit out; `strict` is `scan`'s."""
     t = _engine.Text(text)
     spans = _known_spans(text, known)
     gitleaks = [n for n in names if n in GITLEAKS_SETS]
     if gitleaks:
-        spans += _gitleaks_spans(t, gitleaks, path, keep_marked=keep_marked)
+        spans += _gitleaks_spans(t, gitleaks, path, keep_marked=keep_marked, strict=strict)
     if "private-names" in names:
         from . import names as _names
 
-        spans += _names.spans(t)
+        spans += _names.spans(t, strict=strict)
     if "personal-data" in names:
         from . import personal
 
@@ -862,7 +1022,8 @@ def _replace_lines(text: str, hits) -> str:
                      for k, line in enumerate(lines))
 
 
-def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) -> str:
+def redact(text: str, sets, *, path: str | None = None, allow=None, known=(),
+           strict: bool = False) -> str:
     """`text` with every hit replaced by `[REDACTED:<rule>]`.
 
     Unlike `scan`, `redact` lets nothing on a secret's line keep it: a `gitleaks:allow`
@@ -872,32 +1033,44 @@ def redact(text: str, sets, *, path: str | None = None, allow=None, known=()) ->
     the result scans empty with the same arguments, under `scan` and under `redact`'s own
     rules. Redacting the result again changes nothing. Up to three passes replace hits;
     then each line that still holds one becomes a placeholder; then, if a hit spans
-    lines, the whole text.
+    lines, the whole text. `strict` is `scan`'s, in every pass.
     """
     names = _set_names(sets)
     if not isinstance(text, str):
         raise TypeError("text is a str")
     if path is not None and not isinstance(path, str):
         path = str(path)
-    known = tuple(known)
+    return redacted(text, names, path=path, allow=allow, known=tuple(known),
+                    strict=strict)[0]
+
+
+def redacted(text: str, names: tuple, *, path=None, allow=None, known=(),
+             strict: bool = False) -> tuple:
+    """`redact`'s text for checked arguments, and whether a pass found the text, or a
+    part of it, unscanned."""
+    unscanned = False
 
     def hits_in(current):
-        return _seen_hits(current, names, path, allow, known, keep_marked=False)
+        nonlocal unscanned
+        found = _seen_hits(current, names, path, allow, known, keep_marked=False,
+                           strict=strict)
+        unscanned = unscanned or any(h.rule == UNSCANNED for h in found)
+        return found
 
     current = text
     for _ in range(3):
         hits = hits_in(current)
         if not hits:
-            return current
+            return current, unscanned
         current = _replace(current, hits)
     hits = hits_in(current)
     if not hits:
-        return current
+        return current, unscanned
     current = _replace_lines(current, hits)
     hits = hits_in(current)
     if not hits:
-        return current
-    return placeholder(hits[0].rule)
+        return current, unscanned
+    return placeholder(hits[0].rule), unscanned
 
 
 # -- line batches ---------------------------------------------------------------------------

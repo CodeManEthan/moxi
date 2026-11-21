@@ -412,6 +412,103 @@ at the next read.
 repo removes the two gates and the saved spec. Your notes folder and its history are never
 touched.
 
+## In the Claude apps
+
+With its `connector` and `secrets` extras, notes serves three read-only tools to the
+Claude apps through the connector, Moxi's public MCP host:
+
+```sh
+moxi install notes --with connector,secrets
+```
+
+That installs `moxi-notes[connector,secrets]`. The `connector` extra brings the host
+and python-stdnum, the validators secrets' personal-data set runs with. secrets itself is
+one of notes' dependencies, so with `connector` alone the tools redact with every chat
+set; the `secrets` extra names the personal-data set and adds nothing more. While secrets
+or one of its chat sets can't run (python-stdnum removed, say), every tool refuses
+`redaction-off` and the `notes redaction` row of `moxi doctor connector` says why.
+
+The tools read only your notes root, the `root` setting, read at each call. Every path
+they take or give is relative to it.
+
+**`list_notes`** lists one folder: its folders by name, then its files newest first, each
+with its size and when it changed. Inputs: `folder` (left out for the top) and `skip`
+(entries to pass over). At most 200 entries a call, with `more` saying how many are left;
+`hidden` counts the entries kept out of the chat.
+
+**`read_note`** reads a text file a page at a time. Inputs: `path` (required) and
+`from_line` (default 1). A page holds at most 400 lines and 40,000 characters, and a line
+longer than 4,000 characters is cut there, the cut said. The note is read whole, at most
+2 MiB, put through the chat redaction whole, and only then split into lines and cut into a
+page, so line numbers count the text as shown: a redacted block of several lines is one
+line. The answer gives `lines_total`, `from_line`, `to_line`, `next_line` (null at the
+end) and `redactions`. A note secrets couldn't scan in time is refused `unscanned`, never
+shown.
+
+**`search_notes`** finds notes by words in their path or text. Inputs: `words` (one to
+eight words of letters or digits, every one of which must match a whole word, case
+ignored) and `limit` (1 to 20, default 10). The walk opens text files of at most 1 MiB,
+never follows a link, never enters a dot folder, `node_modules` or `__pycache__`, and
+stops 6 seconds after the call began. Notes whose path holds a word come first, then the
+newest. Each candidate is then read again, put through the chat redaction, and kept only
+when every word still matches its path or its redacted text, until `limit` hits or 16
+seconds after the call began. Each hit gives its `path`, when it changed, and `line`: the
+first line of the redacted text holding a word, cut at 300 characters, or null when only
+the path matched. `files_read` counts the files the walk read whatever the words, and
+`cut` says a time limit stopped it. A note secrets couldn't scan is left out. So neither a
+hit nor a count confirms a value the answer hides.
+
+**Text files only.** A file with a NUL in its first 8 KiB, or a PDF, is refused
+`not-text`: secrets reads text, so nothing else can be redacted. A file over the size cap
+is refused `too-large`.
+
+**Path rules.** Each tool judges a path the same way before it reads:
+
+- It must be relative to the root, with no `..` part, no `~`, no backslash and no NUL
+  (`bad-path`).
+- A part that starts with `.` (where tools keep their config and credentials), a path
+  secrets names a secret file (`.env*`, `*.pem`, anything under `.ssh/` and the rest of
+  its list), and a path the chat redaction would change are kept out (`blocked`). A path
+  goes back to the chat as it is, so one the redaction would change is never offered.
+- Links are followed, and the target must still be under the root (`outside-root`); the
+  rules above run again on the path the link leads to.
+- Only a regular file with one hard link is read (`not-a-file`, or `blocked` for a second
+  link, which could be a secret file linked in from elsewhere).
+- The file read is the file judged: it is opened without following a link, and a file
+  swapped between the check and the read is refused `changed`.
+
+`list_notes` never offers an entry `read_note` would refuse for its name or kind; those
+are counted in `hidden`. No refusal text names the path it refuses.
+
+**Redaction.** Every text an answer holds goes through secrets' `chat_redact`, which
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode,
+before any cut. Paths aren't redacted, since a path the redaction would change is never
+shown. The snapshot gates' sets and their `action` don't apply here.
+
+**Limits and refusals.** At most two calls of notes' tools run at once; a third waits up
+to 5 seconds and then refuses `busy`, and a call still running at 20 seconds refuses
+`timeout`. Refusals: `no-root` (the root is missing or isn't a folder), `bad-path`,
+`blocked`, `outside-root`, `not-found`, `not-a-file`, `not-a-folder`, `not-text`,
+`too-large`, `changed`, `past-end` (a `from_line` past the last line), `bad-words`,
+`unscanned`, `redaction-off`, `busy` and `timeout`.
+
+**Status.** `moxi connector status` and `moxi doctor connector` show a `notes root` row
+(the root, or why it can't be read) and a `notes redaction` row (whether the chat sets
+load, and secrets' engine; a warning on the fallback engine, where a long note may come
+back unscanned).
+
+**The call log** records `entries` and `hidden` for `list_notes`; `note` (the path
+relative to the root), `from_line`, `lines` and `redactions` for `read_note`; and
+`words` (how many), `hits`, `files_read`, `confirmed`, `unscanned` and `cut` for
+`search_notes`; each with `refusal`. `note` is the one field that names what was read, so
+you can see afterwards which notes a chat opened. It never holds the words searched for
+or text read.
+
+What a chat that reads these tools can do with what it read, and what redaction doesn't
+catch, is in the connector's
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-notes-v0.1.1/packages/connector/docs/security.md).
+Read it before you turn the tools on.
+
 ## Install
 
 Linux, Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/).
@@ -441,7 +538,10 @@ the gates through repo's shim mode.
 and runs the home-paths guard;
 `moxi-repo`, the committer and the git hook runner; and `moxi-secrets`, the pattern sets.
 The `projects` extra (`moxi-projects`) adds a project's own notes folder, the `topic` kind
-and projects' remove check. notes reads every other module through its Python API and
+and projects' remove check. The `connector` extra adds `moxi-connector`, the public MCP
+host, and python-stdnum, which secrets' personal-data set runs with, and serves the
+tools of "In the Claude apps". The `secrets` extra names that set,
+`moxi-secrets[personal-data]`, and adds nothing `connector` doesn't. notes reads every other module through its Python API and
 parses no module's printed output.
 
 ## License
