@@ -420,7 +420,8 @@ sessions module. Top to bottom:
 - **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
   From … to …, All time), each range with its figure under the filters set; Project, or
   Folder where the projects module is not installed, which picks any number of them
-  (the button counts them: `1 project`, `2 projects`) and `all` to clear them; Harness
+  (the button counts them: `1 project`, `2 projects`), and `All projects` (`All folders`),
+  which the button reads with none picked, to clear them; Harness
   and Model, each drawn only when there is more than one to choose or one is set; and
   Cost / Tokens; and By class / By model, which says what the chart by cost is stacked by
   and is off under Tokens. Everything under it follows them.
@@ -436,13 +437,15 @@ sessions module. Top to bottom:
   (`Monthly` where its bars are months), and By model the line under it says `Per-model
   dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
   with its share of all tokens, and `Billable work`, input, cache writes and output
-  stacked. A table's column of dollars reads `Est. cost`.
+  stacked; their table has a column for each token class, in the order the chart by cost
+  stacks them. A table's column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
   narrow page its box scrolls), each month is named over its first column, and the five
   shades sit on the quantiles of the days that cost something. Every day is a button: a
-  click or Enter sets the range to it. A day is named by its date (`2026-11-03: 1.75
+  click or Enter sets the range to it, and the map stays drawn, with the day keeping the
+  focus, while the page reads the new range. A day is named by its date (`2026-11-03: 1.75
   USD`); each day says its cost and tokens on hover, and its token classes (at 0 on a day
   nothing was used) when it is in the range. `Table` lists the days that cost something,
   and a used day whose cost is not whole, by date, oldest first.
