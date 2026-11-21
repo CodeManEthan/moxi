@@ -396,9 +396,10 @@ def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkey
 
 def test_a_go_preview_starts_on_a_typed_handoff_or_on_words_after_the_dashes(
         work, tmp_path, capsys):
-    # Core's go launch needs a first turn. A typed --handoff is one, sent as the session's
-    # first turn. On a launch with no identity, so are the words after `--`: they go last
-    # on the harness's argv, which reads them as its opening prompt.
+    # A go launch needs a first turn. A typed --handoff is one, sent as the session's
+    # first turn. On a launch with no identity, so is any tail typed after `--`, flags
+    # alone included: it goes last on the harness's argv. An unknown flag typed before
+    # `--` is passed on too, but carries no first turn.
     handoff = tmp_path / "handoff.md"
     handoff.write_text("Carry on with the build.\n")
     code, out, err = run(["preview", "--posture", "go", "--handoff", str(handoff),
@@ -409,9 +410,13 @@ def test_a_go_preview_starts_on_a_typed_handoff_or_on_words_after_the_dashes(
                          capsys)
     assert code == codes.OK, err
     assert json.loads(out)["argv"][-1] == "Carry on."
-    status, out, err = run(["preview", "--posture", "go", "--", "--verbose"], capsys)
+    code, out, err = run(["preview", "--posture", "go", "--json", "--", "--verbose"],
+                         capsys)
+    assert code == codes.OK, err
+    assert json.loads(out)["argv"][-1] == "--verbose"
+    status, out, err = run(["preview", "--posture", "go", "--verbose"], capsys)
     assert status == codes.REFUSED and out == ""
-    assert err.splitlines()[0].endswith("[posture-brief]")
+    assert any(line.endswith("[posture-brief]") for line in err.splitlines())
 
 
 @pytest.mark.parametrize("argv, code, short", [

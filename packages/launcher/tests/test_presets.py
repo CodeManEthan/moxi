@@ -525,24 +525,34 @@ def test_a_go_launch_with_a_first_turn_resolves(first):
     assert resolve(typed={"posture": "go", **first}).posture == "go"
 
 
-def test_a_go_launch_with_no_identity_starts_on_words_passed_on_to_the_harness():
-    # Core's posture table: on a launch that binds no comms identity, a tail carries the
-    # task, as the harness reads a bare word last on its argv as its opening prompt.
-    assert resolve(typed={"posture": "go"}, extra=["Carry on."]).posture == "go"
-    assert resolve(typed={"posture": "go"},
-                   extra=["--verbose", "Carry on."]).posture == "go"
-    with pytest.raises(presets.PostureBrief) as caught:
-        resolve(typed={"posture": "go"}, extra=["--verbose"])
-    assert "or its task after --" in caught.value.hint
+def test_a_go_launch_with_no_identity_starts_on_the_words_typed_after_the_dashes():
+    # On a launch that binds no comms identity, any words typed after `--` carry the
+    # task, flags alone included: they go last on the harness's argv.
+    for tail in (["Carry on."], ["--verbose", "Carry on."], ["--verbose"]):
+        got = resolve(typed={"posture": "go"}, extra=tail, tail=tail)
+        assert got.posture == "go"
     # comms not installed: the identity is ignored, so the launch binds none.
     assert resolve(typed={"posture": "go", "identity": "builder"},
-                   extra=["Carry on."]).posture == "go"
+                   extra=["Carry on."], tail=["Carry on."]).posture == "go"
+
+
+def test_a_go_launch_does_not_start_on_flags_passed_on_but_not_typed_after_the_dashes():
+    # Unknown flags typed before `--`, the page's field (both reach `extra` with no
+    # tail), a preset's `extra_flags` and `[defaults]`' carry no first turn.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"}, extra=["--add-dir", "Carry on."])
+    assert "or its task after --" in caught.value.hint
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\nextra_flags = ["--add-dir", "/x"]\n', seat="s")
+    with pytest.raises(presets.PostureBrief):
+        resolve('[defaults]\nextra_flags = ["--append-system-prompt", "be terse"]\n',
+                typed={"posture": "go"})
 
 
 def test_a_go_launch_that_binds_an_identity_does_not_start_on_words_passed_on():
     with pytest.raises(presets.PostureBrief) as caught:
         resolve(typed={"posture": "go", "identity": "builder"}, extra=["Carry on."],
-                available=only("comms"))
+                tail=["Carry on."], available=only("comms"))
     assert "after --" not in caught.value.hint
 
 

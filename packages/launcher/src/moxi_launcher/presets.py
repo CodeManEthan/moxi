@@ -527,17 +527,18 @@ def _check_place(where: str, values: Mapping[str, object], *, allow_home: bool
 
 
 def _check_posture_brief(posture: str, values: Mapping[str, object], *,
-                         binds: bool) -> None:
-    """The start posture's rule for the brief, as Core's launcher had it: a `go` launch
-    needs a first turn to start on (a brief, a brief file or a handoff, or, on a launch
-    that binds no comms identity, a word passed on to the harness that is not a flag,
-    which the harness reads as its opening prompt), and a launch under `with:<identity>`
-    takes no brief and no handoff, since its director sends the first message. `binds` says whether the
-    launch binds a comms identity. A replay (a relaunch or a resume) never comes here."""
+                         binds: bool, tail: Sequence[str]) -> None:
+    """The start posture's rule for the brief: a `go` launch needs a first turn to start
+    on (a brief, a brief file or a handoff, or, on a launch that binds no comms identity,
+    any words typed after `--` on the command line, flags included, which go last on the
+    harness's argv), and a launch under `with:<identity>` takes no brief and no handoff,
+    since its director sends the first message. `binds` says whether the launch binds a
+    comms identity, `tail` is the words typed after `--`. Flags passed on otherwise (an
+    unknown flag typed before `--`, a layer's `extra_flags`, the page's field) carry no
+    first turn. A replay (a relaunch or a resume) never comes here."""
     brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
         values.get("brief_file"))
-    first = brief or catalog.is_set(values.get("handoff")) or (
-        not binds and _carries_words(values.get(catalog.EXTRA)))
+    first = brief or catalog.is_set(values.get("handoff")) or (not binds and bool(tail))
     if posture == "go" and not first:
         raise PostureBrief("brief", "posture go needs a brief: nobody is at this session "
                                     "to direct it, so with no first turn it sits idle",
@@ -554,13 +555,6 @@ def _check_posture_brief(posture: str, values: Mapping[str, object], *,
             raise PostureBrief("handoff", f"posture {posture} takes no handoff: {who} "
                                           "sends the first message",
                                "drop the handoff, or pick go")
-
-
-def _carries_words(extra: object) -> bool:
-    """Whether the flags passed on to the harness hold a word that is not a flag."""
-    if not isinstance(extra, (list, tuple)):
-        return False
-    return any(str(word).strip() and not str(word).startswith("-") for word in extra)
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
@@ -820,7 +814,9 @@ class Request:
 
     `typed` is the flags typed, as `catalog.parse(...).values` gives them, and `extra`
     the flags passed on (`catalog.parse(...).extra`), which go in as typed
-    `extra_flags`. `left_out` names the catalog rows the launch leaves out, whatever
+    `extra_flags`. `tail` is the words typed after `--` on the command line
+    (`catalog.parse(...).tail`, also in `extra`), which can carry a `go` launch's first
+    turn; the page sends none. `left_out` names the catalog rows the launch leaves out, whatever
     `[defaults]` or the preset sets. `cwd` is the caller's directory, the session's when
     nothing names a place; None reads this process's."""
 
@@ -828,6 +824,7 @@ class Request:
     project_preset: str | None = None
     typed: Mapping[str, object] = field(default_factory=dict)
     extra: Sequence[str] = ()
+    tail: Sequence[str] = ()
     off_posture: bool = False
     cwd: str | None = None
     left_out: Sequence[str] = ()
@@ -1076,7 +1073,8 @@ def resolve(request, *, presets: Presets | None = None,
         if problem is not None:
             raise BadPreset(problem)
         binds = bool(values.get("identity")) and avail("comms")
-        _check_posture_brief(posture, values, binds=binds)
+        _check_posture_brief(posture, values, binds=binds,
+                             tail=tuple(getattr(request, "tail", None) or ()))
 
     identity = values.get("identity") or None
     scope = values.get("scope") or None

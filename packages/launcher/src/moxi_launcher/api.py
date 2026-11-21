@@ -154,7 +154,8 @@ class ScratchRoot(Refusal):
 class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
     typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
-    `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
+    the words typed after `--` on the command line (`tail`, also in `extra`; the page
+    sends none), `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
     default whatever `[defaults]` or the preset sets), the typed rows whose value the
     caller filled in from an earlier launch (`filled`; a name that is no typed row counts
     for nothing), the caller's directory, and the request id, Claude session id and
@@ -164,6 +165,7 @@ class LaunchRequest:
     project_preset: str | None = None
     typed: Mapping[str, object] = field(default_factory=dict)
     extra: Sequence[str] = ()
+    tail: Sequence[str] = ()
     off_posture: bool = False
     cwd: str | None = None
     request_id: str | None = None

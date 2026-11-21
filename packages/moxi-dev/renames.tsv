@@ -3729,7 +3729,6 @@ launcher	packages/launcher/src/moxi_launcher/presets.py	found: set[str] = set()	
 launcher	packages/launcher/src/moxi_launcher/presets.py	if name not in catalog.launcher() and not any(	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	if not any(p.level == ERROR for p in more):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	return _unset_as_default(row, row.check(value))	keep	ok	ok
-launcher	packages/launcher/src/moxi_launcher/presets.py	return any(str(word).strip() and not str(word).startswith("-") for word in extra)	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	caller_env
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	folder	agents_dir
@@ -4124,6 +4123,7 @@ launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=T
 launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
 launcher	packages/launcher/tests/test_cli.py	"sessions", "resume", "clear-expired", "keep-warm", "show"}	keep	show	show
 launcher	packages/launcher/tests/test_cli.py	assert any("Carry on with the build." in word for word in json.loads(out)["argv"])	keep	any	any
+launcher	packages/launcher/tests/test_cli.py	assert any(line.endswith("[posture-brief]") for line in err.splitlines())	keep	any	any
 launcher	packages/launcher/tests/test_cli_acts.py	"""Through the real verb: the launch is found, so its refusal is logged `refused`."""	keep	refused	refused
 launcher	packages/launcher/tests/test_cli_acts.py	"from_record": None, "dry_run": False, "json": False}),	keep	dry_run	dry_run
 launcher	packages/launcher/tests/test_cli_acts.py	(["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),	keep	dry_run	dry_run

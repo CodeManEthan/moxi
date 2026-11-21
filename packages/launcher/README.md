@@ -134,8 +134,11 @@ default, there is no line.
 - `go`: nobody is waiting at this session to direct it. The agent starts on its brief at
   once and carries it through. A `go` launch with no brief, brief file or handoff would
   sit idle, so `preview` and `run` refuse it (`posture-brief`). On a launch that binds no
-  comms identity, words after `--` count too when one of them is not a flag: they go last
-  on the harness's argv, which reads them as its opening prompt. A relaunch or a resume
+  comms identity, words typed after `--` on the command line count too, whatever they
+  are: they go last on the harness's argv. Nothing else passed on counts: not an unknown
+  flag typed before `--`, not `extra_flags` from a preset or `[defaults]`, and not the
+  page's extra flags, so a `go` launch from the page needs a brief, a brief file or a
+  handoff. A relaunch or a resume
   launches its row again and is not checked; a resume sends no first turn.
 - `with:<identity>` (needs comms): the session works for a director, the comms identity
   named. A director is a session that hands this one its work and hears back through

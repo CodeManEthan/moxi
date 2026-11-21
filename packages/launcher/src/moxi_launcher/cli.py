@@ -168,6 +168,7 @@ def _request(args: argparse.Namespace):
         _warn(parsed.warning)
     return api.LaunchRequest(seat=args.seat, project_preset=args.project_preset,
                              typed=dict(parsed.values), extra=tuple(parsed.extra),
+                             tail=parsed.tail,
                              off_posture=args.off_posture, left_out=left_out,
                              cwd=os.getcwd())
 
