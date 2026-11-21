@@ -1,5 +1,5 @@
-"""The wording of a relaunch notice and of a session's note: a run's detail ends as a
-sentence, and a run's word that repeats its outcome is not said twice."""
+"""The wording of a relaunch notice and of a session's note: a run's detail is a sentence
+of its own, and a run's word that repeats its outcome is not said twice."""
 
 from __future__ import annotations
 
@@ -18,21 +18,26 @@ def test_a_detail_with_no_full_stop_gets_one():
     said = notices.text(run("relaunch-failed", "no-cwd", "the directory /work does not "
                             "exist"), None, "relaunch-failed")
     assert said == ("Relaunch notice from launcher: run r1 for session s1 in slot 16 ended "
-                    "relaunch-failed: no-cwd. the directory /work does not exist. The "
+                    "relaunch-failed: no-cwd. The directory /work does not exist. The "
                     "session is down and was not launched again.")
 
 
-@pytest.mark.parametrize("detail", ["it ended.", "it ended?", "it ended!"])
+@pytest.mark.parametrize("detail", ["It ended.", "It ended?", "It ended!"])
 def test_a_detail_that_ends_a_sentence_is_left_as_it_is(detail):
     said = notices.text(run("gone", "gone", detail), None, "gone")
     assert said == ("Relaunch notice from launcher: run r1 for session s1 in slot 16 ended "
                     f"gone. {detail} The session is down.")
 
 
+def test_a_detail_starts_its_sentence_with_a_capital():
+    said = notices.text(run("gone", "gone", "it ended."), None, "gone")
+    assert "ended gone. It ended. The session is down." in said
+
+
 def test_a_gone_notice_says_gone_once():
     said = notices.text(run("gone", "gone", "session s1 is not live"), None, "gone")
     assert said == ("Relaunch notice from launcher: run r1 for session s1 in slot 16 ended "
-                    "gone. session s1 is not live. The session is down.")
+                    "gone. Session s1 is not live. The session is down.")
 
 
 def test_a_note_not_taken_says_the_runs_outcome_once():

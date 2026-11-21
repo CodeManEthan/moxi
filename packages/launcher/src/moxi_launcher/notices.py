@@ -144,9 +144,13 @@ def _own_word(run: store.Run) -> str:
 
 
 def _sentence(words: str) -> str:
-    """`words` as a sentence: a full stop added when it ends without closing punctuation."""
+    """`words` as a sentence of its own: its first letter capitalised, and a full stop
+    added when it ends without closing punctuation."""
     words = words.strip()
-    return words if not words or words.endswith((".", "!", "?")) else f"{words}."
+    if not words:
+        return words
+    words = words[0].upper() + words[1:]
+    return words if words.endswith((".", "!", "?")) else f"{words}."
 
 
 def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: float) -> bool:
@@ -175,7 +179,7 @@ def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
     command when the outcome allows one (for `exit-pending`, once the session has
     exited). A repair that ended `refused` left its session down: its text says so and
     names the command that repeats the repair, of the run it repaired. The run's word is
-    left out when it repeats the outcome, and its detail ends as a sentence."""
+    left out when it repeats the outcome, and its detail is a sentence of its own."""
     session = run.session_id
     slot = f" in slot {run.slot}" if run.slot else ""
     said, word = outcome, _own_word(run)
