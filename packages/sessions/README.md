@@ -645,6 +645,79 @@ zero and no greyed control stands in for it. What is left out, and what each nee
 - The phone: the shell's phone view does not offer this page. It needs sessions' reads
   opened to the phone.
 
+## In the Claude apps
+
+With its `connector` and `secrets` extras, sessions serves two read-only tools to the
+Claude apps through the connector, Moxi's public MCP host:
+
+```sh
+moxi install sessions --with connector,secrets
+```
+
+That installs `moxi-sessions[connector,secrets]`. The `connector` extra brings the host;
+the `secrets` extra brings secrets, whose redaction every tool needs. Install both: while
+secrets is missing, or one of its chat sets can't run, every tool refuses `redaction-off`
+and the `sessions redaction` row of `moxi doctor connector` says why.
+
+**`list_sessions`** lists recent sessions, newest change first. Inputs: `harness`
+(`claude`, `codex` or `opencode`), `since` (an age such as `7d` or `12h`, or an ISO 8601
+time) and `limit` (1 to 30, default 10). Each row gives `session`, `harness`, `kind`
+(`main`, or `program` for one a program started), `started` and `changed` in UTC, `name`
+and `folder`. `folder` is the last part of the session's folder only, never its full
+path. Roots that couldn't be listed are named in `unlisted`, by their last part too.
+
+**`read_session`** reads part of one session's transcript. Inputs: `session` (required),
+`harness` (needed only when more than one harness holds the id), `agent` (a subagent's
+id, to read that subagent's own transcript), `around` (an ISO 8601 time or epoch seconds;
+left out, the last turns), `turns` (1 to 10, default 3) and `thoughts` (default false).
+It finds a session as `moxi sessions read` does, archive folders included, and reads the
+records, since only a record says who wrote a message (`writer`, under Interfaces):
+
+- A message's text shows when its writer is the person at the prompt, the model writing
+  its own turn, or another agent's session (`peer` or `coordinator` mail, named on the
+  row). A message whose writer sessions doesn't know shows when its text doesn't open
+  with `<` and a letter. In each case a text that opens with an output wrapper
+  (`OUTPUT_WRAPPERS`) shows as one line instead. The text goes through the chat
+  redaction whole, then is cut at 4,000 characters, the cut said.
+- Every other message is one line of its kind and its size in characters: `unknown
+  writer`, `channel`, `hook`, `task`, `harness`, `summary` (a compaction summary) or
+  `command output`.
+- The model's thoughts show only with `thoughts`.
+- A tool call is its one-line summary, redacted before its cut. A call whose input names
+  a secret path shows as its tool and that path only, `Bash(~/.env)`.
+- A tool result is its size and whether it failed. No tool output shows.
+
+The header gives `session`, `harness`, `kind`, `title` and `folder` (its last part), and
+`earlier` and `later` say whether turns were left out on either side. An answer holds at
+most 40,000 characters of text: the oldest turns go first, so the turn around `around`
+(or the last turn) always stays, and inside one turn too long by itself, the rows
+farthest from that point go first. Refusals: `bad-session`, `unknown-session` (naming an
+archive folder that didn't answer, by its last part), `ambiguous`, `unknown-agent`,
+`unreadable`, `bad-around`, `redaction-off`, `busy` and `timeout`.
+
+**Redaction.** Every string an answer holds goes through secrets' `chat_redact`, which
+redacts with its chat sets (`credentials`, `broad` and `personal-data`) in strict mode:
+message text, tool-call lines, names, titles, folders, and refusal texts that name a
+folder. Session ids, harness names, kinds, times, counts and flags come from a fixed
+vocabulary or format and go as they are. `moxi sessions read` keeps its own redaction and
+shows more than these tools do.
+
+**Limits.** At most two calls of sessions' tools run at once; a third waits up to 5
+seconds and then refuses `busy`. A call still running at 20 seconds refuses `timeout`.
+
+**Status.** `moxi connector status` and `moxi doctor connector` show a `redaction` row
+(whether the chat sets load, and secrets' engine) and a `roots` row (each harness's root,
+and any that can't be listed).
+
+**The call log** records `rows` for `list_sessions`, and `harness`, `turns`, `rows`,
+`cut` and `redactions` for `read_session`, each with `refusal`. It never holds a session
+id or text read.
+
+What a chat that reads these tools can do with what it read, and what redaction doesn't
+catch, is in the connector's
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/connector/docs/security.md).
+Read it before you turn the tools on.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
@@ -663,11 +736,15 @@ modules.
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
 UI shell, whose page-server base sessions' page server runs on. The optional extra
-`secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with. The optional
+`secrets` adds `moxi-secrets`, which `moxi sessions read` and the tools in the Claude
+apps redact with. The optional
 extra `turns` adds `moxi-turns`, which enforces the transcript-read guard. The optional
 extra `projects` adds `moxi-projects`, whose read API (interface 2, `for_paths`) says which
 project holds each folder, for the facts on the Projects page; a projects that doesn't
 offer it reads as absent.
+The optional extra `connector` adds `moxi-connector`, the public MCP host, and
+python-stdnum for the chat redaction: it serves the tools of "In the Claude apps", and
+needs the `secrets` extra beside it.
 
 ## Interfaces
 

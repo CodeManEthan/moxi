@@ -12,6 +12,8 @@
   secret path. Text goes through secrets' `chat_redact` whole, then is cut at 4,000
   characters; an answer holds at most 40,000, the oldest turns going first. The redaction
   gate now also needs secrets' `secret_path`, and refuses `redaction-off` without it.
+  The README's "In the Claude apps" section covers both tools and the install line,
+  `moxi install sessions --with connector,secrets`.
 - A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
   `list_sessions` to the Claude apps. Each row gives the session, harness, kind (`main`
   or `program`), start and last change in UTC, the name, and the last part of its folder
