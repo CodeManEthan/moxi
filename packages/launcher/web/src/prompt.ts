@@ -20,7 +20,8 @@
 // failed is made again when the tab is shown again and when the button's menu opens. The menu is three
 // lists side by side, the harness first; `older…` opens a field for a model's full name.
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
-// set here, which are the first harness's own.
+// set here and of the values filled from the last launch, which are the first harness's
+// own; the comms identity for the harness picked fills, unless one was set here.
 //
 // `Preset` beside the place, once `/api/presets` lists any, names the one preset the launch
 // starts from, `none` dim while none is applied. Its menu takes it off, or applies one of
@@ -147,7 +148,7 @@ import type {
 
 import {
   BY_DEFAULT, CLEAR, filledAt, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
-  HARNESS_ROW, harnessStep, keptFill, lastKey, lastWhen, parseLast, refusalNote, withoutFill,
+  HARNESS_ROW, harnessStep, keptFill, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote, withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -784,12 +785,13 @@ export class LauncherPrompt extends LitElement {
    * preset applied reads it again with none for the same harness. An answer that can't be
    * read leaves the form as it was. A read the fill asks for (`fill`) takes no form that is
    * refused; another harness read for any other reason lets go of the filled values, which
-   * are the first harness's own. */
-  async #readForm(harness: string, fill = false): Promise<void> {
+   * are the first harness's own. A harness the user picked (`picked`) then fills the comms
+   * identity the last launch gives it, unless the user set the identity here. */
+  async #readForm(harness: string, fill = false, picked = false): Promise<void> {
     const asked = (this.#asked += 1);
     this.#formIn = true;
     try {
-      await this.#formRead(asked, harness, fill);
+      await this.#formRead(asked, harness, fill, picked);
     } finally {
       // The fill waits for the latest read of the form, however it ended.
       if (asked === this.#asked) {
@@ -799,7 +801,7 @@ export class LauncherPrompt extends LitElement {
     }
   }
 
-  async #formRead(asked: number, harness: string, fill: boolean): Promise<void> {
+  async #formRead(asked: number, harness: string, fill: boolean, picked: boolean): Promise<void> {
     const identity = this.fields.length === 0 ? "" : this.#identity;
     this.#identityAsked = identity;
     const choice = this.preset;
@@ -831,6 +833,9 @@ export class LauncherPrompt extends LitElement {
     if (other && this.fields.length > 0) {
       this.options = keptOptions(this.options, this.fields);
       this.pending = null;
+    }
+    if (other && picked && this.last !== null && this.fields.length > 0) {
+      this.filled = pickedHarnessFill(this.last, this.fields as PanelField[], form, this.#held());
     }
   }
 
@@ -893,9 +898,8 @@ export class LauncherPrompt extends LitElement {
       void this.#readForm(this.#fillHarness, true);
       return;
     }
-    const held = new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
     // Off the launch's harness only the comms identity for the form's own harness fills.
-    const values = fillOf(last, this.fields as PanelField[], form, held);
+    const values = fillOf(last, this.fields as PanelField[], form, this.#held());
     if (step !== "same" && Object.keys(values).length === 0) {
       this.#filledNothing();
       return;
@@ -904,6 +908,11 @@ export class LauncherPrompt extends LitElement {
     this.last = last;
     this.#waiting = null;
     this.#fillHarness = "";
+  }
+
+  /** The rows the user set here, which nothing fills over. */
+  #held(): Set<string> {
+    return new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
   }
 
   /** The last launch waiting fills nothing. */
@@ -990,7 +999,7 @@ export class LauncherPrompt extends LitElement {
 
   #setHarness(value: string): void {
     this.older = false;
-    if (value !== this.harness) void this.#readForm(value);
+    if (value !== this.harness) void this.#readForm(value, false, true);
   }
 
   #openOlder(): void {

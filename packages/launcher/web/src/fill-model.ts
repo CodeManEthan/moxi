@@ -17,7 +17,8 @@
 // default, the harness fills like a row and the form is read again for it, and the values
 // fill against that form; when `[defaults]` or the preset sets another harness, only the
 // comms identity for the form's harness fills, since the values are rows of a harness this
-// launch does not use.
+// launch does not use. A harness the user picks by hand lets go of every filled value and
+// fills the comms identity for that harness, unless the user set the identity here.
 //
 // A filled value is not a change. It is named on its own item on the line above the box,
 // with what it is, where it came from and `Clear`, and under its row in the panel. One the
@@ -189,6 +190,14 @@ export function fillOf(last: Last, fields: readonly PanelField[], form: Form,
     if (!same(value, shownValue(field))) out[field.name] = value;
   }
   return out;
+}
+
+/** What fills when the user picks another harness by hand: the comms identity `last` gives the
+ * form now drawn for it, at the global scope, unless the user set the identity here (`held`).
+ * None of the launch's own values fill: the user chose the harness over them. */
+export function pickedHarnessFill(last: Last, fields: readonly PanelField[], form: Form,
+                                  held: ReadonlySet<string> = new Set()): Record<string, FormValue> {
+  return fillOf({ ...last, values: [] }, fields, form, held);
 }
 
 /** The filled values the form still leaves at their shipped default, as after it is read
