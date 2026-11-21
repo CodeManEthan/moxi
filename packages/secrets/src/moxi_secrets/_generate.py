@@ -52,6 +52,16 @@ RULE_FIELDS = frozenset({"id", "description", "regex", "keywords", "entropy", "s
 ALLOWLIST_FIELDS = frozenset({"description", "regexes", "regexTarget", "stopwords",
                               "condition", "paths"})
 PIN_FIELDS = frozenset({"tag", "commit", "sha256", "fetched"})
+#: Moxi's own rule fields, which only broad.toml may use (no gitleaks binary reads it).
+#: `requires` lists regexes a secret must each match, or the finding is no hit; strict
+#: mode keeps them, since they are part of the rule's shape.
+BROAD_FIELDS = frozenset({"requires"})
+
+
+#: gitleaks' end condition: what must follow a value for most upstream rules to match.
+#: The generator writes each rule whose regex ends with it a second regex without it,
+#: `strictRegex`, which strict mode runs.
+END_CONDITION = r"""(?:[\x60'"\s;]|\\[nr]|$)"""
 
 
 class GenerationError(Exception):
@@ -527,7 +537,7 @@ def _rule(table: dict, file: str, source: str) -> dict:
     """One rule, resolved; raises _Dropped when the scanner cannot run it as gitleaks
     would."""
     rid = table["id"]
-    unknown = sorted(set(table) - RULE_FIELDS)
+    unknown = sorted(set(table) - RULE_FIELDS - (BROAD_FIELDS if file == BROAD else set()))
     if unknown:
         raise _Dropped(f"uses {', '.join(unknown)}, which the scanner does not implement")
     allowlists = table.get("allowlists", [])
@@ -551,16 +561,22 @@ def _rule(table: dict, file: str, source: str) -> dict:
         raise GenerationError(f"{file}: rule {rid}'s secretGroup is not a whole number")
     keywords = _strings(table.get("keywords", []), f"rule {rid}'s keywords", file)
     tags = _strings(table.get("tags", []), f"rule {rid}'s tags", file)
+    requires = _strings(table.get("requires", []), f"rule {rid}'s requires", file)
+    strict = None
+    if regex and regex.endswith(END_CONDITION) and len(regex) > len(END_CONDITION):
+        strict = _pattern(regex[:-len(END_CONDITION)], "its regex without the end condition")
     return {
         "id": rid,
         "description": table.get("description", ""),
         "source": source,
         "regex": _pattern(regex, "its regex") if regex else None,
+        "strictRegex": strict,
         "secretGroup": group,
         "entropy": float(entropy),
         "keywords": [k.lower() for k in keywords],
         "path": _pattern(path, "its path") if path else None,
         "tags": tags,
+        "requires": [_pattern(r, f"its requires {n}") for n, r in enumerate(requires, 1)],
         "allowlists": [_allowlist(a, file, f"rule {rid}'s allowlist {n}", rule=True)
                        for n, a in enumerate(allowlists, 1)],
     }

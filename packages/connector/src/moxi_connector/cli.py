@@ -183,6 +183,9 @@ def _status(args, out: TextIO) -> int:
             print(line, file=out)
             if tools:
                 print(f"  tools: {', '.join(tools)}", file=out)
+        withheld = [str(name) for name in answer.get("withheld") or ()]
+        if withheld:
+            print(f"withheld: {', '.join(withheld)}", file=out)
         for name, level, text in answer.get("rows") or ():
             print(f"  {name}: {level}: {text}", file=out)
     if snap.grants is not None:
