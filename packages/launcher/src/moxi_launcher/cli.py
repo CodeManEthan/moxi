@@ -777,8 +777,9 @@ def _act_parsers(verbs) -> None:
 
     exit_session = verbs.add_parser(
         "exit-session", help="exit a launched session", allow_abbrev=False,
-        description="Exit a session the launcher launched, once it is quiet; in a slot, "
-                    "Claude Code's exit dialog is answered too.")
+        description="Exit a session the launcher launched, once it is quiet: Claude Code "
+                    "through turns, its exit dialog answered too in a slot; Codex under "
+                    "turns' Codex host by stopping the host.")
     exit_session.add_argument("session_id", metavar="SESSION_ID", help="the session to exit")
     exit_session.add_argument("--dry-run", action="store_true",
                               help="take the checks and the quiet read; exit nothing")
@@ -808,7 +809,8 @@ def _act_parsers(verbs) -> None:
                     "conversation, live or not, with the rows that shape what the "
                     "harness sends copied from its launch and no comms name, brief or "
                     "posture; print the new session's id. The session forked goes on as "
-                    "it was.")
+                    "it was. A Codex session is forked by turns' Codex host, from "
+                    "moxi-turns 0.2.5 on.")
     fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")
     fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",
                       help="where the fork runs: this terminal (the default) or a slot")
