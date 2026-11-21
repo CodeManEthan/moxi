@@ -349,7 +349,8 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
                         {"word": "person", "detail": "a client was active 40 s ago"},
                         at="2026-10-31T10:01:00.000000Z")
     status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
-    assert (status, err) == (codes.OK, "")
+    # An open run exits 75, its lines still on stdout.
+    assert (status, err) == (codes.TEMPFAIL, "")
     lines = out.splitlines()
     assert lines[0] == (f"run {run_.run_id}: relaunch (self) of session {SID} in slot 3: "
                         "armed")
@@ -357,7 +358,7 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
     assert len(lines) == 4
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
     data = json.loads(out)
-    assert status == codes.OK and data["outcome"] == "armed"
+    assert status == codes.TEMPFAIL and data["outcome"] == "armed"
     assert data["wait"]["word"] == "person" and len(data["events"]) == 2
 
 
@@ -365,7 +366,9 @@ def test_relaunch_status_of_an_ended_run_carries_its_outcome(conn, capsys):
     launched(conn)
     run_ = ended_run(conn, "not-exited", word="mismatch", detail="the dialog changed")
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
-    assert status == codes.OK and json.loads(out)["outcome"] == "not-exited"
+    assert status == codes.ERROR and json.loads(out)["outcome"] == "not-exited"
+    status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
+    assert status == codes.ERROR and err == "" and "not-exited (mismatch)" in out
 
 
 def test_relaunch_status_of_no_run_is_refused(conn, capsys):

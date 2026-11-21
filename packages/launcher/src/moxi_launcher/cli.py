@@ -51,7 +51,7 @@ relaunch armed or relaunched, a session exited); 1 a start that failed, or a run
 ended in a failed outcome; 2 bad arguments or a bad value; 3 refused (before the launch's
 row is written nothing is written, after it the row says why); 75 a lock held past its
 wait, an act held by the session's state now, or a run still going past the follow
-bound: try again. A refusal prints one line ending in its short code, and a hint.
+bound or still open under `relaunch --status`: try again. A refusal prints one line ending in its short code, and a hint.
 `--json` prints the verb's data, with its outcome word.
 """
 
@@ -540,14 +540,14 @@ def _deliver(args: argparse.Namespace, prog: str) -> int:
 # -- acts on launched sessions --------------------------------------------------------------
 
 
-def _said(result, args: argparse.Namespace) -> int:
+def _said(result, args: argparse.Namespace, *, shown: bool = False) -> int:
     """Print a verb's result and return its exit code: with `--json` its data (the outcome
-    word among it) on stdout; else its lines, on stdout when it exits 0 and on stderr
-    otherwise."""
+    word among it) on stdout; else its lines, on stdout when it exits 0 or `shown` (a
+    verb that shows a thing, whose exit code reports on it) and on stderr otherwise."""
     if getattr(args, "json", False):
         print(_dump(dict(result.data)))
     else:
-        out = sys.stdout if result.exit_code == codes.OK else sys.stderr
+        out = sys.stdout if result.exit_code == codes.OK or shown else sys.stderr
         for line in result.lines:
             print(line, file=out)
     return result.exit_code
@@ -557,7 +557,7 @@ def _relaunch(args: argparse.Namespace, prog: str) -> int:
     from . import relaunch
 
     if args.status is not None:
-        return _said(relaunch.status(args.status), args)
+        return _said(relaunch.status(args.status), args, shown=True)
     if args.stop is not None:
         return _said(relaunch.stop_run(args.stop), args)
     if args.from_record is not None:
@@ -756,7 +756,9 @@ def _act_parsers(verbs) -> None:
                     "and did not bring it back.")
     relaunch.add_argument("target", nargs="?", metavar="SESSION_ID|IDENTITY",
                           help="the session to relaunch as its director: its session id or "
-                               "its comms name")
+                               "its comms name. The call follows the run for "
+                               "relaunch.follow_s (300 s shipped): run it with a Bash "
+                               "timeout of at least that plus 30 s")
     form = relaunch.add_mutually_exclusive_group()
     form.add_argument("--self", action="store_true",
                       help="arm a relaunch of the session this runs in")

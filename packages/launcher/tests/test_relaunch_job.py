@@ -196,11 +196,11 @@ class Clock:
 
 
 def launched_result(state="started", outcome="sent", reason=None, finding=None,
-                    line=None):
+                    line=None, session_id=None):
     return SimpleNamespace(state=state, reason=reason, line=line or f"launch r2 {state}",
                            outcome=None if outcome is None else SimpleNamespace(
                                outcome=outcome), request_id="r2", base="row",
-                           finding=finding)
+                           finding=finding, session_id=session_id)
 
 
 #: A respawned session the launch flagged: held on a screen it won't answer, or not ready.
@@ -404,9 +404,16 @@ def test_a_replay_with_no_credentials_or_the_jobs_base_says_so(conn, base):
 def test_a_dialog_with_a_new_turn_is_left_for_a_person(conn):
     session = FakeSession(facts_seq=[facts(number=5)])
     slots_api = FakeSlots(ended=False)
-    got = go(conn, arm(conn, mode="director"), session=session, slots_api=slots_api)
+    comms = FakeComms()
+    got = go(conn, arm(conn, mode="director"), session=session, slots_api=slots_api,
+             comms=comms)
     assert got.outcome == "exit-pending" and got.run.word == "turn"
     assert "answer" not in slots_api.names()
+    # The notice names the repair, for once a person has answered the dialog.
+    [(_, _, _, text)] = comms.sent
+    assert ("Once a person has answered the dialog and the session has exited, to launch "
+            f"it again from the run's record: moxi launcher relaunch --from-record "
+            f"{got.run.run_id}") in text
 
 
 def test_a_person_at_the_dialog_presses_nothing(conn):
@@ -1109,3 +1116,194 @@ def test_repairable_runs():
     assert job.repairable(run("error", "repair"), [])
     assert not job.repairable(run("first-turn-not-sent"), acted)
     assert not job.repairable(run("relaunched"), acted)
+
+
+# -- turns' pace, the dead hold and what came back ---------------------------------------
+
+
+def again_events(conn, run):
+    return [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "again"]
+
+
+@pytest.mark.parametrize("reason", job.PACED)
+def test_a_refusal_of_turns_pace_holds_the_self_run_out_of_the_exit(conn, monkeypatch,
+                                                                   reason):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    monkeypatch.setattr(job, "PACE_HOLD_OFF_S", 0.3)
+    session = FakeSession([Result("refused", reason), Result("ran")])
+    started = time.time()
+    run = arm(conn)
+    got = go(conn, run, session=session)
+    assert got.outcome == "relaunched" and session.commands == [("exit", 4), ("exit", 4)]
+    [again] = again_events(conn, run)
+    assert again["word"] == reason and "act_after" in again
+    act_after = store.parse_time(again["act_after"]).timestamp()
+    assert started < act_after
+    # The wait held as `rate` until then, and the second exit came after it.
+    waits = [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "wait"]
+    assert waits and waits[-1]["word"] == "rate"
+    assert "turns' pace holds the exit until" in waits[-1]["detail"]
+    assert time.time() >= act_after
+    # And the run paused before its wait.
+    assert 0.01 in got.job.sleep.__self__.slept
+
+
+def test_any_other_refusal_pauses_and_holds_nothing(conn, monkeypatch):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    run = arm(conn)
+    got = go(conn, run, session=FakeSession([Result("refused", "busy-turn"), Result("ran")]))
+    assert got.outcome == "relaunched"
+    [again] = again_events(conn, run)
+    assert "act_after" not in again and got.job.act_after is None
+    assert 0.01 in got.job.sleep.__self__.slept
+
+
+def test_a_wait_that_ends_inside_turns_pace_expires_as_rate(conn, monkeypatch):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    session = FakeSession([Result("refused", "rate"), Result("ran")])
+    got = go(conn, arm(conn), session=session, settings={"relaunch.wait_s": 1})
+    assert got.outcome == "expired" and got.run.word == "rate"
+    assert session.commands == [("exit", 4)]
+
+
+def hold_events(conn, run):
+    return [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "hold"]
+
+
+def test_a_run_holds_its_slot_for_core_s_510_s(conn):
+    run = arm(conn)
+    go(conn, run)
+    assert [h["seconds"] for h in hold_events(conn, run)] == [510.0]
+
+
+class OnceHeldSlots(FakeSlots):
+    """A slot held by `holder` until that hold is released (or refused `times` times)."""
+
+    def __init__(self, holder, *, times=None, **kw):
+        super().__init__(ended=True, **kw)
+        self.holder, self.times = holder, times
+
+    def hold(self, slot, *, holder, seconds):
+        self.calls.append(("hold", slot, holder))
+        if self.holder is not None and (self.times is None or self.times > 0):
+            if self.times is not None:
+                self.times -= 1
+            raise self.Refused("held", f"slot {slot} is held by {self.holder}",
+                               holder={"holder": self.holder, "until": 0})
+
+    def release(self, slot, *, holder):
+        self.calls.append(("release", slot, holder))
+        if holder == self.holder:
+            self.holder = None
+            return True
+        return False
+
+
+def dead_run(conn, request_id="r1", *, ended=True):
+    old = store.insert_run(conn, kind="relaunch", mode="self", request_id=request_id,
+                           session_id=SID, by="planner", slot="3", job="slots:relaunch-old",
+                           at="2026-01-01T00:00:00.000000Z")
+    if ended:
+        store.end_run(conn, old.run_id, *store.JOB_GONE[:1], word=store.JOB_GONE[1])
+    return old
+
+
+def test_a_hold_left_by_a_dead_run_of_the_launch_is_released_and_taken_again(conn):
+    old = dead_run(conn)
+    slots_api = OnceHeldSlots(old.run_id)
+    run = arm(conn)
+    got = go(conn, run, slots_api=slots_api)
+    assert got.outcome == "relaunched"
+    assert ("release", "3", old.run_id) in slots_api.calls
+    assert slots_api.names()[:3] == ["hold", "release", "hold"]
+    [released] = [e.detail for e in store.run_events(conn, run.run_id)
+                  if e.kind == "released-dead"]
+    assert released == {"slot": "3", "holder": old.run_id, "released": True}
+
+
+def test_a_dead_hold_is_released_once_only(conn):
+    old = dead_run(conn)
+
+    class Stubborn(OnceHeldSlots):
+        def release(self, slot, *, holder):
+            self.calls.append(("release", slot, holder))
+            return False
+
+    slots_api = Stubborn(old.run_id)
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "not-held" and got.run.word == "held"
+    assert slots_api.names().count("hold") == 2
+
+
+def test_a_hold_by_a_run_of_another_launch_is_not_released(conn):
+    store.insert(conn, request_id="r9", by="ann", harness="claude", target="slot",
+                 cwd="/work", values={}, argv=["claude"], env={}, posture="operator",
+                 session_id="other-sid", slot="3", identity="other")
+    old = dead_run(conn, "r9")
+    slots_api = OnceHeldSlots(old.run_id)
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "not-held" and "release" not in slots_api.names()[:2]
+    assert ("release", "3", old.run_id) not in slots_api.calls
+
+
+def test_a_hold_by_a_run_whose_job_still_runs_is_not_released(conn):
+    old = dead_run(conn)
+
+    class Running(OnceHeldSlots):
+        def job(self, name):
+            return SimpleNamespace(name=name, running=True)
+
+    slots_api = Running(old.run_id)
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "not-held"
+    assert ("release", "3", old.run_id) not in slots_api.calls
+
+
+def test_a_hold_by_no_run_is_not_released(conn):
+    slots_api = OnceHeldSlots("someone-else")
+    got = go(conn, arm(conn, mode="director"), slots_api=slots_api)
+    assert got.outcome == "not-held"
+    assert ("release", "3", "someone-else") not in slots_api.calls
+
+
+def ended_detail(conn, run):
+    [ended] = [e.detail for e in store.run_events(conn, run.run_id) if e.kind == "ended"]
+    return ended
+
+
+class BindingComms(FakeComms):
+    """comms whose name is free at the name step, then `after` once the launch ran."""
+
+    def __init__(self, after):
+        super().__init__()
+        self.after, self.launched = after, False
+
+    def identity_state(self, name, scope=None):
+        return SimpleNamespace(state=self.after if self.launched else "free")
+
+
+@pytest.mark.parametrize("state", ["held", "free"])
+def test_a_relaunch_records_what_came_back(conn, state):
+    run = arm(conn, mode="director")
+    comms = BindingComms(state)
+
+    def launch(request):
+        comms.launched = True
+        return launched_result(session_id="new-sid")
+
+    got = go(conn, run, comms=comms, launch=launch)
+    assert got.outcome == "relaunched"
+    detail = ended_detail(conn, run)
+    assert {k: detail[k] for k in ("session_id", "identity", "posture", "model",
+                                    "model_how", "identity_state")} == {
+        "session_id": "new-sid", "identity": "planner", "posture": "with:boss",
+        "model": "opus", "model_how": "row", "identity_state": state}
+
+
+def test_a_relaunch_without_comms_records_no_identity_state(conn):
+    run = arm(conn)
+    got = go(conn, run)
+    assert got.outcome == "relaunched"
+    detail = ended_detail(conn, run)
+    assert detail["identity_state"] is None
+    assert detail["posture"] == "relaunched (handoff: /work/h.md)"

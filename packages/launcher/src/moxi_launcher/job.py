@@ -24,12 +24,16 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    (a draft, subagents, a read that failed) is read whole every 2 s, since its end may
    bring no event.
    Each change of the first word that holds is one `wait` event. Nothing holding goes on;
-   `relaunch.wait_s` after the run was armed it ends `expired`. A session whose current
+   `relaunch.wait_s` after the run was armed it ends `expired`. Within 60 s of a refusal
+   of turns' pace (`rate`, `in-flight`) a quiet session holds as `rate`, so the exit is
+   asked at most once a minute while the pace holds. A session whose current
    id is no longer the run's (a `/clear` since: the conversation that armed the run is
    gone) ends the run `changed`, untouched. Then, for every run, the
    model the relaunch comes back on (`pin.choose`), read on each pass, a `model` event
    when it changed.
-2. Hold the slot for the run (`slots.hold`, holder the run id). Refused: `not-held`.
+2. Hold the slot for the run (`slots.hold`, holder the run id) for 510 s. A hold left by
+   a dead run of the same launch (its job gone) is released under that run's id and the
+   hold taken again, once. Refused: `not-held`.
    A director's run then reads the session's cache again: warm or fresh ends it `held`,
    word `warm`. Then the launch check (`launch_check`): the relaunch's own launch, on its
    pin, would be accepted now, the session's own name and slot not counted against it;
@@ -39,7 +43,7 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    launch's consent, idleness and the number again. `Ran`, any `Failed` and turns' `gone`
    go on to the pane; a refusal that clears by itself (`busy-turn`, `draft`,
    `busy-agents`, `stale-turn`, `rate`, `in-flight`, `loading`) sends a self run back to
-   step 1 with the hold released and ends a director's run `held`; `not-allowed` and
+   step 1 with the hold released, after a 2 s pause, and ends a director's run `held`; `not-allowed` and
    `unsupported` end it `not-exited`.
 4. The exit dialog. Within `relaunch.dialog_s`: a pane that ended goes on; once the dialog
    has fully matched on two reads at least 0.5 s apart, the last checks (turns' facts show
@@ -64,7 +68,10 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
    once, with the finding as its word and the launch's line, which names the screen and
    the slot.
 8. `relaunched`, with the new request id on the run. A director's relaunch the launch
-   flagged ends `relaunched` with the finding as its word, and tells the directors.
+   flagged ends `relaunched` with the finding as its word, and tells the directors. The
+   `ended` event of a run that launched records what came back: the new session id, the
+   identity, the posture, the model and how it was chosen, and one read of comms' state
+   of the identity (`held` once the new session has bound it).
 
 **A stop signal before step 3 ends the run `stopped`; from step 3 on it is recorded and
 deferred until step 6 has been tried.** **A job acts only while its run is open**: right
@@ -74,7 +81,8 @@ ended under it, and it stops without acting. **Every terminal path releases the 
 slot hold**; only a respawn that succeeds ends it another way.
 
 **The repair run** repeats steps 5-7 from a run's record, for a run that exited its
-session and did not relaunch it. It acts under the original run's id as the slot's
+session and did not relaunch it, or left its exit dialog for a person who then answered
+it (`exit-pending`). It acts under the original run's id as the slot's
 holder, so a hold the original left behind reads as its own. The recorded slot is used
 when it is free or ended, or held by the original run; it is refused `occupied-by-chain`
 when it is occupied by the launch chain's own session (the original died after its
@@ -149,8 +157,18 @@ TRANSIENT = ("busy-turn", "draft", "busy-agents", "stale-turn", "rate", "in-flig
 TERMINAL = ("not-allowed", "unsupported")
 #: turns' word for an endpoint that is gone or could not be reached.
 GONE = "gone"
-#: How often the wait re-reads the person's signs between the watch's events, seconds.
+#: How often the wait re-reads the person's signs between the watch's events, seconds;
+#: a self run also waits this long after a refusal before it reads the session again.
 POLL_S = 2.0
+#: The exit refusals of turns' pace: it takes one command a minute, and refuses another
+#: while one is in flight.
+PACED = ("rate", "in-flight")
+#: How long a refusal of turns' pace keeps a self run out of the exit, counted from the
+#: refusal, in seconds: turns' own 60 s between accepted commands.
+PACE_HOLD_OFF_S = 60.0
+#: How long a run holds its slot, in seconds: the hold is taken after the wait, so it
+#: spans the launch check, the exit, the dialog, the name and the respawn.
+HOLD_S = 510.0
 #: How far apart two full matches of the exit dialog must be before it is answered.
 SETTLE_S = 0.5
 #: The word slots' answer leads its words with when its settle bound ran out.
@@ -165,7 +183,7 @@ RETRY_S = 5.0
 #: How often, and how many times, a job tries its run's first read.
 FIRST_READS, FIRST_READ_S = 5, 0.2
 #: The outcomes after which a run's session is down and its record can launch it again.
-REPAIRABLE = ("relaunch-failed", "gone", "error")
+REPAIRABLE = ("relaunch-failed", "gone", "exit-pending", "error")
 #: The events that mark a run as having acted on its session (the exit, or later).
 ACTED = ("exit", "respawn")
 
@@ -225,9 +243,10 @@ def gone(job: str, *, slots_api: Any | None = None) -> bool:
 
 
 def repairable(run: store.Run, events: Sequence[store.RunEvent]) -> bool:
-    """Whether a run ended having exited its session without relaunching it: ended
-    `relaunch-failed` or `gone`, or `error` after it acted on the session (or in a
-    repair, whose session was already down)."""
+    """Whether a run ended having exited its session without relaunching it, or may have:
+    ended `relaunch-failed` or `gone`, `exit-pending` (its exit dialog left for a person,
+    who may answer it), or `error` after it acted on the session (or in a repair, whose
+    session was already down). A repair still refuses a session that is live."""
     if run.kind != "relaunch" or run.open or run.outcome not in REPAIRABLE:
         return False
     if run.outcome != "error" or run.mode == "repair":
@@ -385,6 +404,8 @@ class RelaunchJob:
         self._check = check
         self.pin: Any | None = None
         self.facts: Any | None = None
+        #: The wall time before which a self run stays out of the exit (turns' pace).
+        self.act_after: float | None = None
         self._launch = launch
         self._settings = settings
         self.clock, self.wall, self.sleep = clock, wall, sleep
@@ -519,7 +540,12 @@ class RelaunchJob:
             except _Again as exc:
                 self.acting = False
                 self._release()
-                self.event("again", {"word": exc.word, "detail": exc.detail})
+                again = {"word": exc.word, "detail": exc.detail}
+                if exc.word in PACED:
+                    self.act_after = self.wall() + PACE_HOLD_OFF_S
+                    again["act_after"] = _stamp(self.act_after)
+                self.event("again", again)
+                self.sleep(POLL_S)
         self.dialog(number)
         self.name()
         self.respawn(self.request())
@@ -530,13 +556,14 @@ class RelaunchJob:
         store.add_run_event(self.conn, self.run_id, kind, detail)
 
     def end(self, outcome: str, word: str | None = None, detail: str | None = None,
-            **fields: Any) -> None:
-        """End the run with `outcome`, release its hold and stop the steps."""
+            *, noted: Mapping[str, Any] | None = None, **fields: Any) -> None:
+        """End the run with `outcome`, release its hold and stop the steps. `noted` goes
+        on the `ended` event only."""
         self.ended_here = store.end_run(self.conn, self.run_id, outcome, word=word,
                                         detail=detail, **fields)
         if self.ended_here:
             self.event("ended", {"outcome": outcome, "word": word, "detail": detail,
-                                 **fields})
+                                 **fields, **(noted or {})})
             self.outcome = outcome
         else:
             self._ended_under()
@@ -619,18 +646,20 @@ class RelaunchJob:
                                        f"{watch.gone}")
             self.check_stop()
             first = reading.first
-            if first is not None and first.word != said:
-                said = first.word
-                self.event("wait", {"word": first.word, "detail": first.detail})
-            if first is None:
+            holds = first or self.paced()
+            if holds is not None and holds.word != said:
+                said = holds.word
+                self.event("wait", {"word": holds.word, "detail": holds.detail})
+            if holds is None:
                 self.facts = reading.facts
                 return reading.turn_number
             left = bound - self.wall()
             if left <= 0:
-                self.end(expired, first.word, first.detail)
+                self.end(expired, holds.word, holds.detail)
             now = watch.wait(seen, min(POLL_S, left))
-            if now > seen or watch.gone is not None:
-                seen = now
+            if now > seen or watch.gone is not None or first is None:
+                # A quiet session held by turns' pace alone is read whole again too.
+                seen = max(seen, now)
                 reading = watch.read(**read)
             elif first.word == "turn":
                 # An open turn ends with a watch event; nothing to read on the clock.
@@ -641,6 +670,14 @@ class RelaunchJob:
                 # A draft cleared, a subagent done or a read that failed again may come
                 # with no event: the whole read again.
                 reading = watch.read(**read)
+
+    def paced(self) -> quiet.Hold | None:
+        """The hold `rate` while a refusal of turns' pace keeps the run out of the exit,
+        else None."""
+        if self.act_after is None or self.wall() >= self.act_after:
+            return None
+        return quiet.Hold("rate", f"turns' pace holds the exit until "
+                                  f"{_stamp(self.act_after)}")
 
     def same_conversation(self) -> None:
         """The run acts only on the conversation that armed it: a session whose current id
@@ -699,22 +736,60 @@ class RelaunchJob:
             self.end("held", refused_exc.code, refused_exc.problem)
 
     def hold(self) -> None:
-        """Step 2: hold the slot for the run."""
+        """Step 2: hold the slot for the run, for `HOLD_S`. A hold left by a dead run of
+        the same launch is released under its holder and the hold taken again, once."""
         api, slot = self.slots_api, self.slot
         if api is None or not slot:
             self.end("not-held", "no-slot", "the run has no slot to hold, or slots can't "
                                             "be loaded")
-        seconds = float(self.setting("relaunch.wait_s"))
-        try:
-            api.hold(slot, holder=self.holder, seconds=seconds)
-        except api.TryAgain as exc:
-            self._transient("try-again", f"slots did not answer: {exc}")
-        except api.Refused as refused_exc:
-            self.end("not-held", refused_exc.reason, refused_exc.words or str(refused_exc))
-        except api.SlotsError as exc:
-            self.end("not-held", type(exc).__name__, _words(exc))
+        seconds = HOLD_S
+        released = False
+        while True:
+            try:
+                api.hold(slot, holder=self.holder, seconds=seconds)
+            except api.TryAgain as exc:
+                self._transient("try-again", f"slots did not answer: {exc}")
+            except api.Refused as refused_exc:
+                dead = None if released else self.dead_holder(refused_exc)
+                if dead is not None and self._release_dead(api, slot, dead):
+                    released = True
+                    continue
+                self.end("not-held", refused_exc.reason,
+                         refused_exc.words or str(refused_exc))
+            except api.SlotsError as exc:
+                self.end("not-held", type(exc).__name__, _words(exc))
+            break
         self.held = str(slot)
         self.event("hold", {"slot": str(slot), "holder": self.holder, "seconds": seconds})
+
+    def dead_holder(self, refused_exc: Any) -> str | None:
+        """The holder a `held` refusal names, when it is another run of this run's launch
+        whose job is gone (open and stale, or ended with its job gone); else None."""
+        named = refused_exc.holder if getattr(refused_exc, "reason", None) == "held" else None
+        holder = named.get("holder") if isinstance(named, Mapping) else None
+        if not isinstance(holder, str) or not holder or holder == self.holder:
+            return None
+        other = store.get_run(self.conn, holder)
+        if other is None or other.request_id != self.run.request_id:
+            return None
+
+        def is_gone(job_text: str) -> bool:
+            return gone(job_text, slots_api=self.slots_api)
+
+        if other.open:
+            return holder if store.run_stale(other, is_gone) else None
+        return holder if other.job is None or is_gone(other.job) else None
+
+    def _release_dead(self, api: Any, slot: str, holder: str) -> bool:
+        try:
+            released = api.release(slot, holder=holder)
+        except Exception as exc:  # noqa: BLE001  (a release that fails leaves the refusal)
+            log.warning("run %s could not release slot %s's dead hold by %s: %s",
+                        self.run_id, slot, holder, exc)
+            return False
+        self.event("released-dead", {"slot": str(slot), "holder": holder,
+                                     "released": bool(released)})
+        return True
 
     def _transient(self, word: str, detail: str) -> None:
         if self.run.mode == "self":
@@ -891,17 +966,40 @@ class RelaunchJob:
             self.end("relaunch-failed", result.reason, result.line,
                      new_request_id=result.request_id)
         self.held = None
+        came_back = self.came_back(result, request)
         finding = getattr(result, "finding", None)
         if finding is not None:
             self.event("flagged", {"code": finding, "request_id": result.request_id})
             if request.handoff:
                 self.end("first-turn-not-sent", finding, result.line,
-                         new_request_id=result.request_id)
-            self.end("relaunched", finding, result.line, new_request_id=result.request_id)
+                         new_request_id=result.request_id, noted=came_back)
+            self.end("relaunched", finding, result.line, new_request_id=result.request_id,
+                     noted=came_back)
         if request.handoff and sent is None:
             self.end("first-turn-not-sent", "not-sent", result.line,
-                     new_request_id=result.request_id)
-        self.end("relaunched", None, result.line, new_request_id=result.request_id)
+                     new_request_id=result.request_id, noted=came_back)
+        self.end("relaunched", None, result.line, new_request_id=result.request_id,
+                 noted=came_back)
+
+    def came_back(self, result: Any, request: Any) -> dict[str, Any]:
+        """What the relaunch came back as, for the `ended` event: the new session id, the
+        identity, the posture, the model pin, and comms' one read of the identity after
+        the respawn (`held` once the new session has bound it; None without comms or a
+        name)."""
+        row, comms = self.row, self.comms
+        state = None
+        if row.identity and comms is not None:
+            try:
+                state = comms.identity_state(row.identity, scope=row.scope or None).state
+            except Exception as exc:  # noqa: BLE001  (an unread state is said so)
+                state = f"unreadable: {_words(exc)}"
+        found = self.pin
+        return {"session_id": getattr(result, "session_id", None),
+                "identity": row.identity or None,
+                "posture": getattr(request, "posture", None),
+                "model": found.model if found is not None else None,
+                "model_how": found.how if found is not None else None,
+                "identity_state": state}
 
     # -- the end ------------------------------------------------------------------------
 
@@ -1002,8 +1100,7 @@ class RepairJob(RelaunchJob):
         repair can be repeated; a hold refused sends the launch to the lowest slot."""
         for attempt in range(HOLD_TRIES):
             try:
-                api.hold(choice.slot, holder=self.holder,
-                         seconds=float(self.setting("relaunch.wait_s")))
+                api.hold(choice.slot, holder=self.holder, seconds=HOLD_S)
             except api.TryAgain as exc:
                 if attempt + 1 == HOLD_TRIES:
                     self.end("relaunch-failed", "slots-busy",
@@ -1079,11 +1176,11 @@ class CompactJob(RelaunchJob):
             self.sleep(RETRY_S)
 
     def end(self, outcome: str, word: str | None = None, detail: str | None = None,
-            **fields: Any) -> None:
+            *, noted: Mapping[str, Any] | None = None, **fields: Any) -> None:
         mapped = self.OUTCOMES.get(outcome, outcome)
         if mapped != outcome and word is None:
             word = outcome
-        super().end(mapped, word, detail, **fields)
+        super().end(mapped, word, detail, noted=noted, **fields)
 
     def _tell(self) -> None:
         """A compact tells no one: its run is its record."""
@@ -1364,12 +1461,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if outcome in DONE else 1
 
 
+def _stamp(at: float) -> str:
+    """A wall time as the store writes times."""
+    from datetime import datetime, timezone
+
+    return store.stamp(datetime.fromtimestamp(at, timezone.utc))
+
+
 def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
 __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED", "LOOK",
-           "NOT_SETTLED", "OFF_POSTURE_HINT", "PAGE", "POLL_S", "REPAIRABLE", "RETRY_S",
+           "HOLD_S", "NOT_SETTLED", "OFF_POSTURE_HINT", "PACED", "PACE_HOLD_OFF_S", "PAGE",
+           "POLL_S", "REPAIRABLE", "RETRY_S",
            "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
            "LaunchCheckFailed", "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of",
            "choose_slot", "gone", "job_name", "launch_check", "launch_request", "main",

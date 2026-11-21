@@ -2,7 +2,7 @@
 
     arm_self(handoff)              # --self --handoff FILE: the session relaunches itself
     call_director(session)         # SESSION_ID | IDENTITY: a director relaunches it
-    status(run)                    # --status RUN: the run and its events
+    status(run)                    # --status RUN: the run and its events, exit by its end
     stop_run(run)                  # --stop RUN: stop a run's job
     from_record(run)               # --from-record RUN: launch it again from a run's record
 
@@ -38,17 +38,21 @@ this process), the handoff (a regular, readable, non-empty file of at most 64 Ki
 modified after the session's current id was first seen, so a stale one is refused; with
 notes installed, in notes' handoff folder for the launch), and no live subagent (a
 background shell never refuses: the exit dialog stops it). Then it prints the armed text
-and the agent ends its turn; the job waits for the session to be quiet.
+and the agent ends its turn, making no further tool call; the job waits for the session
+to be quiet. The armed text names the model the session comes back on.
 
 **A director's call** needs comms: the caller's identity, proven by its session's claim
 (never a variable it sets); the target by session id (anything shaped like a UUID,
 looked up in the launch log only), or else by a bound comms name; the caller among the
 launch's directors (`values_json`: a director named with a scope admits that qualified
-name only, a plain one the name in any scope); with
+name only, a plain one the name in the target launch's own scope); with
 cache installed, a session whose cache is warm or fresh is refused `warm` (it can be
 mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
 written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
-past that it exits 75 naming `--status`.
+past that it exits 75 naming `--status`. A relaunch that came back says the identity, the
+slot, the new session, the posture, the model and whether comms has bound the name. An
+agent runs the call with a Bash timeout of at least `relaunch.follow_s` plus 30 s.
+`--status` exits as the call would: by the run's end, 75 while it runs.
 
 **A stop** (`--stop`) sends the job of an open relaunch or repair run SIGTERM: before the
 exit the run ends `stopped` and a self run's session is told by a note; from the exit on,
@@ -58,7 +62,8 @@ checks it still runs; a run that is not a relaunch or repair run is refused
 who can run the launcher's CLI as this user may stop a run.
 
 **A repair** (`--from-record`) is for a run that exited its session and did not relaunch
-it (`relaunch-failed`, `gone`, or `error` after the exit, and a repair that failed so),
+it (`relaunch-failed`, `gone`, `exit-pending` once a person has answered the exit dialog,
+or `error` after the exit, and a repair that failed so),
 including a run left open by a job that died after the exit, whose job is gone. It
 writes a run of its own (`mode` `repair`, `repair_of` the run) and starts the job
 `repair-<run>`, which launches the row again from the record under the original run's
@@ -73,7 +78,7 @@ import signal
 import sqlite3
 import stat
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -98,8 +103,8 @@ REACHABLE = ("warm", "fresh")
 
 ARMED = ("armed {run}: this session exits once its turn has ended and nobody has used its "
          "pane or\nsent it a message for {person}; then it comes back in slot {slot} with "
-         "your handoff.\n`moxi launcher relaunch --status {run}` shows what it is waiting "
-         "on. End your turn now.")
+         "your handoff,\non {model} ({how}). `moxi launcher relaunch --status {run}` shows "
+         "what it is waiting on.\nEnd your turn now and make no further tool call.")
 
 #: Stands for a seam the verb looks up itself.
 LOOK: Any = object()
@@ -171,7 +176,9 @@ def arm_self(handoff: str, *, dry_run: bool = False,
             if failed is not None:
                 return failed
             text = ARMED.format(run=run.run_id, slot=row.slot,
-                                person=_span(float(current["relaunch.person_s"])))
+                                person=_span(float(current["relaunch.person_s"])),
+                                model=chosen.model or "the harness's default model",
+                                how=chosen.how)
             return Result(exits.OK, tuple(text.splitlines()), run,
                           {**data, "run_id": run.run_id, "outcome": "armed"})
         finally:
@@ -196,8 +203,9 @@ def may_recycle(row: store.LaunchRow) -> None:
 
 def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                   session_id: str | None, *, cwd: str | None = None) -> Path:
-    """The handoff a self relaunch carries, checked: a regular, readable, non-empty file of
-    at most `HANDOFF_CAP` bytes, modified after the session's current id was first seen;
+    """The handoff a self relaunch carries, checked: a regular file of at most
+    `HANDOFF_CAP` bytes of UTF-8 text that is not blank, modified after the session's
+    current id was first seen (after the launch was made, when that was not recorded);
     with notes installed, in notes' handoff folder for the launch. Returns its absolute
     path."""
     path = Path(handoff).expanduser()
@@ -219,12 +227,17 @@ def check_handoff(handoff: str, conn: sqlite3.Connection, row: store.LaunchRow,
                       "shorten it to the state of the work and its next step")
     try:
         with open(path, "rb") as fh:
-            fh.read(1)
+            text = fh.read().decode("utf-8")
     except OSError as exc:
         raise Refused("handoff", f"the handoff {path} can't be read: "
                                  f"{exc.strerror or exc}", hint) from None
+    except UnicodeDecodeError:
+        raise Refused("handoff", f"the handoff {path} is not UTF-8 text", hint) from None
+    if not text.strip():
+        raise Refused("handoff", f"the handoff {path} is blank", hint)
     seen = store.seen_at(conn, row.request_id, session_id) if session_id else None
-    if seen is not None and info.st_mtime <= store.parse_time(seen).timestamp():
+    seen = seen or row.created_at
+    if seen and info.st_mtime <= store.parse_time(seen).timestamp():
         raise Refused("handoff", f"the handoff {path} was last written before this session "
                                  f"began ({seen}): it is stale",
                       "write this session's handoff, then arm the relaunch again")
@@ -382,25 +395,20 @@ def _split(comms: Any, name: str) -> tuple[str, str | None]:
         return bare, scope if sep else None
 
 
-def _bare(comms: Any, name: str) -> str:
-    return _split(comms, name)[0]
-
-
-def is_director(comms: Any, caller: str, named: list[str]) -> bool:
+def is_director(comms: Any, caller: str, named: list[str], scope: str | None = None) -> bool:
     """Whether the qualified identity `caller` is one of the directors `named`: a director
     named with a scope admits that qualified name only (the global scope spelled bare, as
-    comms spells it); a plain name admits the name in any scope."""
-    bare = _bare(comms, caller)
+    comms spells it); a plain name is read in `scope`, the target launch's own (the
+    global scope when None), and admits that qualified name only."""
     for director in named:
-        name, scope = _split(comms, director)
-        if scope is None:
-            if name == bare:
-                return True
-            continue
+        name, named_scope = _split(comms, director)
+        if named_scope is None:
+            named_scope = scope or getattr(comms, "GLOBAL", "global")
         try:
-            qualified = comms.qualify(name, scope)
+            qualified = comms.qualify(name, named_scope)
         except Exception:  # noqa: BLE001
-            qualified = name if scope == getattr(comms, "GLOBAL", "global") else director
+            qualified = (name if named_scope == getattr(comms, "GLOBAL", "global")
+                         else f"{name}@{named_scope}")
         if qualified == caller:
             return True
     return False
@@ -408,7 +416,7 @@ def is_director(comms: Any, caller: str, named: list[str]) -> bool:
 
 def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
     """Refuse `not-director` unless the caller is one of the directors the launch named."""
-    if is_director(comms, caller, notices.directors(row)):
+    if is_director(comms, caller, notices.directors(row), row.scope or None):
         return
     raise Refused("not-director", f"{caller} is not a director of launch {row.request_id}",
                   "only a director the launch named may relaunch it; mail its session")
@@ -430,7 +438,9 @@ def not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
 
 
 def status(run_id: str, *, conn: sqlite3.Connection | None = None) -> Result:
-    """The run and its events, the latest `wait` first."""
+    """The run and its events, the latest `wait` first. It exits as a director's call
+    that followed the run would: an ended run by its outcome (`outcome_result`), an open
+    one 75."""
     with _store(conn) as c:
         run = store.get_run(c, run_id)
         if run is None:
@@ -438,7 +448,7 @@ def status(run_id: str, *, conn: sqlite3.Connection | None = None) -> Result:
         events = store.run_events(c, run_id)
     waits = [e for e in events if e.kind == "wait"]
     latest = waits[-1] if waits else None
-    lines = [run_line(run)]
+    lines = [run_line(run, _ended(events))]
     if latest is not None:
         lines.append(f"waiting on: {latest.detail.get('word')}: "
                      f"{latest.detail.get('detail')} (since {latest.at})")
@@ -446,7 +456,8 @@ def status(run_id: str, *, conn: sqlite3.Connection | None = None) -> Result:
     data = {"run": run.as_json(), "outcome": run.outcome or run.state,
             "wait": None if latest is None else {"at": latest.at, **latest.detail},
             "events": [{"at": e.at, "kind": e.kind, "detail": e.detail} for e in events]}
-    return Result(exits.OK, tuple(lines), run, data)
+    code = exits.TEMPFAIL if run.open else outcome_result(run).exit_code
+    return Result(code, tuple(lines), run, data)
 
 
 #: What a stop sends a run's job.
@@ -495,8 +506,13 @@ def stop_run(run_id: str, *, conn: sqlite3.Connection | None = None,
                   {"run_id": run_id, "outcome": "stop-sent", "pid": pid})
 
 
-def run_line(run: store.Run) -> str:
-    """One line for a run: what it is, and where it stands or how it ended."""
+def run_line(run: store.Run, ended: Mapping[str, Any] | None = None) -> str:
+    """One line for a run: what it is, and where it stands or how it ended. A director's
+    run that relaunched its session, with its `ended` event's detail, says what came
+    back: the identity, the slot, the new session, the posture, the model and whether
+    comms has bound the name."""
+    if run.mode == "director" and run.outcome == "relaunched" and ended:
+        return _came_back_line(run, ended)
     what = f"run {run.run_id}: {run.kind} ({run.mode}) of session {run.session_id}"
     if run.slot:
         what += f" in slot {run.slot}"
@@ -510,6 +526,32 @@ def run_line(run: store.Run) -> str:
     if run.detail:
         said += f": {run.detail}"
     return said
+
+
+def _came_back_line(run: store.Run, ended: Mapping[str, Any]) -> str:
+    who = ended.get("identity") or f"session {run.session_id}"
+    slot = f" in slot {run.slot}" if run.slot else ""
+    session = ended.get("session_id") or "not known yet"
+    model = ended.get("model") or "the harness's default model"
+    said = (f"run {run.run_id}: relaunched {who}{slot} as session {session}, posture "
+            f"{ended.get('posture') or 'with:' + run.actor}, model {model} "
+            f"({ended.get('model_how') or 'not read'})")
+    state = ended.get("identity_state")
+    if state:
+        said += "; comms bound" if state == "held" else "; comms not yet bound"
+    if run.word:
+        said += f"; flagged {run.word}"
+        if run.detail:
+            said += f": {run.detail}"
+    if run.new_request_id:
+        said += f"; new launch {run.new_request_id}"
+    return said
+
+
+def _ended(events: Sequence[store.RunEvent]) -> Mapping[str, Any] | None:
+    """The detail of a run's last `ended` event, or None."""
+    ends = [e for e in events if e.kind == "ended"]
+    return ends[-1].detail if ends else None
 
 
 def _detail(detail: Mapping[str, Any]) -> str:
@@ -528,7 +570,7 @@ def follow_run(conn: sqlite3.Connection, run_id: str, follow_s: float, *,
         if run is None:
             raise Refused("no-run", f"there is no run {run_id}", "check the run id")
         if not run.open:
-            return outcome_result(run)
+            return outcome_result(run, _ended(store.run_events(conn, run_id)))
         if clock() >= deadline:
             return Result(exits.TEMPFAIL, (f"run {run_id} is still {run.state}; moxi launcher "
                                            f"relaunch --status {run_id} shows it",), run,
@@ -536,11 +578,12 @@ def follow_run(conn: sqlite3.Connection, run_id: str, follow_s: float, *,
         sleep(FOLLOW_POLL_S)
 
 
-def outcome_result(run: store.Run) -> Result:
-    """An ended run as a verb's result."""
+def outcome_result(run: store.Run, ended: Mapping[str, Any] | None = None) -> Result:
+    """An ended run as a verb's result: 0 relaunched, 75 held, 1 any other end. `ended`
+    is its `ended` event's detail, for the line."""
     code = (exits.OK if run.outcome == "relaunched"
             else exits.TEMPFAIL if run.outcome == "held" else exits.ERROR)
-    return Result(code, (run_line(run),), run,
+    return Result(code, (run_line(run, ended),), run,
                   {"run_id": run.run_id, "outcome": run.outcome, "word": run.word,
                    "detail": run.detail, "new_request_id": run.new_request_id})
 
@@ -605,7 +648,7 @@ def from_record(run_id: str, *, follow: bool = True,
             raise Refused("not-repairable",
                           f"run {run_id} ended {judged.outcome}: only a run that exited its "
                           "session and did not relaunch it is repaired (relaunch-failed, "
-                          "gone, or error after the exit)",
+                          "gone, exit-pending, or error after the exit)",
                           "relaunch the session again instead")
         root = job.root_run(c, run)
         for other in store.runs(c, request_id=run.request_id):

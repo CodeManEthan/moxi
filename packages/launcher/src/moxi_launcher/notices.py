@@ -153,7 +153,8 @@ def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: floa
 def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
          repairable: bool = False) -> str:
     """A notice's text: the session, the slot, the run, the outcome, and the repair
-    command when the outcome allows one."""
+    command when the outcome allows one (for `exit-pending`, once the session has
+    exited)."""
     session = run.session_id
     slot = f" in slot {run.slot}" if run.slot else ""
     said = outcome
@@ -167,7 +168,9 @@ def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
         lines.append(run.detail)
     lines.append(_SESSION.get(outcome, ""))
     if repairable:
-        lines.append(f"To launch it again from the run's record: moxi launcher relaunch "
+        when = ("Once a person has answered the dialog and the session has exited, to "
+                "launch it again" if run.outcome == "exit-pending" else "To launch it again")
+        lines.append(f"{when} from the run's record: moxi launcher relaunch "
                      f"--from-record {run.run_id}")
     return " ".join(line for line in lines if line)
 
