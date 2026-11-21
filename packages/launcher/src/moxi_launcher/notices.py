@@ -77,13 +77,15 @@ OFFLINE_RETRY_S = 60.0
 NOTE = ("Relaunch note from launcher: run {run} did not run ({word}: {detail}). Nothing "
         "was exited. Carry on, and arm it again at your next pause point if you still "
         "need it.")
-#: The note for an end that left the session in place by another way, by outcome.
+#: The note for an end that left the session in place by another way, by outcome. Its
+#: why field is the run's word in brackets and its said field the word and the detail,
+#: each without the word when the word repeats the outcome the note names.
 NOTES = {
     "not-exited": ("Relaunch note from launcher: run {run} ended not-exited ({detail}). The "
-                   "relaunch did not exit this session ({word}): carry on with your work, "
-                   "and arm it again at your next pause point if you still need it."),
-    "error": ("Relaunch note from launcher: run {run} ended error ({word}: {detail}). The "
-              "relaunch stopped with an error before the exit: carry on with your work."),
+                   "relaunch did not exit this session{why}: carry on with your work, and "
+                   "arm it again at your next pause point if you still need it."),
+    "error": ("Relaunch note from launcher: run {run} ended error ({said}). The relaunch "
+              "stopped with an error before the exit: carry on with your work."),
     "changed": ("Relaunch note from launcher: run {run} did not run ({detail}). Nothing was "
                 "exited: carry on, and arm a run of this conversation's own if you need "
                 "one."),
@@ -129,9 +131,22 @@ def owes_note(run: store.Run, outcome: str | None,
 
 def note_text(run: store.Run) -> str:
     """The note a self run's session left in place is sent."""
+    word = _own_word(run)
+    detail = run.detail or "no detail"
     return NOTES.get(run.outcome or "", NOTE).format(
-        run=run.run_id, word=run.word or run.outcome or "ended",
-        detail=run.detail or "no detail")
+        run=run.run_id, word=run.word or run.outcome or "ended", detail=detail,
+        why=f" ({word})" if word else "", said=f"{word}: {detail}" if word else detail)
+
+
+def _own_word(run: store.Run) -> str:
+    """The run's word, or nothing when it only repeats the run's outcome (gone, gone)."""
+    return "" if not run.word or run.word == run.outcome else run.word
+
+
+def _sentence(words: str) -> str:
+    """`words` as a sentence: a full stop added when it ends without closing punctuation."""
+    words = words.strip()
+    return words if not words or words.endswith((".", "!", "?")) else f"{words}."
 
 
 def note(conn: sqlite3.Connection, run: store.Run, session: Any, *, wait_s: float) -> bool:
@@ -159,18 +174,19 @@ def text(run: store.Run, row: store.LaunchRow | None, outcome: str, *,
     """A notice's text: the session, the slot, the run, the outcome, and the repair
     command when the outcome allows one (for `exit-pending`, once the session has
     exited). A repair that ended `refused` left its session down: its text says so and
-    names the command that repeats the repair, of the run it repaired."""
+    names the command that repeats the repair, of the run it repaired. The run's word is
+    left out when it repeats the outcome, and its detail ends as a sentence."""
     session = run.session_id
     slot = f" in slot {run.slot}" if run.slot else ""
-    said = outcome
+    said, word = outcome, _own_word(run)
     if outcome == NOTE_NOT_TAKEN:
-        said += f" (the run ended {run.outcome}" + (f": {run.word}" if run.word else "") + ")"
-    elif run.word:
-        said += f": {run.word}"
+        said += f" (the run ended {run.outcome}" + (f": {word}" if word else "") + ")"
+    elif word and word != outcome:
+        said += f": {word}"
     lines = [f"Relaunch notice from launcher: run {run.run_id} for session {session}{slot} "
              f"ended {said}."]
     if run.detail and outcome != NOTE_NOT_TAKEN:
-        lines.append(run.detail)
+        lines.append(_sentence(run.detail))
     refused_repair = outcome == "refused" and run.mode == "repair"
     lines.append(_REPAIR_REFUSED if refused_repair else _SESSION.get(outcome, ""))
     if refused_repair:

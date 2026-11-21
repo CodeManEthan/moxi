@@ -3577,7 +3577,8 @@ launcher	packages/launcher/src/moxi_launcher/notices.py	"changed": ("Relaunch no
 launcher	packages/launcher/src/moxi_launcher/notices.py	"refused": "Nothing was exited or launched: the launch would have been refused.",	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/notices.py	#: What a repair that ended `refused` says of its session, which it found down.	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/notices.py	return outcome != "error" or not any(event.kind == "exit" for event in events)	keep	any	any
-launcher	packages/launcher/src/moxi_launcher/notices.py	run=run.run_id, word=run.word or run.outcome or "ended",	keep	run	run
+launcher	packages/launcher/src/moxi_launcher/notices.py	run=run.run_id, word=run.word or run.outcome or "ended", detail=detail,	keep	run	run
+launcher	packages/launcher/src/moxi_launcher/notices.py	why=f" ({word})" if word else "", said=f"{word}: {detail}" if word else detail)	keep	said	said
 launcher	packages/launcher/src/moxi_launcher/notices.py	exited). A repair that ended `refused` left its session down: its text says so and	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/notices.py	refused_repair = outcome == "refused" and run.mode == "repair"	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/page.py	"NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",	keep	NAME	NAME
@@ -4388,6 +4389,7 @@ launcher	packages/launcher/tests/test_names.py	file.parent.mkdir(parents=True, e
 launcher	packages/launcher/tests/test_names.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id="running", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
+launcher	packages/launcher/tests/test_notices.py	said = notices.text(run("refused", "no-cwd", "x", mode="self"), None,	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	"page": "page", "prompt": "block", "sessions": "block", "state": "inline"}	keep	sessions	sessions
 launcher	packages/launcher/tests/test_page.py	"refused": None, "why": None})	keep	refused	refused
 launcher	packages/launcher/tests/test_page.py	-	name	test_no_answer_declares_an_environment_a_brief_or_a_process	test_no_answer_declares_an_env_a_brief_or_a_process

@@ -855,7 +855,7 @@ def test_a_self_run_after_a_clear_whose_note_is_not_taken_tells_the_directors(co
     session = FakeSession(facts_seq=[facts(session_id=CLEARED)], delivered="refused")
     got = go(conn, arm(conn), session=session, comms=comms)
     assert got.outcome == "changed"
-    assert "note-not-taken (the run ended changed: changed)" in comms.sent[0][3]
+    assert "note-not-taken (the run ended changed)." in comms.sent[0][3]
 
 
 def test_a_director_run_after_a_clear_ends_changed_and_tells_nobody(conn):
