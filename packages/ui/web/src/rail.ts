@@ -237,6 +237,22 @@ export function defineRail(): void {
       else this.#render();
     }
 
+    /** Sets the host's `small` and `vertical` states, which size it. An engine with no
+     * custom states (Firefox before 126), or one that takes only names that start with
+     * `--` (Chrome 123 and 124), keeps the host's plain size and the mark draws on. */
+    #setStates(small: boolean, vertical: boolean): void {
+      const states = this.#internals.states as CustomStateSet | undefined;
+      if (states === undefined) return;
+      try {
+        for (const [name, on] of [["small", small], ["vertical", vertical]] as const) {
+          if (on) states.add(name);
+          else states.delete(name);
+        }
+      } catch {
+        // Below the floor: drawn plainly.
+      }
+    }
+
     #render(): void {
       const { line, vertical } = this.#layout;
       const small = this.#layout.small && !vertical;
@@ -247,11 +263,7 @@ export function defineRail(): void {
       };
       const wide = this.hasAttribute("wide");
       const state = wide ? null : stateOf(get("state"));
-      const states = this.#internals.states;
-      for (const [name, on] of [["small", small], ["vertical", vertical]] as const) {
-        if (on) states.add(name);
-        else states.delete(name);
-      }
+      this.#setStates(small, vertical);
 
       const classes = ["cell"];
       if (state !== null) classes.push(`s-${state}`);

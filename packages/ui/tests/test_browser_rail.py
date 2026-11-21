@@ -1,7 +1,8 @@
 """`<moxi-ui-rail>` in a browser: each state's marker, its word, count and `here`, the line
 solid through what is settled and dashed after, the cell widths, a wide mark's children,
 the `moxi-rail-mark` event for a click, Enter and Space, a quiet mark, `open`, the small
-and vertical rails, and the three state colours in every colour set.
+and vertical rails, the plain marks of an engine below the floor, and the three state
+colours in every colour set.
 
 The rails are put in the shell's panel by the test: the element is the client's, so no
 module's page is needed to draw one."""
@@ -309,6 +310,34 @@ def test_a_small_rail_is_a_picture_of_11_px_markers_and_7_px_stretches(ui_page):
     assert _box(ui_page.locator("#r"))["width"] == 11 * 3 + 7 * 2
     ui_page.get_by_role("img", name="design").click()
     assert _marks(ui_page) == []
+
+
+#: An engine below the rail's floor, made of the one the test runs: Firefox before 126
+#: has no custom states, and Chrome 123 and 124 refuse a name that doesn't start `--`.
+_OLD_STATES = {
+    "none": "() => undefined",
+    "dashed names only": """() => ({
+      add(name) { if (!name.startsWith("--")) throw new DOMException(name, "SyntaxError"); },
+      delete() { return false; }, has() { return false; } })""",
+}
+
+
+@pytest.mark.parametrize("states", list(_OLD_STATES))
+def test_below_the_floor_a_small_or_vertical_mark_draws_plainly_and_nothing_throws(ui_page,
+                                                                                   states):
+    errors: list[str] = []
+    ui_page.on("pageerror", lambda err: errors.append(str(err)))
+    ui_page.evaluate("(getter) => Object.defineProperty(ElementInternals.prototype, 'states',"
+                     " { configurable: true, get: eval(getter) })", _OLD_STATES[states])
+    _place(ui_page, [
+        ("s", {"size": "small"}, [({"state": "done", "settled": ""}, None), ({"state": "todo"}, None)]),
+        ("v", {"vertical": ""}, [({"state": "yours", "label": "docket", "key": "docket"}, None)]),
+    ])
+    expect(ui_page.locator("#s").get_by_role("img")).to_have_count(2)
+    expect(ui_page.locator("#v").get_by_role("button", name="docket")).to_have_count(1)
+    # Plainly: the host keeps a full cell's size, which the states would have changed.
+    assert _box(ui_page.locator("#s-0"))["width"] == 56
+    assert errors == []
 
 
 def test_a_vertical_rail_stacks_the_marks_with_label_and_word_and_runs_the_line_down(ui_page):

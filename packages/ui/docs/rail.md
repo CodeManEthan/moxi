@@ -25,6 +25,14 @@ draws
   v8     pub                                held
 ```
 
+## Browsers
+
+The rail draws as designed from Chrome 125, Firefox 126 and Safari 17.4: its small and
+vertical forms size each mark through custom element states (`:state(small)`,
+`:state(vertical)`). An older engine, one with no custom states or one that takes only
+names starting with `--` (Chrome 123 and 124), draws each mark plainly at a full cell's
+size, and nothing throws.
+
 ## The marks
 
 Each `<moxi-ui-mark>` child of the rail is one cell, in order. Any other child is not
