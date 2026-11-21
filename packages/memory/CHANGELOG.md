@@ -16,8 +16,9 @@
   run or `redact.sets` lacks `credentials` or `broad`, `no-index`, `index-unreadable`
   (a generation still at schema 1 among them), `bad-since`, and `no-sessions` when the
   sessions installed doesn't offer interface 7, which the `search` row then names. The provider's status
-  gives the `search` and `redaction` rows. The `secrets` extra brings personal-data's
-  validators for the chat redaction.
+  gives the `search` and `redaction` rows. The `connector` extra brings python-stdnum,
+  which secrets' personal-data set runs with; the `secrets` extra names that set and adds
+  nothing more.
 - Each row records its writer (schema 2): who the record's harness says wrote it, from
   sessions' `writer` at interface 7, which memory now reads sessions at. A generation
   still at schema 1 gains the column when memory next writes to it; its rows, like every

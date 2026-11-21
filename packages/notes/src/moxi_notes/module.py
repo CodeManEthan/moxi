@@ -17,8 +17,9 @@ OPTIONAL = {
     "connector": "notes' read tools in the Claude apps, list_notes, read_note and "
                  "search_notes, served by the connector over the notes folder; with "
                  "secrets beside it, `moxi-notes[connector,secrets]`.",
-    "secrets": "secrets' personal-data set, which the read tools' chat redaction needs: "
-               "without it every read tool refuses redaction-off.",
+    "secrets": "secrets' personal-data set, by name. secrets is already one of notes' "
+               "dependencies and the connector extra brings the set's validators, so "
+               "the read tools redact with every chat set without this extra.",
 }
 GATED = {}
 #: The one variable notes reads from a session's environment, never from its own API's.

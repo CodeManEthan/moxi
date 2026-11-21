@@ -21,8 +21,9 @@
   at 20 seconds.
 - A `connector` extra and a provider for the connector, the public MCP host, so notes can
   give tools to the Claude apps. The `connector` extra brings the host and python-stdnum,
-  and a `secrets` extra brings secrets with its personal-data set; install both,
-  `moxi-notes[connector,secrets]`. The provider reads only the notes root, judges every path by one
+  which secrets' personal-data set runs with, so the tools redact with every chat set
+  from `connector` alone; a `secrets` extra names that set and adds nothing more. The
+  install line is `moxi-notes[connector,secrets]`. The provider reads only the notes root, judges every path by one
   set of rules (relative, no dot part, no secret path, no name the chat redaction would
   change, links followed and judged again, plain files of one link, text only, a size
   cap, and the file read checked against the file judged), and shows a `root` and a

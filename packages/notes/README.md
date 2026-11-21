@@ -421,9 +421,11 @@ Claude apps through the connector, Moxi's public MCP host:
 moxi install notes --with connector,secrets
 ```
 
-That installs `moxi-notes[connector,secrets]`. The `connector` extra brings the host;
-the `secrets` extra brings secrets' personal-data set, which the chat redaction needs.
-Install both: while secrets or one of its chat sets can't run, every tool refuses
+That installs `moxi-notes[connector,secrets]`. The `connector` extra brings the host
+and python-stdnum, the validators secrets' personal-data set runs with. secrets itself is
+one of notes' dependencies, so with `connector` alone the tools redact with every chat
+set; the `secrets` extra names the personal-data set and adds nothing more. While secrets
+or one of its chat sets can't run (python-stdnum removed, say), every tool refuses
 `redaction-off` and the `notes redaction` row of `moxi doctor connector` says why.
 
 The tools read only your notes root, the `root` setting, read at each call. Every path
@@ -537,8 +539,9 @@ and runs the home-paths guard;
 `moxi-repo`, the committer and the git hook runner; and `moxi-secrets`, the pattern sets.
 The `projects` extra (`moxi-projects`) adds a project's own notes folder, the `topic` kind
 and projects' remove check. The `connector` extra adds `moxi-connector`, the public MCP
-host, and python-stdnum, and serves the tools of "In the Claude apps"; it needs the
-`secrets` extra beside it, which adds secrets' personal-data set. notes reads every other module through its Python API and
+host, and python-stdnum, which secrets' personal-data set runs with, and serves the
+tools of "In the Claude apps". The `secrets` extra names that set,
+`moxi-secrets[personal-data]`, and adds nothing `connector` doesn't. notes reads every other module through its Python API and
 parses no module's printed output.
 
 ## License

@@ -566,9 +566,11 @@ With its `connector` and `secrets` extras, memory serves one read-only tool,
 moxi install memory --with connector,secrets
 ```
 
-That installs `moxi-memory[connector,secrets]`. The `connector` extra brings the host;
-the `secrets` extra brings secrets' personal-data set, which the chat redaction needs.
-Install both: while secrets or one of its chat sets can't run, the tool refuses
+That installs `moxi-memory[connector,secrets]`. The `connector` extra brings the host
+and python-stdnum, the validators secrets' personal-data set runs with. secrets itself is
+one of memory's dependencies, so with `connector` alone the tool redacts with every chat
+set; the `secrets` extra names the personal-data set and adds nothing more. While secrets
+or one of its chat sets can't run (python-stdnum removed, say), the tool refuses
 `redaction-off` and the `memory redaction` row of `moxi doctor connector` says why.
 
 **`search_memory`** searches past sessions in memory's index. Inputs: `words` (required,
@@ -685,9 +687,10 @@ turns' own setup: see
 the ingest trigger; `moxi-sessions`, through which memory reads every transcript and each
 harness's retention, and whose `moxi sessions read` opens a session; and `moxi-secrets`,
 the redaction sets. The extras `comms` and `launcher` add the two links above. The extra
-`connector` adds `moxi-connector`, the public MCP host, and python-stdnum, and serves
-`search_memory` ("In the Claude apps"); it needs the extra `secrets` beside it, which
-adds secrets' personal-data set. memory parses no harness's transcript format itself.
+`connector` adds `moxi-connector`, the public MCP host, and python-stdnum, which
+secrets' personal-data set runs with, and serves `search_memory` ("In the Claude apps").
+The extra `secrets` names that set, `moxi-secrets[personal-data]`, and adds nothing
+`connector` doesn't. memory parses no harness's transcript format itself.
 
 ## License
 
