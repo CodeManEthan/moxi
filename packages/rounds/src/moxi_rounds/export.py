@@ -40,8 +40,8 @@ end can leave one so) is listed apart, as waiting for a new round, and is no ent
 
 **A project's export** holds every open and every parked question on the project's list
 and in each open round of the project, and every major decision of those rounds not yet
-ruled, each entry naming its holder. A decision's entry adds its stage, its weight and
-whether it forecloses; one that forecloses is marked `alone`, an entry of its own. `waiting` gives
+ruled, each entry naming its holder. A decision's entry adds its stage, its weight,
+whether it forecloses, and `not_put`, why it is not put to him, where it is not; one that forecloses is marked `alone`, an entry of its own. `waiting` gives
 those rows, and is the one function anything that lists what waits in a project takes
 its question rows from.
 
@@ -134,6 +134,9 @@ class Entry:
     forecloses: bool = False
     #: The group it is drawn in (`MINORS`), or None for an entry of its own.
     group: str | None = None
+    #: For a decision in a project's rows: why it is not put to him
+    #: (`decisions.not_put`), or None when it is.
+    not_put: str | None = None
 
     @property
     def decision(self) -> bool:
@@ -167,6 +170,8 @@ class Entry:
                 data["alone"] = True
         if self.group is not None:
             data["group"] = self.group
+        if self.not_put is not None:
+            data["not_put"] = self.not_put
         return data
 
 
@@ -353,7 +358,9 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
     It reads the index where its rows are fresh and the logs where they are not, and
     writes nothing. A round whose log can't be read is in `unreadable`; the project's
     own log unreadable raises `Unreadable`."""
-    on_closed = _closed(own.load() if settings is None else settings)
+    settings = own.load() if settings is None else settings
+    on_closed = _closed(settings)
+    setting = str(own.round_setting(settings, home.project, "ratify"))
     listed = index.read(home.project, home.rounds_dir, env=env)
     if listed.unreadable is not None:
         raise listed.unreadable
@@ -362,8 +369,15 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
         if summary.unreadable is not None:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
-            # Of the decisions, only a major one waits on him here.
-            entries += [entry for entry in _entries(summary, on_closed)
+            covers, declared = _landed(summary)
+            # Of the decisions, only a major one waits here, each said to be put to
+            # him or not by the rule the ratification draws by.
+            entries += [entry if not entry.decision else replace(
+                            entry, not_put=decisions.not_put(
+                                entry.weight, setting=setting, stage=entry.stage,
+                                finished=entry.stage in covers,
+                                declared=entry.id in declared))
+                        for entry in _entries(summary, on_closed)
                         if entry.weight in (None, report_block.MAJOR)]
     return Rows(_ordered(entries), tuple(unreadable))
 
@@ -397,16 +411,22 @@ def of_round(home: folders.Home, slug: str, *, view: str | None = None, settings
     return replace(rows, entries=rows.entries + put, covers=covers, later=later)
 
 
+def _landed(summary: index.Summary) -> tuple[tuple[str, ...], set[str]]:
+    """The finished stages of a round, and the decisions their stages' current builds
+    declared, by key."""
+    stages = summary.of(index.STAGE)
+    covers = tuple(item.id for item in stages if item.body.get("finished") is True)
+    # A stage's current build answers only for the decisions its own reports
+    # declared: one only a dropped build declared never reached the target.
+    return covers, {key for item in stages for key in item.body.get("decisions") or ()}
+
+
 def _ratification(summary: index.Summary, found: list[Entry], setting: str):
     """What a round's ratification holds, as `(entries, covers, later)`: of the
     decisions not yet ruled, `found`, those of the finished builds that `setting` puts
     to him, the major ones first and then the minor ones as one group; the stages of
     the finished builds; and the major decisions of the builds not yet finished."""
-    stages = summary.of(index.STAGE)
-    covers = tuple(item.id for item in stages if item.body.get("finished") is True)
-    # A stage's current build answers only for the decisions its own reports
-    # declared: one only a dropped build declared never reached the target.
-    own = {key for item in stages for key in item.body.get("decisions") or ()}
+    covers, own = _landed(summary)
     unruled = [entry for entry in found
                if entry.state == questions.OPEN and entry.id in own]
     if setting == OFF:

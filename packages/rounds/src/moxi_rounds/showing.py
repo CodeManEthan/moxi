@@ -14,7 +14,9 @@ the operator was shown it; and its history, every event, oldest first.
 
 A round that is open is shown with what its close waits for, since no verb closes a
 round: it closes on the write that leaves nothing waited for. A round that has ended
-is shown with how it ended and the numbers its ending event holds. A question whose record still reads
+is shown with how it ended, each decision of a finished build it left open, and the
+numbers its ending event holds. A decision not yet ruled is labelled his to rule only
+where it is put to him (`decisions.why_not`). A question whose record still reads
 as open or parked there (a correction made after the end can leave one so) is shown as
 waiting for a new round, apart from the open and the parked ones: it is put to nobody
 on a round that has ended.
@@ -721,12 +723,31 @@ def _wait_lines(listed: list) -> list[str]:
 
 
 def _decisions(found: Shown) -> list:
-    """Every decision of the round, in the order declared, open or ruled; an open one
-    with `to_rule`, the command that records his ruling."""
-    return [{**one.data(),
-             "to_rule": (decisions.rule_line(found.name, one.key)
-                         if one.state == decisions.OPEN else None)}
-            for one in decisions.of_round(found.state)]
+    """Every decision of the round, in the order declared, open or ruled. An open one
+    has `put`, whether it is put to him (`decisions.why_not`), `not_put`, why not,
+    `open_as`, the line said under it (`decisions.open_line`), and `to_rule`, the
+    command that records his ruling, None once the round has ended and takes no
+    ruling."""
+    state = found.state
+    held = decisions.of_round(state)
+    why = {}
+    if any(one.state == decisions.OPEN for one in held):
+        # Read only here: a project's log, shown for its register, holds no decision.
+        settings = own.load() if found.settings is None else found.settings
+        why = decisions.why_not(state, str(own.round_setting(settings, found.project,
+                                                             closing.RATIFY)))
+    ended = state.ended is not None
+    listed = []
+    for one in held:
+        more = {"to_rule": None}
+        if one.state == decisions.OPEN:
+            more = {"put": why[one.key] is None, "not_put": why[one.key],
+                    "open_as": decisions.open_line(found.name, one.key,
+                                                   why=why[one.key], ended=ended),
+                    "to_rule": None if ended else decisions.rule_line(found.name,
+                                                                      one.key)}
+        listed.append({**one.data(), **more})
+    return listed
 
 
 def decision_line(one: dict) -> str:
@@ -737,13 +758,13 @@ def decision_line(one: dict) -> str:
 
 def decision_facts(one: dict) -> list[str]:
     """What is known of a decision beyond its line: where it came from, and his
-    ruling or the command that records it."""
+    ruling, or whether it is his to rule and the command that records it."""
     said = [f"from: {one['from']}   by: {one['by']}   at: {one['at']}"]
     if one["ruling"] is not None:
         said.append(f"ruled: {one['chose']} by {one['ruling']}   record: "
                     f"{one['record']}")
     else:
-        said.append(f"his to rule: {one['to_rule']}")
+        said.append(one["open_as"])
     return said
 
 
@@ -947,15 +968,23 @@ def _ended(state: states.State, *,
     question that was open or parked went, and the round's numbers as the event that
     ended it holds them, with the round's time and longest stretch with nothing
     logged computed from its log where the event holds neither, the steps due read
-    under the setting `ratify` gives (`numbers.with_clocks`)."""
+    under the setting `ratify` gives (`numbers.with_clocks`). `left_open` is each
+    decision of a finished build it left open, with whether that setting puts it to
+    him (`decisions.left_open`)."""
     end = state.ended
     if end is None:
         return None
     held = end.numbers
+    setting = None
     if isinstance(held, Mapping) and not {"round_time_s", "longest_gap"} <= set(held):
-        held = numbers.with_clocks(state, held, ratify=ratify())
+        setting = ratify()
+        held = numbers.with_clocks(state, held, ratify=setting)
+    left = ()
+    if any(one.state == decisions.OPEN for one in decisions.reached(state)):
+        left = decisions.left_open(state, ratify() if setting is None else setting)
     return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,
-            "at": end.at, "questions": dict(end.questions), "numbers": held}
+            "at": end.at, "questions": dict(end.questions), "numbers": held,
+            "left_open": list(left)}
 
 
 def ended_line(ended: dict) -> str:
@@ -1023,6 +1052,8 @@ def as_text(found: Shown) -> str:
         lines.append(f"inherits: {', '.join(shown_as['inherits'])}")
     if shown_as["ended"] is not None:
         lines.append(f"ended: {ended_line(shown_as['ended'])}")
+        lines += [f"  {decisions.left_open_line(one)}"
+                  for one in shown_as["ended"]["left_open"]]
         if shown_as["ended"]["numbers"] is not None:
             lines += ["numbers:", *(f"  {line}" for line in
                                     numbers.lines(shown_as["ended"]["numbers"]))]

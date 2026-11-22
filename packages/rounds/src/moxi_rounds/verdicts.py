@@ -85,8 +85,8 @@ The standing of a design, which its verdicts give, is `versions.standing`.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import (brake, builds, checking, decisions, ending, findings, finish_gates, flows,
@@ -121,6 +121,9 @@ class Recorded:
     #: For a report of a build or of majors: each decision it lists, as the record
     #: now holds it.
     decisions: tuple[decisions.Decision, ...] = ()
+    #: Of those not yet ruled, by key, the line said under each: whether it is his to
+    #: rule and the command that records his ruling (`decisions.open_line`).
+    open_as: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -615,9 +618,14 @@ def record(name: str, report: Path | str, *, by: str, settings=None,
     declared = tuple(decision for decision in decisions.of_round(after)
                      if decision.key in {f"{stage}.{entry['id']}" for stage, entry in
                                          decisions.listed(written.events[0])})
+    why = decisions.why_not(after, str(own.round_setting(settings, home.project,
+                                                         "ratify")))
+    open_as = {decision.key: decisions.open_line(name, decision.key,
+                                                 why=why[decision.key], ended=False)
+               for decision in declared if decision.key in why}
     return Recorded(name=name, verdict=one, standing=versions.standing(after),
                     event=written.events[0], failed=written.failed, findings=held,
-                    waits=finish, opened=opened, decisions=declared)
+                    waits=finish, opened=opened, decisions=declared, open_as=open_as)
 
 
 def finish_waits(state: states.State, stage: str, *, name: str,

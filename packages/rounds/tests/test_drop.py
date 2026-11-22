@@ -788,7 +788,8 @@ def test_a_dropped_round_is_shown_as_dropped_with_who_and_when(rounds, capsys):
     assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
                               "actor": "planner", "at": DROPPED_AT,
                               "questions": {"Q1": "P1"},
-                              "numbers": log.read(round_log(rounds))[-1]["numbers"]}
+                              "numbers": log.read(round_log(rounds))[-1]["numbers"],
+                              "left_open": []}
     assert found["questions"][0]["moved_to"] == "P1"
     assert found["history"][-1]["type"] == "round.dropped"
 

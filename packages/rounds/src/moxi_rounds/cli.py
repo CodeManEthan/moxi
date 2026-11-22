@@ -309,13 +309,26 @@ def _warn_of(failed, prog: str, verb: str) -> None:
 
 
 def _say_closed(writes, out) -> None:
-    """Say, in a line, each round a write of the verb closed. No verb closes a round,
-    so the verb's own lines never say it: whichever write left the close nothing to
-    wait for did."""
+    """Say, in a line, each round a write of the verb closed, then a line for each
+    decision of a finished build it left open, with whether the project's `ratify`
+    setting puts it to him. No verb closes a round, so the verb's own lines never say
+    it: whichever write left the close nothing to wait for did."""
+    from . import closing, decisions
+    from . import settings as own
+    from . import state as states
+
     for written in writes:
-        if written.closed is not None:
-            print(f"closed {written.where.project}/{written.where.slug}: nothing is "
-                  "left for its close to wait for", file=out)
+        if written.closed is None:
+            continue
+        name = f"{written.where.project}/{written.where.slug}"
+        print(f"closed {name}: nothing is left for its close to wait for", file=out)
+        try:
+            setting = closing.ratify_of(own.load(), name)
+        except ConfigError:
+            # The close read it a moment ago; what it leaves open is in show.
+            continue
+        for one in decisions.left_open(states.fold(written.round_events), setting):
+            print(f"  {decisions.left_open_line(one)}", file=out)
 
 
 # -- open --------------------------------------------------------------------------------
@@ -1178,9 +1191,8 @@ def _verdict(args, out) -> int:
         foreclosing = ", forecloses" if decision.forecloses else ""
         print(f"decision {decision.key}: {decision.weight}{foreclosing}, "
               f"{decision.state}: {decision.text}", file=out)
-        if decision.state == "open":
-            print(f"  his to rule: {decisions.rule_line(done.name, decision.key)}",
-                  file=out)
+        if decision.key in done.open_as:
+            print(f"  {done.open_as[decision.key]}", file=out)
     if one.kind in ("majors", "retro"):
         # Neither names a design version or a build: no standing or gates to print.
         _warn_of(done.failed, args.prog, args.verb)

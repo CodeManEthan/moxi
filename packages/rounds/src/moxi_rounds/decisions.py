@@ -36,6 +36,12 @@ What it holds, when it is major, reached the target and is not ruled (`unruled_m
 is the round's close and its `ratify` step, which both read it here. It is never
 parked, narrowed, moved or withdrawn: those rulings are of asked questions.
 
+**Put to him.** A decision not yet ruled is put to the operator when the project's
+`ratify` setting names its weight and it reached the target (`not_put`, `why_not`):
+only then is it labelled his to rule. One that is not is recorded only if he rules it.
+In a round that has ended none takes a ruling: each is left open, and the close lists
+those of the finished builds (`left_open`).
+
 Nothing here reads a file, the config or git.
 """
 
@@ -239,7 +245,70 @@ def rule_line(name: str, key: str) -> str:
     return f"moxi rounds rule {name} {key}={ACCEPT}|{REJECT} --record PTR"
 
 
+# -- put to him --------------------------------------------------------------------------
+
+#: The weights each value of the project's `ratify` setting puts to him: `majors` the
+#: major ones, `majors+minors` both. `off` puts none.
+PUT_BY = {"majors": (report_block.MAJOR,),
+          "majors+minors": (report_block.MAJOR, report_block.MINOR)}
+
+
+def not_put(weight: str, *, setting: str, stage: str, finished: bool,
+            declared: bool) -> str | None:
+    """Why a decision not yet ruled is not put to him, in a few words, or None when it
+    is. It is put when `setting`, the project's `ratify` setting, names its `weight`,
+    its `stage` is `finished`, and the build that finished the stage `declared` it: the
+    rule the ratify export draws by."""
+    if weight not in PUT_BY.get(setting, ()):
+        return f"ratify is {setting}"
+    if not finished:
+        return f"stage {stage} is not finished"
+    if not declared:
+        return f"the build that finished {stage} did not declare it"
+    return None
+
+
+def why_not(state: states.State, setting: str) -> dict[str, str | None]:
+    """Each decision of the round not yet ruled, by key, with why it is not put to him
+    under `setting` (`not_put`), None where it is."""
+    done = {build.stage for build in finished_builds(state)}
+    landed = {one.key for one in reached(state)}
+    return {one.key: not_put(one.weight, setting=setting, stage=one.stage,
+                             finished=one.stage in done, declared=one.key in landed)
+            for one in of_round(state) if one.state == OPEN}
+
+
+def open_line(name: str, key: str, *, why: str | None, ended: bool) -> str:
+    """What is said under a decision not yet ruled: `his to rule` with the command
+    only when it is put to him (`why` None) in a round still open. One not put to him
+    is recorded only if he rules it. A round that has ended takes no ruling, so there
+    it is left open, with no command."""
+    if ended:
+        return ("left open, put to him and not ruled" if why is None
+                else f"left open, not put to him ({why})")
+    if why is None:
+        return f"his to rule: {rule_line(name, key)}"
+    return f"not put to him ({why}); recorded only if he rules it: {rule_line(name, key)}"
+
+
+def left_open(state: states.State, setting: str) -> tuple[dict, ...]:
+    """The decisions of the finished builds still open, in that order, each with
+    whether `setting` puts it to him: what the close of the round leaves open. One only
+    a dropped build declared is not among them."""
+    return tuple({"id": one.key, "weight": one.weight, "forecloses": one.forecloses,
+                  "text": one.text, "put": one.weight in PUT_BY.get(setting, ())}
+                 for one in reached(state) if one.state == OPEN)
+
+
+def left_open_line(one: dict) -> str:
+    """A decision the close left open, as `left_open` gives it, in a line."""
+    head = ("left open, put to him and not ruled" if one["put"]
+            else "left open, not put to him")
+    weight = one["weight"] + (", forecloses" if one["forecloses"] else "")
+    return f"{head}: decision {one['id']}, {weight}: {one['text']}"
+
+
 __all__ = ["KEY", "ITEM", "ACCEPT", "REJECT", "OPTIONS", "BLOCKS", "OPEN", "RULED",
-           "Decision", "listed", "lighter", "of_round", "of_build", "finished",
+           "PUT_BY", "Decision", "listed", "lighter", "of_round", "of_build", "finished",
            "finished_builds", "reached", "unruled_majors", "find", "item", "items",
-           "rule_line"]
+           "rule_line", "not_put", "why_not", "open_line", "left_open", "left_open_line"]
