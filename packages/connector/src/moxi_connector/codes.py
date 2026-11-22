@@ -16,7 +16,7 @@ match spends it. A miss counts toward `BURN_AFTER` misses across every sign-in i
 one started provider declares a gate and no declared gate refuses. Each gate's `peer`
 check runs on the socket's peer before every mint; a check that raises refuses. With no
 gate, nothing is minted: a connector that can't tell an agent's process from the owner's
-terminal can't keep the sign-in his alone. The verb's own `shell` check runs in
+terminal can't keep the sign-in to the owner alone. The verb's own `shell` check runs in
 `moxi connector code`, before it asks the socket.
 """
 

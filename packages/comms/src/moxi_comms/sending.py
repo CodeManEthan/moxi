@@ -80,20 +80,19 @@ HELD_NOTE_SESSION_ONLY = ("NOTE: {name} reads this after its own next turn in th
                           "(when the operator types into it, or its first turn after a "
                           "/clear). Nothing wakes it for this message alone.")
 
-#: `--held` with the operator among the recipients: he has no session,
-#: so it goes to him as an ordinary message. Before the outcome line, exit 0.
+#: `--held` with the operator among the recipients: the operator has no session,
+#: so it goes as an ordinary message. Before the outcome line, exit 0.
 HELD_IGNORED_OPERATOR = ("NOTE: --held was ignored for operator: the operator has no "
-                         "session to hold it for, so it went to him as an ordinary "
-                         "message.")
+                         "session to hold it for, so it went as an ordinary message.")
 
-#: `--interrupt` with the operator among the recipients: he has no session to steer.
+#: `--interrupt` with the operator among the recipients: the operator has no session to
+#: steer.
 INTERRUPT_IGNORED_OPERATOR = ("NOTE: --interrupt was ignored for operator: the operator "
-                              "has no session to steer, so it went to him as an ordinary "
-                              "message.")
+                              "has no session to steer, so it went as an ordinary message.")
 
 INTERRUPT_IGNORED_OPERATOR_TOOL = ("NOTE: interrupt was ignored for operator: the operator "
-                                   "has no session to steer, so it went to him as an "
-                                   "ordinary message.")
+                                   "has no session to steer, so it went as an ordinary "
+                                   "message.")
 
 #: `--interrupt` beside `--held`: one says go into a running turn, the other wait for
 #: the next release point.
@@ -1568,7 +1567,7 @@ def _blocked(ctx: Context) -> bool:
 
 def _exempt(sender) -> bool:
     """Is this sender exempt from every posture refusal? The operator, by the name every
-    lane of his carries, and no one else."""
+    operator lane carries, and no one else."""
     return sender.qualified == OPERATOR
 
 
@@ -2666,7 +2665,7 @@ def _delete(ctx: Context, mid: str, *, bound=None):
             _refuse(ctx, "no-identity",
                     "comms has no identity for this process to delete as: a session "
                     "deletes its own messages through its own claim socket, and the "
-                    "operator from his own terminal. Nothing was withdrawn.")
+                    "operator from a terminal outside any session. Nothing was withdrawn.")
             return _REFUSED, None
         try:
             with ctx.db() as db:

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The notes, refusals, docstrings and docs name the operator neutrally, never "he" or
+  "him": the `--held` and `--interrupt` notes for the operator end "so it went as an
+  ordinary message".
 - The comms daemon replaces a Claude Code session's adapter that died while the session
   runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
   for its claim socket to stop answering, and starts a new adapter with the environment
