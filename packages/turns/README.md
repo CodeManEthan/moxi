@@ -30,7 +30,7 @@ host that is experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.4/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.5/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -218,4 +218,4 @@ the panel.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.4/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.5/packages/turns/LICENSE).

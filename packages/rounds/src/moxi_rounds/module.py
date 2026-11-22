@@ -1,6 +1,7 @@
 """The announcement of Moxi's rounds module, which moxi.modules reads.
 
-It offers interface 1, the read API in `moxi_rounds.api`, and the verb `moxi rounds`.
+It offers interface 1, the read API in `moxi_rounds.api`, the verb `moxi rounds`, and
+with ui its page in the browser UI shell.
 """
 
 ANNOUNCES = 1
@@ -11,6 +12,8 @@ CLI = "moxi_rounds.cli:main"
 SUMMARY = ("A piece of work tracked from design to landing: its questions, rulings, "
            "builds and gates.")
 OPTIONAL = {
+    "ui": "The rounds page in the browser UI shell: every open round as a line of its "
+          "steps.",
     "notes": "Gives the default notes folder of a project that names none, for a "
              "relative rounds folder.",
     "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on.",
@@ -43,3 +46,12 @@ STORES = {"index": {"root": "data", "path": "index.db", "kind": "sqlite", "priva
           "sweeps": {"root": "state", "path": "sweep.jsonl", "kind": "jsonl",
                      "private": True, "retention": "2M", "rebuildable": False,
                      "lazy": True}}
+#: rounds' page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_rounds.page:PAGE"
+#: What rounds offers the browser UI shell: its page.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Rounds", "contract": 1, "place": "page",
+             "group": "daily", "order": 45,
+             "doc": "Every open round as a line of its steps: what waits on you, the "
+                    "builds in flight, and each step's record."},
+}

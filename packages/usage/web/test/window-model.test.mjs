@@ -121,6 +121,20 @@ test("a total that is not whole says at least, one with no price says so, and on
   assert.deepEqual([none.used.total, none.used.cost], ["0 sessions, 0 requests since 16:34", "$0.00"]);
 });
 
+test("a limit that counts one family of models names it in the total; the rows are the same", () => {
+  const scoped = answer({ limit_id: "opus", window_minutes: 10080, opened: "2026-11-04T23:58:00Z",
+    resets_at: "2026-11-11T23:58:00Z", model_family: "opus",
+    used: { since: "2026-11-04T23:58:00Z", count: 2, requests: 9, cost: 3.1, complete: true,
+            rows: [{ harness: "claude", session_id: "s1", requests: 1, cost: 0.4 }] } });
+  const model = opened(scoped, { name: () => "planner" });
+  assert.deepEqual(model.used, { label: "Used by", rows: [{ name: "planner", requests: "1 request", cost: "$0.40" }],
+                                 total: "2 sessions, 9 Opus requests since Wed 23:58", cost: "$3.10" });
+  const one = opened({ ...scoped, used: { ...scoped.used, count: 1, requests: 1 } });
+  assert.equal(one.used.total, "1 session, 1 Opus request since Wed 23:58");
+  // A main limit's answer, with the field null or from a usage that serves none, names no family.
+  assert.equal(opened(answer({ model_family: null })).used.total, "6 sessions, 63 requests since 16:34");
+});
+
 test("a limit with no report of who used it has no such line", () => {
   assert.equal(opened(answer({ used: null })).used, null);
 });

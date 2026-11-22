@@ -14,8 +14,8 @@
 // phone can't reach.
 //
 // It also defines `<moxi-ui-form>`, the one form renderer, `<moxi-ui-confirm>`, the
-// confirm sheet, and `<moxi-ui-row>`, the two-line row of a list, so every page can use
-// them.
+// confirm sheet, `<moxi-ui-row>`, the two-line row of a list, and `<moxi-ui-rail>` with its
+// `<moxi-ui-mark>` cells, a line of step markers, so every page can use them.
 
 import { defineConfirm } from "./confirm.ts";
 import { isConfirmed, mintKey, outcomeOf, pagePath, SIGNED_OUT } from "./confirm-model.ts";
@@ -26,6 +26,7 @@ import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
 import { Gate } from "./hold-model.ts";
 import { defineRow } from "./row.ts";
+import { defineRail } from "./rail.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
 import { boot, where } from "./shell.ts";
 
@@ -236,10 +237,44 @@ export interface FormElement extends HTMLElement {
  */
 export interface RowElement extends HTMLElement {}
 
+/**
+ * `<moxi-ui-rail>`, a line of step markers with the line through what is done, defined by
+ * this script. Each `<moxi-ui-mark>` child is one cell, in order. It draws what its marks
+ * carry and reads nothing:
+ *
+ * - a mark's `state` is one of `done`, `none`, `yours`, `failed`, `owed`, `waiting`,
+ *   `todo` and `child`, each its own shape; unset, the cell draws no marker and the line
+ *   passes through. `word` is written under the marker, `count` at its corner, and
+ *   `label` is its accessible name, used as given (else the state in words). `key` is
+ *   opaque and comes back in the event.
+ * - a mark's flags: `settled`, `here` (`▼` over the marker), `open` (a ring and
+ *   `aria-expanded`, while the page shows what the marker opened), `quiet` (drawn, not a
+ *   button) and `wide` (the label's width, showing the mark's own children over the line).
+ * - the line is solid, in `--moxi-state-done`, from the first marker through each settled
+ *   one up to and including the first not settled, and dashed after it.
+ * - cells are `--moxi-rail-cell` (56px) wide, a wide one `--moxi-rail-label` (132px).
+ * - a click, Enter or Space on a marker sends `moxi-rail-mark` from the rail, bubbling and
+ *   crossing shadow roots, with `{key}`. The rail opens nothing itself.
+ * - `size="small"`: 11 px markers, no words or counts, no buttons. `vertical`: one mark a
+ *   row, its label and word beside it, the line running down.
+ */
+export interface RailElement extends HTMLElement {}
+
+/** `<moxi-ui-mark>`, one cell of `<moxi-ui-rail>`; its attributes are listed there. Its
+ * `focus()` focuses its marker. */
+export interface MarkElement extends HTMLElement {}
+
+/** The detail of `moxi-rail-mark`: the pressed mark's `key`, null when it has none. */
+export interface RailMark {
+  key: string | null;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     "moxi-ui-form": FormElement;
     "moxi-ui-row": RowElement;
+    "moxi-ui-rail": RailElement;
+    "moxi-ui-mark": MarkElement;
   }
 }
 
@@ -643,6 +678,7 @@ function registerWorker(): void {
 defineForm(installed);
 defineConfirm();
 defineRow();
+defineRail();
 push.start();
 if (here.gateway) registerWorker();
 addEventListener("storage", (event) => {

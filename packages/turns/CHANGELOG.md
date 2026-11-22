@@ -4,8 +4,19 @@
 
 - With `moxi-sessions` installed, `Live sessions` leaves the browser UI shell's band of
   pages: the Sessions page shows the running sessions with turns' live state. `/m/turns/`
-  still opens the panel. It needs a ui that reads `band_unless`; an older one keeps the
-  entry.
+  still opens the panel. It needs ui 0.2.5 or later, which reads `band_unless`; an older
+  ui keeps the entry.
+
+## 0.2.5 (2026-11-22)
+
+- A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises
+  it once per endpoint process, the first time it learns its session's id. That is
+  normally the runner's `session` line at the endpoint's own start, so a module hears of
+  an endpoint that replaced another (Claude Code ends and restarts every endpoint when
+  its plugins reload) without waiting for the session's next start, resume, clear or
+  compaction. When that line carries no id, `load` comes just before the first `ready`.
+  Every row naming it is called with the session's id, harness and environment, and its
+  answer is ignored. A turns older than this refuses a registration that names `load`.
 - `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
   `prompt` event carries `own`, true when its origin is on that list, and question mode's
