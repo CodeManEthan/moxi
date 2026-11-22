@@ -321,6 +321,18 @@ as Claude Code redrawing its status line, never holds an act. Keep-warm takes it
 reads instead (below), since it nudges because subagents are at work. A background shell
 holds only exit-session (below).
 
+**The claim follows the session.** The first turns endpoint to name a launch's session
+claims the launch. Claude Code ends a session's endpoint and starts a new one whenever its
+plugins reload. The new endpoint takes the launch as soon as it learns the session's id,
+because its parent process is the launch's own `claude` (the pid and start time the
+launch recorded); when the old endpoint is still ending, the new one waits up to 5 seconds
+for it. So an act still finds a launched session after a plugin reload and any `/clear` or
+compaction that follows. A session started from inside a launched one (an agent's
+`claude -p`, a `claude --resume` in a subshell) runs under another `claude`, so it never
+takes the launch, whatever session id it names. A Codex launch's claim moves to a new
+endpoint only when that endpoint names a session id the launch already knows. This needs
+moxi-turns 0.2.5 or later, which the `turns` extra asks for.
+
 A launch has one act open at a time. A second one is refused (`run-open`, exit 3), naming
 the open run. Each act is a run in the launch log, with its events and its outcome.
 

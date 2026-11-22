@@ -160,6 +160,7 @@ def test_a_replaced_endpoint_not_yet_reclaimed_is_changed_and_says_so(conn):
     assert caught.value.reclaim_pending
     assert caught.value.serving == me()
     assert "has not claimed it yet" in caught.value.problem
+    assert "within seconds" in caught.value.hint
     assert "next start, clear or compaction" in caught.value.hint
     assert len(turns.asked) == 1  # read once, never waited on
     # Nothing here moves the claim.

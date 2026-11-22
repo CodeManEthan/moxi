@@ -3973,7 +3973,7 @@ launcher	packages/launcher/src/moxi_launcher/target.py	_slot	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/target.py	_with_store	name	opened	store_conn
 launcher	packages/launcher/src/moxi_launcher/target.py	caller	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/target.py	code = "changed"	keep	changed	changed
-launcher	packages/launcher/src/moxi_launcher/target.py	held endpoint is gone and a live one serves the session; `find` refuses that `changed` too,	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	serves the session; `find` refuses that `changed` too, with `reclaim_pending` set (once the	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	names, else refused `changed`.	keep	changed	changed
 launcher	packages/launcher/src/moxi_launcher/target.py	return api.show(row.slot)	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/target.py	session = turns.find(pid=os.getpid() if pid is None else pid)	keep	find	find
@@ -4511,6 +4511,7 @@ launcher	packages/launcher/tests/test_listeners.py	stand_in_notes	name	folder	ha
 launcher	packages/launcher/tests/test_listeners.py	test_a_codex_seat_gets_its_identity_block_and_instructions	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_claiming_at_once_exactly_one_wins.race	name	mine	conn
 launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_reclaiming_at_once_exactly_one_wins.race	name	mine	conn
+launcher	packages/launcher/tests/test_listeners.py	listen_ready._drainer.join(timeout=10)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_live.py	-	name	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	test_codex_trusts_the_launch_dir_from_the_trust_row_even_with_a_dot_in_it
 launcher	packages/launcher/tests/test_live.py	assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_live.py	assert any(brief in word for word in result.argv)	keep	any	any
@@ -13871,6 +13872,8 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.session_known.set()	
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	slot[0].set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),	keep	round	round
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	while not self.ended.is_set() and not any(e.is_set() for e in events):	keep	any	any
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._loaded = False	keep	_loaded	_loaded
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	first, self._loaded = not self._loaded, True	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
 turns	packages/turns/src/moxi_turns/claude_leg.py	and any answer but `allow` reports `refused` `unsupported` with nothing run.	keep	refused	refused
@@ -14473,6 +14476,7 @@ turns	packages/turns/tests/test_claude_endpoint.py	out.put(s.command(name, timeo
 turns	packages/turns/tests/test_claude_endpoint.py	runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",	keep	refused	refused
 turns	packages/turns/tests/test_claude_endpoint.py	runner.turn_complete("T1", reason="aborted", is_aborted=True)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).start()	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_claude_endpoint.py	out = [SEEN.get(timeout=timeout) for _ in range(count)]	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	use	"folder"	"plugin_dir"

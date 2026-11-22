@@ -429,6 +429,65 @@ def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
         ("Ready", "startup"), ("Ready", "clear")]
 
 
+#: The `load` and `ready` rows' calls: (event, session id, harness, env, cwd).
+SEEN: queue.Queue = queue.Queue()
+
+
+def _seen(event):
+    SEEN.put((event.event, event.session_id, event.harness, event.env, event.cwd))
+
+
+def _seen_calls(count, timeout=2.0):
+    """The first `count` calls, then any more that come within a short wait."""
+    out = [SEEN.get(timeout=timeout) for _ in range(count)]
+    return out + drain(SEEN, timeout=0.3)
+
+
+@pytest.fixture
+def seen():
+    drain(SEEN, timeout=0)
+    yield SEEN
+    drain(SEEN, timeout=0)
+
+
+def test_load_is_raised_once_at_the_first_session_line_with_the_id(claude, seen):
+    registry = Registry((Listener("launcher", frozenset({"load"}), f"{__name__}:_seen"),))
+    ep, runner = claude(registry=registry)
+    [(event, session_id, harness, env, cwd)] = _seen_calls(1)
+    assert (event, session_id, harness, cwd) == ("load", "s-1", "claude", ep.harness.cwd)
+    assert env == ep.env
+    # The runner sends its line again on a reload; a later id comes with a ready.
+    runner.session("s-1")
+    runner.session("s-2")
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                   "session_id": "s-3"})
+    assert drain(seen) == []
+
+
+def test_a_session_line_with_no_id_raises_no_load_and_the_ready_raises_it_first(
+        claude, seen, monkeypatch):
+    registry = Registry((Listener("launcher", frozenset({"load", "ready"}),
+                                  f"{__name__}:_seen"),))
+    raised = []
+    launch = listeners._launch
+
+    def record(chosen, event, after=None):
+        raised.append(event.event)
+        return launch(chosen, event, after)
+
+    monkeypatch.setattr(listeners, "_launch", record)
+    ep, runner = claude(registry=registry, session=None)
+    runner.report(leg.R_SESSION, session_id=None, mod_version="0.1.0")
+    assert drain(seen) == [] and raised == []
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1"})
+    assert raised == ["load", "ready"]
+    calls = _seen_calls(2)
+    assert sorted((c[0], c[1]) for c in calls) == [("load", "s-1"), ("ready", "s-1")]
+    runner.session("s-1")
+    assert drain(seen) == [] and raised == ["load", "ready"]
+
+
 def _command(s, name, out):
     out.put(s.command(name, timeout_s=5))
 
