@@ -86,7 +86,7 @@ config`.
 
 A module's schema decides how its settings look on the page with page fields (`label`,
 `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal`, `elsewhere`;
-the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/settings.md)
+the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/settings.md)
 says what each does on the page, what a save does, and the page's routes. The page is not
 on the phone.
 
@@ -105,7 +105,7 @@ Home, at `/m/ui/`, shows one main piece and a row per module with something to r
 module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
 and an `order`; a row component reports its line with a `moxi-home-row` event and Home
 draws it. A main piece that opens a panel at the window's right edge sends
-`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/home.md)
+`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/home.md)
 has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
 side panel's event.
 
@@ -117,7 +117,7 @@ what was last said and the row's acts;
 and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
 places it with attributes and bundles nothing. It draws nothing for an attribute that is
 unset, and a row opens by its lines only when it carries `toggles`.
-[docs/row.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/row.md)
+[docs/row.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/row.md)
 has every attribute, the slots and the `moxi-row-toggle` event.
 
 ## The rail of steps
@@ -130,14 +130,14 @@ the rest stay ink and grey. `/m/ui/client.js` defines it, so a page places it wi
 attributes and bundles nothing. A marker is a button that sends `moxi-rail-mark` with the
 mark's `key`, and the page sets `open` on the mark while it shows that step. A small rail
 is a picture for a card, and a vertical one stacks the steps for a phone.
-[docs/rail.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/rail.md)
+[docs/rail.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/rail.md)
 has every attribute, the line's rule, the event, widths and looks.
 
 ## Confirmed acts in a page
 
 An act the user should confirm a second time, such as stopping a service, is a confirmed
 act: it runs at most once, and only after the user says yes on a sheet the shell draws. The page declares it in its route table with `confirmed=True` and
-the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/loopback.md), "Confirmed acts",
+the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/loopback.md), "Confirmed acts",
 has the route's whole shape. For example:
 
 ```python
@@ -220,7 +220,7 @@ marks `gateway=True`, with marked fields redacted, and every request is in an au
 A text that may name a path, such as a check's name, reaches the phone with each path
 that starts a word, or follows `:` or `=`, with `/` or `~` cut to its last folder name, up
 to the next space; a path in another form is sent as it is
-([docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/loopback.md)
+([docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/loopback.md)
 has the rule).
 
 To set it up, outside Moxi: a Tailscale account, Tailscale on the computer and the phone,
@@ -297,7 +297,7 @@ too, and names the step: install or update moxi-ui.
 The shell starts each module's page server on the first request for its page, as
 `python -P -m moxi_ui.loopback.serve <module>`, and reads every module's route table with
 `python -P -m moxi_ui.loopback.export <module>...`. Both run on loopback, ui's
-page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/docs/loopback.md) has the request check, how a page
+page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/docs/loopback.md) has the request check, how a page
 is declared, and the runner's rules.
 
 ## Testing a module's pages
@@ -341,4 +341,4 @@ and `psutil`, which the shell uses to watch its page servers.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.4/packages/ui/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.5/packages/ui/LICENSE).
