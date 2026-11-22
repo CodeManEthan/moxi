@@ -222,10 +222,10 @@ def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
     steered_at: list = []
     session_steer = session.steer
 
-    def steer(text, *, ref=None):
+    def steer(text, *, ref=None, **asker):
         if MARK in text:
             steered_at.append(time.monotonic())
-        return session_steer(text, ref=ref)
+        return session_steer(text, ref=ref, **asker)
 
     session.steer = steer
     queued_at: list = []                    # when the adapter queued the interrupt mail

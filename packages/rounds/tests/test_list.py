@@ -668,6 +668,80 @@ def test_the_numbers_are_a_listing_of_their_own(rounds, capsys):
     assert f"moxi rounds show {A}" in capsys.readouterr().err
 
 
+# -- one reading for several listings ------------------------------------------------------
+
+def _counted_reads(monkeypatch):
+    from moxi_rounds import open_builds
+    calls = []
+    real = open_builds.read
+
+    def read(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(open_builds, "read", read)
+    return calls
+
+
+def test_projects_read_once_list_the_rounds_and_what_waits_the_same(rounds):
+    waiting_setup()
+    given = listing.projects(refresh=False)
+    assert (listing.rounds(given=given).data()
+            == listing.rounds(refresh=False).data())
+    assert (listing.rounds(given=given, ended=True).data()
+            == listing.rounds(refresh=False, ended=True).data())
+    assert (listing.waiting(given=given).data()
+            == listing.waiting(refresh=False).data())
+
+
+def test_the_open_builds_read_already_are_not_read_again(rounds, monkeypatch):
+    from moxi_rounds import open_builds
+    opening.open_round("proj-a/d-round", description="a placeholder round",
+                       by="planner", flow="fix", at=T1)
+    round_log = log.round_log(rounds / "d-round")
+    log.append(round_log, "stage.declared", {"id": "B1", "repo": "proj-a",
+                                             "branch": "branch-b1"}, by="planner")
+    log.append(round_log, "build.commissioned", {
+        "stage": "B1", "repo": "proj-a", "branch": "branch-b1", "base": "0" * 40,
+        "target": "main", "builder": "builder-1", "build": "0123456789abcdef"},
+        by="lead")
+    read = open_builds.read()
+    calls = _counted_reads(monkeypatch)
+    given = listing.rounds(read=read, refresh=False)
+    assert calls == []
+    assert given.data() == listing.rounds(refresh=False).data()
+    assert calls == [1]
+
+
+def test_seen_given_for_a_round_reads_no_git_for_its_step(rounds, monkeypatch):
+    from moxi_rounds import checking
+    opening.open_round("proj-a/d-round", description="a placeholder round",
+                       by="planner", flow="fix", at=T1)
+    round_log = log.round_log(rounds / "d-round")
+    log.append(round_log, "stage.declared", {"id": "B1", "repo": "proj-a",
+                                             "branch": "branch-b1"}, by="planner")
+    log.append(round_log, "build.commissioned", {
+        "stage": "B1", "repo": "proj-a", "branch": "branch-b1", "base": "0" * 40,
+        "target": "main", "builder": "builder-1", "build": "0123456789abcdef"},
+        by="lead")
+    calls = []
+    monkeypatch.setattr(checking, "seen_of", lambda *args, **kwargs: calls.append(1))
+    listing.rounds(refresh=False, seen={"proj-a/d-round": {}},
+                   on_closed=lambda name: False)
+    assert calls == []
+
+
+def test_what_waits_without_git_lists_no_build_and_reads_none(rounds, monkeypatch):
+    waiting_setup()
+    calls = _counted_reads(monkeypatch)
+    found = listing.waiting(refresh=False, read_git=False).data()
+    assert calls == []
+    assert found["builds"] == []
+    whole = listing.waiting(refresh=False).data()
+    assert {key: value for key, value in found.items() if key != "builds"} == {
+        key: value for key, value in whole.items() if key != "builds"}
+
+
 # -- the lead ----------------------------------------------------------------------------
 
 def test_each_round_listed_as_data_carries_its_lead(rounds, capsys):

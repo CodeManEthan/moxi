@@ -27,6 +27,10 @@ it. A dropped round's numbers stay in its drop and its `retro.md`, and are not s
 A closed round whose closing holds no numbers is named and not summed, and so is a
 round whose log can't be read.
 
+**One reading for several listings.** A caller that lists both, or that read the open
+builds or a round's git state already, passes what it read (`projects`, the open builds,
+each round's `seen`), and it is not read again.
+
 **A later kind of record** joins a listing in one place. A count of the rounds listing
 is a row of `COUNTS`. A kind of row that waits on the operator is a row of `WAITING`:
 what one project gives, how the rows read as data, and how they read as lines.
@@ -97,29 +101,35 @@ COUNTS: tuple[tuple[str, str, Callable[[index.Summary, Project], int | None]], .
 
 
 def _step(summary: index.Summary, project: Project,
-          opened: Callable[[], open_builds.OpenBuilds]) -> dict | None:
+          opened: Callable[[], open_builds.OpenBuilds], *,
+          seen: Mapping | None = None,
+          on_closed: Callable[[str], bool] | None = None) -> dict | None:
     """The step the round is at, as `{"step", "stage", "state"}`, or None for a round
     at no step. The index keeps it as the round's own log gives it. The log is read
     again where that is not the answer: where the step is one whose state git says,
-    which is read then with the open builds `opened` gives; and where a question of
-    the round is parked until another round closes and that round has, since the
-    question reads as open from then on and may hold the round at an earlier step."""
+    which is read then with the open builds `opened` gives, or with `seen` where the
+    caller read them already; and where a question of the round is parked until
+    another round closes and that round has, since the question reads as open from
+    then on and may hold the round at an earlier step. `on_closed` answers whether a
+    round is closed, `questions.is_closed` when left out."""
     kept = next((item.body for item in summary.of(index.STEP)), None)
     if kept is None:
         return None
 
-    def on_closed(name: str) -> bool:
-        return questions.is_closed(name, project.settings)
+    if on_closed is None:
+        def on_closed(name: str) -> bool:
+            return questions.is_closed(name, project.settings)
 
     if kept.get("git") or any(on_closed(name) for name in kept.get("until", ())):
         try:
             folded = states.fold(log.read_round(log.round_log(summary.log_dir)))
         except RoundsError:
             return None
-        read = {one.build.stage: one for one in opened().builds
-                if one.round == summary.name}
-        seen = checking.seen_of(folded, summary.name, settings=project.settings,
-                                read=read)
+        if seen is None:
+            read = {one.build.stage: one for one in opened().builds
+                    if one.round == summary.name}
+            seen = checking.seen_of(folded, summary.name, settings=project.settings,
+                                    read=read)
         at = steps.current(folded, name=summary.name, on_closed=on_closed, seen=seen)
         kept = {} if at is None else {"step": at.step, "stage": at.stage,
                                       "state": at.state}
@@ -188,18 +198,30 @@ class Rounds:
 
 
 def rounds(project: str | None = None, *, ended: bool = False, settings=None,
-           now: str | None = None, refresh: bool = True) -> Rounds:
+           now: str | None = None, refresh: bool = True, given: Projects | None = None,
+           read: open_builds.OpenBuilds | None = None,
+           seen: Mapping[str, Mapping] | None = None,
+           on_closed: Callable[[str], bool] | None = None) -> Rounds:
     """The open rounds of every project, or of `project`, each with its flow and its
     counts; with `ended`, the rounds that are open no longer. `settings` is what
     `settings.load()` gives, read now when left out, and `now` the second the listing
     is computed in. With `refresh` false the index is left as it is, and a round it
     is behind on is read from its log.
 
+    A caller that read some of it already passes it in, and it is not read again:
+    `given`, the projects as `projects` read them (`project`, `settings` and `refresh`
+    are then not used); `read`, the open builds as `open_builds.read` read them; `seen`,
+    by round name, what `checking.seen_of` read of a round's open builds; `on_closed`,
+    whether a round, by name, is closed (`questions.is_closed` when left out).
+
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, unplaced = _projects(project, settings, now, refresh=refresh)
-    looked: list[open_builds.OpenBuilds] = []
+    if given is None:
+        given = projects(project, settings=settings, now=now, refresh=refresh)
+    found, unplaced = list(given.found), given.unplaced
+    looked: list[open_builds.OpenBuilds] = [] if read is None else [read]
+    seen = {} if seen is None else seen
 
     def opened() -> open_builds.OpenBuilds:
         # Read once, the first time a round's step is one git says.
@@ -219,12 +241,13 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                     summary.name, summary.project, str(summary.log_dir),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
                     lead=leads.chosen(summary.lead, one.home.lead),
-                    step=_step(summary, one, opened),
+                    step=_step(summary, one, opened, seen=seen.get(summary.name),
+                               on_closed=on_closed),
                     standing=next((item.body.get("standing")
                                    for item in summary.of(index.VERSION)), None),
                     counts=tuple((key, count(summary, one))
                                  for key, _called, count in COUNTS)))
-    return Rounds(computed=now, project=None if project is None else found[0].home.project,
+    return Rounds(computed=now, project=given.project,
                   ended=ended, rounds=tuple(listed),
                   unreadable=tuple(one.unreadable.reason for one in found
                                    if one.unreadable is not None),
@@ -447,29 +470,35 @@ class Waiting:
 
 
 def waiting(project: str | None = None, *, settings=None,
-            now: str | None = None, refresh: bool = True) -> Waiting:
+            now: str | None = None, refresh: bool = True, given: Projects | None = None,
+            read_git: bool = True) -> Waiting:
     """What waits on the operator across every project, or in `project`. `settings` is
     what `settings.load()` gives, read now when left out, and `now` the second the
     listing is computed in, which every project's list of rulings not yet shown is
     computed in too. With `refresh` false the index is left as it is, and a log it is
-    behind on is read itself.
+    behind on is read itself. `given` is the projects as `projects` read them, for a
+    caller that read them already (`project`, `settings` and `refresh` are then not
+    used). With `read_git` false git is not read, and no build is listed.
 
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, unplaced = _projects(project, settings, now, refresh=refresh)
+    if given is None:
+        given = projects(project, settings=settings, now=now, refresh=refresh)
+    found, unplaced = list(given.found), given.unplaced
     readable = [one for one in found if one.unreadable is None]
-    looked = open_builds.read(settings=settings, now=now)
-    readable = [dataclasses.replace(one, builds=tuple(
-        build for build in looked.builds
-        if build.round.partition("/")[0] == one.home.project and _to_look_at(build)))
-        for one in readable]
+    if read_git:
+        looked = open_builds.read(settings=settings, now=now)
+        readable = [dataclasses.replace(one, builds=tuple(
+            build for build in looked.builds
+            if build.round.partition("/")[0] == one.home.project and _to_look_at(build)))
+            for one in readable]
     unreadable = [one.unreadable.reason for one in found if one.unreadable is not None]
     for one in readable:
         unreadable += [error.reason
                        for error in (*one.rows.unreadable, *one.back.unreadable)]
     return Waiting(
-        computed=now, project=None if project is None else found[0].home.project,
+        computed=now, project=given.project,
         found=tuple((kind.key, tuple(row for one in readable for row in kind.rows(one)))
                     for kind in WAITING),
         # One line for a log, whichever reading could not read it.
@@ -579,6 +608,31 @@ def as_json(listing: Rounds | Waiting | Numbers) -> str:
     return json.dumps(listing.data(), indent=2, ensure_ascii=False) + "\n"
 
 
+@dataclass(frozen=True)
+class Projects:
+    """What each project of a listing gives (`found`), a line for each project whose
+    rounds folder can't be worked out (`unplaced`), and `project`, the one the listing
+    is kept to, as the projects list stores its key, or None."""
+
+    found: tuple[Project, ...]
+    unplaced: tuple[str, ...] = ()
+    project: str | None = None
+
+
+def projects(project: str | None = None, *, settings=None, now: str | None = None,
+             refresh: bool = True) -> Projects:
+    """What each project of a listing gives, read once, so one reading serves several
+    listings (`rounds` and `waiting` take it as `given`). With `project`, that one
+    alone. `settings`, `now` and `refresh` are as `rounds` takes them, and so are its
+    refusals. The index is brought up to every project's logs first, unless `refresh`
+    is false: the reads then answer the same from an index that is behind, and write
+    nothing."""
+    now = log.stamp() if now is None else now
+    found, unplaced = _projects(project, settings, now, refresh=refresh)
+    return Projects(tuple(found), unplaced,
+                    None if project is None else found[0].home.project)
+
+
 def _projects(project: str | None, settings, now: str, *,
               refresh: bool = True) -> tuple[list[Project], tuple[str, ...]]:
     """What each project of a listing gives, and a line for each project whose rounds
@@ -642,6 +696,7 @@ def _error(error: RoundsError) -> dict:
     return {"reason": error.reason, "fix": error.fix}
 
 
-__all__ = ["Project", "COUNTS", "Round", "Rounds", "rounds", "rounds_as_text", "Kind",
+__all__ = ["Project", "Projects", "projects", "COUNTS", "Round", "Rounds", "rounds",
+           "rounds_as_text", "Kind",
            "WAITING", "Waiting", "waiting", "waiting_as_text", "Numbers", "numbers",
            "numbers_as_text", "age", "as_json"]
