@@ -210,9 +210,14 @@ export function presetOff(applied: Choice, fields: readonly PanelField[], option
 
 /** The query `/api/last` and `/api/recents` take for what the line above the box names: the
  * seat while one is applied, else the project, else the folder; null while no place is
- * picked, and for a scratch folder, which no launch is filled from or run again in. */
+ * picked, and for a scratch folder, which no launch is filled from or run again in. A seat
+ * goes with the project picked, if any, which the default comms identity reads; the seat
+ * still keys the launches. */
 export function lastQuery(applied: Choice, pick: Pick | null): string | null {
-  if (applied.kind === "seat") return new URLSearchParams({ seat: applied.name }).toString();
+  if (applied.kind === "seat") {
+    return new URLSearchParams({ seat: applied.name, ...(pick?.kind === "project" ? { project: pick.key } : {}) })
+      .toString();
+  }
   if (pick === null || pick.kind === "choose" || pick.kind === "scratch") return null;
   return new URLSearchParams(pick.kind === "project" ? { project: pick.key } : { cwd: pick.path }).toString();
 }

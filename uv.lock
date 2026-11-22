@@ -971,6 +971,7 @@ version = "0.1.3"
 source = { editable = "packages/launcher" }
 dependencies = [
     { name = "moxi" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
@@ -1022,6 +1023,7 @@ requires-dist = [
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
 provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions"]
 

@@ -10,6 +10,7 @@ import dataclasses
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ from moxi.paths import Layout
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, slots, store, targets
+from moxi_launcher import api, catalog, first, names, slots, store, targets
 from moxi_launcher.api import LaunchRequest, ReplayRequest
 from moxi_launcher.compose import Context, claude, codex, common
 
@@ -553,16 +554,18 @@ def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 
 
-def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec):
+def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec, monkeypatch):
     api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
                              session_id=SID, actor="ann"))
     where = row("r1").cwd
-    assert where == str(common.scratch_dir("r1"))
+    assert where == str(common.scratch_dir(row("r1").values["name"]))
     ended()
+    # Under another name the folder would be another; the replay keeps the row's.
+    monkeypatch.setattr(names, "now", lambda: datetime(2026, 11, 9, 8, 0))
     got = api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2",
                                    actor="ann"))
     assert row("r2").cwd == where and no_exec[-1]["cwd"] == where
-    assert not common.scratch_dir("r2").exists()
+    assert row("r2").values["name"] == row("r1").values["name"]
     assert got.state == "started"
 
 

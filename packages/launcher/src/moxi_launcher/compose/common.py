@@ -26,7 +26,6 @@ import os
 import re
 import stat
 import subprocess
-import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -537,20 +536,27 @@ def first_turn(by: str, *, brief: str | None = None, handoff: str | None = None,
     return f"{header}\nstart posture: {posture}" + (f"\n{rest}" if rest else "")
 
 
+#: The folder this user's scratch parent is made in, where there is a uid. Fixed: `TMPDIR`
+#: is never read, since one under a folder notes keeps notes for would give every scratch
+#: folder a notes home.
+SCRATCH_TMP = Path("/tmp")
+
+
 def scratch_root() -> Path:
-    """The folder this user's scratch launches go under: `moxi-scratch-<uid>` in the
-    system's temporary folder (the user's name where there is no uid), always absolute.
-    One per user, so no other user owns it, and none can move a launch's folder out of it
-    and put their own in its place."""
+    """The folder this user's scratch launches go under: `/tmp/scratch-<uid>`, by the
+    numeric uid, one per user, so no other user owns it, and none can move a launch's
+    folder out of it and put their own in its place. Where there is no uid (Windows) it is
+    `scratch-<user name>` in the user's own temporary folder, `TEMP` or `TMP`."""
     if hasattr(os, "getuid"):
-        who = str(os.getuid())
-    else:
-        try:
-            who = getpass.getuser()
-        except Exception:  # noqa: BLE001  (no name to be had: one folder for all)
-            who = "user"
-        who = re.sub(r"[^A-Za-z0-9._-]", "_", who) or "user"
-    return Path(os.path.abspath(tempfile.gettempdir())) / f"moxi-scratch-{who}"
+        return SCRATCH_TMP / f"scratch-{os.getuid()}"
+    try:
+        who = getpass.getuser()
+    except Exception:  # noqa: BLE001  (no name to be had: one folder for all)
+        who = "user"
+    who = re.sub(r"[^A-Za-z0-9._-]", "_", who) or "user"
+    temp = (os.environ.get("TEMP") or os.environ.get("TMP")
+            or str(Path.home() / "AppData" / "Local" / "Temp"))
+    return Path(os.path.abspath(temp)) / f"scratch-{who}"
 
 
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9._-]+")
@@ -562,14 +568,24 @@ def plain_name(name: str) -> bool:
     return bool(_PLAIN_NAME.fullmatch(name)) and name not in (".", "..")
 
 
-def scratch_dir(request_id: str) -> Path:
-    """Where a scratch launch works: a folder named by its request id under
-    `scratch_root()`, always as an absolute path (a slot launch is refused a relative
-    one). Only the path: the launch makes the folder. Raises ValueError for a request id
-    that is not a plain name, which would put the folder outside `scratch_root()`."""
-    if not plain_name(request_id):
-        raise ValueError(f"request id {request_id!r} is not a plain name")
-    return scratch_root() / request_id
+_FOLD_UNSAFE = re.compile(r"[^a-z0-9-]+")
+
+
+def scratch_name(session_name: str) -> str:
+    """The name of a scratch launch's folder: the session name folded to lowercase
+    letters, digits and single dashes, at most 63 characters, or `launch` when nothing is
+    left, whatever the name (`Foo_Bar` works in `foo-bar`). A folded name holds no `.`,
+    `..` or separator, so the folder stays under `scratch_root()`."""
+    folded = re.sub(r"-{2,}", "-", _FOLD_UNSAFE.sub("-", session_name.lower())).strip("-")
+    return folded[:63].strip("-") or "launch"
+
+
+def scratch_dir(session_name: str) -> Path:
+    """Where a scratch launch works: a folder named by its session name, folded
+    (`scratch_name`), under `scratch_root()`, always as an absolute path (a slot launch is
+    refused a relative one). Only the path: the launch makes the folder, and a later
+    launch under the same name works in the same one."""
+    return scratch_root() / scratch_name(session_name)
 
 
 def scratch_root_problem(root: Path | None = None) -> str | None:
@@ -880,6 +896,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
            "LIMIT_FALLBACK", "limit_mark", "locator", "no_credentials", "option_stamps",
            "prompt_path", "read_settings", "usage_default_mark",
-           "replay_env", "scratch_dir", "scratch_root", "scratch_root_problem", "scrub",
-           "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
+           "replay_env", "scratch_dir", "scratch_name", "scratch_root",
+           "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
+           "settings_value", "short_env",
            "skip_key_owed", "stamps", "without_settings", "write_prompt", "write_settings"]

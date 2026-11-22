@@ -283,22 +283,8 @@ def test_a_scratch_launch_gives_slots_an_absolute_cwd(harness, rig, tmp_path,
                                    request_id="r1", session_id=SID, actor="ann"))
     [call] = rig.calls("start")
     assert os.path.isabs(call["cwd"])
-    assert call["cwd"] == str(compose.common.scratch_dir("r1"))
+    assert call["cwd"] == str(compose.common.scratch_dir(row("r1").values["name"]))
     assert got.state == "started"
-
-
-def common_root_name() -> str:
-    return compose.common.scratch_root().name
-
-
-def test_a_relative_temp_dir_still_gives_an_absolute_scratch_dir(tmp_path,
-                                                                   monkeypatch):
-    import tempfile
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: ".")
-    path = compose.common.scratch_dir("r9")
-    assert path.is_absolute() and path == tmp_path / common_root_name() / "r9"
 
 
 def test_a_command_that_did_not_start_fails_the_row_with_slots_exec_line(work, harness,
