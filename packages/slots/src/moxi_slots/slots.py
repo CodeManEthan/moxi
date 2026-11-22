@@ -15,6 +15,7 @@ import os
 import shlex
 import time
 from collections.abc import Iterable
+from dataclasses import replace
 
 from . import panes, places, registry, server, tmux
 from .errors import Refused, UsageError
@@ -159,8 +160,8 @@ def _remove_why(found: Slot | None, number: int, *, force: bool,
         return "occupied", (f"slot {number} runs a launch{label}; end it through its "
                             "session first")
     if found.hold is not None and found.hold.holder != holder:
-        return "held", (f"slot {number} is held by {found.hold.holder} until "
-                        f"{_when(found.hold.until)}; `moxi slots release {number} "
+        return "held", (f"slot {number} is held by {found.hold.holder} "
+                        f"{until_words(found.hold)}; `moxi slots release {number} "
                         f"--holder {found.hold.holder}` ends the hold")
     if found.state == MISSING or found.idle or force:
         return None
@@ -171,6 +172,14 @@ def _remove_why(found: Slot | None, number: int, *, force: bool,
 
 def _when(epoch: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch))
+
+
+def until_words(reservation: Hold) -> str:
+    """How long a hold lasts, for a sentence: `until <time>`, or `until released by hand`
+    for one with no `until`."""
+    if reservation.until is None:
+        return "until released by hand"
+    return f"until {_when(reservation.until)}"
 
 
 def remove(numbers: Iterable[int | str] | None = None, *, all_free: bool = False,
@@ -256,35 +265,55 @@ def rename(slot: int | str, name: str | None) -> None:
         registry.write(reg)
 
 
-def hold(slot: int | str, holder: str, seconds: float) -> Hold:
-    """Reserve a slot for `holder` for `seconds` (at most 24 h). A free, ended or occupied
-    slot may be held; a missing one is refused (`missing`), and one another holder holds
-    is refused (`held`, naming them). The same holder holding again moves `until`."""
+def hold(slot: int | str, holder: str, seconds: float | None = None, *,
+         expect: str | None = None) -> Hold:
+    """Reserve a registered slot for `holder`: for `seconds` (at most 24 h), or, with
+    `seconds` None, until the holder releases it. The slot may be in any state, missing
+    included: a hold reserves the number. A slot another live holder holds is refused
+    (`held`, naming them), and a number with no registry row `no-slot`. The same holder
+    holding again replaces its hold.
+
+    `expect`, a request id, makes the hold conditional: it is refused `changed` unless the
+    slot's last launch carries that `request_id` in its meta, checked under the same lock
+    as the hold."""
     check_holder(holder)
-    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
-            or not 0 < seconds <= HOLD_MAX:
-        raise UsageError(f"a hold lasts more than 0 and at most {HOLD_MAX} seconds, not "
-                         f"{seconds!r}")
+    if seconds is not None and (isinstance(seconds, bool)
+                                or not isinstance(seconds, (int, float))
+                                or not 0 < seconds <= HOLD_MAX):
+        raise UsageError(f"a hold lasts more than 0 and at most {HOLD_MAX} seconds, or "
+                         f"until released (None), not {seconds!r}")
+    if expect is not None and not (isinstance(expect, str) and expect):
+        raise UsageError(f"expect is a request id, not {expect!r}")
     with registry.locked():
-        reg, listing = _snapshot()
+        reg = registry.read()
         number = resolve(slot, reg)
         row = reg.rows.get(number)
-        found = listing.find(number)
-        if row is None or found is None:
+        if row is None:
             raise Refused("no-slot", f"there is no slot {number}; `moxi slots create "
                                      f"{number}` makes it")
-        if found.state == MISSING:
-            raise Refused("missing", f"slot {number} has no session; `moxi slots create "
-                                     f"{number}` makes it again")
         now = time.time()
         current = row.live_hold(now)
         if current is not None and current.holder != holder:
-            raise Refused("held", f"slot {number} is held by {current.holder} until "
-                                  f"{_when(current.until)}",
+            raise Refused("held", f"slot {number} is held by {current.holder} "
+                                  f"{until_words(current)}",
                           holder={"holder": current.holder, "until": current.until})
-        row.hold = Hold(holder, now + float(seconds))
+        if expect is not None:
+            meta = row.last.meta if row.last is not None else None
+            found = meta.get("request_id") if isinstance(meta, dict) else None
+            if found != expect:
+                raise Refused("changed", f"slot {number}'s last launch is "
+                                         f"{found or 'none recorded'}, not {expect}",
+                              holder=_holder_of_row(row))
+        row.hold = Hold(holder, None if seconds is None else now + float(seconds))
         registry.write(reg)
         return row.hold
+
+
+def _holder_of_row(row: Row) -> dict | None:
+    """The last launch's label and meta from a registry row, for a `changed` refusal."""
+    if row.last is None:
+        return None
+    return {"label": row.last.label, "meta": row.last.meta}
 
 
 def release(slot: int | str, holder: str) -> bool:
@@ -301,6 +330,38 @@ def release(slot: int | str, holder: str) -> bool:
         row.hold = None
         registry.write(reg)
         return live
+
+
+#: The longest reason `settle` takes.
+SETTLED_MAX = 200
+
+
+def settle(slot: int | str, why: str) -> bool:
+    """End a slot's crashed reading without a run: record `why` as its last run's end
+    (`last.ended` with `settled`, no status and no signal). True when written; False
+    when the slot has no last launch to settle. Refuses `no-slot` for a number with no
+    registry row and `occupied` for a slot whose run pane is live. A new placement
+    replaces `last`, and so ends a settled record too."""
+    from .model import RunEnd
+
+    if not isinstance(why, str) or not why or len(why) > SETTLED_MAX \
+            or not why.isprintable():
+        raise UsageError(f"why is 1-{SETTLED_MAX} printable characters, not {why!r}")
+    with registry.locked():
+        reg, listing = _snapshot()
+        number = resolve(slot, reg)
+        row = reg.rows.get(number)
+        found = listing.find(number)
+        if row is None or found is None:
+            raise Refused("no-slot", f"there is no slot {number}")
+        if found.state == OCCUPIED:
+            raise Refused("occupied", f"slot {number} runs a launch; a live run is not "
+                                      "settled", holder=_holder_of(found, "occupied"))
+        if row.last is None:
+            return False
+        row.last = replace(row.last, ended=RunEnd(time.time(), None, None, settled=why))
+        registry.write(reg)
+        return True
 
 
 def inside_this_server(env=None) -> bool:
@@ -373,5 +434,5 @@ def quoted(argv: list[str]) -> str:
 
 
 __all__ = ["resolve", "list_slots", "show", "make_session", "create", "remove", "rename",
-           "hold", "release", "inside_this_server", "attach_argv", "attach_env", "busy",
-           "quoted"]
+           "hold", "release", "until_words", "SETTLED_MAX", "settle", "inside_this_server",
+           "attach_argv", "attach_env", "busy", "quoted"]

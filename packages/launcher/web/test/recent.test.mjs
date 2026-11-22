@@ -35,7 +35,7 @@ const REFUSED = parseRecent({ state: "up", detail: null, request: null, shows: n
   refused: { code: "no-preset", row: null, problem: "no preset named proj-c.", hint: "pick another preset" } });
 
 const SLOTS = parseTargets({ state: "up", new_slot: true, default: { target: "slot", slot: 2 },
-  slots: [{ number: 1, state: "occupied", launchable: false }, { number: 2, state: "free", launchable: true }] });
+  slots: [{ number: 1, state: "occupied", launchable: false }, { number: 2, state: "free", launchable: true, choosable: true }] });
 
 test("the list reads each recent with its slot as a number, and a failed read as none", () => {
   const listed = parseRecents({ state: "up", detail: null, recents: [

@@ -6,6 +6,7 @@ per exit, and the exit log."""
 from __future__ import annotations
 
 import os
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -623,3 +624,124 @@ def test_retention_ages_out_exits_with_their_runs_and_those_with_none(conn):
 def test_the_exit_run_is_a_relaunch_job_whose_outcomes_are_verdicts():
     assert issubclass(exits.ExitRun, job.RelaunchJob)
     assert set(exits.EXIT_CODES) == set(store.VERDICTS)
+
+
+# -- park's exit ------------------------------------------------------------------------------
+
+
+def park_go(conn, **kw):
+    """`go` as park's exit: mode `park`, waiting for quiet up to 30 s on the fake clock."""
+    return go(conn, mode="park", deadline=30.0, **kw)
+
+
+ACTIVE = dict(pane_id="%9", pane_in_mode=False, client_activity=1e9 - 5,
+              pane_activity=1e9 - 5)
+
+
+def test_parks_exit_waits_for_an_open_turn_to_end(conn):
+    session = FakeSession(facts_seq=[facts(turn_open=True), facts(turn_open=True), facts()])
+    result = park_go(conn, session=session)
+    assert result.data["outcome"] == "exited" and session.commands == [("exit", 4)]
+    assert result.run.mode == "park"
+    waits = [e.detail["word"] for e in store.run_events(conn, result.run.run_id)
+             if e.kind == "wait"]
+    assert waits == ["turn"]
+
+
+def test_parks_exit_ignores_a_clients_activity_that_holds_exit_session(conn):
+    # The quiet read takes the time from the clock, not the job's wall.
+    now = time.time()
+    pane = SimpleNamespace(**{**ACTIVE, "client_activity": now - 5, "pane_activity": now - 5})
+    held = go(conn, slots_api=FakeSlots(ended=True, pane=pane))
+    assert (held.data["outcome"], held.run.word) == ("held", "person")
+    parked = park_go(conn, slots_api=FakeSlots(ended=True, pane=pane))
+    assert parked.data["outcome"] == "exited"
+
+
+@pytest.mark.parametrize("cache", [idle(60), None], ids=["idle-a-minute", "no-cache"])
+def test_parks_exit_does_not_wait_on_background_shells_that_hold_exit_session(conn, cache):
+    held = go(conn, cache=cache, read_shells=lambda pid: [4101])
+    assert (held.data["outcome"], held.run.word) == ("held", "shells")
+    seen, session = [], FakeSession(exits=(Result("failed", "not-exited"),))
+    slots_api = FakeSlots(ended=False, answer="ended")
+    parked = park_go(conn, session=session, slots_api=slots_api, cache=cache,
+                     read_shells=lambda pid: seen.append(pid) or [4101])
+    assert parked.data["outcome"] == "exited" and seen == []
+    assert session.commands == [("exit", 4)] and ("answer", 0) in slots_api.calls
+    kinds = [e.kind for e in store.run_events(conn, parked.run.run_id)]
+    assert "wait" not in kinds and "shells" not in kinds
+
+
+def test_parks_dry_run_does_not_count_background_shells(conn):
+    held = go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert held.exit_code == 75 and held.data["word"] == "shells"
+    parked = park_go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert parked.exit_code == 0 and parked.data["shells"] == []
+    assert parked.lines == (f"would exit session {SID} through its exit dialog in slot 3",)
+    assert store.runs(conn) == [] and logged(conn) == []
+
+
+def test_parks_exit_ignores_a_client_at_the_dialog(conn):
+    client = SimpleNamespace(**{**ACTIVE, "pane_activity": None})
+    slots_api = DrawingSlots(then=client)
+    result = park_go(conn, slots_api=slots_api,
+                     session=FakeSession(exits=(Result("failed", "not-exited"),)))
+    assert result.data["outcome"] == "exited" and ("answer", 0) in slots_api.calls
+
+
+def test_copy_mode_at_the_dialog_still_holds_parks_exit(conn):
+    copy = SimpleNamespace(pane_id="%9", pane_in_mode=True, client_activity=None,
+                           pane_activity=None)
+    slots_api = DrawingSlots(then=copy)
+    result = park_go(conn, slots_api=slots_api)
+    assert result.data["outcome"] == "at-dialog" and result.run.word == "person"
+    assert ("answer", 0) not in slots_api.calls
+
+
+@pytest.mark.parametrize("session, pane, word", [
+    (FakeSession(facts_seq=[facts(draft=True)]), None, "draft"),
+    (FakeSession(), SimpleNamespace(pane_id="%9", pane_in_mode=True, client_activity=None,
+                                    pane_activity=None), "person"),
+], ids=["draft", "copy-mode"])
+def test_parks_exit_still_held_when_its_wait_runs_out(conn, session, pane, word):
+    result = park_go(conn, session=session, slots_api=FakeSlots(ended=True, pane=pane))
+    assert (result.data["outcome"], result.run.word) == ("held", word)
+    assert session.commands == []
+    [row] = logged(conn)
+    assert row.verdict == "held"
+
+
+def test_parks_exit_goes_back_to_its_wait_on_a_refusal_that_clears(conn):
+    session = FakeSession(exits=(Result("refused", "busy-turn"), Result("ran")))
+    result = park_go(conn, session=session)
+    assert result.data["outcome"] == "exited" and len(session.commands) == 2
+
+
+def test_parks_exit_tries_again_a_launch_another_run_holds(conn):
+    other = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                             session_id=SID, by="ann", state="waiting",
+                             job=exits.own_job())
+    clock = Clock()
+
+    def sleep(seconds):
+        clock.sleep(seconds)
+        store.end_run(conn, other.run_id, "expired")
+
+    result = exits.park_exit(
+        SID, deadline=30.0, conn=conn, turns=FakeTurns(FakeSession()),
+        slots_api=FakeSlots(ended=True), settings=SETTINGS, caller_env=dict(os.environ),
+        clock=clock, wall=lambda: 1e9, sleep=sleep)
+    assert result.data["outcome"] == "exited"
+    assert [r.verdict for r in reversed(logged(conn))] == ["refused", "exited"]
+
+
+def test_parks_exit_gives_up_on_a_launch_another_run_holds_past_its_wait(conn):
+    store.insert_run(conn, kind="relaunch", mode="self", request_id="r1", session_id=SID,
+                     by="ann", state="waiting", job=exits.own_job())
+    clock = Clock()
+    with pytest.raises(store.RunOpen):
+        exits.park_exit(SID, deadline=10.0, conn=conn, turns=FakeTurns(FakeSession()),
+                        slots_api=FakeSlots(ended=True), settings=SETTINGS,
+                        caller_env=dict(os.environ), clock=clock, wall=lambda: 1e9,
+                        sleep=clock.sleep)
+    assert {r.verdict for r in logged(conn)} == {"refused"}
