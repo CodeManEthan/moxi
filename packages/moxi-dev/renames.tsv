@@ -12730,6 +12730,7 @@ sessions	packages/sessions/tests/test_browser_list.py	expect(button).not_to_have
 sessions	packages/sessions/tests/test_browser_list.py	expect(button).to_have_class("set")	keep	set	set
 sessions	packages/sessions/tests/test_browser_list.py	for key in ("folder", "harness", "when"):	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_list.py	if key == "folder":	keep	folder	folder
+sessions	packages/sessions/tests/test_browser_live.py	"turn_started_at": now - 300 if turn_open else None, "agents": 0, "draft": False, "stale": False,	keep	stale	stale
 sessions	packages/sessions/tests/test_browser_opened.py	db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())	use	directory=	work_dir=
 sessions	packages/sessions/tests/test_browser_page.py	check = ui_component_check(ui_page, "sessions", "page", keep=True)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_page.py	expect(panel.locator('section[data-part="subagents"]')).to_have_attribute("data-state", "refused")	keep	refused	refused
