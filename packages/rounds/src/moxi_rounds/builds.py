@@ -257,13 +257,30 @@ class Status:
     hand_merge: str | None = None
 
 
+#: The builds last read, with the history they were read from and its length: a
+#: reader asks for one round's builds many times over, and a history only grows.
+_last: tuple[list, int, tuple[Build, ...]] | None = None
+
+
 def builds(round_state: states.State) -> tuple[Build, ...]:
-    """Every build the round's log records, in the order commissioned."""
+    """Every build the round's log records, in the order commissioned. The answer for
+    a history as long as it was at the last call is that call's, not read again."""
+    global _last
+    history = round_state.history
+    last = _last
+    if last is not None and last[0] is history and last[1] == len(history):
+        return last[2]
+    made = _builds(history)
+    _last = (history, len(history), made)
+    return made
+
+
+def _builds(history: list[dict]) -> tuple[Build, ...]:
     found: list[dict] = []
     open_by_stage: dict[str, dict] = {}
     credited: list[dict] = []
     taken_back: set[str] = set()
-    for event in round_state.history:
+    for event in history:
         kind = event["type"]
         if kind == "ruling.recorded":
             if isinstance(event.get("revokes"), str):

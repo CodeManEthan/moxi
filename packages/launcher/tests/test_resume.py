@@ -13,12 +13,13 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import wait_for
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import (api, catalog, first, presets, resume, slots, store, target,
-                           targets)
+from moxi_launcher import (api, catalog, first, presets, restore, resume, slots, store,
+                           target, targets)
 from moxi_launcher.compose import common
 
 TESTS = Path(__file__).resolve().parent
@@ -793,6 +794,38 @@ def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     resume.resume(SID, request_id="r2", turns=None)
     assert [c["numbers"] for c in rig.calls("create")] == [[3]]
     assert rig.calls("start")[-1]["slot"] == 3
+
+
+def test_a_restored_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
+    # Restore resumes a parked session through the slot target, so the new launch's row
+    # names its own `claude` by pid and start time, the process its endpoints are
+    # children of.
+    rig.plan(slots={"3": {"state": "free", "launchable": True}}, run=True)
+    first_launch(work, target="slot", slot="3")
+    with_store(lambda c: store.add_entry(c, park_id="p1", kind="park", by="ann", slot=3,
+                                         request_id="r1", session_id=SID,
+                                         harness="claude", outcome="exited"))
+    rig.plan(slots={"3": {"state": "ended", "launchable": False,
+                          "hold": {"holder": store.park_holder("p1"), "until": None},
+                          "last": {"at": 1.0, "label": "launcher:r1",
+                                   "meta": {"request_id": "r1", "session_id": SID,
+                                            "chain": "r1"}}}})
+    result = restore.restore([3], turns=None)
+    assert result.exit_code == 0, result.lines
+    [entry] = with_store(lambda c: store.entries_log(c))
+    assert entry.state == "restored" and entry.restore_request_id
+    new = with_store(lambda c: store.get(c, entry.restore_request_id))
+    assert (new.resume_of, new.slot) == ("r1", "3")
+
+    def runs_of_new():
+        return [r for r in harness.runs()
+                if r["env"].get("MOXI_LAUNCHER_REQUEST") == new.request_id]
+
+    wait_for(lambda: runs_of_new(), timeout=30)
+    [run] = runs_of_new()
+    assert new.pid == run["pid"]
+    assert run["started"] is not None and new.pid_started is not None
+    assert abs(new.pid_started - run["started"]) < 1.0
 
 
 def test_a_slot_named_for_a_terminal_resume_is_refused(work, harness, no_exec):
