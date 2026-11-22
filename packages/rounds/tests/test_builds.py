@@ -125,6 +125,20 @@ def test_a_stage_never_commissioned_has_no_build(a_round):
     assert a_round.build("B3") is None
 
 
+def test_a_history_read_as_it_grows_gives_the_builds_a_fresh_read_gives(a_round):
+    a_round.commission(base="a" * 40)
+    a_round.check("b" * 40, "a" * 40)
+    a_round.add("build.dropped", stage="B1", by="lead", record="comms:1234567")
+    a_round.commission(base="d" * 40)
+    a_round.check("e" * 40, "d" * 40)
+    events = log.read(a_round.path)
+    # The fold changes one state in place, so each read below is of a longer history.
+    for count, grown in enumerate(state.folding(events), start=1):
+        found = builds.builds(grown)
+        assert builds.builds(grown) is found
+        assert found == builds.builds(state.fold(events[:count]))
+
+
 # -- recorded ends ----------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("event", "fields", "word"), [
