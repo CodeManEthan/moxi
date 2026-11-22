@@ -170,12 +170,6 @@ def test_a_manifest_that_cant_be_read_shows_its_line_and_no_count(loadout_dir, u
 def test_the_blocks_link_on_the_modules_view_opens_the_page(loadout_dir, ui_page):
     ui_page.goto("/m/ui/modules")
     home = ui_page.locator("#moxi-panel > moxi-ui-page #home")
-    # The page servers list comes over the push stream, which reopens with its topic only
-    # once the blocks have stopped asking for theirs, so it is often drawn after the link
-    # shows, and it grows the row above the link. A click whose press and release
-    # straddle that move releases off the link and opens nothing, so the click waits for
-    # the list.
-    expect(home.locator('[data-block="ui.servers"] li[data-module="loadout"]')).to_be_visible()
     link = home.locator("moxi-loadout-drift h2 a")
     expect(link).to_have_text("Loadout")
     expect(link).not_to_have_attribute("aria-current", "page")

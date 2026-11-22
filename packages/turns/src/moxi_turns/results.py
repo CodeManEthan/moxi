@@ -477,13 +477,17 @@ class Lost(_Value):
 
 @dataclass(frozen=True)
 class Ended(_Value):
-    """The turn that took a delivery ended, with its outcome (one of `OUTCOMES`)."""
+    """The turn that took a delivery ended, with its outcome (one of `OUTCOMES`) and
+    `answer`, the turn's final text: on Claude Code the assistant's final visible text,
+    on Codex the turn's last agent message; None when the turn had no text, on either
+    harness, and where the harness gave none."""
 
     KIND = "ended"
     turn_id: str | None
     outcome: str
     delivery: str | None = None
     ref: str | None = None
+    answer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -552,8 +556,13 @@ class SessionEvent:
       `is_error`, `point` (`after`, or `pre` where the harness has only a pre-tool point)
       and `record_path`, the file the harness writes this session's records to (None
       where it has none).
-    - On `prompt`: `text`, the prompt as the harness gave it, and `origin`, its origin
-      kind (`composer`, `plugin`, ...), None where the harness gives none.
+    - On `prompt`: `text`, the prompt as the harness gave it; `origin`, its origin
+      kind (`composer`, `plugin`, ...), None where the harness gives none; and `own`,
+      true when that origin is on turns' `prompt.own_origins`, so the person typed it;
+      `delivery_by` and `delivery_senders`, the `by` and `senders` of the turns delivery
+      that is this prompt, both None for a prompt turns did not hand in (`senders` an
+      empty tuple when the delivery named none); and `opens`, true when the prompt opens
+      a turn, false when it joins a main-loop turn already running.
     - On `usage`: `usage`, the harness's usage reading as given, unparsed, and
       `received_at`, when it arrived (Unix seconds).
     - On `codex_limits`: `payload`, the limits reading as given, unparsed, `received_at`,
@@ -581,6 +590,10 @@ class SessionEvent:
     received_at: float | None = None
     payload: dict[str, Any] | None = None
     kind: str | None = None
+    own: bool | None = None
+    delivery_by: str | None = None
+    delivery_senders: tuple[str, ...] | None = None
+    opens: bool | None = None
 
 
 _KINDS: dict[str, type[_Value]] = {

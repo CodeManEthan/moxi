@@ -17,7 +17,7 @@ nothing of this user holds.
 | address | a URL from tunnel or `public_url` | tunnel's entry on while the switch is off | the switch on and no URL |
 | port | a port Claude is known to reach | any other port | |
 | edge | Tailscale | Cloudflare or a typed URL, with the last check | |
-| providers | each started, with its tool count | none loaded | a failed start, a refused entry, a clashing tool name |
+| providers | each started, with its served tool count, and each tool `tools.withheld` lists | none loaded | a failed start, a refused entry, a clashing tool name |
 | mint gate | a gate is loaded | | none loaded |
 | grants | the count | a stale grant | |
 | each provider's own | from its `status()` | | |
@@ -237,23 +237,40 @@ def _count(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
+def _with_withheld(parts: list[str], withheld: list[str], entries: list[dict]) -> str:
+    """`parts` joined, then each withheld tool with the provider that declares it."""
+    if withheld:
+        owners: dict[str, str] = {}
+        for entry in entries:
+            for tool in entry.get("tools") or ():
+                owners.setdefault(str(tool), str(entry.get("module")))
+        parts = [*parts, "withheld: " + ", ".join(
+            f"{name} ({owners[name]})" if name in owners
+            else f"{name} (no provider declares it)" for name in withheld)]
+    return "; ".join(parts)
+
+
 def _provider_rows(answer: dict[str, Any]) -> list[Row]:
     rows: list[Row] = []
     entries = [e for e in answer.get("providers") or () if isinstance(e, dict)]
     clashes = answer.get("clashes") or {}
+    withheld = [str(name) for name in answer.get("withheld") or ()]
     bad = [e for e in entries if e.get("state") in ("failed", "refused")]
     started = [e for e in entries if e.get("state") == "started"]
     if bad or clashes:
         parts = [f"{e.get('module')}: {e.get('why') or e.get('state')}" for e in bad]
         parts += [f"the tool {name} is declared by {' and '.join(mods)}, so neither serves it"
                   for name, mods in sorted(clashes.items())]
-        rows.append(Row(MODULE, "providers", "fail", "; ".join(parts)))
+        rows.append(Row(MODULE, "providers", "fail", _with_withheld(parts, withheld,
+                                                                     entries)))
     elif not started:
-        rows.append(Row(MODULE, "providers", "warn", NO_PROVIDER))
+        rows.append(Row(MODULE, "providers", "warn", _with_withheld([NO_PROVIDER], withheld,
+                                                                     entries)))
     else:
-        rows.append(Row(MODULE, "providers", "ok", "; ".join(
-            f"{e.get('module')}, {_count(len(e.get('tools') or ()), 'tool')}"
-            for e in started)))
+        rows.append(Row(MODULE, "providers", "ok", _with_withheld([
+            f"{e.get('module')}, "
+            f"{_count(len([t for t in e.get('tools') or () if t not in withheld]), 'tool')}"
+            for e in started], withheld, entries)))
 
     gates = answer.get("gates") or []
     if gates:

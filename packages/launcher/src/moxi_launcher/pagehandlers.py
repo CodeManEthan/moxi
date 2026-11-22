@@ -7,7 +7,7 @@ log (`store.log`), the runs with their events (`store.runs`, `store.run_events`)
 past-sessions list (`resume.sessions`), a session's state (`state.state`, or
 `state.of_launch` for every live launch), the places the page server's own actor last
 launched in (`store.places`), where a launch may run now (slots' `list_slots`, joined
-with the launch log) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
+with the launch log, its park entries and read-only crash discovery) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
 and start time its row recorded, or, with no pid, on the endpoint that claimed it
@@ -69,6 +69,22 @@ ticket, so what the page shows of a recent is what running it again runs. The la
 are those of the seat the query names, else of its project, else of its folder, and a
 project's or a folder's never include a seat's.
 
+**The comms identity `/api/last` hands back is not the newest launch's own.** It is
+answered apart from the values, once for each harness (`identities`), so the form fills
+the one for the harness it is drawn for, whatever harness the newest launch ran. For a
+harness it is the name of the newest launch of that harness that bound one, skipping one
+still spawning, where a project's launches include those made through its seats, even
+when comms reports that name retired, and its scope is always the empty one, which comms
+reads as global: a project scope is never carried. Each carries comms' refusal of a
+launch under it, if any (a retired name's among them), so the page shows the name with
+why it can't launch, and a note when a live session holds the same name in a project
+scope. With no such name, and for any
+harness but Codex, it is the default (`default_identity`): on a seat named for one of
+its project's agents that sets no identity, the seat's own name; else a project of kind
+`agent`'s own key; else the project's `lead`; else `<key>-lead`, only when comms lists
+that name. With no launch at all the answer has no `at` and no values, only the
+identities.
+
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
 typed, as the command line reads it: it becomes its row's option and goes through
@@ -100,14 +116,19 @@ again, as the presets file is now, and writes the request file
 the refusal the job recorded before it. A ticket used a second time is a 409, whether its
 request file is still there or the launch log already knows its id.
 
-`/api/resume` takes a session id, and a slot in place of the launch's own. It answers the
+`/api/resume` takes a session id, a slot in place of the launch's own, a brief or a brief
+file (an absolute path), sent as the resumed session's first turn, and `plain`, which Home's
+`Continue the last session` sends with an empty box: a resume with no first turn, which a
+`go` launch takes too. It answers the
 refusals a resume meets before anything runs, as `moxi launcher resume` words them: no
 launch holds the id, the launch ran headless (nothing to resume it into), it has no session
 id, its harness is no longer launched, its session is live now (liveness read at the call),
-its liveness can't be read, or a relaunch, exit or recycle under way owns it (an open run
+its liveness can't be read, the brief doesn't fit (both given, none for a `go` launch that
+is not `plain`, one under `with:<identity>`), or a relaunch, exit or recycle under way owns it (an open run
 whose job still runs). A launch that ran in a terminal is not resumed here: the
-answer is the `moxi launcher resume <id>` command to copy, since run here it would take the
-server's place. A slot launch is resumed by the same detached job as a launch: a request
+answer is the `moxi launcher resume <id>` command to copy, with its `--brief` or
+`--brief-file`, or `--plain` for a `plain` resume with neither, since run here it would
+take the server's place. A slot launch is resumed by the same detached job as a launch: a request
 file whose act is `resume`, under a new request id that becomes the new launch's, and a 202
 with the status path holding that id. What the resume meets later (a run opened since, a
 slot slots won't give, another resume of the session starting first) the job records as it
@@ -158,8 +179,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, joiner, keepwarm, names, presets, recycle, relaunch,
-               settings, slots, state, store, target, targets, waits)
+from . import (api, catalog, first, identity, job, joiner, keepwarm, names, parks, presets,
+               recycle, relaunch, settings, slots, state, store, target, targets, waits)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -651,12 +672,37 @@ def _slots_there() -> bool:
         return False
 
 
+def _parked(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
+    """The session a park reservation keeps `slot` for: its open park entry's, when the
+    slot's hold is that entry's."""
+    holder = slot.hold.holder if slot.hold else None
+    if conn is None or holder is None or not holder.startswith(store.HOLDER_PREFIX):
+        return None
+    entry = store.open_entry(conn, slot.number)
+    if entry is None or entry.holder != holder:
+        return None
+    row = store.get(conn, entry.request_id)
+    return {"session_id": entry.session_id,
+            "label": entry.session_id if row is None else names.shown(row)}
+
+
+def _crash_reserved(conn: sqlite3.Connection | None, api: Any, listing: Any) -> set[int]:
+    """The slots the next launch's crash discovery would reserve, read without writing."""
+    if conn is None:
+        return set()
+    found = parks.discover(conn, api, by=first.actor(), write=False, listing=listing)
+    return {seen.slot for seen in found if seen.action == "reserve"}
+
+
 def targets_now() -> dict[str, Any]:
     """`/api/targets`' answer. Where slots is installed, loads and can run, each
-    registered slot in number order, and a default that names the lowest launchable one,
-    or none when a launch would take a new slot. Where it is not, or the slots can't be
-    read, no slot and the terminal as the default, with `unread` true only for slots
-    that are there and could not be read. Headless is never the default."""
+    registered slot in number order, and a default that names the slot a launch naming
+    none would take, or none when it would take a new slot. A slot is `choosable` when a
+    launch may name it: launchable, or missing with no hold (made again at launch), and
+    not one the next launch's crash discovery reserves (`crashed`). A park reservation's
+    slot names its `parked` session. Where slots is not there, or the slots can't be
+    read, no slot and the terminal as the default, with `unread` true only for slots that
+    are there and could not be read. Headless is never the default."""
     none = _up(slots=[], new_slot=False, unread=False, default=dict(NO_SLOTS))
     api = _usable_slots()
     if api is None:
@@ -666,11 +712,16 @@ def targets_now() -> dict[str, Any]:
         return {**none, "unread": True}
     listed = sorted(listing.slots, key=lambda slot: slot.number)
     with _store() as conn:
+        crashed = _crash_reserved(conn, api, listing)
         rows = [{"number": slot.number, "state": slot.state, "launchable": slot.launchable,
+                 "choosable": slot.number not in crashed and (
+                     slot.launchable or (slot.state == "missing" and slot.hold is None)),
+                 "crashed": slot.number in crashed,
                  "holder": slot.hold.holder if slot.hold else None,
                  "until": slot.hold.until if slot.hold else None,
-                 "taken_by": _taken_by(conn, slot)} for slot in listed]
-    free = next((slot.number for slot in listed if slot.launchable), None)
+                 "taken_by": _taken_by(conn, slot), "parked": _parked(conn, slot)}
+                for slot in listed]
+    free = next((row["number"] for row in rows if row["choosable"]), None)
     return _up(slots=rows, new_slot=True, unread=False,
                default={"target": "slot", "slot": free})
 
@@ -1434,12 +1485,12 @@ def _norm_dir(text: str) -> str:
     return os.path.normpath(os.path.expanduser(text))
 
 
-def _is_of(row: store.LaunchRow, key: str, value: str) -> bool:
+def _is_of(row: store.LaunchRow, key: str, value: str, *, seats: bool = False) -> bool:
     seat = row.preset_kind == "seat"
     if key == "seat":
         return seat and row.preset_name == value
     if key == "project":
-        return not seat and row.project_key == value
+        return (seats or not seat) and row.project_key == value
     return not seat and _norm_dir(row.cwd) == value
 
 
@@ -1451,40 +1502,216 @@ def made_again(row: store.LaunchRow, by: str) -> bool:
     return store.launched_by(row, by) and isinstance(row.values.get("sources"), dict)
 
 
-def launches_of(conn: sqlite3.Connection | None, key: str,
-                value: str) -> list[store.LaunchRow]:
+def launches_of(conn: sqlite3.Connection | None, key: str, value: str, *,
+                seats: bool = False) -> list[store.LaunchRow]:
     """The launches of a seat (`key` `seat`: its preset, wherever it ran), a project
-    (`project`: its key, and no seat named) or a folder (`cwd`: it ran there, and no
-    seat named) that `made_again` counts, newest first, among the newest
+    (`project`: its key, and no seat named, unless `seats`) or a folder (`cwd`: it ran
+    there, and no seat named) that `made_again` counts, newest first, among the newest
     `store.PLACES_SCAN` rows of the log."""
     if conn is None:
         return []
     actor = first.actor()
     return [row for row in store.log(conn, limit=store.PLACES_SCAN)
-            if made_again(row, actor) and _is_of(row, key, value)]
+            if made_again(row, actor) and _is_of(row, key, value, seats=seats)]
 
 
 # -- /api/last ------------------------------------------------------------------------------
 
 
+#: The rows of a launch's comms identity, which `/api/last` hands back in `identities`,
+#: never as the newest launch's request gave them.
+IDENTITY_ROWS = ("identity", "scope")
+#: The harnesses a default identity is offered for: every one but Codex.
+DEFAULT_HARNESSES = tuple(h for h in catalog.HARNESSES if h != "codex")
+#: The launch states of a launch that has not yet started, whose identity is not yet
+#: bound.
+NOT_STARTED = ("spawning", "failed")
+#: The project kind of an agent's home, whose default identity is its own key.
+AGENT_KIND = "agent"
+
+
 def last(query: Mapping[str, Any]) -> dict[str, Any]:
     """`/api/last`'s answer: for the newest launch of the seat, project or folder asked
     for, when it was made, its harness, and each value its own request gave
-    (`request_of`) for a row that may be filled from an earlier launch (`carry`). No
-    such launch, or no key asked, is answered with no values."""
-    none = _up(at=None, harness=None, values=[])
+    (`request_of`) for a row that may be filled from an earlier launch (`carry`) but the
+    identity and scope; and the comms identity each harness fills with (`identities_of`),
+    which for a project reads its seats' launches too. With no such launch, no `at`, no
+    harness and no values; with no key asked, nothing."""
+    none = _up(at=None, harness=None, values=[], identities=[])
     key = whose(query)
     if key is None:
         return none
     with _store() as conn:
         found = launches_of(conn, *key)
+        binding = launches_of(conn, *key, seats=True) if key[0] == "project" else found
+    named = identities_of(binding, query, key)
     if not found:
-        return none
+        return {**none, "identities": named}
     row = found[0]
     values = request_of(row, _available())["values"]
-    kept = {name: value for name, value in values.items()
-            if getattr(catalog.row(row.harness, name), "carry", False)}
-    return _up(at=row.created_at, harness=row.harness, values=handed_rows(kept))
+    kept = {name: value for name, value in values.items() if name not in IDENTITY_ROWS
+            and getattr(catalog.row(row.harness, name), "carry", False)}
+    return _up(at=row.created_at, harness=row.harness, values=handed_rows(kept),
+               identities=named)
+
+
+def identities_of(found: list[store.LaunchRow], query: Mapping[str, Any],
+                  key: tuple[str, str]) -> list[dict[str, Any]]:
+    """The comms identity a form drawn for each harness fills with, for the launches
+    `found` (newest first) of what `query` asks for (`key`): the name the newest launch of
+    that harness bound (`binding_launch`) and when that launch was made, whatever comms
+    says of it now; else, for a harness in `DEFAULT_HARNESSES`, `default_identity` with no
+    time. Each carries comms' refusal of a launch under that name (`comms_refusal`), a
+    retired name's among them, null when comms lets it through, and the note a live
+    namesake in a project scope gives (`namesake_note`), null with none. A harness whose
+    identity row is not carried, or that has neither, is left out; the scope is the empty
+    one, which comms reads as global."""
+    out: list[dict[str, Any]] = []
+    unbound: list[str] = []
+    said: dict[str, catalog.Refused | None] = {}
+    live: list[tuple] = []
+
+    def refusal_of(name: str) -> catalog.Refused | None:
+        if name not in said:
+            said[name] = comms_refusal(name)
+        return said[name]
+
+    def identity_entry(harness: str, name: str, at: str | None) -> dict[str, Any]:
+        if not live:
+            live.append(live_bindings())
+        return _identity(harness, name, at, refusal_of(name), namesake_note(name, live[0]))
+
+    for harness in catalog.HARNESSES:
+        if not getattr(catalog.row(harness, "identity"), "carry", False):
+            continue
+        row = binding_launch(found, harness)
+        name = _bare(row.identity) if row is not None else ""
+        if row is not None and name:
+            out.append(identity_entry(harness, name, row.created_at))
+        elif harness in DEFAULT_HARNESSES:
+            unbound.append(harness)
+    default = default_identity(query, *key) if unbound else None
+    if default is not None:
+        out += [identity_entry(harness, default, None) for harness in unbound]
+    return out
+
+
+def _identity(harness: str, name: str, at: str | None, refused: catalog.Refused | None,
+              note: str | None) -> dict[str, Any]:
+    return {"harness": harness, "identity": name, "at": at,
+            "refused": None if refused is None else _refused(refused), "note": note}
+
+
+def live_bindings() -> tuple:
+    """The names live sessions hold now, as comms' roster lists them (each with its
+    `name` and `qualified`); empty when comms is not installed or can't be read."""
+    roster = getattr(joiner.comms_api(), "roster", None)
+    if roster is None:
+        return ()
+    try:
+        return tuple(roster().bound)
+    except Exception:  # noqa: BLE001  (comms down: nothing to note)
+        return ()
+
+
+def namesake_note(name: str, bound: tuple) -> str | None:
+    """The note beside an identity filled at the global scope when a live session holds the
+    same name in a project scope, so a launch meant for that binding picks its scope;
+    None with no such session."""
+    for agent in bound:
+        qualified = str(getattr(agent, "qualified", "") or "")
+        if getattr(agent, "name", None) == name and "@" in qualified:
+            return (f"{qualified} is live in its project scope; the global name is the one "
+                    "filled. Pick that scope only if you mean that binding")
+    return None
+
+
+def _bare(identity: str | None) -> str:
+    """A comms identity without its scope."""
+    return (identity or "").split("@", 1)[0]
+
+
+def comms_refusal(name: str) -> catalog.Refused | None:
+    """comms' refusal of a launch under `name` at the global scope (`identity.check`), as
+    a launch meets it: held, reserved, retired, not a name a launch can claim, or comms
+    not answering; None when comms lets it through, is not installed, or can't be
+    asked at all."""
+    try:
+        return identity.check(name, None, joiner.comms_api())
+    except Exception:  # noqa: BLE001  (comms can't say: nothing to show)
+        return None
+
+
+def binding_launch(found: list[store.LaunchRow], harness: str) -> store.LaunchRow | None:
+    """The newest launch in `found` (newest first) of `harness` that bound a comms name;
+    None when none did. A launch not yet started, or failed, binds none."""
+    for row in found:
+        if row.harness != harness or row.state in NOT_STARTED:
+            continue
+        if _bare(row.identity):
+            return row
+    return None
+
+
+def default_identity(query: Mapping[str, Any], key: str, value: str) -> str | None:
+    """The comms name a launch of the seat or project asked for defaults to when no launch
+    of it bound one; None for a folder, or when there is none.
+
+    On a seat that sets no identity, of the project the query names (else the one the
+    seat names as its `project` or `home`): the seat's own name when the project has an
+    agent of that name. Else, with a project: its own key when its kind is `agent`, else
+    its `lead` when set, else `<key>-lead` when comms lists that name, bound or standing,
+    in any scope."""
+    if key == "cwd":
+        return None
+    project_key = value
+    if key == "seat":
+        try:
+            seat = presets.read().get("seat", value)
+        except REFUSALS:
+            return None
+        if seat.values.get("identity"):
+            return None
+        project_key = (query.get("project") or seat.values.get("project")
+                       or seat.values.get(presets.HOME) or "")
+        project = _project(project_key)
+        if project is not None and value in (getattr(project, "agents", None) or ()):
+            return value
+    else:
+        project = _project(project_key)
+    if project is None:
+        return None
+    if getattr(project, "kind", None) == AGENT_KIND:
+        return str(project.key)
+    if getattr(project, "lead", None):
+        return str(project.lead)
+    guess = f"{project.key}-lead"
+    return guess if _comms_lists(guess) else None
+
+
+def _project(key: str) -> Any | None:
+    """The project `key` names, by projects; None without projects or for no project."""
+    if not key or not _available()("projects"):
+        return None
+    try:
+        return presets.projects_api("this", _available()).get(key)
+    except Exception:  # noqa: BLE001  (no project there: no default)
+        return None
+
+
+def _comms_lists(name: str) -> bool:
+    """Whether comms' roster lists `name`, bound or standing, in any scope; False when
+    comms is not installed or can't be read."""
+    api_ = joiner.comms_api()
+    roster = getattr(api_, "roster", None)
+    if roster is None:
+        return False
+    try:
+        got = roster()
+    except Exception:  # noqa: BLE001  (comms down: no guess)
+        return False
+    return any(getattr(entry, "name", None) == name
+               for entry in (*got.bound, *got.standing))
 
 
 def read_last(call: Any) -> dict[str, Any]:
@@ -1495,7 +1722,7 @@ def read_last(call: Any) -> dict[str, Any]:
             return last(call.query)
         except Exception as exc:
             return _failed(exc, "reading the last launch failed", at=None, harness=None,
-                           values=[])
+                           values=[], identities=[])
 
 
 def _command(words: list[str]) -> str:
@@ -1852,11 +2079,16 @@ def resumable(session: str) -> store.LaunchRow:
 def resumed(body: Mapping[str, Any]) -> Any:
     """What `/api/resume` answers for the page's `body`: a refusal, the command to copy
     for a launch that ran in a terminal, or, for a slot launch, 202 with the status path
-    once the job that resumes it is started."""
+    once the job that resumes it is started. `plain` in `body` goes to the job's request
+    as it goes to the brief's check, and to the command as `--plain` when no brief goes."""
     session = str(body.get("session") or "").strip()
     slot = str(body.get("slot") or "").strip() or None
+    plain = body.get("plain") is True
     try:
         row = resumable(session)
+        brief, brief_file = resuming.checked_brief(row, str(body.get("brief") or ""),
+                                                   str(body.get("brief_file") or ""),
+                                                   plain=plain)
     except REFUSALS as exc:
         return {"refused": _refusal(exc), "command": None}
     if row.target != "slot":
@@ -1866,11 +2098,20 @@ def resumed(body: Mapping[str, Any]) -> Any:
                                            "and only a slot launch resumes in a slot",
                                 "hint": "resume it without a slot"},
                     "command": None}
-        return {"refused": None,
-                "command": _command(["moxi", "launcher", "resume", session])}
+        words = ["moxi", "launcher", "resume", session]
+        if brief is not None:
+            words += ["--brief", brief]
+        if brief_file is not None:
+            words += ["--brief-file", brief_file]
+        if plain and brief is None and brief_file is None:
+            words.append("--plain")
+        return {"refused": None, "command": _command(words)}
     request_id = _new_request_id()
+    given = {"brief": brief, "brief_file": brief_file, "plain": True if plain else None}
     return _run_job(request_id, {"act": "resume", "request_id": request_id,
-                                 "session": session, "slot": slot}, used=RESUME_USED)
+                                 "session": session, "slot": slot,
+                                 **{k: v for k, v in given.items() if v is not None}},
+                    used=RESUME_USED)
 
 
 def resume(call: Any) -> Any:

@@ -39,11 +39,15 @@ def _types(*types: EventType) -> dict[str, EventType]:
 #: Every event type, by name.
 TYPES = _types(
     # A round begins: what it is for, the flow it follows with that flow's steps as they
-    # stood then, the round it is a child of, the register entries it starts from, and
-    # the pointer to the operator's go.
+    # stood then, the round it is a child of, the register entries it starts from, the
+    # pointer to the operator's go, and the agent who leads it (`lead`).
     EventType("round.opened",
-              ("description", "flow", "steps", "parent", "inherits", "record"),
+              ("description", "flow", "steps", "parent", "inherits", "record", "lead"),
               required=("description", "flow", "steps")),
+    # The round's own lead was set or changed: the new name (`lead`) and the round's
+    # own lead before, None when it had none (`was`). A lead is a record the leads
+    # keep, not the operator's ruling, so it carries no pointer.
+    EventType("lead.changed", ("lead", "was"), required=("lead",)),
     # The round moved to another flow: the name it had, the new name and its steps, and
     # who moved it. The operator's move is his ruling, and that ruling's own event
     # holds the same three.

@@ -2,6 +2,7 @@
 work it handed out, and the named holds that say a director has work out.
 
     ask(session_id)                  # moxi-launcher-job keep-warm SESSION, asked by cache
+    keep_warm(session, dry_run=...)  # moxi launcher keep-warm: the ask, run by hand
     hold(name) / release(name)       # keep-warm hold|release NAME, from the session itself
     holds()                          # keep-warm holds: the open holds of the caller's launch
     open_hold(request_id, name)      # the same, for a caller that knows the launch
@@ -58,6 +59,13 @@ open, or turns refused for a reason that clears by itself: `stale-turn`, `rate`,
 at the delivery); `failed` (turns' `not-allowed`, `unsupported`, `gone`, or another
 refusal); or `unconfirmed`, when turns could not say whether the nudge went in. **A
 repeated `blocked` updates one run** (`store.end_blocked`).
+
+**By hand.** `moxi launcher keep-warm --session ID` makes the same ask of one session, now.
+With `--dry-run` it takes the ask's reads and stops before its first write: it ends as a
+live ask would, except that one that would nudge ends quietly as `would-nudge`, one that
+would end `blocked` at the cap says so and writes no run, and nothing is written for an
+agent newly dropped or a cover that would end. A dry run with no `--session` asks about
+every live launch keep-warm is on for. A stale open run is not ended.
 
 **Cover.** A press records that keep-warm is on for one running session: cover is the
 newest `keep-warm-cover` event of the launch, when it says `on` and names the session id
@@ -149,11 +157,12 @@ ASK_EVERY_S = float(next(t["every"] for t in cachetimers.TIMERS
 def ask(session_id: str, *, conn: sqlite3.Connection | None = None, turns: Any | None = None,
         slots_api: Any = LOOK, cache: Any = LOOK, comms: Any = LOOK,
         settings: Mapping[str, Any] | None = None,
-        caller_env: Mapping[str, str] | None = None) -> Verdict:
+        caller_env: Mapping[str, str] | None = None, dry_run: bool = False) -> Verdict:
     """One keep-warm ask of the session `session_id`, to its end. Never raises for what it
     reads; a fault after its run was written ends the run `exc`. `comms` stands in for
     comms' API (None for comms not installed); it is loaded only for a session under
-    cover."""
+    cover. With `dry_run` the ask writes nothing and ends, where it would nudge, as
+    `would-nudge`."""
     env = dict(os.environ if caller_env is None else caller_env)
     try:
         opened = conn if conn is not None else store.connect(create=False)
@@ -161,14 +170,16 @@ def ask(session_id: str, *, conn: sqlite3.Connection | None = None, turns: Any |
         return Verdict(None, "not-launched", f"the launch log could not be opened: "
                                              f"{_words(exc)}")
     try:
-        return _ask(opened, session_id, turns, slots_api, cache, comms, settings, env)
+        return _ask(opened, session_id, turns, slots_api, cache, comms, settings, env,
+                    dry_run=dry_run)
     finally:
         if conn is None:
             opened.close()
 
 
 def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, cache: Any,
-         comms: Any, settings: Mapping[str, Any] | None, env: Mapping[str, str]) -> Verdict:
+         comms: Any, settings: Mapping[str, Any] | None, env: Mapping[str, str], *,
+         dry_run: bool) -> Verdict:
     from . import exits, job, recycle
 
     row = store.resolve(conn, session_id)
@@ -209,10 +220,11 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         current_settings = settings if settings is not None else _settings()
         nudges = run_of_nudges(conn, row.request_id, sid, number)
         join = _joiner(turns, comms, sid) if held is not None else None
-        signal, joined = _signal(conn, row, session, nudges, join)
+        signal, joined = _signal(conn, row, session, nudges, join, write=not dry_run)
         if joined is not None and signal.case != SUBAGENTS and not joined.names:
             if signal.sure:
-                cover_off(conn, row, sid, "idle")
+                if not dry_run:
+                    cover_off(conn, row, sid, "idle")
                 held = None
             elif signal.case is None:
                 return Verdict(None, "unreadable", f"{signal.detail}; the cover is kept")
@@ -221,6 +233,11 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         cap = int(current_settings[CAPS[signal.case]])
         if held is not None:
             nudges = [r for r in nudges if r.created_at > held.at]
+        if dry_run:
+            if len(nudges) >= cap:
+                return _capped(signal, nudges, cap, held)
+            return Verdict(None, "would-nudge", f"a run would nudge for the {signal.case} "
+                                                f"case now: nudge {len(nudges) + 1} of {cap}")
         recycle._prune(conn, current_settings)
         try:
             run = store.insert_run(conn, kind=KIND, mode=MODE, request_id=row.request_id,
@@ -230,14 +247,46 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         except store.RunOpen as open_run_exc:
             return Verdict(None, "run-open", str(open_run_exc))
         if len(nudges) >= cap:
-            since = "the press" if held is not None else "the last turn no nudge opened"
-            return recycle.end(conn, run, Verdict(
-                "blocked", "capped", f"{len(nudges)} nudges in a row since {since}; the "
-                                     f"{signal.case} cap is {cap}"))
+            return recycle.end(conn, run, _capped(signal, nudges, cap, held))
         text = nudge_text(signal, len(nudges), current_settings)
         return _nudge(conn, run, session, number, signal, text)
     finally:
         found.close()
+
+
+def _capped(signal: Signal, nudges: Sequence[store.Run], cap: int,
+            held: Cover | None) -> Verdict:
+    since = "the press" if held is not None else "the last turn no nudge opened"
+    return Verdict("blocked", "capped", f"{len(nudges)} nudges in a row since {since}; the "
+                                        f"{signal.case} cap is {cap}")
+
+
+def keep_warm(session: str | None = None, *, dry_run: bool = False,
+              conn: sqlite3.Connection | None = None, turns: Any | None = None,
+              slots_api: Any = LOOK, cache: Any = LOOK, comms: Any = LOOK,
+              settings: Mapping[str, Any] | None = None,
+              caller_env: Mapping[str, str] | None = None) -> relaunch.Result:
+    """`moxi launcher keep-warm [--session ID] [--dry-run]`: the ask (`ask`) of the session
+    `session`; with none, the ask of every live launch keep-warm is on for (`on`), by the
+    id it was last known by, newest launch first (the CLI takes that only with
+    `--dry-run`). Exit 1 when an ask ended other than quietly or done, else 0."""
+    from . import live, recycle
+
+    options = {"turns": turns, "cache": cache, "comms": comms, "settings": settings,
+               "caller_env": caller_env, "dry_run": dry_run}
+    with recycle.sweep_log(conn) as opened:
+        api = slots.api() if slots_api is LOOK and opened is not None else slots_api
+        if session is not None:
+            row = None if opened is None else store.resolve(opened, session)
+            asked = [recycle.Asked(row.request_id if row else "-", session, ask(
+                session, conn=opened, slots_api=api, **options))]
+        else:
+            rows = [] if opened is None else [
+                r for r in live.live(opened)
+                if r.newest_session_id and on(opened, r, r.newest_session_id)]
+            asked = [recycle.Asked(r.request_id, r.newest_session_id, ask(
+                r.newest_session_id, conn=opened, slots_api=api, **options)) for r in rows]
+    return recycle.swept(asked, dry_run=dry_run, none="no live launch keeps warm")
 
 
 def window(clock: Any | None) -> Verdict | None:
@@ -282,10 +331,11 @@ class Signal:
 
 
 def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
-            nudges: Sequence[store.Run],
-            join: Callable[[], waits.Directed] | None) -> tuple[Signal, waits.Directed | None]:
+            nudges: Sequence[store.Run], join: Callable[[], waits.Directed] | None, *,
+            write: bool = True) -> tuple[Signal, waits.Directed | None]:
     """The ask's signal, and the directed join when it was made: by `join`, given for a
-    session under cover, when no subagent is live. Writes the agents newly dropped."""
+    session under cover, when no subagent is live. With `write`, writes the agents newly
+    dropped."""
     named, dropped = _run_record(conn, nudges)
     try:
         listed = session.agents()
@@ -295,7 +345,7 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
         failed = None
     held = _holds(conn, row)
     signal, newly = signal_of(listed, named, dropped, held)
-    if newly:
+    if newly and write:
         store.add_run_event(conn, nudges[0].run_id, "dropped", {"agents": list(newly)})
     joined = None
     if join is not None and signal.case != SUBAGENTS:
@@ -907,6 +957,6 @@ __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "COVE
            "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S", "QUIET_REFUSALS", "SHUT_S", "SIGNAL_KINDS",
            "SIGNAL_STATES", "SUBAGENTS", "TEXTS", "Cover", "Held", "Reading", "Signal", "ask",
            "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered",
-           "hold", "holds", "no_window", "nudge_text", "open_hold", "reading", "release",
+           "hold", "holds", "keep_warm", "no_window", "nudge_text", "open_hold", "reading", "release",
            "release_hold", "run_of_nudges", "signal_now", "signal_of", "timed", "window",
            "would_nudge"]

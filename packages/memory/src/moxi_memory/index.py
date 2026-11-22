@@ -71,6 +71,8 @@ WRITER_LOCK = "writer.lock"
 REBUILD_LOCK = "rebuild.lock"
 #: The tokenizer every generation's text tables use, and so every query.
 TOKENIZER = "porter unicode61 remove_diacritics 2"
+#: The `meta` key that says which secrets `redact` stored a generation's rows.
+REDACT_VERSION_KEY = "redact_version"
 #: How long a reader waits for a generation's shared lock. Only a child removing that
 #: generation holds it exclusively, for the moment the removal takes.
 READ_LOCK_WAIT = 2.0
@@ -93,13 +95,20 @@ _DB_SUFFIXES = ("", "-wal", "-shm", "-journal")
 #: row's kind (a message's role, or a tool call). `key` names the one record the row
 #: came from. `time` is seconds since the epoch.
 #:
+#: Step 2 adds `writer`: who the record's harness says wrote it, as sessions' `writer`
+#: names it (`person`, `model`, `unknown`, or the kind of a message sessions doesn't
+#: mark injected). A row stored before the step has none (NULL) until a rebuild reads
+#: it again; `rows_no_writer` finds those rows without a scan.
+#:
 #: `tails` holds tier 2: the end of each main-session tool result, one row per record
 #: under that record's key, with whether the tool failed.
 #:
 #: `sources` holds each source's read cursor and reuse keys, so a cursor goes when the
 #: index goes. `secret_calls` holds the call ids of each source's secret-path calls, whose
-#: results give no tail. `meta` holds the schema version, the tokenizer and whether the first full
-#: read has finished (`first_read`, "0" or "1"), and whatever else a writer records.
+#: results give no tail. `meta` holds the schema version, the tokenizer, whether the first full
+#: read has finished (`first_read`, "0" or "1"), which secrets `redact` stored the rows
+#: (`redact_version`, written when the generation is made; one without it counts as 1),
+#: and whatever else a writer records.
 SCHEMA = (
     f"""
     CREATE TABLE rows (
@@ -175,7 +184,15 @@ SCHEMA = (
     INSERT INTO meta (key, value) VALUES ('schema', '1'), ('tokenizer', '{TOKENIZER}'),
         ('first_read', '0');
     """,
+    """
+    ALTER TABLE rows ADD COLUMN writer TEXT;
+    CREATE INDEX rows_no_writer ON rows (id) WHERE writer IS NULL;
+    UPDATE meta SET value = '2' WHERE key = 'schema';
+    """,
 )
+
+#: The schema version whose rows record their writer.
+WRITER_SCHEMA = 2
 
 
 class IndexMissing(Exception):
@@ -288,6 +305,37 @@ def meta_set(conn: sqlite3.Connection, key: str, value: object) -> None:
     """Set a generation's meta value (stored as text)."""
     conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) "
                  "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+
+def stored_redact_version(conn: sqlite3.Connection) -> int:
+    """Which secrets `redact` stored a generation's rows: its `redact_version`, or 1 for
+    a generation without one (made before memory recorded it)."""
+    value = meta_get(conn, REDACT_VERSION_KEY)
+    try:
+        return int(value) if value is not None else 1
+    except ValueError:
+        return 1
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    """A generation's schema version: how many steps of `SCHEMA` it has run."""
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+
+def has_writer(conn: sqlite3.Connection) -> bool:
+    """Whether a generation's `rows` table has the `writer` column: its schema is at
+    `WRITER_SCHEMA` or past it."""
+    return any(column[1] == "writer" for column in
+               conn.execute("PRAGMA table_info(rows)"))
+
+
+def rows_without_writer(conn: sqlite3.Connection) -> int | None:
+    """How many rows of a generation record no writer, or None for a generation at a
+    schema before the column (none of its rows does)."""
+    if not has_writer(conn):
+        return None
+    return int(conn.execute("SELECT count(*) FROM rows INDEXED BY rows_no_writer "
+                            "WHERE writer IS NULL").fetchone()[0])
 
 
 # -- readers --------------------------------------------------------------------------
@@ -600,6 +648,10 @@ class Writer:
         conn = store.connect(db_path(n, self.env), create=create, timeout_s=timeout)
         try:
             store.migrate(conn, SCHEMA)
+            if create and meta_get(conn, REDACT_VERSION_KEY) is None:
+                from .rows import redact_version
+
+                meta_set(conn, REDACT_VERSION_KEY, redact_version())
         except BaseException:
             conn.close()
             raise
@@ -653,5 +705,7 @@ __all__ = ["INDEX_DIR", "POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "
            "IndexUnreadable", "StateUnreadable", "WriterBusy", "Rebuilding", "Reader",
            "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",
-           "current", "generations", "meta_get", "meta_set", "open_read",
+           "current", "generations", "meta_get", "meta_set", "stored_redact_version",
+           "WRITER_SCHEMA", "schema_version", "has_writer", "rows_without_writer",
+           "REDACT_VERSION_KEY", "open_read",
            "rebuild_running", "writer"]

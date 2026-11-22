@@ -41,8 +41,8 @@ _WINDOWS = sys.platform == "win32"
 #: the read end of the pipe `lifeline="fd"` passes, a file descriptor on POSIX and a
 #: handle on Windows. Only this module reads it; a child asks `lifeline_kind()`.
 LIFELINE_ENV = "MOXI_LIFELINE_FD"
-#: How long a timed-out `run` waits between SIGTERM and SIGKILL (POSIX), and the
-#: watchdog between the two when a lifeline closes.
+#: How long a timed-out `run` waits between its first signal and SIGKILL (POSIX) unless
+#: told otherwise, and the watchdog between the two when a lifeline closes.
 KILL_GRACE = 2.0
 #: How long `lifeline`'s default stop waits after interrupting the main thread before it
 #: ends the process.
@@ -62,8 +62,9 @@ Argv = Sequence[str | os.PathLike]
 
 def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         env: Mapping[str, str] | None = None, cwd: str | os.PathLike | None = None,
-        capture: bool = True,
-        output: str | os.PathLike | None = None) -> subprocess.CompletedProcess:
+        capture: bool = True, output: str | os.PathLike | None = None,
+        first_signal: str = "SIGTERM",
+        grace_s: float | None = None) -> subprocess.CompletedProcess:
     """Run `argv` to its end, or kill everything it started once `timeout_s` seconds pass.
 
     stdin is closed (`/dev/null`), or a pipe fed `stdin_data` and then closed. With `capture`
@@ -82,6 +83,8 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
     POSIX: the child starts in a new session, so it and everything it starts form one
     process group; on timeout the group gets SIGTERM and, two seconds later, SIGKILL
     for any member still running, whether or not the first child has ended by then.
+    `first_signal` names another signal to send first (`"SIGINT"`, which test runners
+    stop cleanly on), and `grace_s` another wait than `KILL_GRACE` before the SIGKILL.
     Windows: the child starts in a new process group and is put in a Job Object as soon
     as it starts; on timeout the job is terminated, which ends the whole tree.
 
@@ -114,7 +117,7 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         try:
             out, err = proc.communicate(stdin_data, timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            out, err = _end_tree(proc, job)
+            out, err = _end_tree(proc, job, first_signal=first_signal, grace_s=grace_s)
             raise subprocess.TimeoutExpired(proc.args, timeout_s, output=out,
                                             stderr=err) from None
     except BaseException:
@@ -140,11 +143,12 @@ def _output_file(output: str | os.PathLike) -> int:
                    0o600)
 
 
-def _end_tree(proc: subprocess.Popen, job) -> tuple:
+def _end_tree(proc: subprocess.Popen, job, *, first_signal: str = "SIGTERM",
+              grace_s: float | None = None) -> tuple:
     """Kill a timed-out child's whole tree and collect what it wrote.
 
-    POSIX: SIGTERM to the group, then up to `KILL_GRACE` seconds for the group to empty,
-    then SIGKILL to whatever of it is left. The first child may end and close its pipes
+    POSIX: `first_signal` to the group, then up to `grace_s` seconds for the group to
+    empty (`KILL_GRACE` when None), then SIGKILL to whatever of it is left. The first child may end and close its pipes
     well before then while another member, one that ignores SIGTERM and holds no pipe,
     keeps running; the group, not the first child, decides when the grace is over.
     """
@@ -153,10 +157,11 @@ def _end_tree(proc: subprocess.Popen, job) -> tuple:
         return _drain(proc)
     import time
 
-    _signal_group(proc.pid, _sig("SIGTERM"))
-    deadline = time.monotonic() + KILL_GRACE
+    grace_s = KILL_GRACE if grace_s is None else grace_s
+    _signal_group(proc.pid, _sig(first_signal))
+    deadline = time.monotonic() + grace_s
     try:
-        out, err = proc.communicate(timeout=KILL_GRACE)
+        out, err = proc.communicate(timeout=grace_s)
     except subprocess.TimeoutExpired:
         _signal_group(proc.pid, _sig("SIGKILL"))
         return _drain(proc)

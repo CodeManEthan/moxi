@@ -4,13 +4,15 @@ and as JSON, for each harness, with what secrets redacts and what no flag prints
 from __future__ import annotations
 
 import json
+import random
+import string
 import time
 from datetime import datetime
 
 import pytest
 
 from moxi import modules
-from moxi_sessions import cli, view
+from moxi_sessions import catalog, cli, view
 from moxi_sessions.read import records
 from moxi_sessions.shape import SHAPE, SUMMARY_CHARS, tool_summary
 from moxi_sessions.source import Source
@@ -455,3 +457,75 @@ def test_the_read_redacts_with_credentials_and_broad():
     assert view.SETS == ("credentials", "broad")
     redact = view.redactor().redact
     assert redact("password = 'hunter2hunter2'") == "password = '[REDACTED:credential-assignment]'"
+
+
+# --- a marked line and a split token ---------------------------------------------------------
+
+def pat(r: random.Random) -> str:
+    """A token the credentials set knows by its shape, made at run time."""
+    return "ghp" + "_" + "".join(r.choice(string.ascii_letters + string.digits)
+                                 for _ in range(36))
+
+
+def mounted_key(r: random.Random) -> str:
+    """An `api_key=` assignment the broad set's generic-api-key redacts on its own."""
+    redact = view.redactor().redact
+    while True:
+        value = "api" + "_key=" + "".join(r.choice(string.ascii_letters + string.digits)
+                                          for _ in range(24))
+        if redact(value) == "api_key=[REDACTED:generic-api-key]":
+            return value
+
+
+def leaky_session(home):
+    """A session holding the secrets a same-line allow mark or an invisible character
+    once kept whole: a marked token in a prompt of one JSON line, tokens split by U+200B
+    and by U+00AD, and an `api_key=` value on a secret mount line. Returns the session
+    and each secret with what it would show in the clear."""
+    r = random.Random(7)
+    marked, zero_width, soft = pat(r), pat(r), pat(r)
+    key = mounted_key(r)
+    split_zw = zero_width[:10] + "\u200b" + zero_width[10:]
+    split_soft = soft[:10] + "\u00ad" + soft[10:]
+    t = ClaudeTranscript(home / ".claude" / "projects")
+    t.title(f"rotate {split_zw}")
+    t.user(json.dumps({"token": marked, "why": "gitleaks:allow"}), origin="human")
+    call = t.request().tool_use("Bash", {"command": f"RUN --mount=type=secret,id=a {key}"})
+    t.tool_result(call, "ok")
+    t.assistant(f"the old one was {split_zw}")
+    t.assistant(f"the new one is {split_soft}")
+    t.write()
+    shown = [marked, zero_width, soft, split_zw, split_soft, key.split("=", 1)[1]]
+    # What a placeholder short of the whole token would leave: the part past the split.
+    shown += [zero_width[10:], soft[10:]]
+    return t, shown
+
+
+@pytest.mark.parametrize("flags", [(), ("--all",), ("--json",), ("--all", "--json")],
+                         ids=lambda f: " ".join(f) or "default")
+def test_read_redacts_a_marked_line_and_a_split_token(env, capsys, flags):
+    t, shown = leaky_session(env)
+    code, out, err = run(capsys, "read", t.session_id, *flags)
+    assert code == 0 and err == ""
+    text = json.dumps(json.loads(out), ensure_ascii=False) if "--json" in flags else out
+    assert [s for s in shown if s in text] == []
+    assert text.count("[REDACTED:github-pat]") >= 4      # the title and the three tokens
+    assert "[REDACTED:generic-api-key]" in text
+
+
+def test_list_text_redacts_a_marked_line_and_a_split_token(env, capsys):
+    t, shown = leaky_session(env)
+    catalog.reset()
+    try:
+        code, out, err = run(capsys, "list", "--text")
+        assert code == 0 and t.session_id in out and "not redacted" not in err
+        assert [s for s in shown if s in out] == []
+        assert "rotate [REDACTED:github-pat]" in out
+        assert "agent: the new one is [REDACTED:github-pat]" in out
+        data = json.loads(run(capsys, "list", "--text", "--json")[1])
+        text = json.dumps(data, ensure_ascii=False)
+        assert data["redacted"] is True and [s for s in shown if s in text] == []
+        row, = data["rows"]
+        assert "[REDACTED:github-pat]" in row["prompt"]["text"]
+    finally:
+        catalog.reset()

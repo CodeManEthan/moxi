@@ -255,6 +255,17 @@ def test_a_waiting_item_marked_done_is_one_event_with_its_pointer(built, capsys)
     assert json.loads(capsys.readouterr().out)["waits"] == []
 
 
+def test_a_waiting_item_marked_done_on_a_page_keeps_the_pages_pointer(built, capsys):
+    round_dir, tree = built
+    verify(round_dir, tree.rev(), ("W1", PAGE))
+    pointer = "page:rounds/doneW1xxxxxx@2026-11-21T04:18:05Z"
+
+    assert main(["mark", ROUND, "B1.W1", "--done", "--record", pointer]) == 0
+
+    assert capsys.readouterr().out == f"{ROUND} B1.W1: done   record: {pointer}\n"
+    assert log.read(log.round_log(round_dir))[-1]["record"] == pointer
+
+
 def test_a_mark_run_again_finds_the_item_done_and_writes_nothing(built, capsys):
     round_dir, tree = built
     verify(round_dir, tree.rev(), ("W1", PAGE))

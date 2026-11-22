@@ -69,6 +69,11 @@ with the reason. A verdict
 that sends the design back applies nothing: the pass that objects to a removal is not
 the thing that grants it.
 
+**The trace check.** A design report is refused on a version the check of its trace
+rows did not run on, and a publishable one on a version that fails it; a fold-first
+report on a version that fails it is recorded (`tracing.outcome`). A version frozen
+where the check was not asked for refuses nothing.
+
 **Noted, not refused.** One full pass reads a design. A report of a full pass
 recorded after another one is recorded all the same, with the flag
 `brake.EXTRA_FULL_PASS`. A report whose model the `models` setting places in a weaker
@@ -85,8 +90,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import (brake, builds, checking, decisions, ending, findings, finish_gates, flows,
-               folders, model_tiers, open_builds, questions, report_block, stages,
-               stepping, versions, waits, write)
+               folders, model_tiers, open_builds, places, questions, report_block, stages,
+               stepping, tracing, versions, waits, write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, Refused, RoundsError, Unmet
@@ -214,12 +219,13 @@ def _entry(one: states.Pending) -> dict:
 
 def path(report: Path, round_dir: Path) -> str:
     """The report's file as the log names it: from the round's folder when it is in
-    it, so the record reads the same wherever the folder is, else the whole path."""
+    it, so the record reads the same wherever the folder is, else the whole path, under
+    the home folder as `places.contract_home` writes it."""
     whole = Path(os.path.abspath(report))
     try:
         return whole.relative_to(Path(os.path.abspath(round_dir))).as_posix()
     except ValueError:
-        return str(whole)
+        return places.contract_home(whole)
 
 
 def _again(state: states.State, block: report_block.ReportBlock,
@@ -360,6 +366,26 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
     if noted:
         fields["flags"] = noted
     return fields
+
+
+def _traced(state: states.State, block: report_block.ReportBlock, *,
+            name: str) -> Unmet | None:
+    """What the check of the trace rows of the version a design report read refuses
+    of it: every report where the check did not run on that version, a publishable
+    one where it fails. None where it refuses nothing."""
+    version = versions.find(state, block.design)
+    found = tracing.outcome(version)
+    fold = f"moxi rounds fold {name}"
+    if found == tracing.NOT_RUN:
+        return Unmet(f"{tracing.said(version)}; no report of v{version.n} is recorded, "
+                     "since a check that did not run found nothing on the design",
+                     f"freeze the design again and verify the new version: {fold}")
+    if found == tracing.FAILS and block.verdict == report_block.PUBLISHABLE:
+        return Unmet(f"{tracing.said(version)}: a publishable report of a design is "
+                     "recorded only on a version that passes the check; a fold-first "
+                     "one is recorded",
+                     f"give {versions.DESIGN_FILE} the rows, then {fold}")
+    return None
 
 
 def lists(block: report_block.ReportBlock) -> dict[str, list[dict]]:
@@ -551,6 +577,9 @@ def record(name: str, report: Path | str, *, by: str, settings=None,
                 f"which was never frozen: {frozen}",
                 "give design the number of the frozen version the pass read")])
         unmet += _again(state, block, shown)
+        traced = _traced(state, block, name=name)
+        if traced is not None:
+            unmet.append(traced)
         if unmet:
             raise Refused(unmet)
         fields: dict[str, object] = {

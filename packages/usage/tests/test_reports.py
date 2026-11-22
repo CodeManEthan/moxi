@@ -414,6 +414,26 @@ def stored_keys(conn):
     source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
 
 
+def test_several_places_keep_the_files_any_of_them_matches(conn):
+    stored_keys(conn)
+
+    def count(**filters):
+        return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
+
+    assert count(project=["key-app", "/w/app"]) == count(project="key-app") + count(project="/w/app") == 4
+    assert count(project=("key-app", "key-app")) == 3
+    assert count(work_dir=["/w/app", "/w/app-wt/"]) == 4
+    assert count(work_dir=["/w/app"], project=["key-app", "nothing"]) == 1
+    assert count(project=[]) == count(work_dir=[]) == count(project=["", ""]) == 5
+    found = reports.daily(conn, project=["key-app", "/w/app"], work_dir=["/w/app", "/w/app-wt"],
+                          table=table())
+    assert found.filters == {"project": "key-app, /w/app", "folder": "/w/app, /w/app-wt"}
+    with pytest.raises(reports.ReportError, match="whole path"):
+        count(work_dir=["/w/app", "app"])
+    with pytest.raises(reports.ReportError, match="project key"):
+        count(project=["key-app", 3])
+
+
 def test_projects_by_dir_group_by_cwd_alone(conn):
     stored_keys(conn)
     report = reports.projects(conn, by="folder", table=table())
@@ -1371,6 +1391,25 @@ def test_requests_count_turns_and_place_the_compaction_between_rows(conn):
     # a compaction outside the range is left out; one with no time only in an open range
     late = reports.requests(conn, session="s1", since="2026-10-02", tz="UTC", table=table())
     assert late.rows == [] and late.total["marks"] == []
+
+
+def test_sessions_count_their_main_files_turns_and_what_their_subagents_cost(conn):
+    requests_index(conn)
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/s3.jsonl", [request("x1", t)], session_id="s3")
+    source(conn, "/p/s3/subagents/agent-q.jsonl", [request("q1", t + 5, model="mystery-9")],
+           session_id="s3", kind="subagent", agent_id="q")
+    report = reports.sessions(conn, table=table())
+    first, resumed, third = (one(report, session_id=sid) for sid in ("s1", "s2", "s3"))
+    # distinct turn ids over the whole main file: the subagent's requests carry none, and
+    # the resumed copy counts the turns it carries from the first session too
+    assert (first["turns"], resumed["turns"], third["turns"]) == (2, 3, None)
+    agent = [row for row in reports.session(conn, session="s1", table=table()).rows
+             if row["agent"] == "a"]
+    assert first["subagent_cost"] == pytest.approx(sum(row["cost"] for row in agent))
+    assert 0 < first["subagent_cost"] < first["cost"]
+    assert resumed["subagent_cost"] == 0.0
+    assert third["subagent_cost"] is UNKNOWN and third["cost"] > 0
 
 
 def test_requests_without_turn_ids_have_null_turns(conn):

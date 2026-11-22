@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_comms import kinds
+from moxi_comms import cache, kinds
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import ADAPTER_KINDS
 
@@ -33,7 +33,8 @@ def test_comms_declares_its_own_kinds_in_the_group():
     assert declared == {"claude-shim": "moxi_comms.kinds:CLAUDE_SHIM",
                         "codex": "moxi_comms.kinds:CODEX",
                         "opencode": "moxi_comms.kinds:OPENCODE",
-                        "connector": "moxi_comms.kinds:CONNECTOR"}
+                        "connector": "moxi_comms.kinds:CONNECTOR",
+                        "speech": "moxi_comms.kinds:SPEECH"}
     assert tuple(declared) == tuple(kinds.BUILT_IN) == ADAPTER_KINDS
 
 
@@ -42,7 +43,7 @@ def test_the_installed_group_reads_as_the_built_ins():
     names = {ep.name for ep in entry_points(group=kinds.GROUP)}
     assert set(kinds.BUILT_IN) <= names
     got = kinds.load()
-    assert got.names()[:4] == ADAPTER_KINDS and got.broken == ()
+    assert got.names()[:len(ADAPTER_KINDS)] == ADAPTER_KINDS and got.broken == ()
 
 
 def test_the_built_ins_are_known_with_no_metadata():
@@ -50,7 +51,7 @@ def test_the_built_ins_are_known_with_no_metadata():
     assert got.names() == ADAPTER_KINDS
     assert [(k.cache, k.harness) for k in got.kinds] == [
         ("harness", "claude"), ("harness", "codex"), ("harness", "opencode"),
-        ("person", None)]
+        ("person", None), ("person", None)]
     assert all(k.built_in and k.evidence is None for k in got.kinds)
 
 
@@ -106,7 +107,7 @@ def test_the_daemon_accepts_a_declared_kind_and_refuses_an_unknown_one(rig):
             client.bind(name="planner", scope="proj-a",
                             adapter="no-such-kind")
         assert "unknown adapter kind 'no-such-kind'" in str(e.value)
-        assert "claude-shim, codex, opencode, connector, person-kind" in str(e.value)
+        assert "claude-shim, codex, opencode, connector, speech, person-kind" in str(e.value)
         answer = client.bind(name="planner", scope="proj-a",
                                  adapter="person-kind")
         assert answer["identity"]["qualified"] == "planner@proj-a"
@@ -118,4 +119,42 @@ def test_the_daemon_accepts_a_declared_kind_and_refuses_an_unknown_one(rig):
 
 
 def test_a_default_daemon_reads_the_group(rig):
-    assert rig.daemon.kinds.names()[:5] == ADAPTER_KINDS
+    assert rig.daemon.kinds.names()[:len(ADAPTER_KINDS)] == ADAPTER_KINDS
+
+
+def test_speech_binds_as_a_person_whose_cache_is_never_read(rig, monkeypatch):
+    """An older comms' daemon took `speech` as a register kind, a person's binding such
+    as the operator's, and its cold-cache read answered a speech binding `no-cache`
+    without reading anything. comms keeps both: the default daemon binds a name as
+    `speech`, and the read says `person` without asking the cache module."""
+    def refuse():
+        raise AssertionError("the seam asked for the cache module")
+    monkeypatch.setattr(cache, "module", refuse)
+    client = DaemonClient(rig.daemon.socket_path).connect()
+    try:
+        answer = client.bind(name="voice", scope="proj-a", adapter="speech")
+        assert answer["identity"]["qualified"] == "voice@proj-a"
+        assert rig.daemon.bindings["voice@proj-a"].adapter == "speech"
+    finally:
+        client.close()
+    clock = cache.clock_state("speech", None, kinds=rig.daemon.kinds)
+    assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.PERSON)
+    assert cache.clock_state("speech", None).code == cache.PERSON
+
+
+def test_the_operator_binds_as_speech(rig, monkeypatch):
+    """The binding the speech kind is for: the operator's own name, bound as a person
+    whose cache is never read."""
+    def refuse():
+        raise AssertionError("the seam asked for the cache module")
+    monkeypatch.setattr(cache, "module", refuse)
+    client = DaemonClient(rig.daemon.socket_path).connect()
+    try:
+        answer = client.bind(name="operator", scope="global", adapter="speech")
+        assert answer["identity"]["qualified"] == "operator"
+        binding = rig.daemon.bindings["operator"]
+        assert binding.adapter == "speech"
+        clock = cache.clock_state(binding.adapter, None, kinds=rig.daemon.kinds)
+        assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.PERSON)
+    finally:
+        client.close()

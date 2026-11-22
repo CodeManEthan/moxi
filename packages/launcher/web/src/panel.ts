@@ -48,6 +48,11 @@ function refusal(value: Refusal): Refusal {
   return { code: value.code, row: text(value.row), problem: value.problem, hint: text(value.hint) ?? "" };
 }
 
+/** `value` read as a refusal; null when it is not one. */
+export function refusalOf(value: unknown): Refusal | null {
+  return isRefusal(value) ? refusal(value) : null;
+}
+
 // --- the catalog and the presets -------------------------------------------------------
 
 /** One harness's form: the launcher's rows, then the harness's own. */
@@ -734,6 +739,22 @@ export function parsePasts(data: unknown): Pasts | null {
   const { sessions } = read.fields;
   if (!Array.isArray(sessions)) return null;
   return { state: "up", detail: null, sessions: sessions.filter(isPast) };
+}
+
+/** The body of a past session's `POST /api/resume`: its session, and the brief or the
+ * brief file typed beside it, each only when it holds more than spaces. Both typed go as
+ * they are, and the page server refuses them as a resume of both is refused. */
+export interface ResumeBody {
+  session: string;
+  brief?: string;
+  brief_file?: string;
+}
+
+export function resumeBody(session: string, brief: string, briefFile: string): ResumeBody {
+  const body: ResumeBody = { session };
+  if (brief.trim()) body.brief = brief;
+  if (briefFile.trim()) body.brief_file = briefFile.trim();
+  return body;
 }
 
 /** What a past session's resume does: `slot` runs it as a job, `terminal` gives the

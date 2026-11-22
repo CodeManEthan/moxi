@@ -59,7 +59,8 @@ class Move:
     - `was`: the name of the flow the round follows now.
     - `steps`: the new flow's entries as the config has them, None when the config
       has no such flow; `known` then names the flows it has.
-    - `same`: the round already follows that flow with exactly those steps.
+    - `same`: the round already follows that flow with those steps, a path under the
+      home folder in a command's argv counting the same in its `~` form.
     - `lost`: the steps the round's recorded list has and the new one lacks.
     - `up`: the move is a step up, which the lead makes alone.
     - `why`: for a move that is not, the reason it is the operator's.
@@ -108,7 +109,8 @@ def judge(state: states.State, flow: str, settings) -> Move:
         return Move(was=state.flow, flow=flow, steps=None, known=tuple(known))
     have = flows.names(steps)
     lost = tuple(step for step in flows.names(state.steps) if step not in have)
-    same = flow == state.flow and steps == state.steps
+    same = (flow == state.flow
+            and flows.recorded(steps) == flows.recorded(state.steps))
     tiers = list(settings["tiers"])
     why = None
     if lost:
@@ -150,9 +152,9 @@ def gates(flow: str, *, name: str, settings, again: str) -> list[write.Gate]:
 
 def fields(flow: str, view: write.View, settings) -> dict[str, object]:
     """What the event of a move to `flow` holds: the name the round's flow had, the
-    new name, and its steps as the config has them now."""
+    new name, and its steps as the config has them now, as a record holds them."""
     return {"was": view.state.flow, "flow": flow,
-            "steps": judge(view.state, flow, settings).steps}
+            "steps": flows.recorded(judge(view.state, flow, settings).steps)}
 
 
 def step_up(target: str, flow: str, *, by: str, settings=None,

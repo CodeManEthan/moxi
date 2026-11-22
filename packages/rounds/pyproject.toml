@@ -1,6 +1,6 @@
 [project]
 name = "moxi-rounds"
-version = "0.1.0"
+version = "0.1.1"
 description = "Moxi's rounds: a piece of work tracked from design to landing, with its questions, rulings, builds and gates."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ classifiers = [
 ]
 # projects names a round's home and the repo each build is in; psutil reads which
 # processes use a leftover folder before the sweep removes it, on every platform.
-dependencies = ["moxi>=0.1.9,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
+dependencies = ["moxi>=0.1.11,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # notes: with it, a project that names no notes folder gets notes' default one, so its
@@ -37,6 +37,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 rounds = "moxi_rounds.module"
+
+# projects asks this before it removes a project: no project goes while a build names it.
+[project.entry-points."moxi.projects"]
+rounds = "moxi_rounds.projects_link"
 
 # The sweep at a session's start, called by turns in a session's endpoint process.
 [project.entry-points."moxi.turns.listeners"]

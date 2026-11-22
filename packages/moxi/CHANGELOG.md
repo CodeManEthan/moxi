@@ -2,6 +2,14 @@
 
 ## 0.1.11 (unreleased)
 
+- A `moxi.ipc` Unix server closed within a second of an accept failing at the
+  file-descriptor limit no longer logs errors after close: `close()` cancels the accept
+  retries asyncio still holds for its listener, each of which logged
+  `Invalid file descriptor: -1` with a traceback when it ran on the closed socket.
+- `moxi.proc.run` takes `first_signal` and `grace_s`: on POSIX a timed-out run sends its
+  group that signal first (`"SIGINT"`, which test runners stop cleanly on) and waits
+  `grace_s` seconds before the SIGKILL. The defaults, SIGTERM and `KILL_GRACE`, are
+  unchanged. A module that passes them needs `moxi>=0.1.11`.
 - On Windows `moxi doctor --costs` shows a module's daemons' open handles in a row of its
   own, `cost handles`, as `N open handles`, and never compares them with the module's
   `fds` budget, a POSIX fd limit: a handle count also holds events, threads and registry

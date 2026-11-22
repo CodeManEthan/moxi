@@ -653,7 +653,7 @@ def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, 
     with pytest.raises(api.CommsOffline):
         api.launch(request, env=live_env)
     assert launch_row() is None
-    monkeypatch.setattr(api, "_identity_taken", lambda name, scope: None)
+    monkeypatch.setattr(api, "_identity_taken", lambda name, scope, replacing=None: None)
     result = api.launch(request, env=live_env)
     row = launch_row(result.request_id)
     try:

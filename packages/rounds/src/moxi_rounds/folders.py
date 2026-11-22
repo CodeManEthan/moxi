@@ -5,7 +5,9 @@ with `~`) is the folder. A relative one is placed in the project's notes folder:
 its projects record names, else the one the notes module gives the project by default,
 when notes is installed. That one call is all rounds asks of notes. A project the
 projects list does not hold is `UnknownProject`; a relative `dir` with no notes folder to
-place it in is `NoFolder`, which names the setting that fixes it.
+place it in is `NoFolder`, which names the setting that fixes it. A project's record
+also names its lead agent, or none, which `Home.lead` carries for a round that has no
+lead of its own.
 
 A rounds folder belongs to one project. Every log in it is written under its project's
 lock, so two projects that reached one folder would write one log under two locks. A
@@ -38,10 +40,12 @@ SLUG = re.compile(r"[a-z0-9-]+")
 @dataclass(frozen=True)
 class Home:
     """A project as rounds' home for rounds: `project` is its key as the projects list
-    stores it, and `rounds_dir` its rounds folder, which need not exist yet."""
+    stores it, `rounds_dir` its rounds folder, which need not exist yet, and `lead`
+    the lead agent its record names, None when it names none."""
 
     project: str
     rounds_dir: Path
+    lead: str | None = None
 
     def round_dir(self, slug: str) -> Path:
         """The folder of the round `<project>/<slug>`."""
@@ -70,7 +74,7 @@ def home(project: str, settings=None) -> Home:
     api = _projects()
     record = _record(api.get, project)
     settings = _settings(settings)
-    found = Home(record.key, _rounds_dir(record, settings))
+    found = Home(record.key, _rounds_dir(record, settings), record.lead)
     mine = os.path.realpath(found.rounds_dir)
     for other in _records(api):
         if other.key == record.key:
@@ -95,7 +99,7 @@ def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     reach: dict[str, list[str]] = {}
     for record in records:
         try:
-            one = Home(record.key, _rounds_dir(record, settings))
+            one = Home(record.key, _rounds_dir(record, settings), record.lead)
         except NoFolder as exc:
             placed.append(exc)
             continue
@@ -120,6 +124,12 @@ def notes_dir(project: str) -> Path:
     projects record names, else the one the notes module gives it. Raises
     `UnknownProject`, or `NoFolder` when it has none or none can be found out."""
     return _notes_dir(_record(_projects().get, project))
+
+
+def lead(project: str) -> str | None:
+    """The lead agent the record of the project `project` (its key, in any case) names,
+    or None when it names none. Raises `UnknownProject`."""
+    return _record(_projects().get, project).lead
 
 
 def root(project: str) -> tuple[str, Path]:
@@ -239,5 +249,5 @@ def _notes_dir(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "root",
-           "slugs", "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "lead",
+           "root", "slugs", "names"]

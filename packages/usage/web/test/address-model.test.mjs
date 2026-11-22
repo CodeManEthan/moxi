@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addressPath, addressRoute, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress,
+  addressPath, addressRoute, addressWrite, addsHistoryEntry, historyView, limitAddress, NOTHING_OPEN, parseAddress, sameAddress,
   sessionAddress, SESSIONS, settled,
 } from "../src/address-model.ts";
 
@@ -94,4 +94,34 @@ test("the page rewrites the entry it is on, only when the address is another, on
   assert.equal(addressWrite(SESSIONS, "/m/ui/"), null);
   assert.equal(addressWrite(SESSIONS, "/m/usagex/"), null);
   assert.equal(addressWrite(SESSIONS, "/"), null);
+});
+
+test("a move adds a history entry only from one view of the page to another", () => {
+  const five = limitAddress("claude", "plan", 300);
+  const opus = limitAddress("claude", "opus", 10080);
+  const first = sessionAddress("claude", "s1");
+  const second = sessionAddress("claude", "s2");
+  const agent = sessionAddress("claude", "s1", "a1");
+  const other = sessionAddress("claude", "s1", "a2");
+  const sections = ["models", "kinds"].map(piece => ({ piece }));
+  // The page itself: nothing open, a limit row, Models, Kinds, an address it does not have.
+  for (const a of [NOTHING_OPEN, five, opus, { piece: "unknown" }, ...sections]) {
+    assert.equal(historyView(a), "");
+    for (const b of [NOTHING_OPEN, five, opus, { piece: "unknown" }, ...sections]) {
+      assert.equal(addsHistoryEntry(a, b), false, `${addressRoute(a)} -> ${addressRoute(b)}`);
+    }
+  }
+  // Projects and Folders are one view, and a subagent and another of the same session.
+  assert.equal(addsHistoryEntry({ piece: "projects" }, { piece: "folders" }), false);
+  assert.equal(addsHistoryEntry(agent, other), false);
+  // Every other move is to another view.
+  const views = [NOTHING_OPEN, SESSIONS, first, agent, second, { piece: "projects" }, { piece: "prices" }];
+  for (const a of views) {
+    for (const b of views) assert.equal(addsHistoryEntry(a, b), a !== b, `${addressRoute(a)} -> ${addressRoute(b)}`);
+  }
+  for (const a of [five, ...sections]) {
+    assert.equal(addsHistoryEntry(a, SESSIONS), true);
+    assert.equal(addsHistoryEntry(first, a), true);
+    assert.equal(addsHistoryEntry({ piece: "prices" }, a), true);
+  }
 });

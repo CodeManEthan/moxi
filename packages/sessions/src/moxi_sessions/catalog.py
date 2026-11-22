@@ -31,7 +31,9 @@ loses its sessions, so the counts are no longer of every session. The gather say
 harness has an `Unread` with no reason and `parts`, how many such folders and files there
 were. For Codex a rollout whose head could not be opened is one of them: it is listed, but
 whether a thread spawned it is not known. A Claude Code session whose subagents folder
-could not be listed has `subagents` None, not 0.
+could not be listed has `subagents` None, not 0. Of the folders and files, `lost` names
+those that may hold a main session, with why each could not be listed: all but the ones
+under a Claude Code session's subagents folder, which holds no main session.
 
 **The details.** `Catalog.details(entry)` reads what a row shows of one session, a
 `Details`. A fact that was not read is None; nothing is filled in for it.
@@ -39,8 +41,9 @@ could not be listed has `subagents` None, not 0.
 * From the head of the file (`Head`; an OpenCode session's come from its row): `folder`,
   `started`, `by_program` and, for Claude Code, the name its first lines give.
   `by_program` is True where a Claude head's `entrypoint` was read and starts with `sdk`,
-  and None everywhere else: a session is listed with the ones started in a terminal
-  unless its record says a program started it.
+  False where it was read and does not (a person started the session), and None where
+  it was not read and for every Codex and OpenCode session: a session is listed with the
+  ones started in a terminal unless its record says a program started it.
 * From the session's last turn (`window(entry, turns=1)`): `name`, `model` and
   `activity`.
 * From the whole session (`read_prompt`): `prompt`, the last message in the file's
@@ -209,12 +212,17 @@ class Unread:
     * `reason`: why the root could not be listed; None when it was listed.
     * `parts`: how many folders and files under a listed root could not be listed, so the
       harness's counts leave their sessions out; None when the root was not listed.
+    * `lost`: `(path, reason)` under the root for each of those folders and files that
+      may hold a main session, so a main session may be in no entry: every one but those
+      under a Claude Code session's `subagents` folder. A Codex rollout whose head could
+      not be opened is not one: it is an entry.
     """
 
     harness: str
     root: str | None
     reason: str | None
     parts: int | None = None
+    lost: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -238,7 +246,8 @@ class Head:
 
     * `folder`: the session's directory.
     * `started`: when it started, in epoch seconds.
-    * `by_program`: True where a Claude head's `entrypoint` starts with `sdk`, else None.
+    * `by_program`: True where a Claude head's `entrypoint` starts with `sdk`, False
+      where it is another value, None where it was not read and for the other harnesses.
     * `name`: the name a Claude file's first lines give the session.
     * `spawn`: a Codex rollout's spawn link (`Header.spawn`): None for a thread no thread
       spawned, `UNKNOWN` where line 1 was not read. None for the other harnesses.
@@ -319,11 +328,12 @@ def _time(value: Any) -> float | None:
 
 
 def by_program(entrypoint: Any) -> bool | None:
-    """True for an `entrypoint` a program's run writes (`sdk-cli`, `sdk-py`); None for
-    any other value and for one that was not read."""
-    if isinstance(entrypoint, str) and entrypoint.startswith(PROGRAM_ENTRYPOINT):
-        return True
-    return None
+    """True for an `entrypoint` a program's run writes (`sdk-cli`, `sdk-py`); False for
+    one a person's run writes (`cli`, `claude-vscode`, any other text); None for one that
+    was not read (not text, or empty)."""
+    if not isinstance(entrypoint, str) or not entrypoint:
+        return None
+    return entrypoint.startswith(PROGRAM_ENTRYPOINT)
 
 
 def cut(text: str, limit: int = ACTIVITY_BYTES) -> str:
@@ -608,20 +618,37 @@ def _entry(listed: Listed, subagents: int | None, changed_ns: int | None = None
 def _unlisted(listing: Listing) -> int:
     """How many folders and files under a listed root could not be listed. One inside a
     folder that could not be listed itself is that folder's, and is not counted again."""
-    paths = {path for path, _ in listing.unreadable}
-    return sum(1 for path in paths
-               if not any(path.startswith(f"{other}/") for other in paths))
+    return len(_outermost(listing))
+
+
+def _outermost(listing: Listing) -> dict[str, str]:
+    """The folders and files under a listed root that could not be listed, by path, with
+    why; one inside another of them is left out."""
+    why = dict(listing.unreadable)
+    return {path: reason for path, reason in sorted(why.items())
+            if not any(path.startswith(f"{other}/") for other in why)}
+
+
+def _lost(listing: Listing) -> tuple[tuple[str, str], ...]:
+    """The folders and files under a listed root that could not be listed and may hold a
+    main session (`Unread.lost`)."""
+    return tuple((path, reason) for path, reason in _outermost(listing).items()
+                 if not (listing.harness == CLAUDE and _in_subagents(path)))
+
+
+def _in_subagents(path: str) -> bool:
+    """Whether a path under Claude Code's root is a session's subagents folder or in it:
+    `<project>/<session>/subagents/...`."""
+    parts = path.split("/")
+    return len(parts) >= 3 and parts[2] == "subagents"
 
 
 def _claude_entries(listing: Listing) -> list[Entry]:
     agents = Counter(e.source.session_id for e in listing if e.kind == "subagent")
     # A part under `<project>/<session>/subagents` that could not be listed leaves that
     # session's count unknown.
-    unknown = set()
-    for path, _ in listing.unreadable:
-        parts = path.split("/")
-        if len(parts) >= 3 and parts[2] == "subagents":
-            unknown.add(parts[1])
+    unknown = {path.split("/")[1] for path, _ in listing.unreadable
+               if _in_subagents(path)}
     return [_entry(e, None if e.source.session_id in unknown
                    else agents[e.source.session_id])
             for e in listing if e.kind == "main"]
@@ -777,7 +804,7 @@ class Catalog:
                 entries += found
                 parts += unopened
             if parts:
-                unread.append(Unread(harness, listing.root, None, parts))
+                unread.append(Unread(harness, listing.root, None, parts, _lost(listing)))
                 unsure.append(listing.root)
             if harness != OPENCODE:
                 live.update(e.source.path for e in listing

@@ -17,6 +17,17 @@ A subagent's hooks run turns' commands too. Its input carries the root thread's
 and the ping forwards both. A UserPromptSubmit that carries an ``agent_id`` gets no
 listener text and raises no ``prompt`` event: those belong to the main loop's prompts.
 
+A main-loop prompt's origin. Codex's hook input carries none, so the host stamps one
+(``place_prompt``). It matches the prompt's text against each of its own hand-ins still
+out (the ``turn/start`` it has out, the delivery that opened the turn the prompt names, a
+steer it is handing in). A prompt that matches one is that delivery's: it carries no
+origin, as turns' own submits carry none on Claude Code, and the ``prompt`` event carries
+that delivery's ``by`` and ``senders``. A prompt that matches none is typed in the window
+and is ``composer`` (``PROMPT_ORIGIN``) only when no hand-in is out; while one is, it
+carries no origin and no delivery, so a delivery whose text Codex changed never reads as
+the person's. The host also says whether the prompt opens its turn: the first prompt
+naming a turn opens it, a later one naming the same turn joins it.
+
 The tool hooks. ``PreToolUse`` is in the launch's hook list only when a guard that is on
 covers Codex, with a ``matcher`` built from every such guard's Codex patterns
 (``matcher``), so Codex starts the ping only for those tools; ``PostToolUse`` only when an
@@ -75,6 +86,9 @@ DEFAULT_TIMEOUT = 600
 INTERRUPT_TIMEOUT = 3
 PING_TIMEOUT = 3.0
 PRINTED = "printed"
+#: The origin the host stamps on a main-loop prompt typed in the window, as Claude Code
+#: stamps one typed at its terminal.
+PROMPT_ORIGIN = "composer"
 #: The refusal of a call a deny guard covers when the host gave no answer; it names no
 #: guard, since the ping can't tell which one would have broken.
 CANNOT_CHECK = "turns could not check this call"
@@ -237,11 +251,17 @@ def _toml_key(key: str) -> str:
 
 def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIMEOUT - 1,
                   listen_wait_s: float = PING_TIMEOUT - 1,
+                  prompt_wait_s: float | None = None,
                   pre_matcher: str | None = None, guard_wait_s: float = PING_TIMEOUT - 1,
                   refuse: str | None = None,
                   after_tool: bool = False, after_wait_s: float = PING_TIMEOUT - 1) \
         -> tuple[list[str], dict[str, str]]:
     """The launch's `-c` hook flags and the trust key and hash of each hook.
+
+    Each ping waits its event's bound plus a second: Stop `hold_wait_s`,
+    UserPromptSubmit the session's prompt bound `prompt_wait_s` (`listen_wait_s` when
+    None), the other session hooks `listen_wait_s`. The waits are in the commands, so a
+    session's prompt bound is baked into its flags and their trust hashes.
 
     `PreToolUse` is added only with a `pre_matcher` (`matcher`), its ping waiting
     `guard_wait_s` plus a margin, and carrying `refuse` (`refuse_table`) when given;
@@ -254,6 +274,8 @@ def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIM
             event_wait_s = hold_wait_s + 1
         elif event.event == "Interrupt":
             event_wait_s = PING_TIMEOUT
+        elif event.event == "UserPromptSubmit" and prompt_wait_s is not None:
+            event_wait_s = prompt_wait_s + 1
         else:
             event_wait_s = listen_wait_s + 1
         one = handler(command(ping, socket_path, event, event_wait_s), event.timeout)
@@ -469,10 +491,18 @@ class HookServer:
                 return {"ok": True}
             text = frame.get("prompt")
             text = text if isinstance(text, str) else None
+            # A prompt typed in the window is the person's (`composer`); one the host
+            # handed in for a delivery, or one it cannot place while a hand-in of its own
+            # is out, carries no origin.
+            place = getattr(self.harness, "place_prompt", None)
+            origin, delivery_id, opens = (place(frame.get("turn_id"), text)
+                                          if place is not None else (None, None, None))
             seen = getattr(self.harness, "prompt_seen", None)
             if seen is not None:
-                seen(frame.get("turn_id"), text)
-            return {"ok": True, "context": endpoint.prompt(text)}
+                seen(frame.get("turn_id"), text, origin)
+            return {"ok": True, "context": endpoint.prompt(text, origin,
+                                                           delivery_id=delivery_id,
+                                                           opens=opens)}
         # A hook answers what it is asked and closes no turn. Stop is Codex
         # asking whether the turn may end: the turn runs on until Codex's own
         # turn/completed, which carries the outcome (`interrupted` for Esc).

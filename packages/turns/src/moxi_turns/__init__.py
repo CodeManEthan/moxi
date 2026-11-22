@@ -20,11 +20,16 @@ out of the harness. This package is turns' whole public API, the announcement's
                            # from its endpoint (capability environ; at most 64 names)
 
     d = s.deliver(text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
-                  refuse_agents=False, ref=None)
-    d = s.steer(text, *, ref=None)
+                  refuse_agents=False, ref=None, by=None, senders=())
+    d = s.steer(text, *, ref=None, by=None, senders=())
+                             # by: the asking module; senders: the names the text speaks
+                             # for; prompt listeners read them as delivery_by and
+                             # delivery_senders
     d.id, d.ref              # id None until a hand-in whose answer never came is found
     d.wait_started(timeout_s)  # Started | Refused | Lost
-    d.wait_ended(timeout_s)    # Ended | Refused | Lost
+    d.wait_ended(timeout_s)    # Ended(turn_id, outcome, delivery, ref, answer) | Refused
+                               # | Lost; answer: the turn's final text, None when the
+                               # turn had none or the harness gave none
 
     r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout_s=None,
                   stop_shells=False)              # Ran(new_session_id, shells) | Refused | Failed
@@ -59,9 +64,13 @@ out of the harness. This package is turns' whole public API, the announcement's
                               additions=None)   # an OpenCode host, experimental
     turns.Guard(name, calls, *, who="any", match=None, match_flags="", judge=None,
                 deny="", wants=(), on_error="allow", deadline_ms=500, switch=None,
-                doc="")       # a guard, declared in a module's GUARDS (group
+                sessions=None, doc="", step="call")
+                              # a guard, declared in a module's GUARDS (group
                               # moxi.turns.guards); its judge takes a ToolCall (prompts:
-                              # Prompt values) and answers None | Allow(line) | Deny(reason)
+                              # Prompt values) and answers None | Allow(line) | Deny(reason);
+                              # sessions, "package.module:function", takes the session's
+                              # env and answers True to turn the guard on there, asked
+                              # once at the session's start
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
