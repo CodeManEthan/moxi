@@ -48,6 +48,7 @@ import uuid
 from pathlib import Path
 
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 
 VERSION = 2
 
@@ -480,7 +481,7 @@ class FakeEndpoint:
         with self._lock:
             return [i for i, d in self.deliveries.items() if d["ref"] == ref]
 
-    def wait_for(self, predicate, timeout: float = 3.0) -> None:
+    def wait_for(self, predicate, timeout: float = PROC_WAIT_S) -> None:
         deadline = time.monotonic() + timeout
         while not predicate():
             if time.monotonic() > deadline:

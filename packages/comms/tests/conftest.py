@@ -50,6 +50,7 @@ from moxi_comms.provision import NAMES, provision
 from moxi_comms.scoping import is_auto_name, project_key
 from moxi_comms.sender import MalformedStamp, SenderIdentity, sender_from_env
 from moxi_comms.tokens import TokenStore
+from moxi_dev.testing import PROC_WAIT_S
 
 
 class FakeClock:
@@ -499,7 +500,7 @@ class Rig:
             bound_here = server.holder.ever_held
             server.stop()
             if bound_here:
-                deadline = time.monotonic() + 5.0
+                deadline = time.monotonic() + PROC_WAIT_S
                 while (sender.qualified in self.daemon.bindings
                        and time.monotonic() < deadline):
                     time.sleep(0.01)
@@ -694,20 +695,13 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
     return path
 
 
-#: How long a wait gives a daemon, shim or wrapper thread to act. The suite runs with
-#: 16 workers, and often beside other 16-worker runs, so a thread can go seconds
-#: without the CPU; a wait returns as soon as its condition holds, so the deadline
-#: costs time only when a test is failing. A wait that expects nothing to happen passes
-#: its own short timeout.
-WAIT = 10.0
-
 #: How long a wait gives something that must happen: a bind after a reconnect, a post,
 #: a frame. The test proves that it happens, not how fast, so the bound is long; it
 #: costs time only when a test is failing.
 LIVE_S = 30.0
 
 
-def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
+def wait_until(predicate, timeout: float = PROC_WAIT_S, interval: float = 0.01):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
@@ -717,12 +711,12 @@ def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
     return predicate()
 
 
-def wait_for_queue(shim, count: int, timeout: float = WAIT):
+def wait_for_queue(shim, count: int, timeout: float = PROC_WAIT_S):
     wait_until(lambda: len(shim.queue) >= count, timeout)
     return shim.queue
 
 
-def wait_for_payload(shim, message_id: str, timeout: float = WAIT) -> dict:
+def wait_for_payload(shim, message_id: str, timeout: float = PROC_WAIT_S) -> dict:
     """The payload of `message_id` in the shim's queue, once it is there. Other mail
     (a replay, an earlier send) can reach the queue first, so a count says nothing
     about which payload has arrived."""

@@ -9,7 +9,7 @@ import logging
 import sqlite3
 
 import pytest
-from conftest import WAIT, wait_until
+from conftest import wait_until
 
 from moxi_comms import bindings, claimfile, wire
 from moxi_comms.client import DaemonClient, DaemonError
@@ -17,6 +17,7 @@ from moxi_comms.daemon import Daemon
 from moxi_comms.mcp import tokens
 from moxi_comms.membership import ProcView, Root
 from moxi_comms.paths import comms_db, daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 
 PLANNER = "planner@proj-a"
 _pids = itertools.count(52000, 10)
@@ -90,7 +91,7 @@ class Session:
         self.client = None
         assert wait_until(lambda: f"{self.name}@{self.scope}" not in rig.daemon.bindings)
         host = rig.daemon.host
-        host.run_on_loop(asyncio.sleep(0), timeout=WAIT)
+        host.run_on_loop(asyncio.sleep(0), timeout=PROC_WAIT_S)
 
         def released() -> bool:
             with host._releases_lock:

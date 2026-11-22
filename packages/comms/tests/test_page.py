@@ -25,6 +25,7 @@ from conftest import wait_until
 
 from moxi import modules
 from moxi_comms import api, kinds, page, pagehandlers
+from moxi_dev.testing import PROC_WAIT_S
 
 from test_reply_enforcement import PLANNER, REVIEWER, P, R
 
@@ -604,7 +605,7 @@ def test_the_first_event_is_current_and_a_new_binding_comes_within_12_s(rig):
     async def go():
         stream = Stream(served())
         try:
-            name, data = await stream.next(3)
+            name, data = await stream.next(PROC_WAIT_S)
             assert stream.status == 200
             assert (name, data) == ("roster", up(api.roster_rows()))
             rig.shim(**PLANNER)
@@ -627,7 +628,7 @@ def test_two_gathers_with_no_change_publish_once(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", up(rows))
+            assert await stream.next(PROC_WAIT_S) == ("roster", up(rows))
             assert await stream.none_within(0.6)
         finally:
             await stream.close()
@@ -657,7 +658,7 @@ def test_two_gathers_a_second_apart_publish_a_warm_cache_once(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["rows"][0]["cache"] == {"kind": "warm",
                                                 "until": float(round(turned_at + 300.0))}
             assert await stream.none_within(2.5)
@@ -685,10 +686,10 @@ def test_the_topic_goes_offline_with_the_daemon_and_up_when_it_answers(rig, monk
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", {"state": "offline", "detail": None,
-                                                       "rows": [], "waiting": []})
+            assert await stream.next(PROC_WAIT_S) == ("roster", {
+                "state": "offline", "detail": None, "rows": [], "waiting": []})
             offline[0] = False
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["state"] == "up" and data["rows"][0]["qualified"] == R
         finally:
             await stream.close()
@@ -711,16 +712,16 @@ def test_the_topic_publishes_the_error_and_then_up_once_the_read_recovers(monkey
         app = served()
         stream = Stream(app)
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "error", "rows": [], "waiting": [],
                             "detail": pagehandlers.DAEMON_ERROR.format("DaemonError")}
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["detail"] == pagehandlers.UNEXPECTED.format("RuntimeError")
             status, body = await get(app, "/api/roster")
             assert status == 200 and body["state"] == "error"
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "up", "detail": None, "rows": [], "waiting": []}
         finally:
             await stream.close()
@@ -743,8 +744,8 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", {"state": "up", "detail": None,
-                                                       "rows": []})
+            assert await stream.next(PROC_WAIT_S) == ("roster", {
+                "state": "up", "detail": None, "rows": []})
         finally:
             await stream.close()
 
@@ -760,7 +761,7 @@ def test_the_poller_starts_with_the_first_stream_and_keeps_running_after_it(monk
     async def go():
         assert pagehandlers._current is None
         stream = Stream(served())
-        await stream.next(3)
+        await stream.next(PROC_WAIT_S)
         feed = pagehandlers._current
         await stream.close()
         await asyncio.sleep(0.3)

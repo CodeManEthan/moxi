@@ -43,6 +43,7 @@ from moxi import paths as moxi_paths
 from moxi.store import transaction
 from moxi_comms import machine_line, store
 from moxi_comms.paths import daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 from roster_kit import holding, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, last, reply, send
 
@@ -101,7 +102,7 @@ def page_shell(ui_shells, rig):
 
 def bound(rig, *names: str) -> None:
     wait_for(lambda: all(n in rig.daemon.bindings and rig.daemon.bindings[n].session_id
-                         for n in names), 5, what=f"{names} to bind")
+                         for n in names), PROC_WAIT_S, what=f"{names} to bind")
 
 
 def cold_shim(rig, who: dict) -> Any:
@@ -562,7 +563,8 @@ def app_link(rig):
 
     link = Link(APP, backoff=lambda: iter(lambda: 0.05, None), held_retry=0.2)
     link.start()
-    wait_for(lambda: link.bound and APP in rig.daemon.bindings, 5, what=f"{APP} to bind")
+    wait_for(lambda: link.bound and APP in rig.daemon.bindings,
+             PROC_WAIT_S, what=f"{APP} to bind")
     yield link
     link.stop()
 
@@ -747,7 +749,8 @@ def test_a_cache_comms_cannot_read_refuses_the_check_until_check_again(
     bound(rig, R)
     shim_drive.turn_started(reviewer)
     shim_drive.turn_ended(reviewer)
-    wait_for(lambda: rig.daemon.bindings[R].turned, 5, what="reviewer's turn to reach the daemon")
+    wait_for(lambda: rig.daemon.bindings[R].turned,
+             PROC_WAIT_S, what="reviewer's turn to reach the daemon")
     shell = page_shell()
     roster_kit.current(shell, holding([R]))
     _, root, _ = open_page(shell, ui_contexts, [])
