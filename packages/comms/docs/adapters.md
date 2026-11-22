@@ -123,7 +123,9 @@ a harness.
      one second by default, so an adapter whose delivery keeps failing doesn't spin.
 7. **The adapter reports completion; the daemon keeps the books.** The adapter opens each
    digest with the daemon (`open_digest`), hands it to turns with the digest's id as its
-   ref, and reports each turn's end (`turn_ended`) with the digests it handled and the
+   ref, `by="comms"` and the qualified name of each of its messages' senders, once each
+   (`senders`; a session's `prompt` listeners read them as `delivery_by` and
+   `delivery_senders`), and reports each turn's end (`turn_ended`) with the digests it handled and the
    ones it didn't. The daemon advances the cursor and deletes the handled rows in one
    transaction. A digest whose turn can't be identified is reported unhandled and
    replays. Replay is the safe direction; a cursor that moved too far is not. No adapter
@@ -357,10 +359,11 @@ hands turns one digest with `deliver`, which starts a turn. Mail that arrives wh
 turn runs, yours or the one a digest started, waits for that turn's end and goes in as
 one digest then. Mail sent with `--interrupt` goes into the running turn at once, by
 turns' `steer`, with `[interrupt]` on its frame line so the model knows why it came
-mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Each digest
-is acked when the turn that took it ends with an answer, and handed again otherwise. A
-hand-in whose answer never came is waited on, not handed again: the text may already be
-in a turn.
+mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Every
+digest, steered or not, carries `by="comms"` and its senders' names; a headless launch's
+brief carries neither. Each digest is acked when the turn that took it ends with an
+answer, and handed again otherwise. A hand-in whose answer never came is waited on, not
+handed again: the text may already be in a turn.
 
 **A headless session.** `--headless` runs the session with no window and nobody in it:
 

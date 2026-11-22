@@ -21,9 +21,9 @@ moxi rounds next alpha/search                               # the step it is at
 moxi rounds show alpha/search
 ```
 
-rounds starts no agent, registers no git hook and draws no page. It writes the open
-questions out as markdown and as data, and whatever shows them to the operator is outside
-it.
+rounds starts no agent and registers no git hook. It writes the open questions out as
+markdown and as data. With the `ui` extra it also has a page in the browser UI shell,
+which shows every open round and acts on nothing (see The page).
 
 ## What this version does
 
@@ -56,7 +56,9 @@ This version does not yet do:
   operator;
 - parent and child rounds: a design may plan a stage that stands for a child round,
   and `next` prints that stage's steps as not built;
-- `list --dormant`, the rounds that have gone quiet.
+- `list --dormant`, the rounds that have gone quiet;
+- acting from the page: answering a question, a decision or a job there, or dropping a
+  build. The page reads only, and the operator still answers through the round's lead.
 
 `defaults.dormant_days` and `defaults.sitting_at` belong to those parts: they are
 declared and checked, and nothing reads them yet (see Config).
@@ -984,6 +986,62 @@ model in no tier gets no flag.
 rounds reads no environment variable but the ones that place its directories,
 `MOXI_ROUNDS_HOME` and the rest, and `MOXI_HOME`.
 
+## The page
+
+With the `ui` extra (`moxi-ui` 0.2.4 or later, Moxi's browser UI shell), rounds has a
+page in the shell, at `/m/rounds/`, listed as Rounds among the daily pages. It shows
+every open round as one line of its steps, the steps in columns lined up across rounds,
+with a line under it for each build in flight. It only reads: it writes no log and no
+index, and nothing on it acts on a round. Top to bottom:
+
+- **Waiting on you.** The questions, decisions, jobs and rulings to read back that wait
+  on the operator, counted with the number of rounds they are in, or `Nothing waits on
+  you.` `Go through in order` opens each item in turn at its marker: rounds in the
+  board's order, and in each its questions, rulings, decisions and jobs, then the
+  project-level items. The arrow keys and `j`/`k` move, Esc closes.
+- **Last acted on.** The ten builds with the newest recorded step, across projects and
+  closed rounds, each with a small rail of its stage and the act in words (`landed`,
+  `CI green`). A card opens its build's current step, with the stage's five steps as
+  tabs, and `Show its line on the board`.
+- **Open rounds**, with chips for `Your turn`, `Stuck`, `Moving` and `Wrapping up`, a
+  project picker and `Key`. The rounds are grouped in that order. A round's line holds
+  its slug, its markers, a phrase for where it is and the age of its last act. Landed
+  stages and stages not started are folded under their counts, and the closed rounds
+  under one line at the foot.
+
+Each step is a marker of one of eight states, drawn by the shell's rail element. Three
+of them have a colour, each with a shape of its own so it also reads in greyscale:
+green for done, amber for waiting on the operator, red for failed or sent back. `Key`
+lists them all. A marker opens its step's record in place: a build's CI, the checks run
+and their output files, verdicts and their open findings, finish gates, what the step
+waits on and the command that clears it, and the newest events. A marker that waits on
+the operator opens the question, decision or job, which reads only and ends with the
+command the round's lead records the answer with. A round's name opens its card.
+Whatever is open is in the page's address, so a link reopens it and Back closes it. An
+address that names something no longer open says so at the foot.
+
+At 720 px wide and under the page is a column of rounds; a round opens a sheet with its
+steps as one vertical rail and its questions as text, to be answered at a desk.
+
+With turns installed, a builder's name in a build's record links to its row on Live
+sessions when exactly one live session runs in the build's worktree. The page needs only
+ui, rounds and projects.
+
+The page server reads rounds in process and never runs the `moxi rounds` command. It has
+three routes, none open to the phone gateway:
+
+| Route | Gives |
+|---|---|
+| `GET /api/rounds` | the whole board, with the server's clock |
+| `GET /api/record` | one marker's record, a waiting item's or a round's card; `{"gone": true}` for a round no longer open |
+| `GET /api/events` | the stream, topic `rounds`: the board, published when it changes |
+
+The server reads again every 5 seconds only what changed since its last read: each
+round's log, its project's log, its `design.md` and the config file. Git can change with
+no file written, so once a minute it also reads git again for every round with an open
+build. A question's text, and every other free text, is cut to a fixed length before it
+is sent.
+
 ## The read API
 
 Other modules read rounds in process through interface 1, reached with
@@ -1042,10 +1100,10 @@ moxi install rounds
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
 second adds rounds beside it, with the projects module it needs, offers its optional
-extras, `notes` and `turns`, and offers to place its skill. The repository's README, at
+extras, `notes`, `turns` and `ui`, and offers to place its skill. The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.1/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.2/packages/rounds/LICENSE).

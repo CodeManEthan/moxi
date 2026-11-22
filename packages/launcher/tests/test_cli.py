@@ -135,7 +135,8 @@ def test_each_verb_parses(argv, expected):
 def test_every_verb_has_a_handler():
     assert set(cli.VERBS) == {"run", "preview", "log", "presets", "catalog", "handoff",
                               "handoffs", "deliver", "relaunch", "exit-session", "exits",
-                              "sessions", "resume", "clear-expired", "keep-warm", "show"}
+                              "sessions", "resume", "park", "restore", "unpark",
+                              "clear-expired", "keep-warm", "show"}
 
 
 REFUSED = [
@@ -157,6 +158,16 @@ def test_bad_arguments_exit_2(argv, capsys):
     with pytest.raises(SystemExit) as raised:
         cli.parse(argv)
     assert raised.value.code == codes.USAGE
+
+
+def test_run_help_says_where_a_slot_launch_goes(capsys):
+    with pytest.raises(SystemExit) as done:
+        cli.main(["run", "--help"])
+    assert done.value.code == 0
+    said = " ".join(capsys.readouterr().out.split())
+    assert "--target slot --slot N runs the session in slot N" in said
+    assert "making its tmux session again when it is missing" in said
+    assert "park's reservation among them, is refused" in said
 
 
 def test_no_verb_says_it_is_not_built(capsys):

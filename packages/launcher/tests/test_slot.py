@@ -247,6 +247,20 @@ def test_the_harness_runs_in_the_slot_with_the_launch_env(work, harness, rig):
     assert row().pid_started is not None
 
 
+def test_a_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
+    # A held claim moves only to an endpoint whose parent is the row's pid and
+    # pid_started. In a slot the pane's process is the harness (slots' trampoline execs
+    # it), and the launcher records that pane's pid with its start time.
+    rig.plan(run=True)
+    api.launch(request(work))
+    run = harness.one()
+    assert Path(run["argv"][0]).name == "claude"
+    got = row()
+    assert got.pid == run["pid"]
+    assert run["started"] is not None and got.pid_started is not None
+    assert abs(got.pid_started - run["started"]) < 1.0
+
+
 def test_an_unconfirmed_start_is_started_and_says_so(work, harness, rig):
     rig.plan(exec="unconfirmed", exec_line="taken")
     got = api.launch(request(work))
@@ -366,9 +380,26 @@ def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
     assert type(listed) is targets.SlotTaken
 
 
+def test_a_named_missing_slot_with_no_hold_is_made_again_and_launched(work, harness, rig):
+    rig.plan(slots={"3": {"state": "missing", "launchable": False}})
+    assert api.check(request(work, slot="3")) == []
+    got = api.launch(request(work, slot="3"))
+    assert got.state != "failed"
+    assert [c["numbers"] for c in rig.calls("create")] == [[3]]
+    assert [c["slot"] for c in rig.calls("start")] == [3]
+
+
+def test_a_named_missing_slot_a_park_reserves_is_refused_held(work, harness, rig):
+    rig.plan(slots={"3": {"state": "missing", "launchable": False,
+                          "hold": {"holder": "park-p1", "until": None}}})
+    with pytest.raises(targets.SlotTaken) as raised:
+        api.launch(request(work, slot="3"))
+    assert raised.value.problem == "slot 3 is held by park-p1"
+    assert "moxi launcher restore 3" in raised.value.hint
+    assert rig.calls("create") == [] and rig.calls("start") == []
+
+
 @pytest.mark.parametrize("entry, words, hint", [
-    ({"state": "missing", "launchable": False}, "slot 3 is missing: its tmux session is gone",
-     "moxi slots create 3"),
     (None, "there is no slot 3", "moxi slots create"),
     # A live session named like the slot but with no registry row: slots reads it not
     # launchable, whatever its state, and its start refuses it no-slot. Not taken.
@@ -1295,7 +1326,8 @@ USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "an
         "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
         "CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG")
 #: The shapes the launcher reads, as the fake gives them.
-SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
+SHAPES = ("Support", "Hold", "RunEnd", "Last", "Slot", "Listing", "Placed", "Screen", "Seen",
+          "Answer")
 
 
 @pytest.fixture
@@ -1356,8 +1388,8 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "list_slots", "show", "create", "start", "read_screen",
-                 "answer_screen"):
+    for name in ("supported", "list_slots", "show", "create", "start", "respawn", "hold",
+                 "release", "settle", "read_screen", "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [

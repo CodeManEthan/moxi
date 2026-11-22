@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+- A launch follows its Claude session when Claude Code replaces the session's turns
+  endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
+  parent process is the launch's own `claude`, the row's `pid` and `pid_started`
+  compared by pid and start time, once the endpoint that held it has ended. No session id
+  moves a Claude claim any more, so a session started from inside a launched one never
+  takes it, even by naming a known id; a row with no `pid_started` never moves. The
+  `reclaimed` event's detail gains `"by": "parent"`. A Codex launch keeps the known-id
+  move.
+- The ready recorder listens for turns' `load`, raised when an endpoint first learns its
+  session id, so the replacing endpoint claims the launch at its own start. An id first
+  learned there is recorded with the new source `load`, until a `ready` of the same
+  endpoint names that id and gives it the `ready`'s source.
+- When the replacing endpoint starts before the old one has ended, its `load` and `ready`
+  events are queued in arrival order and handled once the old one ends, checked every
+  100 ms for up to 5 s; if it outlives the wait, the next event moves the claim.
+- Launches stuck on an ended endpoint heal at their next endpoint start after the
+  update, with no repair step. A limit crossing a seat passed while stuck is not
+  replayed.
+- The `changed` refusal's hint for a claim not yet moved says it moves within seconds.
+- The `turns` extra needs moxi-turns 0.2.5 or later: an older turns refuses a listener
+  row naming `load`, and with it every launcher listener.
+
+- Crash discovery: before every slot launch, a slot slots reads crashed (its run was
+  going when its tmux server went down) whose last launch is a launcher slot launch with
+  a session no one has taken up since is reserved for that session (an open-ended hold
+  `park-<id>` and a `crash` park entry), and a crashed slot with nothing to restore is
+  settled. A launch naming a reserved slot is refused `held by park-<id>`, with the hint
+  `moxi launcher restore N` or `moxi launcher unpark N`. Every slot placement tells slots
+  whether the harness's exit status can be trusted: not for Codex, which ends with status
+  0 on SIGHUP and SIGTERM alike.
+- The launch log moves to schema version 3, adding `park_entries`: one row per session
+  that belongs back in a slot, at most one open per slot. Open entries are never pruned;
+  closed ones follow `records.keep_days`. A park lock (`park.lock` in the state
+  directory) names its holder's kind and pid. Needs moxi-slots 0.1.1 or later. An older
+  launcher refuses the log once it is at version 3, so restart the launcher's page and
+  every process that runs the launcher with the update.
+- `moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]` exits every launched
+  session in a slot and reserves its slot for it first (an open-ended `park-<id>` hold
+  and a park entry). Each exit waits for the session to be quiet, up to `--wait-s` or the
+  setting `park.wait_s` (300 s), not counting a client's activity; copy mode, an open
+  turn, subagents and a draft still hold it. It exits regardless of background shells,
+  which Claude's exit dialog stops. A Codex session is left
+  running and reserved, since Codex offers no exit, and so is the session park runs in.
+  Exits 75 while another park or restore runs.
+- `moxi launcher restore [SLOT ...] [--dry-run] [--json]` resumes each parked session
+  into its reserved slot, made again when it is missing, under the reservation. A slot
+  that can't take it sends the session to the lowest slot and releases the reservation;
+  a session still running, or one taken up by another launch, is said and left or
+  closed. A launch that fails keeps the entry and its reservation.
+- `moxi launcher unpark SLOT ... | --all [--json]` gives reserved slots up; their
+  sessions stay resumable with `moxi launcher resume`. A slot given up that reads
+  crashed is settled, so it is not reserved again.
+- `moxi launcher resume` of a parked session goes back into its reserved slot as restore
+  does, with the brief, brief file or `--plain` it was given. Restore itself is given no
+  brief, so it resumes each parked session with no first turn, as `--plain` does, a `go`
+  launch's too. A slot resume runs crash discovery first, and a recorded slot another
+  session's reservation holds sends the resume to the lowest slot, with a line saying
+  why.
+- `moxi launcher run --slot N`, the page's slot choice and a resume make a missing slot
+  again when no one else holds it; one held by another is refused `held by H`.
+  `moxi launcher run --help` has a line for `--slot`.
+- The page's targets list marks each slot `choosable`, `crashed` (crash discovery would
+  reserve it) and `parked` (the session a park reservation keeps it for), and its
+  default slot is the one a launch naming none would take. Home's run menu words them
+  `missing, made again at launch`, `crashed, reserved at the next launch` and `held for
+  park-<id> · parked <name>`.
+- `moxi launcher sessions` marks a session with an open park entry `parked in slot N`
+  (`parked` in `--json`).
 - Home fills the comms identity with the name the newest launch of the seat, project or
   folder of the harness the form is drawn for bound (a project's include those made
   through its seats), even one comms now reports retired, whatever harness the last launch
@@ -23,7 +91,7 @@
   with no session reads every live launch keep-warm is on for.
 - Exit-session holds while the session runs a background shell or Monitor, until the
   session has been idle an hour (`held`, word `shells`); only then does it exit and stop
-  them at Claude's exit dialog. `--dry-run` says which.
+  them at Claude's exit dialog. `--dry-run` says which. Park's exit doesn't wait on them.
 - `moxi launcher resume` takes `--brief TEXT` or `--brief-file FILE`, and the page's
   resume a brief or a brief file beside each past session; the brief is sent as the
   resumed session's first turn, as a launch's is. A resume of a `go` launch with no brief

@@ -13,12 +13,13 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import wait_for
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import (api, catalog, first, presets, resume, slots, store, target,
-                           targets)
+from moxi_launcher import (api, catalog, first, presets, restore, resume, slots, store,
+                           target, targets)
 from moxi_launcher.compose import common
 
 TESTS = Path(__file__).resolve().parent
@@ -87,7 +88,8 @@ class Turns:
 
 
 class Slots:
-    """slots' `supported`, `show` and `create`, from a table of slots by number."""
+    """slots' `supported`, `list_slots`, `show` and `create`, from a table of slots by
+    number."""
 
     class SlotsError(Exception):
         pass
@@ -104,6 +106,12 @@ class Slots:
 
     def supported(self):
         return SimpleNamespace(ok=self.ok, why="")
+
+    def list_slots(self):
+        if self.how != "ok":  # as slots: a listing that can't be read says so, never raises
+            return SimpleNamespace(ok=False, why="tmux failed", slots=(), unregistered=())
+        found = (self.show(n) for n in sorted(self.table, key=int) if str(n).isdigit())
+        return SimpleNamespace(ok=True, slots=tuple(found), unregistered=())
 
     def show(self, slot):
         if self.how == "try-again":
@@ -190,6 +198,24 @@ def test_an_entry_names_its_launchs_project_and_actor(conn):
         "sessions"]}
     assert (entries["r1"]["project_key"], entries["r1"]["actor"]) == (None, "ann")
     assert (entries["r2"]["project_key"], entries["r2"]["actor"]) == ("proj-a", "alice")
+
+
+def test_a_session_with_an_open_park_entry_is_marked_parked_in_its_slot(conn):
+    launched(conn, request_id="r1", at="2026-10-30T10:00:00.000000+00:00")
+    launched(conn, request_id="r2", session_id=SID2, slot="4",
+             at="2026-10-31T10:00:00.000000+00:00")
+    entry = store.add_entry(conn, park_id="p1", kind="park", by="ann", slot=3,
+                            request_id="r1", session_id=SID, harness="claude",
+                            outcome="exited")
+    got = resume.sessions(conn=conn, turns=None)
+    by = {e["request_id"]: e for e in got.data["sessions"]}
+    assert (by["r1"]["parked"], by["r2"]["parked"]) == (3, None)
+    assert got.lines[1].endswith(f"session {SID}, ended, parked in slot 3: resumable")
+    assert "parked" not in got.lines[0]
+    # Once the entry is closed the mark goes.
+    store.close_entry(conn, entry.entry_id, "dropped")
+    assert [e["parked"] for e in resume.sessions(conn=conn, turns=None).data["sessions"]] == [
+        None, None]
 
 
 def test_an_empty_log_lists_no_sessions(conn):
@@ -572,6 +598,26 @@ def test_a_missing_recorded_slot_is_made_again_first(conn, entry):
     assert api_.created == [[3]]
 
 
+def test_a_missing_recorded_slot_another_holds_goes_to_the_lowest_and_says_why(conn):
+    reserved = {**MISSING, "hold": SimpleNamespace(holder="park-p1", until=None)}
+    api_, said = Slots({"3": reserved}), []
+    assert resume.choose_slot(api_, row_in(conn), None, say=said.append) == ""
+    assert api_.created == []
+    assert said == ["slot 3 is held by park-p1; resuming into the lowest slot that takes it"]
+    # Named, it is passed on for the launch's own check to refuse with slots' words.
+    assert resume.choose_slot(api_, store.get(conn, "r1"), 3) == 3
+    assert api_.created == []
+
+
+def test_a_recorded_slot_held_by_the_resumes_own_hold_takes_it(conn):
+    own = SimpleNamespace(holder="park-p1", until=None)
+    api_ = Slots({"3": {**MISSING, "hold": own}})
+    assert resume.choose_slot(api_, row_in(conn), None, hold="park-p1") == "3"
+    assert api_.created == [[3]]
+    ended = Slots({"3": {"state": "ended", "launchable": False, "hold": own}})
+    assert resume.choose_slot(ended, store.get(conn, "r1"), None, hold="park-p1") == "3"
+
+
 def test_a_slot_session_with_no_registry_row_is_made_again_first(conn):
     api_ = Slots({"3": {"state": "occupied", "created": None}})
     assert resume.choose_slot(api_, row_in(conn), None) == "3"
@@ -748,6 +794,38 @@ def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     resume.resume(SID, request_id="r2", turns=None)
     assert [c["numbers"] for c in rig.calls("create")] == [[3]]
     assert rig.calls("start")[-1]["slot"] == 3
+
+
+def test_a_restored_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
+    # Restore resumes a parked session through the slot target, so the new launch's row
+    # names its own `claude` by pid and start time, the process its endpoints are
+    # children of.
+    rig.plan(slots={"3": {"state": "free", "launchable": True}}, run=True)
+    first_launch(work, target="slot", slot="3")
+    with_store(lambda c: store.add_entry(c, park_id="p1", kind="park", by="ann", slot=3,
+                                         request_id="r1", session_id=SID,
+                                         harness="claude", outcome="exited"))
+    rig.plan(slots={"3": {"state": "ended", "launchable": False,
+                          "hold": {"holder": store.park_holder("p1"), "until": None},
+                          "last": {"at": 1.0, "label": "launcher:r1",
+                                   "meta": {"request_id": "r1", "session_id": SID,
+                                            "chain": "r1"}}}})
+    result = restore.restore([3], turns=None)
+    assert result.exit_code == 0, result.lines
+    [entry] = with_store(lambda c: store.entries_log(c))
+    assert entry.state == "restored" and entry.restore_request_id
+    new = with_store(lambda c: store.get(c, entry.restore_request_id))
+    assert (new.resume_of, new.slot) == ("r1", "3")
+
+    def runs_of_new():
+        return [r for r in harness.runs()
+                if r["env"].get("MOXI_LAUNCHER_REQUEST") == new.request_id]
+
+    wait_for(lambda: runs_of_new(), timeout=30)
+    [run] = runs_of_new()
+    assert new.pid == run["pid"]
+    assert run["started"] is not None and new.pid_started is not None
+    assert abs(new.pid_started - run["started"]) < 1.0
 
 
 def test_a_slot_named_for_a_terminal_resume_is_refused(work, harness, no_exec):

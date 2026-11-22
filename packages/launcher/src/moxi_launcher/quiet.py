@@ -16,11 +16,15 @@ that holds the act is a word, and the words come in this order:
 **A `shell` entry never counts as live work** in this read, whichever harness reports
 it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
 Exit-session reads them itself after this read (`exits.background_shells`), and holds
-for them until the session has been idle an hour.
+for them until the session has been idle an hour; park's exit doesn't read them.
 
 **The pane's own output never holds.** `pane_use` also gives the pane's activity, which
 any output moves: Claude Code redrawing its spinner and status line, or its exit dialog
 drawing itself. It says nothing of a person, so the read takes no account of it.
+
+A caller may leave out the client's activity (`count_activity=False`): park does, since
+the person who parks is the one at the panes. Copy mode still holds then, and so does a
+turn no delivery opened.
 
 **A turn no delivery opened holds as a person's, whatever way it came.** turns marks such
 a turn with `opening` and `command` both None, in `facts().turn` and as a `turn.started`
@@ -134,20 +138,21 @@ def live_agents(agents: Any) -> list[Any]:
 
 def read(session: Any, *, slot: str | int | None = None, slots_api: Any | None = None,
          person_s: float = PERSON_S, person_turn_at: float | None = None,
-         clock: Callable[[], float] = time.time) -> Reading:
+         clock: Callable[[], float] = time.time, count_activity: bool = True) -> Reading:
     """Take the whole quiet read of `session` (turns' `Session`) now.
 
     `slot` is the launch's slot, whose run pane `pane_use` reads (`slots_api` stands in
     for slots' API; with slots not installed the pane read fails and holds `unreadable`).
     `person_turn_at` is the start of the latest turn no delivery opened that the caller's
-    watch saw. A read that fails holds `unreadable`; it never raises.
+    watch saw. With `count_activity` false a client's activity holds nothing.
+    A read that fails holds `unreadable`; it never raises.
     """
     failures: dict[str, str] = {}
     facts = _try(failures, "facts", session.facts)
     agents = _try(failures, "agents", session.agents)
     pane = _pane(failures, slot, slots_api)
     return judge(facts, agents, pane, failures=failures, person_turn_at=person_turn_at,
-                 now=clock(), person_s=person_s)
+                 now=clock(), person_s=person_s, count_activity=count_activity)
 
 
 def reread_person(last: Reading, *, slot: str | int | None = None,
@@ -165,9 +170,10 @@ def reread_person(last: Reading, *, slot: str | int | None = None,
 
 def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
           failures: Mapping[str, str] | None = None, person_turn_at: float | None = None,
-          now: float, person_s: float = PERSON_S) -> Reading:
+          now: float, person_s: float = PERSON_S, count_activity: bool = True) -> Reading:
     """What holds, from what was read: the words in `WORDS` order, each with its words for
-    a person."""
+    a person. With `count_activity` false a client's activity does not hold; copy mode
+    still does."""
     failures = dict(failures or {})
     holds: list[Hold] = []
     if facts is not None and facts.turn_open:
@@ -186,7 +192,8 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
         holds.append(Hold("draft", "a draft is in the prompt box"))
     if facts is not None and person_turn(facts.turn):
         person_turn_at = _latest(person_turn_at, facts.turn.started_at)
-    if person := _person(pane, person_turn_at, now, person_s):
+    if person := _person(pane, person_turn_at, now, person_s,
+                         count_activity=count_activity):
         holds.append(Hold("person", person))
     if facts is not None and facts.stale:
         failures.setdefault("facts", "the facts moved while they were read (stale)")
@@ -195,12 +202,13 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
     return Reading(tuple(holds), facts, agents, pane, failures, person_turn_at, now)
 
 
-def _person(pane: Any | None, turn_at: float | None, now: float,
-            person_s: float) -> str | None:
+def _person(pane: Any | None, turn_at: float | None, now: float, person_s: float, *,
+            count_activity: bool = True) -> str | None:
     if pane is not None and getattr(pane, "pane_id", None) is not None:
         if pane.pane_in_mode:
             return "the pane is in copy mode"
-        if pane.client_activity is not None and now - pane.client_activity < person_s:
+        if (count_activity and pane.client_activity is not None
+                and now - pane.client_activity < person_s):
             return f"a client was active {_ago(now, pane.client_activity)} ago"
     if turn_at is not None and now - turn_at < person_s:
         return f"a turn no delivery opened, {_ago(now, turn_at)} ago"

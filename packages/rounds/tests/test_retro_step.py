@@ -172,6 +172,23 @@ def test_next_gives_the_retro_its_reads_its_block_its_verdict_and_the_numbers(
     assert "\n  time in steps: " in text
 
 
+def test_the_retro_s_group_left_uncounted_has_its_lines_and_no_numbers(
+        round_dir, monkeypatch):
+    from moxi_rounds import next_step, showing
+    from moxi_rounds import numbers as counted
+
+    built(round_dir)
+    found = showing.show(ROUND, refresh=False)
+    step = retro(round_dir)
+    monkeypatch.setattr(counted, "of", lambda *_a, **_k: pytest.fail("counted"))
+
+    group = next_step.group(found, step, {}, count_numbers=False)
+
+    assert "numbers" not in group
+    assert group["then"] == [f"moxi rounds verdict {ROUND} <your report>"]
+    assert group["reads"][0] == "the numbers below"
+
+
 def test_a_skip_of_retro_lets_the_round_close(round_dir):
     built(round_dir)
     rule("skip:retro")
