@@ -11,7 +11,8 @@ endpoint process, and ignores its answer. For a launch this endpoint holds
   adds its new id, and a nested session's ids never join;
 - at `load`, the claim is the point: an endpoint that replaced the launch's own takes the
   launch at its start. The event's id joins the launch's ids with source `load` (an id
-  already known is left as it is), and nothing else is written;
+  already known is left as it is), and nothing else is written. A later `ready` of this
+  endpoint naming the id its `load` added gives the id the `ready`'s source;
 - at `gone`, an event `gone` is added, with turns' reason.
 
 **The overlap.** Claude Code may start the replacing endpoint before the one it replaces
@@ -53,6 +54,8 @@ OVERLAP_STEP_S = 0.1
 _lock = threading.Lock()
 _queue: list = []
 _drainer: threading.Thread | None = None
+#: The id this endpoint's `load` added to a launch: (endpoint, request id, session id).
+_load_added: tuple[str, str, str] | None = None
 
 
 def observe(event) -> None:
@@ -122,15 +125,18 @@ def _drain(held: str) -> None:
 
 def _record(conn, row: store.LaunchRow, event) -> None:
     """Record a `ready` or `load` of the launch `row`, which this endpoint holds."""
+    global _load_added
     session_id = getattr(event, "session_id", None)
+    learned = (listeners.endpoint_id(), row.request_id, session_id)
     if event.event == "load":
-        if session_id:
-            store.learn_session(conn, row.request_id, session_id, "load")
+        if session_id and store.learn_session(conn, row.request_id, session_id, "load"):
+            _load_added = learned
         return
     if session_id:
         source = getattr(event, "source", None)
         store.learn_session(conn, row.request_id, session_id,
-                            source if source in store.SOURCES else "startup")
+                            source if source in store.SOURCES else "startup",
+                            replace_load=learned == _load_added)
     store.set_state(conn, row.request_id, "ready")
 
 

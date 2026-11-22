@@ -12,7 +12,8 @@
   move.
 - The ready recorder listens for turns' `load`, raised when an endpoint first learns its
   session id, so the replacing endpoint claims the launch at its own start. An id first
-  learned there is recorded with the new source `load`.
+  learned there is recorded with the new source `load`, until a `ready` of the same
+  endpoint names that id and gives it the `ready`'s source.
 - When the replacing endpoint starts before the old one has ended, its `load` and `ready`
   events are queued in arrival order and handled once the old one ends, checked every
   100 ms for up to 5 s; if it outlives the wait, the next event moves the claim.

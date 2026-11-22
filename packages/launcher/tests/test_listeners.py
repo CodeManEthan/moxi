@@ -114,9 +114,11 @@ def dead() -> str:
 
 @pytest.fixture(autouse=True)
 def overlap_drained():
-    """Each test starts with no wait for a held endpoint under way, and ends once the one
-    it started, if any, has handled or dropped its queue."""
+    """Each test starts with no wait for a held endpoint under way and no id remembered
+    from a `load`, and ends once the wait it started, if any, has handled or dropped its
+    queue."""
     listen_ready._drainer = None
+    listen_ready._load_added = None
     yield
     if listen_ready._drainer is not None:
         listen_ready._drainer.join(timeout=10)
@@ -549,6 +551,31 @@ def test_a_load_and_a_ready_of_one_endpoint_arriving_at_once(
         assert (row.endpoint, row.state) == (NEW, "ready")
         assert [e.kind for e in store.events(conn, request_id)] == [store.RECLAIMED]
         assert store.session_ids(conn, request_id) == [(minted, "minted"), (cleared, "clear")]
+
+
+@pytest.mark.parametrize("load_first", [True, False])
+def test_a_ready_after_its_own_endpoints_load_of_the_same_id_names_its_source(
+        conn, endpoint, dead, load_first):
+    # The two arrive in either order; the `ready`'s source says how the id began.
+    held_by(conn, dead)
+    endpoint(NEW, parent=SEAT)
+    events = [load("claude", LOADED_ID, "r1"),
+              ready("claude", LOADED_ID, "r1", source="clear")]
+    for event in events if load_first else events[::-1]:
+        listen_ready.observe(event)
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "clear")]
+    found = store.resolve(conn, CLAUDE_ID)
+    assert found.request_id == "r1" and found.newest_session_id == LOADED_ID
+
+
+def test_a_ready_of_an_id_another_endpoint_loaded_leaves_its_source(conn, endpoint, dead):
+    held_by(conn, dead)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    endpoint("3001@3.000000", parent=SEAT)
+    listen_ready.observe(ready("claude", LOADED_ID, "r1", source="resume"))
+    assert store.get(conn, "r1").endpoint == "3001@3.000000"
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "load")]
 
 
 def test_a_live_held_endpoint_that_is_not_a_sibling_waits_for_nothing(conn, endpoint):

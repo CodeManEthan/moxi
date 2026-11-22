@@ -710,7 +710,7 @@ def _write_facts(conn: sqlite3.Connection, request_id: str, facts: Mapping[str, 
 
 
 def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
-                  source: str, *, at: str | None = None) -> bool:
+                  source: str, *, at: str | None = None, replace_load: bool = False) -> bool:
     """Record a session id a launch is known by, whatever its state, and say whether it is
     new.
 
@@ -720,8 +720,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     the claim read the same owner. The table is keyed by the pair, which would hold the id
     for both; this write keeps it with the launch that has it, except for a resume: a
     launch made to resume (`resume_of` set) learns a `resume` id whoever holds it, and
-    `resolve` then finds it, the newest. A pair already there is left as it is. The state
-    is not touched.
+    `resolve` then finds it, the newest. A pair already there is left as it is, but for
+    `replace_load`: a pair learned at `load` then takes `source`, which the ready recorder
+    asks for at a `ready` of the id its own endpoint's `load` added. The state is not
+    touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
@@ -737,6 +739,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
             "WHERE session_id = ? AND request_id <> ?)",
             (session_id, request_id, source, at, shared, session_id, request_id))
         added = cursor.rowcount == 1
+        if replace_load and not added:
+            conn.execute("UPDATE session_ids SET source = ? WHERE session_id = ? "
+                         "AND request_id = ? AND source = 'load'",
+                         (source, session_id, request_id))
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
                      "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
                      "SELECT 1 FROM session_ids WHERE session_id = ? AND request_id = ?)",
