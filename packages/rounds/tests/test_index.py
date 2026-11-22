@@ -127,7 +127,7 @@ def test_a_write_leaves_the_rounds_dir_status_and_flow_and_its_logs_digest(home)
     assert found["logs"] == [("proj-a", "a-round", str(at.round_log), len(data),
                               hashlib.sha256(data).hexdigest(), 1, index.DERIVED, None)]
     assert found["rounds"] == [("proj-a", "a-round", str(home.rounds_dir / "a-round"), "open",
-                                "small", None)]
+                                "small", None, None)]
     assert found["items"] == []
 
 
@@ -598,3 +598,33 @@ def test_a_landing_row_the_log_does_not_give_is_a_disagreement(home):
     conn.close()
     assert [one.problem for one in index.disagreements([home])] == [
         "has rows in the index that its log does not give"]
+
+
+# -- the round's own lead ----------------------------------------------------------------
+
+def test_a_rounds_row_keeps_its_own_lead(home):
+    open_round(home)
+    write.record(where(home, "a-round"), by="planner",
+                 event=lambda view, result: write.Entry(
+                     "lead.changed", {"lead": "atlas-lead", "was": None}))
+
+    assert rows()["rounds"][0][-1] == "atlas-lead"
+    assert index.read("proj-a", home.rounds_dir, "a-round").lead == "atlas-lead"
+    assert index.rounds("proj-a", home.rounds_dir)[0].lead == "atlas-lead"
+
+
+def test_a_row_made_before_the_lead_was_kept_reads_the_lead_from_the_log(home):
+    at = open_round(home)
+    write.record(at, by="planner",
+                 event=lambda view, result: write.Entry(
+                     "lead.changed", {"lead": "atlas-lead", "was": None}))
+    # As the version before left the row: no lead, made under the count before.
+    conn = sqlite3.connect(paths.index_file())
+    with conn:
+        conn.execute("UPDATE rounds SET lead = NULL")
+        conn.execute("UPDATE logs SET derived = ?", (index.DERIVED - 1,))
+    conn.close()
+
+    assert index.read("proj-a", home.rounds_dir, "a-round").lead == "atlas-lead"
+    assert [one.problem for one in index.disagreements([home])] == [
+        "has a log that changed since the index last read it"]

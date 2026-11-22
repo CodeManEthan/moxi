@@ -222,6 +222,9 @@ export interface FilterFacts {
 }
 
 export const ALL = "all";
+/** The place menu's first item, which clears its picks, and its button with none picked. */
+export const ALL_PROJECTS = "All projects";
+export const ALL_FOLDERS = "All folders";
 const item = (key: string, label: string, picked: boolean, patch: Partial<PageState>): MenuItem =>
   ({ key, label, figure: null, picked, ruled: false, several: false, patch });
 const severalItem = (key: string, label: string, picked: boolean, patch: Partial<PageState>): MenuItem =>
@@ -252,18 +255,20 @@ function toggled(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((other) => other !== value) : [...values, value];
 }
 
-/** The project (or folder) menu: `all`, then the entries, any number of them picked, those
- * picked that are not entries first. The button counts those picked by `noun`, one
- * included (`1 project`). */
+/** The project (or folder) menu: `All projects` (`All folders` when `label` is `Folder`),
+ * then the entries, any number of them picked, those picked that are not entries first.
+ * The button reads the first item's words with none picked, and counts those picked by
+ * `noun`, one included (`1 project`). */
 function places(label: string, noun: string, current: string[], entries: [string, string][],
                 patch: (values: string[]) => Partial<PageState>, name: (value: string) => string): Menu {
   const listed = [...current.filter((value) => !entries.some(([key]) => key === value)).map((value): [string, string] => [value, name(value)]),
                   ...entries];
+  const all = label === "Folder" ? ALL_FOLDERS : ALL_PROJECTS;
   return {
     key: "place", label,
-    value: current.length === 0 ? ALL : countWords(current.length, noun),
+    value: current.length === 0 ? all : countWords(current.length, noun),
     set: current.length > 0,
-    items: [item("", ALL, current.length === 0, patch([])),
+    items: [item("", all, current.length === 0, patch([])),
             ...listed.map(([value, words]) => severalItem(value, words, current.includes(value), patch(toggled(current, value))))],
   };
 }

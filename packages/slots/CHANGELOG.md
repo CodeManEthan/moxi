@@ -1,6 +1,51 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (unreleased)
+
+- The registry moves to version 2 at the first change this version makes (a hold, a
+  start, a create). An older slots refuses a version 2 registry, so restart every
+  process that uses slots (the launcher's page, its jobs) with the update.
+
+- Each slot reads `crashed` (`Slot.crashed`): its last run was going when its tmux
+  server went down. It is not occupied, its last run was placed under another server
+  than the one answering now, it did not end by itself (status 0, no signal, a trusted
+  status), it was not settled, and either no end was recorded or it ended within 120 s
+  before its server's end. A server's end is, within one boot, the start of the server
+  answering now, or the boot's last journal entry for an earlier boot (`journalctl
+  --list-boots`); where that can't be read only a run with no end recorded is crashed,
+  and with no server answering nothing is. `moxi slots list` and `show` print it in the
+  state, as `missing, crashed`. slots itself never acts on it. `settle(slot, why)` ends
+  a slot's crashed reading by recording why in place of an end, and refuses an occupied
+  slot. The reading needs Linux's boot id (`/proc/sys/kernel/random/boot_id`): on macOS
+  no slot reads crashed.
+
+- Each run records how it ended. Every `start` and `respawn` writes a fresh run token
+  (`Last.run`) and the tmux server's id (`Last.server`, `<boot id>:<tmux pid>`) into the
+  slot's last launch, and sets a `pane-died` hook on the run window that writes
+  `Last.ended` (a `RunEnd`: the pane's death time, its exit status, the signal that
+  ended it) for that token only, so a late hook of an earlier run writes nothing. The
+  hook waits up to 60 s for the module lock; a write it fails, or a hook that does
+  not start (its Python moved) or that a signal ends, goes as a line to `hooks.log` in
+  the state directory, and `moxi doctor` warns of it, since the run it missed reads
+  crashed later. `start` and `respawn` take `status_trusted` (default True), kept as
+  `Last.status_trusted`, for a command whose exit status doesn't tell a clean end from
+  a kill. `moxi slots show` prints `ended`.
+
+- `start(None, ..., create=True)` takes the lowest registered slot with no session
+  running that it may use, a missing one included when it has no hold but the caller's,
+  and makes that slot's session again with a new run window. Its name, hold and last
+  launch stay. A new number is made only when no registered slot takes the launch, so
+  after a reboot launches no longer climb past the missing numbers. Without `create`,
+  `start(None)` still skips missing slots.
+
+- A hold can last until its holder releases it: `hold(slot, holder)` with no `seconds`,
+  or `moxi slots hold N --holder H --until-released`. Its `Hold.until` is None, and
+  `list` and `show` print it as `until released by hand`. A missing slot can now be held
+  (the `missing` refusal is gone), and the hold stays when the slot is made again.
+  `hold(..., expect=REQUEST_ID)` holds only while the slot's last launch carries that
+  `request_id` in its meta, else it is refused with the new reason `changed`. The
+  registry file moves to version 2, which an older slots refuses by its version; this
+  one reads version 1 files.
 
 - Three screens slots reads and never answers, from Claude Code 2.1.326:
   `CLAUDE_THEME_PICKER` and `CLAUDE_WELCOME`, the first-run theme picker and welcome

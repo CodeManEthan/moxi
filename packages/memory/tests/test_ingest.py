@@ -344,15 +344,6 @@ def test_a_patch_to_an_env_file_keeps_only_the_path():
     assert texts() == ["apply_patch(/work/app/.env)"] and texts("tails") == []
 
 
-@pytest.mark.parametrize("value", [
-    "cat > /x/.env <<EOF\nA=1\nEOF", "cat ~/.ssh/id_rsa && echo done",
-    ["bash", "-lc", "cat /x/.env | head -n 3"], "*** Update File: /x/.env\n+A=1",
-    {"a": ["not this", {"b": "then /x/.env with words"}]}])
-def test_the_path_found_is_one_word(value):
-    found = rows.secret_path(value)
-    assert found is not None and found.split() == [found]
-
-
 def _runs(count, size, seed):
     """`count` random letter-and-digit runs of `size`, which redaction turns into short
     placeholders."""

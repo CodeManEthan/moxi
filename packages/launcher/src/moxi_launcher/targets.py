@@ -34,8 +34,10 @@ wrapper (SIGTERM), and with it the session, and the row `failed`.
 a slot (a number or a name) goes only there, and `check` refuses it when slots says it is
 not launchable: as taken, naming who has it, when it is occupied or held (by a hold not
 the launch's own: a replay may come with the hold on its slot), and as missing
-when slots has no such slot (a session of its name with no registry row included) or its
-session is gone. One that names none takes the lowest launchable slot or a new one. slots claims the slot and opens the window in one step (`start`), with the
+when slots has no such slot (a session of its name with no registry row included). A
+named slot whose tmux session is gone, with no hold or the launch's own, is made again
+(`create`) just before the start. One that names none takes the lowest slot with nothing
+running in it, made again when it is missing, or a new one. slots claims the slot and opens the window in one step (`start`), with the
 launch's environment on that command only; a relaunch goes back into its slot's ended run
 pane (`respawn`), which keeps the pane, and a launch with the slot's hold passes it, which
 ends with the start. slots keeps the launch's request id, session id and chain (the first
@@ -429,6 +431,11 @@ class Headless(Target):
                             f"to {output}")
 
 
+#: The harnesses whose exit status in a slot says nothing of how they ended: slots is
+#: told so at every placement, and reads their runs by its 120 s window alone.
+UNTRUSTED_STATUS = ("codex",)
+
+
 class Slot(Target):
     """A tmux slot, through slots: the launch claims a slot and starts there, its startup
     screens are watched and those it is set to answer are answered, it waits for ready,
@@ -471,11 +478,11 @@ class Slot(Target):
             return [SlotMissing(named, f"there is no slot {found.number} (a session of "
                                        "that name runs with no registry row)",
                                 f"moxi slots create {found.number} makes it")]
-        if found.launchable or _own_hold(found, getattr(resolved, "hold", None)):
+        if found.launchable or _own_hold(found, getattr(resolved, "hold", None)) \
+                or _own_pane(found, resolved):
             return []
-        if found.state == "missing":
-            return [SlotMissing(named, f"slot {named} is missing: its tmux session is gone",
-                                f"recreate it with moxi slots create {named}")]
+        if found.state == "missing" and found.hold is None:
+            return []  # made again at the start
         # As slots' own refusal at start: an occupied slot names its last launch, even when
         # it is held too; a held one names the hold.
         if found.state == "occupied":
@@ -485,9 +492,12 @@ class Slot(Target):
         else:
             state, holder = found.state or "not launchable", None
         by = f" by {holder}" if holder else ""
-        return [SlotTaken(named, f"slot {named} is {state}{by}",
-                          "name another slot, or leave out the slot to take the lowest "
-                          "free one", holder)]
+        hint = "name another slot, or leave out the slot to take the lowest free one"
+        if state == "held" and found.hold.holder.startswith(store.HOLDER_PREFIX):
+            # A park reservation: the slot is kept for the session parked or crashed in it.
+            hint = (f"moxi launcher restore {named} brings its session back, or moxi "
+                    f"launcher unpark {named} gives the slot up")
+        return [SlotTaken(named, f"slot {named} is {state}{by}", hint, holder)]
 
     def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
         # slots' trampoline finds the command on the child's PATH; a harness that is not
@@ -507,8 +517,11 @@ class Slot(Target):
         notes = _seed(conn, rid, launch, current)
         meta = {"request_id": rid, "session_id": row.session_id if row else None,
                 "chain": launch.chain or rid}
+        # Codex ends with status 0 on SIGHUP and SIGTERM alike, so its exit status can't
+        # tell slots a clean end from a kill.
         place = dict(env=dict(launch.env), cwd=launch.cwd, label=f"launcher:{rid}",
-                     meta=meta, hold=launch.hold)
+                     meta=meta, hold=launch.hold,
+                     status_trusted=launch.composition.harness not in UNTRUSTED_STATUS)
         try:
             if launch.respawn:
                 if named is None:
@@ -516,6 +529,8 @@ class Slot(Target):
                                 "a respawn names the slot whose run pane it reuses")
                 placed = api.respawn(named, list(launch.argv), **place)
             else:
+                if named is not None:
+                    _make_again(api, named)
                 placed = api.start(named, list(launch.argv), **place, create=named is None)
         except api.Refused as refused_exc:
             holder = _refused_holder(refused_exc.reason, refused_exc.holder)
@@ -879,9 +894,27 @@ def _dead_status(api: Any, slot: Any, placed: Any) -> int | None:
 
 def _own_hold(found: Any, hold: str | None) -> bool:
     """Whether a slot takes a launch only because the hold on it is the launch's own: it
-    is free or ended, and held by `hold`."""
-    return bool(hold) and found.state in ("free", "ended") and found.hold is not None \
-        and found.hold.holder == hold
+    is free, ended or missing (made again at the start), and held by `hold`."""
+    return bool(hold) and found.state in ("free", "ended", "missing") \
+        and found.hold is not None and found.hold.holder == hold
+
+
+def _make_again(api: Any, named: int | str) -> None:
+    """Make the named slot's tmux session again when it is gone; its registry row, with
+    its hold and last launch, stays. slots' refusal (a session of that name with no row)
+    is raised for the start to fail with."""
+    found = api.show(named)
+    if found is not None and found.created is not None and found.state == "missing":
+        api.create([found.number])
+
+
+def _own_pane(found: Any, resolved: Any) -> bool:
+    """Whether a slot is occupied only by the session a relaunch's check replaces: its
+    run pane is the replaced launch's, and any hold on it is the relaunch's own."""
+    pane = getattr(resolved, "replacing_pane", None)
+    if not pane or found.state != "occupied" or found.pane_id != pane:
+        return False
+    return found.hold is None or found.hold.holder == getattr(resolved, "hold", None)
 
 
 def named_slot(values: Mapping[str, object]) -> int | str | None:

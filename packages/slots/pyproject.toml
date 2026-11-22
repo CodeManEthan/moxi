@@ -1,6 +1,6 @@
 [project]
 name = "moxi-slots"
-version = "0.1.0"
+version = "0.1.1"
 description = "Numbered tmux sessions to launch into, on one supervised tmux server."
 readme = "README.md"
 requires-python = ">=3.12"

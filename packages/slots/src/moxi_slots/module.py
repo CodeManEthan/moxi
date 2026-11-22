@@ -31,7 +31,8 @@ DOCTOR = "moxi_slots.doctor:rows"
 #: The registry holds only what tmux can't know; the launch files hold a launch's
 #: environment until the trampoline takes it; the mismatched screen regions are kept to be
 #: read and added as fixtures (slots itself keeps the last 20: a retention here is a size
-#: or an age); a server started on demand logs to server.log.
+#: or an age); a server started on demand logs to server.log; the pane-died hook logs a
+#: run end it could not write to hooks.log.
 STORES = {"registry": {"root": "state", "path": "slots.json", "kind": "file",
                        "private": True, "retention": "keep", "rebuildable": False,
                        "lazy": True},
@@ -42,6 +43,9 @@ STORES = {"registry": {"root": "state", "path": "slots.json", "kind": "file",
                      "retention": "keep", "rebuildable": True, "lazy": True},
           "server-log": {"root": "state", "path": "server.log", "kind": "file",
                          "private": True, "retention": "10M", "rebuildable": True,
-                         "lazy": True}}
+                         "lazy": True},
+          "hooks-log": {"root": "state", "path": "hooks.log", "kind": "file",
+                        "private": True, "retention": "1M", "rebuildable": True,
+                        "lazy": True}}
 #: The server's idle CPU, as a share of one core.
 BUDGETS = {"idle_cpu": 0.03}

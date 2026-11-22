@@ -823,14 +823,17 @@ def test_targets_list_each_slot_in_number_order_with_its_state_and_hold(fake_slo
         "10": {"state": "free", "launchable": True}})
     said = targets_answer()
 
-    def slot(number, state, launchable, holder=None, until=None):
+    def slot(number, state, launchable, holder=None, until=None, choosable=None):
         return {"number": number, "state": state, "launchable": launchable,
-                "holder": holder, "until": until, "taken_by": None}
+                "choosable": launchable if choosable is None else choosable,
+                "crashed": False, "holder": holder, "until": until, "taken_by": None,
+                "parked": None}
 
     assert said["slots"] == [
         slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),
         slot(3, "free", launchable=False, holder="planner", until=1900000000.5),
-        slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]
+        slot(4, "missing", launchable=False, choosable=True),
+        slot(10, "free", launchable=True)]
     assert said["new_slot"] is True
     assert said["default"] == {"target": "slot", "slot": 2}
 
@@ -885,8 +888,69 @@ def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, 
                           meta={"request_id": "r1"}, create=True)
     said = targets_answer()
     assert said["slots"] == [{"number": 1, "state": "occupied", "launchable": False,
+                              "choosable": False, "crashed": False,
                               "holder": None, "until": None,
-                              "taken_by": {"request_id": "r1", "label": "coder"}}]
+                              "taken_by": {"request_id": "r1", "label": "coder"},
+                              "parked": None}]
+    assert said["default"] == {"target": "slot", "slot": None}
+
+
+def test_the_default_is_the_lowest_slot_a_launch_naming_none_takes(fake_slots):
+    # A missing slot with no hold is made again at launch, so it is the default before a
+    # free one above it; a held missing slot is passed over.
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "planner", "until": None}},
+                      "2": {"state": "missing", "launchable": False},
+                      "3": {"state": "free", "launchable": True}})
+    said = targets_answer()
+    assert [(s["number"], s["choosable"]) for s in said["slots"]] == [
+        (1, False), (2, True), (3, True)]
+    assert said["default"] == {"target": "slot", "slot": 2}
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "planner", "until": None}}})
+    assert targets_answer()["default"] == {"target": "slot", "slot": None}
+
+
+def crashed_slot(request_id: str, **more) -> dict:
+    return {"state": "missing", "launchable": False, "crashed": True,
+            "last": {"at": 1.0, "label": f"launcher:{request_id}",
+                     "meta": {"request_id": request_id}}, **more}
+
+
+def test_a_slot_the_next_launch_reserves_for_its_crashed_session_is_not_choosable(
+        fake_slots, log):
+    sid = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", target="slot", slot="1",
+             session_id=sid)
+    store.set_state(log, "r1", "ready")
+    launched(log, "r2", "2026-01-01T09:00:00.000000Z", target="slot", slot="2")
+    fake_slots(slots={"1": crashed_slot("r1"), "2": crashed_slot("r2"),
+                      "3": {"state": "free", "launchable": True}})
+    said = targets_answer()
+    # Slot 1's session can be restored, so the next launch reserves it; slot 2's launch
+    # never learned a session id, so the next launch settles it and may take it.
+    assert [(s["number"], s["crashed"], s["choosable"]) for s in said["slots"]] == [
+        (1, True, False), (2, False, True), (3, False, True)]
+    assert said["default"] == {"target": "slot", "slot": 2}
+    # The page's read writes nothing: no hold, no settle, no entry.
+    assert fake_slots.calls("hold") == [] and fake_slots.calls("settle") == []
+    assert store.open_entries(log) == []
+
+
+def test_a_park_reservation_names_the_session_it_keeps_the_slot_for(fake_slots, log):
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", target="slot", slot="1",
+             identity="planner", session_id="s1")
+    entry = store.add_entry(log, park_id="p1", kind="park", by="ann", slot=1,
+                            request_id="r1", session_id="s1", harness="codex",
+                            outcome="exited")
+    fake_slots(slots={"1": {"state": "missing", "launchable": False,
+                            "hold": {"holder": entry.holder, "until": None}},
+                      "2": {"state": "missing", "launchable": False,
+                            "hold": {"holder": "park-other", "until": None}}})
+    said = targets_answer()
+    assert [(s["holder"], s["until"], s["choosable"], s["parked"]) for s in said["slots"]] == [
+        ("park-p1", None, False, {"session_id": "s1", "label": "planner"}),
+        ("park-other", None, False, None)]
     assert said["default"] == {"target": "slot", "slot": None}
 
 

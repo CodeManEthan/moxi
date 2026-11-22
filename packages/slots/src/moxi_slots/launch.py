@@ -16,6 +16,15 @@ ended, and its id is kept.
 The rule: no slots call kills a live run pane. `respawn` refuses a live one
 (`live-pane`), and `respawn-pane` runs without `-k`: a session ends through its own exit.
 
+The rule for a start that names no slot and may create one: it takes the lowest
+registered slot with no session running that it may use (free or ended and launchable,
+or missing with no hold but the caller's), making a missing one's session again, and
+makes a new number only when no registered slot takes it. A remade slot gets a new run
+window, since its old pane went with its session.
+
+Each placement is a new run: it records a fresh run token and the server's id in the
+slot's last launch, and sets the run window's ended hook for that token (see `runs`).
+
 Neither call needs an attached terminal, so a timer can launch into a slot.
 """
 
@@ -25,12 +34,12 @@ import time
 from collections.abc import Mapping, Sequence
 from os import PathLike
 
-from . import launchfile, panes, registry, server, tmux
+from . import launchfile, panes, registry, runs, server, tmux
 from .errors import Refused, SlotsError, TmuxError, TryAgain, UsageError
 from .model import (ENDED, FREE, MISSING, OCCUPIED, RUN_MARK, Ended, Last, Placed, Slot,
                     check_holder, check_label, check_meta, launchable, session_name)
 from .registry import Row
-from .slots import _holder_of, _lowest_free, _when, make_session, resolve
+from .slots import _holder_of, _lowest_free, make_session, resolve, until_words
 
 #: The `pane-died` hook's index on a run window; the hook signals `wait_ended`.
 HOOK = "pane-died[64]"
@@ -43,7 +52,9 @@ def tmux_text(text: str) -> str:
     return text.replace("#", "##")
 
 
-def _checked(argv, env, cwd, label, meta, hold):
+def _checked(argv, env, cwd, label, meta, hold, status_trusted):
+    if not isinstance(status_trusted, bool):
+        raise UsageError(f"status_trusted is True or False, not {status_trusted!r}")
     argv, env, cwd = launchfile.check(argv, env, cwd)
     check_label(label)
     meta = check_meta(meta)
@@ -63,9 +74,19 @@ def _taken(found: Slot, number: int, hold: str | None, *, occupied: str) -> None
         raise Refused(occupied, f"slot {number} runs a launch{label}; it ends through its "
                                 "own session", holder=_holder_of(found, "occupied"))
     if found.hold is not None and found.hold.holder != hold:
-        raise Refused("held", f"slot {number} is held by {found.hold.holder} until "
-                              f"{_when(found.hold.until)}",
+        raise Refused("held", f"slot {number} is held by {found.hold.holder} "
+                              f"{until_words(found.hold)}",
                       holder=_holder_of(found, "held"))
+
+
+def _takes(found: Slot, hold: str | None, *, create: bool) -> bool:
+    """Whether a start that names no slot may take registered slot `found`: one that is
+    launchable for `hold`, or, with `create`, a missing one whose hold is absent or
+    `hold`'s, which the start makes again."""
+    if launchable(found.state, found.hold, hold):
+        return True
+    return create and found.state == MISSING and (found.hold is None
+                                                   or found.hold.holder == hold)
 
 
 def _registered(found: Slot | None, number: int, reg) -> Slot:
@@ -77,9 +98,9 @@ def _registered(found: Slot | None, number: int, reg) -> Slot:
 
 
 def _new_window(number: int, seen: list[panes.Pane], script: str, path,
-                label: str) -> tuple[str, str]:
-    """Make slot `number`'s run window at a fresh index, in one tmux call; return its
-    window and pane ids."""
+                label: str, token: str) -> tuple[str, str]:
+    """Make slot `number`'s run window at a fresh index, with run `token`'s ended hook,
+    in one tmux call; return its window and pane ids."""
     name = session_name(number)
     index = max((p.window_index for p in seen if p.session == name), default=0) + 1
     target = f"={name}:{index}"
@@ -87,15 +108,19 @@ def _new_window(number: int, seen: list[panes.Pane], script: str, path,
                      "-t", target, "-n", tmux_text(label), script, str(path),
                      ";", "set-option", "-w", "-t", target, RUN_MARK, "on",
                      ";", "set-option", "-w", "-t", target, "remain-on-exit", "on",
+                     ";", *runs.set_hook_args(target, number, token),
                      ";", "select-window", "-t", target)
     window_id, pane_id = made.out.split()[:2]
     return window_id, pane_id
 
 
-def _respawn(number: int, found: Slot, script: str, path, label: str) -> None:
-    """Run the trampoline in slot `number`'s ended run pane, keeping its id. A pane that
-    is live is refused (`live-pane`); tmux refuses it too, since no `-k` is given."""
+def _respawn(number: int, found: Slot, script: str, path, label: str,
+             token: str) -> None:
+    """Run the trampoline in slot `number`'s ended run pane, keeping its id, and set run
+    `token`'s ended hook after it. A pane that is live is refused (`live-pane`); tmux
+    refuses it too, since no `-k` is given, and then sets no hook."""
     result = tmux.attempt("respawn-pane", "-t", found.pane_id, script, str(path),
+                          ";", *runs.set_hook_args(found.window_id, number, token),
                           ";", "rename-window", "-t", found.window_id, tmux_text(label),
                           ";", "select-window", "-t", found.window_id)
     if result.ok:
@@ -111,21 +136,26 @@ def _respawn(number: int, found: Slot, script: str, path, label: str) -> None:
 
 
 def _place(number: int, found: Slot | None, seen: list[panes.Pane], reg, script: str,
-           argv, env, cwd, label: str, meta, hold: str | None) -> tuple:
-    """Write the launch file and make (or respawn) the run pane; record the launch and
-    end the caller's hold. Runs under the module lock. Returns (path, window, pane)."""
+           argv, env, cwd, label: str, meta, hold: str | None, *,
+           status_trusted: bool) -> tuple:
+    """Write the launch file and make (or respawn) the run pane with a new run's ended
+    hook; record the launch, its run token and server, and end the caller's hold. Runs
+    under the module lock. Returns (path, window, pane)."""
+    token = runs.new_token()
+    server_id = runs.server_id(runs.server_pid())
     path = launchfile.write(argv, env, cwd)
     try:
         if found is None or found.state == FREE:
-            window_id, pane_id = _new_window(number, seen, script, path, label)
+            window_id, pane_id = _new_window(number, seen, script, path, label, token)
         else:
-            _respawn(number, found, script, path, label)
+            _respawn(number, found, script, path, label, token)
             window_id, pane_id = found.window_id, found.pane_id
     except BaseException:
         launchfile.remove(path)
         raise
     row = reg.rows[number]
-    row.last = Last(time.time(), label, meta)
+    row.last = Last(time.time(), label, meta, run=token, server=server_id,
+                    status_trusted=status_trusted)
     if hold is not None and row.hold is not None and row.hold.holder == hold:
         row.hold = None
     return path, window_id, pane_id
@@ -154,23 +184,28 @@ def _verdict(number: int, path, window_id: str, pane_id: str,
 
 def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str],
           cwd: str | PathLike, label: str, meta: dict | None = None,
-          hold: str | None = None, create: bool = False) -> Placed:
+          hold: str | None = None, create: bool = False,
+          status_trusted: bool = True) -> Placed:
     """Run `argv` in a slot with exactly `env` (and the pane's terminal names) in `cwd`;
     return once it has started, or has not.
 
-    `slot=None, create=True`: the lowest launchable slot, or a new one when none is.
-    `slot=None` alone: the lowest launchable slot, else refused `no-free-slot`. A number
+    `slot=None, create=True`: the lowest registered slot that takes the launch, either
+    launchable or missing with no hold but the caller's (made again, keeping its name,
+    hold and last launch, with a new run window); a new number only when none does.
+    `slot=None` alone: the lowest launchable slot, else refused `no-free-slot`; it never
+    makes a session, so it skips missing slots. A number
     or name: that slot only, never created here; refused `no-slot`, `missing`,
     `occupied` (holder: the last launch's label and meta) or `held` (holder: the hold's
     holder and until). `create=True` with a named slot is a usage error: create it
     first. `hold` names the caller's hold, which lets it start in the slot it holds and
     ends with this start. `label` (64 printable characters) names the run window and the
-    last launch; `meta` (a JSON object, 4 KiB) is kept with it."""
+    last launch; `meta` (a JSON object, 4 KiB) is kept with it. `status_trusted` False
+    records that the command's exit status does not tell a clean end from a kill."""
     if slot is not None and create:
         raise UsageError("create=True makes a slot only for a start that names none; a "
                          "start into a named slot never creates it: create it first "
                          "(`moxi slots create N`)")
-    argv, env, cwd, meta = _checked(argv, env, cwd, label, meta, hold)
+    argv, env, cwd, meta = _checked(argv, env, cwd, label, meta, hold, status_trusted)
     script = launchfile.trampoline()
     server.ensure()
     with registry.locked():
@@ -180,9 +215,16 @@ def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str]
         listing = panes.join(reg, seen)
         made = False
         if slot is None:
-            found = next((s for s in listing.slots
-                          if launchable(s.state, s.hold, hold)), None)
-            if found is not None:
+            found = next((s for s in listing.slots if _takes(s, hold, create=create)),
+                         None)
+            if found is not None and found.state == MISSING:
+                number = found.number
+                make_session(number)
+                reg.rows[number].created = time.time()
+                made = True
+                found = None
+                seen = panes.read()
+            elif found is not None:
                 number = found.number
             elif create:
                 number = _lowest_free(reg, listing)
@@ -202,7 +244,8 @@ def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str]
             _taken(found, number, hold, occupied="occupied")
         try:
             path, window_id, pane_id = _place(number, found, seen, reg, script, argv, env,
-                                              cwd, label, meta, hold)
+                                              cwd, label, meta, hold,
+                                              status_trusted=status_trusted)
         except BaseException:
             if made:
                 registry.write(reg)
@@ -213,7 +256,7 @@ def start(slot: int | str | None, argv: Sequence[str], *, env: Mapping[str, str]
 
 def respawn(slot: int | str, argv: Sequence[str], *, env: Mapping[str, str],
             cwd: str | PathLike, label: str, meta: dict | None = None,
-            hold: str | None = None) -> Placed:
+            hold: str | None = None, status_trusted: bool = True) -> Placed:
     """Run the next launch in a slot's ended run pane, keeping its pane id (relaunch's
     call). Refuses `no-slot`, `missing`, `live-pane` (the run pane is live; nothing kills
     it) and `held` (another holder's live hold). The rest is as `start`.
@@ -223,7 +266,7 @@ def respawn(slot: int | str, argv: Sequence[str], *, env: Mapping[str, str],
     session is there but has no run pane to reuse, and `start` places a first launch."""
     if slot is None:
         raise UsageError("respawn names the slot whose run pane it reuses")
-    argv, env, cwd, meta = _checked(argv, env, cwd, label, meta, hold)
+    argv, env, cwd, meta = _checked(argv, env, cwd, label, meta, hold, status_trusted)
     script = launchfile.trampoline()
     server.ensure()
     with registry.locked():
@@ -238,7 +281,8 @@ def respawn(slot: int | str, argv: Sequence[str], *, env: Mapping[str, str],
             raise Refused("missing", f"slot {number} has no run pane to reuse; `start` "
                                      "places a launch there")
         path, window_id, pane_id = _place(number, found, seen, reg, script, argv, env,
-                                          cwd, label, meta, hold)
+                                          cwd, label, meta, hold,
+                                          status_trusted=status_trusted)
         failure = _record(reg)
     return _verdict(number, path, window_id, pane_id, failure)
 
