@@ -14,7 +14,9 @@ A handler on the loop never waits on the harness or on a blocking write. `sessio
 `deliver`, `steer`, `fork`, `fork.continue`, `stops.handle`, `stops.answer` and a `wait` with
 `timeout_ms` 0 read or write the core's record and answer at once: `deliver` and `steer`
 record the delivery and put its hand-off on the endpoint's ordered worker in one locked
-step, before the handler's first `await`, and so do `fork` and `fork.continue`. `environ`
+step, before the handler's first `await`, and so do `fork` and `fork.continue`. A kept
+end is written under that same step when a delivery settles there. `ack` reads and
+removes kept ends in the state folder on a thread of its own. `environ`
 reads the endpoint's own copy of the session's environment and answers at once.
 `usage.codex_limits` and `mcp.reload` (a Codex host's) run on a thread of their own: the
 first waits on one app-server request, the second on the host's MCP settle, which its
@@ -82,6 +84,7 @@ class Rpc:
             "fork": self._fork,
             "fork.continue": self._fork_continue,
             "wait": self._wait,
+            "ack": self._ack,
             "command": self._command,
             "watch": self._watch,
             "stops.handle": self._stops_handle,
@@ -133,11 +136,12 @@ class Rpc:
             raise invalid("if_turn_number, refuse_draft and refuse_agents are valid only "
                           "with only_if_idle: true")
         self._needs("only-if-idle" if only_if_idle else "deliver")
+        keep = self._keep(params, ref)
         # Recorded, checked and handed to the worker before this handler's first await.
         d = self.ep.deliver(text, ref=ref, only_if_idle=only_if_idle,
                             if_turn_number=if_turn_number, refuse_draft=refuse_draft,
                             refuse_agents=refuse_agents, by=_by(params),
-                            senders=_senders(params))
+                            senders=_senders(params), keep=keep)
         await self._hook("deliver", d)
         return self._handed(d)
 
@@ -157,7 +161,8 @@ class Rpc:
         if by is None:
             raise invalid("by is the asking module's name, a non-empty string")
         self._needs("fork")
-        d = self.ep.fork(text, ref=ref, by=by)
+        keep = self._keep(params, ref)
+        d = self.ep.fork(text, ref=ref, by=by, keep=keep)
         await self._hook("fork", d)
         return self._handed(d)
 
@@ -168,7 +173,8 @@ class Rpc:
         text = _text(params)
         ref = _ref(params)
         self._needs("fork")
-        d = self.ep.fork_continue(of, text, ref=ref)
+        keep = self._keep(params, ref)
+        d = self.ep.fork_continue(of, text, ref=ref, keep=keep)
         await self._hook("fork.continue", d)
         return self._handed(d)
 
@@ -208,6 +214,24 @@ class Rpc:
         else:
             delivery, value = await self._in_thread(self.ep.wait_ref, ref, until, timeout)
         return {"delivery": delivery, **_waited(value)}
+
+    async def _ack(self, conn, params: dict) -> dict:
+        ref = _ref(params)
+        if ref is None:
+            raise invalid("ref is the kept delivery's ref, a string")
+        self._needs("keep")
+        # Reads and removes files in the state folder: on a thread, off the loop.
+        removed = await self._in_thread(self.ep.ack, ref)
+        return {"ref": ref, "removed": removed}
+
+    def _keep(self, params: dict, ref: str | None) -> bool:
+        """The `keep` param: true needs a `ref` and the `keep` capability."""
+        keep = _bool(params, "keep")
+        if keep and ref is None:
+            raise invalid("keep needs a ref: a kept end is read and acked by its ref")
+        if keep:
+            self._needs("keep")
+        return keep
 
     async def _command(self, conn, params: dict) -> dict:
         name = params.get("name")

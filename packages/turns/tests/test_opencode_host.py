@@ -176,7 +176,7 @@ def test_the_host_is_an_endpoint_that_can_start_and_compact(host):
     s, h, world = host()
     assert s.harness == "opencode"
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents",
-                                        "environ"})
+                                        "environ", "keep"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
     for call, lacking in ((lambda: s.steer("x"), "steer"),
                           (lambda: s.command("clear"), "clear"),

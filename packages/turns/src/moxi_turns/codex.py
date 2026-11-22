@@ -239,7 +239,7 @@ class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
                      "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "mcp-token", "environ"})
+                     "mcp-token", "environ", "keep"})
     mod_version = None
 
     @staticmethod

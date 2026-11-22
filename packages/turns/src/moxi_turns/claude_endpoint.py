@@ -161,7 +161,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                      "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ", "fork"})
+                     "environ", "fork", "keep"})
     live_wait_s = LIVE_WAIT_S
 
     @staticmethod

@@ -25,11 +25,20 @@ out of the harness. This package is turns' whole public API, the announcement's
                              # by: the asking module; senders: the names the text speaks
                              # for; prompt listeners read them as delivery_by and
                              # delivery_senders
+    d = s.fork(text, *, by, ref=None, keep=False)   # a fork of the main loop (capability
+                             # fork); Started carries its agent_id, Ended its answer
+    d = s.fork_continue(delivery, text, *, ref=None, keep=False)   # the fork's next round
     d.id, d.ref              # id None until a hand-in whose answer never came is found
     d.wait_started(timeout_s)  # Started | Refused | Lost
     d.wait_ended(timeout_s)    # Ended(turn_id, outcome, delivery, ref, answer) | Refused
                                # | Lost; answer: the turn's final text, None when the
                                # turn had none or the harness gave none
+    s.ack(ref)               # keep=True (deliver, fork, fork_continue; capability keep)
+                             # keeps a delivery's end until its ref is acked, readable
+                             # by the waits after the endpoint has ended too
+    v = turns.wait_ref(ref, *, session_id, until="ended", timeout_s=None)
+    turns.ack(ref, *, session_id)    # the same for a caller holding no Delivery, on the
+                                     # live endpoint or turns' state folder
 
     r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout_s=None,
                   stop_shells=False)              # Ran(new_session_id, shells) | Refused | Failed
@@ -88,8 +97,9 @@ from __future__ import annotations
 #: Each public name and the submodule that holds it.
 _WHERE = {
     "codex": "codex",
-    **dict.fromkeys(("find", "sessions", "wait_ready", "Session", "Delivery", "Watch",
-                     "StopHandler", "TurnsError", "VersionError"), "client"),
+    **dict.fromkeys(("find", "sessions", "wait_ready", "wait_ref", "ack", "Session",
+                     "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError"),
+                    "client"),
     **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
                      "AdditionsRequest", "McpServer"), "additions"),
     "codex_host_available": "codex_host",
@@ -107,7 +117,7 @@ _WHERE = {
 }
 
 __all__ = [
-    "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
+    "find", "sessions", "wait_ready", "wait_ref", "ack", "codex", "codex_host_available", "opencode",
     "codex_rate_limits", "CodexLimits", "start_plan", "StartPlan", "StartEntry",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "McpServer", "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",

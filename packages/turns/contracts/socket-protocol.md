@@ -103,11 +103,14 @@ The session's capabilities:
 | `mcp-token` | no | yes | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |
 | `fork` | yes | no | no | `fork` |
+| `keep` | yes | yes | yes | `keep` on `deliver`, `fork` and `fork.continue`, and `ack` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode
 support is experimental. An endpoint of an older turns lacks the later capabilities
-(`guards` to `fork`), and a caller reads their absence as "not offered". On OpenCode an
+(`guards` to `keep`), and a caller reads their absence as "not offered". An older
+endpoint would ignore `keep` and keep nothing, so a caller sends `keep` only to a session
+that offers it. On OpenCode an
 `after-tool` row is still told of a finished call, observe only: its text reaches no
 model, so OpenCode does not offer `after-tool`.
 
@@ -126,7 +129,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean; `keep` not a boolean, or true without a `ref`; an `ack` without a `ref` |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -324,11 +327,12 @@ Params are an object; a missing optional param takes its default. In short:
 | `session` | `{}` | `<session>` |
 | `facts` | `{}` | `<facts>` |
 | `agents` | `{}` | `<agents>` |
-| `deliver` | `{text, ref?, only_if_idle?, if_turn_number?, refuse_draft?, refuse_agents?}` | `{delivery, ref, result?}` |
+| `deliver` | `{text, ref?, only_if_idle?, if_turn_number?, refuse_draft?, refuse_agents?, keep?}` | `{delivery, ref, result?}` |
 | `steer` | `{text, ref?}` | `{delivery, ref, result?}` |
-| `fork` | `{text, by, ref?}` | `{delivery, ref, result?}` |
-| `fork.continue` | `{delivery, text, ref?}` | `{delivery, ref, result?}` |
+| `fork` | `{text, by, ref?, keep?}` | `{delivery, ref, result?}` |
+| `fork.continue` | `{delivery, text, ref?, keep?}` | `{delivery, ref, result?}` |
 | `wait` | `delivery` or `ref`, `until`, `timeout_ms` | `{result}` or `{pending: true}`, with `delivery` when asked by `ref` |
+| `ack` | `{ref}` | `{ref, removed}` |
 | `command` | `{name, if_turn_number?, timeout_ms?, stop_shells?}` | `{result}` |
 | `watch` | `{}` | `{facts}`, then notifications |
 | `stops.handle` | `{}` | `{}`, then `stop.asked` notifications |
@@ -341,7 +345,8 @@ Params are an object; a missing optional param takes its default. In short:
 or null.
 
 **No answer waits on the harness.** `session`, `deliver`, `steer`, `fork`, `fork.continue`, `environ` and a `wait`
-with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
+with `timeout_ms` 0 answer from the endpoint's own record, at once, and `ack` from its
+record and turns' state folder. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
 bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`),
 `mcp.reload` (the host's settle, bounded by its deadline) and the long-lived `watch` and
@@ -385,7 +390,9 @@ Result: `<agents>`, read from the harness's own record on each call. Needs `agen
 Params: `text`; `ref`; `only_if_idle` (boolean, default false); `if_turn_number` (integer
 or null), `refuse_draft` and `refuse_agents` (booleans), all three valid only beside
 `only_if_idle: true`; `by` (a non-empty string, or null), the module that asked; `senders`
-(a list of non-empty strings, default empty), the names the text speaks for.
+(a list of non-empty strings, default empty), the names the text speaks for; `keep`
+(boolean, default false; true needs a `ref` and the `keep` capability): the delivery's end
+is kept until the caller acks its `ref` (see `ack`).
 
 `by` and `senders` change nothing about how the delivery goes in. The endpoint hands them
 to the session's `prompt` listeners on the prompt the delivery raises, as `delivery_by`
@@ -437,7 +444,7 @@ refusal it received; on an unknown outcome it waits for the steer's value.
 ### `fork`
 
 Params: `text`, the fork's task; `by`, the asking module's name (a non-empty string,
-required); `ref`. Needs `fork`.
+required); `ref`; `keep`, as `deliver`'s. Needs `fork`.
 
 Starts a fork of the session's main loop: an agent that holds the session's conversation
 up to now and runs `text` as its task beside the main loop. It holds no slot and waits on
@@ -459,7 +466,7 @@ harness's own way, if it has one; turns adds no delivery of its own for it.
 ### `fork.continue`
 
 Params: `delivery`, the id of a fork's delivery (its `fork`, or an earlier
-`fork.continue`); `text`, the round's task; `ref`. Needs `fork`.
+`fork.continue`); `text`, the round's task; `ref`; `keep`, as `deliver`'s. Needs `fork`.
 
 Gives the fork, which has answered, its next round: a new delivery, asked by the fork's
 own asker, that runs `text` in the fork's conversation as it stands. It answers as `fork`
@@ -490,8 +497,37 @@ Result: `{result: <value>}`, or `{pending: true}` when `timeout_ms` passed first
 With `ref`, the wait is for the endpoint's newest delivery carrying that `ref`, in flight or
 among the settled ones it keeps, and the answer, `{result}` or `{pending: true}` alike, also
 carries that delivery's id as `delivery`, so the caller can go on waiting by id. With no
-delivery carrying it, the answer is `{delivery: null, result: <lost>}`, with a reason
-starting `unknown delivery`.
+delivery carrying it, the endpoint reads the newest kept end of its session carrying that
+`ref` (see `ack`), an earlier endpoint's of the same session among them, and answers it
+with its delivery's id. With neither, the answer is `{delivery: null, result: <lost>}`,
+with a reason starting `unknown delivery`.
+
+### `ack`
+
+Params: `ref`, a kept delivery's `ref` (required). Needs `keep`.
+
+**Kept until acked.** A `deliver`, `fork` or `fork.continue` asked with `keep: true` has its
+end kept. When the delivery settles, whatever settles it (the harness, a refusal, the
+endpoint's 300 s bound, or the endpoint's own end, which settles every open delivery
+`lost`), the endpoint writes its `started` and `ended` values to turns' state folder
+(`STATE/turns/kept/`), with its id, `ref`, kind, asker (`by`; a round's is its fork's), the
+session's ids and the time it settled. The endpoint leaves a kept delivery out of the
+settled deliveries it drops for space, so `wait` by id or by `ref` reads the same end at
+every read. Once the endpoint has ended, `moxi_turns` reads the end from the state folder:
+a wait that finds nothing listening, or gets the `gone` error, returns the kept end of its
+`ref` before it would return `lost`. A later endpoint of the same session answers a `wait`
+by that `ref` from the state folder too. A `deliver` or `fork` answered with the `gone`
+error was never taken, so nothing is kept for it. turns removes no kept end by age;
+`moxi doctor` lists each one older than a day with its `ref` and asker.
+
+`ack` removes the kept end of `ref`: from the endpoint's record (the delivery then counts
+among the settled ones it may drop) and from the state folder, this session's earlier
+endpoints' ends included. Result: `{ref, removed}`, `removed` true when a kept end was
+removed. An ack of a `ref` with no kept end succeeds and removes nothing, so a second ack is
+harmless. A delivery carrying `ref` that has not settled yet is left alone: its end is kept
+when it settles, so a caller acks only once the delivery has settled (`wait` returned its
+end) or can never hold one (no delivery carries the `ref`). For an endpoint that has ended,
+`moxi_turns` performs the ack on the state folder itself.
 
 ### `command`
 
@@ -702,6 +738,11 @@ written on it, so the library can tell where a failure fell:
     ask again.
   - `stops.answer`: the outcome is logged as unknown, and a missing answer is never read as
     `taken: false`.
+  - `ack` raises an error; acking again is safe.
+
+Wherever this section reads `lost` for a wait (`unanswered`, or after the `gone` error), a
+delivery asked with `keep` reads its kept end instead, when the state folder holds one for
+its `ref`.
 
 A missed read leaves its connection open: the late answer is dropped, and the resolve above
 needs that connection.

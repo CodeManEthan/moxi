@@ -23,10 +23,11 @@ from typing import Any, ClassVar
 #: the guard list at its tool calls. `after-tool`: an `after-tool` row's text reaches the
 #: model after the tool. `usage`: the session reports usage (Claude's readings, Codex's
 #: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.
-#: `fork`: the `fork` method, a fork of the session's main loop.
+#: `fork`: the `fork` method, a fork of the session's main loop. `keep`: the `keep` option
+#: of `deliver`, `fork` and `fork.continue`, and the `ack` method.
 CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                 "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                "mcp-token", "environ", "fork")
+                "mcp-token", "environ", "fork", "keep")
 
 #: The most names one `environ` call may ask.
 ENV_MAX_NAMES = 64

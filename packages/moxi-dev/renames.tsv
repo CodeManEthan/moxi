@@ -14008,6 +14008,8 @@ turns	packages/turns/src/moxi_turns/__init__.py	d.wait_started(timeout)  # Start
 turns	packages/turns/src/moxi_turns/__init__.py	e = s.environ(names)   # {name: value | None}: the session's own environment, read	use	environ	env
 turns	packages/turns/src/moxi_turns/__init__.py	r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout=None,	use	timeout=None	timeout_s=None
 turns	packages/turns/src/moxi_turns/__init__.py	s = turns.wait_ready(session_id="…", timeout=30)   # or pid=: found, and its Ready seen	use	timeout=30	timeout_s=30
+turns	packages/turns/src/moxi_turns/__init__.py	**dict.fromkeys(("find", "sessions", "wait_ready", "wait_ref", "ack", "Session",	keep	find	find
+turns	packages/turns/src/moxi_turns/__init__.py	"find", "sessions", "wait_ready", "wait_ref", "ack", "codex", "codex_host_available", "opencode",	keep	find	find
 turns	packages/turns/src/moxi_turns/additions.py	granted = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	ClaudeHarness	name	expired	on_expired
@@ -14029,7 +14031,7 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	"prompt_wait_ms": int(rou
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	while not self.ended.is_set() and not any(e.is_set() for e in events):	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._loaded = False	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	first, self._loaded = not self._loaded, True	keep	_loaded	_loaded
-turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ", "fork"})	keep	environ	environ
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ", "fork", "keep"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._forks: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
@@ -14098,7 +14100,9 @@ turns	packages/turns/src/moxi_turns/client.py	the session started, resumed, was 
 turns	packages/turns/src/moxi_turns/client.py	timeout=READ_S)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/client.py	wait_ready	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	wanted = [(directory, hello) for directory, hello, version in _candidates()	use	directory	endpoint_dir
-turns	packages/turns/src/moxi_turns/client.py	`deliver`, `steer`, `fork`, `environ`, and the look-up by `ref` of a hand-in whose answer never	keep	environ	environ
+turns	packages/turns/src/moxi_turns/client.py	`deliver`, `steer`, `fork`, `fork.continue`, `ack`, `environ`, and the look-up by `ref`	keep	environ	environ
+turns	packages/turns/src/moxi_turns/client.py	`TimeoutError` as the `Delivery` waits do, and `VersionError` as `find` does."""	keep	find	find
+turns	packages/turns/src/moxi_turns/client.py	"runtime_dir", "sessions", "find", "wait_ready", "wait_ref", "ack"]	keep	find	find
 turns	packages/turns/src/moxi_turns/codex.py	"""Apply a collab item's notices to `record`, in order. An agent's latest status is	keep	record	record
 turns	packages/turns/src/moxi_turns/codex.py	"mcp-token", "environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/codex.py	CodexHarness	name	_completed	_on_completed
@@ -14150,6 +14154,7 @@ turns	packages/turns/src/moxi_turns/codex.py	self._placed: set[str] = set()	keep
 turns	packages/turns/src/moxi_turns/codex.py	opened = self._opened	keep	_opened	_opened
 turns	packages/turns/src/moxi_turns/codex.py	self._placed &= set(live)	keep	set	set
 turns	packages/turns/src/moxi_turns/codex.py	self._opened = (turn_id, delivery_id) if delivery_id is not None else None	keep	_opened	_opened
+turns	packages/turns/src/moxi_turns/codex.py	"mcp-token", "environ", "keep"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/codex_appserver.py	_from_app_server	name	folder	server_dir
 turns	packages/turns/src/moxi_turns/codex_appserver.py	answer = session.codex_limits(timeout=remaining)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/codex_appserver.py	codex_rate_limits	name	timeout	timeout_s
@@ -14329,6 +14334,10 @@ turns	packages/turns/src/moxi_turns/hooktimes.py	"at": round(time.time() if at i
 turns	packages/turns/src/moxi_turns/hooktimes.py	record = {"harness": self.harness, "event": event, "ms": round(float(ms), 3),	keep	round	round
 turns	packages/turns/src/moxi_turns/hooktimes.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/hooktimes.py	thread.join(timeout=2.0)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/kept.py	"""Write one kept end (`record`, as `entry` makes it) in one step. Raises `OSError`."""	keep	record	record
+turns	packages/turns/src/moxi_turns/kept.py	"""True when `record` is a kept end of the session named by `session_ids` or by	keep	record	record
+turns	packages/turns/src/moxi_turns/kept.py	return any(s in ids for s in session_ids if s)	keep	any	any
+turns	packages/turns/src/moxi_turns/kept.py	__all__ = ["KEPT_DIR", "OLD_S", "kept_dir", "write", "entry", "records", "find", "remove"]	keep	find	find
 turns	packages/turns/src/moxi_turns/listeners.py	Floors	name	any	has_floor
 turns	packages/turns/src/moxi_turns/listeners.py	_text	kwonly	done	done
 turns	packages/turns/src/moxi_turns/listeners.py	listed = set(registry.start_order())	keep	set	set
@@ -14376,6 +14385,7 @@ turns	packages/turns/src/moxi_turns/opencode.py	server = self._server_factory(bi
 turns	packages/turns/src/moxi_turns/opencode.py	sstatus, status = http.json("GET", "/session/status", timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	threading.Thread(target=self.endpoint.gone, args=(reason,), daemon=True,	use	gone	on_gone
 turns	packages/turns/src/moxi_turns/opencode.py	timeout=SUMMARIZE_WAIT)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/opencode.py	can = frozenset({"deliver", "only-if-idle", "compact", "agents", "environ", "keep"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream._read	name	e	exc
 turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream.start	name	e	exc
 turns	packages/turns/src/moxi_turns/opencode_server.py	Http.connect	name	e	exc
@@ -14476,7 +14486,7 @@ turns	packages/turns/src/moxi_turns/results.py	after `compact`, None. `shells` r
 turns	packages/turns/src/moxi_turns/results.py	is the wall-clock time of the read. `stale` is True when the turn ledger moved while	keep	stale	stale
 turns	packages/turns/src/moxi_turns/results.py	tells the endpoint's own two apart: True for `untied` and `expired`, where the	keep	expired	expired
 turns	packages/turns/src/moxi_turns/results.py	turn's `deliveries`, `how` it joined the turn (`opened` or `steered`, `DELIVERY_HOW`).	keep	opened	opened
-turns	packages/turns/src/moxi_turns/results.py	"mcp-token", "environ", "fork")	keep	environ	environ
+turns	packages/turns/src/moxi_turns/results.py	"mcp-token", "environ", "fork", "keep")	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._env,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._environ,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	#: A name `environ` may ask: an environment variable's name.	keep	environ	environ
@@ -14487,7 +14497,7 @@ turns	packages/turns/src/moxi_turns/rpc.py	in_thread.settle	kwonly	ok	ok
 turns	packages/turns/src/moxi_turns/rpc.py	name, if_turn_number=if_turn_number, timeout=timeout, stop_shells=stop_shells))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/rpc.py	params)`, and `rpc.closed(conn)` once a connection has closed."""	use	rpc.closed(	rpc.on_closed(
 turns	packages/turns/src/moxi_turns/rpc.py	self._needs("environ")	keep	environ	environ
-turns	packages/turns/src/moxi_turns/rpc.py	first `await`, and so does `fork`. `environ` reads the endpoint's own copy of the session's environment and answers at once.	keep	environ	environ
+turns	packages/turns/src/moxi_turns/rpc.py	removes kept ends in the state folder on a thread of its own. `environ`	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	step, before the handler's first `await`, and so do `fork` and `fork.continue`. `environ`	keep	environ	environ
 turns	packages/turns/tests/claude_runner.py	FakeRunner.turn_complete	kwonly	is_aborted	is_aborted
 turns	packages/turns/tests/claude_runner.py	line = self.lines.get(timeout=timeout)	keep	timeout	timeout
@@ -14639,7 +14649,7 @@ turns	packages/turns/tests/test_claude_endpoint.py	runner.report(leg.R_COMMAND_D
 turns	packages/turns/tests/test_claude_endpoint.py	runner.turn_complete("T1", reason="aborted", is_aborted=True)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).start()	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_claude_endpoint.py	out = [SEEN.get(timeout=timeout) for _ in range(count)]	keep	timeout	timeout
-turns	packages/turns/tests/test_claude_endpoint.py	"environ", "fork"})	keep	environ	environ
+turns	packages/turns/tests/test_claude_endpoint.py	"environ", "fork", "keep"})	keep	environ	environ
 turns	packages/turns/tests/test_claude_endpoint.py	is_aborted=False)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
@@ -14987,6 +14997,7 @@ turns	packages/turns/tests/test_opencode_host.py	until(lambda: seen.extend(_drai
 turns	packages/turns/tests/test_opencode_host.py	while not isinstance(events.get(timeout=5), TurnEnded):	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	world.fake.compacted(h.session_id)	keep	compacted	compacted
 turns	packages/turns/tests/test_opencode_host.py	world.fake.sessions.clear()	keep	sessions	sessions
+turns	packages/turns/tests/test_opencode_host.py	"environ", "keep"})	keep	environ	environ
 turns	packages/turns/tests/test_page.py	"""A session stand-in whose facts readings are stale for the first `stale` reads."""	keep	stale	stale
 turns	packages/turns/tests/test_page.py	"turn": None, "agents": 0, "draft": False, "at": time.time(), "stale": False,	keep	stale	stale
 turns	packages/turns/tests/test_page.py	"turn_started_at", "agents", "draft", "stale",	keep	stale	stale

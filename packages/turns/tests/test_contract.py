@@ -124,6 +124,7 @@ CAPABILITIES = {
     "mcp-token": (False, True, False),
     "environ": (True, True, True),
     "fork": (True, False, False),
+    "keep": (True, True, True),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys
@@ -138,6 +139,7 @@ METHODS = {
     "fork": ("fork", {"delivery", "ref"}),
     "fork.continue": ("fork", {"delivery", "ref"}),
     "wait": (None, {"result"}),
+    "ack": ("keep", {"ref", "removed"}),
     "command": (None, {"result"}),
     "watch": (None, {"facts"}),
     "stops.handle": ("stop-handler", set()),
@@ -435,6 +437,13 @@ INVALID_PARAMS = [
     ("wait", {"delivery": "d", "until": "started", "timeout_ms": -1}),
     ("wait", {"delivery": "d", "until": "started", "timeout_ms": "0"}),
     ("wait", {"ref": "x" * 257, "until": "started", "timeout_ms": 0}),
+    ("deliver", {"text": "x", "keep": True}),
+    ("deliver", {"text": "x", "ref": "r", "keep": "yes"}),
+    ("fork", {"text": "x", "by": "m", "keep": True}),
+    ("fork.continue", {"delivery": "d", "text": "x", "keep": True}),
+    ("ack", {}),
+    ("ack", {"ref": 5}),
+    ("ack", {"ref": "x" * 257}),
     ("command", {"name": "dance"}),
     ("command", {"name": "clear", "stop_shells": "yes"}),
     ("command", {"name": "exit", "stop_shells": True}),
@@ -468,6 +477,10 @@ CAPABILITY_ROWS = [
     ("environ", {"names": ["HOME"]}, "environ"),
     ("fork", {"text": "x", "by": "m"}, "fork"),
     ("fork.continue", {"delivery": "d", "text": "x"}, "fork"),
+    ("deliver", {"text": "x", "ref": "r", "keep": True}, "keep"),
+    ("fork", {"text": "x", "by": "m", "ref": "r", "keep": True}, "keep"),
+    ("fork.continue", {"delivery": "d", "text": "x", "ref": "r", "keep": True}, "keep"),
+    ("ack", {"ref": "r"}, "keep"),
     ("usage.codex_limits", {}, "usage"),
     ("mcp.reload", {}, "mcp-token"),
 ]
