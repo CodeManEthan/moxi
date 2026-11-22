@@ -44,6 +44,9 @@ a caller that will not wait that long frees itself with its own `wait_*` timeout
 The endpoint's life, a rule: it ends on its own SIGTERM, an EPIPE on its stdout, or
 a change of parent, and never on a `session.end` hook. It takes its session id from the
 runner on every load, and opens its caller socket (answers `hello`) once it has the id.
+The first id it learns raises the `load` listener event, once per endpoint process: at
+the runner's `session` line, or, when that line carries no id, just before the next
+SessionStart's `ready`.
 
 Lines and the adapter's lock: `submit`, `append` and `command` come from the endpoint's
 ordered worker, and each writes a line through `LineWriter.write`, which blocks while the
@@ -183,6 +186,8 @@ class ClaudeHarness(Harness):
         #: Closed windows by nonce: (delivery, how it closed), to name a late entry.
         self._closed: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self.session_known = threading.Event()
+        #: Set once this process raised `load`.
+        self._loaded = False
         self.server: leg.LegServer | None = None
 
     # -- the leg ------------------------------------------------------------------------
@@ -462,9 +467,14 @@ class ClaudeHarness(Harness):
             self._command_done(body)
 
     def _learn(self, session_id: str | None) -> None:
-        if session_id:
-            self.endpoint.learn_session(session_id)
-            self.session_known.set()
+        if not session_id:
+            return
+        self.endpoint.learn_session(session_id)
+        self.session_known.set()
+        with self._lock:
+            first, self._loaded = not self._loaded, True
+        if first:
+            self.endpoint.load()
 
     # -- asks ---------------------------------------------------------------------------
 
