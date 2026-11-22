@@ -313,9 +313,8 @@ class Choice:
         return self.source == BY_NESTING
 
     @property
-    def is_top_level(self) -> bool:
-        """Whether the run records, sweeps and makes process dirs: a top-level run not
-        given `--basetemp`."""
+    def sweeps(self) -> bool:
+        """Whether the run sweeps: a top-level run not given `--basetemp`."""
         return self.source not in (BY_NESTING, BY_BASETEMP)
 
     def as_dict(self) -> dict[str, Any]:

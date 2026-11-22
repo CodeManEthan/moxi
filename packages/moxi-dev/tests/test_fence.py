@@ -57,7 +57,8 @@ def test_the_env_is_what_the_fence_says(fence, tmp_path):
     modules = testing._modules()
     assert modules, "the workspace installs Moxi modules; none found"
     expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR",
-                                              testing.ANCHOR_HOME_ENV} | {
+                                              testing.ANCHOR_HOME_ENV,
+                                              testing.FENCED_ENV} | {
         f"MOXI_{m.upper()}_HOME" for m in modules}
     kept = set(testing.KEPT_ENV)
     if testing.WINDOWS:
@@ -74,6 +75,8 @@ def test_the_env_is_what_the_fence_says(fence, tmp_path):
         assert Path(os.environ[key]).is_relative_to(tmp_path)
     assert os.environ["XDG_RUNTIME_DIR"] == str(fence.runtime)
     assert os.environ["TMPDIR"] == str(fence.short) == tempfile.gettempdir()
+    # The mark a run started from this test reads as nested in it.
+    assert os.environ[testing.FENCED_ENV] == str(fence.short)
     assert fence.runtime.is_dir()
     if not testing.WINDOWS:         # Windows keeps no POSIX mode: the profile's ACL does
         assert (fence.runtime.stat().st_mode & 0o777) == 0o700
@@ -484,8 +487,8 @@ def test_another_thread_is_fenced_too():
 def outside():
     """A directory outside every test's tmp, made unfenced (a wider-scoped fixture is),
     with a module in it never imported and no `__pycache__`, one `__pycache__` that is
-    there already, and a listening socket like another process's under /tmp."""
-    where = Path(tempfile.mkdtemp(prefix="mxd-out-", dir="/tmp"))
+    there already, and a listening socket like another process's in the short root."""
+    where = Path(tempfile.mkdtemp(prefix="mxd-out-", dir=testing.short_root()))
     name = f"fresh_{uuid.uuid4().hex}"
     (where / "src").mkdir()
     (where / "src" / f"{name}.py").write_text("VALUE = 7\n")
@@ -538,7 +541,9 @@ def test_temp_files_land_in_the_test_s_short_dir(fence):
     with testing.short_dir() as where:
         assert where.parent == fence.short
         if hasattr(socket, "AF_UNIX"):          # a Unix socket's bound; Windows has none
-            assert len(str(where / "sock")) < 40
+            # /var/tmp/mx-<6>/<8>/mx-<8>/sock: the test's short dir is in its
+            # process's short process dir.
+            assert len(str(where / "sock")) < 51
 
 
 @pytest.fixture(scope="module")

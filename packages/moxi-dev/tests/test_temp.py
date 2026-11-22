@@ -134,7 +134,7 @@ def test_a_basetemp_wins_over_the_setting(machine):
     where = machine.places()
     chosen = temp.choose({TEMP_ENV: "ram", TEMPROOT_ENV: "/x"}, basetemp="/x/y", where=where)
     assert chosen.source == temp.BY_BASETEMP and chosen.root is None
-    assert not chosen.is_in_memory and not chosen.is_top_level
+    assert not chosen.is_in_memory and not chosen.sweeps and not chosen.is_nested
     assert chosen.short_root == str(machine.ram)        # the short root follows the setting
     assert chosen.header() == "--basetemp /x/y, left to pytest"
     assert temp.choose({}, basetemp="/x/y", where=where).short_root == str(machine.disk)
@@ -325,7 +325,7 @@ def test_a_run_is_nested_with_a_fence_or_the_mark():
     assert not temp.top_level({FENCED_ENV: "/tmp/mx-x"}, is_fenced=False)
     assert not temp.top_level({})                   # this test runs fenced
     nested = temp.nested("/short")
-    assert nested.is_nested and not nested.is_top_level
+    assert nested.is_nested and not nested.sweeps
     assert nested.header() == "nested in a test; left to the outer run"
 
 
