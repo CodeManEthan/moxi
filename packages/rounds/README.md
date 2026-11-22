@@ -649,7 +649,9 @@ by the rule above; what it puts to the operator is the project's `ratify` settin
 `majors` (the default) each major decision, `majors+minors` the minor ones too, drawn as
 one group that lists their ids and is still ruled one id at a time, and `off` none. A
 round whose flow has no `ratify` step, or whose `ratify` is skipped, puts none either,
-and its export says why under `not_ratified`. The major decisions of builds not yet
+and its export says why under `not_ratified`, which it learns from the round's
+decisions: with none to draw, the markdown says what it puts only where the flow
+ratifies. The major decisions of builds not yet
 finished are listed under `later`, and come in an export run once their build is
 finished. A build answers only for the decisions its own reports declared: a dropped
 build counts for nothing, so a decision only a dropped build declared is in neither
@@ -1137,7 +1139,9 @@ index, and nothing on it acts on a round. Top to bottom:
   on the operator, counted with the number of rounds they are in, or `Nothing waits on
   you.` `Go through in order` opens each item in turn at its marker: rounds in the
   board's order, and in each its questions, rulings, decisions and jobs, then the
-  project-level items. The arrow keys and `j`/`k` move, Esc closes.
+  project-level items. The arrow keys and `j`/`k` move, Esc closes. A decision that
+  `list --waiting` says is not put to the operator is not counted, here or in a round's
+  line.
 - **Last acted on.** The ten builds with the newest recorded step, across projects and
   closed rounds, each with a small rail of its stage and the act in words (`landed`,
   `CI green`). A card opens its build's current step, with the stage's five steps as

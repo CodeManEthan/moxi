@@ -433,6 +433,20 @@ def test_a_major_under_a_skipped_ratify_leaves_the_export_and_the_later_group(
         drawn)
 
 
+def test_an_export_with_no_decision_does_not_say_the_flow_ratifies(opened):
+    round_dir = opened()
+    log.append(log.round_log(round_dir), "ruling.recorded",
+               {"id": "C1", "record": PTR, "kind": "process", "rules": "skip:ratify"},
+               by="planner")
+    drawn = export.questions_of(ROUND, view="ratify")
+    text = export.as_markdown(drawn)
+
+    assert (drawn.entries, drawn.later) == ((), ())
+    assert "It puts to the operator each major decision" not in text
+    assert ("No decision waits. Where the round's flow has a ratify step that is not "
+            "skipped, it puts to the operator each major decision not yet ruled.") in text
+
+
 def test_the_project_list_says_a_major_under_a_skipped_ratify_is_not_put(
         opened, capsys):
     round_dir = opened()
@@ -462,6 +476,13 @@ def test_under_majors_and_minors_the_export_and_the_list_hold_the_operator_s_min
     assert [(one.id, one.group) for one in drawn.entries] == [
         ("B1.M1", "minors"), ("B1.M2", "minors")]
     assert [row["id"] for row in rows] == ["B1.M1", "B1.M2"]
+    # The minors are listed under a heading that does not call them major.
+    listed = run(capsys, "list", "--waiting")
+    assert f"\ndecisions not yet ruled:\n  {ROUND} B1.M1: " in listed
+    assert "major decisions" not in listed
+    project_text = export.as_markdown(export.questions_of(ROUND.split("/")[0]))
+    assert "## Decisions not yet ruled\n" in project_text
+    assert "Major decisions" not in project_text
 
 
 def test_with_no_ratify_step_the_same_minor_is_the_lead_s_and_not_in_the_export(

@@ -38,6 +38,11 @@
   decision in its export, which says why in `not_ratified`. The write that closes a
   round lists each decision of a finished build it left open, and `show` of an ended
   round keeps the list.
+- The rounds page counts and walks only the decisions put to the operator, and a round
+  whose open decisions are all not put to the operator is no longer drawn as the
+  operator's turn. `list --waiting` and a project's export head their decision rows
+  `decisions not yet ruled`, since the operator's minor decisions are among them. A
+  round's ratify export with no decision to draw no longer says its flow ratifies.
 - The lead settles a minor decision that is not the operator's:
   `mark ROUND B<n>.M<k> --accept|--reject --record PTR`, one `decision.settled` event.
   The close waits for every such one, in every flow, and a reject owes a fix as the

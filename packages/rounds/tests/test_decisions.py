@@ -272,14 +272,14 @@ def test_list_waiting_and_the_project_export_hold_each_unruled_major(built, caps
     project = export.questions_of("proj-a")
     docket = export.questions_of(ROUND)
 
-    assert f"major decisions not yet ruled:\n  {ROUND} B1.M1: {RETRIED}\n" in out
+    assert f"decisions not yet ruled:\n  {ROUND} B1.M1: {RETRIED}\n" in out
     assert [row["id"] for row in rows] == ["B1.M1"]
     assert {key: rows[0][key] for key in ("holder", "blocks", "state", "stage",
                                           "weight", "forecloses")} == {
         "holder": ROUND, "blocks": "none", "state": "open", "stage": "B1",
         "weight": "major", "forecloses": False}
     assert [entry.data() for entry in project.decisions] == rows
-    assert "## Major decisions not yet ruled" in export.as_markdown(project)
+    assert "## Decisions not yet ruled" in export.as_markdown(project)
     assert docket.entries == ()
     assert api.waiting()["decisions"] == rows
 

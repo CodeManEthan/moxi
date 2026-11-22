@@ -345,7 +345,7 @@ parked questions, not put to the operator:
 open waiting items:
   none
 
-major decisions not yet ruled:
+decisions not yet ruled:
   none
 
 rulings not yet shown to the operator:
@@ -455,7 +455,7 @@ parked questions, not put to the operator:
 open waiting items:
   none
 
-major decisions not yet ruled:
+decisions not yet ruled:
   none
 
 rulings not yet shown to the operator:

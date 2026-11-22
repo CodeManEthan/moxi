@@ -25,8 +25,10 @@ no view it holds both, the docket first:
   group, whose entries carry `group` and are drawn together under one heading that
   lists their ids; `off` none. A round whose flow has no `ratify` step, or whose
   `ratify` is skipped, puts none either, and says why in `not_ratified`: the index
-  keeps that with each decision. A decision the lead settled is in neither. A group is a way to draw, not a thing to answer: each id in it is
-  ruled on its own. The major decisions of builds that are not finished are listed
+  keeps that with each decision, so a round that holds none can't say it, and where
+  nothing is drawn the markdown says what it puts only for a flow that ratifies. A
+  decision the lead settled is in neither. A group is a way to draw, not a thing to
+  answer: each id in it is ruled on its own. The major decisions of builds that are not finished are listed
   under `later`, which are no entries: they come in a later export, once their build
   is finished. A build answers only for the decisions its own reports declared: a
   dropped build counts for nothing, so a decision only a dropped build declared is in
@@ -558,8 +560,8 @@ def as_markdown(export: Export) -> str:
     if export.has_ratification:
         lines += _ratification_lines(export)
     if export.round is None:
-        lines += ["## Major decisions not yet ruled", ""]
-        lines += _group(export.decisions, "No major decision waits.")
+        lines += ["## Decisions not yet ruled", ""]
+        lines += _group(export.decisions, "No decision waits.")
     if export.left:
         lines += ["## Waiting for a new round: not put to the operator", "",
                   "The round ended, and a ruling of each was replaced or taken back "
@@ -586,8 +588,14 @@ def _ratification_lines(export: Export) -> list[str]:
                    if entry.weight == report_block.MAJOR)
     puts = (f"nothing: {export.not_ratified}" if export.not_ratified is not None
             else _PUTS.get(export.ratify, export.ratify))
-    lines = ["## Ratification", "",
-             f"Covers the finished builds: {covers}. It puts to the operator {puts}.", ""]
+    said = f"It puts to the operator {puts}."
+    if (export.not_ratified is None and export.ratify != OFF and not export.decisions
+            and not export.later):
+        # The index says why the flow puts no decision only with a decision, so with
+        # none drawn the flow's ratify step is not known here.
+        said = ("No decision waits. Where the round's flow has a ratify step that is "
+                f"not skipped, it puts to the operator {puts}.")
+    lines = ["## Ratification", "", f"Covers the finished builds: {covers}. {said}", ""]
     if export.ratify == OFF or export.not_ratified is not None:
         return lines
     lines += ["## Ratification: major decisions", ""]

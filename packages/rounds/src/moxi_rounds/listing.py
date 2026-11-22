@@ -446,7 +446,7 @@ WAITING: tuple[Kind, ...] = (
     Kind("parked", "parked questions, not put to the operator", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
     Kind("waits", "open waiting items", _waits, _builds_data, _wait_lines),
-    Kind("decisions", "major decisions not yet ruled", _decisions, _entries_data,
+    Kind("decisions", "decisions not yet ruled", _decisions, _entries_data,
          _decision_lines),
     Kind("not_shown", "rulings not yet shown to the operator", _lists, _lists_data, _list_lines),
     Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
