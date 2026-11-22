@@ -513,9 +513,11 @@ def _time(text: str) -> datetime:
 class Numbers:
     """The numbers of the closed rounds summed: `project` is the one the listing was
     kept to, or None; `rounds` the closed rounds summed, by name; `uncounted` the
-    closed rounds whose closing holds no numbers; `unreadable` a line for each log
-    that can't be read, and `unplaced` one for each project whose rounds folder
-    can't be worked out, whose rounds are therefore not summed."""
+    closed rounds whose closing holds no numbers; `timed` the rounds of `rounds`
+    whose closing holds the round's time open, the ones `round_time_s` sums;
+    `unreadable` a line for each log that can't be read, and `unplaced` one for each
+    project whose rounds folder can't be worked out, whose rounds are therefore not
+    summed."""
 
     computed: str
     project: str | None
@@ -524,11 +526,12 @@ class Numbers:
     uncounted: tuple[str, ...] = ()
     unreadable: tuple[str, ...] = ()
     unplaced: tuple[str, ...] = ()
+    timed: tuple[str, ...] = ()
 
     def data(self) -> dict:
         return {"computed": self.computed, "project": self.project,
                 "rounds": list(self.rounds), "numbers": dict(self.numbers),
-                "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
+                "timed": list(self.timed), "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
                 "no_folder": list(self.unplaced)}
 
 
@@ -553,6 +556,8 @@ def numbers(project: str | None = None, *, settings=None, now: str | None = None
     return Numbers(computed=now, project=None if project is None else homes[0].project,
                    rounds=tuple(name for name, _held in summed),
                    numbers=counted.summed(held for _name, held in summed),
+                   timed=tuple(name for name, held in summed
+                               if isinstance(held.get("round_time_s"), int)),
                    uncounted=tuple(uncounted), unreadable=tuple(unreadable),
                    unplaced=unplaced)
 
@@ -564,6 +569,9 @@ def numbers_as_text(listing: Numbers) -> str:
         count = len(listing.rounds)
         lines = [f"numbers of {count} closed round{'' if count == 1 else 's'}{where}",
                  *(f"  {line}" for line in counted.lines(listing.numbers))]
+        if len(listing.timed) < count:
+            lines.append(f"  time open sums {len(listing.timed)} of the {count} rounds: "
+                         "the others closed before their closing held it")
     else:
         lines = [f"no round{where} has closed with its numbers"]
     if listing.uncounted:

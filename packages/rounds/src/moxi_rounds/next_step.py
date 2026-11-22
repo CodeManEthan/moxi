@@ -60,7 +60,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
+from . import (brake, builds, checking, ci, closing, commission_block, drift, flows, log,
                model_tiers, places, rendering, report_block, showing, sizing, stages, steps,
                tracing, versions)
 from . import numbers as counted
@@ -241,7 +241,7 @@ def _retro(found: showing.Shown, step: steps.Step) -> dict:
     settings = own.load() if found.settings is None else found.settings
     return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
                       f"the reports in {found.round_dir}", *_named(step)],
-            "numbers": counted.of(found.state,
+            "numbers": counted.of(found.state, now=log.stamp(),
                                   ratify=closing.ratify_of(settings, found.name)),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.RETRO}"),

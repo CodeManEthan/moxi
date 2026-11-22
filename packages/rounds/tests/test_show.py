@@ -8,8 +8,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, dropping, index, leads, log, moving, opening, paths,
-                         ruling, showing, shown)
+from moxi_rounds import (asking, dropping, index, leads, log, moving, numbers, opening,
+                         paths, ruling, showing, shown)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadName, NoRound, Refused
 
@@ -148,6 +148,22 @@ def test_a_round_that_has_ended_is_shown_at_no_step(rounds, capsys):
     dropping.drop(A, by="operator", record="comms:30", run_by="planner")
     assert data(capsys)["step"] is None
     assert not any(line.startswith("step:") for line in printed(capsys, A).splitlines())
+
+
+def test_a_round_that_ended_before_its_clocks_were_kept_shows_them_from_its_log(
+        rounds, capsys):
+    path = log.round_log(rounds / "a-round")
+    log.append(path, "round.dropped", {"by": "operator", "record": "comms:30",
+                                       "numbers": {"folds": 0}}, by="planner", at=T3)
+    before = logs(rounds)
+
+    held = data(capsys)["ended"]["numbers"]
+
+    assert held["folds"] == 0
+    assert held["round_time_s"] == numbers._seconds(T3) - numbers._seconds(T1)
+    assert held["longest_gap"]["since"] == T1 and held["longest_gap"]["until"] == T3
+    assert "\n  time open: 2s, open to close" in printed(capsys, A)
+    assert logs(rounds) == before
 
 
 def test_questions_are_shown_by_state_each_with_who_asked_it_and_when(rounds, capsys):

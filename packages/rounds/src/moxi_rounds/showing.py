@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -781,7 +781,9 @@ def _head(found: Shown) -> dict:
     seen = checking.seen_of(state, found.name, settings=settings)
     at = steps.current(state, name=found.name, on_closed=found.on_closed,
                        register=found.register, seen=seen)
-    return {**head, "status": state.status, "ended": _ended(state),
+    return {**head, "status": state.status,
+            "ended": _ended(state, ratify=lambda: closing.ratify_of(settings,
+                                                                     found.name)),
             "description": state.description,
             "lead": leads.of(state, found.project_lead),
             "parent": state.parent, "inherits": list(state.inherits),
@@ -938,16 +940,22 @@ def skip_line(one: dict) -> str:
     return f"{line} (record {one['record']})"
 
 
-def _ended(state: states.State) -> dict | None:
+def _ended(state: states.State, *,
+           ratify: Callable[[], str | None] = lambda: None) -> dict | None:
     """How the round ended, or None while it is open: the status it has since, whose
     act it was and the pointer it carried, who recorded it and when, where each
     question that was open or parked went, and the round's numbers as the event that
-    ended it holds them."""
+    ended it holds them, with the round's time and longest stretch with nothing
+    logged computed from its log where the event holds neither, the steps due read
+    under the setting `ratify` gives (`numbers.with_clocks`)."""
     end = state.ended
     if end is None:
         return None
+    held = end.numbers
+    if isinstance(held, Mapping) and not {"round_time_s", "longest_gap"} <= set(held):
+        held = numbers.with_clocks(state, held, ratify=ratify())
     return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,
-            "at": end.at, "questions": dict(end.questions), "numbers": end.numbers}
+            "at": end.at, "questions": dict(end.questions), "numbers": held}
 
 
 def ended_line(ended: dict) -> str:

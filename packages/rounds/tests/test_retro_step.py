@@ -169,7 +169,7 @@ def test_next_gives_the_retro_its_reads_its_block_its_verdict_and_the_numbers(
     assert group["then"] == [f"moxi rounds verdict {ROUND} <your report>"]
     assert group["numbers"]["design_passes"] == 0
     assert "\nnumbers:\n  design: passes 0, " in text
-    assert "\n  time in steps: " in text
+    assert "\n  time in steps, overlapping (steps due side by side each count the same time): " in text
 
 
 def test_a_skip_of_retro_lets_the_round_close(round_dir):

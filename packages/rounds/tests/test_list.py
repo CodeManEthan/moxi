@@ -613,7 +613,9 @@ def close(round_dir, slug, held, *, at=T6):
 def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not(
         rounds, tmp_path, capsys):
     close(rounds, "a-round", {"folds": 1, "step_time_s": {"commission B1": 30},
-                              "findings": {"major": 1, "minor": 0}})
+                              "findings": {"major": 1, "minor": 0},
+                              "round_time_s": 90, "longest_gap": {
+                                  "since": T6, "until": T6, "due": []}})
     close(tmp_path / "notes-b" / "rounds", "c-round",
           {"folds": 2, "step_time_s": {"commission B1": 5, "build B1": 60},
            "findings": {"major": 0, "minor": 2}})
@@ -624,10 +626,16 @@ def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not
     assert found["rounds"] == [A, C] and found["uncounted"] == []
     assert found["numbers"] == {"folds": 3,
                                 "step_time_s": {"commission B1": 35, "build B1": 60},
-                                "findings": {"major": 1, "minor": 2}}
+                                "findings": {"major": 1, "minor": 2},
+                                "round_time_s": 90}
+    assert found["timed"] == [A]
     text = printed(capsys, "--numbers")
     assert text.startswith("numbers of 2 closed rounds\n  design: passes 0, ")
-    assert "\n  time in steps: commission B1 35s, build B1 1m\n" in text
+    assert ("\n  time in steps, overlapping (steps due side by side each count the same "
+            "time): commission B1 35s, build B1 1m\n") in text
+    assert "\n  time open: 1m 30s, open to close" in text
+    assert ("\n  time open sums 1 of the 2 rounds: the others closed before their "
+            "closing held it\n") in text
     assert data(capsys, "proj-a", "--numbers")["rounds"] == [A]
 
 
