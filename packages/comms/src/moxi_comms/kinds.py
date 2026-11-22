@@ -37,8 +37,9 @@ Anything else, or an exception, reads `unknown` (code `evidence-failed`). The fu
 runs in the daemon's process at each read, so it is quick and reads only its own record.
 
 comms' own kinds are declared the same way in its `pyproject.toml`: `claude-shim`,
-`codex` and `opencode`, harness kinds whose evidence is their own register report, and
-`connector`, the person kind comms' tools in the Claude apps bind as. They are also
+`codex` and `opencode`, harness kinds whose evidence is their own register report;
+`connector`, the person kind comms' tools in the Claude apps bind as; and `speech`, the
+person kind a spoken binding takes (voice binds the operator's name as `speech`). They are also
 compiled in here (`BUILT_IN`), so a daemon in an environment
 whose metadata predates the group still knows them, and a test holds the two copies
 equal.
@@ -79,10 +80,13 @@ CONNECTOR = {"cache": CACHE_PERSON}
 #: The connector kind's name, and comms' words for what a binding of that kind is.
 CONNECTOR_KIND = "connector"
 CONNECTOR_VIA = "Claude's apps, through the connector"
+#: A person speaking and listening, through voice's binding of the operator: its mail is
+#: read out to them, so it is never held for a cold cache and its cache is never read.
+SPEECH = {"cache": CACHE_PERSON}
 
 #: The built-in kinds, by name, in the order the daemon has always listed them.
 BUILT_IN = {"claude-shim": CLAUDE_SHIM, "codex": CODEX, "opencode": OPENCODE,
-            CONNECTOR_KIND: CONNECTOR}
+            CONNECTOR_KIND: CONNECTOR, "speech": SPEECH}
 
 #: What an evidence function answers when its record exists but cannot be read.
 UNREADABLE = "unreadable"

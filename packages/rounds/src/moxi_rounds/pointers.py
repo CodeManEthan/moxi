@@ -1,14 +1,20 @@
 """Pointers: where the operator said something.
 
 An act that is the operator's is recorded with a pointer to where he said it. A pointer
-is one token, with no white space, of one of four shapes:
+is one token, with no white space, of one of five shapes:
 
 - `comms:<digits>`: a message;
 - `<8 or more hex digits>@<UTC time>`: a moment in a session, the time written
   `2026-01-02T03:04Z` or `2026-01-02T03:04:05Z`;
 - an `https://` URL;
 - `file:<path>#<anchor>`: a place in a file of the round's folder, the path relative to
-  that folder.
+  that folder;
+- `page:<page>/<act>@<UTC time>`: one act on a module's page, as in
+  `page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z`. `<page>` is the module whose page it
+  was (lower-case letters, digits and `-`, from a letter), `<act>` the id the page
+  minted for that one act (8 to 64 letters, digits, `_` and `-`), and the time is UTC
+  to the second. The act id keeps two acts in one second two pointers. A page on this
+  machine has no `https://` address, so its acts point at themselves this way.
 
 Only the shape is checked. Nothing here reads a message, a session, a page or a file, so
 a pointer of a right shape that points at nothing is accepted.
@@ -26,21 +32,25 @@ from datetime import datetime
 
 from .errors import Unmet
 
-#: The four shapes, as `shape` names them.
+#: The five shapes, as `shape` names them.
 COMMS = "comms"
 SESSION = "session"
 URL = "url"
 FILE = "file"
+PAGE = "page"
 
 #: The shapes in words, for a refusal.
 SHAPES = ("comms:<digits>, <8 or more hex digits>@<UTC time> (2026-01-02T03:04Z), an "
-          "https:// URL, or file:<path in the round's folder>#<anchor>")
+          "https:// URL, file:<path in the round's folder>#<anchor>, or "
+          "page:<page>/<act id>@<UTC time to the second> (2026-01-02T03:04:05Z)")
 
 _COMMS = re.compile(r"comms:[0-9]+")
 _SESSION = re.compile(r"[0-9A-Fa-f]{8,}@([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}"
                       r"(:[0-9]{2})?)Z")
 _URL = re.compile(r"https://[^/?#]+.*")
 _FILE = re.compile(r"file:([^#]+)#(.+)")
+_PAGE = re.compile(r"page:[a-z][a-z0-9-]*/[A-Za-z0-9_-]{8,64}@"
+                   r"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})Z")
 
 #: The shape of a question's origin in a build, as `build_origin` writes it.
 BUILD = "build"
@@ -59,8 +69,8 @@ def is_build_origin(origin: object) -> bool:
 
 
 def shape(pointer: object) -> str | None:
-    """Which of the four shapes `pointer` has (`COMMS`, `SESSION`, `URL` or `FILE`), or
-    None when it has none of them."""
+    """Which of the five shapes `pointer` has (`COMMS`, `SESSION`, `URL`, `FILE` or
+    `PAGE`), or None when it has none of them."""
     if not isinstance(pointer, str) or not pointer or re.search(r"\s", pointer):
         return None
     if _COMMS.fullmatch(pointer):
@@ -74,7 +84,20 @@ def shape(pointer: object) -> str | None:
     file = _FILE.fullmatch(pointer)
     if file and _is_under(file.group(1)):
         return FILE
+    if page_at(pointer) is not None:
+        return PAGE
     return None
+
+
+def page_at(pointer: object) -> str | None:
+    """The time a `PAGE` pointer names, as the log writes a time
+    (`2026-01-02T03:04:05Z`), or None for any other pointer."""
+    if not isinstance(pointer, str):
+        return None
+    page = _PAGE.fullmatch(pointer)
+    if page is None or not _is_time(page.group(1), seconds=True):
+        return None
+    return page.group(1) + "Z"
 
 
 def number(pointer: str) -> int:
@@ -93,7 +116,7 @@ def same(one: object, other: object) -> bool:
 
 def unmet(pointer: object, fix: str, *,
           names: str = "where the operator said it") -> Unmet | None:
-    """The unmet condition of a pointer that has none of the four shapes, or None for one
+    """The unmet condition of a pointer that has none of the five shapes, or None for one
     that has. `fix` is the command that gives a right one, and `names` what the pointer
     is to, for one that names something else than the operator's word."""
     if shape(pointer) is not None:
@@ -119,5 +142,5 @@ def _is_under(path: str) -> bool:
     return all(part not in ("", "..") for part in path.split("/"))
 
 
-__all__ = ["COMMS", "SESSION", "URL", "FILE", "SHAPES", "BUILD", "shape", "number",
-           "same", "unmet", "build_origin", "is_build_origin"]
+__all__ = ["COMMS", "SESSION", "URL", "FILE", "PAGE", "SHAPES", "BUILD", "shape",
+           "page_at", "number", "same", "unmet", "build_origin", "is_build_origin"]

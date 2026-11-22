@@ -20,7 +20,8 @@
 // failed is made again when the tab is shown again and when the button's menu opens. The menu is three
 // lists side by side, the harness first; `older…` opens a field for a model's full name.
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
-// set here, which are the first harness's own.
+// set here and of the values filled from the last launch, which are the first harness's
+// own; the comms identity for the harness picked fills, unless one was set here.
 //
 // `Preset` beside the place, once `/api/presets` lists any, names the one preset the launch
 // starts from, `none` dim while none is applied. Its menu takes it off, or applies one of
@@ -76,15 +77,18 @@
 // it. A launch whose permission rows are not all at the user's usual values says so in its
 // request, and each such row is one of those the lines under and above the box name.
 //
-// The piece reads `/api/last` when it connects and whenever what the line above the box names
-// changes (a place picked, a seat applied or taken off), never on a launch, so nothing fills
-// under the user's hands; an answer for a key the line no longer names fills nothing. The
-// values that launch gave fill the rows the form leaves at their shipped defaults, the
-// harness first, and `From last launch` on the line above the box names them, with `Clear`
-// for each in its list and under its row in the panel. A filled value is not a change; one
-// the user edits becomes his, and leaves the item. A filled value that can do harm asks
-// nothing and stays after a launch. The button is off until the fill is read and made, and
-// the request names each filled row.
+// The piece reads `/api/last` when it connects and whenever what the line above the box
+// names changes (a place picked, a seat applied or taken off), never on a launch, so
+// nothing fills under the user's hands; an answer for a key the line no longer names fills
+// nothing. The values that launch gave fill the rows the form leaves at their shipped
+// defaults, the harness first, and `From last launch` on the line above the box names them,
+// with `Clear` for each in its list and under its row in the panel. A filled value is not a
+// change; one the user edits becomes his, and leaves the item. A filled value that can do
+// harm asks nothing and stays after a launch. A filled comms identity comms refuses a
+// launch under (held, reserved, retired) shows comms' refusal beside it, in the list and
+// under its row, and so does the note when a live session holds the same name in a project
+// scope. The button is off until the fill is read and made, and the request names
+// each filled row.
 //
 // `Run again` under the box lists the recent launches of what the line names, read when the
 // piece connects, when what the line names changes, and on every event of the topic
@@ -119,8 +123,10 @@
 // offered when the menu's read of `/api/sessions`, made each time it opens, holds a session
 // of the line's place that he made and can resume now; its dim line says whether it resumes
 // in a slot or copies the resume command. A click resumes it at once through `/api/resume`,
-// with the lines under the box a launch has, in a resume's words; the box keeps its text.
-// With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
+// with the lines under the box a launch has, in a resume's words. The box's text goes as the
+// resume's brief, or the brief file in its place while one is set, and a resume that starts
+// empties the box and lets go of the file as a launch does; an empty box sends none, and
+// the session resumes with no first turn, a `go` session too. With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
 // continue.
 //
 // Every menu opens inside the page: after a render while one is open, and on a resize, the
@@ -144,8 +150,9 @@ import type {
 } from "./options-model.ts";
 
 import {
-  CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, FROM_LAST, fromLast, HARNESS_ROW, harnessStep, keptFill,
-  lastKey, lastWhen, parseLast, withoutFill,
+  BY_DEFAULT, CLEAR, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
+  HARNESS_ROW, harnessStep, keptFill, keptForPick, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote,
+  withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -317,6 +324,7 @@ const STYLES = css`
   .fr .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
   .fr.dg .d, .fr.dg > span { color: var(--moxi-danger); }
   .fr button, .came button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .fr .nref { grid-column: 1 / -1; margin: 2px 0 0; }
   .fnote { margin: 6px 0 0; padding: 9px 14px 10px; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim);
            font-size: 13px; line-height: 18px; }
   .came { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--moxi-text-dim);
@@ -514,7 +522,8 @@ export class LauncherPrompt extends LitElement {
   /** The values filled from the last launch and left as they were, by row; `harness` when the
    * harness was filled too. */
   filled: Record<string, FormValue> = {};
-  /** The last launch the fill was made from, with the key it was read for; null with none. */
+  /** The last launch the fill was made from, with the key it was read for; with nothing
+   * filled, the answer whose comms identities a harness picked by hand fills; null with none. */
   last: (Last & { key: LastKey }) | null = null;
   /** The earlier launches `Run again` lists, newest first; empty until read. */
   recents: Recent[] = [];
@@ -572,8 +581,8 @@ export class LauncherPrompt extends LitElement {
   #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
-  /** The box's text when the button was pressed; null for a recent run again, a resume, or a
-   * launch with a brief file, which send none of it. */
+  /** The box's text when the button or `Continue the last session` was pressed; null for a
+   * recent run again, or a launch or resume with a brief file, which send none of it. */
   #sent: string | null = "";
   /** The values that can do harm turned on when the button was pressed, by row. */
   #sentOn: Record<string, string> = {};
@@ -781,12 +790,13 @@ export class LauncherPrompt extends LitElement {
    * preset applied reads it again with none for the same harness. An answer that can't be
    * read leaves the form as it was. A read the fill asks for (`fill`) takes no form that is
    * refused; another harness read for any other reason lets go of the filled values, which
-   * are the first harness's own. */
-  async #readForm(harness: string, fill = false): Promise<void> {
+   * are the first harness's own. A harness the user picked (`picked`) then fills the comms
+   * identity the last launch gives it, unless the user set the identity here. */
+  async #readForm(harness: string, fill = false, picked = false): Promise<void> {
     const asked = (this.#asked += 1);
     this.#formIn = true;
     try {
-      await this.#formRead(asked, harness, fill);
+      await this.#formRead(asked, harness, fill, picked);
     } finally {
       // The fill waits for the latest read of the form, however it ended.
       if (asked === this.#asked) {
@@ -796,7 +806,7 @@ export class LauncherPrompt extends LitElement {
     }
   }
 
-  async #formRead(asked: number, harness: string, fill: boolean): Promise<void> {
+  async #formRead(asked: number, harness: string, fill: boolean, picked: boolean): Promise<void> {
     const identity = this.fields.length === 0 ? "" : this.#identity;
     this.#identityAsked = identity;
     const choice = this.preset;
@@ -828,6 +838,9 @@ export class LauncherPrompt extends LitElement {
     if (other && this.fields.length > 0) {
       this.options = keptOptions(this.options, this.fields);
       this.pending = null;
+    }
+    if (other && picked && this.last !== null && this.fields.length > 0) {
+      this.filled = pickedHarnessFill(this.last, this.fields as PanelField[], form, this.#held());
     }
   }
 
@@ -867,7 +880,7 @@ export class LauncherPrompt extends LitElement {
       if (asked !== this.#lastAsked) return;
       const read = answer.status === 200 ? parseLast(answer.data) : null;
       this.#lastRead = true;
-      if (read !== null && read.state === "up" && read.at !== null) this.#waiting = { ...read, key };
+      if (read !== null && read.state === "up" && fills(read)) this.#waiting = { ...read, key };
       this.#settle();
       this.requestUpdate();
     });
@@ -885,25 +898,32 @@ export class LauncherPrompt extends LitElement {
       return;
     }
     const step = harnessStep(last, form);
-    if (step === "none" || (step === "read" && this.#fillHarness === last.harness)) {
-      this.#filledNothing();
-      return;
-    }
-    if (step === "read") {
+    if (step === "read" && this.#fillHarness !== last.harness) {
       this.#fillHarness = last.harness as string;
       void this.#readForm(this.#fillHarness, true);
       return;
     }
-    const held = new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
-    const values = fillOf(last, this.fields as PanelField[], form, held);
+    // Off the launch's harness only the comms identity for the form's own harness fills.
+    const values = fillOf(last, this.fields as PanelField[], form, this.#held());
+    if (step !== "same" && Object.keys(values).length === 0) {
+      this.#filledNothing();
+      return;
+    }
     this.filled = this.#fillHarness === form.harness ? { [HARNESS_ROW]: form.harness, ...values } : values;
     this.last = last;
     this.#waiting = null;
     this.#fillHarness = "";
   }
 
-  /** The last launch waiting fills nothing. */
+  /** The rows the user set here, which nothing fills over. */
+  #held(): Set<string> {
+    return new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
+  }
+
+  /** The last launch waiting fills nothing; its comms identities stay for a harness picked
+   * by hand. */
   #filledNothing(): void {
+    this.last = keptForPick(this.#waiting);
     this.#waiting = null;
     this.#fillHarness = "";
     this.requestUpdate();
@@ -986,7 +1006,7 @@ export class LauncherPrompt extends LitElement {
 
   #setHarness(value: string): void {
     this.older = false;
-    if (value !== this.harness) void this.#readForm(value);
+    if (value !== this.harness) void this.#readForm(value, false, true);
   }
 
   #openOlder(): void {
@@ -1098,26 +1118,44 @@ export class LauncherPrompt extends LitElement {
         this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
   }
 
-  /** When the last launch the fill came from was made, as the page says it. */
-  get #lastWhen(): string {
-    return this.last === null ? "" : lastWhen(this.last.at ?? "", new Date());
+  /** comms' refusal of the filled identity and the note of a live namesake in a project scope,
+   * under the row `name` names when it is the identity; nothing when there is neither. */
+  #refusedBeside(name: string) {
+    if (name !== "identity" || this.last === null) return nothing;
+    const harness = this.#form?.harness ?? "";
+    const found = filledRefusal(this.last, this.#fill, harness);
+    const note = filledNote(this.last, this.#fill, harness);
+    return html`${found === null ? nothing : html`<p class="nref" data-refused=${found.code}>${refusalNote(found)}</p>`}${
+      note === null ? nothing : html`<p class="nref" data-namesake>${note}.</p>`}`;
   }
 
-  /** `· From last launch <label>` on the line, once a value is filled, and its list while
-   * it is open: each value with `Clear`, then where the values came from. */
+  /** When the launch the fill came from was made; null for a default identity. */
+  get #fillAt(): string | null {
+    return this.last === null ? null : filledAt(this.last, this.#fill, this.#form?.harness ?? "");
+  }
+
+  /** When the launch the fill came from was made, as the page says it. */
+  get #lastWhen(): string {
+    return this.last === null ? "" : lastWhen(this.#fillAt ?? "", new Date());
+  }
+
+  /** `· From last launch <label>` on the line, once a value is filled, or `· Default <label>`
+   * for the default filled with no launch, and its list while it is open: each value with
+   * `Clear`, then where the values came from. */
   #fillItem() {
     const rows = fillRows(this.#fill, this.fields as PanelField[], this.#home);
     const face = fillFace(rows);
     if (face === null || this.last === null) return nothing;
     const open = this.menu === "fill";
-    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${FROM_LAST}</span><span
+    const from = this.#fillAt === null ? BY_DEFAULT : FROM_LAST;
+    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${from}</span><span
       class=${open ? "anchor open" : "anchor"} data-item="fill"><button type="button" class="pre" aria-haspopup="true"
-        aria-expanded=${open ? "true" : "false"} aria-label=${`${FROM_LAST} ${face.text}`}
+        aria-expanded=${open ? "true" : "false"} aria-label=${`${from} ${face.text}`}
         @click=${() => { this.menu = open ? "" : "fill"; }}><span class=${face.danger ? "dg" : ""}>${face.text}</span><span
         class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu fill" data-menu="fill">
         ${rows.map((row) => html`<div class=${row.danger ? "fr dg" : "fr"} data-fill=${row.name}><span>${row.label}</span><span
           class="d">${row.text}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-          @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`)}
+          @click=${() => this.#clear(row.name)}>${CLEAR}</button>${this.#refusedBeside(row.name)}</div>`)}
         <p class="fnote">${fillNote(this.last.key, this.#lastWhen, rows.length)}</p></div>` : nothing}</span>`;
   }
 
@@ -1343,19 +1381,22 @@ export class LauncherPrompt extends LitElement {
       }}>${CLEAR_FILE}</button></div>`;
   }
 
-  /** A click on `Continue the last session`: the session resumed at once, its lines under the
-   * box, or its command copied. The box, the panel and the fill stay as they are. */
+  /** A click on `Continue the last session`: the session resumed at once with the box's text
+   * as its brief, or the brief file while one is set, its lines under the box, or its command
+   * copied. A resume that starts lets go of the box's text or the file as a launch does; the
+   * panel and the fill stay as they are. */
   async #continue(past: Past): Promise<void> {
     if (inFlight(this.flight)) return;
     const mine = (this.#pressed += 1);
     this.#stopFollow();
-    this.#sent = null;
+    const body = resumeBody(past, this.brief, this.briefFile);
+    this.#sentFile = this.briefFile === "" ? null : this.briefFile;
+    this.#sent = this.#sentFile === null ? this.brief : null;
     this.#sentOn = {};
-    this.#sentFile = null;
     this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
-    const sent = resumeSent(await api("launcher", "api/resume", resumeBody(past)));
+    const sent = resumeSent(await api("launcher", "api/resume", body));
     if (mine !== this.#pressed) return;
     if (sent.copy !== null) {
       await this.#copy(mine, sent.copy, []);
@@ -1570,13 +1611,14 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Under a value filled from the last launch: when that launch was made, and `Clear`; in
-   * the warning colour for a value that can do harm. */
+   * the warning colour for a value that can do harm. Under a filled identity comms refuses a
+   * launch under, comms' refusal. */
   #fromLast(row: PanelRow) {
     const fill = this.#fill;
     if (!Object.hasOwn(fill, row.name) || this.last === null) return nothing;
     return html`<div class=${isDanger(row.field, fill[row.name]) ? "came dg" : "came"} data-from=${row.name}><span>${
       fromLast(this.#lastWhen)}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`;
+      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>${this.#refusedBeside(row.name)}`;
   }
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.
@@ -2010,9 +2052,9 @@ export class LauncherPrompt extends LitElement {
     if (mine === this.#pressed) this.#landed(followed(this.flight, answer));
   }
 
-  /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, lets go of the brief file and of the handoff set
-   * or cleared it was launched with, unless one was changed since, so the form's handoff
+  /** Takes the followed launch's or resume's next state. One that started empties the box,
+   * unless its text was changed since the press, lets go of the brief file and of the handoff
+   * set or cleared it was launched with, unless one was changed since, so the form's handoff
    * shows again, and lets go of each value that can do harm it was launched with, unless its
    * row was changed since the press. */
   #landed(next: Flight): void {

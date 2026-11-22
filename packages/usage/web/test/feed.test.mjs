@@ -118,6 +118,37 @@ test("a held value shows until the feed's own read answers", async () => {
   assert.deepEqual(feed.value.rows, REPORT.rows);
 });
 
+/** A feed whose reads wait until `answer` is called. */
+function waitingFeed() {
+  const out = [];
+  const feed = new Feed(() => new Promise((done) => out.push(done)), parseReport, () => {});
+  return { feed, answer: (result) => out.shift()(result) };
+}
+
+test("a feed is stale while a read is out over a value from before it", async () => {
+  const { feed, answer } = waitingFeed();
+  // The first read, over nothing, is not stale.
+  let running = feed.refresh();
+  assert.equal(feed.stale, false);
+  answer({ status: 200, data: REPORT });
+  await running;
+  assert.equal(feed.stale, false);
+  // A read again over the last value is, until it answers, whatever it answers.
+  running = feed.refresh();
+  assert.equal(feed.stale, true);
+  answer({ status: 500, data: null });
+  await running;
+  assert.equal(feed.stale, false);
+  // So is a held value's first read.
+  const held = waitingFeed();
+  held.feed.hold({ ...REPORT, rows: [] });
+  running = held.feed.refresh();
+  assert.equal(held.feed.stale, true);
+  held.answer({ status: 200, data: REPORT });
+  await running;
+  assert.equal(held.feed.stale, false);
+});
+
 test("a closed feed drops answers and events", async () => {
   const { feed, changes } = feedOf([{ status: 200, data: REPORT }]);
   const running = feed.refresh();

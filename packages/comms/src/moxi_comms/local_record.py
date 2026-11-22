@@ -405,9 +405,35 @@ class LocalRecord:
             key = int(message_id)
         except (TypeError, ValueError):
             return None
-        row = self._conn().execute(f"SELECT {self._COLUMNS} FROM messages WHERE id = ?",
-                                   (key,)).fetchone()
-        return self._message(row) if row else None
+        conn = self._conn()
+        row = conn.execute(f"SELECT {self._COLUMNS} FROM messages WHERE id = ?",
+                           (key,)).fetchone()
+        if row:
+            return self._message(row)
+        # An id the counter skipped for an older comms' record is that record's
+        # (`archive.py`); every other id is this store's alone.
+        from . import archive
+
+        return archive.get_message(conn, key)
+
+    def skip_ids_to(self, last: int, *, meta_key: str) -> tuple[int, int] | None:
+        """Move the message counter up to `last`, so the next id is above it, and record
+        the ids skipped under `meta_key` as `"<from> <to>"`. Once: a store that already
+        records a skip, or whose counter is at or past `last`, is left as it is, and None
+        is returned; else the range skipped."""
+        with self._write() as conn:
+            if conn.execute("SELECT 1 FROM meta WHERE key = ?", (meta_key,)).fetchone():
+                return None
+            row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                               (META_NEXT_ID,)).fetchone()
+            now = int(row[0])
+            if now >= int(last):
+                return None
+            conn.execute("UPDATE meta SET value = ? WHERE key = ?", (str(int(last)),
+                                                                     META_NEXT_ID))
+            conn.execute("INSERT INTO meta(key, value) VALUES (?, ?)",
+                         (meta_key, f"{now} {int(last)}"))
+        return (now, int(last))
 
     def max_message_id(self, channel_id: str | None = None) -> str | None:
         """`MAX(id)` is O(log n) through the primary key (or `messages_channel`), so the

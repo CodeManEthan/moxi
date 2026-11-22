@@ -44,8 +44,9 @@ A `mismatch` saves the screen's region, plain and with its escape sequences, as 
 file in the `mismatches` store, which keeps the last 20; `Answer.capture` is its path.
 A new layout can then be read and added as a fixture.
 
-`pane_use(slot)` is the read behind a launcher's check for a person at the pane: copy
-mode, the attached clients' latest activity, and the run window's.
+`pane_use(slot)` reads copy mode, the attached clients' latest activity, and the run
+window's last output or input. A launcher's check for a person at the pane takes the
+first two; it never reads the run window's activity for a person.
 """
 
 from __future__ import annotations
@@ -436,9 +437,10 @@ def prune(mismatches_dir: Path | None = None, keep: int = KEEP) -> list[str]:
 # -- pane use --------------------------------------------------------------------------------
 
 def pane_use(slot: int | str) -> PaneUse:
-    """The read behind a launcher's check for a person at the slot's run pane, in one
-    tmux call: whether the pane is in a tmux mode (copy mode sends keys to tmux, not to
-    the program), the attached clients' latest activity, and the run window's."""
+    """How the slot's run pane is in use, in one tmux call: whether the pane is in a tmux
+    mode (copy mode sends keys to tmux, not to the program), the attached clients'
+    latest activity, and the run window's last output or input. A launcher's check for
+    a person takes the first two, never the run window's activity."""
     number, pane_id = _run_pane(slot)
     if pane_id is None:
         return PaneUse(number, None)

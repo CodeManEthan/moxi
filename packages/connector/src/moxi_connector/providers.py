@@ -10,9 +10,10 @@ when its target can't be imported, or when it is not a `Provider`.
 `START_WAIT`; a provider whose start raises or takes longer loads no tools and gets a
 `fail` row, and the others serve. `tools()` is the table the door serves: every tool of
 every started provider, less each name two providers declare, which is refused for both
-and named in a `fail` row. The table is data built from the providers, so a later rule
-(a per-tool allowlist, a per-provider switch) can filter it without touching the provider
-interface.
+and named in a `fail` row, and less each name of `withheld` (the setting
+`tools.withheld`), which the door serves to no grant: absent from `tools/list`, and a call
+to it answers as a call to a tool that doesn't exist. The table is data built from the
+providers, so it is filtered without touching the provider interface.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import asyncio
 import importlib
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from moxi import modules, names
@@ -98,15 +99,19 @@ class Registry:
     """The providers this process loaded, and the tools it serves from them."""
 
     entries: list[Loaded] = field(default_factory=list)
+    #: The tool names the door serves to no grant, whichever provider declares them.
+    withheld: frozenset[str] = frozenset()
 
     @classmethod
-    def from_group(cls) -> Registry:
-        return cls(load())
+    def from_group(cls, *, withheld: Iterable[str] = ()) -> Registry:
+        return cls(load(), frozenset(withheld))
 
     @classmethod
-    def of(cls, providers: Mapping[str, Provider]) -> Registry:
+    def of(cls, providers: Mapping[str, Provider], *, withheld: Iterable[str] = ()
+           ) -> Registry:
         """A registry of `providers` by module name, as if each had loaded (tests)."""
-        return cls([Loaded(name, f"moxi-{name}", p, "loaded") for name, p in providers.items()])
+        return cls([Loaded(name, f"moxi-{name}", p, "loaded") for name, p in providers.items()],
+                   frozenset(withheld))
 
     async def start(self, env: Mapping[str, str], *, wait: float = START_WAIT) -> None:
         """Run each loaded provider's start once, in name order."""
@@ -149,14 +154,14 @@ class Registry:
 
     def tools(self) -> dict[str, tuple[str, Tool]]:
         """The tools served: name to (provider module, tool), in provider and tool order,
-        every clashing name left out."""
-        clashing = self.clashes()
+        every clashing name and every withheld name left out."""
+        left_out = set(self.clashes()) | self.withheld
         out: dict[str, tuple[str, Tool]] = {}
         for entry in self.entries:
             if entry.state != "started" or entry.provider is None:
                 continue
             for tool in entry.provider.tools:
-                if tool.name not in clashing and tool.name not in out:
+                if tool.name not in left_out and tool.name not in out:
                     out[tool.name] = (entry.module, tool)
         return out
 

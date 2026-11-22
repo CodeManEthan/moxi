@@ -71,8 +71,19 @@ def test_the_declarations_match_the_design():
     assert (q.calls, q.who, q.wants, q.on_error, q.switch) == (
         {"claude": ("AskUserQuestion",)}, "any", ("prompts",), "deny", "guards.question_mode")
     assert q.judge == "moxi_turns.guards.question:judge"
+    assert q.deadline_ms == 3000
     assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),
                                 (("start",), "moxi_turns.startline:answer"))
+
+
+def test_question_modes_deadline_is_clamped_by_max_wait():
+    q = BY_NAME["question-mode"]
+    assert q.deadline() == 3000                      # max_wait_ms's default
+    assert q.deadline(10_000) == 3000
+    assert q.deadline(1200) == 1200
+    on = guards.On(found(q), ("switch",))
+    assert entry_for(on, "claude", 3000).deadline_ms == 3000
+    assert entry_for(on, "claude", 800).deadline_ms == 800
 
 
 def test_each_judge_target_imports():
@@ -288,7 +299,7 @@ def test_a_prompt_from_the_claude_apps_counts_as_typed_by_default(turns_env, arg
 
 
 def test_a_config_of_composer_alone_refuses_a_prompt_from_the_claude_apps(turns_env, argv):
-    write_config(turns_env, '[question_mode]\norigins = ["composer"]\n')
+    write_config(turns_env, '[prompt]\nown_origins = ["composer"]\n')
     assert qm.judge(ask(Prompt("bridge", "any questions?"))) == \
         Deny(qm.R_NOT_HERE.format(origin="bridge"))
     assert qm.judge(ask(Prompt("composer", "any questions?"))) is None
@@ -321,9 +332,9 @@ def test_the_launch_prompt_never_counts(turns_env, argv):
 
 
 def test_the_origins_come_from_turns_config(turns_env, argv):
-    write_config(turns_env, '[question_mode]\norigins = ["composer", "plugin"]\n')
+    write_config(turns_env, '[prompt]\nown_origins = ["composer", "plugin"]\n')
     assert qm.judge(ask(Prompt("plugin", "a question"))) is None
-    write_config(turns_env, '[question_mode]\norigins = []\n')
+    write_config(turns_env, '[prompt]\nown_origins = []\n')
     assert qm.judge(ask(Prompt("composer", "a question"))) == \
         Deny(qm.R_NOT_HERE.format(origin="composer"))
 
@@ -384,8 +395,11 @@ def test_nudges_reads_the_prose_words_it_is_given():
 
 
 def prompt_event(text, origin, env=None) -> SessionEvent:
-    return SessionEvent("prompt", "claude", "s-1", env=dict(os.environ) if env is None else env,
-                        cwd="/w", text=text, origin=origin)
+    """A `prompt` event as the endpoint makes it: `own` from `prompt.own_origins`."""
+    env = dict(os.environ) if env is None else env
+    own = origin is not None and origin in config.load(env)[qm.ORIGINS_KEY]
+    return SessionEvent("prompt", "claude", "s-1", env=env, cwd="/w", text=text,
+                        origin=origin, own=own)
 
 
 def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turns_env):
@@ -401,18 +415,29 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
     write_config(turns_env, '[guards]\nrun = ["turns.question-mode"]\n')
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
     write_config(turns_env, '[guards]\nrun = ["turns.question-mode"]\n'
-                            '[question_mode]\norigins = ["plugin"]\n')
+                            '[prompt]\nown_origins = ["plugin"]\n')
     assert qm.on_prompt(prompt_event(text, "plugin")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "composer")) is None
     write_config(turns_env, '[guards]\nquestion_mode = true\n'
-                            '[question_mode]\norigins = ["composer"]\n')
+                            '[prompt]\nown_origins = ["composer"]\n')
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "bridge")) is None
 
 
+def test_pros_asks_for_prose_by_default(turns_env):
+    assert config.schema().keys[qm.PROSE_KEY].default == ["prose", "pros"]
+    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    for text in ("let's go through the open questions in pros",
+                 "let's go through the open questions in prose"):
+        assert qm.on_prompt(prompt_event(text, "composer")) is None
+    assert qm.on_prompt(prompt_event("let's go through the open questions",
+                                     "composer")) == qm.REMINDER
+
+
 def test_the_reminder_reads_the_prose_words_setting(turns_env):
     text = "let's go through the open questions in pros"
-    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    write_config(turns_env, '[guards]\nquestion_mode = true\n'
+                            '[question_mode]\nprose_words = ["prose"]\n')
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
     write_config(turns_env, '[guards]\nquestion_mode = true\n'
                             '[question_mode]\nprose_words = ["Prose", "PROS"]\n')
@@ -423,9 +448,13 @@ def test_the_reminder_reads_the_prose_words_setting(turns_env):
                                      "composer")) == qm.REMINDER
 
 
-def test_the_reminder_names_no_one():
-    assert "operator" not in qm.REMINDER and "AskUserQuestion" in qm.REMINDER
-    assert "up to four per call" in qm.REMINDER
+def test_the_reminder_leaves_the_agent_to_judge_whether_they_are_asking_now():
+    assert qm.REMINDER == (
+        "The person at the keyboard just asked to go through open questions. If they are "
+        "asking now, put the questions that are open now to them with AskUserQuestion: up "
+        "to four per call, as many calls as you need, each self-contained with your "
+        "recommendation first. Once they have answered them, count any new questions at the "
+        "end of your output, as always.")
 
 
 # -- through the Claude endpoint -------------------------------------------------------------

@@ -22,6 +22,7 @@ with what it adds: its posture, a resume, the relaunch's header and stamps.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterable, Mapping
@@ -128,10 +129,10 @@ def context(values: Mapping[str, object], *, request_id: str,
         preset_name=preset_name, project_key=project_key))
     handoff_dir = None
     if key and values.get("cwd"):
-        handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
-                                          notes_dir=values.get("notes_dir") or None,
-                                          env=env, create=create,
-                                          create_own=False))
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
+                                                   notes_dir=values.get("notes_dir") or None,
+                                                   env=env, create=create, create_own=False))
 
     role_found = None
     if values.get("agent"):
@@ -199,7 +200,9 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
 
     `request` gives `request_id`, `session_id` and `actor`, each read as None when it is
     missing (an id is then minted, the actor read from the environment). A scratch launch
-    works in `common.scratch_dir(request_id)`, which the launch makes; this only names it.
+    works in `common.scratch_dir(name)`, named by the launch's session name (folded to
+    lowercase letters, digits and dashes), which the launch makes; this only names it.
+    It raises `presets.ScratchNotes` when notes would give that folder a notes home.
     `preview` and the launch both come here, so the same request, its ids given, composes
     the same argv.
 
@@ -217,7 +220,15 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
         session_id = str(uuid.uuid4())
     if replay is None and (getattr(resolved, "scratch", False)
                            or (values.get("scratch") and not values.get("cwd"))):
-        values["cwd"] = str(common.scratch_dir(request_id))
+        values["cwd"] = str(common.scratch_dir(str(values.get("name") or "")))
+        home = handoffs.notes_home(values["cwd"])
+        if home is not None:
+            root = common.scratch_root()
+            raise presets.ScratchNotes(
+                "scratch", f"the scratch folder {values['cwd']} resolves to a notes home "
+                           f"({home}), and a scratch launch keeps nothing",
+                f"keep notes out of {root} (moxi config set notes exclude --add {root}), "
+                "or launch in a folder of your own")
     if hasattr(resolved, "off_posture"):
         values["off_posture"] = bool(resolved.off_posture)
     ctx = context(values, request_id=request_id, session_id=session_id,

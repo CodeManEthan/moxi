@@ -98,7 +98,7 @@ def test_version_2_keeps_every_row_and_settles_only_the_excluded_ones(tmp_path):
             conn.execute("INSERT INTO requests (file_id, key, seq, sidechain, synthetic, won)"
                          " VALUES (?, 1, 1, 0, 0, 1)", (kept,))
         # a step that drops no row runs while an archive lane is offline
-        result = store.migrate(conn, offline=["archive:old"])
+        result = store.migrate(conn, offline=["archive:old"], steps=store.STEPS[:2])
         assert (result.before, result.after) == (1, 2) and result.dropped == ()
         flags = {f["path"]: f["marks_read"] for f in store.files(conn)}
         assert flags == {"/c/kept.jsonl": 0, "/c/skipped.jsonl": 1}
@@ -108,6 +108,46 @@ def test_version_2_keeps_every_row_and_settles_only_the_excluded_ones(tmp_path):
         assert store.check(conn) == [] and skipped
     finally:
         conn.close()
+
+
+def test_version_3_keeps_every_row_and_settles_all_but_the_claude_files_read(tmp_path):
+    conn = store.connect(path=tmp_path / "index.db")
+    try:
+        store.migrate(conn, steps=store.STEPS[:2])
+        read = add_file(conn, "/p/read.jsonl")
+        archived = add_file(conn, "/a/read.jsonl", lane="archive:old", rank=3)
+        rollout = add_file(conn, "/c/kept.jsonl", lane="codex", harness="codex")
+        skipped = add_file(conn, "/c/skipped.jsonl", lane="codex", harness="codex",
+                           excluded="imported")
+        with moxi.store.transaction(conn):
+            conn.execute("UPDATE files SET marks_read = 1")
+            for file_id in (read, archived, rollout):
+                conn.execute("INSERT INTO requests (file_id, key, seq, sidechain, synthetic,"
+                             " won) VALUES (?, ?, 1, 0, 0, 1)", (file_id, file_id))
+        result = store.migrate(conn, offline=["archive:old"])
+        assert (result.before, result.after) == (2, 3) and result.dropped == ()
+        assert store.get_meta(conn, store.META_INDEX_VERSION) == "3"
+        flags = {f["path"]: (f["marks_read"], f["prompts_read"]) for f in store.files(conn)}
+        assert flags == {"/p/read.jsonl": (1, 0), "/a/read.jsonl": (1, 0),
+                         "/c/kept.jsonl": (1, 1), "/c/skipped.jsonl": (1, 1)}
+        assert conn.execute("SELECT count(*) FROM requests").fetchone()[0] == 3
+        assert conn.execute("SELECT count(*) FROM prompts").fetchone()[0] == 0
+        assert store.check(conn) == [] and skipped
+    finally:
+        conn.close()
+
+
+def test_a_prompt_read_twice_is_stored_once_and_goes_with_its_file(conn):
+    file_id = add_file(conn)
+    with moxi.store.transaction(conn):
+        assert store.add_prompts(conn, file_id, ["p1", "p2"]) == 2
+        assert store.add_prompts(conn, file_id, ["p2", "p3", "p3"]) == 1
+    assert [r[0] for r in conn.execute("SELECT turn_id FROM prompts")] == ["p1", "p2", "p3"]
+    with moxi.store.transaction(conn):
+        assert store.delete_prompts(conn, [file_id]) == 3
+        store.add_prompts(conn, file_id, ["p1"])
+        conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+    assert conn.execute("SELECT count(*) FROM prompts").fetchone()[0] == 0
 
 
 def test_a_marker_read_twice_is_stored_once_and_goes_with_its_file(conn):

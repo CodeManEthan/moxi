@@ -22,15 +22,15 @@ CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTO
                "CHECKED_VERSIONS"}
 
 
-def test_the_announcement_offers_interfaces_2_to_6():
-    assert module.INTERFACES == frozenset({2, 3, 4, 5, 6})
+def test_the_announcement_offers_interfaces_2_to_7():
+    assert module.INTERFACES == frozenset({2, 3, 4, 5, 6, 7})
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
     assert module.SETUP == "moxi_sessions.setup:setup"
     target, _, name = module.SETUP.partition(":")
     assert callable(getattr(importlib.import_module(target), name))
-    assert set(module.OPTIONAL) == {"ui", "secrets", "turns"}
+    assert set(module.OPTIONAL) == {"ui", "secrets", "turns", "projects", "connector"}
     assert module.GATED == {} and module.INTERNAL_ENV == {}
 
 
@@ -58,7 +58,8 @@ def test_load_finds_the_module_and_its_api():
     assert not modules.load("sessions", interface=1).ok
     assert modules.load("sessions", interface=5).ok
     assert modules.load("sessions", interface=6).ok
-    assert not modules.load("sessions", interface=7).ok
+    assert modules.load("sessions", interface=7).ok
+    assert not modules.load("sessions", interface=8).ok
 
 
 def test_interface_3_adds_retention():

@@ -8,8 +8,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, dropping, index, log, moving, opening, paths, ruling,
-                         showing, shown)
+from moxi_rounds import (asking, dropping, index, leads, log, moving, opening, paths,
+                         ruling, showing, shown)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadName, NoRound, Refused
 
@@ -83,6 +83,7 @@ def test_a_round_just_opened_is_shown_with_what_it_is_for_and_its_flow(rounds, c
     assert printed(capsys, B) == f"""\
 round {B}   open   flow fix ({names})
 description: a placeholder round
+lead: none
 folder: {rounds / "b-round"}
 step: commission, ready
 close waits for: {'; '.join(OPENED_WAITS)}
@@ -106,16 +107,18 @@ history: 1 event
 """
     found = data(capsys, B)
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
-                           "ended", "description", "parent", "inherits", "flow",
+                           "ended", "description", "lead", "parent", "inherits",
+                           "flow",
                            "steps", "step", "close", "skips",
                            "stages", "versions", "standing", "trace", "threads",
                            "register_unreadable", "builds", "waits", "decisions",
                            "questions",
                            "rulings", "verdicts", "repairs", "history"]
-    assert {key: found[key] for key in list(found)[:21]} == {
+    assert {key: found[key] for key in list(found)[:22]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
-        "ended": None, "description": "a placeholder round", "parent": None,
+        "ended": None, "description": "a placeholder round", "lead": None,
+        "parent": None,
         "inherits": [], "flow": "fix",
         "steps": steps,
         "step": {"step": "commission", "stage": None, "state": "ready",
@@ -136,7 +139,7 @@ def test_the_step_the_round_is_at_is_shown_with_what_it_waits_for(rounds, capsys
     assert data(capsys)["step"] == {
         "step": "commission", "stage": "B1", "state": "waiting", "waits": [held],
         "questions": []}
-    assert printed(capsys, A).splitlines()[3:6] == [
+    assert printed(capsys, A).splitlines()[4:7] == [
         "step: commission of B1, waiting", f"  waits for: {held['reason']}",
         f"    fix: {held['fix']}"]
 
@@ -495,3 +498,42 @@ def test_help_says_what_show_does(capsys):
     said = " ".join(capsys.readouterr().out.split())
     for part in ("ROUND", "--json", "Show one round", "listed with list"):
         assert part in said
+
+
+# -- the lead ----------------------------------------------------------------------------
+
+def set_project_lead(name):
+    assert cli.main(["projects", "set", "proj-a", "--lead", name]) == 0
+
+
+def test_a_round_with_a_lead_of_its_own_is_shown_with_it(rounds, capsys):
+    leads.mark(A, "atlas-lead", by="planner")
+
+    assert data(capsys)["lead"] == {"name": "atlas-lead", "from": "round"}
+    lines = printed(capsys, A).splitlines()
+    assert lines[1:3] == ["description: a placeholder round", "lead: atlas-lead"]
+    assert lines[-1].startswith("  2  ")
+    assert lines[-1].endswith("  planner  lead.changed  none to atlas-lead")
+
+
+def test_a_round_with_none_of_its_own_is_shown_with_its_projects(rounds, capsys):
+    set_project_lead("kestrel")
+    capsys.readouterr()
+
+    assert data(capsys)["lead"] == {"name": "kestrel", "from": "project"}
+    assert printed(capsys, A).splitlines()[2] == (
+        f"lead: kestrel (the project's; moxi rounds mark {A} --lead NAME records the "
+        "round's own)")
+
+
+def test_a_round_with_neither_is_shown_with_no_lead(rounds, capsys):
+    assert data(capsys)["lead"] is None
+    assert printed(capsys, A).splitlines()[2] == "lead: none"
+
+
+def test_a_change_of_lead_names_the_one_before_in_the_history(rounds, capsys):
+    leads.mark(A, "atlas-lead", by="planner")
+    leads.mark(A, "kestrel", by="planner")
+
+    assert printed(capsys, A).splitlines()[-1].endswith(
+        "planner  lead.changed  atlas-lead to kestrel")

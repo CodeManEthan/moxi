@@ -57,6 +57,14 @@ def no_projects(monkeypatch):
 
 
 @pytest.fixture
+def no_notes(monkeypatch):
+    """notes not installed, whatever this environment holds: handoffs go in the
+    launcher's own folder."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
     monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
@@ -127,7 +135,7 @@ def test_each_verb_parses(argv, expected):
 def test_every_verb_has_a_handler():
     assert set(cli.VERBS) == {"run", "preview", "log", "presets", "catalog", "handoff",
                               "handoffs", "deliver", "relaunch", "exit-session", "exits",
-                              "sessions", "resume", "keep-warm", "show"}
+                              "sessions", "resume", "clear-expired", "keep-warm", "show"}
 
 
 REFUSED = [
@@ -356,7 +364,9 @@ def test_preview_prints_the_argv_and_the_stamped_env(work, monkeypatch, capsys):
     assert lines[1] == "argv:" and lines[2].startswith("  claude ")
     # A word with a newline in it is quoted across lines, as a shell reads it back.
     assert "--model opus" in out and "'Brief from launcher, launched by " in lines[2]
-    assert lines[lines.index("env:") + 1].startswith("  MOXI_LAUNCHER_REQUEST=")
+    env_lines = lines[lines.index("env:") + 1:]
+    assert "  MOXI_USAGE_WARN_AT=2x" in env_lines
+    assert any(line.startswith("  MOXI_LAUNCHER_REQUEST=") for line in env_lines)
     assert dict(seen["request"].typed) == {"model": "opus", "brief": BRIEF}
     assert rows() == []
 
@@ -371,7 +381,7 @@ def test_preview_json_is_one_object_with_argv_and_env(work, capsys):
     assert shown["argv"][:2] == ["codex", "exec"]
     assert set(shown["env"]) == {common.REQUEST_ENV}
     assert shown["first_turn"] is None and shown["values"]["scratch"] is True
-    assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST_ENV]).exists()
+    assert rows() == [] and not common.scratch_dir(shown["values"]["name"]).exists()
 
 
 def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkeypatch, capsys):
@@ -384,6 +394,31 @@ def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkey
     assert out.splitlines()[-5:] == ["not applied in this mode: effort",
                                      "first turn, sent once the session is ready:",
                                      "  Brief from launcher", "", "  Go."]
+
+
+def test_a_go_preview_starts_on_a_typed_handoff_or_on_words_after_the_dashes(
+        work, tmp_path, capsys):
+    # A go launch needs a first turn. A typed --handoff is one, sent as the session's
+    # first turn. On a launch with no identity, so is any tail typed after `--`, flags
+    # alone included: it goes last on the harness's argv. An unknown flag typed before
+    # `--` is passed on too, but carries no first turn.
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("Carry on with the build.\n")
+    code, out, err = run(["preview", "--posture", "go", "--handoff", str(handoff),
+                          "--json"], capsys)
+    assert code == codes.OK, err
+    assert any("Carry on with the build." in word for word in json.loads(out)["argv"])
+    code, out, err = run(["preview", "--posture", "go", "--json", "--", "Carry on."],
+                         capsys)
+    assert code == codes.OK, err
+    assert json.loads(out)["argv"][-1] == "Carry on."
+    code, out, err = run(["preview", "--posture", "go", "--json", "--", "--verbose"],
+                         capsys)
+    assert code == codes.OK, err
+    assert json.loads(out)["argv"][-1] == "--verbose"
+    status, out, err = run(["preview", "--posture", "go", "--verbose"], capsys)
+    assert status == codes.REFUSED and out == ""
+    assert any(line.endswith("[posture-brief]") for line in err.splitlines())
 
 
 @pytest.mark.parametrize("argv, code, short", [
@@ -698,7 +733,7 @@ def test_handoff_dir_of_a_session_with_no_key_is_refused(capsys):
     assert code == codes.REFUSED and out == "" and "[no-key]" in err
 
 
-def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys):
+def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys, no_notes):
     monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
     code, out, _ = run(["handoff", "dir"], capsys)
     assert code == codes.OK and out == f"{handoffs.own_handoffs_dir(create=False)}\n"
@@ -706,6 +741,20 @@ def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys):
     shown = json.loads(run(["handoff", "dir", "--json"], capsys)[1])
     assert shown == {"key": "planner", "folder": str(handoffs.own_handoffs_dir(create=False)),
                      "request_id": None}
+
+
+def test_handoff_dir_with_notes_and_no_notes_dir_is_refused(monkeypatch, capsys):
+    monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
+    real, real_load = modules.available, modules.load
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    code, out, err = run(["handoff", "dir"], capsys)
+    assert code == codes.REFUSED and out == ""
+    assert "so it has no handoffs/ to read from [no-notes-dir]" in err
+    assert not handoffs.own_handoffs_dir(create=False).exists()
 
 
 def test_handoff_dir_asks_handoffs_for_the_current_session(monkeypatch, capsys):
@@ -722,7 +771,7 @@ def handoff_files(*names: str) -> Path:
     return handoffs_dir
 
 
-def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys):
+def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys, no_notes):
     handoffs_dir = handoff_files("2026-10-28-lead.md", "2026-10-29-lead.md",
                            "2026-10-29-lead-2.md", "2026-10-29-other.md")
     conn = store.connect()
@@ -738,14 +787,14 @@ def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys):
     assert [h["waiting"] for h in shown["handoffs"]] == [True, False, False]
 
 
-def test_handoffs_with_no_launch_log_count_every_file_waiting(capsys):
+def test_handoffs_with_no_launch_log_count_every_file_waiting(capsys, no_notes):
     handoff_files("2026-10-29-lead.md")
     out = run(["handoffs", "--key", "lead"], capsys)[1]
     assert out.split()[:2] == ["2026-10-29", "waiting"]
     assert not store.path().exists()
 
 
-def test_handoffs_of_this_session_by_its_comms_name(monkeypatch, capsys):
+def test_handoffs_of_this_session_by_its_comms_name(monkeypatch, capsys, no_notes):
     handoff_files("2026-10-29-planner.md")
     monkeypatch.setenv("MOXI_COMMS_NAME", "planner")
     code, out, _ = run(["handoffs"], capsys)

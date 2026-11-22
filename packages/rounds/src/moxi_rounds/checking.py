@@ -26,11 +26,14 @@ and to append:
    reads `building` or `merged`). The tip `T` is read then, with the merge-base of `T`
    and the target's head. Any of these that does not hold refuses the verb, having run
    nothing.
-2. With no lock held: the argv runs in the worktree, stdin closed, with the caller's
-   environment less every `GIT_` variable, its stdout and stderr written straight to
-   `check-<n>.log` in the scratch folder (`n` one above the highest there), and its
-   whole process tree ended at the time limit: `timeout_s` when given, else the check's
-   or the step's own `timeout_s`, else none.
+2. With the round's lock released, the machine's check lock is taken (below), and the
+   argv runs in the worktree, stdin closed, with the caller's environment less every
+   `GIT_` variable, its stdout and stderr written straight to `check-<n>.log` in the
+   scratch folder (`n` one above the highest there). At the time limit, `timeout_s`
+   when given, else the check's or the step's own `timeout_s`, else
+   `DEFAULT_TIMEOUT_S`, the run's whole process group gets SIGINT, the signal test
+   runners stop cleanly on, and `GRACE_S` later SIGKILL (on Windows the tree is ended
+   at once). The limit counts the run only, never the wait for the lock.
 3. Under the lock again: the tip must still be `T` and the worktree still clean, so the
    commit recorded is what ran. If either changed, nothing is recorded and the verb says
    so. Otherwise `check.ran` is appended with the stage, the step, `T`, the merge-base,
@@ -40,6 +43,16 @@ and to append:
 
 A run the caller interrupts records nothing: the interrupt ends the run's tree and the
 verb before its append.
+
+**The check lock.** One run at a time on this machine, across every repo and round, so
+builds of parallel rounds don't run whole test suites side by side: each run, the
+local part of a check by CI and a command step's included, holds an exclusive lock on
+`check.lock` in rounds' folder of lock files (`lock_file`) from just before its command
+starts until it ends, however it ends. The lock is the process's, so the system frees
+it when the verb dies, and the command does not inherit it. A run that finds it held
+says once who holds it and waits, then says how long it waited; with `wait=False`
+(`--no-wait`) it is refused at once instead, naming the holder, with nothing run or
+recorded. A wait that a tip moved during is caught by step 3.
 """
 
 from __future__ import annotations
@@ -49,11 +62,12 @@ import re
 import shlex
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi import proc
+from moxi import files, proc
 
 from . import (builds, findings, flows, folders, gitreads, open_builds, paths, places,
                write)
@@ -74,6 +88,12 @@ WITH_WORK = (builds.BUILDING, builds.MERGED)
 PUSH_TIMEOUT_S = 300
 #: The name of a run's output file in the build's scratch folder, by its number.
 OUTPUT = "check-{n}.log"
+#: The time limit of a run with no `timeout_s` from the call, the check or the step.
+DEFAULT_TIMEOUT_S = 3600.0
+#: How long a run ended at its time limit has between SIGINT and SIGKILL.
+GRACE_S = 30.0
+#: The machine's check lock, in rounds' folder of lock files.
+LOCK_FILE = "check.lock"
 
 _OUTPUT_NAME = re.compile(r"check-([0-9]+)\.log")
 _PLACEHOLDER = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
@@ -392,24 +412,31 @@ class _Look:
     local_due: bool = False
 
 
+def lock_file(env=None) -> Path:
+    """The machine's check lock, STATE/rounds/locks/check.lock."""
+    return paths.locks_dir(env) / LOCK_FILE
+
+
 def check(name: str, stage: str, *, by: str, step: str | None = None,
           full: bool = False, timeout_s: float | None = None, settings=None,
           wait_s: float = write.WAIT_S, at: str | None = None,
-          env=None) -> Ran | CiChecked:
+          env=None, wait: bool = True, say=None) -> Ran | CiChecked:
     """Run the repo's check for the build of `stage` in the round `name` at its tip,
     and record the run; with `step`, run that command step of the user's own instead,
     and record the run under its name. In a repo that declares `ci`, with neither
     `step` nor `full`, check by CI instead (`CiChecked`): push the tip where the
     setting names a remote, run the local part unless it passed at the tip, and read
     CI. `timeout_s` is the time limit of the run rounds makes, in place of its own.
-    `settings` is what `settings.load()` gives, read now when left out.
+    `settings` is what `settings.load()` gives, read now when left out. `wait` says
+    whether to wait for the machine's check lock while another run holds it; `say`
+    gets the lines that say who holds it and how long the wait was.
 
     Raises `BadArgument` for no stage, a time limit that is not above 0, `step` with
     `full`, and a `step` whose name no step of the user's own can have; what
     `folders.home` raises for a round that can't be found; and `Refused` with every
     condition that does not hold before the run, with a refused push, with what
-    changed during the run, or with a failed read of CI when nothing ran, in which
-    case nothing is recorded."""
+    changed during the run, with the check lock held and `wait` false, or with a
+    failed read of CI when nothing ran, in which case nothing is recorded."""
     if not isinstance(stage, str) or not stage.strip():
         raise BadArgument("no stage is named, so no build is known to check",
                           f"moxi rounds check {name} B<n>, or run moxi rounds check in "
@@ -436,13 +463,16 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
                                      by_ci=step is None and not full)
         return looked[id(view)]
 
+    held = _Held(wait=wait, say=say, again=again, env=env)
+
     def act(view):
         found = look(view)
         if found.ci is not None:
-            return _by_ci(found, again=again)
+            return _by_ci(found, again=again, held=held)
         where = ("the check's command in the settings" if step is None
                  else f"the argv of the step {step} in the round's flow")
-        return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}")
+        return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}",
+                    held=held)
 
     first: list[_Look] = []
 
@@ -480,22 +510,60 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
                failed=written.failed)
 
 
-def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
-         fix: str) -> tuple[int | None, float, Path]:
-    """Run `argv` in the build's worktree, its output to a new file in the scratch
-    folder: its exit code (None when ended at `timeout_s`), duration and output file."""
-    output = _output_file(found.scratch)
-    started = time.monotonic()
+@dataclass(frozen=True)
+class _Held:
+    """How a run takes the machine's check lock: whether it `wait`s, the `say` that
+    gets the waiting lines, the command that runs the check `again`, and the `env`
+    the lock file's place is read from."""
+
+    wait: bool = True
+    say: object = None
+    again: str = ""
+    env: object = None
+
+
+@contextmanager
+def _check_lock(held: _Held) -> Iterator[None]:
+    """Hold the machine's check lock for the block, waiting while another run holds
+    it, or refused at once where `held.wait` is false."""
+    path = lock_file(held.env)
+    say = held.say or (lambda _line: None)
     try:
-        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
-                        cwd=found.worktree, output=output)
-        code: int | None = done.returncode
-    except subprocess.TimeoutExpired:
-        code = None
-    except OSError as exc:
-        raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
-                          f"{found.worktree}: {exc}", fix) from None
-    return code, round(time.monotonic() - started, 3), output
+        with files.lock(path, timeout_s=0):
+            yield
+        return
+    except files.LockTimeout as exc:
+        who = f"pid {exc.holder}" if exc.holder else "another process"
+    if not held.wait:
+        raise Refused([Unmet(f"another check holds the machine's check lock {path}: "
+                             f"{who}", f"run it again once {who} is done: {held.again}, "
+                             "or leave --no-wait out to wait for it")])
+    say(f"waiting for the machine's check lock {path}, held by {who}")
+    started = time.monotonic()
+    with files.lock(path):
+        say(f"got the check lock after {time.monotonic() - started:.1f} s")
+        yield
+
+
+def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
+         fix: str, *, held: _Held) -> tuple[int | None, float, Path]:
+    """Run `argv` in the build's worktree, holding the machine's check lock, its
+    output to a new file in the scratch folder: its exit code (None when ended at
+    `timeout_s`), duration and output file. The duration counts the run only."""
+    with _check_lock(held):
+        output = _output_file(found.scratch)
+        started = time.monotonic()
+        try:
+            done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
+                            cwd=found.worktree, output=output, first_signal="SIGINT",
+                            grace_s=GRACE_S)
+            code: int | None = done.returncode
+        except subprocess.TimeoutExpired:
+            code = None
+        except OSError as exc:
+            raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
+                              f"{found.worktree}: {exc}", fix) from None
+        return code, round(time.monotonic() - started, 3), output
 
 
 # -- by CI -------------------------------------------------------------------------------
@@ -622,7 +690,7 @@ def _push(found: _Look, *, again: str) -> tuple[str | None, bool]:
         "--no-verify, set a push word, or push to another remote or ref"))])
 
 
-def _by_ci(found: _Look, *, again: str) -> _ByCi:
+def _by_ci(found: _Look, *, again: str, held: _Held) -> _ByCi:
     from . import ci
 
     pushed = ref = None
@@ -633,7 +701,7 @@ def _by_ci(found: _Look, *, again: str) -> _ByCi:
     local = None
     if found.local_due:
         local = _run(found, found.local_argv, found.timeout_s,
-                     f"fix ci.local in the settings, then {again}")
+                     f"fix ci.local in the settings, then {again}", held=held)
         if local[0] != 0:
             # A failed local run stops the check there: CI is not read.
             return _ByCi(pushed, local, ref=ref, already=already)
@@ -822,10 +890,19 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
     if found.tip is not None:
         found.values = values(name, build, root=root, tip=found.tip)
         found.argv = fill(words, found.values)
-    found.timeout_s = timeout_s if timeout_s is not None else own_timeout_s
+    found.timeout_s = _limit(timeout_s, own_timeout_s)
     if by_ci:
         _by_ci_look(found, state, settings, timeout_s=timeout_s, name=name)
     return found
+
+
+def _limit(given_s: float | None, own_s: float | None) -> float:
+    """A run's time limit: the one the call gives, else the command's own, else
+    `DEFAULT_TIMEOUT_S`."""
+    for one in (given_s, own_s):
+        if one is not None:
+            return one
+    return DEFAULT_TIMEOUT_S
 
 
 def _by_ci_look(found: _Look, state: states.State, settings, *,
@@ -849,7 +926,7 @@ def _by_ci_look(found: _Look, state: states.State, settings, *,
             f"{ci.ref_for(declared_ci.ref, build.branch)} is the lead's to push, so a "
             "check by CI pushes nothing for it",
             f"check it by the full check: moxi rounds check {name} {build.stage} --full"))
-    found.timeout_s = timeout_s if timeout_s is not None else declared_ci.local_timeout_s
+    found.timeout_s = _limit(timeout_s, declared_ci.local_timeout_s)
     if declared_ci.local is None or found.values is None:
         return
     found.local_argv = fill(declared_ci.local, found.values)
@@ -894,7 +971,8 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
     return unmet
 
 
-__all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
+__all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
+           "GRACE_S", "LOCK_FILE", "lock_file", "fill", "declared",
            "values", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
            "step_entry", "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

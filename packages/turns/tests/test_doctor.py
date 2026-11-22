@@ -284,18 +284,21 @@ class GuardEntry:
 
 @pytest.fixture
 def guard_group(monkeypatch):
-    """The guard group the doctor reads, set by the test; switches read off unless the
-    test names them in `switches`."""
+    """The guard group the doctor reads, set by the test; switches and `sessions`
+    functions read off unless the test names them in `switches` and `sessions`."""
     from moxi_turns import guards
 
-    holder = {"entries": [], "switches": {}}
+    holder = {"entries": [], "switches": {}, "sessions": {}}
     real = guards.load
 
-    def load(on=None, *, entries=None, switches=None, env=None):
+    def load(on=None, *, entries=None, switches=None, sessions=None, env=None):
         def read(module, key):
             return holder["switches"].get((module, key), (False, None))
+
+        def answer(target):
+            return holder["sessions"].get(target, (False, None))
         return real(on, entries=holder["entries"] if entries is None else entries,
-                    switches=switches or read, env=env)
+                    switches=switches or read, sessions=sessions or answer, env=env)
 
     monkeypatch.setattr(guards, "load", load)
     return holder
@@ -386,6 +389,28 @@ def test_a_switch_that_fails_the_core_check_fails_listed_or_not(turns_env, regis
     row = guard_rows()["guard mod.sw"]
     assert row.state == "fail" and "its default is true" in row.detail
     assert [r.state for r in doctor.check() if r.name == "guard mod.sw"] == ["fail"]
+
+
+def test_a_guard_by_its_sessions_function_reads_in_the_doctors_env(
+        turns_env, registry, guard_group):
+    guard_group["entries"] = [GuardEntry("mod", [
+        a_guard("yes", sessions="pkg.mod:yes", switch="mod.sw",
+                judge="nowhere_at_all.mod:judge"),
+        a_guard("no", sessions="pkg.mod:no", doc="Idle guard."),
+        a_guard("faulty", sessions="pkg.mod:faulty")])]
+    guard_group["sessions"].update({"pkg.mod:yes": (True, None),
+                                    "pkg.mod:faulty": (False, "RuntimeError: gone")})
+    rows = guard_rows()
+    assert "mod.yes (call step, on by its sessions function)" in rows["guards"].detail
+    # On by its function alone, its switch off: no config command turns it off.
+    yes = rows["guard mod.yes"]
+    assert yes.state == "fail" and "does not import" in yes.detail and yes.fix is None
+    no = rows["guard mod.no"]
+    assert (no.state, no.detail) == ("off", "Idle guard; it also runs in each session "
+                                            "pkg.mod:no picks")
+    faulty = rows["guard mod.faulty"]
+    assert faulty.state == "fail"
+    assert "sessions pkg.mod:faulty reads off: RuntimeError: gone" in faulty.detail
 
 
 def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registry,
