@@ -1,4 +1,4 @@
-"""Pointers: the four shapes one may have, and what has none of them."""
+"""Pointers: the five shapes one may have, and what has none of them."""
 
 from __future__ import annotations
 
@@ -14,6 +14,10 @@ RIGHT = [
     ("https://example.com/pages/7?tab=2#answers", pointers.URL),
     ("file:design.md#rulings", pointers.FILE),
     ("file:versions/design-v2.md#q3", pointers.FILE),
+    ("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z", pointers.PAGE),
+    (f"page:rounds/{'aZ0_-' * 8}abc@2026-11-21T04:18:05Z", pointers.PAGE),
+    ("page:moxi-ui2/abcdefgh@2026-01-02T03:04:05Z", pointers.PAGE),
+    (f"page:rounds/{'a' * 64}@2026-01-02T03:04:05Z", pointers.PAGE),
 ]
 WRONG = [
     None, "", 12, "he said so in chat", "comms:", "comms:12a", "comms:-3", "msg:12",
@@ -29,23 +33,40 @@ WRONG = [
     "file:/abs/design.md#rulings", "file:~/design.md#rulings",
     "file:../other-round/design.md#rulings", "file:versions//design.md#rulings",
     "comms:12 comms:13", " comms:12", "comms:12\n",
+    "page:rounds@2026-11-21T04:18:05Z",                # no act id
+    "page:rounds/@2026-11-21T04:18:05Z",               # an empty act id
+    "page:rounds/abcdefg@2026-11-21T04:18:05Z",        # an act id of 7
+    f"page:rounds/{'a' * 65}@2026-11-21T04:18:05Z",    # an act id of 65
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18Z",      # no seconds
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05",    # no Z
+    "page:rounds/k3J9xQ2aZf1T@2026-02-30T04:18:05Z",   # no such day
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:61Z",   # no such second
+    "page:Rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",   # a page name in capitals
+    "page:1rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",  # a page name from a digit
+    "page:/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",         # no page name
+    "page:rounds/k3J9 xQ2aZf1T@2026-11-21T04:18:05Z",  # white space
+    "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z\n",
+    "page:rounds/k3J9.xQ2aZf1T@2026-11-21T04:18:05Z",  # a dot in the act id
+    "page:rounds/sub/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",
+    "moxi page /m/rounds/#merge-queue/Q2@2026-11-21T04:18:05Z",
 ]
 
 
 @pytest.mark.parametrize(("pointer", "shape"), RIGHT)
-def test_a_pointer_of_each_of_the_four_shapes_is_one(pointer, shape):
+def test_a_pointer_of_each_of_the_five_shapes_is_one(pointer, shape):
     assert pointers.shape(pointer) == shape
     assert pointers.unmet(pointer, "a command") is None
 
 
 @pytest.mark.parametrize("pointer", WRONG)
-def test_what_has_none_of_the_four_shapes_is_no_pointer(pointer):
+def test_what_has_none_of_the_five_shapes_is_no_pointer(pointer):
     assert pointers.shape(pointer) is None
 
     found = pointers.unmet(pointer, "moxi rounds rule proj-a --text TEXT --record PTR")
 
     assert repr(pointer) in found.reason
-    for shape in ("comms:<digits>", "@<UTC time>", "https://", "file:<path"):
+    for shape in ("comms:<digits>", "@<UTC time>", "https://", "file:<path",
+                  "page:<page>/<act id>@<UTC time to the second>"):
         assert shape in found.reason
     assert found.fix == "moxi rounds rule proj-a --text TEXT --record PTR"
 
@@ -62,6 +83,20 @@ def test_only_the_shape_is_checked():
     ("comms:12", "comms:0012", True), ("comms:12", "comms:13", False),
     ("comms:12", "https://example.com/12", False),
     ("https://example.com/said", "https://example.com/said", True),
-    ("comms:12", None, False)])
+    ("comms:12", None, False),
+    ("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",
+     "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z", True),
+    ("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",
+     "page:rounds/k3J9xQ2aZf1U@2026-11-21T04:18:05Z", False),
+    ("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z",
+     "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:06Z", False)])
 def test_two_message_pointers_of_one_number_point_at_one_message(one, other, same):
     assert pointers.same(one, other) is same
+
+
+def test_a_page_pointer_gives_its_time_and_no_other_pointer_does():
+    assert pointers.page_at("page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18:05Z") == \
+        "2026-11-21T04:18:05Z"
+    for other in ("comms:12", "0a1b2c3d@2026-01-02T03:04:05Z",
+                  "page:rounds/k3J9xQ2aZf1T@2026-11-21T04:18Z", None):
+        assert pointers.page_at(other) is None

@@ -155,6 +155,20 @@ class NotYet(Refused):
     code = "not-yet"
 
 
+class ScratchNotes(Refused):
+    """A scratch launch given a notes folder: by its `notes_dir` value, or by a folder
+    notes would keep notes for. A scratch launch keeps nothing."""
+
+    code = "scratch-notes"
+
+
+class PostureBrief(Refused):
+    """A brief that doesn't fit the start posture: a `go` launch with nothing to start on,
+    or a brief under `with:<identity>`, whose director sends the first message."""
+
+    code = "posture-brief"
+
+
 class NeedsProjects(Refused):
     """A project key with projects not installed."""
 
@@ -344,8 +358,11 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     warnings, in file order; none means the file is good. Types and values come from the
     catalog; a row whose module is absent fails with "needs <module>"; a project key must
     be known to projects; an `instructions_file` must be readable; an `agent` role must be
-    found among the harness's role files. A `moxi.config.ConfigError` (the file is not
-    TOML, or holds a table it should not) is raised, not returned."""
+    found among the harness's role files; a preset that sets `recycle_at_limit =
+    relaunch` must not launch in a scratch folder. A `[defaults]` relaunch is not
+    flagged: a scratch launch holds `off` in its place, as `resolve` does. A
+    `moxi.config.ConfigError` (the file is not TOML, or holds a table it should not) is
+    raised, not returned."""
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
@@ -365,12 +382,19 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
                  defaults: Mapping[str, object], base_harness: str,
                  avail) -> list[Problem]:
     """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
-    resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset."""
+    resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset,
+    whose place, when it names one, replaces the one `[defaults]` names. On a scratch
+    launch a `[defaults]` relaunch holds `off`, as `resolve` holds it."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
     effective.update({k: v for k, v in defaults.items() if k in rows})
+    if [k for k in PLACE if catalog.is_set(values.get(k))]:
+        effective.update({k: rows[k].default for k in PLACE if k in rows})
     effective.update({k: v for k, v in values.items() if k in rows})
+    if (effective.get("scratch") and RECYCLE_AT_LIMIT not in values
+            and effective.get(RECYCLE_AT_LIMIT) == "relaunch"):
+        effective[RECYCLE_AT_LIMIT] = "off"
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
@@ -509,6 +533,59 @@ def _check_place(where: str, values: Mapping[str, object], *, allow_home: bool
         return [Problem(where, named[1], f"{' and '.join(named)} each name where the "
                         "session starts", "keep one of them", "two-places")]
     return []
+
+
+def _check_posture_brief(posture: str, values: Mapping[str, object], *,
+                         binds: bool, tail: Sequence[str]) -> None:
+    """The start posture's rule for the brief: a `go` launch needs a first turn to start
+    on (a brief, a brief file or a handoff, or, on a launch that binds no comms identity,
+    any words typed after `--` on the command line, flags included, which go last on the
+    harness's argv), and a launch under `with:<identity>` takes no brief, since its
+    director sends the first message; a handoff there is sent first, and the director's
+    message comes after it. `binds` says whether the launch binds a comms identity,
+    `tail` is the words typed after `--`. Flags passed on otherwise (an unknown flag typed
+    before `--`, a layer's `extra_flags`, the page's field) carry no first turn. A replay
+    (a relaunch or a resume) never comes here; a resume's brief is checked by
+    `check_resume_brief`."""
+    brief = bool(str(values.get("brief") or "").strip()) or catalog.is_set(
+        values.get("brief_file"))
+    first = brief or catalog.is_set(values.get("handoff")) or (not binds and bool(tail))
+    if posture == "go" and not first:
+        raise PostureBrief("brief", "posture go needs a brief: nobody is at this session "
+                                    "to direct it, so with no first turn it sits idle",
+                           "give it --brief, --brief-file or --handoff"
+                           + ("" if binds else ", or its task after --")
+                           + ", or pick another posture")
+    if posture.startswith(WITH) and brief:
+        who = posture[len(WITH):]
+        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
+                                    "first message",
+                           "drop the brief, or pick go")
+
+
+def check_resume_brief(posture: str, *, brief: str = "", brief_file: str = "",
+                       plain: bool = False) -> None:
+    """The start posture's rule for the brief a resume is given, as a launch's: one of
+    `brief` and `brief_file`, not both; a resume of a `go` launch needs one, since a
+    resumed session does not wake itself either, unless `plain` asks for a resume with no
+    first turn whatever the posture (`moxi launcher resume --plain`, and Home's `Continue the
+    last session` with an empty box);
+    and a resume under `with:<identity>` takes none, since its director sends the first
+    message. `posture` is the one the resumed launch was configured with, not the one a
+    relaunch shows. Raises `BadValue` or `PostureBrief`."""
+    if brief and catalog.is_set(brief_file):
+        raise BadValue("brief", "both brief and brief_file are given", "give one of them")
+    given = bool(brief.strip()) or catalog.is_set(brief_file)
+    if posture == "go" and not given and not plain:
+        raise PostureBrief("brief", "posture go needs a brief on a resume: a resumed "
+                                    "session does not wake itself either, so with no first "
+                                    "turn it sits idle",
+                           "give the resume --brief or --brief-file")
+    if posture.startswith(WITH) and given:
+        who = posture[len(WITH):]
+        raise PostureBrief("brief", f"posture {posture} takes no brief: {who} sends the "
+                                    "first message",
+                           "resume it without a brief")
 
 
 def _posture_problem(where: str, posture: object, avail) -> Problem | None:
@@ -768,7 +845,9 @@ class Request:
 
     `typed` is the flags typed, as `catalog.parse(...).values` gives them, and `extra`
     the flags passed on (`catalog.parse(...).extra`), which go in as typed
-    `extra_flags`. `left_out` names the catalog rows the launch leaves out, whatever
+    `extra_flags`. `tail` is the words typed after `--` on the command line
+    (`catalog.parse(...).tail`, also in `extra`), which can carry a `go` launch's first
+    turn; the page sends none. `left_out` names the catalog rows the launch leaves out, whatever
     `[defaults]` or the preset sets. `cwd` is the caller's directory, the session's when
     nothing names a place; None reads this process's."""
 
@@ -776,6 +855,7 @@ class Request:
     project_preset: str | None = None
     typed: Mapping[str, object] = field(default_factory=dict)
     extra: Sequence[str] = ()
+    tail: Sequence[str] = ()
     off_posture: bool = False
     cwd: str | None = None
     left_out: Sequence[str] = ()
@@ -993,9 +1073,12 @@ def resolve(request, *, presets: Presets | None = None,
     """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
     preset named, then the flags typed (`layered`), each row the request leaves out
     holding its shipped default, except that a seat or Codex launch that sets no
-    `warn_at` holds none (`_no_default_mark`). Reads projects when a place needs it. Raises a
-    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
-    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
+    `warn_at` holds none (`_no_default_mark`). A scratch launch holds
+    `recycle_at_limit = off`, with the `SCRATCH_RECYCLE_OFF` warning, when `relaunch`
+    came from `[defaults]`; typed or set by the preset, the pair is refused
+    (`catalog.ScratchRecycle`). Reads projects when a place needs it. Raises a
+    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `PostureBrief`,
+    `NotYet`, `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
     catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
     avail = _avail(available)
     laid = layered(request, presets=presets, env=env, available=avail)
@@ -1013,6 +1096,11 @@ def resolve(request, *, presets: Presets | None = None,
     values["cwd"] = cwd or ""
     values["scratch"] = scratch
     values["project"] = project.key if project is not None else ""
+    if scratch and values.get("notes_dir"):
+        _scratch_notes_dir(values, sources)
+    if scratch and _default_relaunch(values, sources):
+        values[RECYCLE_AT_LIMIT], sources[RECYCLE_AT_LIMIT] = "off", LEFT_OUT
+        warnings.append(SCRATCH_RECYCLE_OFF)
     if _no_default_mark(harness, preset, scratch=scratch, source=sources.get(WARN_AT)):
         values[WARN_AT] = ""
 
@@ -1024,6 +1112,9 @@ def resolve(request, *, presets: Presets | None = None,
         problem = _posture_problem("the launch", posture, avail)
         if problem is not None:
             raise BadPreset(problem)
+        binds = bool(values.get("identity")) and avail("comms")
+        _check_posture_brief(posture, values, binds=binds,
+                             tail=tuple(getattr(request, "tail", None) or ()))
 
     identity = values.get("identity") or None
     scope = values.get("scope") or None
@@ -1057,6 +1148,21 @@ def resolve(request, *, presets: Presets | None = None,
         agents=tuple(project.agents) if project is not None else (),
         identity=identity, scope=scope, posture=str(posture), target=target,
         off_posture=off_posture, links=frozenset(links), warnings=tuple(warnings))
+
+
+#: The row that recycles a launch at its context limit.
+RECYCLE_AT_LIMIT = "recycle_at_limit"
+#: The warning of a scratch launch whose `recycle_at_limit = relaunch` came from
+#: `[defaults]`: a scratch launch can't recycle itself, so that launch holds `off`.
+SCRATCH_RECYCLE_OFF = ("recycle_at_limit relaunch is left out: a scratch launch can't "
+                       "recycle itself, so the default relaunch holds off here")
+
+
+def _default_relaunch(values: Mapping[str, object], sources: Mapping[str, str]) -> bool:
+    """Whether `recycle_at_limit = relaunch` came from `[defaults]` (or the shipped
+    default), which reach every launch, not from the preset named or a flag."""
+    return (values.get(RECYCLE_AT_LIMIT) == "relaunch"
+            and sources.get(RECYCLE_AT_LIMIT) in (SHIPPED, DEFAULTS))
 
 
 #: The row holding the context mark usage warns at.
@@ -1290,6 +1396,18 @@ def _named(request, found: Presets) -> Preset | None:
     return None
 
 
+def _scratch_notes_dir(values: dict, sources: dict) -> None:
+    """A scratch launch has no notes home: a `notes_dir` typed or set by its preset is
+    refused by name, and one from `[defaults]`, which is set for every launch, is left
+    out."""
+    if sources.get("notes_dir") == DEFAULTS:
+        values["notes_dir"], sources["notes_dir"] = "", LEFT_OUT
+        return
+    raise ScratchNotes("notes_dir", "a scratch launch keeps no notes, so it takes no "
+                                    "notes_dir", "leave notes_dir out, or launch in a "
+                                                 "folder of your own")
+
+
 def _place(place: Mapping[str, object], caller: str, avail, what: str
            ) -> tuple[str | None, bool, object | None]:
     """(cwd, scratch, project) from the one place named, else the caller's directory."""
@@ -1381,9 +1499,11 @@ def _show(value: object) -> str:
 __all__ = [
     "Agent", "BadPreset", "CACHE_TIMER_ROWS", "CODEX_START_CEILING", "COLD_GAP",
     "COMMS_INTERFACE", "ERROR", "HEADLESS_EXIT", "KINDS",
-    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
-    "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
-    "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
+    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "PostureBrief",
+    "Preset", "Presets",
+    "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "ScratchNotes",
+    "UnknownPreset", "UnknownProject", "WARNING", "check", "check_resume_brief", "comms_api",
+    "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "comms_headless",
     "harness_of",
     "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",

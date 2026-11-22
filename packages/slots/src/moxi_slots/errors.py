@@ -18,7 +18,7 @@ from __future__ import annotations
 
 #: Every reason a `Refused` may carry.
 REASONS = ("occupied", "held", "missing", "in-use", "no-slot", "no-free-slot", "live-pane",
-           "name-taken", "job-running", "unsupported")
+           "name-taken", "job-running", "unsupported", "changed")
 
 
 class SlotsError(Exception):

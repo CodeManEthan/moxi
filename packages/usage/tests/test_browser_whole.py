@@ -182,9 +182,12 @@ def open_every_piece(page, shell):
     page.keyboard.press("Escape")
     chart = section(panel, "chart")
     panel.locator("[data-part=measure]").get_by_role("button", name="Tokens").click()
-    chart.get_by_role("button", name="Table").click()
-    expect(chart.locator("table")).to_be_visible()
-    yield "the chart's Table under Tokens"
+    # Each chart has its own Table: the cache reads' and the billable work's.
+    for name in ("Cache reads", "Billable work"):
+        chart.locator(f'[data-chart="{name}"]').get_by_role("button", name="Table").click()
+    expect(chart.locator("table")).to_have_count(2)
+    expect(chart.locator("table").last).to_be_visible()
+    yield "the chart's Tables under Tokens"
     panel.locator("[data-part=measure]").get_by_role("button", name="Cost").click()
     for which in ("claude/plan/300", "codex/codex/300"):
         panel = open_page(page, f"limit/{which}")

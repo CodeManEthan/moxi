@@ -201,7 +201,9 @@ test("a request names the applied preset alone, and is off the usual against the
 });
 
 test("the last launch is keyed by the seat applied, else the project on the line, else the folder", () => {
-  assert.equal(lastQuery(SEAT, PROJECT_A), "seat=reviewer");
+  // The project picked goes with the seat, for the default comms identity; the seat keys the launches.
+  assert.equal(lastQuery(SEAT, PROJECT_A), "seat=reviewer&project=proj-a");
+  assert.equal(lastQuery(SEAT, FOLDER), "seat=reviewer");
   assert.equal(lastQuery({ kind: "project", name: "proj-a" }, PROJECT_A), "project=proj-a");
   assert.equal(lastQuery(NO_PRESET, PROJECT_A), "project=proj-a");
   assert.equal(lastQuery({ kind: "project", name: "proj-a" }, FOLDER), "cwd=%2Fsrv%2Fother");

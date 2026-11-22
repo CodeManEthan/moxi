@@ -1,4 +1,4 @@
-"""The eight questions usage's page is there to answer, each answered from the page the
+"""The nine questions usage's page is there to answer, each answered from the page the
 way a person would, in a browser, through a real shell that starts usage's real page
 server:
 
@@ -11,6 +11,7 @@ server:
 6. Is caching paying off?
 7. What is eating the 5-hour window? (a new reading read again)
 8. How fresh is this?
+9. What counts against the weekly Opus limit?
 
 Each walk starts at the page's own address and reads only what the page shows. Each runs
 twice: on a small install, whose shell leaves out every module but ui, usage and
@@ -58,6 +59,7 @@ SMALL = ("sessions", "ui", "usage")
 
 SONNET = "claude-sonnet-4-5"
 HAIKU = "claude-haiku-4-5"
+OPUS = "claude-opus-4-5"
 CODEX_MODEL = "gpt-5-codex"
 PROJECTS = ("proj-a", "proj-b")
 WORK_DIRS = ("proj-a", "proj-b", "scratch")
@@ -97,6 +99,10 @@ SESSIONS = WEEK + [CODEX] + EARLIER
 #: today's, so it adds to today's cost.
 LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,
         "today": True, "model": SONNET, "title": None, "agents": []}
+#: A session on Opus twenty minutes before the moment, for the walk over the weekly Opus
+#: limit: today's, in the first project.
+ON_OPUS = {"harness": "claude", "session": session_id(31), "requests": 2, "folder": "proj-a",
+           "ago": 20 * 60, "today": True, "model": OPUS, "title": None, "agents": []}
 #: The oldest of today's sessions, in seconds before the moment.
 TODAY_S = max(spec["ago"] for spec in SESSIONS + [LATE] if spec["today"])
 
@@ -178,12 +184,28 @@ finally:
     conn.close()
 """
 
+#: One reading of Claude's weekly Opus window, a minute before the moment argv[1], from
+#: the session argv[2]: 20% used, resetting in four days.
+OPUS_READING = """
+import sys
+from moxi_usage import readings
+from moxi_usage.readings import Reading
+moment, session = float(sys.argv[1]), sys.argv[2]
+conn = readings.open_store()
+try:
+    readings.store(conn, [Reading("claude", "opus", 10080, "seven_day_opus", 20.0, moment + 4 * 86400,
+                                  moment - 60, "session-usage", session)], now=moment, days=7)
+finally:
+    conn.close()
+"""
+
 TIME = r"\d{1,2}:\d\d(?: [AP]M)?"
 #: A time with the day it may carry: `21:34`, `today 21:34`, `Wed 23:58`, `Nov 3 08:52`.
 WHEN = rf"(?:\w+ (?:\d+ )?)?{TIME}"
 MONEY = r"(?:at least )?\$\d[\d,]*\.\d\d"
 NAMED = rf"(?:today|yesterday|\w+|\w+ \d+) {TIME}"
 FIVE, WEEKLY = "claude/plan/300", "claude/plan/10080"
+WEEKLY_OPUS = "claude/opus/10080"
 CODEX_FIVE, CODEX_WEEKLY = "codex/codex/300", "codex/codex/10080"
 
 #: What a part of the page shows, top to bottom: each run of text, each control, each
@@ -557,7 +579,7 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
         expect(rows_of(sessions)).to_have_count(len(in_b))
         assert sorted(row_keys(rows_of(sessions))) == sorted(in_b)
         steps.append(shown(sessions))
-        settle(panel, "place", "all")
+        settle(panel, "place", "All folders" if shell.small else "All projects")
 
         # Which model: the Model filter narrows everything below to it.
         expect(filter_of(panel, "model").locator(".k")).to_have_text("Model")
@@ -751,5 +773,39 @@ def test_each_part_says_when_it_was_read_and_read_new_sessions_brings_a_new_one_
         expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
         steps.append(shown(panel.locator("[data-group=limits] .gk, [data-group=cost], [data-part=foot]")))
         return steps
+
+    on_both(made, walk)
+
+
+# --- 9. What counts against the weekly Opus limit? -----------------------------------------
+
+def test_the_weekly_opus_limit_names_the_sessions_whose_opus_requests_count(ui_shells, on_both):
+    made = two_installs(ui_shells)
+    for shell in made.values():
+        write(shell, [ON_OPUS], shell.moment)
+        run(shell, sys.executable, "-m", "moxi", "usage", "index")
+        run(shell, sys.executable, "-c", OPUS_READING, repr(shell.moment), ON_OPUS["session"])
+
+    def walk(page, shell) -> list:
+        panel = open_page(page)
+        opus = limit(panel, WEEKLY_OPUS)
+        expect(opus.locator("span").first).to_have_text("Weekly Opus")
+        expect(opus.locator(".u")).to_have_text("20% used")
+        opus.click()
+        expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/opus/10080$"))
+        # Only the Opus session counts against it: the week's Sonnet and Haiku sessions,
+        # the dearest among them, are not listed, and the total names the models.
+        used = opened(panel).locator("[data-opened=used]")
+        expect(used.locator(".k")).to_have_text("Used by")
+        expect(used.locator("[data-part=used-row]")).to_have_text([
+            re.compile(rf"^\s*proj-a · started {NAMED} · 2 requests\s*{MONEY}$")])
+        expect(used.locator("[data-part=used-total]")).to_have_text(
+            re.compile(rf"^\s*1 session, 2 Opus requests since {WHEN}\s*{MONEY}$"))
+        # The plan's own 5-hour window, opened, still counts every model.
+        limit(panel, FIVE).click()
+        expect(page).to_have_url(re.compile(r"/m/usage/limit/claude/plan/300$"))
+        expect(opened(panel).locator("[data-opened=used] [data-part=used-total]")).to_have_text(
+            re.compile(rf"^\s*3 sessions, \d+ requests since {WHEN}\s*{MONEY}$"))
+        return [shown(group(panel, "claude"))]
 
     on_both(made, walk)

@@ -403,12 +403,16 @@ export interface OpenedWindow {
   resets_at: string;
   used_percent: number;
   opened: string | null;
+  /** The family of models a scoped limit counts (`opus`), where its reading says; null
+   * otherwise. Absent from an answer of a usage that serves no such field. */
+  model_family?: string | null;
   /** `first` is null when the period's earliest reading is `last`; `last.session` is
    * the session the reading came from, null when it names none. */
   readings: { count: number; first: Reading | null;
               last: Reading & { session: SessionRef | null } } | null;
-  /** Null for a limit that is not the harness's main one, with no known start, and
-   * with no index to read. `rows` are the ten dearest. */
+  /** Null for a limit that is neither the harness's main one nor counts a named family
+   * of models, with no known start, and with no index to read. With `model_family` it
+   * counts only that family's requests. `rows` are the ten dearest. */
   used: { since: string; count: number; requests: number; cost: number | null; complete: boolean;
           rows: UsedRow[] } | null;
 }
@@ -577,6 +581,9 @@ export class Feed<V> {
   loading = true;
   /** A read is running. */
   reading = false;
+  /** A read is out while the feed shows a value from before it: its last value, or one
+   * `hold` gave. False once the read answers, whatever it answers. */
+  stale = false;
   /** The server's clock minus this browser's, in seconds; null until a body gave `now`. */
   offset: number | null = null;
 
@@ -654,6 +661,7 @@ export class Feed<V> {
   }
 
   async #once(): Promise<void> {
+    this.stale = this.value !== null;
     let answer = await this.#read();
     for (let tries = 0; answer.status === 503 && tries < RETRIES && !this.#closed; tries += 1) {
       await this.#wait(RETRY_MS);
@@ -663,6 +671,7 @@ export class Feed<V> {
     if (this.#closed) return;
     const at = this.#clock();
     this.loading = false;
+    this.stale = false;
     const data = answer.data as Record<string, unknown> | null;
     const value = answer.status === 200 ? this.#parse(data) : null;
     if (value !== null) {

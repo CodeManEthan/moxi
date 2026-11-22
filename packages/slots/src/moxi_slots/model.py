@@ -14,8 +14,9 @@ States:
 
 A slot is launchable when it is `free` or `ended` and unheld, or held by the caller. A
 live `slot-<n>` session with no registry row is never launchable: `start` refuses it. A
-hold is a reservation by a `holder` word until `until` (epoch seconds); past `until` it
-reads as absent.
+hold is a reservation by a `holder` word until `until` (epoch seconds), past which it reads
+as absent, or, with `until` None, until its holder releases it. A hold may sit on a
+missing slot: it reserves the registered number, whether its session exists or not.
 
 A slot is idle when no client is attached, it has no window but the home window and a
 dead run window, and the home pane runs the shell it started with (or has died).
@@ -127,22 +128,46 @@ def check_meta(meta: object) -> dict | None:
 
 @dataclass(frozen=True)
 class Hold:
-    """A reservation: `holder` has the slot until `until` (epoch seconds)."""
+    """A reservation: `holder` has the slot until `until` (epoch seconds), or, with
+    `until` None, until the holder releases it."""
 
     holder: str
-    until: float
+    until: float | None
 
     def live(self, now: float) -> bool:
-        return self.until > now
+        return self.until is None or self.until > now
+
+
+@dataclass(frozen=True)
+class RunEnd:
+    """How a slot's last run ended: when its pane died (`at`, epoch seconds), its exit
+    `status` or the `signal` that ended it (each None when tmux gave none). A settled
+    slot's record has `settled`, why it was settled, in place of a death: `at` is when,
+    and `status` and `signal` are None."""
+
+    at: float
+    status: int | None
+    signal: int | None
+    settled: str | None = None
 
 
 @dataclass(frozen=True)
 class Last:
-    """The last launch placed in the slot: when, its label, and the caller's meta."""
+    """The last launch placed in the slot: when, its label, and the caller's meta.
+
+    `run` is the run's token and `server` the tmux server it was placed under
+    (`<boot id>:<tmux pid>`); both are None for a launch placed by an older slots, and
+    `server` is None where the boot id can't be read. `status_trusted` is the caller's
+    word that the command's exit status tells a clean end from a kill. `ended` is how the
+    run ended, None until its pane-died hook wrote it."""
 
     at: float
     label: str
     meta: dict | None = None
+    run: str | None = None
+    server: str | None = None
+    status_trusted: bool = True
+    ended: RunEnd | None = None
 
 
 @dataclass(frozen=True)
@@ -152,7 +177,9 @@ class Slot:
     `hold` is a live hold or None. The run pane's facts (`pane_id`, `window_id`,
     `pane_pid`, `current_command`, `dead_status`) are None when there is no run
     window. `label` is the last launch's label while its run pane is there. `created`
-    is None, and `launchable` False, for a session with no registry row.
+    is None, and `launchable` False, for a session with no registry row. `crashed` is
+    whether the last run was going when its tmux server went down (see `runs.crashed`);
+    it is read, never acted on, by slots.
     """
 
     number: int
@@ -170,6 +197,7 @@ class Slot:
     dead_status: int | None
     last: Last | None
     created: float | None
+    crashed: bool = False
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -381,7 +409,7 @@ __all__ = ["LOWEST", "HIGHEST", "SESSION_PREFIX", "HOME_MARK", "RUN_MARK", "MISS
            "FREE", "ENDED", "OCCUPIED", "STATES", "NAME_MAX", "LABEL_MAX", "HOLDER_MAX",
            "META_MAX", "HOLD_MAX", "session_name", "session_target", "window_target",
            "number_of", "check_number", "check_name", "check_label", "check_holder",
-           "check_meta", "check_job_name", "Hold", "Last", "Slot", "Drift", "Listing",
+           "check_meta", "check_job_name", "Hold", "RunEnd", "Last", "Slot", "Drift", "Listing",
            "Removed", "STARTED", "FAILED", "UNCONFIRMED", "EXEC_OUTCOMES", "Placed", "Job",
            "Ended", "ANSWER_OUTCOMES", "NOT_SETTLED", "Seen", "Answer", "PaneUse",
            "JOB_NAME_MAX", "launchable"]

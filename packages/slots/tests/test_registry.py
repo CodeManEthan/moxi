@@ -33,7 +33,32 @@ def test_a_registry_reads_back_as_written():
     assert back.rows == reg.rows
     assert back.by_name("review") == 3 and back.by_name("other") is None
     data = json.loads(places.registry().read_text())
-    assert data["version"] == 1 and set(data["slots"]) == {"3", "12"}
+    assert data["version"] == 2 and set(data["slots"]) == {"3", "12"}
+
+
+def test_a_hold_until_released_is_kept_by_every_write():
+    reg = Registry({4: Row(1.0, hold=Hold("park-1", None))})
+    registry.write(reg)
+    data = json.loads(places.registry().read_text())
+    assert data["slots"]["4"]["hold"] == {"holder": "park-1", "until": None}
+    assert registry.expired_holds(registry.read()) == []
+    registry.write(registry.read())
+    assert registry.read().rows[4].hold == Hold("park-1", None)
+
+
+def test_a_version_1_registry_is_read_and_written_back_as_version_2():
+    places.registry().parent.mkdir(parents=True, exist_ok=True)
+    later = time.time() + 600
+    places.registry().write_text(json.dumps(
+        {"version": 1, "slots": {"2": {"created": 5.0, "name": None,
+                                       "hold": {"holder": "run-1", "until": later},
+                                       "last": {"at": 6.0, "label": "agent",
+                                                "meta": {"request_id": "r1"}}}}}))
+    back = registry.read()
+    assert back.rows[2] == Row(5.0, None, Hold("run-1", later),
+                               Last(6.0, "agent", {"request_id": "r1"}))
+    registry.write(back)
+    assert json.loads(places.registry().read_text())["version"] == 2
 
 
 def test_a_write_drops_holds_that_ran_out():
@@ -45,12 +70,15 @@ def test_a_write_drops_holds_that_ran_out():
     assert back.rows[1].hold is None and back.rows[2].hold.holder == "new"
 
 
-@pytest.mark.parametrize("text", ["not json", "[]", '{"version": 2, "slots": {}}',
+@pytest.mark.parametrize("text", ["not json", "[]", '{"version": 3, "slots": {}}',
+                                  '{"version": true, "slots": {}}',
                                   '{"version": 1}', '{"version": 1, "slots": {"0": {}}}',
                                   '{"version": 1, "slots": {"x": {"created": 1}}}',
                                   '{"version": 1, "slots": {"1": {"name": "a"}}}',
                                   '{"version": 1, "slots": {"1": {"created": 1, '
-                                  '"hold": {"holder": "h"}}}}'])
+                                  '"hold": {"holder": "h"}}}}',
+                                  '{"version": 2, "slots": {"1": {"created": 1, '
+                                  '"hold": {"holder": "h", "until": "x"}}}}'])
 def test_a_registry_slots_cannot_read_raises_naming_the_file(text):
     places.registry().parent.mkdir(parents=True, exist_ok=True)
     places.registry().write_text(text)

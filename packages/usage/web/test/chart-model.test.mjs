@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  axisWords, BILLABLE_SERIES, chartDraw, chartGroup, chartModel, chartTable, classCosts, COST_SERIES, modelSeries, niceTop,
+  axisWords, BILLABLE_SERIES, chartDraw, chartGroup, COST_CHART, chartModel, chartTables, classCosts, COST_SERIES, modelSeries, niceTop,
   NOTHING_USED, tokenCharts,
 } from "../src/chart-model.ts";
+
+/** The one table the chart has by cost. */
+function chartTable(...args) {
+  const tables = chartTables(...args);
+  assert.deepEqual(tables.map((one) => one.name), [null]);
+  return tables[0].table;
+}
 
 const TODAY = "2026-11-08";    // a Sunday
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -147,43 +154,78 @@ test("the table has no total column, marks a row not whole in its Day cell, and 
   assert.equal(table.rows[2].key, "no time");
 });
 
-test("the tokens table: a column per token class, by day or by month", () => {
+test("by tokens a table for each chart: Cache reads, then Billable work's classes in its order", () => {
   const rows = [day("2026-11", 1, 1700, { fresh_input: 100, cache_read: 1200, cache_write: 300, output: 100 }),
                 day("2026-11", 1, 300, { model: "m-b", fresh_input: 200, output: 100, unknown_rows: 1, complete: false }),
                 day("2026-10", null, 50, { output: 50, complete: false })];
-  const table = chartTable(report(rows), "tokens", "month");
-  assert.deepEqual(table.columns.map((column) => column.label),
-                   ["Month", "Input", "Cache read", "Cache create", "Output"]);
-  assert.deepEqual(table.rows.map((row) => [row.cells, row.why]), [
-    [["Oct 2026", "0", "0", "0", "50"], null],
-    [["Nov 2026", "300", "1.20k", "300", "200"], "1 request with a token count the harness didn't report"],
+  const [reads, billable, ...more] = chartTables(report(rows), "tokens", "month");
+  assert.deepEqual(more, []);
+  assert.equal(reads.name, "Cache reads");
+  assert.deepEqual(reads.table.columns.map((column) => column.label), ["Month", "Cache read"]);
+  assert.deepEqual(reads.table.rows.map((row) => [row.cells, row.why]), [
+    [["Oct 2026", "0"], null],
+    [["Nov 2026", "1.20k"], "1 request with a token count the harness didn't report"],
   ]);
-  assert.deepEqual(chartTable(report([]), "tokens").rows, []);
+  assert.equal(billable.name, "Billable work");
+  assert.deepEqual(billable.table.columns.map((column) => column.label), ["Month", "Input", "Cache create", "Output"]);
+  assert.deepEqual(billable.table.rows.map((row) => [row.cells, row.why]), [
+    [["Oct 2026", "0", "0", "50"], null],
+    [["Nov 2026", "300", "300", "200"], "1 request with a token count the harness didn't report"],
+  ]);
+  assert.deepEqual(chartTables(report([]), "tokens").map((one) => [one.name, one.table.rows]),
+                   [["Cache reads", []], ["Billable work", []]]);
+  const days = chartTables(report([day(TODAY, 1, 10, { cache_read: 10 })]), "tokens");
+  assert.deepEqual(days.map((one) => one.table.columns[0].label), ["Day", "Day"]);
 });
 
 // --- the group and the layout -------------------------------------------------------------
 
-test("the group is the chart with Table beside its sentence, or the table with Chart", () => {
-  const drawn = chartGroup(DAILY, MONTH, "cost", TODAY, false);
-  assert.deepEqual([drawn.label, drawn.sentence, drawn.toggle, drawn.nothing, drawn.table],
-                   ["Each day", "The most in these 30 days was today, $19.54. 8 days had no sessions.", "Table", null, null]);
-  assert.equal(drawn.charts.length, 1);
-  assert.equal(drawn.charts[0].bars.length, 30);
-  const tabled = chartGroup(DAILY, MONTH, "cost", TODAY, true);
-  assert.deepEqual([tabled.sentence, tabled.toggle, tabled.charts, tabled.nothing], [drawn.sentence, "Chart", [], null]);
+const NONE = new Set();
+
+test("the group is the chart under its name with Table, or its table with Chart", () => {
+  const drawn = chartGroup(DAILY, MONTH, "cost", TODAY, NONE);
+  assert.deepEqual([drawn.label, drawn.sentence, drawn.nothing],
+                   ["Each day", "The most in these 30 days was today, $19.54. 8 days had no sessions.", null]);
+  assert.equal(drawn.parts.length, 1);
+  const [chart] = drawn.parts;
+  assert.deepEqual([chart.key, chart.name, chart.toggle, chart.table], [COST_CHART, "Daily estimated cost — by class", "Table", null]);
+  assert.equal(chart.chart.bars.length, 30);
+  const [tabled] = chartGroup(DAILY, MONTH, "cost", TODAY, new Set([COST_CHART])).parts;
+  assert.deepEqual([tabled.key, tabled.name, tabled.toggle, tabled.chart], [COST_CHART, chart.name, "Chart", null]);
   assert.equal(tabled.table.rows.length, 22);
-  assert.equal(chartGroup(report([day("2026-10", 4)]), { kind: "all" }, "cost", TODAY, false).label, "Each month");
+  // The cost chart's key leaves the charts by tokens drawn.
+  assert.deepEqual(chartGroup(DAILY, MONTH, "tokens", TODAY, new Set([COST_CHART])).parts.map((part) => part.toggle),
+                   ["Table", "Table"]);
+  assert.equal(chartGroup(report([day("2026-10", 4)]), { kind: "all" }, "cost", TODAY, NONE).label, "Each month");
+});
+
+test("by tokens each chart has its own Table, which switches it alone", () => {
+  const both = chartGroup(DAILY, MONTH, "tokens", TODAY, NONE).parts;
+  assert.deepEqual(both.map((part) => [part.key, part.name, part.toggle, part.table]),
+                   [["Cache reads", "Cache reads", "Table", null], ["Billable work", "Billable work", "Table", null]]);
+  const reads = chartGroup(DAILY, MONTH, "tokens", TODAY, new Set(["Cache reads"])).parts;
+  assert.deepEqual(reads.map((part) => [part.toggle, part.chart === null]), [["Chart", true], ["Table", false]]);
+  assert.deepEqual(reads[0].table.columns.map((column) => column.label), ["Day", "Cache read"]);
+  const billable = chartGroup(DAILY, MONTH, "tokens", TODAY, new Set(["Billable work"])).parts;
+  assert.deepEqual(billable.map((part) => [part.toggle, part.chart === null]), [["Table", false], ["Chart", true]]);
+  assert.deepEqual(billable[1].table.columns.map((column) => column.label), ["Day", "Input", "Cache create", "Output"]);
+  // The cost chart's key is not one of theirs.
+  assert.equal(chartGroup(DAILY, MONTH, "cost", TODAY, new Set(["Cache reads", "Billable work"])).parts[0].toggle, "Table");
 });
 
 test("a range that holds nothing says so in the chart's place", () => {
-  assert.deepEqual(chartGroup(report([]), MONTH, "cost", TODAY, true),
-                   { label: "Each day", sentence: null, toggle: null, nothing: NOTHING_USED, charts: [], table: null });
+  assert.deepEqual(chartGroup(report([]), MONTH, "cost", TODAY, new Set([COST_CHART])),
+                   { label: "Each day", sentence: null, nothing: NOTHING_USED, parts: [] });
 });
 
 test("rows that all have no time show as their table alone", () => {
-  const group = chartGroup(report([day(null, 0.25)]), MONTH, "cost", TODAY, false);
-  assert.deepEqual([group.sentence, group.toggle, group.nothing, group.charts], [null, null, null, []]);
-  assert.deepEqual(group.table.rows.map((row) => row.cells[0]), ["no time"]);
+  const group = chartGroup(report([day(null, 0.25)]), MONTH, "cost", TODAY, NONE);
+  assert.deepEqual([group.sentence, group.nothing], [null, null]);
+  assert.deepEqual(group.parts.map((part) => [part.name, part.toggle, part.chart]), [[null, null, null]]);
+  assert.deepEqual(group.parts[0].table.rows.map((row) => row.cells[0]), ["no time"]);
+  const tokens = chartGroup(report([day(null, 0.25)]), MONTH, "tokens", TODAY, NONE);
+  assert.deepEqual(tokens.parts.map((part) => [part.name, part.toggle, part.chart]),
+                   [["Cache reads", null, null], ["Billable work", null, null]]);
 });
 
 test("the chart at 584 px: a column a day, today's value beside its bar, four labels", () => {
@@ -333,8 +375,8 @@ test("by tokens: the cache reads alone and the billable work stacked, each with 
   assert.deepEqual([billable.bars[6].value, billable.bars[5].value], [3_000, 1_000]);
   assert.equal(billable.bars[6].hover, "today: 3.00k\nInput 200\nCache create 1.30k\nOutput 1.50k");
   // The group draws both under the one sentence of all tokens.
-  const group = chartGroup(report(rows), { kind: "7d" }, "tokens", TODAY, false);
-  assert.deepEqual(group.charts.map((chart) => chart.name), ["Cache reads", "Billable work"]);
+  const group = chartGroup(report(rows), { kind: "7d" }, "tokens", TODAY, NONE);
+  assert.deepEqual(group.parts.map((part) => part.chart.name), ["Cache reads", "Billable work"]);
   assert.equal(group.sentence, "40.0k tokens in these 7 days. The most was today, 30.0k.");
   assert.equal(tokenCharts(report([]), MONTH, TODAY), null);
 });
@@ -384,6 +426,7 @@ test("the cost table follows the split: a column per token class, or per model",
                    ["Day", "m-1", "m-2", "m-3", "m-4", "m-5", "m-6", "Other"]);
   assert.deepEqual(at(models, "2026-11-07"), ["2026-11-07", "$0.00", "$0.00", "$0.00", "$0.00", "$0.00", "$0.50", "$0.50"]);
   // The group's table follows it too.
-  assert.equal(chartGroup(MODELS, MONTH, "cost", TODAY, true, null, "model").table.columns[1].label, "m-1");
-  assert.equal(chartGroup(DAILY, MONTH, "cost", TODAY, true, TERMS).table.columns[1].label, "Input");
+  const tabled = new Set([COST_CHART]);
+  assert.equal(chartGroup(MODELS, MONTH, "cost", TODAY, tabled, null, "model").parts[0].table.columns[1].label, "m-1");
+  assert.equal(chartGroup(DAILY, MONTH, "cost", TODAY, tabled, TERMS).parts[0].table.columns[1].label, "Input");
 });

@@ -11,8 +11,9 @@ that has ended. The caller ends the build; the folder and this machine's config 
 the rest, never the record alone, which only names a folder to look at:
 
 - A1. The record was made on this machine (`host`).
-- A2. The recorded path is, as text, the place rounds builds for that build from the
-  roots as config stands now (`places`): `<worktree_dir>/<repo>/<branch>` or
+- A2. The recorded path, `~` or a `~/`-led one read as the home folder or a path
+  under it (`places.expand_home`), is, as text, the place rounds builds for that build
+  from the roots as config stands now (`places`): `<worktree_dir>/<repo>/<branch>` or
   `<scratch root>/<repo>/<branch>/<build id>`. The repo is a projects key, the branch
   has no `..`, `.` or empty part, no `\\` and no `:`, and the build id is 16 hex digits.
   A path under a root the config moved from is outside the roots.
@@ -190,7 +191,8 @@ def removes(name: str, commissioned: Mapping, kinds: Iterable[str] = (WORKTREE, 
                            deletes=deletes, on_rename=on_rename, on_delete=on_delete)
         except RoundsError as exc:
             # What can't be read counts as work.
-            found = Kept(Path(str(commissioned.get(kind) or "")), "read", exc.reason)
+            found = Kept(Path(places.expand_home(commissioned.get(kind) or "")), "read",
+                         exc.reason)
         if isinstance(found, Kept):
             kept.append(replace(found, kind=kind))
         elif found is not None:
@@ -230,7 +232,7 @@ def _owned(name: str, commissioned: Mapping, kind: str, *, settings, env):
     folder; else `Kept`, or None when nothing is at its place."""
     if not commissioned.get(kind):
         return None
-    recorded = Path(str(commissioned[kind]))
+    recorded = Path(places.expand_home(commissioned[kind]))
     if not places.made_here(commissioned, unrecorded_is_here=False):
         made = commissioned.get("host")
         return Kept(recorded, "A1", "its record names no machine it was made on"
