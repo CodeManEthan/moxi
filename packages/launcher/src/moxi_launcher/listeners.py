@@ -5,7 +5,8 @@ Standard library only at import, and imports nothing else of the launcher until 
 is asked: turns' endpoint reads this module when it starts, and imports each function in
 its own thread at its first ask.
 
-Three rows. The ready recorder observes `ready` and `gone` (its answer is ignored). The
+Three rows. The ready recorder observes `ready`, `gone` and `load` (its answer is
+ignored). The
 Codex seat listener and the handoff pointer answer `start`, the event whose answers turns
 adds to start context; turns asks them only when the launcher is on its `start.order`, and
 joins their answers in the order below.
@@ -21,10 +22,17 @@ state, no instructions, no pointer, no pick. Listeners run in the session's endp
 process, so the endpoint is named by its own pid and start time.
 
 An endpoint serves its session for the endpoint's own life, and a session may outlive it:
-Claude starts a new endpoint for the same session when its plugins reload. The new
-endpoint claims the launch again when its event names a session id the launch is known by
-(its own, or one recorded for it, as after a `/clear`) and the endpoint that held it has
-ended (`store.claim`).
+Claude Code starts a new endpoint for the same session when its plugins reload, and the
+new one raises `load` as soon as it learns its session id. **A held Claude launch moves
+only to an endpoint whose parent process is the launch's own `claude`** (the row's `pid`
+and `pid_started`), once the endpoint that held it has ended (`store.claim`). Every
+endpoint Claude Code starts for a session is a direct child of that session's `claude`,
+so the launch follows its session across a reload and any `/clear` after it. A session
+started from inside the launched one runs in another `claude` process, its endpoint a
+child of that one, so it never takes the launch, whatever session id it names: no
+session id moves a Claude claim. Each endpoint names its parent by pid and start time,
+read once (`endpoint_parent`). A Codex launch is claimed again by a session id it is
+known by.
 """
 
 from __future__ import annotations
@@ -34,7 +42,7 @@ import threading
 from collections.abc import Mapping
 
 LISTENERS = (
-    (("ready", "gone"), "moxi_launcher.listen_ready:observe"),
+    (("ready", "gone", "load"), "moxi_launcher.listen_ready:observe"),
     (("start",), "moxi_launcher.listen_codex:answer"),
     (("start",), "moxi_launcher.listen_handoff:answer"),
 )
@@ -49,6 +57,7 @@ RELAUNCH_ENV = "MOXI_LAUNCHER_RELAUNCH"
 STORE_TIMEOUT = 1.0
 
 _me: tuple[int, str] | None = None
+_parent: tuple[int, object] | None = None
 _me_lock = threading.Lock()
 
 
@@ -67,6 +76,23 @@ def endpoint_id() -> str:
             ident = proc.identity(pid)
             _me = (pid, f"{pid}@{ident.started:.6f}" if ident else str(pid))
         return _me[1]
+
+
+def endpoint_parent():
+    """This endpoint process's parent, as a `moxi.proc.ProcId` (its pid and start time),
+    or None when it can't be read.
+
+    Read once per process and kept, like `endpoint_id`: an endpoint whose parent changes
+    is ending anyway (turns' endpoint ends on a change of parent).
+    """
+    global _parent
+    pid = os.getpid()
+    with _me_lock:
+        if _parent is None or _parent[0] != pid:
+            from moxi import proc
+
+            _parent = (pid, proc.identity(os.getppid()))
+        return _parent[1]
 
 
 def event_env(event) -> Mapping[str, str]:
@@ -93,7 +119,8 @@ def claim(event, conn):
     """The launch row this event's endpoint holds, claiming it when it is free, or None.
 
     None when the session carries no launcher stamp, when the launch is unknown, and when
-    the launch is another endpoint's (a nested session).
+    the launch is another endpoint's: a nested session's, or the launched session's own
+    while the endpoint that held it has not ended yet.
     """
     from . import store
 
@@ -102,8 +129,8 @@ def claim(event, conn):
         return None
     return store.claim(conn, request_id, harness=event.harness,
                        session_id=getattr(event, "session_id", None),
-                       endpoint=endpoint_id())
+                       endpoint=endpoint_id(), parent=endpoint_parent())
 
 
 __all__ = ["LISTENERS", "REQUEST_ENV", "RELAUNCH_ENV", "STORE_TIMEOUT", "claim", "endpoint_id",
-           "event_env", "open_store"]
+           "endpoint_parent", "event_env", "open_store"]
