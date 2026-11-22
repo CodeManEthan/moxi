@@ -61,7 +61,7 @@ VALUES = {
     "facts": ("session_id", "turn_number", "turn_open", "turn", "agents", "draft", "at",
               "stale", "ready"),
     "agents": ("entries", "complete", "at"),
-    "started": ("delivery", "ref", "turn_id"),
+    "started": ("delivery", "ref", "turn_id", "agent_id"),
     "refused": ("delivery", "ref", "reason"),
     "lost": ("delivery", "ref", "reason"),
     "ended": ("delivery", "ref", "turn_id", "outcome", "answer"),
@@ -123,6 +123,7 @@ CAPABILITIES = {
     "usage": (True, True, False),
     "mcp-token": (False, True, False),
     "environ": (True, True, True),
+    "fork": (False, False, False),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys
@@ -134,6 +135,7 @@ METHODS = {
     "agents": ("agents", "agents"),
     "deliver": ("deliver", {"delivery", "ref"}),
     "steer": ("steer", {"delivery", "ref"}),
+    "fork": ("fork", {"delivery", "ref"}),
     "wait": (None, {"result"}),
     "command": (None, {"result"}),
     "watch": (None, {"facts"}),
@@ -171,6 +173,7 @@ SAMPLES = [
     results.Passed(),
     results.StopFacts("t", "s", stop_hook_active=True, task_types=("shell",), crons=2),
     results.StopFacts(),
+    results.Started(None, "d1", "r1", agent_id="a1"),
 ]
 
 NOTE_SAMPLES = [
@@ -414,6 +417,11 @@ INVALID_PARAMS = [
     ("steer", {}),
     ("steer", {"text": ""}),
     ("steer", {"text": "x", "ref": "x" * 257}),
+    ("fork", {"by": "m"}),
+    ("fork", {"text": "", "by": "m"}),
+    ("fork", {"text": "x"}),
+    ("fork", {"text": "x", "by": ""}),
+    ("fork", {"text": "x", "by": "m", "ref": "x" * 257}),
     ("wait", {"until": "started", "timeout_ms": 0}),
     ("wait", {"delivery": "d", "ref": "r", "until": "started", "timeout_ms": 0}),
     ("wait", {"delivery": "d", "until": "begun", "timeout_ms": 0}),
@@ -451,6 +459,7 @@ CAPABILITY_ROWS = [
     ("command", {"name": "clear", "stop_shells": True}, "stop-shells"),
     ("command", {"name": "compact", "stop_shells": True}, "stop-shells"),
     ("environ", {"names": ["HOME"]}, "environ"),
+    ("fork", {"text": "x", "by": "m"}, "fork"),
     ("usage.codex_limits", {}, "usage"),
     ("mcp.reload", {}, "mcp-token"),
 ]

@@ -48,6 +48,8 @@ class FakeHarness(Harness):
         self.box_fails = False
         self.submitted: list[Delivery] = []
         self.appended: list[Delivery] = []
+        #: The forks handed in, in order; the test starts and ends each.
+        self.forked: list[Delivery] = []
         self.commands: list[CommandRequest] = []
         self.auto_commands = True
         self.open_turn: str | None = None
@@ -95,6 +97,9 @@ class FakeHarness(Harness):
         self.appended.append(delivery)
         if self.auto_steer:
             self.take(delivery)
+
+    def fork(self, delivery: Delivery) -> None:
+        self.forked.append(delivery)
 
     def command(self, request: CommandRequest) -> None:
         self.commands.append(request)

@@ -10,7 +10,7 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
   `hello.json` once it listens. The key is the launch's nonce, not the session id, so a
   `/clear` keeps the endpoint and `hello.json` follows the id;
 - answers the socket protocol (`contracts/socket-protocol.md`) through `rpc.Rpc`:
-  `session`, `facts`, `agents`, `deliver`, `steer`, `wait`, `command`, `watch`,
+  `session`, `facts`, `agents`, `deliver`, `steer`, `fork`, `wait`, `command`, `watch`,
   `stops.handle` and `stops.answer`;
 - keeps the turn ledger the adapter feeds, ties deliveries to turns, holds a
   delivery made while a turn runs until that turn ends, and answers `wait` from the
@@ -119,8 +119,9 @@ OPEN_WAIT_S = 10.0
 ANSWER_WAIT_S = 1.0
 
 #: A delivery's states: held behind a turn or the load gate; handed to `submit` and not
-#: yet tied; a steer handed to `append` and not yet confirmed; taken into a turn; settled.
-_QUEUED, _INFLIGHT, _STEERING = "queued", "in-flight", "steering"
+#: yet tied; a steer handed to `append` and not yet confirmed; a fork handed to `fork`
+#: and not yet started; taken into a turn (or a fork started); settled.
+_QUEUED, _INFLIGHT, _STEERING, _FORKING = "queued", "in-flight", "steering", "forking"
 _STARTED, _DONE = "started", "done"
 
 
@@ -1202,6 +1203,48 @@ class Endpoint:
             self._worker.put(self._handoff(d, self.harness.append))
             return d
 
+    def fork(self, text: str, *, by: str, ref: str | None = None) -> Handed:
+        """Start a fork of the session's main loop with `text` as its task. The fork runs
+        beside the main loop's turns and holds no slot: it is handed on at once, whatever
+        turn runs. `started` names the fork (`Started.agent_id`) once the harness has
+        started it; `ended` carries its answer, or the fork's `Lost` (`denied`, `gone`).
+        `unsupported` in the answer when the session cannot fork. Never waits on the
+        harness, as `deliver`."""
+        with self._lock:
+            d = self._new("fork", text, ref, by=by)
+            reason = self._unable("fork")
+            if reason is not None:
+                self._refuse(d, reason, early=True)
+                return d
+            d.state = _FORKING
+            d.handed_at = time.monotonic()
+            self._worker.put(self._handoff(d, self.harness.fork))
+            return d
+
+    def fork_started(self, delivery_id: str, agent_id: str) -> None:
+        """The harness started the fork `delivery_id` asked for, as `agent_id`."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if d is None or d.state != _FORKING:
+                log.info("fork %s started as %s after it settled; ignored", delivery_id,
+                         agent_id)
+                return
+            d.state = _STARTED
+            self._settle(d, started=Started(None, agent_id=agent_id))
+
+    def fork_ended(self, delivery_id: str, answer: str | None, *,
+                   outcome: str = "answer") -> None:
+        """The fork `delivery_id` asked for answered its task: `answer` is its final text,
+        None when it had none."""
+        if outcome not in OUTCOMES:
+            outcome = "error"
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if d is None or d.spec.kind != "fork" or d.state == _DONE:
+                return
+            self._settle(d, started=Started(None) if d.started is None else None,
+                         ended=Ended(None, outcome, answer=answer))
+
     def wait(self, delivery_id: str, until: str, timeout: float | None):
         """`Started | Refused | Lost` (until "started") or `Ended | Refused | Lost`
         (until "ended"), or None when `timeout` passes first."""
@@ -1385,7 +1428,7 @@ class Endpoint:
 
         def run() -> None:
             with self._lock:
-                skip = d.state not in (_INFLIGHT, _STEERING) or d.expired
+                skip = d.state not in (_INFLIGHT, _STEERING, _FORKING) or d.expired
                 gone = self._gone is not None
             if skip:
                 log.info("delivery %s settled before its hand-off; skipped", d.id)

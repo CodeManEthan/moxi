@@ -11,10 +11,10 @@ for params that break the contract, and turns' own: `gone` (the endpoint is endi
 `stop-handler-taken`. Every reason the session's state decides is a value instead.
 
 A handler on the loop never waits on the harness or on a blocking write. `session`,
-`deliver`, `steer`, `stops.handle`, `stops.answer` and a `wait` with `timeout_ms` 0 read or
+`deliver`, `steer`, `fork`, `stops.handle`, `stops.answer` and a `wait` with `timeout_ms` 0 read or
 write the core's record and answer at once: `deliver` and `steer` record the delivery and
 put its hand-off on the endpoint's ordered worker in one locked step, before the handler's
-first `await`. `environ` reads the endpoint's own copy of the session's environment and answers at once.
+first `await`, and so does `fork`. `environ` reads the endpoint's own copy of the session's environment and answers at once.
 `usage.codex_limits` and `mcp.reload` (a Codex host's) run on a thread of their own: the
 first waits on one app-server request, the second on the host's MCP settle, which its
 deadline bounds. `usage.codex_limits` with `cached` answers from the host's record at once.
@@ -78,6 +78,7 @@ class Rpc:
             "agents": self._agents,
             "deliver": self._deliver,
             "steer": self._steer,
+            "fork": self._fork,
             "wait": self._wait,
             "command": self._command,
             "watch": self._watch,
@@ -145,6 +146,17 @@ class Rpc:
         self._needs("steer")
         d = self.ep.steer(text, ref=ref, by=by, senders=senders)
         await self._hook("steer", d)
+        return self._handed(d)
+
+    async def _fork(self, conn, params: dict) -> dict:
+        text = _text(params)
+        ref = _ref(params)
+        by = _by(params)
+        if by is None:
+            raise invalid("by is the asking module's name, a non-empty string")
+        self._needs("fork")
+        d = self.ep.fork(text, ref=ref, by=by)
+        await self._hook("fork", d)
         return self._handed(d)
 
     async def _in_thread(self, fn: Callable[..., Any], *args: Any) -> Any:

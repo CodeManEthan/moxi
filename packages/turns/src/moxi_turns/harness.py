@@ -19,6 +19,8 @@ The core calls the adapter:
                           harness or the endpoint (the base does nothing)
     submit(delivery)      put the text in as a new turn
     append(delivery)      put the text into the running turn (a steer)
+    fork(delivery)        start a fork of the session's main loop with the text as its
+                          task (only where `can` has `fork`)
     tool_points()         where the harness lets turns act at a tool call:
                           `{"pre": bool, "after": bool}` (the base has neither)
     command(request)      run `/clear`, `/exit` or a compaction, and with
@@ -29,10 +31,10 @@ The core calls the adapter:
                           settled: the adapter lets go of it (the base does nothing)
     close()               the endpoint is stopping
 
-`submit`, `append` and `command` run on the endpoint's one ordered worker, in the order
-the endpoint recorded them, never on the loop that answers callers. They may block (a line
-write, a request to the harness), which holds only the worker; what happened comes back
-through the endpoint's adapter-side calls:
+`submit`, `append`, `fork` and `command` run on the endpoint's one ordered worker, in
+the order the endpoint recorded them, never on the loop that answers callers. They may
+block (a line write, a request to the harness), which holds only the worker; what
+happened comes back through the endpoint's adapter-side calls:
 
     endpoint.ready(source, session_id, announce=True) -> str | None
                                           a start, resume, clear or compaction; returns
@@ -71,6 +73,11 @@ through the endpoint's adapter-side calls:
                                           only-if-idle one is re-checked against the
                                           ledger; a reason refuses it
     endpoint.on_steered(delivery_id)         the harness took a steer into the running turn
+    endpoint.fork_started(delivery_id, agent_id)
+                                          the harness started the fork a `fork` delivery
+                                          asked for, under the id it gave it
+    endpoint.fork_ended(delivery_id, answer, outcome="answer")
+                                          the fork answered its task: its final text
     endpoint.on_refused(delivery_id, reason) the adapter refused a delivery it was handed
     endpoint.on_stop(facts) -> str | None a Stop of the main loop: the stop handler's
                                           answer
@@ -98,7 +105,11 @@ The adapter's duty to settle: every delivery handed to `submit` ends in exactly 
 `turn_started(…, delivery.id)` or `turn_tied(…, delivery.id)` (the tie),
 `on_refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
 `append` in one `on_steered(delivery.id)`, `on_refused(delivery.id, "idle")` (the harness had no
-turn to take it into) or `lost(delivery.id, reason)`; and every request handed to `command`
+turn to take it into) or `lost(delivery.id, reason)`; every delivery handed to `fork` in
+one `fork_ended(delivery.id, …)` or `lost(delivery.id, reason)`, after at most one
+`fork_started(delivery.id, agent_id)`, the reason starting `denied` when the harness
+refused to start the fork and `gone` when the fork went away with no answer; and every
+request handed to `command`
 in one `command_settled(request.id, result)` or `command_ran(request.id, …)`. A compaction
 is confirmed by the session: the core settles it `ran` at the next Ready with source
 `compact` (with `stop_shells`, once `command_ran` has reported the stop too); the adapter
@@ -121,7 +132,11 @@ whether or not a main-loop turn is open. An adapter maps the harness's states in
 None when the harness gives no notice to read. A list it could not read whole is
 `complete` False, never a shorter list: an unknown count is not zero.
 
-A `submit`, `append` or `command` that
+A fork holds no slot and runs beside the main loop's turns; the core keeps no bound on
+it, so the adapter bounds each wait of its own (`PENDING_TTL_S` does not apply), and the
+endpoint's own end settles a fork still open `Lost`.
+
+A `submit`, `append`, `fork` or `command` that
 raises counts as settled (the delivery is refused, the command fails). Until it settles,
 a submitted delivery holds the endpoint's one in-flight slot (later only-if-idle
 deliveries refuse `busy-turn`, later plain ones queue) and a command holds the one command
@@ -196,11 +211,12 @@ class Live:
 @dataclass(frozen=True)
 class Delivery:
     """One text handed to the adapter. `kind` is "deliver" (a new turn, handed to
-    `submit`) or "steer" (into the running turn, handed to `append`). `only_if_idle`: the
-    caller asked for a new turn only if none is open, so `entering` re-checks it, and the
-    refusal flags apply. `ref` is the caller's, carried for the adapter's logs; turns never
-    acts on it. `by` is the module that asked and `senders` the names the text speaks
-    for, as the caller gave them; the `prompt` event the delivery raises carries both."""
+    `submit`), "steer" (into the running turn, handed to `append`) or "fork" (a fork's
+    task, handed to `fork`). `only_if_idle`: the caller asked for a new turn only if none is open, so
+    `entering` re-checks it, and the refusal flags apply. `ref` is the caller's, carried
+    for the adapter's logs; turns never acts on it. `by` is the module that asked and
+    `senders` the names the text speaks for, as the caller gave them; the `prompt` event
+    the delivery raises carries both."""
 
     id: str
     text: str
@@ -283,6 +299,9 @@ class Harness:
         raise NotImplementedError
 
     def append(self, delivery: Delivery) -> None:
+        raise NotImplementedError
+
+    def fork(self, delivery: Delivery) -> None:
         raise NotImplementedError
 
     def command(self, request: CommandRequest) -> None:

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
+  capability, `fork`: start a fork of the session's main loop with `text` as its task. It
+  runs beside the main loop's turns and holds no slot. Its `started` value carries the
+  fork's `agent_id` (a new field of `started`, null for every other delivery), its
+  `ended` the fork's answer, and a fork the harness refused or that went away reads
+  `lost` with a reason starting `denied` or `gone`. No harness offers `fork` yet.
+
 ## 0.2.5 (2026-11-22)
 
 - A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises

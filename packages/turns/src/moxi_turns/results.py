@@ -23,9 +23,10 @@ from typing import Any, ClassVar
 #: the guard list at its tool calls. `after-tool`: an `after-tool` row's text reaches the
 #: model after the tool. `usage`: the session reports usage (Claude's readings, Codex's
 #: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.
+#: `fork`: the `fork` method, a fork of the session's main loop.
 CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                 "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                "mcp-token", "environ")
+                "mcp-token", "environ", "fork")
 
 #: The most names one `environ` call may ask.
 ENV_MAX_NAMES = 64
@@ -113,6 +114,12 @@ LOST_UNKNOWN = "unknown delivery"
 #: learn because the endpoint no longer serves, or the call carried no `ref` to look it up
 #: by. No endpoint sends it.
 LOST_UNANSWERED = "unanswered"
+
+#: The reason prefix of a fork's `Lost` when the harness refused to start the fork.
+LOST_DENIED = "denied"
+#: The reason prefix of a fork's `Lost` when the fork went away with no answer: the
+#: harness did not take its task, or its warm-up never answered.
+LOST_GONE = "gone"
 
 #: The library's `Failed` reason for a command it wrote and got no answer to. The command
 #: may still run.
@@ -420,12 +427,15 @@ class Agents(_Value):
 @dataclass(frozen=True)
 class Started(_Value):
     """A delivery went in: the harness turn that took it. For a steer, given when the
-    harness confirmed it took the text."""
+    harness confirmed it took the text. For a fork, `agent_id` names the fork the harness
+    started (on Claude Code its subagent's agent id), and `turn_id` is None; every other
+    delivery's `agent_id` is None."""
 
     KIND = "started"
     turn_id: str | None
     delivery: str | None = None
     ref: str | None = None
+    agent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -636,7 +646,8 @@ __all__ = ["CAPABILITIES", "ENV_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
            "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",
            "ERROR_STOP_HANDLER_TAKEN", "ERRORS", "REFUSED_GONE", "LOST_UNTIED",
-           "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "FAILED_UNANSWERED",
+           "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "LOST_DENIED", "LOST_GONE",
+           "FAILED_UNANSWERED",
            "FAILED_TIMEOUT", "SHELL_UNLISTED", "NOTIFICATIONS", "check_ref",
            "DeliveryRef", "OpenTurn", "Agent", "LeftShell", "Shells", "Ready",
            "TurnStarted", "TurnSteered", "TurnEnded", "Gone", "Facts", "Agents", "Started",

@@ -11,7 +11,7 @@ two shared connections, each opened on first use and closed with the `Session` (
 `close()`, or its collection):
 
 - the first carries the calls whose answer never waits on the harness: `session`,
-  `deliver`, `steer`, `environ`, and the look-up by `ref` of a hand-in whose answer never
+  `deliver`, `steer`, `fork`, `environ`, and the look-up by `ref` of a hand-in whose answer never
   came;
 - the second carries `facts` and `agents`, which wait on the harness's live read for up
   to its live bound, so a `deliver` never queues behind one.
@@ -32,12 +32,13 @@ When an answer does not come. The library reports a refusal only when it receive
 or when it never wrote the request:
 
 - Never written (nothing serves the address, or the connection failed during its
-  `rpc.hello` or `session`): `deliver`, `steer` and `command` read `Refused("gone")`;
-  `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents` raise `TurnsError`.
-- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer` and
-  `command`, `Lost` on `wait`, `TurnsError` on the reads.
+  `rpc.hello` or `session`): `deliver`, `steer`, `fork` and `command` read
+  `Refused("gone")`; `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents`
+  raise `TurnsError`.
+- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer`, `fork`
+  and `command`, `Lost` on `wait`, `TurnsError` on the reads.
 - Written and not answered (the bound passed, or the connection closed): the outcome is
-  unknown. `deliver` and `steer` give a `Delivery` whose `id` is None; its waits first
+  unknown. `deliver`, `steer` and `fork` give a `Delivery` whose `id` is None; its waits first
   look the delivery up by its `ref` on the connection the request went on (the endpoint
   serves that connection in order, so the answer follows the request's), or, when that
   connection has closed, on a new one. `command` reads `Failed("unanswered")`, and the
@@ -497,6 +498,22 @@ class Session:
         if ref is not None:
             params["ref"] = ref
         return self._hand("steer", params, ref)
+
+    def fork(self, text: str, *, by: str, ref: str | None = None) -> Delivery:
+        """Start a fork of the session's main loop with `text` as its task. `by` is the
+        asking module's name. The fork runs beside the main loop's turns, whatever turn
+        runs. `wait_started` reads `Started` with the fork's `agent_id`; `wait_ended`
+        reads `Ended` with the fork's answer, or `Lost` with a reason starting `denied`
+        (the harness refused the fork) or `gone` (it went away with no answer). Raises
+        `TurnsError` with the `capability` code on a session that cannot fork."""
+        _check_text(text)
+        ref = check_ref(ref)
+        if not isinstance(by, str) or not by:
+            raise ValueError("by is the asking module's name, a non-empty string")
+        params: dict[str, Any] = {"text": text, "by": by}
+        if ref is not None:
+            params["ref"] = ref
+        return self._hand("fork", params, ref)
 
     def _hand(self, method: str, params: dict[str, Any], ref: str | None) -> Delivery:
         try:

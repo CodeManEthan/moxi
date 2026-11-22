@@ -102,11 +102,12 @@ The session's capabilities:
 | `usage` | yes | yes | no | Claude Code reports its usage to `usage` listener rows; the Codex host hands each rate-limits reading to `codex_limits` rows and answers `usage.codex_limits` |
 | `mcp-token` | no | yes | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |
+| `fork` | no | no | no | `fork` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode
 support is experimental. An endpoint of an older turns lacks the later capabilities
-(`guards` to `environ`), and a caller reads their absence as "not offered". On OpenCode an
+(`guards` to `fork`), and a caller reads their absence as "not offered". On OpenCode an
 `after-tool` row is still told of a finished call, observe only: its text reaches no
 model, so OpenCode does not offer `after-tool`.
 
@@ -150,7 +151,7 @@ turn, an agent, a shell) is a plain object with no `kind`.
 |---|---|
 | `facts` | `session_id`, `turn_number`, `turn_open`, `turn`, `agents`, `draft`, `at`, `stale`, `ready` |
 | `agents` | `entries`, `complete`, `at` |
-| `started` | `delivery`, `ref`, `turn_id` |
+| `started` | `delivery`, `ref`, `turn_id`, `agent_id` |
 | `refused` | `delivery`, `ref`, `reason` (a delivery's); `reason` alone (a command's) |
 | `lost` | `delivery`, `ref`, `reason` |
 | `ended` | `delivery`, `ref`, `turn_id`, `outcome`, `answer` |
@@ -160,7 +161,8 @@ turn, an agent, a shell) is a plain object with no `kind`.
 | `stop` | `turn_id`, `session_id`, `stop_hook_active`, `task_types`, `crons` (each null when the harness did not give it) |
 
 Every value of a delivery (`started`, `refused`, `lost`, `ended`) names the `delivery` id
-and echoes the `ref` the caller gave it, null when it gave none. turns never acts on a
+and echoes the `ref` the caller gave it, null when it gave none. A `started`'s `agent_id`
+is null but for a `fork`'s. turns never acts on a
 `ref`; `wait` only looks a delivery up by it.
 
 **Facts.**
@@ -324,6 +326,7 @@ Params are an object; a missing optional param takes its default. In short:
 | `agents` | `{}` | `<agents>` |
 | `deliver` | `{text, ref?, only_if_idle?, if_turn_number?, refuse_draft?, refuse_agents?}` | `{delivery, ref, result?}` |
 | `steer` | `{text, ref?}` | `{delivery, ref, result?}` |
+| `fork` | `{text, by, ref?}` | `{delivery, ref, result?}` |
 | `wait` | `delivery` or `ref`, `until`, `timeout_ms` | `{result}` or `{pending: true}`, with `delivery` when asked by `ref` |
 | `command` | `{name, if_turn_number?, timeout_ms?, stop_shells?}` | `{result}` |
 | `watch` | `{}` | `{facts}`, then notifications |
@@ -336,7 +339,7 @@ Params are an object; a missing optional param takes its default. In short:
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
 
-**No answer waits on the harness.** `session`, `deliver`, `steer`, `environ` and a `wait`
+**No answer waits on the harness.** `session`, `deliver`, `steer`, `fork`, `environ` and a `wait`
 with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
 bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`),
@@ -429,6 +432,28 @@ A caller that wants a steer where the session can take one, and a turn of its ow
 cannot, calls `steer` and, on a `refused` `idle` or `loading` it received (in the answer's
 `result` or from `wait`), calls `deliver` with the same text. It falls back only on a
 refusal it received; on an unknown outcome it waits for the steer's value.
+
+### `fork`
+
+Params: `text`, the fork's task; `by`, the asking module's name (a non-empty string,
+required); `ref`. Needs `fork`.
+
+Starts a fork of the session's main loop: an agent that holds the session's conversation
+up to now and runs `text` as its task beside the main loop. It holds no slot and waits on
+no turn: it is handed on at once, whatever turn runs, and a `deliver` or `steer` made
+while it runs goes as it would without it. The endpoint records it and answers as
+`deliver` does, `{delivery, ref, result?}`, with `result` present only when the session
+cannot fork now (`unsupported`).
+
+Its values: `started` once the harness has started the fork, with `agent_id` naming it
+(`turn_id` is null); `ended` once the fork has answered its task, with `outcome` and
+`answer`, the fork's final text (`turn_id` null); or `lost`, with a reason starting
+`denied` when the harness refused to start the fork, `gone` when the fork went away with
+no answer, or the endpoint's own reason when the endpoint ended first. A fork has no
+endpoint bound of 300 s: the harness's half bounds its own waits.
+
+`by` names the asker to turns. The fork's answer comes back to the session by the
+harness's own way, if it has one; turns adds no delivery of its own for it.
 
 ### `wait`
 
