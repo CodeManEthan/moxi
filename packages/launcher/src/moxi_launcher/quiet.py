@@ -16,7 +16,7 @@ that holds the act is a word, and the words come in this order:
 **A `shell` entry never counts as live work** in this read, whichever harness reports
 it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
 Exit-session reads them itself after this read (`exits.background_shells`), and holds
-for them until the session has been idle an hour.
+for them until the session has been idle an hour; park's exit doesn't read them.
 
 **The pane's own output never holds.** `pane_use` also gives the pane's activity, which
 any output moves: Claude Code redrawing its spinner and status line, or its exit dialog

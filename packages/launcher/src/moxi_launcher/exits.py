@@ -21,7 +21,7 @@ The steps, in this process (no job: the exit is over before the verb returns):
    reads it (`recycle.SHELLS_IDLE_S`). With cache absent or unread the age is unknown and
    the shells hold. Once the session is that idle, its shells no longer hold, and
    Claude's exit dialog, answered with "Exit and stop tasks", stops them. A child list
-   that can't be read holds `unreadable`.
+   that can't be read holds `unreadable`. Park's exit skips this step (below).
 5. The exit, through turns, with the turn number the quiet read saw. turns checks the
    consent, idleness and the number again. A refusal that clears by itself ends the run
    `held`; `not-allowed` and `unsupported` end it `not-exited`.
@@ -36,13 +36,15 @@ found (unclaimed, changed, not live, no exit offered, another run open), which h
 A session no launch holds is refused `not-launched` and logged nowhere. Exit codes: 0
 exited; 1 at-dialog, not-exited, or a fault; 3 refused; 75 held.
 
-**Park's exit** (`park_exit`) is the same run with mode `park` and two differences. It
+**Park's exit** (`park_exit`) is the same run with mode `park` and three differences. It
 waits for quiet, reading it every `PARK_POLL_S` until a deadline, instead of taking one
 read; a refusal of turns' that clears by itself sends it back to that wait, and a
 `run-open` refusal (another act on the launch) is tried again within the same wait, each
-try logged. And a client's activity does not hold it, at the quiet read or at the exit
-dialog: copy mode still does, as do a turn, subagents, a draft, background shells and a
-read that failed.
+try logged. A client's activity does not hold it, at the quiet read or at the exit
+dialog: copy mode still does, as do a turn, subagents, a draft and a read that failed.
+And it does not read background shells at all: they never hold it, however recently
+the session worked, and Claude's exit dialog stops them, since park comes before a
+reboot that ends them anyway.
 """
 
 from __future__ import annotations
@@ -138,7 +140,7 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
         reading = quiet.read(found.session, slot=row.slot if in_slot else None,
                              slots_api=api if in_slot else None, person_s=person_s,
                              count_activity=mode != "park")
-        hold = reading.first if not reading.quiet else shells.hold(found.session)
+        hold = _held(reading, shells, found.session, count_shells=mode != "park")
         if hold is not None:
             return Result(codes.TEMPFAIL, (f"held: {hold}; nothing would be done now",),
                           data={**data, "outcome": "held", "word": hold.word,
@@ -162,6 +164,15 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
     return Result(EXIT_CODES.get(verdict, codes.ERROR), lines, ended,
                   {**data, "run_id": run.run_id, "outcome": verdict, "word": ended.word,
                    "detail": ended.detail})
+
+
+def _held(reading: quiet.Reading, shells: Shells, session: Any, *,
+          count_shells: bool) -> quiet.Hold | None:
+    """What holds the exit: the quiet read's first hold, then, when it is quiet and
+    `count_shells`, the background shells'. Park leaves the shells out."""
+    if not reading.quiet:
+        return reading.first
+    return shells.hold(session) if count_shells else None
 
 
 class Shells:
@@ -260,6 +271,7 @@ class ExitRun(job.RelaunchJob):
         self.parking = run.mode == "park"
         self.deadline = deadline
         self.count_activity = not self.parking
+        self.count_shells = not self.parking
         # The exit starts at once: there is no wait for a stop to end.
         self.acting = True
         self.verdict = "not-exited"
@@ -316,9 +328,9 @@ class ExitRun(job.RelaunchJob):
                  "a slot, so if Claude's exit dialog is up, a person answers it")
 
     def _quiet(self) -> int | None:
-        """The quiet read and the background shells, once for the verb; for park, again
-        every `PARK_POLL_S` until nothing holds or the deadline. Ends the run `held` with
-        what still holds."""
+        """The quiet read and the background shells, once for the verb; for park, the
+        quiet read alone, again every `PARK_POLL_S` until nothing holds or the deadline.
+        Ends the run `held` with what still holds."""
         session, row = self.target.session, self.row
         said: str | None = None
         while True:
@@ -326,7 +338,7 @@ class ExitRun(job.RelaunchJob):
                                  slots_api=self.slots_api if self.in_slot else None,
                                  person_s=float(self.setting("relaunch.person_s")),
                                  count_activity=self.count_activity)
-            hold = reading.first if not reading.quiet else self.shells.hold(session)
+            hold = _held(reading, self.shells, session, count_shells=self.count_shells)
             if hold is None:
                 if self.shells.found:
                     self.event("shells", {"pids": list(self.shells.found),

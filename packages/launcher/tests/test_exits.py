@@ -648,7 +648,7 @@ def test_parks_exit_waits_for_an_open_turn_to_end(conn):
     assert waits == ["turn"]
 
 
-def test_parks_exit_ignores_the_panes_and_a_clients_activity_at_the_quiet_read(conn):
+def test_parks_exit_ignores_a_clients_activity_that_holds_exit_session(conn):
     # The quiet read takes the time from the clock, not the job's wall.
     now = time.time()
     pane = SimpleNamespace(**{**ACTIVE, "client_activity": now - 5, "pane_activity": now - 5})
@@ -656,6 +656,29 @@ def test_parks_exit_ignores_the_panes_and_a_clients_activity_at_the_quiet_read(c
     assert (held.data["outcome"], held.run.word) == ("held", "person")
     parked = park_go(conn, slots_api=FakeSlots(ended=True, pane=pane))
     assert parked.data["outcome"] == "exited"
+
+
+@pytest.mark.parametrize("cache", [idle(60), None], ids=["idle-a-minute", "no-cache"])
+def test_parks_exit_does_not_wait_on_background_shells_that_hold_exit_session(conn, cache):
+    held = go(conn, cache=cache, read_shells=lambda pid: [4101])
+    assert (held.data["outcome"], held.run.word) == ("held", "shells")
+    seen, session = [], FakeSession(exits=(Result("failed", "not-exited"),))
+    slots_api = FakeSlots(ended=False, answer="ended")
+    parked = park_go(conn, session=session, slots_api=slots_api, cache=cache,
+                     read_shells=lambda pid: seen.append(pid) or [4101])
+    assert parked.data["outcome"] == "exited" and seen == []
+    assert session.commands == [("exit", 4)] and ("answer", 0) in slots_api.calls
+    kinds = [e.kind for e in store.run_events(conn, parked.run.run_id)]
+    assert "wait" not in kinds and "shells" not in kinds
+
+
+def test_parks_dry_run_does_not_count_background_shells(conn):
+    held = go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert held.exit_code == 75 and held.data["word"] == "shells"
+    parked = park_go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert parked.exit_code == 0 and parked.data["shells"] == []
+    assert parked.lines == (f"would exit session {SID} through its exit dialog in slot 3",)
+    assert store.runs(conn) == [] and logged(conn) == []
 
 
 def test_parks_exit_ignores_a_client_at_the_dialog(conn):

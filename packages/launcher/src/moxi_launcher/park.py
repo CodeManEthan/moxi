@@ -18,8 +18,9 @@ Park holds the park lock for its whole run, and runs reconcile and crash discove
    gets an entry. A `changed` refusal (the run ended and something else took the slot) is
    listed `changed; left alone`; a slot another holder holds, `held by H; left running`.
 3. **Exit**, every session at once, each in its own thread with its own store connection,
-   by `exits.park_exit`: it waits for quiet up to `park.wait_s` (or `--wait-s`), and
-   a client's activity does not hold it.
+   by `exits.park_exit`: it waits for quiet up to `park.wait_s` (or `--wait-s`). A
+   client's activity does not hold it, and it exits regardless of background shells,
+   which Claude's exit dialog stops.
 4. **Outcomes**, on each entry: `exited`; `not-exited` with the reason when the wait ran
    out or the exit failed, the entry and reservation kept; `left-running` for a Codex
    session, which offers no exit. The session park runs in is reserved and recorded

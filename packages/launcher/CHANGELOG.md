@@ -20,7 +20,8 @@
   session in a slot and reserves its slot for it first (an open-ended `park-<id>` hold
   and a park entry). Each exit waits for the session to be quiet, up to `--wait-s` or the
   setting `park.wait_s` (300 s), not counting a client's activity; copy mode, an open
-  turn, subagents, a draft and background shells still hold it. A Codex session is left
+  turn, subagents and a draft still hold it. It exits regardless of background shells,
+  which Claude's exit dialog stops. A Codex session is left
   running and reserved, since Codex offers no exit, and so is the session park runs in.
   Exits 75 while another park or restore runs.
 - `moxi launcher restore [SLOT ...] [--dry-run] [--json]` resumes each parked session
@@ -68,7 +69,7 @@
   with no session reads every live launch keep-warm is on for.
 - Exit-session holds while the session runs a background shell or Monitor, until the
   session has been idle an hour (`held`, word `shells`); only then does it exit and stop
-  them at Claude's exit dialog. `--dry-run` says which.
+  them at Claude's exit dialog. `--dry-run` says which. Park's exit doesn't wait on them.
 - `moxi launcher resume` takes `--brief TEXT` or `--brief-file FILE`, and the page's
   resume a brief or a brief file beside each past session; the brief is sent as the
   resumed session's first turn, as a launch's is. A resume of a `go` launch with no brief

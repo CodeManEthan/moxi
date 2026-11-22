@@ -406,10 +406,10 @@ exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the lau
 the commands it granted turns. A background shell or Monitor the session runs holds the
 exit (`held`, `shells`) until the session has been idle an hour, as cache reads its last
 request; with cache not installed the idle time is unknown and the shells hold. Past the
-hour, Claude's exit dialog stops them. In a slot the exit dialog is answered too, with
-"Exit and stop tasks"; elsewhere the session is left at the dialog for a person
-(`at-dialog`). Every exit tried writes a row to
-the exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
+hour, Claude's exit dialog stops them; park's exit doesn't wait on them (below). In a
+slot the exit dialog is answered too, with "Exit and stop tasks"; elsewhere the session
+is left at the dialog for a person (`at-dialog`). Every exit tried writes a row to the
+exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
 `not-exited` or `refused`.
 
 **Resume.** `moxi launcher sessions` lists past launches, newest first, each with whether
@@ -444,12 +444,13 @@ launch is under way, the resume is refused `run-open` (exit 3), naming the run.
 the launcher launched into a slot, records which session was in which slot (a park
 entry), and reserves each of those slots with a slots hold `park-<id>` that lasts until
 it is released, so no other launch takes the slot. It holds the slot before it exits the
-session, so the slot is never free between the two. Each exit is exit-session's, with two
-differences: it waits for the session to be quiet, up to `park.wait_s` (300 s, or
-`--wait-s`), and it does not count a client's activity as a person, at the quiet read or
-at the exit dialog, since the person parking is the one at the panes. Copy mode in the
-pane still holds, as do an open turn, subagents, a draft, background shells and a read
-that failed. Each slot gets one line:
+session, so the slot is never free between the two. Each exit is exit-session's, with
+three differences: it waits for the session to be quiet, up to `park.wait_s` (300 s, or
+`--wait-s`); it does not count a client's activity as a person, at the quiet read or at
+the exit dialog, since the person parking is the one at the panes; and it exits
+regardless of background shells and Monitors, which Claude's exit dialog stops, since the
+reboot would end them anyway. Copy mode in the pane still holds, as do an open turn,
+subagents, a draft and a read that failed. Each slot gets one line:
 
 - `exited`: the session ended.
 - `not-exited`, with the reason: the wait ran out or the exit failed. The session still
