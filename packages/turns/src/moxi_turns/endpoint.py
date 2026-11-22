@@ -683,6 +683,14 @@ class Endpoint:
                             point=point, record_path=record_path)
         return self._after_tool.ask(event, rows)
 
+    def load(self) -> None:
+        """The adapter learned the session's id for the first time in this process: the
+        `load` rows are told, with that id, and not waited for. The adapter raises it
+        once per endpoint process."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("load"))
+
     def usage(self, reading: dict[str, Any]) -> None:
         """A usage reading from the harness, as given: the `usage` rows are told, with the
         time it arrived, and not waited for."""
