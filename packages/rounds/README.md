@@ -957,6 +957,17 @@ and nothing in this version reads them. The `[sweep]` table is this machine's an
 `grace_hours` (2, at least 1). A project's `shared_paths` lists globs of paths every build of its repo shares,
 beside the common lockfiles: a change to one on the target owes a build a re-check.
 
+A project's table may set `land`: `"finish"` (the default), where each build lands by
+its own finish, or `"queue"`, where a finish joins the repo's merge queue and a lander
+merges the queued builds (see The merge queue). A queue project's `check` also names
+`scoped`, the command line `moxi rounds check` runs for a build, with `{base}` filled in
+as the merge-base of the build's tip and its target, as in `scoped = "uv run moxi-dev
+check --base {base}"`; `land = "queue"` with no `scoped` is refused. `defaults.director`
+(and a project's `director`) is a comms name told about a queue project's queue as a
+whole and about a red main whose owner has no running session. The module ships it
+empty, naming nobody, and `moxi config rounds check` refuses a value that is not a
+name: letters, digits, `.`, `_` and `-`, with at most one `@scope`.
+
 `models` maps each tier a step names to a model per harness. The order the tiers are
 written in is their order, strongest first. `next` prints beside a tier every
 harness's model in the order written, as `tier second (claude: model-two, codex:
