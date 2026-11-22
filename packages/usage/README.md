@@ -415,8 +415,10 @@ sessions module. Top to bottom:
   warning line above the page names it. A window whose last reading is from a period that
   has ended is one dim row, `5-hour · reset 21:34`. A row opens in place: the window's
   start and reset, its readings and the session the last one came from, why it has no
-  fill time, and, on a harness's main limit, this machine's sessions of that harness since
-  the window opened (the ten dearest, under a total that counts them all).
+  fill time, and, on a harness's main limit or a scoped limit whose reading names its
+  models (Claude's Opus window), this machine's sessions of that harness since the window
+  opened (the ten dearest, under a total that counts them all; a scoped limit counts only
+  its models' requests).
 - **Cost.** Today, the last 7 days and the last 30, each beside the period before it; the
   two sessions that cost most today; when the sessions were last read; and `Prices`. It
   sits above the filter line and does not follow it.
@@ -586,7 +588,7 @@ The page server's reads, each a `GET` under `/api`:
 | route | query | answers |
 |---|---|---|
 | `limits` | none | each plan window now, from the stored readings, with `opened` |
-| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
+| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, its `model_family` where its reading names one, and the sessions that used it |
 | `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
 | `sessions` | `top` (1 to 500, 200 unless asked), `skip`, `sort`, `order` (`asc`, `desc`), filters | sessions, dearest first unless `sort` names another column: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context`, `turns`, `subagent_share` and what names it |
 | `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
@@ -615,8 +617,8 @@ main file and the window it ran against, null when that is not known. Its `turns
 many distinct turns its main file's requests carry, whatever the range, 0 when none
 says its turn; its `subagent_share` is the part of its cost in the range that its
 subagents ran up, from 0 to 1. `window`'s sessions
-are given for the harness's main limit when its start is known and there is an index to
-read, else null.
+are given for the harness's main limit, and for a limit with a `model_family`, when its
+start is known and there is an index to read, else null.
 
 Wherever an answer names a session it carries `harness`, `session_id`, `name`, `folder`,
 `started` and `known`. The page server asks the sessions module for them once per answer,

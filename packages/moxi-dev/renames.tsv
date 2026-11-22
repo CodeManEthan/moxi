@@ -1616,8 +1616,8 @@ comms	packages/comms/tests/fake_turns.py	ref = DeliveryRef(delivery_id, d.ref if
 comms	packages/comms/tests/fake_turns.py	return self.reason.startswith(("untied", "expired"))	keep	expired	expired
 comms	packages/comms/tests/fake_turns.py	self.closed = False	keep	closed	closed
 comms	packages/comms/tests/fake_turns.py	self.closed = True	keep	closed	closed
-comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(None, text, method != "deliver", ref))	keep	delivered	delivered
-comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(did, text, method != "deliver", ref))	keep	delivered	delivered
+comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(None, text, method != "deliver", ref, *asker))	keep	delivered	delivered
+comms	packages/comms/tests/fake_turns.py	self.delivered.append(Handed(did, text, method != "deliver", ref, *asker))	keep	delivered	delivered
 comms	packages/comms/tests/fake_turns.py	self.delivered: list[Handed] = []	keep	delivered	delivered
 comms	packages/comms/tests/fake_turns.py	while not self.closed:	keep	closed	closed
 comms	packages/comms/tests/fixtures/comms-0.2/make.py	adapter="claude-shim", at=now - 120)	keep	at	at
@@ -1858,6 +1858,7 @@ comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(
 comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(mid[0] in f.get("handled_ids", ()) and "answer" in f	keep	any	any
 comms	packages/comms/tests/test_claude_adapter.py	return rig.send(REVIEWER, text, *flags, sender=PLANNER)	keep	fail	fail
 comms	packages/comms/tests/test_claude_adapter.py	return rig.send(REVIEWER, text, *flags, sender=PLANNER)	keep	interrupt	interrupt
+comms	packages/comms/tests/test_claude_adapter.py	assert rig.send(REVIEWER, "from the builder", sender=BUILDER)[0] == 0	keep	fail	fail
 comms	packages/comms/tests/test_claude_adapter.py	send(rig, "refused")	keep	refused	refused
 comms	packages/comms/tests/test_claude_adapter.py	shim = rig.shim(name="reviewer", scope="proj-a", session_id=None, start=False)	keep	start	start
 comms	packages/comms/tests/test_claude_adapter.py	stall.set()	keep	set	set
@@ -1928,6 +1929,7 @@ comms	packages/comms/tests/test_codex_containment.py	added = tmp_path / "record"
 comms	packages/comms/tests/test_codex_containment.py	tmp_path / "record")	keep	record	record
 comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, text, *flags, sender=SENDER)	keep	fail	fail
 comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, text, *flags, sender=SENDER)	keep	interrupt	interrupt
+comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, "from the builder", sender=dict(name="builder",	keep	fail	fail
 comms	packages/comms/tests/test_codex_readiness.py	-	name	test_an_environment_with_no_moxi_script_finds_none	test_an_env_with_no_moxi_script_finds_none
 comms	packages/comms/tests/test_codex_turns_host.py	and any(f"msg {message_id}" in (item.get("text") or "")	keep	any	any
 comms	packages/comms/tests/test_codex_turns_host.py	assert any(row["event"] == "app-server-exit" for row in events(records))	keep	any	any
@@ -3971,7 +3973,7 @@ launcher	packages/launcher/src/moxi_launcher/target.py	_slot	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/target.py	_with_store	name	opened	store_conn
 launcher	packages/launcher/src/moxi_launcher/target.py	caller	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/target.py	code = "changed"	keep	changed	changed
-launcher	packages/launcher/src/moxi_launcher/target.py	held endpoint is gone and a live one serves the session; `find` refuses that `changed` too,	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/target.py	serves the session; `find` refuses that `changed` too, with `reclaim_pending` set (once the	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	names, else refused `changed`.	keep	changed	changed
 launcher	packages/launcher/src/moxi_launcher/target.py	return api.show(row.slot)	keep	show	show
 launcher	packages/launcher/src/moxi_launcher/target.py	session = turns.find(pid=os.getpid() if pid is None else pid)	keep	find	find
@@ -4509,6 +4511,7 @@ launcher	packages/launcher/tests/test_listeners.py	stand_in_notes	name	folder	ha
 launcher	packages/launcher/tests/test_listeners.py	test_a_codex_seat_gets_its_identity_block_and_instructions	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_claiming_at_once_exactly_one_wins.race	name	mine	conn
 launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_reclaiming_at_once_exactly_one_wins.race	name	mine	conn
+launcher	packages/launcher/tests/test_listeners.py	listen_ready._drainer.join(timeout=10)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_live.py	-	name	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	test_codex_trusts_the_launch_dir_from_the_trust_row_even_with_a_dot_in_it
 launcher	packages/launcher/tests/test_live.py	assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_live.py	assert any(brief in word for word in result.argv)	keep	any	any
@@ -13908,6 +13911,8 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.session_known.set()	
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	slot[0].set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),	keep	round	round
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	while not self.ended.is_set() and not any(e.is_set() for e in events):	keep	any	any
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._loaded = False	keep	_loaded	_loaded
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	first, self._loaded = not self._loaded, True	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
 turns	packages/turns/src/moxi_turns/claude_leg.py	and any answer but `allow` reports `refused` `unsupported` with nothing run.	keep	refused	refused
@@ -14510,6 +14515,7 @@ turns	packages/turns/tests/test_claude_endpoint.py	out.put(s.command(name, timeo
 turns	packages/turns/tests/test_claude_endpoint.py	runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",	keep	refused	refused
 turns	packages/turns/tests/test_claude_endpoint.py	runner.turn_complete("T1", reason="aborted", is_aborted=True)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).start()	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_claude_endpoint.py	out = [SEEN.get(timeout=timeout) for _ in range(count)]	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	use	"folder"	"plugin_dir"
@@ -16310,6 +16316,7 @@ usage	packages/usage/src/moxi_usage/limits.py	a time it was already read at, nor
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/limits.py	return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))	keep	any	any
 usage	packages/usage/src/moxi_usage/limits.py	there is none; `fit` counts the readings it fitted. `opened` is when the window	keep	opened	opened
+usage	packages/usage/src/moxi_usage/limits.py	"project", "period", "opened", "label", "model_family", "dollars", "harness_rows",	keep	opened	opened
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	-	name	WARN_AT	WARN_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	_said: set[str] = set()	keep	set	set
@@ -16379,6 +16386,8 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
+usage	packages/usage/src/moxi_usage/page.py	#: names none. `used` is this machine's sessions of the harness with requests since the	keep	used	used
+usage	packages/usage/src/moxi_usage/page.py	#: models, with a null `opened`, and when there is no index to read.	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
 usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
@@ -16417,6 +16426,9 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
+usage	packages/usage/src/moxi_usage/pagehandlers.py	names one. `used` is the sessions of the harness since the window opened, with a	keep	used	used
+usage	packages/usage/src/moxi_usage/pagehandlers.py	known `opened`, for the harness's main limit and for a limit with a `model_family`,	keep	opened	opened
+usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened, family) if counted and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
@@ -16790,6 +16802,7 @@ usage	packages/usage/tests/test_browser_questions.py	return Path(shell.env["HOME
 usage	packages/usage/tests/test_browser_questions.py	seeded	name	folder	work_dir
 usage	packages/usage/tests/test_browser_questions.py	t.assistant("Done.", usage=T.usage(input=200, cache_read=6000, cache_write=1000, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	timeout=30_000)	keep	timeout	timeout
+usage	packages/usage/tests/test_browser_questions.py	ON_OPUS = {"harness": "claude", "session": session_id(31), "requests": 2, "folder": "proj-a",	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	(work / spec["folder"]).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder	test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_the_folders_table_has_no_project_column	test_the_dirs_table_has_no_project_column
@@ -17055,6 +17068,12 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
+usage	packages/usage/tests/test_page.py	assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"	keep	opened	opened
+usage	packages/usage/tests/test_page.py	used = body["used"]	keep	used	used
+usage	packages/usage/tests/test_page.py	assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)	keep	used	used
+usage	packages/usage/tests/test_page.py	assert body["opened"] is not None	keep	opened	opened
+usage	packages/usage/tests/test_page.py	assert (body["model_family"], body["used"]) == (None, None)	keep	used	used
+usage	packages/usage/tests/test_page.py	assert main["model_family"] is None and main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder

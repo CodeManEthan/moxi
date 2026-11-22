@@ -65,7 +65,7 @@ from .readings import CLAUDE, CODEX, FIVE_HOUR, SEVEN_DAY, Reading
 # The row states, labels and main limits live in `windows`, which the status line segment
 # loads alone; they are imported back here so callers find them where they always have.
 from .windows import (FRESH, LABELS, MAIN_LIMIT, NO_PERCENT, RESET, ROW_STATES,
-                      UNAVAILABLE, label, row_state)
+                      UNAVAILABLE, label, model_family, row_state)
 
 if TYPE_CHECKING:
     import sqlite3
@@ -648,5 +648,5 @@ def iso(epoch: Any) -> Any:
 
 
 __all__ = ["limits", "window", "Limits", "Window", "Row", "Pull", "pick", "row_state",
-           "project", "period", "opened", "label", "dollars", "harness_rows", "window_row",
-           "FRESH", "RESET", "UNAVAILABLE"]
+           "project", "period", "opened", "label", "model_family", "dollars", "harness_rows",
+           "window_row", "FRESH", "RESET", "UNAVAILABLE"]
