@@ -224,6 +224,99 @@ def test_a_fork_is_pointed_to_no_handoff_and_marks_none_picked(work, harness, no
     assert listen_handoff._launched(object(), None) == []
 
 
+# -- the model --------------------------------------------------------------------------
+
+PINNED = "claude-fable-5-2-20261101"
+
+
+class Transcripts:
+    """Stands in for sessions' API over one transcript whose newest request names `model`;
+    `asked` keeps each session id looked up."""
+
+    def __init__(self, model: str):
+        from types import SimpleNamespace
+
+        self.request = SimpleNamespace(model=model, response_model=None, time=1.0,
+                                       synthetic=None, sidechain=None)
+        self.hit = SimpleNamespace(source="s0", compressed=False)
+        self.asked: list[str] = []
+
+    def find(self, harness, session_id, *, root=None):
+        from types import SimpleNamespace
+
+        self.asked.append(session_id)
+        return SimpleNamespace(hits=(self.hit,))
+
+    def records_back(self, source, *, kinds=None):
+        return iter([self.request])
+
+
+def model_pins(rid: str) -> list[dict]:
+    conn = store.connect(create=False)
+    try:
+        return [e.detail for e in store.events(conn, rid) if e.kind == api.MODEL_PIN]
+    finally:
+        conn.close()
+
+
+def test_a_fork_of_a_row_naming_no_model_runs_the_model_the_session_ran(work, harness,
+                                                                        no_exec):
+    parent(work, model="")
+    assert not row("r1").values.get("model")
+    seen = Transcripts(PINNED)
+    fork.fork(SID, request_id="r2", sessions=seen)
+    argv = no_exec[-1]["argv"]
+    assert argv[argv.index("--model") + 1] == PINNED and seen.asked == [SID]
+    assert not row("r2").values.get("model")
+    assert model_pins("r2") == [{"model": PINNED, "how": "pinned"}]
+
+
+def test_a_fork_reads_the_session_its_launch_was_last_known_by(work, harness, no_exec):
+    parent(work, model="")
+    conn = store.connect()
+    try:
+        store.learn_session(conn, "r1", NEW, "clear")
+    finally:
+        conn.close()
+    seen = Transcripts(PINNED)
+    fork.fork(SID, request_id="r2", sessions=seen)
+    assert seen.asked == [NEW]
+    assert model_pins("r2") == [{"model": PINNED, "how": "pinned"}]
+
+
+def test_a_fork_of_a_row_naming_a_model_takes_it_and_reads_nothing(work, harness,
+                                                                    no_exec):
+    parent(work)
+    seen = Transcripts(PINNED)
+    fork.fork(SID, request_id="r2", sessions=seen)
+    argv = no_exec[-1]["argv"]
+    assert argv[argv.index("--model") + 1] == "opus" and PINNED not in argv
+    assert seen.asked == [] and model_pins("r2") == []
+
+
+@pytest.mark.parametrize("sessions", [None, Transcripts("not a model id")])
+def test_a_fork_whose_model_cant_be_read_runs_the_default(work, harness, no_exec,
+                                                          sessions):
+    parent(work, model="")
+    fork.fork(SID, request_id="r2", sessions=sessions)
+    assert "--model" not in no_exec[-1]["argv"]
+    assert model_pins("r2") == []
+
+
+def test_a_resume_of_a_pinned_fork_runs_its_rows_own_model(work, harness, no_exec):
+    parent(work, model="")
+    forked = fork.fork(SID, request_id="r2",
+                       sessions=Transcripts(PINNED)).data["session_id"]
+    conn = store.connect()
+    try:
+        conn.execute("UPDATE launches SET pid_started = 1.0 WHERE request_id = 'r2'")
+        found = store.resolve(conn, forked)
+    finally:
+        conn.close()
+    resumed = api.launch(ReplayRequest(found, resume_of="r2", request_id="r3", actor="ann"))
+    assert "--model" not in resumed.argv and PINNED not in resumed.argv
+
+
 # -- stamps and interface 3 ----------------------------------------------------------------
 
 FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"

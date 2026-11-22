@@ -16,6 +16,13 @@ launch are composed again. So a fork has no comms name, no start posture, no bri
 preset, and its row records `fork_of`, the session id it copies, which makes its launch
 kind `fork`.
 
+**Its model** is the one the session forked runs, so the fork shares its prompt cache: the
+row's model when the row names one, else the model pin a relaunch takes (`pin.choose`),
+the model the session's transcript last used, since a session whose row names no model
+may run another (after `/model`, or after a pinned relaunch). As a relaunch's, the pin is
+the fork's model and a `model-pin` event on its row, never a value in the row, and when
+nothing can be read the fork runs the harness's default model.
+
 **Its environment** is built as a replay's, from the parent row's recorded base and the
 launcher's settings, never from the process that asked for the fork, so the comms name
 and claim socket of the session it copies never reach it. A caller of `api.fork` may add
@@ -56,7 +63,7 @@ from moxi import exit as codes
 from moxi import modules as moxi_modules
 from moxi import names as moxi_names
 
-from . import catalog, first, relaunch, store
+from . import catalog, first, pin, relaunch, store
 from .target import NotLaunched
 
 Refused = relaunch.Refused
@@ -75,13 +82,13 @@ def fork(session_id: str, *, target: str = "terminal", slot: int | str | None = 
          caller_env: Mapping[str, str] | None = None,
          launch: Callable[..., Any] | None = None,
          warn: Callable[[str], None] | None = None,
-         conn: sqlite3.Connection | None = None) -> Result:
+         conn: sqlite3.Connection | None = None, sessions: Any = pin.LOOK) -> Result:
     """Fork the session `session_id`, and say what the launch did: its lines and its
     data (`outcome` `forked` or `failed`, the new `session_id`, `fork_of` and the
     launch's own fields). Raises a refusal with nothing written."""
     result, parent = start(session_id, target=target, slot=slot, stamps=stamps,
                            request_id=request_id, caller_env=caller_env, launch=launch,
-                           warn=warn, conn=conn)
+                           warn=warn, conn=conn, sessions=sessions)
     lines = (result.line,)
     if result.outcome is not None and result.outcome.line() != result.line:
         lines += (result.outcome.line(),)
@@ -99,11 +106,13 @@ def start(session_id: str, *, target: str = "terminal",
           request_id: str | None = None, caller_env: Mapping[str, str] | None = None,
           launch: Callable[..., Any] | None = None,
           warn: Callable[[str], None] | None = None,
-          conn: sqlite3.Connection | None = None) -> tuple[Any, str]:
+          conn: sqlite3.Connection | None = None,
+          sessions: Any = pin.LOOK) -> tuple[Any, str]:
     """Launch the fork of `session_id`; return the launch's `api.LaunchResult`, with the
     new session's id once the launch log knows it, and the id of the session forked (the
     one its launch was last known by). Raises a refusal with nothing written. `launch`
-    stands in for `api.launch`."""
+    stands in for `api.launch`, `sessions` for sessions' API, which the model pin reads
+    through (None: not installed)."""
     from . import api
 
     if target not in TARGETS:
@@ -123,7 +132,9 @@ def start(session_id: str, *, target: str = "terminal",
         refused = refusal(row, parent)
         if refused is not None:
             raise refused
+    chosen = pin.choose(row, parent, sessions=sessions, env=env)
     request = api.ReplayRequest(row, fork_of=parent, target=target, slot=slot,
+                                model_pin=chosen.model if chosen.pinned else None,
                                 stamps=dict(stamps or {}),
                                 request_id=request_id or str(uuid.uuid4()),
                                 actor=first.actor(env))

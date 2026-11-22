@@ -480,7 +480,10 @@ of the shipped catalogs carries one, and a row without one fails the catalog che
 
 - `copy`: the rows that shape the request the harness sends (the directory, the model,
   the effort, the tools, the permission rows, `extra_flags` and the rest) are taken as
-  the session ran them, so the fork reads the session's prompt cache;
+  the session ran them, so the fork reads the session's prompt cache. A launch that names
+  no model may run another (after `/model`, or a relaunch on the model its transcript
+  last used); its fork runs the model the transcript last used, as a relaunch does, and
+  the harness's default when none can be read;
 - `drop`: the rows about who the session is, what its first turn says and how it lives
   and ends (its name, comms identity, posture, instructions, brief, handoff, keep-warm,
   recycle and usage marks) are unset;

@@ -91,8 +91,10 @@ conversation, which may be live. Its values are the row's, each by its catalog r
 `fork` class (`catalog.forked`): the rows that shape the request the harness sends as the
 parent ran them, so the fork reads the parent's prompt cache; the rows about who the
 session is, its first turn and how it lives and ends unset; and its target and slot its
-own. It has no preset, no comms name, no start posture and no brief, and its row records
-`fork_of`, the session id it copies, which makes its launch kind `fork`. Its environment
+own. Its model is the session's: the row's, else the model pin a relaunch takes, which,
+as a relaunch's, is a `model-pin` event and never a value in its row. It has no preset,
+no comms name, no start posture and no brief, and its row records `fork_of`, the session
+id it copies, which makes its launch kind `fork`. Its environment
 is built as any replay's, so nothing of the asking process's session reaches it, and
 then gets the request's `stamps`.
 
@@ -232,10 +234,10 @@ class ReplayRequest:
     first launch reached through `relaunch_of`, for a relaunch; else the new launch's
     own id).
 
-    `model_pin` is the model a relaunch comes back on (`pin.choose`): it is the launch's
-    model only when the stored values name none, it never reaches the new row's
-    `values_json` (so a resume of the new launch runs the row's own model), and the new
-    launch records it as a `model-pin` event.
+    `model_pin` is the model a relaunch comes back on, or a fork runs (`pin.choose`): it
+    is the launch's model only when the stored values name none, it never reaches the new
+    row's `values_json` (so a resume of the new launch runs the row's own model), and the
+    new launch records it as a `model-pin` event.
 
     `replacing` is the session id of the session the replay takes over, for `check`
     before a relaunch exits it: comms' name held by that session, and the slot whose run
@@ -584,7 +586,8 @@ def _fork_of(request) -> str | None:
 
 def _forked(request: ReplayRequest) -> Replayed:
     """A fork's resolved values: the row's by each row's `fork` class, in the request's
-    target and slot, with no preset, comms name, start posture, brief or handoff."""
+    target and slot, its model the request's `model_pin` when the row names none, with no
+    preset, comms name, start posture, brief or handoff."""
     row = request.row
     if request.relaunch_of or request.resume_of:
         raise ValueError("a fork is not a relaunch or a resume")
@@ -603,6 +606,9 @@ def _forked(request: ReplayRequest) -> Replayed:
               "target": target}
     if request.slot is not None:
         values["slot"] = str(request.slot)
+    model_pin = request.model_pin if request.model_pin and not values.get("model") else None
+    if model_pin is not None:
+        values["model"] = model_pin
     mode, turns, warnings = presets.mode_of(row.harness, target, identity=None)
     links = {name for name, on in (
         ("turns", turns), ("projects", bool(row.project_key)),
@@ -613,7 +619,8 @@ def _forked(request: ReplayRequest) -> Replayed:
         preset_name=None, cwd=row.cwd, scratch=bool(values.get("scratch")),
         project_key=row.project_key, agents=(), identity=None, scope=None, posture="",
         target=target, off_posture=bool(row.values.get("off_posture", False)),
-        links=frozenset(links), warnings=tuple(warnings), hold=request.hold)
+        links=frozenset(links), warnings=tuple(warnings), hold=request.hold,
+        model_pin=model_pin)
 
 
 def _replayed(request: ReplayRequest) -> Replayed:
