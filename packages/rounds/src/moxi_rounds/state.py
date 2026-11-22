@@ -939,6 +939,11 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "thread.decided": _thread_decided,
     "repair": _repair,
     "round.closed": _round_closed,
+    "queue.join": _kept,
+    "queue.left": _kept,
+    "queue.batch": _kept,
+    "queue.landed": _kept,
+    "queue.ejected": _kept,
 }
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
