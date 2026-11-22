@@ -557,7 +557,7 @@ def _shares(found: _Look, git: Git, *, name: str, stage, opened,
                 if one.status is not None and one.build.target == found.target}
     key = (name, stage.id)
     statuses[key] = status
-    shared = builds.sharing(git, statuses)[key]
+    shared = [other for other, _how in builds.sharing(git, statuses)[key]]
     if not shared:
         return []
     said = ", ".join(f"{other} {other_stage}" for other, other_stage in shared)

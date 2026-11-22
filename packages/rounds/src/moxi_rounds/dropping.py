@@ -406,8 +406,9 @@ def _not_the_leads(round_state: states.State, name: str, build: builds.Build, se
     if found.status.has_own_commits:
         said += " with commits of its own"
     if found.shares:
-        said += ", sharing with " + ", ".join(f"{other} {stage}"
-                                              for other, stage in found.shares)
+        said += ", " + builds.share_words(
+            ((one.round, one.stage, one.relation) for one in found.shares),
+            merged=found.status.state == builds.MERGED)
     return f"reads {said} ({found.status.why}), and a drop could lose its work"
 
 

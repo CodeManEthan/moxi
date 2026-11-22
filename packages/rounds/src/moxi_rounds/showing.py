@@ -601,7 +601,8 @@ def check_line(run: dict) -> str:
 
 def build_line(one: dict) -> str:
     """A build in a line: `B1: proj-a on work, base 81c7f5b, target main, builder
-    coder; building, idle, shares with proj-a/b-round B2`."""
+    coder; building, idle, inside proj-a/b-round B2 (finishes first)`, each build it
+    shares commits with worded by its relation (`builds.share_words`)."""
     line = (f"{one['stage']}: {one['repo']} on {one['branch']}, base "
             f"{(one['base'] or '')[:7]}, target {one['target']}, builder "
             f"{one['builder']}; ")
@@ -611,8 +612,10 @@ def build_line(one: dict) -> str:
     if one["idle"]:
         line += ", idle"
     if one["shares"]:
-        line += ", shares with " + ", ".join(f"{other['round']} {other['stage']}"
-                                             for other in one["shares"])
+        line += ", " + builds.share_words(
+            ((other["round"], other["stage"], other.get("relation", builds.OVERLAPS))
+             for other in one["shares"]),
+            merged=one["state"] == builds.MERGED)
     return line
 
 

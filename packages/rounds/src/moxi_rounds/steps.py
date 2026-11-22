@@ -186,8 +186,8 @@ class Seen:
     when that could not be read; `tree`, the worktree as `finish` reads it: None where
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
     or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
-    name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
-    `(round, stage)` of each build it shares commits with; `ratify`, the project's
+    name; `actions`, the repo's finish actions, each with its `id`; `shares`, a
+    `builds.Share` for each build it shares commits with; `ratify`, the project's
     setting of that name; `design`, what `commission` refuses on while `design.md`
     holds other bytes than its current version was frozen from (`versions.unchanged`),
     None when it holds the same or that was not read;
@@ -211,7 +211,7 @@ class Seen:
     tree: str | None = None
     check_on: str = "merged"
     actions: tuple[Mapping, ...] = ()
-    shares: tuple[tuple[str, str], ...] = ()
+    shares: tuple[builds.Share, ...] = ()
     ratify: str = "majors"
     design: Unmet | None = None
     problem: Unmet | None = None

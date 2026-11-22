@@ -83,6 +83,16 @@ not say which branch a commit was made on, so sharing is read from both sides al
 no order of records, commissions or reads changes it, and neither build is given the
 shared commits or loses them. A build that ended has no range.
 
+Of two builds that share, each stands in one **relation** to the other (`relation`):
+`inside` it, when its range is a strict part of the other's; `contains` it, when the
+other's range is a strict part of its own; else they `overlap` (each has a commit the
+other lacks, or the ranges are equal). The relation sets the **order** of their
+finishes (`order`): of two builds one strictly inside the other, the one whose work
+reaches the target first finishes first and the other is held until that work is on
+the target. That is the inner build, unless the outer one reads `merged`: its work is
+on the target already, so it goes first, and the inner build is held until its finish
+records the landing. Overlapping builds have no order, and neither finishes.
+
 **Idle** qualifies `building`: a build reads idle when the commit date of its head is
 older than the `idle_days` of its round's project (`idle`).
 
@@ -103,7 +113,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TypeVar
+from typing import NamedTuple, TypeVar
 
 from . import state as states
 from .errors import RoundsError
@@ -649,18 +659,100 @@ def span(git: Git, status: Status) -> frozenset[str]:
     return frozenset(git.between(status.target_before, status.head))
 
 
-def sharing(git: Git, statuses: Mapping[_Key, Status]) -> dict[_Key, tuple[_Key, ...]]:
-    """Which builds share commits. `statuses` are builds of one repo and one target, in
-    any rounds, each read now and under the key the caller names it by. Gives each key
-    the keys of the other builds whose range has a commit in common with its own,
-    sorted, so the answer is the same in whatever order the builds are given; a build
-    that shares with none, or has no range, gets none."""
+#: The relations of a build's range to the range of another it shares commits with.
+INSIDE = "inside"
+CONTAINS = "contains"
+OVERLAPS = "overlaps"
+RELATIONS = (INSIDE, CONTAINS, OVERLAPS)
+
+
+def relation(own: frozenset[str], theirs: frozenset[str]) -> str | None:
+    """How the range `own` stands to the range `theirs`: `INSIDE` when it is a strict
+    part of it, `CONTAINS` when `theirs` is a strict part of `own`, `OVERLAPS` when
+    they share a commit and neither is (equal ranges among them); None when they share
+    none."""
+    if not own & theirs:
+        return None
+    if own < theirs:
+        return INSIDE
+    if theirs < own:
+        return CONTAINS
+    return OVERLAPS
+
+
+def sharing(git: Git, statuses: Mapping[_Key, Status]
+            ) -> dict[_Key, tuple[tuple[_Key, str], ...]]:
+    """Which builds share commits, and how. `statuses` are builds of one repo and one
+    target, in any rounds, each read now and under the key the caller names it by.
+    Gives each key `(other key, relation)` for each other build whose range has a
+    commit in common with its own, its `relation` to that build, sorted by key, so the
+    answer is the same in whatever order the builds are given; a build that shares
+    with none, or has no range, gets none."""
     ranges = {key: span(git, status) for key, status in statuses.items()}
-    found: dict[_Key, tuple[_Key, ...]] = {}
+    found: dict[_Key, tuple[tuple[_Key, str], ...]] = {}
     for key, own in ranges.items():
-        found[key] = tuple(sorted(other for other, theirs in ranges.items()
-                                  if other != key and own & theirs))
+        related = ((other, relation(own, theirs)) for other, theirs in ranges.items()
+                   if other != key)
+        found[key] = tuple(sorted((other, how) for other, how in related
+                                  if how is not None))
     return found
+
+
+class Share(NamedTuple):
+    """One other open build a build shares commits with: the `round` and `stage` that
+    name it, the build's `relation` to it, and whether it reads `merged`."""
+
+    round: str
+    stage: str
+    relation: str
+    merged: bool = False
+
+
+#: What a build that shares does at the finish's sharing gate (`order`).
+FIRST = "first"
+HELD_FOR_WORK = "held for work"
+HELD_FOR_LANDING = "held for landing"
+REFUSED = "refused"
+
+
+def order(share: Share, *, merged: bool) -> str:
+    """What a build that reads `merged` or not does at the finish's sharing gate, for
+    the build `share` names: `FIRST`, it may finish before it; `HELD_FOR_WORK`, it
+    contains it and is held until its work is on the target; `HELD_FOR_LANDING`, it
+    is inside it, that build reads merged, and it is held until that build's finish
+    records the landing; `REFUSED`, they overlap. A build that reads merged holds no
+    other build."""
+    if share.relation == OVERLAPS:
+        return REFUSED
+    if share.relation == INSIDE:
+        return HELD_FOR_LANDING if share.merged else FIRST
+    return FIRST if merged else HELD_FOR_WORK
+
+
+#: The words for a share, by relation and then by whether the build reads merged.
+_SHARE_WORDS = {
+    (INSIDE, False): "finishes first",
+    (INSIDE, True): "held until its finish records the landing",
+    (CONTAINS, False): "held until its work is on the target",
+    (CONTAINS, True): "finishes first",
+}
+
+
+def share_words(shares: Iterable[tuple[str, str, str]], *, merged: bool) -> str:
+    """The builds `shares`, each `(round, stage, relation)`, in words for a build that
+    reads `merged` or not: `inside proj-a/b B1 (finishes first)` or `contains proj-a/b
+    B2 (held until its work is on the target)` for each build in a stack with it,
+    then `shares with proj-a/b B3, proj-a/c B1` for those it overlaps; empty for
+    none."""
+    said, overlapping = [], []
+    for name, stage, how in shares:
+        if how == OVERLAPS:
+            overlapping.append(f"{name} {stage}")
+        else:
+            said.append(f"{how} {name} {stage} ({_SHARE_WORDS[(how, merged)]})")
+    if overlapping:
+        said.append("shares with " + ", ".join(overlapping))
+    return ", ".join(said)
 
 
 __all__ = ["CREDIT", "LEAD", "OPERATOR", "DROPPED", "FINISHED", "GONE", "EMPTY",
@@ -668,5 +760,7 @@ __all__ = ["CREDIT", "LEAD", "OPERATOR", "DROPPED", "FINISHED", "GONE", "EMPTY",
            "OWN_LANDING", "NOTHING_OWN", "HAND_MERGE", "FAST_FORWARD", "READINGS",
            "TIPS", "MERGE", "LANDED", "Reading", "Landing", "Build", "Status",
            "NoTarget", "RANGED", "builds", "opened", "from_item", "landings", "current",
-           "shows_work", "read", "idle", "span", "sharing", "drop_by",
+           "shows_work", "read", "idle", "span", "INSIDE", "CONTAINS", "OVERLAPS",
+           "RELATIONS", "relation", "sharing", "Share", "FIRST", "HELD_FOR_WORK",
+           "HELD_FOR_LANDING", "REFUSED", "order", "share_words", "drop_by",
            "credit_refusal"]

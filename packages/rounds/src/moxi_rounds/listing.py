@@ -392,8 +392,9 @@ def _build_lines(listed: Sequence, now: str) -> list[str]:
             what = [said["state"]] + (["idle"] if one.idle else [])
             what = ", ".join(what)
             if one.shares:
-                what += ", shares with " + ", ".join(f"{name} {stage}"
-                                                     for name, stage in one.shares)
+                what += ", " + builds.share_words(
+                    ((other.round, other.stage, other.relation) for other in one.shares),
+                    merged=one.status.state == builds.MERGED)
             what += f"; the {said['drop_by']}'s to drop"
         lines.append(f"  {one.round} {one.build.stage}: {one.build.repo} on "
                      f"{one.build.branch}; {what}")
