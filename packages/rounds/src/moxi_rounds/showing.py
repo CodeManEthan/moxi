@@ -56,8 +56,8 @@ from moxi import store
 from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
                folders,
                index, leads, log, numbers,
-               open_builds, questions, shown, sizing, skips, steps, tracing, versions,
-               waits)
+               open_builds, places, questions, shown, sizing, skips, steps, tracing,
+               versions, waits)
 from . import settings as own
 from . import state as states
 from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet,
@@ -449,6 +449,9 @@ def _builds(found: Shown) -> list:
                "slices": sizing.slices_of(found.state, one),
                "briefs": sizing.verifications_of(found.state, one),
                "drift": None, "finish": []}
+        # A folder is shown as the place it names here, whichever form the record has.
+        row.update({key: places.expand_home(row[key]) for key in ("worktree", "scratch")
+                    if isinstance(row[key], str)})
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -580,8 +583,11 @@ def _check_run(state: states.State, build: builds.Build,
             break
     if found is None:
         return None
-    return {key: found.get(key) for key in ("step", "commit", "exit_code", "duration_s",
-                                            "output", "at")}
+    run = {key: found.get(key) for key in ("step", "commit", "exit_code", "duration_s",
+                                           "output", "at")}
+    if isinstance(run["output"], str):
+        run["output"] = places.expand_home(run["output"])
+    return run
 
 
 def check_line(run: dict) -> str:

@@ -36,7 +36,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import builds, ending, findings, folders, questions, report_block, verdicts, write
+from . import (builds, ending, findings, folders, places, questions, report_block,
+               verdicts, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Refused, RoundsError, Unmet
@@ -233,7 +234,10 @@ def reread(target: str, report: Path | str, *, by: str, settings=None,
                        None)
         if verdict is None:
             given = verdicts.path(report, round_dir)
-            was = next((one for one in state.verdicts if one.report == given), None)
+            # A path the record wrote whole and one it wrote from `~` name one file.
+            was = next((one for one in state.verdicts
+                        if places.expand_home(one.report) == places.expand_home(given)),
+                       None)
             if was is not None:
                 raise Refused([Unmet(
                     f"{report} changed since its verdict was recorded on line {was.n}: "
