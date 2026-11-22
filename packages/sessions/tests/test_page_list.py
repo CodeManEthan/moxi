@@ -263,7 +263,7 @@ def test_a_row_carries_what_was_read_and_null_for_what_was_not(roots):
     named = found[sid(1)]
     assert named["name"] == "fix the tests" and named["folder"] == "/work/proj-a"
     assert named["subagents"] == 2 and named["recent"] is True
-    assert named["by_program"] is None and named["model"] == "claude-model-y"
+    assert named["by_program"] is False and named["model"] == "claude-model-y"
     assert named["path"].endswith(f"{sid(1)}.jsonl") and named["size"] > LONG
     assert named["activity"]["who"] == "agent"
     assert named["activity"]["text"].startswith("All fixed. é")
@@ -549,6 +549,19 @@ def test_an_opened_session_with_nothing_read_is_nulls(roots):
 
     opencode = read("/api/session", f"harness=opencode&session={seeded['opencode']}")
     assert opencode["reply"] is None and opencode["size"] is None
+
+
+def test_an_opened_session_says_by_program_only_where_its_head_was_read(roots):
+    seeded = seed(roots)
+
+    def by_program(harness: str, session: str):
+        return read("/api/session", f"harness={harness}&session={session}")["by_program"]
+
+    assert by_program("claude", sid(1)) is False         # a head that names `cli`
+    assert by_program("claude", sid(2)) is True          # a head that names `sdk-cli`
+    assert by_program("claude", sid(3)) is None          # a head that names nothing
+    assert by_program("codex", tid(1)) is None
+    assert by_program("opencode", seeded["opencode"]) is None
 
 
 def test_an_id_the_list_does_not_hold_is_refused(roots):

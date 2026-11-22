@@ -264,10 +264,11 @@ def compiled(names: PrivateNames) -> Compiled:
     return _compiled[1]
 
 
-def spans(t, names: PrivateNames | None = None, eng=None) -> list:
+def spans(t, names: PrivateNames | None = None, eng=None, *, strict=False) -> list:
     """The private-names set's hits on `t`, as (set, rule, description, start, end).
 
-    `names` defaults to the config's list and `eng` to the active engine.
+    `names` defaults to the config's list and `eng` to the active engine. With `strict`,
+    no `allowed` entry and neither the author's name nor email cuts a match.
     """
     if names is None:
         names = private_names()
@@ -279,6 +280,8 @@ def spans(t, names: PrivateNames | None = None, eng=None) -> list:
     entries, cuts = comp.present(t, eng)
     if not entries:
         return []
+    if strict:
+        cuts = []
     allowed = sorted(span for c in cuts for span in comp.occurrences(c, t, eng))
     a_starts = [s for s, _ in allowed]
     a_reach = []

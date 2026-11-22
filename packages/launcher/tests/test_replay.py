@@ -10,6 +10,7 @@ import dataclasses
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ from moxi.paths import Layout
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, slots, store, targets
+from moxi_launcher import api, catalog, first, names, slots, store, targets
 from moxi_launcher.api import LaunchRequest, ReplayRequest
 from moxi_launcher.compose import Context, claude, codex, common
 
@@ -553,16 +554,18 @@ def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 
 
-def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec):
+def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec, monkeypatch):
     api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
                              session_id=SID, actor="ann"))
     where = row("r1").cwd
-    assert where == str(common.scratch_dir("r1"))
+    assert where == str(common.scratch_dir(row("r1").values["name"]))
     ended()
+    # Under another name the folder would be another; the replay keeps the row's.
+    monkeypatch.setattr(names, "now", lambda: datetime(2026, 11, 9, 8, 0))
     got = api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2",
                                    actor="ann"))
     assert row("r2").cwd == where and no_exec[-1]["cwd"] == where
-    assert not common.scratch_dir("r2").exists()
+    assert row("r2").values["name"] == row("r1").values["name"]
     assert got.state == "started"
 
 
@@ -744,3 +747,93 @@ def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
                                    hold="run1", respawn=True))
     assert (got.state, got.reason) == ("failed", "live-pane")
     assert row("r2").state == "failed"
+
+
+def test_a_relaunched_row_keeps_recycle_at_limit_relaunch(work, harness, no_exec,
+                                                          monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(request(work))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    replayed = api._replayed(ReplayRequest(
+        dataclasses.replace(old, target="slot", values_json=json.dumps(stored)),
+        relaunch_of="r1", request_id="r2", actor="ann"))
+    assert replayed.values["recycle_at_limit"] == "relaunch"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
+def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
+        harness, tmp_path, no_exec, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
+                             session_id=SID, actor="ann"))
+    old = row("r1")
+    # Recorded before a scratch launch was refused recycle_at_limit = relaunch.
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    old = dataclasses.replace(old, target="slot", values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replayed = api._replayed(ReplayRequest(old, request_id="r2", actor="ann",
+                                               **replay))
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert ("recycle_at_limit relaunch is not applied: a scratch launch can't recycle "
+                "itself") in replayed.warnings
+        # So the launch check does not refuse the replay.
+        assert "scratch-recycle" not in {r.code for r in api._check(replayed, {})}
+    # compact is replayed as it was.
+    stored = {**old.values, "recycle_at_limit": "compact"}
+    replayed = api._replayed(ReplayRequest(
+        dataclasses.replace(old, values_json=json.dumps(stored)), relaunch_of="r1",
+        request_id="r2", actor="ann"))
+    assert replayed.values["recycle_at_limit"] == "compact"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
+# -- the model pin ------------------------------------------------------------------------
+
+
+def events_of(rid: str, kind: str) -> list[dict]:
+    conn = store.connect(create=False)
+    try:
+        return [e.detail for e in store.events(conn, rid) if e.kind == kind]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("harness_name, flag, sid", [("claude", "--model", SID),
+                                                     ("codex", "-m", None)])
+def test_a_relaunch_runs_on_the_pin_and_the_new_row_keeps_no_model(
+        work, harness, no_exec, harness_name, flag, sid):
+    api.launch(request(work, sid=sid, harness=harness_name))
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="ann", model_pin="claude-fable-5-2"))
+    assert got.argv[got.argv.index(flag) + 1] == "claude-fable-5-2"
+    assert not row("r2").values.get("model")
+    assert events_of("r2", api.MODEL_PIN) == [{"model": "claude-fable-5-2",
+                                               "how": "pinned"}]
+    # A replay of the relaunched launch with no pin runs the row's own model: the default.
+    again = api.launch(ReplayRequest(row("r2"), relaunch_of="r2", request_id="r3",
+                                     actor="ann"))
+    assert flag not in again.argv and "claude-fable-5-2" not in again.argv
+    assert events_of("r3", api.MODEL_PIN) == []
+
+
+def test_a_resume_of_a_pinned_relaunch_runs_the_rows_own_model(work, harness, no_exec):
+    api.launch(request(work))
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann",
+                             model_pin="claude-fable-5-2"))
+    ended("r2")
+    resumed = api.launch(ReplayRequest(row("r2"), resume_of="r2", request_id="r3",
+                                       actor="ann"))
+    assert "--resume" in resumed.argv
+    assert "--model" not in resumed.argv and "claude-fable-5-2" not in resumed.argv
+
+
+def test_a_row_that_names_a_model_takes_no_pin(work, harness, no_exec):
+    api.launch(request(work, model="opus"))
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="ann", model_pin="claude-fable-5-2"))
+    assert got.argv[got.argv.index("--model") + 1] == "opus"
+    assert "claude-fable-5-2" not in got.argv
+    assert row("r2").values["model"] == "opus" and events_of("r2", api.MODEL_PIN) == []

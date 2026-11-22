@@ -38,6 +38,12 @@ none); the operator, any build, and one git can't read. One `build.dropped` even
 the whole drop: who, the pointer, and the branch's tip. It changes no question and no
 hold, and the stage stays owed: it is commissioned again, or taken out of the plan.
 
+**A scratch folder in use.** A drop is never refused for a process that uses the
+scratch folder of a build it ends. Just before the folder would move, the processes are
+read (`sweeping.remove_build_dirs`): one a process uses is not moved and stays for the
+sweep, named with the process; where the processes can't be read, the drop says so and
+goes on.
+
 **What goes.** A drop deletes no branch, so the work can be commissioned again. Once
 its event is on the log, the worktree and scratch folder of each build it ended are
 removed under the removal rule (`removal`), and those the rule keeps are named with
@@ -86,7 +92,8 @@ class Dropped:
     written. `finished` says the call completed a drop that an earlier call was stopped
     in the middle of. `removed` and `kept` hold the folders of the builds that ended
     with it that the removal rule took and kept, and `refs` what became of CI's own
-    refs they pushed.
+    refs they pushed. `unscanned` says the processes were not read before a scratch
+    folder's move, where they could not be read.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -100,6 +107,7 @@ class Dropped:
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
     refs: tuple[ci_refs.Ref, ...] = ()
+    unscanned: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,7 +115,9 @@ class BuildDropped:
     """One build as it was dropped: the round's `name`, the `stage`, who it was `by`
     and the `record` given, the `event` written, the build's folders the removal
     rule `removed` and `kept`, and what became of CI's own `refs` it pushed.
-    `failed` pairs each after-append callback that raised with what it raised."""
+    `failed` pairs each after-append callback that raised with what it raised.
+    `unscanned` says the processes were not read before a scratch folder's move,
+    where they could not be read."""
 
     name: str
     stage: str
@@ -118,6 +128,7 @@ class BuildDropped:
     kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
     refs: tuple[ci_refs.Ref, ...] = ()
+    unscanned: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -256,7 +267,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
                    went=tuple(event["questions"].items()), event=event,
                    events=written.events, finished=finished[0],
                    removed=cleaned.removed, kept=cleaned.kept,
-                   failed=written.failed, refs=refs)
+                   failed=written.failed, refs=refs, unscanned=cleaned.unscanned)
 
 
 def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by: str,
@@ -339,20 +350,30 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by:
     return BuildDropped(name=name, stage=stage_id, by=by, record=record,
                         event=written.events[0], removed=cleaned.removed,
                         kept=cleaned.kept, failed=written.failed,
-                        refs=ci_refs.remove(written.view.state, build, settings))
+                        refs=ci_refs.remove(written.view.state, build, settings),
+                        unscanned=cleaned.unscanned)
 
 
-def _remove_dirs(state: states.State, name: str, ended, settings) -> removal.Removed:
+@dataclass(frozen=True)
+class _Cleaned:
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
+    unscanned: tuple[str, ...] = ()
+
+
+def _remove_dirs(state: states.State, name: str, ended, settings) -> _Cleaned:
     """Remove the folders of the builds `ended`, which the drop just ended, under the
-    removal rule. No branch is deleted, so B reads every branch as staying."""
-    removed, kept = [], []
+    removal rule, leaving a scratch folder a process uses for the sweep. No branch is
+    deleted, so B reads every branch as staying."""
+    removed, kept, unscanned = [], [], []
     for build in ended:
         commissioned = checking.commission_of(state, build)
-        done = removal.removes(name, commissioned, settings=settings,
-                               **sweeping.trash_log(name, commissioned))
+        done, unread = sweeping.remove_build_dirs(name, commissioned, stage=build.stage,
+                                                  settings=settings)
         removed += done.removed
         kept += done.kept
-    return removal.Removed(tuple(removed), tuple(kept))
+        unscanned += unread
+    return _Cleaned(tuple(removed), tuple(kept), tuple(unscanned))
 
 
 def _tip(build: builds.Build) -> dict:

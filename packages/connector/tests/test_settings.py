@@ -23,7 +23,8 @@ def test_show_json_gives_every_key_a_label(capsys):
     keys = show_json(capsys)
     assert {name: key["label"] for name, key in keys.items()} == {
         "enabled": "The public door", "port": "Port", "public_url": "Public address",
-        "redirect_uris": "Sign-in callbacks", "refresh_days": "A sign-in lasts for"}
+        "redirect_uris": "Sign-in callbacks", "refresh_days": "A sign-in lasts for",
+        "tools.withheld": "Tools withheld from Claude"}
     assert keys["public_url"]["line"] == (
         "The public origin, https://name:port with no path, when no tunnel gives one.")
     assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == {

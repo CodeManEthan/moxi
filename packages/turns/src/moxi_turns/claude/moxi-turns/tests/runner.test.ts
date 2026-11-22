@@ -13,8 +13,8 @@ type E = any
 
 const start = ($: E) => $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
 const turnStart = ($: E, turnId: string) => $.turn.start({ text: '', turnId })
-const turnEnd = ($: E, turnId: string, reason = 'answer') =>
-  $.turn.complete({ answer: '', durationMs: 1, isAborted: reason === 'aborted', turnId, reason })
+const turnEnd = ($: E, turnId: string, reason = 'answer', answer = '') =>
+  $.turn.complete({ answer, durationMs: 1, isAborted: reason === 'aborted', turnId, reason })
 
 async function attached($: E, w: World): Promise<void> {
   await start($)
@@ -415,13 +415,13 @@ describe('the report queue', () => {
     const w = world(on)
     await start($)
     await turnStart($, 't1')
-    await turnEnd($, 't1')
+    await turnEnd($, 't1', 'answer', 'done.')
     expect(w.got).toEqual([])
     await w.hello()
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
-    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.2.1' })
+    expect(w.reports()[0]).toEqual({ seq: 1, kind: 'session', session_id: 'S-1', mod_version: '0.2.2' })
     expect(w.reports().map(r => r.seq)).toEqual([1, 2, 3])
-    expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false })
+    expect(w.reports()[2]).toEqual({ seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: 'done.' })
   })
 
   test('a turn-start hook waits at most 1 s for its report, and the report still lands after', async ($: E, on) => {
@@ -467,7 +467,7 @@ describe('main-loop turns only', () => {
     expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
     expect(w.reports().slice(1)).toEqual([
       { seq: 2, kind: 'turn.start', turn_id: 't1' },
-      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false },
+      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false, answer: '' },
     ])
   })
 
@@ -517,6 +517,42 @@ describe('the context asks', () => {
     expect(done).toBe(false)
     await w.clock.advance(1)
     expect((await r).additionalContext ?? []).toEqual([])
+  })
+
+  test('a prompt ask waits the session\'s prompt bound + 1 s, a ready\'s listen_wait_ms + 1 s', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello({ prompt_wait_ms: 9000 })
+    w.answers['/ask/context'] = 'hang'
+    const r = $.classic.UserPromptSubmit({ prompt: 'hi' })
+    let done = false
+    void r.then(() => { done = true })
+    await w.clock.advance(9999)
+    await w.clock.settle()
+    expect(done).toBe(false)
+    await w.clock.advance(1)
+    expect((await r).additionalContext ?? []).toEqual([])
+    const ready = sessionStart($)
+    let readyDone = false
+    void ready.then(() => { readyDone = true })
+    await w.clock.advance(2999)
+    await w.clock.settle()
+    expect(readies(w).length).toBe(1)
+    expect(readyDone).toBe(false)
+    await w.clock.advance(1)
+    await w.clock.settle()
+    expect(readyDone).toBe(true)
+  })
+
+  test('a prompt ask says whether it opens a turn or joins the running one', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.answers['/ask/context'] = { context: null }
+    await $.classic.UserPromptSubmit({ prompt: 'idle' })
+    await turnStart($, 't1')
+    await $.classic.UserPromptSubmit({ prompt: 'mid-turn' })
+    const asked = w.got.filter(g => g.path === '/ask/context' && g.body.event === 'prompt').map(g => [g.body.text, g.body.opens])
+    expect(asked).toEqual([['idle', true], ['mid-turn', false]])
   })
 })
 

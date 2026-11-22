@@ -326,6 +326,58 @@ def test_a_message_numbered_lower_than_a_page_or_session_ruling_is_not_compared(
     assert mark(ROUND, "C1", record="comms:1").marked == ("C1",)
 
 
+def page(act, at):
+    """A page's pointer for one act at `at`."""
+    return f"page:rounds/{act}@{at}"
+
+
+@pytest.mark.parametrize("at", [T1, T2, LATER])
+def test_a_page_act_at_or_after_the_ruling_is_a_showing(rounds, at):
+    rule(at=T1, record="comms:12")
+
+    marked = mark(ROUND, "C1", record=page("readback0001", at))
+
+    assert marked.marked == ("C1",)
+    assert last(round_log(rounds))["record"] == page("readback0001", at)
+
+
+def test_a_page_act_before_the_ruling_is_refused_and_says_when_it_was_recorded(
+        rounds, capsys):
+    rule(at=T2, record="comms:12")
+    before = logs(rounds)
+    early = page("readback0001", T1)
+
+    assert main(["mark", ROUND, "C1", "--shown", "--record", early]) == 3
+
+    err = capsys.readouterr().err
+    assert (f"{early} is before C1 was recorded at {T2}: a page can only show a "
+            "ruling on record") in err
+    assert f"run: moxi rounds mark {ROUND} C1 --shown --record PTR" in err
+    assert logs(rounds) == before
+
+
+def test_a_page_act_is_compared_with_each_ruling_it_marks(rounds):
+    rule(at=T1, record="comms:12")
+    rule(at=T3, record="comms:40", text="A second.")
+
+    with pytest.raises(Refused) as refused:
+        mark(ROUND, "C1,C2", record=page("readback0001", T2))
+
+    [unmet] = refused.value.unmet
+    assert unmet.reason.startswith(f"{page('readback0001', T2)} is before C2 was "
+                                   f"recorded at {T3}")
+
+
+def test_the_rulings_own_page_pointer_is_no_showing_of_it(rounds):
+    said = page("pickoption01", T1)
+    rule(at=T1, record=said)
+
+    with pytest.raises(Refused, match=f"{said} is the pointer of C1 itself"):
+        mark(ROUND, "C1", record=said)
+    # A read-back in the same second is another act, so another pointer.
+    assert mark(ROUND, "C1", record=page("readback0001", T1)).marked == ("C1",)
+
+
 @pytest.mark.parametrize("target, ids, pointer, says, fix", [
     (ROUND, "C1", None, "a mark needs a pointer to where he was shown the sentence",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),

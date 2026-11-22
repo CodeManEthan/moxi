@@ -7,10 +7,13 @@ top and common git dir with one `git rev-parse`, and reads notes' config and bot
 allowlists once. Then, for each file git hands it, it answers with the text `redact` gives
 for notes' sets at the file's path. The file on disk keeps the original.
 
-It redacts exactly what the gates refuse in a text blob, and `redact` reaches a fixed
-point, so a redacted blob passes the prepare step and both gates. What it passes through
-unchanged, and so is still left out or refused by them: a blob with a NUL byte in its
-first 8,000 bytes (git's own binary test), and a blob over `max_mib`.
+It redacts everything the gates refuse in a text blob, a token an invisible character
+splits among them, and more: a secret beside a `gitleaks:allow` mark, or on a line a
+rule's line allowlist names, is redacted though the gates pass it. Only a line in one of the two
+allowlist files keeps a value whole. `redact` reaches a fixed point, so a redacted blob
+passes the prepare step and both gates. What it passes through unchanged, and so is still
+left out or refused by them: a blob with a NUL byte in its first 8,000 bytes (git's own
+binary test), and a blob over `max_mib`.
 
 It never answers with one placeholder in place of a whole text. git writes the committed
 copy back over the file at the next checkout, reset, stash, merge, rebase or pull, so a
@@ -19,7 +22,8 @@ whole-text placeholder would destroy the note. When `redact` gives exactly one
 couldn't scan in time, a rule that matches the path alone, or `redact`'s own last
 resort), the filter answers `status=error` for that file: git keeps its content, and the
 prepare step leaves it out. A file whose whole text, with no line end, is one secret is
-left out the same way. A placeholder that replaces one line of a longer text is redaction and stays.
+left out the same way, a token split by an invisible character included. A placeholder
+that replaces one line of a longer text is redaction and stays.
 
 A failure costs only the files it failed on: setup writes the driver with
 `required = false`. A file the filter fails on is answered `status=error` and git keeps

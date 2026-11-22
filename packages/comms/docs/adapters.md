@@ -15,8 +15,9 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 |---|---|---|
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
-| `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
+| `opencode` | `moxi comms opencode` (also `moxi-comms-opencode`) | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
+| `speech` | none: voice binds it | a person speaking and listening through voice, which binds the operator's name as it; a person kind |
 
 A live row of `api.roster_rows()` and `agents --json` bound as the `connector` kind
 carries `via`, `Claude's apps, through the connector`, while the connector module is
@@ -234,7 +235,7 @@ a loop while supervision brings it back.
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
 | Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch, or on the thread `--resume THREAD_ID` names | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
-| OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
+| OpenCode | `opencode` | `moxi comms opencode <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
 request in its rollout, under the sessions root its wrapper reports; an OpenCode
@@ -272,6 +273,46 @@ starts never binds. A launcher reads which harnesses' wrappers end this way, and
 longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "codex"}`)
 and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
 own process before it starts OpenCode's server, so it waits for no adapter's word.
+
+A Claude Code session's adapter that dies while `claude` runs is replaced at once, with
+no relaunch and no prompt. Its claim file stays, with a socket that answers no one under a
+live `claude`. The daemon sees the adapter's connection drop, reads its claim socket for
+up to 10 seconds until nothing answers it (a live adapter that only lost its connection
+binds again by itself), and starts a new adapter for the session, with the environment
+`claude` started with. The new adapter takes a handle on the same `claude` (the claim
+file's root, its pid checked against the start time recorded there), reads the claim
+file, binds the same name and serves the same claim socket, with the tool token the
+session's environment carries. It finds the session's endpoint as any adapter does, and
+ends with `claude`. Its bind releases the mail that waited, and its first look at an idle
+session is a release point, so the mail starts a turn with nobody typing. A daemon that
+was not running when an adapter died does the same for it once it starts. A daemon that
+runs as a systemd service starts the new adapter in a scope of its own
+(`moxi-comms-adapter-<session id>.scope`, through `systemd-run --user --scope`), so a
+restart of the daemon's service doesn't kill it. When `systemd-run` fails, the daemon logs
+why and starts the adapter in its own cgroup instead: a restart of the daemon then ends
+that adapter, and the restarted daemon replaces it. The daemon replaces one session's
+adapter at most 3 times in 10 minutes; past that it logs once and leaves the session to
+its next start or prompt, which starts a new adapter itself.
+
+The session is told at its next start or prompt, in one line before the start's layer one
+and roster or the prompt's roster changes, which it gets as it would with its adapter
+alive: `comms: this session's comms adapter had stopped at <HH:MM>. A new one has bound
+<name> again, and its mail resumes.` The new adapter leaves the line in the session's
+runtime directory and the line is printed once. When no adapter serves the session at a
+start or prompt (the daemon's cap was reached, or its new adapter couldn't bind), comms'
+listener starts one itself, waits for its word within its 1.5-second bound and says the
+same line without the time. A daemon that is not running is no failure: the new adapter
+binds when it returns. Mail sent while the session was unbound waits at the daemon and is
+delivered once the name is bound again.
+
+When no new adapter can be started (the claim file's `claude` can't be found, or the
+system has no process handle to watch it with) or the new one's bind is refused (another
+session took the name meanwhile), the claim file and the session's roster memory stay,
+and the line is `comms: mail has stopped for <name>`, with why: no message reaches the
+session and a send from it is refused. The next start or prompt tries again; a relaunch
+gets the mail back for good.
+Until an adapter binds it, `moxi comms doctor` prints an `adapter` line for the session
+and `moxi doctor` a fail row `adapter: <name>`.
 
 ## Codex
 
@@ -385,7 +426,7 @@ launch and launch again.
 
 ## OpenCode
 
-`"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` runs an [OpenCode](https://opencode.ai) session you sit in,
+`moxi comms opencode <identity>` (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>`) runs an [OpenCode](https://opencode.ai) session you sit in,
 in the terminal you start it from. It is experimental. It was built and tested on
 OpenCode 1.18.34, with OpenCode Zen's free models (no account and no key) and with a
 local model through Ollama.

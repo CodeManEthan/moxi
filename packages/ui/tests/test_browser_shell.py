@@ -123,9 +123,10 @@ def test_the_modules_view_lists_ui_and_fixture_and_check_shows_doctor_rows(ui_pa
 
 def test_the_modules_view_holds_the_servers_block_and_the_fixture_block(ui_page):
     ui_page.goto("/m/ui/modules")
-    home = _modules(ui_page).locator("#home")
-    expect(home.locator("section[data-block='ui.servers'] moxi-ui-servers")).to_be_attached()
-    block = home.locator("section[data-block='fixture.block']")
+    view = _modules(ui_page)
+    expect(view.locator("#last section[data-block='ui.servers'] moxi-ui-servers")).to_be_attached()
+    expect(view.locator("#home section[data-block='ui.servers']")).to_have_count(0)
+    block = view.locator("#home section[data-block='fixture.block']")
     expect(block.locator("h2")).to_have_text("Fixture count")
     expect(block.locator("moxi-fixture-block").get_by_test_id("count")).to_have_text(
         re.compile(r"^Count: \d+$"))

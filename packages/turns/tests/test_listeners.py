@@ -257,17 +257,57 @@ def test_a_listener_written_for_the_first_events_reads_the_longer_event():
     ev = event("prompt")
     assert (ev.cwd, ev.text, ev.origin, ev.agent_id, ev.record_path, ev.usage,
             ev.received_at, ev.payload, ev.kind, ev.is_error, ev.point, ev.tool,
-            ev.tool_use_id) == (None,) * 13
+            ev.tool_use_id, ev.own, ev.delivery_by, ev.delivery_senders,
+            ev.opens) == (None,) * 17
     names = [f.name for f in dataclasses.fields(turns.SessionEvent)]
     assert names[:8] == ["event", "harness", "session_id", "env", "source", "turn_id",
                          "outcome", "reason"]
     assert names[8:] == ["cwd", "agent_id", "tool", "tool_use_id", "is_error", "point",
                          "record_path", "text", "origin", "usage", "received_at",
-                         "payload", "kind"]
+                         "payload", "kind", "own", "delivery_by", "delivery_senders",
+                         "opens"]
     full = turns.SessionEvent("after-tool", "claude", "s-1", {}, None, None, None, None,
                               "/w", "a-1", "Bash", "tu-1", is_error=False, point="after", record_path="/r.jsonl")
     assert (full.cwd, full.agent_id, full.point, full.record_path) == (
         "/w", "a-1", "after", "/r.jsonl")
+
+
+def test_a_prompt_rows_wait_ms_lengthens_the_sessions_prompt_bound(caplog):
+    reg = registry(
+        Entry("comms", [("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:hold_ms"})]),
+        Entry("alpha", [("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:bad_wait"}),
+                        ("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:broken_wait"}),
+                        ("start", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:hold_ms"})]))
+    assert [ls.wait_ms for ls in reg.listeners if ls.module == "comms"] == [
+        "listener_targets:hold_ms"]
+    assert not reg.notices
+    assert listeners.prompt_wait_ms(reg, {"HOLD_MS": "9000"}, 2000) == 9000
+    assert listeners.prompt_wait_ms(reg, {"HOLD_MS": "500"}, 2000) == 2000
+    assert listeners.prompt_wait_ms(reg, {}, 2000) == 2000       # None adds nothing
+    assert "bad_wait" in caplog.text and "broken_wait" in caplog.text
+    broken = registry(Entry("comms", [("prompt", "listener_targets:silent",
+                                       {"wait_ms": 9000})]))
+    assert broken.broken and "wait_ms" in broken.broken[0].reason
+
+
+def test_the_endpoint_asks_a_prompt_within_its_prompt_bound(turns_env):
+    from conftest import write_config
+    from moxi_turns.endpoint import Endpoint
+
+    reg = registry(Entry("comms", [("prompt", "listener_targets:slow",
+                                    {"wait_ms": "listener_targets:hold_ms"})]))
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="1500"))
+    assert (ep.listen_wait_s, ep.prompt_wait_s) == (2.0, 2.0)
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="3000"))
+    assert ep.prompt_wait_s == 3.0
+    write_config(turns_env, "[listen]\nwait_ms = 200\n")
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="1500"))
+    assert (ep.listen_wait_s, ep.prompt_wait_s) == (0.2, 1.5)
+    assert ep.prompt("hi", "composer") == "too late"     # slow answers in 1 s
 
 
 # -- after-tool rows and floors ------------------------------------------------------------

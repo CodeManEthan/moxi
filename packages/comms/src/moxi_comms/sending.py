@@ -23,6 +23,7 @@ from . import (attribution, cache, claimfile, claimhold, config, constants, dire
                machine_line, policy, wire)
 from .membership import sessions_of
 from .claimhold import AdapterMismatch, ClaimUnreachable
+from .envelope import scrub
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
                      DaemonTimeout, VersionMismatch)
 from .record import RecordError
@@ -305,8 +306,15 @@ class Context:
     (`mcp.inprocess`). None connects to the daemon socket, as the verbs do.
 
     `cures` is the vocabulary a refusal or a note names its cure in (`CURES`): `cli`,
-    the verb's command lines and flags, or `tool`, the names and parameters of comms'
-    tools, so an agent that has only the tools can act on every cure it is given.
+    the verb's command lines and flags; `tool`, the names and parameters of comms'
+    tools, so an agent that has only the tools can act on every cure it is given; or
+    `connector`, the tools' words narrowed to the connector's own tools and parameters
+    (`send` with `reply_to` for a reply, no reply tool, no `new`).
+
+    `when_asks_open` says what an open single-reply ask does to a send (`ASKS_OPEN`):
+    `refuse`, the verb's rule, refuses a plain send while one is open; `note` posts it,
+    and any send, a reply included, carries a NOTE listing the asks still open from its
+    recipients other than the one it answers. Only the connector's tools pass `note`.
 
     `close` closes the record the context opened for itself; a `record` given at
     construction is the caller's, and stays open.
@@ -314,10 +322,14 @@ class Context:
 
     def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
                  backend=None, clock=None, deadline: float | None = None, daemon=None,
-                 cures: str = "cli"):
+                 cures: str = "cli", when_asks_open: str = "refuse"):
         if cures not in CURES:
             raise ValueError(f"cures must be one of {', '.join(CURES)}, not {cures!r}")
+        if when_asks_open not in ASKS_OPEN:
+            raise ValueError(f"when_asks_open must be one of {', '.join(ASKS_OPEN)}, not "
+                             f"{when_asks_open!r}")
         self.cures = cures
+        self.when_asks_open = when_asks_open
         self.env = env if env is not None else os.environ
         self.deadline = deadline
         self._client = daemon
@@ -414,16 +426,35 @@ class Context:
         self.say(text)
 
 
-#: The vocabularies a cure is named in: the verb's command lines and flags, or the
-#: names and parameters of comms' tools.
-CURES_CLI, CURES_TOOL = "cli", "tool"
-CURES = (CURES_CLI, CURES_TOOL)
+#: The vocabularies a cure is named in: the verb's command lines and flags, the names
+#: and parameters of comms' tools, or those of the connector's tools. The connector
+#: shares every tools' text that names nothing it lacks; the few that differ are
+#: rendered by `_connector`.
+CURES_CLI, CURES_TOOL, CURES_CONNECTOR = "cli", "tool", "connector"
+CURES = (CURES_CLI, CURES_TOOL, CURES_CONNECTOR)
+
+
+#: What an open single-reply ask does to a send: refuse a plain send, or post it with a
+#: NOTE listing the asks.
+ASKS_OPEN_REFUSE, ASKS_OPEN_NOTE = "refuse", "note"
+ASKS_OPEN = (ASKS_OPEN_REFUSE, ASKS_OPEN_NOTE)
 
 
 def _tool(ctx) -> bool:
-    """Does `ctx` name cures in the tools' words? A caller's own stand-in context, with
-    no `cures`, names them as the verb does."""
-    return getattr(ctx, "cures", CURES_CLI) == CURES_TOOL
+    """Does `ctx` name cures in the tools' words, comms' tools' or the connector's? A
+    caller's own stand-in context, with no `cures`, names them as the verb does."""
+    return getattr(ctx, "cures", CURES_CLI) in (CURES_TOOL, CURES_CONNECTOR)
+
+
+def _connector(ctx) -> bool:
+    """Does `ctx` name cures in the connector's words?"""
+    return getattr(ctx, "cures", CURES_CLI) == CURES_CONNECTOR
+
+
+def _noting(ctx) -> bool:
+    """Does an open single-reply ask post a send with a NOTE, not refuse it? A caller's
+    own stand-in context, with no `when_asks_open`, refuses as the verb does."""
+    return getattr(ctx, "when_asks_open", ASKS_OPEN_REFUSE) == ASKS_OPEN_NOTE
 
 
 def _keep(ctx, **facts) -> None:
@@ -1040,9 +1071,14 @@ NO_ANSWER = ("the daemon did not answer, so this message may have been sent; che
              "`moxi comms history` before sending it again")
 NO_ANSWER_TOOL = ("the daemon did not answer, so this message may have been sent; check "
                   "the history tool before sending it again")
+#: The connector has no history tool.
+NO_ANSWER_CONNECTOR = ("the daemon did not answer, so this message may have been sent; "
+                       "ask the agent whether it arrived before sending it again")
 
 
 def _no_answer(ctx) -> str:
+    if _connector(ctx):
+        return NO_ANSWER_CONNECTOR
     return NO_ANSWER_TOOL if _tool(ctx) else NO_ANSWER
 
 
@@ -1203,7 +1239,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
          refusal, the `--standing` declaration and, on a `moxi comms send`, the
          never-bound check), the `session` query for each bound recipient, and the
          claim's token;
-      3. the single-reply refusal;
+      3. the single-reply refusal, or, on a context that notes open asks
+         (`when_asks_open`), the NOTE that lists them, on a reply too;
       4. the reply checks: read the referent, then a reply to `[no reply]`, `--posture
          open` on a reply to a once ask, the open-thread
          check and the rest of the `--cap` refusals;
@@ -1307,8 +1344,11 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     t_ask = {}              # qualified -> the verb's clock just before it read the name
     tiers = {}              # qualified -> its tier, from the resolve answer
     # The single-reply check: a plain send only -- no `--reply-to`
-    # (which `reply` always has), no `--new` -- and never from an exempt sender.
-    check_asks = reply_to is None and not getattr(args, "new", False) and not exempt
+    # (which `reply` always has), no `--new` -- and never from an exempt sender. A
+    # context that notes open asks runs it on a reply too, to list the others.
+    noting = _noting(ctx)
+    check_asks = ((reply_to is None or noting) and not getattr(args, "new", False)
+                  and not exempt)
     nominated, ask_notes = [], []
     try:
         resolved, deferred = [], []
@@ -1380,13 +1420,19 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         # Right after the daemon block and AHEAD of the cache reads: each nominated ask,
         # and the replies after it, read back from the record and judged by `open_for`.
         # Only a predicate read true refuses; a read that fails lets the send through
-        # with a NOTE.
+        # with a NOTE. A context that notes open asks never refuses here: the send
+        # posts, with one NOTE listing the asks other than the one a reply answers.
         open_asks, read_notes = _open_asks(ctx, sender, nominated, resolved)
         ask_notes += read_notes
-        if open_asks:
+        if noting:
+            others = [(ask, asker) for ask, asker in open_asks
+                      if reply_to is None or str(ask.id) != str(reply_to)]
+            if others:
+                ask_notes.append(_open_asks_note(others, resolved, now=ctx.clock()))
+        elif open_asks:
             _refuse(ctx, "single-reply",
                     _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args,
-                                 tool=_tool(ctx)))
+                                 cures=getattr(ctx, "cures", CURES_CLI)))
             return _REFUSED, None
 
     # ---- 4. the reply checks --------------------------------------------------------
@@ -1725,6 +1771,10 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
         names_text = _and([t for t in names_text.split(",") if t] or ["them"])
 
     def new_flag() -> str:
+        if _connector(ctx):
+            # The connector has no `new`, and no plain send of its meets the
+            # single-reply refusal.
+            return ""
         flag = _new_flag(ctx, sender, resolved)
         return (" and new: true" if flag else "") if tool else flag
 
@@ -1954,7 +2004,10 @@ def _thread_idle(ctx: Context, items, sender, epoch) -> tuple[bool, str | None]:
 def _new_flag(ctx: Context, sender, resolved) -> str:
     """` --new` when a plain send from this sender to `resolved` would meet the
     single-reply refusal, so a cure that names a new send is one the rules accept; empty
-    otherwise, and whenever that check's reads fail."""
+    otherwise, whenever that check's reads fail, and on a context that notes open asks,
+    where no plain send meets that refusal."""
+    if _noting(ctx):
+        return ""
     try:
         client = ctx.daemon()
         try:
@@ -2108,13 +2161,20 @@ def _cure_flags(args, *, tool: bool = False) -> str:
 
 
 def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
-                 tool: bool = False) -> str:
-    """What a refused plain send prints: who asked, when, and both cures, as command
-    lines or, with `tool`, as the tools and their parameters."""
+                 cures: str = CURES_CLI) -> str:
+    """What a refused plain send prints: who asked, when, and both cures, in the
+    vocabulary `cures` names: command lines, or the tools and their parameters. The
+    connector's words name only the reply cure, as `send` with `reply_to`: it has no
+    `new`."""
     from .daemon import _epoch
     open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
     newest = open_asks[0][0].id
-    if tool:
+    if cures == CURES_CONNECTOR:
+        cure = (f"send with reply_to: {newest}" if len(resolved) == 1 else
+                f"send to {_and(tags)} with reply_to: {newest}"
+                ) + _cure_flags(args, tool=True)
+        tail = "Nothing was sent."
+    elif cures == CURES_TOOL:
         cure = (f"the reply tool with message_id: {newest}" if len(resolved) == 1 else
                 f"the send tool to {_and(tags)} with reply_to: {newest}"
                 ) + _cure_flags(args, tool=True)
@@ -2145,6 +2205,61 @@ def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
               f"  {cure}",
               f"so it closes that ask. {tail}"]
     return "\n".join(lines)
+
+
+#: How many open asks the open-asks NOTE lists, and how much of each one's first line.
+OPEN_ASKS_LISTED = 3
+ASK_LINE_MAX_CHARS = 100
+
+
+def _open_asks_note(open_asks, resolved, *, now: float) -> str:
+    """The NOTE a send carries, on a context that notes open asks, for the single-reply
+    asks to its sender still open from its recipients: newest first, at most
+    `OPEN_ASKS_LISTED` of them with a count of the rest, each with its age and its
+    text's first line, then how to answer one, in the connector's words."""
+    from .daemon import _epoch
+    open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
+    count = len(open_asks)
+    whom = "this recipient" if len(set(resolved)) == 1 else "these recipients"
+    lines = [f"Still open: {count} single-reply ask{'' if count == 1 else 's'} to you "
+             f"from {whom}."]
+    for ask, asker in open_asks[:OPEN_ASKS_LISTED]:
+        line = (f"  msg {ask.id} from {asker.qualified} "
+                f"({spoken_ago(now - _epoch(ask.timestamp))})")
+        first = _ask_first_line(ask.content)
+        lines.append(f"{line}: {first}" if first else line)
+    if count > OPEN_ASKS_LISTED:
+        lines.append(f"  and {count - OPEN_ASKS_LISTED} more")
+    lines.append(("Answer it" if count == 1 else "Answer one")
+                 + " with send and reply_to set to its id.")
+    return "\n".join(lines)
+
+
+def _ask_first_line(content) -> str:
+    """An ask's first line of text below line zero, scrubbed of control and format
+    characters like any returned body, and cut to `ASK_LINE_MAX_CHARS` with `...` when
+    it is longer."""
+    _line_zero, _, body = str(content).partition("\n")
+    for raw in body.split("\n"):
+        line = scrub(raw).strip()
+        if line:
+            if len(line) > ASK_LINE_MAX_CHARS:
+                return line[:ASK_LINE_MAX_CHARS].rstrip() + "..."
+            return line
+    return ""
+
+
+def spoken_ago(seconds) -> str:
+    """How long ago, as it is read aloud: `just now`, `5 minutes ago`, `14 hours ago`,
+    `2 days ago`, or `at an unknown time` for None."""
+    if seconds is None:
+        return "at an unknown time"
+    seconds = max(0.0, float(seconds))
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            n = int(seconds // size)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return "just now"
 
 
 def _names_of(held) -> str:

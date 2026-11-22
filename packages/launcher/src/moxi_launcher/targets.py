@@ -478,7 +478,8 @@ class Slot(Target):
             return [SlotMissing(named, f"there is no slot {found.number} (a session of "
                                        "that name runs with no registry row)",
                                 f"moxi slots create {found.number} makes it")]
-        if found.launchable or _own_hold(found, getattr(resolved, "hold", None)):
+        if found.launchable or _own_hold(found, getattr(resolved, "hold", None)) \
+                or _own_pane(found, resolved):
             return []
         if found.state == "missing" and found.hold is None:
             return []  # made again at the start
@@ -905,6 +906,15 @@ def _make_again(api: Any, named: int | str) -> None:
     found = api.show(named)
     if found is not None and found.created is not None and found.state == "missing":
         api.create([found.number])
+
+
+def _own_pane(found: Any, resolved: Any) -> bool:
+    """Whether a slot is occupied only by the session a relaunch's check replaces: its
+    run pane is the replaced launch's, and any hold on it is the relaunch's own."""
+    pane = getattr(resolved, "replacing_pane", None)
+    if not pane or found.state != "occupied" or found.pane_id != pane:
+        return False
+    return found.hold is None or found.hold.holder == getattr(resolved, "hold", None)
 
 
 def named_slot(values: Mapping[str, object]) -> int | str | None:

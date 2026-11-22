@@ -145,7 +145,7 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert [one["name"] for one in listing["rounds"]] == [A, B, C]
     assert listing["rounds"][0] == {
         "name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
-        "status": "open", "flow": "fix",
+        "status": "open", "flow": "fix", "lead": None,
         "step": {"step": "commission", "stage": "B1", "state": "waiting"},
         "counts": {"open": 1, "parked": 1, "not_shown": 3}, "standing": None,
         "ended": None}
@@ -166,6 +166,22 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
 
     assert [entry["id"] for entry in api.questions(A)["entries"]] == ["Q1", "Q2"]
     assert api.questions("proj-a")["entries"] == [*waits["open"][:2], *waits["parked"]]
+
+
+def test_the_rounds_and_one_round_carry_its_lead(rounds):
+    from moxi import cli
+
+    from moxi_rounds import leads
+
+    leads.mark(A, "atlas-lead", by="planner")
+    assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0
+
+    assert {one["name"]: one["lead"] for one in api.rounds()["rounds"]} == {
+        A: {"name": "atlas-lead", "from": "round"},
+        B: {"name": "kestrel", "from": "project"}, C: None}
+    assert api.round_data(A)["lead"] == {"name": "atlas-lead", "from": "round"}
+    assert api.round_data(B)["lead"] == {"name": "kestrel", "from": "project"}
+    assert api.round_data(D)["lead"] is None
 
 
 def test_the_calls_say_what_step_a_round_is_at(rounds):
@@ -368,10 +384,11 @@ def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_
             assert "extra == 'turns'" in requirement.replace('"', "'")
 
 
-def test_the_package_registers_its_module_and_its_turns_listener_and_no_git_hook():
+def test_the_package_registers_its_module_its_listener_its_refusal_and_no_git_hook():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
-    assert set(declared["project"]["entry-points"]) == {"moxi.modules", "moxi.turns.listeners"}
+    expected = {"moxi.modules", "moxi.turns.listeners", "moxi.projects"}
+    assert set(declared["project"]["entry-points"]) == expected
 
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}
-    assert groups == {"moxi.modules", "moxi.turns.listeners"}
+    assert groups == expected
     assert "moxi.repo.git_hooks" not in groups

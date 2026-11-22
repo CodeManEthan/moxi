@@ -137,9 +137,9 @@ class FakeRunner:
         return self.report(leg.R_TURN_START, turn_id=turn_id)
 
     def turn_complete(self, turn_id: str, reason: str = "answer",
-                      *, is_aborted: bool = False) -> dict:
+                      *, is_aborted: bool = False, answer: str | None = None) -> dict:
         return self.report(leg.R_TURN_COMPLETE, turn_id=turn_id, reason=reason,
-                           is_aborted=is_aborted)
+                           is_aborted=is_aborted, answer=answer)
 
     def close(self, delivery: str, end: str, reason: str | None = None) -> dict:
         return self.report(leg.R_SUBMIT_CLOSE, delivery=delivery, end=end, reason=reason)

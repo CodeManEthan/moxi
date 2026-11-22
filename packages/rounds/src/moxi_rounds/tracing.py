@@ -28,6 +28,13 @@ it back. A version frozen where the check was not asked for records that. The se
 is read when a version is frozen and at no other time: the result of a version stands
 as recorded, and turning the check on or off reaches a round at its next freezing.
 
+**What waits on it.** `outcome` says what a version's recorded check comes to: it
+passes, it fails, or it did not run, which is what a version whose event holds no
+result reads as. The design is verified only while its current version passes
+(`steps`), the questions step waits on the same, and a design report is refused on a
+version that did not run the check, as a publishable one is on a version that fails
+it (`verdicts`). A version frozen where the check was not asked for passes.
+
 **After a freezing.** A ruling that says what is built and has no row in the current
 version holds up the stages it applies to, and no other stage, until a version cites
 it: `holding` gives the rulings that hold up one stage. A ruling that replaces another
@@ -54,6 +61,7 @@ from dataclasses import dataclass
 from . import (corrections, design_block, flows, pointers, questions, ruling, skips,
                versions)
 from . import state as states
+from .errors import Unmet
 
 _STANDING = "S"
 _ROUND = "C"
@@ -260,15 +268,52 @@ def _stands_as(register: states.State, ruling_id: str) -> str | None:
 
 # -- what a version's check holds up -----------------------------------------------------
 
+#: What the check recorded for a version comes to (`outcome`).
+PASSES = "passes"
+FAILS = "fails"
+NOT_RUN = "not run"
+
+
+def outcome(version: states.Version | None) -> str:
+    """What the check recorded for `version` comes to: `PASSES` where it passed, and
+    where it was not asked for, as nothing waits on a check that was not asked for;
+    `FAILS` where it found what fails it; `NOT_RUN` for no version, and for a version
+    whose event holds no result it can read, as no check is known to have run on it."""
+    found = recorded(version)
+    if found is None:
+        return NOT_RUN
+    return PASSES if found.passes else FAILS
+
+
+def said(version: states.Version) -> str:
+    """What the check recorded for `version`, in one line: `trace: v3 passes`, the
+    ids of what fails it, or that the version holds no result."""
+    found = recorded(version)
+    if found is None:
+        return f"trace: v{version.n} holds no result: the check did not run on it"
+    if not found.asked:
+        return f"trace: v{version.n} was frozen where the check was not asked for"
+    return lines({**found.stored(), "version": version.n, "stale_now": ()})[0]
+
+
+def unmet(version: states.Version, *, fold: str) -> Unmet | None:
+    """What waits on the check of `version`, as a step's wait or a verb's refusal
+    names it; None where it passes. `fold` is the command that freezes a version."""
+    found = outcome(version)
+    if found == PASSES:
+        return None
+    if found == NOT_RUN:
+        return Unmet(f"{said(version)}; a version the check ran on and passes is "
+                     "waited for", f"freeze the design again: {fold}")
+    return Unmet(f"{said(version)}; a version whose rows pass is waited for",
+                 f"give {versions.DESIGN_FILE} the rows, then {fold}")
+
+
 def passes(state: states.State) -> bool:
     """Whether the current version passes the trace check, as recorded when it was
-    frozen. A version whose check was not asked for passes, as nothing waits on a
-    check that was not run; a design never frozen does not."""
-    version = versions.current(state)
-    if version is None:
-        return False
-    found = recorded(version)
-    return found is None or found.passes
+    frozen (`outcome`). A version whose check was not asked for passes; a design never
+    frozen does not, and neither does a version whose event holds no result."""
+    return outcome(versions.current(state)) == PASSES
 
 
 def is_asked(state: states.State) -> bool:
@@ -490,6 +535,7 @@ def _reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
 
 
 __all__ = ["Stale", "Result", "Given", "NOT_ASKED", "trace_set", "rows", "check",
-           "stale", "stale_data", "recorded", "passes", "is_asked", "applies_to",
+           "stale", "stale_data", "recorded", "PASSES", "FAILS", "NOT_RUN", "outcome",
+           "said", "unmet", "passes", "is_asked", "applies_to",
            "unrowed", "holding", "scope_reaches", "designed", "given", "follows",
            "shown", "lines", "stale_line"]
