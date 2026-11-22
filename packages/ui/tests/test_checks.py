@@ -10,6 +10,7 @@ import time
 import psutil
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui import page
 from moxi_ui.checks import CHECKS_FILE, STALE_AFTER, Checks, read_kept
 
@@ -184,7 +185,7 @@ def test_with_the_runs_off_nothing_is_started(tmp_path):
 
 
 def _gone(pid):
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while time.monotonic() < deadline:
         try:
             if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
@@ -212,7 +213,7 @@ def test_closing_cancels_the_run_kills_its_doctor_and_keeps_the_earlier_run(tmp_
     async def scene():
         checks = Checks(path, run=doctor)
         assert checks.ask()["running"]
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + PROC_WAIT_S
         while not (tmp_path / "pids").exists() or not (tmp_path / "pids").read_text():
             assert time.monotonic() < deadline, "the doctor never started"
             await asyncio.sleep(0.05)
@@ -315,7 +316,7 @@ def test_a_shell_runs_the_doctor_once_keeps_it_and_tells_the_topic(ui_shells):
 def test_a_stopping_shell_ends_its_run_and_keeps_nothing_of_it(ui_shells):
     shell = ui_shells(checks=True)
     assert shell.session().get("/m/ui/api/checks")[1]["running"]
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + PROC_WAIT_S
     doctors = []
     while not doctors and time.monotonic() < deadline:
         below = psutil.Process(shell.info.pid).children(recursive=True)

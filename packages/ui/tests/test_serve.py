@@ -14,6 +14,7 @@ import time
 
 import pytest
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui import listen, serve
 from moxi_ui.serve import HEAD_LIMIT, Shell
 
@@ -25,7 +26,7 @@ def shell():
     running.start()
     thread = threading.Thread(target=lambda: asyncio.run(running.run()), daemon=True)
     thread.start()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while running._should_exit is None and time.monotonic() < deadline:
         time.sleep(0.01)
     yield running
@@ -137,7 +138,7 @@ def test_sign_in_and_a_navigation_pass_under_a_full_cookie_jar(shell):
     assert status == 200 and b"not signed in" in page
 
 
-def _read_until(sock, marker, wait=5.0):
+def _read_until(sock, marker, wait=PROC_WAIT_S):
     sock.settimeout(wait)
     data = b""
     try:
@@ -165,7 +166,7 @@ def test_a_push_stream_ends_when_every_browser_is_signed_out(shell):
         shell.sessions.store.clear()
         rest = _read_until(stream, b"0\r\n\r\n")
         assert rest.endswith(b"0\r\n\r\n")
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while shell.push.streams and time.monotonic() < deadline:
         time.sleep(0.01)
     assert shell.push.streams == 0
@@ -375,7 +376,7 @@ def test_a_shell_started_on_a_passed_socket_serves_it_then_exits_idle(tmp_path):
     argv += [sys.executable, "-P", "-m", "moxi_ui.serve"]
     activator = subprocess.Popen(argv, stderr=subprocess.PIPE, text=True)
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while True:
             try:
                 conn = socket.create_connection(("127.0.0.1", port), timeout=10)

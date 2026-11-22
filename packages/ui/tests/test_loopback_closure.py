@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 
 import moxi_ui
 import moxi_ui.loopback
@@ -107,11 +108,11 @@ def test_a_page_server_imports_only_the_base_of_ui(fixture_site, cwd, tmp_path):
             head = asyncio.run(_stream_once(info))
             assert head.startswith(b"HTTP/1.1 200"), head[:200]
             child.lifeline.close()
-            assert child.wait(10) == 0, log.read_text(errors="replace")[-2000:]
+            assert child.wait(PROC_WAIT_S) == 0, log.read_text(errors="replace")[-2000:]
         finally:
             if child.poll() is None:
                 child.kill()
-                child.wait(10)
+                child.wait(PROC_WAIT_S)
             child.stdout.close()
     _assert_closure(_imported(log.read_text(errors="replace")), "the page server")
 
