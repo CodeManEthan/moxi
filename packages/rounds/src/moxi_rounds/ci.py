@@ -372,15 +372,23 @@ def read_runs(found: Declared, *, values: Mapping[str, str],
     def jobs_of(run: Mapping) -> list[dict]:
         if run.get("databaseId") is None:
             raise ReadFailed(status, f"printed a run with no databaseId: {dict(run)!r}")
-        argv = tuple(word.replace(RUN, str(run["databaseId"]))
-                     for word in checking.fill(found.jobs, values))
+        argv, jobs = run_jobs(found, str(run["databaseId"]), values=values, cwd=cwd)
         jobs_argvs.append(argv)
-        return _jobs(argv, _json(argv, cwd=cwd, timeout_s=found.status_timeout_s))
+        return jobs
 
     each, whole = reading(found.workflows, by_path, runs, values["tip"], jobs_of=jobs_of)
     urls = {one.get("url") for one in each if one.get("url")}
     read_by = tuple(run for run in runs if run.get("url") in urls)
     return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)), read_by
+
+
+def run_jobs(found: Declared, run: str, *, values: Mapping[str, str],
+             cwd) -> tuple[tuple[str, ...], list[dict]]:
+    """The jobs of the run `run` by the setting's `jobs` command, each with `name`,
+    `status` and `conclusion`, and the argv that ran. Raises `ReadFailed` for a failed
+    read."""
+    argv = tuple(word.replace(RUN, run) for word in checking.fill(found.jobs, values))
+    return argv, _jobs(argv, _json(argv, cwd=cwd, timeout_s=found.status_timeout_s))
 
 
 # -- what the gate reads -----------------------------------------------------------------
@@ -422,8 +430,9 @@ def why_not(state: states.State, stage: str, *, tip: str, now: Now) -> str | Non
 def candidate_why_not(state: states.State, stage: str, *, tip: str) -> str | None:
     """Why a queue member's check is not met at `tip` by its candidate, in words; None
     when it is: the newest `ci.read` at `tip` names a candidate and reads green, or red
-    only on failures excused as the target's own, and the newest `check.local` at `tip`,
-    where one names that candidate, passed."""
+    only on failures excused as the target's own (`excused`, each `{"job", "test"}`),
+    and the newest `check.local` at `tip`, where one names that candidate, passed or
+    its job `local` is excused."""
     found = newest(state, stage, tip)
     if found is None or not found.get("candidate"):
         return f"no candidate of {stage}'s at {tip[:12]} was read"
@@ -434,7 +443,8 @@ def candidate_why_not(state: states.State, stage: str, *, tip: str) -> str | Non
     local = checking.newest(state, stage, LOCAL)
     if (local is not None and local.get("commit") == tip
             and local.get("candidate") == found["candidate"]
-            and local.get("exit_code") != 0 and LOCAL_JOB not in (found.get("excused") or ())):
+            and local.get("exit_code") != 0
+            and not any(one.get("job") == LOCAL_JOB for one in found.get("excused") or ())):
         return f"{LOCAL} exited {local.get('exit_code')} at the candidate"
     return None
 
@@ -461,5 +471,6 @@ def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
 __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_TIMEOUT_S",
            "GREEN", "PENDING", "RED", "ABSENT", "Workflow", "Declared", "declared",
            "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
-           "ReadFailed", "Reading", "reading", "read", "read_runs", "newest", "why_not", "met",
+           "ReadFailed", "Reading", "reading", "read", "read_runs", "run_jobs", "newest",
+           "why_not", "met",
            "LOCAL_JOB", "candidate_why_not"]

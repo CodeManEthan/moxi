@@ -52,7 +52,26 @@ each member is recorded `landed` at its own merge commit, and the batch ends.
 A candidate found on the target already (a lander killed after the fast-forward) is
 landed from its member finishes on, with no re-read.
 
-**Red** (`_red`): each member is ejected as `CI red`, with the run.
+**Red** (`red`): a candidate whose CI reads red, or whose `ci.local` failed, has its
+failed jobs rerun once (`ci.local` run again for `local`); green then lands. Still red,
+its failures are listed (`failures.of_run`, the local job as `local`) and compared with
+the target's own at `M` (`target_failures`): the target's full run at `M`, read once it
+has ended and, when red, after one rerun of its failed jobs, recorded `green` or `red`
+with its failures; and, when the candidate's `local` failed, `ci.local` run once at `M`.
+Until both are known the batch waits, recorded `waiting`; a target that moved off `M`
+meanwhile ends the batch, to be rebuilt on it. No failure the target lacks: the
+candidate lands, each member's `ci.read` naming the failures in `excused` and its
+`landed` event too. A new failure with one member ejects it as `CI red`, with the run
+and the new failures. With two or more, the batch is split in two by join order
+(`failures.halves`): it ends naming the halves, and the next passes build each as a
+batch of its own on the target's head then, run side by side by this same rule.
+
+**Several batches** run only as the halves of a split. A pass advances each, oldest
+first, and a batch lands only when no older one still runs: so the earlier half lands
+first, and a later green half waits for it. A half whose target moved, or that lost a
+member at the re-read, ends naming its remaining members as one group, which the next
+pass rebuilds on the target's head then. Members that join meanwhile wait until no
+batch runs and no group waits to be built.
 
 When a batch ends, its ref is removed from the remote and its local branch deleted.
 """
@@ -65,6 +84,7 @@ from pathlib import Path
 
 from . import (builds, checking, ci, finish_gates, finish_lock, finishing, folders,
                places, queue_ci, queue_file, queue_log, removal, write)
+from . import failures as failing
 from . import settings as own
 from . import state as states
 from .errors import Refused, RoundsError, Unmet
@@ -88,10 +108,13 @@ CANCELLED_WHY = "cancelled"
 SCAN_WHY = "the publishing scan refused its push"
 PAUSED_WHY = "paused"
 RED_WHY = "red"
+SPLIT_WHY = "split"
 #: The `run` events' kinds: the push, the local run, a read, a rerun, a push refused
-#: with no member named, and a read that failed.
+#: with no member named, a read that failed, a red candidate's failures, and the
+#: failures it lands with as the target's own.
 PUSHED, LOCAL, READ, RERUN = "pushed", "local", "read", "rerun"
 PUSH_FAILED, READ_FAILED = "push failed", "read failed"
+FAILURES, EXCUSED = "failures", "excused"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
 READ_FAILS_MAX = 5
 #: The finish gates the landing re-read does not read.
@@ -154,14 +177,24 @@ class _Pass:
 
     def run(self) -> None:
         queue = queue_file.read(self.repo, self.env)
-        running = queue.running()
         if self.ci is None:
             if queue.queued() and queue.paused is None:
                 self.pause(f"{self.repo} has no ci setting, so a candidate has no CI to "
-                           "be read by", running)
+                           "be read by", queue.running())
             return
-        if running is not None:
-            self.advance(queue, running)
+        running = queue.running_batches()
+        for batch in running:
+            now = queue_file.read(self.repo, self.env)
+            found = now.batch(batch.id)
+            if found is not None and not found.ended:
+                self.advance(now, found)
+        regrouped = queue_file.read(self.repo, self.env).regrouped()
+        for source, members in regrouped:
+            paused = queue_file.read(self.repo, self.env).paused
+            members = [one for one in members if paused is None or one.urgent]
+            if members:
+                self.build(queue_file.read(self.repo, self.env), members, source=source)
+        if running or regrouped:
             return
         members = take(queue)
         if members:
@@ -186,7 +219,10 @@ class _Pass:
 
     # -- build ---------------------------------------------------------------------------
 
-    def build(self, queue: queue_file.Queue, members: list[queue_file.Member]) -> None:
+    def build(self, queue: queue_file.Queue, members: list[queue_file.Member], *,
+              source: tuple[str, int] | None = None) -> None:
+        """Build a batch of `members` on the target's head; `source` is the group of an
+        ended batch it is built from."""
         git = QueueGit(self.root)
         target = None
         ready: list[tuple[queue_file.Member, builds.Build]] = []
@@ -236,7 +272,8 @@ class _Pass:
             "event": queue_file.BATCH, "state": queue_file.BUILT, "id": batch_id, "n": n,
             "main": main, "branch": branch, "candidate": candidate,
             "members": [{"round": one.name, "stage": one.stage, "tip": one.tip}
-                        for one, _build in merged]}, self.env)
+                        for one, _build in merged],
+            **({} if source is None else {"source": list(source)})}, self.env)
         for member, _build in merged:
             self.mirror(member.name, member.stage, queue_log.BATCHED,
                         {"tip": member.tip, "batch": batch_id, "main": main,
@@ -292,14 +329,30 @@ class _Pass:
                 self.run_event(batch, PUSH_FAILED, said=pushed.said)
             return
         self.run_event(batch, PUSHED, ref=ref, pushed_s=self.clock())
+        self.run_local(batch, str(batch.candidate))
+
+    def run_local(self, batch: queue_file.Batch, commit: str, *,
+                  head: bool = False) -> dict | None:
+        """Run `ci.local` at `commit` in the lander's worktree and record it: as the
+        batch's, or, with `head`, as the target's at `commit`. The event; None when
+        there is no local run."""
+        if QueueGit(self.place).head() != commit:
+            QueueGit(self.place).run_git("checkout", "--quiet", "--force", "--detach", commit)
+        target = self.target_of(batch) or ""
         values = {"round": f"queue/{self.repo}", "stage": batch.id, "repo": self.repo,
-                  "root": str(self.root), "branch": batch.branch,
-                  "tip": str(batch.candidate), "into": self.target_of(batch) or "",
-                  "base": batch.main}
+                  "root": str(self.root), "branch": target if head else batch.branch,
+                  "tip": commit, "into": target, "base": batch.main}
         local = self.ci.local(self.place, values)
-        if local is not None:
-            self.run_event(batch, LOCAL, argv=list(local.argv), exit_code=local.exit_code,
-                           duration_s=local.duration_s, output=local.output)
+        if local is None:
+            return None
+        fields = {"kind": LOCAL, "argv": list(local.argv), "exit_code": local.exit_code,
+                  "duration_s": local.duration_s, "output": local.output}
+        if head:
+            return queue_file.append(self.repo, {"event": queue_file.RUN, "head": commit,
+                                                 **fields}, self.env)
+        self.run_event(batch, LOCAL, **{key: value for key, value in fields.items()
+                                        if key != "kind"})
+        return batch.run
 
     def names(self, said: str, member: tuple[str, str, str],
               batch: queue_file.Batch) -> bool:
@@ -330,16 +383,7 @@ class _Pass:
         try:
             read = self.ci.read(self.place, batch.candidate)
         except ci.ReadFailed as exc:
-            failed = 0
-            for one in reversed(batch.runs):
-                if one.get("kind") != READ_FAILED:
-                    break
-                failed += 1
-            if failed + 1 >= READ_FAILS_MAX:
-                self.pause(f"CI could not be read {READ_FAILS_MAX} times in a row: {exc}",
-                           batch)
-            else:
-                self.run_event(batch, READ_FAILED, said=str(exc))
+            self.read_failed(batch, exc)
             return
         last = next((one for one in reversed(batch.runs) if one.get("kind") == READ), None)
         if last is None or last.get("reading") != read.word:
@@ -370,11 +414,36 @@ class _Pass:
                 return
             self.end_batch(batch, ABSENT_WHY)
             return
-        if word == ci.GREEN and (local is None or local.get("exit_code") == 0):
-            if target is not None:
+        local_red = local is not None and local.get("exit_code") != 0
+        if target is None:
+            return
+        if word == ci.GREEN and not local_red:
+            if not self.behind(batch):
                 self.land(batch, target=target)
             return
-        self.red(batch, read)
+        try:
+            self.red(batch, read, target=target, local_red=local_red)
+        except ci.ReadFailed as exc:
+            self.read_failed(batch, exc)
+
+    def read_failed(self, batch: queue_file.Batch, exc: ci.ReadFailed) -> None:
+        """Record a failed read of the batch's CI; the queue pauses once
+        `READ_FAILS_MAX` fail in a row."""
+        failed = 0
+        for one in reversed(batch.runs):
+            if one.get("kind") != READ_FAILED:
+                break
+            failed += 1
+        if failed + 1 >= READ_FAILS_MAX:
+            self.pause(f"CI could not be read {READ_FAILS_MAX} times in a row: {exc}",
+                       batch)
+        else:
+            self.run_event(batch, READ_FAILED, said=str(exc))
+
+    def behind(self, batch: queue_file.Batch) -> bool:
+        """Whether an older batch still runs, so this one may not land yet."""
+        return any(one.n < batch.n
+                   for one in queue_file.read(self.repo, self.env).running_batches())
 
     def target_of(self, batch: queue_file.Batch) -> str | None:
         for name, stage, _tip in batch.members:
@@ -389,14 +458,136 @@ class _Pass:
 
     # -- red -----------------------------------------------------------------------------
 
-    def red(self, batch: queue_file.Batch, read: queue_ci.Read) -> None:
+    def red(self, batch: queue_file.Batch, read: queue_ci.Read, *, target: str,
+            local_red: bool) -> None:
+        """The next step for a red candidate: rerun it once, list its failures, compare
+        them with the target's at `M`, and land it, eject its member, or split it."""
+        ci_red = read.word == ci.RED
+        rerun = _newest(batch.runs, RERUN, why=RED_WHY)
+        if rerun is None:
+            said = self.ci.rerun(self.place, read.runs, failed=True) if ci_red else None
+            if local_red:
+                self.run_local(batch, str(batch.candidate))
+            self.run_event(batch, RERUN, why=RED_WHY, runs=list(read.runs) if ci_red else [],
+                           local=local_red, at_s=self.clock(),
+                           code=None if said is None else said.code,
+                           said=None if said is None else said.said)
+            return
+        if not self.rerun_over(batch.runs, rerun):
+            return
+        found = _newest(batch.runs, FAILURES)
+        if found is None:
+            failures = (self.ci.failures(self.place, str(batch.candidate), read)
+                        if ci_red else [])
+            if local_red:
+                failures.append({"job": LOCAL_JOB, "test": None})
+            self.run_event(batch, FAILURES, failures=failures, runs=list(read.runs))
+        else:
+            failures = list(found.get("failures") or [])
+        own = self.target_failures(batch, local=local_red)
+        if own is None:
+            if QueueGit(self.root).branch(target) not in (None, batch.main):
+                self.end_batch(batch, MOVED_WHY, regroups=self.regroups_of(batch))
+            else:
+                self.wait(f"the full run of {target} at {batch.main[:12]}", batch)
+            return
+        new = failing.new(failures, own)
+        if not new:
+            if _newest(batch.runs, EXCUSED) is None:
+                self.run_event(batch, EXCUSED, failures=failures)
+            if not self.behind(batch):
+                self.land(batch, target=target)
+            return
         queue = queue_file.read(self.repo, self.env)
-        for name, stage, _tip in batch.members:
-            member = queue.member(name, stage)
-            if member is not None and member.state == queue_file.IN_BATCH:
-                self.end_member(member, queue_file.EJECTED, reason="CI red",
-                                batch=batch.id, run=list(read.runs))
-        self.end_batch(batch, RED_WHY)
+        members = [one for one in (queue.member(name, stage)
+                                   for name, stage, _tip in batch.members)
+                   if one is not None and one.state == queue_file.IN_BATCH
+                   and one.batch == batch.id]
+        if len(members) < 2:
+            for member in members:
+                self.end_member(member, queue_file.EJECTED,
+                                reason=f"CI red: {failing.said(new)}", batch=batch.id,
+                                run=list(read.runs), failures=new)
+            self.end_batch(batch, RED_WHY)
+            return
+        first, second = failing.halves(members)
+        self.say(f"lander of {self.repo}: batch {batch.id} has new failures "
+                 f"({failing.said(new)}): split in two")
+        self.end_batch(batch, SPLIT_WHY, regroups=[
+            [[one.name, one.stage, one.tip] for one in half] for half in (first, second)])
+
+    def rerun_over(self, runs: list[dict], rerun: dict) -> bool:
+        """Whether the rerun `rerun` has been read past: it reran nothing, it was
+        refused, a read after it found the run going again, or `ABSENT_S` passed."""
+        if not rerun.get("runs") or rerun.get("code") not in (None, 0):
+            return True
+        after = runs[next(index for index, one in enumerate(runs) if one is rerun) + 1:]
+        if any(one.get("kind") == READ and one.get("reading") == ci.PENDING
+               for one in after):
+            return True
+        return self.clock() - float(rerun.get("at_s") or 0) >= ABSENT_S
+
+    def target_failures(self, batch: queue_file.Batch, *, local: bool) -> list[dict] | None:
+        """The target's failures at the batch's `M`: those of its full run there, read
+        once it has ended and, when red, after one rerun of its failed jobs, and, with
+        `local`, `local` when `ci.local` fails at `M`. None until all are known."""
+        head = batch.main
+        queue = queue_file.read(self.repo, self.env)
+        known = queue.main_at(head)
+        if known is None:
+            read = self.ci.read(self.place, head)
+            runs = [one for one in queue.head_runs if one.get("head") == head]
+            last = _newest(runs, READ)
+            if last is None or last.get("reading") != read.word:
+                runs.append(queue_file.append(self.repo, {
+                    "event": queue_file.RUN, "head": head, "kind": READ,
+                    "reading": read.word, "runs": list(read.runs)}, self.env))
+            if read.word == ci.GREEN:
+                known = queue_file.append(self.repo, {
+                    "event": queue_file.GREEN, "head": head, "run": list(read.runs)},
+                    self.env)
+            elif read.word == ci.RED:
+                rerun = _newest(runs, RERUN)
+                if rerun is None:
+                    said = self.ci.rerun(self.place, read.runs, failed=True)
+                    queue_file.append(self.repo, {
+                        "event": queue_file.RUN, "head": head, "kind": RERUN,
+                        "runs": list(read.runs), "at_s": self.clock(), "code": said.code,
+                        "said": said.said}, self.env)
+                    return None
+                if not self.rerun_over(runs, rerun):
+                    return None
+                known = queue_file.append(self.repo, {
+                    "event": queue_file.RED, "head": head, "run": list(read.runs),
+                    "failures": self.ci.failures(self.place, head, read)}, self.env)
+            else:
+                return None
+        own = list(known.get("failures") or [])
+        if local:
+            ran = _newest([one for one in queue_file.read(self.repo, self.env).head_runs
+                           if one.get("head") == head], LOCAL)
+            if ran is None:
+                ran = self.run_local(batch, head, head=True)
+            if ran is not None and ran.get("exit_code") != 0:
+                own.append({"job": LOCAL_JOB, "test": None})
+        return own
+
+    def regroups_of(self, batch: queue_file.Batch) -> list | None:
+        """For a half of a split, its members still in it, as the one group to rebuild;
+        None for a batch that is no half, or a half no member is still in."""
+        if batch.source is None:
+            return None
+        queue = queue_file.read(self.repo, self.env)
+        group = [[name, stage, tip] for name, stage, tip in batch.members
+                 if (one := queue.member(name, stage)) is not None
+                 and one.state == queue_file.IN_BATCH and one.batch == batch.id]
+        return [group] if group else None
+
+    def wait(self, reason: str, batch: queue_file.Batch) -> None:
+        """Record that the lander waits on `reason`, once while it lasts."""
+        if (queue_file.read(self.repo, self.env).waiting_on or {}).get("reason") != reason:
+            queue_file.append(self.repo, {"event": queue_file.WAITING, "reason": reason,
+                                          "batch": batch.id}, self.env)
 
     # -- land ----------------------------------------------------------------------------
 
@@ -431,10 +622,12 @@ class _Pass:
         finally:
             finish_lock.release(taken)
         queue = queue_file.read(self.repo, self.env)
+        excused = (_newest(batch.runs, EXCUSED) or {}).get("failures") or None
         for name, stage, tip, landing in landed:
             member = queue.member(name, stage)
             if member is not None:
-                self.end_member(member, queue_file.LANDED, batch=batch.id, landing=landing)
+                self.end_member(member, queue_file.LANDED, batch=batch.id, landing=landing,
+                                excused=excused)
         self.end_batch(batch, LANDED_WHY)
         self.say(f"lander of {self.repo}: batch {batch.id} landed at "
                  f"{str(batch.candidate)[:12]}")
@@ -445,7 +638,7 @@ class _Pass:
         wait."""
         git = QueueGit(self.root)
         if git.branch(target) != batch.main:
-            self.end_batch(batch, MOVED_WHY)
+            self.end_batch(batch, MOVED_WHY, regroups=self.regroups_of(batch))
             return False
         queue = queue_file.read(self.repo, self.env)
         failed = []
@@ -460,7 +653,8 @@ class _Pass:
                 self.end_member(member, queue_file.LEFT, reason=why, batch=batch.id)
                 failed.append(f"{name} {stage}")
         if failed:
-            self.end_batch(batch, "rebuilt without " + ", ".join(failed))
+            self.end_batch(batch, "rebuilt without " + ", ".join(failed),
+                           regroups=self.regroups_of(batch))
             return False
         checkout = finishing.MergeGit(self.root).checkout_of(target)
         if checkout is not None:
@@ -530,7 +724,8 @@ class _Pass:
                 "candidate": batch.candidate, "batch": batch.id}
         entries = [write.Entry(ci.READ, {
             **same, "run": read.get("runs") or [], "reading": read.get("reading"),
-            "excused": [], "workflows": read.get("workflows") or [],
+            "excused": (_newest(batch.runs, EXCUSED) or {}).get("failures") or [],
+            "workflows": read.get("workflows") or [],
             "status_argv": read.get("status_argv") or [],
             "ids_argv": read.get("ids_argv") or []})]
         if local is not None:
@@ -570,7 +765,7 @@ class _Pass:
         allowed = {queue_log.LEFT: ("reason", "batch"),
                    queue_log.EJECTED: ("batch", "reason", "blocker", "run", "failures",
                                        "output"),
-                   queue_log.LANDED: ("batch", "landing")}[mirrored]
+                   queue_log.LANDED: ("batch", "landing", "excused")}[mirrored]
         self.mirror(member.name, member.stage, mirrored,
                     {"tip": member.tip, **{key: fields[key] for key in allowed
                                            if key in fields}}
@@ -587,9 +782,14 @@ class _Pass:
             self.say(f"lander of {self.repo}: {kind} of {name} {stage} is not in its "
                      f"round's log: {exc}")
 
-    def end_batch(self, batch: queue_file.Batch, why: str) -> None:
+    def end_batch(self, batch: queue_file.Batch, why: str, *,
+                  regroups: list | None = None) -> None:
+        """End the batch, naming the groups of its members to build as batches of their
+        own (`regroups`), and remove its ref and branch."""
         queue_file.append(self.repo, {"event": queue_file.BATCH, "state": queue_file.ENDED,
-                                      "id": batch.id, "why": why}, self.env)
+                                      "id": batch.id, "why": why,
+                                      **({"regroups": regroups} if regroups else {})},
+                          self.env)
         ref = (batch.branch if self.ref_template is None
                else ci.ref_for(self.ref_template, batch.branch))
         self.drop_branch(batch.branch, ref if any(
@@ -615,6 +815,12 @@ class _Pass:
             self.say(f"lander of {self.repo}: {branch} is not deleted: {exc}")
 
 
+def _newest(runs: list[dict], kind: str, **fields) -> dict | None:
+    """The newest of `runs` of `kind` whose `fields` match."""
+    return next((one for one in reversed(runs) if one.get("kind") == kind
+                 and all(one.get(key) == value for key, value in fields.items())), None)
+
+
 def _where(name: str, settings) -> write.Where:
     project, slug = folders.split(name)
     home = folders.home(project, settings)
@@ -633,5 +839,5 @@ class QueueGit(finishing.MergeGit):
         return frozenset(line for line in out.splitlines() if line.strip())
 
 
-__all__ = ["LANDER", "QUEUE_PLACE", "BRANCH_PREFIX", "ABSENT_S", "LOCAL_JOB", "NOT_REREAD", "READ_FAILS_MAX",
-           "place_of", "take", "step", "QueueGit"]
+__all__ = ["LANDER", "QUEUE_PLACE", "BRANCH_PREFIX", "ABSENT_S", "LOCAL_JOB", "NOT_REREAD",
+           "READ_FAILS_MAX", "place_of", "take", "step", "QueueGit"]

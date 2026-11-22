@@ -189,10 +189,7 @@ def leave(name: str, stage: str, *, by: str, settings=None,
             if member is None or not member.waiting:
                 raise Refused([Unmet(f"{stage} of {name} left {repo}'s queue meanwhile",
                                      f"moxi rounds queue --repo {repo}")])
-            running = queue.running()
-            rebuilds = (running.id if running is not None
-                        and member.state == queue_file.IN_BATCH
-                        and member.batch == running.id else None)
+            rebuilds = member.batch if member.state == queue_file.IN_BATCH else None
             add({"event": queue_file.LEFT, "round": name, "stage": stage,
                  "tip": member.tip, "reason": queue_file.BY_HAND, "by": by,
                  "batch": rebuilds})

@@ -1,6 +1,6 @@
 """What `moxi rounds queue` says of a repo's queue, as lines: whether a lander runs, a
-pause and its reason, a wait on something outside the queue, the running batch and its
-CI reading, each member still in the queue in the order it is taken, the target's last
+pause and its reason, a wait on something outside the queue, each running batch and its
+CI reading (two or more while a red batch is split), each member still in the queue in the order it is taken, the target's last
 full run, and the messages the lander could not send.
 
 Everything said is read from the queue file (`queue_file.read`); nothing is written.
@@ -26,8 +26,7 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
                     "dealt with; urgent members still land meanwhile")
     if queue.waiting_on is not None:
         said.append(f"waiting: {queue.waiting_on.get('reason')}")
-    running = queue.running()
-    if running is not None:
+    for running in queue.running_batches():
         run = running.run or {}
         reading = run.get("reading") or "not read yet"
         url = f"   {run['url']}" if run.get("url") else ""

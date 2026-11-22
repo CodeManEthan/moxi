@@ -15,6 +15,7 @@ import pytest
 from moxi_rounds import (batching, checking, ci, commissioning, finishing, joining, log,
                          opening, queue_ci, queue_file, verdicts)
 from moxi_rounds import state as states
+from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
 OTHER = "proj-a/b-round"
@@ -24,16 +25,23 @@ SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--bas
 
 
 class FakeCi:
-    """The candidate's CI: what it reads (`word`), what a push says (`refusal`, None for
-    a push that goes), and the local run's exit code."""
+    """The candidate's CI: what it reads (`word`, or `words` by commit), what a push says
+    (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
+    `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
+    commit)."""
 
     def __init__(self):
         self.word = ci.GREEN
+        self.words: dict[str, str] = {}
         self.refusal: str | None = None
         self.local_code = 0
+        self.local_codes: dict[str, int] = {}
+        self.failed: list[dict] = []
+        self.failed_at: dict[str, list[dict]] = {}
         self.pushes: list[tuple[str, str]] = []
         self.removed: list[str] = []
         self.reruns: list[tuple[tuple[str, ...], bool]] = []
+        self.locals: list[str] = []
 
     def push(self, place, commit, ref):
         self.pushes.append((commit, ref))
@@ -46,11 +54,16 @@ class FakeCi:
         return queue_ci.Said(0, "")
 
     def local(self, place, values):
-        return queue_ci.Local(("ci-local", values["tip"]), self.local_code, 0.5,
+        self.locals.append(values["tip"])
+        return queue_ci.Local(("ci-local", values["tip"]),
+                              self.local_codes.get(values["tip"], self.local_code), 0.5,
                               str(place / "local.log"))
 
     def read(self, place, commit):
-        return queue_ci.Read(self.word, ("101",))
+        return queue_ci.Read(self.words.get(commit, self.word), ("101",))
+
+    def failures(self, place, commit, read):
+        return [dict(one) for one in self.failed_at.get(commit, self.failed)]
 
     def rerun(self, place, runs, *, failed):
         self.reruns.append((tuple(runs), failed))
@@ -357,25 +370,12 @@ def test_a_candidate_on_the_target_already_is_finished_member_by_member(
 
 # -- the read ----------------------------------------------------------------------------
 
-def test_a_pending_run_waits_and_a_red_one_ejects_its_member(
-        repo, ready, fake, lander_pass, tmp_path):
+def test_a_pending_run_waits(repo, ready, fake, lander_pass):
     ready()
     fake.word = ci.PENDING
     lander_pass()
     lander_pass()
-    assert queue().running() is not None
-    fake.word = ci.RED
-    lander_pass()
-    assert events(tmp_path, ROUND, "queue.ejected")[-1]["reason"] == "CI red"
-
-
-def test_a_failing_local_run_counts_as_red(repo, ready, fake, lander_pass, configure):
-    configure('ci = { workflows = ["ci.yml"], local = { command = "ci-local" } }')
-    ready()
-    fake.local_code = 1
-    lander_pass()
-    lander_pass()
-    assert queue().member(ROUND, "B1").state == queue_file.EJECTED
+    assert queue().running() is not None and fake.reruns == []
 
 
 def test_a_cancelled_run_is_rerun_once_then_the_queue_pauses(repo, ready, fake,
@@ -387,6 +387,8 @@ def test_a_cancelled_run_is_rerun_once_then_the_queue_pauses(repo, ready, fake,
     assert fake.reruns == [(("101",), False)]
     lander_pass()
     assert "cancelled twice" in queue().paused
+    member = queue().member(ROUND, "B1")
+    assert (member.state, queue().position(ROUND, "B1")) == (queue_file.QUEUED, 1)
 
 
 def test_an_absent_run_is_pushed_again_under_the_next_number_then_pauses(
@@ -425,3 +427,166 @@ def test_a_failed_read_is_tried_again_and_pauses_the_queue_after_too_many(
     assert queue().paused is None and queue().running() is not None
     lander_pass()
     assert "no network" in queue().paused
+
+
+# -- the landing re-read drops a member a gate now holds -----------------------------------
+
+def _gains_a_finding(tree, tmp_path):
+    report = round_log_of(tmp_path, OTHER).parent / "second.md"
+    report.write_text("# second\n\n```toml rounds\n" + "\n".join([
+        'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
+        'model = "a-model"', 'stage = "B1"', f'head = "{tree.rev()}"',
+        "[[finding]]", 'id = "L1"', 'severity = "minor"', 'state = "open"',
+        'text = "a name is unclear"']) + "\n```\n", encoding="utf-8")
+    verdicts.record(OTHER, report, by="critic")
+
+
+def _gains_a_question(tree, tmp_path):
+    assert main(["ask", OTHER, "Is the page right?", "--from", "comms:1234567",
+                 "--blocks", "B1", "--as", "planner"]) == 0
+
+
+@pytest.mark.parametrize("gain", [_gains_a_finding, _gains_a_question],
+                         ids=["finding", "question"])
+def test_a_member_that_gained_a_finding_or_a_question_is_dropped_at_the_landing(
+        repo, ready, fake, lander_pass, tmp_path, gain):
+    ready()
+    other = ready(OTHER, branch="other", file="other.txt")
+    lander_pass()
+    gain(other, tmp_path)
+    lander_pass()
+    member = queue().member(OTHER, "B1")
+    assert member.state == queue_file.LEFT and member.reason.startswith("gate ")
+    assert queue().batches[-1].why == f"rebuilt without {OTHER} B1"
+    lander_pass()
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+
+
+# -- a red candidate ---------------------------------------------------------------------
+
+#: A failed test as the candidate's scoped job and main's full job name it.
+IN_SCOPED = {"job": "scoped", "test": "tests/test_a.py::test_one"}
+IN_LINUX = {"job": "linux", "test": "tests/test_a.py::test_one"}
+LOCAL_FAILED = {"job": batching.LOCAL_JOB, "test": None}
+
+
+def test_a_red_candidate_is_rerun_once_and_lands_when_the_rerun_is_green(
+        repo, ready, fake, lander_pass, tmp_path):
+    ready()
+    fake.word = ci.RED
+    lander_pass()
+    lander_pass()
+    assert fake.reruns == [(("101",), True)]
+    fake.word = ci.GREEN
+    lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert events(tmp_path, ROUND, ci.READ)[-1]["excused"] == []
+
+
+def test_a_failure_mains_run_at_m_has_blames_no_member_and_lands_excused(
+        repo, ready, fake, lander_pass, tmp_path):
+    main_head = repo.rev("main")
+    ready()
+    fake.word, fake.failed = ci.RED, [IN_SCOPED]
+    fake.words[main_head], fake.failed_at[main_head] = ci.RED, [IN_LINUX]
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(0.0)
+    assert len(fake.reruns) == 1 and queue().running() is not None
+    lander_pass(batching.ABSENT_S)
+    assert fake.reruns == [(("101",), True)] * 2
+    assert "full run of main" in queue().waiting_on["reason"]
+    lander_pass(2 * batching.ABSENT_S)
+    assert queue().main_at(main_head)["failures"] == [IN_LINUX]
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert events(tmp_path, ROUND, "queue.landed")[-1]["excused"] == [IN_SCOPED]
+    read = events(tmp_path, ROUND, ci.READ)[-1]
+    assert (read["reading"], read["excused"]) == (ci.RED, [IN_SCOPED])
+    assert events(tmp_path, ROUND, finishing.DONE)
+
+
+def test_a_new_failure_with_one_member_ejects_it_with_the_failures(
+        repo, ready, fake, lander_pass, tmp_path):
+    ready()
+    fake.word, fake.failed = ci.RED, [IN_SCOPED]
+    fake.words[repo.rev("main")] = ci.GREEN
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    ejected = events(tmp_path, ROUND, "queue.ejected")[-1]
+    assert ejected["reason"] == "CI red: scoped: tests/test_a.py::test_one"
+    assert ejected["failures"] == [IN_SCOPED]
+    assert queue().batches[-1].why == batching.RED_WHY
+    assert repo.rev("main") == queue().batches[-1].main
+
+
+def test_a_red_candidate_waits_for_mains_run_and_ends_when_main_moves(
+        repo, ready, fake, lander_pass):
+    ready()
+    fake.word, fake.failed = ci.RED, [IN_SCOPED]
+    fake.words[repo.rev("main")] = ci.PENDING
+    lander_pass(0.0)
+    lander_pass(0.0)
+    lander_pass(batching.ABSENT_S)
+    assert queue().running() is not None and queue().waiting_on is not None
+    repo.commit("hand.txt", "a hand commit on main")
+    lander_pass(batching.ABSENT_S)
+    assert queue().batches[-1].why == batching.MOVED_WHY
+    assert queue().member(ROUND, "B1").state == queue_file.QUEUED
+
+
+def test_a_new_failure_splits_the_batch_and_the_earlier_green_half_lands_first(
+        repo, ready, fake, lander_pass):
+    ready()
+    ready(OTHER, branch="other", file="other.txt")
+    fake.word, fake.failed = ci.RED, [IN_SCOPED]
+    fake.words[repo.rev("main")] = ci.GREEN
+    lander_pass(0.0)
+    lander_pass(0.0)
+    split = queue().running()
+    lander_pass(batching.ABSENT_S)
+    assert queue().batch(split.id).why == batching.SPLIT_WHY
+    first, second = queue().running_batches()
+    assert [one.members[0][0] for one in (first, second)] == [ROUND, OTHER]
+    assert (first.source, second.source) == ((split.id, 0), (split.id, 1))
+    assert first.main == second.main == repo.rev("main")
+
+    fake.word = ci.GREEN
+    fake.words[first.candidate] = ci.PENDING
+    lander_pass(batching.ABSENT_S)
+    assert [one.id for one in queue().running_batches()] == [first.id, second.id]
+    del fake.words[first.candidate]
+    lander_pass(batching.ABSENT_S)
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert queue().batch(second.id).why == batching.MOVED_WHY
+    rebuilt = queue().running()
+    assert rebuilt.source == (second.id, 0) and rebuilt.main == repo.rev("main")
+    lander_pass(batching.ABSENT_S)
+    assert queue().member(OTHER, "B1").state == queue_file.LANDED
+
+
+def test_a_failing_local_run_is_rerun_then_compared_with_local_at_m(
+        repo, ready, fake, lander_pass, tmp_path, configure):
+    configure('ci = { workflows = ["ci.yml"], local = { command = "ci-local" } }')
+    main_head = repo.rev("main")
+    ready()
+    fake.local_code, fake.local_codes[main_head] = 1, 0
+    lander_pass()
+    candidate = queue().running().candidate
+    lander_pass()
+    lander_pass()
+    assert fake.locals == [candidate, candidate, main_head]
+    assert events(tmp_path, ROUND, "queue.ejected")[-1]["failures"] == [LOCAL_FAILED]
+
+
+def test_a_local_failure_main_has_too_lands_and_the_gate_accepts_it(
+        repo, ready, fake, lander_pass, tmp_path, configure):
+    configure('ci = { workflows = ["ci.yml"], local = { command = "ci-local" } }')
+    ready()
+    fake.local_code = 1
+    for _ in range(3):
+        lander_pass()
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert events(tmp_path, ROUND, ci.READ)[-1]["excused"] == [LOCAL_FAILED]
+    assert events(tmp_path, ROUND, finishing.DONE)

@@ -14,6 +14,10 @@ takes any object with the same methods, so a test gives it a stand-in.
 - `read(place, commit)` reads CI at `commit` as `check` reads it (`ci.read_runs`), as one
   `Read`: the whole reading, or `cancelled` when a run it read was cancelled.
 - `rerun(place, runs, failed=...)` reruns each run, or only its failed jobs.
+- `failures(place, commit, read)` lists the failures of a red read's runs at `commit`
+  (`failures.of_run`): each run's failed jobs by the setting's `jobs` command, of the
+  jobs the setting names where every workflow is read by its jobs, and the tests their
+  logs name (`LOG_FAILED`). Raises `ci.ReadFailed` when either command fails.
 - `remove(place, ref)` deletes `ref` on the remote; what git said is not read, since the
   sweep removes a ref left behind.
 """
@@ -30,6 +34,7 @@ from pathlib import Path
 from moxi import proc
 
 from . import checking, ci, gitreads
+from . import failures as failing
 
 #: How long a push or a rerun may take, in seconds.
 PUSH_TIMEOUT_S = checking.PUSH_TIMEOUT_S
@@ -37,6 +42,8 @@ PUSH_TIMEOUT_S = checking.PUSH_TIMEOUT_S
 LOCAL_TIMEOUT_S = 4 * 3600.0
 #: The reading of a run that was cancelled.
 CANCELLED = "cancelled"
+#: The command that prints the logs of a run's failed jobs, `{run}` its id.
+LOG_FAILED = ("gh", "run", "view", ci.RUN, "--log-failed")
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,23 @@ class QueueCi:
                     reading.workflows, reading.status_argv, reading.ids_argv,
                     reading.jobs_argvs)
 
+    def failures(self, place: Path, commit: str, read: Read) -> list[dict]:
+        names = None
+        if read.workflows and all("jobs" in one for one in read.workflows):
+            names = [str(job.get("name")) for one in read.workflows for job in one["jobs"]]
+        found: list[dict] = []
+        for run in read.runs:
+            _argv, jobs = ci.run_jobs(self.found, run, values={"tip": commit}, cwd=place)
+            failed = failing.failed_jobs(jobs, names)
+            if not failed:
+                continue
+            argv = [word.replace(ci.RUN, run) for word in LOG_FAILED]
+            log = _said(argv, cwd=place, timeout_s=PUSH_TIMEOUT_S)
+            if log.code != 0:
+                raise ci.ReadFailed(argv, f"exited {log.code}")
+            found.extend(failing.of_run(failed, failing.tests_of_log(log.said)))
+        return found
+
     def rerun(self, place: Path, runs: Sequence[str], *, failed: bool) -> Said:
         said = Said(0, "")
         for run in runs:
@@ -136,4 +160,5 @@ class QueueCi:
         return said
 
 
-__all__ = ["PUSH_TIMEOUT_S", "LOCAL_TIMEOUT_S", "CANCELLED", "Said", "Local", "Read", "QueueCi"]
+__all__ = ["PUSH_TIMEOUT_S", "LOCAL_TIMEOUT_S", "CANCELLED", "LOG_FAILED", "Said", "Local",
+           "Read", "QueueCi"]

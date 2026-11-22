@@ -766,11 +766,27 @@ the gate, and the rest are rebuilt; a checkout not clean is waited on. Then it
 fast-forwards that checkout to the candidate (`git merge --ff-only`), writes each
 member's `ci.read` and `check.local` records at its joined tip naming the candidate,
 which meet the check gate, and finishes each one with its own merge found as its
-landing. A red run ejects its members. A lander that dies after the fast-forward is
-finished by the next one from the queue file and git.
+landing. A lander that dies after the fast-forward is finished by the next one from the
+queue file and git.
+
+**A red candidate.** A red run's failed jobs are rerun once (`gh run rerun --failed`),
+and a failed `ci.local` is run again; green then lands. Still red, the lander lists its
+failures: each test a failed job's log names in pytest's `FAILED` lines, or the job
+alone. It compares them with the target's own at the candidate's base: that commit's
+full run, read once it has ended and, when red, after one rerun of its failed jobs, and
+`ci.local` run there once when `local` failed. A test counts as the target's own when
+that run fails it in any job, or fails its job naming no test; a job named alone, when
+that run fails a job of that name. Until the target's run is known the batch waits; if
+the target moves meanwhile, the batch is rebuilt on it. With no failure the target
+lacks, the candidate lands, each member's `ci.read` and `queue.landed` naming the
+failures as `excused`. A new failure with one member ejects it with the failures. With
+two or more, the batch splits in two by join order, each half built on the target's
+head and run side by side by the same rule; the earlier half lands first, and a later
+half whose target moved is rebuilt on it. Members that join meanwhile wait until the
+split is done.
 
 `moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
-runs, a pause and its reason, the running batch and its CI reading, the members still in
+runs, a pause and its reason, each running batch and its CI reading, the members still in
 the queue in the order they are taken, and the target's last full run. `--resume` lifts
 a pause.
 

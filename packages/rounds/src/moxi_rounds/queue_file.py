@@ -14,14 +14,22 @@ The kinds:
 - `left`: a member left (`reason`: "by hand", "moved", or the gate that failed), by
   `by`.
 - `batch`: a candidate was built (`state` "built", with its `id`, `n`, `main` (`M`),
-  `branch` and `members`) or ended (`state` "ended", with why).
-- `run`: what the lander read of a batch's CI run or did to it.
+  `branch` and `members`, and `source`, `[batch id, index]`, when it is one of the
+  groups an ended batch named) or ended (`state` "ended", with why, and `regroups`, the
+  groups of its members, each a list of `[round, stage, tip]`, to be built as batches of
+  their own: the halves of a split, or a half rebuilt without a member or on a moved
+  target).
+- `run`: what the lander read of a batch's CI run or did to it, or, with `head` and no
+  batch, of the target's full run at `head`.
 - `landed`, `ejected`: a member's end in a batch, with its `landing` or `reason`.
 - `waiting`: the lander waits on something outside the queue (`reason`).
 - `paused`, `resumed`: the queue stopped taking members that are not urgent, with its
   `reason`, and started again.
 - `red`, `green`: a full run on the target as the lander read it.
 - `told`: a message the lander sent or could not send, with what comms reported.
+
+Several batches run at once only while a red batch is split (`running_batches`); a
+group an ended batch named and no batch has been built from yet is `regrouped`.
 
 **A member** is a build's newest `join` and what came after it. It is waiting until it
 leaves, lands or is ejected; while a batch that names it has been built and not ended,
@@ -121,8 +129,9 @@ class Member:
 class Batch:
     """One candidate: its `id` (`<M12>-<n>`), number `n`, the target's head `main` it was
     built on, its local `branch`, its `members` as `(name, stage, tip)` in merge order,
-    the `candidate` commit, whether it has `ended` and why (`why`), and the newest `run`
-    event about it."""
+    the `candidate` commit, whether it has `ended` and why (`why`), the newest `run`
+    event about it and every one (`runs`), the group of an ended batch it was built
+    from (`source`), and the groups its end named (`regroups`)."""
 
     id: str
     n: int
@@ -134,21 +143,25 @@ class Batch:
     why: str | None = None
     run: dict | None = None
     runs: list[dict] = field(default_factory=list)
+    source: tuple[str, int] | None = None
+    regroups: list[tuple[tuple[str, str, str], ...]] = field(default_factory=list)
 
 
 @dataclass
 class Queue:
     """A repo's queue as its file reads now: every `member` by `(name, stage)` (the newest
     join of each), the `batches` in order, the pause's reason (`paused`, None when not
-    paused), the target's full runs read (`mains`, each a `red` or `green` event), the
-    `told` events, the newest `waiting` event (None once a batch moved past it), and
-    every event in order (`events`)."""
+    paused), the target's full runs read (`mains`, each a `red` or `green` event), what
+    the lander did to them (`head_runs`, the `run` events with a `head`), the `told`
+    events, the newest `waiting` event (None once a batch moved past it), and every
+    event in order (`events`)."""
 
     repo: str
     members: dict[tuple[str, str], Member] = field(default_factory=dict)
     batches: list[Batch] = field(default_factory=list)
     paused: str | None = None
     mains: list[dict] = field(default_factory=list)
+    head_runs: list[dict] = field(default_factory=list)
     told: list[dict] = field(default_factory=list)
     waiting_on: dict | None = None
     events: list[dict] = field(default_factory=list)
@@ -163,13 +176,15 @@ class Queue:
         return sorted(found, key=lambda one: (not one.urgent, one.line))
 
     def queued(self) -> list[Member]:
-        """Every member still in the queue, in a batch or waiting: the running batch's
-        members first, in its order, then the waiting ones in the order they are taken."""
-        running = self.running()
-        first = [] if running is None else [
-            self.members[(name, stage)] for name, stage, _tip in running.members
+        """Every member still in the queue, in a batch or waiting: the running batches'
+        members first, in their order, then the waiting ones in the order they are
+        taken."""
+        first = [
+            self.members[(name, stage)] for running in self.running_batches()
+            for name, stage, _tip in running.members
             if (name, stage) in self.members
-            and self.members[(name, stage)].state == IN_BATCH]
+            and self.members[(name, stage)].state == IN_BATCH
+            and self.members[(name, stage)].batch == running.id]
         return first + self.waiting()
 
     def position(self, name: str, stage: str) -> int | None:
@@ -181,8 +196,34 @@ class Queue:
         return None
 
     def running(self) -> Batch | None:
-        """The batch built and not ended, None when none is."""
+        """The newest batch built and not ended, None when none is."""
         return next((one for one in reversed(self.batches) if not one.ended), None)
+
+    def running_batches(self) -> list[Batch]:
+        """Every batch built and not ended, oldest first."""
+        return [one for one in self.batches if not one.ended]
+
+    def regrouped(self) -> list[tuple[tuple[str, int], list[Member]]]:
+        """Each group an ended batch named that no batch has been built from, as its
+        source and its members that still wait at the tip the group names; a group none
+        of whose members waits is left out."""
+        built = {one.source for one in self.batches if one.source is not None}
+        found = []
+        for batch in self.batches:
+            for index, group in enumerate(batch.regroups):
+                if (batch.id, index) in built:
+                    continue
+                members = [self.members[(name, stage)] for name, stage, tip in group
+                           if (name, stage) in self.members
+                           and self.members[(name, stage)].state == QUEUED
+                           and self.members[(name, stage)].tip == tip]
+                if members:
+                    found.append(((batch.id, index), members))
+        return found
+
+    def main_at(self, head: str) -> dict | None:
+        """The newest `red` or `green` event of the target's full run at `head`."""
+        return next((one for one in reversed(self.mains) if one.get("head") == head), None)
 
     def batch(self, batch_id: str) -> Batch | None:
         return next((one for one in self.batches if one.id == batch_id), None)
@@ -227,7 +268,8 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
                       main=str(event.get("main")), branch=str(event.get("branch")),
                       members=tuple((str(one["round"]), str(one["stage"]), str(one["tip"]))
                                     for one in event.get("members") or ()),
-                      candidate=event.get("candidate"))
+                      candidate=event.get("candidate"),
+                      source=(tuple(event["source"]) if event.get("source") else None))
         queue.batches.append(batch)
         queue.waiting_on = None
         for name, stage, tip in batch.members:
@@ -238,9 +280,14 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
         batch = queue.batch(str(event.get("id")))
         if batch is not None:
             batch.ended, batch.why = True, event.get("why")
+            batch.regroups = [tuple((str(name), str(stage), str(tip))
+                                    for name, stage, tip in group)
+                              for group in event.get("regroups") or ()]
             for one in queue.members.values():
                 if one.state == IN_BATCH and one.batch == batch.id:
                     one.state = QUEUED
+    elif kind == RUN and event.get("head") and not event.get("batch"):
+        queue.head_runs.append(event)
     elif kind == RUN:
         batch = queue.batch(str(event.get("batch")))
         if batch is not None:
