@@ -81,6 +81,15 @@ label = "A launch from the page may take"
 group = "Waits"
 unit = "seconds"
 
+[park.wait_s]
+type = "int"
+default = 300
+doc = "How long park waits for each session to be quiet before it leaves it running, in seconds."
+read = "use"
+label = "Park waits for each session to be quiet"
+group = "Waits"
+unit = "seconds"
+
 [runs.keep_days]
 type = "int"
 default = 30
@@ -245,7 +254,7 @@ elsewhere = "The session-name template is edited in Home's Options."
 [records.keep_days]
 type = "int"
 default = 90
-doc = "How many days ended runs, their events and exits, and released holds are kept."
+doc = "How many days ended runs, their events and exits, released holds and closed park entries are kept."
 read = "use"
 label = "Keep run records for"
 line = "Ended runs, their events and exits, and released holds."

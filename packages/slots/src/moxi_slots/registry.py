@@ -1,19 +1,34 @@
 """The registry, `slots.json` in the state directory, and the module lock.
 
 The registry holds, per slot, only what tmux can't know: `created`, `name`, `hold` and
-`last` (`at`, `label`, `meta`). Everything else is read from tmux.
+`last` (`at`, `label`, `meta`, the run's token `run`, the `server` it was placed under,
+`status_trusted`, and `ended`, how the run ended or why it was settled). Everything else
+is read from tmux.
 
-    {"version": 1,
+    {"version": 2,
      "slots": {"3": {"created": 1793392266.1, "name": "review",
                      "hold": {"holder": "run-7", "until": 1793395866.0},
-                     "last": {"at": 1793392300.5, "label": "agent", "meta": {...}}}}}
+                     "last": {"at": 1793392300.5, "label": "agent", "meta": {...},
+                              "run": "9f2c...", "server": "<boot id>:<tmux pid>",
+                              "status_trusted": true,
+                              "ended": {"at": 1793399000.0, "status": 0,
+                                        "signal": null}}}}}
 
-Every change (create, remove, rename, hold, release, a launch) runs under the one module
-lock, `locked()`: read the registry, read tmux, act, write with `write()`, which replaces
-the file in one step. The lock is held for the critical section only, never across a
-wait. Reads take no lock: the atomic replace always hands them a whole file.
+A `last` written by an older slots has no `run`, `server`, `status_trusted` or `ended`;
+it reads with None, None, true and None.
 
-A write drops holds that have run out, which read as absent anyway.
+A hold whose `until` is null lasts until its holder releases it. Version 2 is the first
+that may hold one, so a slots that reads only version 1 refuses the file by its version
+rather than misreading it; this code reads version 1 files as well and writes version 2.
+
+Every change (create, remove, rename, hold, release, settle, a launch, and the
+`pane-died` hook's write of a run's end) runs under the one module lock, `locked()`: read
+the registry, read tmux, act, write with `write()`, which replaces the file in one step.
+The lock is held for the critical section only, never across a wait. Reads take no
+lock: the atomic replace always hands them a whole file.
+
+A write drops holds that have run out, which read as absent anyway, and keeps every hold
+with a null `until`.
 """
 
 from __future__ import annotations
@@ -27,9 +42,11 @@ from pathlib import Path
 
 from . import places
 from .errors import RegistryError, TryAgain
-from .model import HIGHEST, LOWEST, Hold, Last
+from .model import HIGHEST, LOWEST, Hold, Last, RunEnd
 
-VERSION = 1
+VERSION = 2
+#: The versions `parse` reads.
+READS = (1, 2)
 #: Seconds a change waits for the module lock before `TryAgain`.
 LOCK_WAIT = 10.0
 
@@ -59,12 +76,24 @@ class Registry:
 
 
 @contextmanager
-def locked(timeout: float = LOCK_WAIT) -> Iterator[None]:
-    """Hold the module lock; `TryAgain` when it is not had in `timeout` seconds."""
+def locked(timeout: float = LOCK_WAIT, path: Path | None = None) -> Iterator[None]:
+    """Hold the module lock (or the lock file at `path`); `TryAgain` when it is not had in
+    `timeout` seconds. Before it takes the module lock it reads the journal for the
+    earlier boots a crashed reading of the registry would ask about
+    (`runs.read_journal_first`), and while it holds either lock no journal is read
+    (`runs.journal_closed`)."""
     from moxi import files
 
+    from . import runs
+
+    if path is None:
+        try:
+            runs.read_journal_first(read())
+        except RegistryError:
+            pass
     try:
-        with files.lock(places.module_lock(), timeout_s=timeout):
+        with files.lock(places.module_lock() if path is None else path,
+                        timeout_s=timeout), runs.journal_closed():
             yield
     except files.LockTimeout as exc:
         raise TryAgain(f"the slots lock was not had in {timeout:g} s ({exc}); try "
@@ -94,8 +123,9 @@ def parse(data: object) -> Registry:
     if not isinstance(data, dict):
         raise ValueError("not a JSON object")
     version = data.get("version")
-    if version != VERSION:
-        raise ValueError(f"version {version!r}, and this code reads version {VERSION}")
+    if isinstance(version, bool) or version not in READS:
+        raise ValueError(f"version {version!r}, and this code reads versions "
+                         f"{', '.join(map(str, READS))}")
     slots = data.get("slots")
     if not isinstance(slots, dict):
         raise ValueError("no slots object")
@@ -120,10 +150,12 @@ def _row(key: str, value: object) -> Row:
         raise ValueError(f"slot {key}'s name is not a string")
     hold = value.get("hold")
     if hold is not None:
+        until = hold.get("until", False) if isinstance(hold, dict) else False
         if not (isinstance(hold, dict) and isinstance(hold.get("holder"), str)
-                and isinstance(hold.get("until"), (int, float))):
+                and (until is None or (isinstance(until, (int, float))
+                                       and not isinstance(until, bool)))):
             raise ValueError(f"slot {key}'s hold has no holder or until")
-        hold = Hold(hold["holder"], float(hold["until"]))
+        hold = Hold(hold["holder"], None if until is None else float(until))
     last = value.get("last")
     if last is not None:
         if not (isinstance(last, dict) and isinstance(last.get("at"), (int, float))
@@ -132,8 +164,48 @@ def _row(key: str, value: object) -> Row:
         meta = last.get("meta")
         if meta is not None and not isinstance(meta, dict):
             raise ValueError(f"slot {key}'s last meta is not an object")
-        last = Last(float(last["at"]), last["label"], meta)
+        run, server = last.get("run"), last.get("server")
+        trusted = last.get("status_trusted", True)
+        if not all(v is None or isinstance(v, str) for v in (run, server)) \
+                or not isinstance(trusted, bool):
+            raise ValueError(f"slot {key}'s last run, server or status_trusted is not one "
+                             "slots wrote")
+        last = Last(float(last["at"]), last["label"], meta, run, server, trusted,
+                    _ended(key, last.get("ended")))
     return Row(float(created), name, hold, last)
+
+
+def _int_or_none(value: object) -> bool:
+    return value is None or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _ended(key: str, value: object) -> RunEnd | None:
+    if value is None:
+        return None
+    if not (isinstance(value, dict) and isinstance(value.get("at"), (int, float))
+            and not isinstance(value.get("at"), bool)
+            and _int_or_none(value.get("status")) and _int_or_none(value.get("signal"))
+            and (value.get("settled") is None or isinstance(value.get("settled"), str))):
+        raise ValueError(f"slot {key}'s last run's end is not one slots wrote")
+    return RunEnd(float(value["at"]), value.get("status"), value.get("signal"),
+                  value.get("settled"))
+
+
+def _ended_json(ended: RunEnd | None) -> dict | None:
+    if ended is None:
+        return None
+    out = {"at": ended.at, "status": ended.status, "signal": ended.signal}
+    if ended.settled is not None:
+        out["settled"] = ended.settled
+    return out
+
+
+def _last_json(last: Last | None) -> dict | None:
+    if last is None:
+        return None
+    return {"at": last.at, "label": last.label, "meta": last.meta, "run": last.run,
+            "server": last.server, "status_trusted": last.status_trusted,
+            "ended": _ended_json(last.ended)}
 
 
 def dump(registry: Registry, now: float | None = None) -> dict:
@@ -147,9 +219,7 @@ def dump(registry: Registry, now: float | None = None) -> dict:
             "created": row.created,
             "name": row.name,
             "hold": None if hold is None else {"holder": hold.holder, "until": hold.until},
-            "last": None if row.last is None else {"at": row.last.at,
-                                                   "label": row.last.label,
-                                                   "meta": row.last.meta}}
+            "last": _last_json(row.last)}
     return {"version": VERSION, "slots": slots}
 
 
@@ -172,5 +242,5 @@ def expired_holds(registry: Registry, now: float | None = None) -> list[tuple[in
             if row.hold is not None and not row.hold.live(now)]
 
 
-__all__ = ["VERSION", "LOCK_WAIT", "Row", "Registry", "locked", "read", "parse", "dump",
+__all__ = ["VERSION", "READS", "LOCK_WAIT", "Row", "Registry", "locked", "read", "parse", "dump",
            "write", "expired_holds"]

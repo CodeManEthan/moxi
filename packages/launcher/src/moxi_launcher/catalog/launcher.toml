@@ -121,7 +121,7 @@ carry = false
 type = "string"
 default = ""
 requires = "slots"
-doc = "The tmux slot a slot launch goes into; the lowest free one when unset."
+doc = "The tmux slot a slot launch goes into, made again when missing; when unset, the lowest slot with no session running."
 label = "Slot"
 carry = false
 

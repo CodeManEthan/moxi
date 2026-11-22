@@ -138,7 +138,7 @@ from typing import Any
 
 from moxi import files
 
-from . import catalog, notices, quiet, slots, store, targets
+from . import catalog, notices, parks, quiet, slots, store, targets
 
 log = logging.getLogger("moxi.launcher.job")
 
@@ -211,6 +211,11 @@ class _Again(Exception):
     def __init__(self, word: str, detail: str = ""):
         super().__init__(word)
         self.word, self.detail = word, detail
+
+
+#: Raised to send a run back to its wait; a run that takes the steps in its own order
+#: catches it.
+Again = _Again
 
 
 # -- what other parts share -------------------------------------------------------------
@@ -394,6 +399,8 @@ class RelaunchJob:
 
     #: The run's kind of job, for its name.
     kind = "relaunch"
+    #: Whether a client's activity holds at the exit dialog (copy mode always does).
+    count_activity = True
 
     def __init__(self, conn: sqlite3.Connection, run_id: str, *, turns: Any = LOOK,
                  slots_api: Any = LOOK, comms: Any = LOOK, sessions: Any = LOOK,
@@ -889,7 +896,8 @@ class RelaunchJob:
             self.end("exit-pending", "unreadable", f"the pane could not be read at the "
                                                    f"exit dialog: {_words(exc)}")
         person = quiet.judge(None, None, pane, now=self.wall(),
-                             person_s=float(self.setting("relaunch.person_s"))).hold("person")
+                             person_s=float(self.setting("relaunch.person_s")),
+                             count_activity=self.count_activity).hold("person")
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")
@@ -1084,6 +1092,14 @@ class RepairJob(RelaunchJob):
         if api is None:
             self.end("relaunch-failed", "no-slots", "slots can't be loaded")
         chain = chain_of(self.conn, self.row.request_id)
+        # Crash discovery before the recorded slot is chosen and held: a crashed slot of
+        # another session is reserved for it, and so passed over; one of this chain's own
+        # is settled, since this repair brings its session back.
+        try:
+            parks.discover_before_launch(by=original.actor, api=api, conn=self.conn,
+                                         chain=chain)
+        except parks.ParkRunning as exc:
+            self.end("relaunch-failed", exc.code, f"{exc.problem}: {exc.hint}")
         try:
             choice = choose_slot(api, original.slot or self.row.slot, self.holder, chain)
         except Exception as exc:  # noqa: BLE001  (a slot that can't be read: nothing done)
