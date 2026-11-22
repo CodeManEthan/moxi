@@ -3,6 +3,7 @@
     moxi install <module> [--with EXTRA,...] [--without EXTRA,...] [--all | --none]
                           [--from SPEC]... [--third-party] [--replace]
                           [--skills | --no-skills] [--skills-form auto|link|copy]
+    moxi install <module> --setup-only
 
 0. The catalogue (`moxi.catalogue`): a name it lists installs its first-party
    distribution. Any other name is refused with the nearest listed names, unless a
@@ -36,6 +37,15 @@ so two installs never interleave; a second waits for the first. Each settle chil
 under that hold. An interrupt (Ctrl-C, SIGTERM, a hang-up) never kills a settle child:
 the install forwards it, waits for the child to start its stopped units again, runs no
 later step and exits 1.
+
+`--setup-only` installs nothing and reaches no index: it skips steps 0 to 2 and 4 to 6,
+and of step 3 runs only the module's `SETUP` and its `setup.json` record
+(`python -m moxi._settle --setup-only`), on the module as it is installed in this
+environment, whatever installed it, under the same hold of the core lock. It is the
+doctor's fix for a setup that last ran at another version (`moxi._settle.setup_command`).
+A module not installed here is refused (exit 3), and so is any other option given with it
+(exit 2). A module that declares no `SETUP` is said, and nothing is recorded. A `SETUP` that
+fails leaves the record as it was, and the exit is 1.
 """
 
 from __future__ import annotations
@@ -48,7 +58,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import names
+from ._settle import SETUP_ONLY
 from .cli import normalize, speakers_of
+from .exit import REFUSED
 
 TOOL = "tool"
 PLAIN = "plain"
@@ -456,6 +468,15 @@ def run_settle(python: str, module: str, *, replace: bool = False,
                                                 install_skills=install_skills))
 
 
+def run_setup(python: str, module: str):
+    """Run module `module`'s `SETUP` alone, and its record, in a fresh process under this
+    install's hold of the core lock (`--setup-only`), and wait for it however long it
+    takes. Returns its `moxi._settle.Outcome`."""
+    from . import _settle
+
+    return _settle.run_child(_settle.child_argv(python, module, setup_only=True))
+
+
 # -- the installer ------------------------------------------------------------------------
 
 def _parser(prog: str):
@@ -492,7 +513,29 @@ def _parser(prog: str):
     parser.add_argument("--skills-form", choices=("auto", "link", "copy"),
                         help="set how skills are placed (the core's skills.form) "
                              "before setting the modules up")
+    parser.add_argument(SETUP_ONLY, dest="setup_only", action="store_true",
+                        help="run the installed module's setup again and record it, "
+                             "installing nothing and reaching no index; takes no other "
+                             "option")
     return parser
+
+
+#: Each option of `moxi install` other than `--setup-only`: its `args` field, what the
+#: field holds when the option isn't given, and the option as typed.
+_OTHERS = (("with_", [], "--with"), ("without", [], "--without"), ("all", False, "--all"),
+           ("none", False, "--none"), ("from_", [], "--from"),
+           ("third_party", False, "--third-party"), ("replace", False, "--replace"),
+           ("skills", None, "--skills"), ("skills_form", None, "--skills-form"))
+
+
+def _options_given(args) -> list[str]:
+    """The options other than `--setup-only` given in `args`, as typed."""
+    given = []
+    for dest, ungiven, flag in _OTHERS:
+        value = getattr(args, dest)
+        if value != ungiven:
+            given.append("--no-skills" if dest == "skills" and value is False else flag)
+    return given
 
 
 def _names(values: list[str]) -> list[str]:
@@ -506,7 +549,13 @@ def _names(values: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None, prog: str = "moxi install") -> int:
-    args = _parser(prog).parse_args(sys.argv[1:] if argv is None else argv)
+    parser = _parser(prog)
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.setup_only:
+        given = _options_given(args)
+        if given:
+            parser.error(f"{SETUP_ONLY} runs the module's setup alone and takes no other "
+                         f"option; drop {', '.join(given)}")
     try:
         return Installer(args).run()
     except InstallError as exc:
@@ -525,6 +574,7 @@ class Installer:
         self.replace = bool(getattr(args, "replace", False))
         self.skills = getattr(args, "skills", None)
         self.skills_form = getattr(args, "skills_form", None)
+        self.setup_only = bool(getattr(args, "setup_only", False))
         #: The module's catalogue entry, when the catalogue lists it.
         self.listed = None
         self.setup_failed: list[str] = []
@@ -543,6 +593,8 @@ class Installer:
         if module in names.RESERVED:
             raise InstallError(f"{module!r} is a name moxi keeps for itself, not a module: "
                                f"{names.reserved_why(module)}")
+        if self.setup_only:
+            return self._setup_only(module)
         both = sorted(set(self.yes) & set(self.no))
         if both:
             raise InstallError(f"--with and --without both name {', '.join(both)}")
@@ -619,6 +671,29 @@ class Installer:
         # step 6 ----------------------------------------------------------------------
         self._report(after)
         return 1 if self.setup_failed else 0
+
+    # --setup-only ------------------------------------------------------------------
+    def _setup_only(self, module: str) -> int:
+        """The module's `SETUP` alone, and its record, in a child under the core lock;
+        no environment check, catalogue, index or install."""
+        from . import modules, paths
+        from ._settle import guard_streams, setup_command
+        from .cli import install_hint
+
+        found = modules.load(module)
+        if found.state == modules.ABSENT:
+            raise InstallError(f"{module} is not installed here, so it has no setup to "
+                               f"run; {install_hint(module)}", exit_code=REFUSED)
+        if found.state != modules.PRESENT:
+            raise InstallError(f"{module} is {found.state}, so its setup can't run"
+                               + (f": {found.reason}" if found.reason else ""))
+        with _core_lock():
+            guard_streams()
+            outcome = run_setup(str(paths.python()), module)
+        if outcome.interrupted:
+            raise InstallError(f"interrupted in {module}'s setup. Run "
+                               f"`{setup_command(module)}` again to finish.")
+        return 0 if outcome.code == 0 else 1
 
     # step 0 ----------------------------------------------------------------------
     def _catalogue_gate(self, module: str) -> None:
