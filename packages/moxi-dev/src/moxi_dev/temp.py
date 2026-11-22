@@ -443,6 +443,22 @@ def nested(short_root: str) -> Choice:
                   source=BY_NESTING)
 
 
+def outer_short_dir(env: Mapping[str, str]) -> str | None:
+    """The outer test's short directory the fence's mark in `env` names, if any."""
+    return env.get(FENCED_ENV) or None
+
+
+def given_root(env: Mapping[str, str]) -> str | None:
+    """The `PYTEST_DEBUG_TEMPROOT` set in `env`, if any."""
+    return env.get(TEMPROOT_ENV) or None
+
+
+def put_root(choice: Choice, env: dict[str, str] | Any) -> None:
+    """Put `choice`'s root in `env` for pytest, where it has one."""
+    if choice.root is not None:
+        env[TEMPROOT_ENV] = choice.root
+
+
 def _fence_active() -> bool:
     testing = sys.modules.get("moxi_dev.testing")
     guard = getattr(testing, "_GUARD", None)

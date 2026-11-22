@@ -275,7 +275,6 @@ from moxi.paths import ANCHOR_HOME_ENV
 from moxi_dev import temp
 from moxi_dev.temp import FENCED_ENV as FENCED_ENV
 from moxi_dev.temp import TEMP_ENV as TEMP_ENV
-from moxi_dev.temp import TEMPROOT_ENV
 
 #: How often a served server looks for its shutdown request, in seconds.
 SHUTDOWN_POLL = 0.05
@@ -1106,19 +1105,18 @@ class _TempRun:
                       else temp.nested(tempfile.gettempdir()))
         elif not temp.top_level(os.environ):
             outer = _GUARD.short if _GUARD.active and _GUARD.short \
-                else os.environ.get(FENCED_ENV)
+                else temp.outer_short_dir(os.environ)
             choice = temp.nested(outer or tempfile.gettempdir())
         else:
             basetemp = config.option.basetemp
             if not basetemp:
-                swept = temp.sweep(own_root=os.environ.get(TEMPROOT_ENV) or None)
+                swept = temp.sweep(own_root=temp.given_root(os.environ))
             try:
                 choice = temp.choose(os.environ, basetemp=str(basetemp) if basetemp else None,
                                      workers=_workers(config))
             except temp.TempError as exc:
                 raise pytest.UsageError(str(exc)) from exc
-            if choice.root is not None:
-                os.environ[TEMPROOT_ENV] = choice.root
+            temp.put_root(choice, os.environ)
         run = cls(config, choice, swept)
         if not choice.is_nested:
             run.process_dir = temp.make_process_dir(choice.short_root)
