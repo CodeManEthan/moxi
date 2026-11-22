@@ -225,7 +225,7 @@ def test_slots_that_cant_be_read_are_said_under_the_box_and_no_slots_are_not(fak
     expect(piece.locator(".said")).not_to_contain_text("slots")
 
 
-def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_picked(
+def test_the_menu_lists_each_slot_with_its_state_and_only_a_choosable_one_can_be_picked(
         fake, ui_page, ui_shell):
     # The launch in slot 1 is another user's, so it is no place of this shell's user.
     with kit.launch_log(ui_shell) as conn:
@@ -257,12 +257,12 @@ def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_pick
     expect(words("Slot 3")).to_have_text("free")
     expect(words("Slot 4")).to_have_text("taken")
     expect(words("Slot 5")).to_have_text(re.compile(f"^held for reviewer until {HOUR}$"))
-    expect(words("Slot 6")).to_have_text("not running")
+    expect(words("Slot 6")).to_have_text("missing, made again at launch")
     expect(words("Your terminal")).to_have_text("copies the command for you to paste")
     expect(words("Headless")).to_have_text("no terminal, runs in the background")
-    for lead in ("Slot 1", "Slot 4", "Slot 5", "Slot 6"):
+    for lead in ("Slot 1", "Slot 4", "Slot 5"):
         assert menu.locator(f'[data-run="{lead}"]').evaluate("row => row.localName") == "div"
-    for lead in ("Slot 2", "Slot 3", "Your terminal", "Headless"):
+    for lead in ("Slot 2", "Slot 3", "Slot 6", "Your terminal", "Headless"):
         expect(menu.locator(f'button[data-run="{lead}"]')).to_be_enabled()
     # The tick is on the default, and a hairline parts the slots from the rest.
     current = menu.locator('.row[data-current="true"]')

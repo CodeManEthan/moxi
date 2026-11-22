@@ -67,7 +67,10 @@ detached, with the brief as its prompt, its output going to the launch's run log
 headless launch needs a brief. With a comms identity it runs comms' wrapper instead
 (below). `--target slot` starts the session in a tmux slot, and needs
 the slots module (Linux and WSL2; macOS untested). `--slot` names the slot; a launch with
-any other target that names one is refused, exit 2.
+any other target that names one is refused, exit 2. A named slot whose tmux session is
+gone (`missing`) is made again first; one held by another holder, a park's reservation
+among them, is refused `held`. A slot launch that names no slot takes the lowest slot
+with no session running and no hold, making a missing one again, else a new slot.
 
 **How a slot launch starts.** Claude Code can open on a screen of its own before the
 session runs: the folder-trust screen, the development-channels screen, and in
@@ -403,10 +406,10 @@ exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the lau
 the commands it granted turns. A background shell or Monitor the session runs holds the
 exit (`held`, `shells`) until the session has been idle an hour, as cache reads its last
 request; with cache not installed the idle time is unknown and the shells hold. Past the
-hour, Claude's exit dialog stops them. In a slot the exit dialog is answered too, with
-"Exit and stop tasks"; elsewhere the session is left at the dialog for a person
-(`at-dialog`). Every exit tried writes a row to
-the exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
+hour, Claude's exit dialog stops them; park's exit doesn't wait on them (below). In a
+slot the exit dialog is answered too, with "Exit and stop tasks"; elsewhere the session
+is left at the dialog for a person (`at-dialog`). Every exit tried writes a row to the
+exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
 `not-exited` or `refused`.
 
 **Resume.** `moxi launcher sessions` lists past launches, newest first, each with whether
@@ -414,11 +417,13 @@ it is live and whether it can be resumed, and why not: it is live (attach to its
 instead), it ran headless, it never learned a session id (a Codex launch made without
 turns' host: use `codex resume`), it ran Codex under a comms name and the installed comms'
 Codex wrapper can't resume a thread (upgrade moxi-comms), its harness is no longer
-launched, or a later launch resumed it since. `moxi launcher resume SESSION_ID` launches
+launched, or a later launch resumed it since. A session a park entry keeps a slot for is
+marked `parked in slot N` (below). `moxi launcher resume SESSION_ID` launches
 it again from its launch's values, resumed, keeping its session id (a Codex launch under a
 comms name continues its thread through comms' wrapper; a relaunch or recycle starts a
 new one): in its own slot when that can take it, else
-the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
+the lowest that can, with a line saying why its own could not (another session's park
+reservation, say); `--slot N` picks one. Or in this terminal for a terminal launch,
 where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 `TERM_PROGRAM_VERSION`) and nothing else of your shell's. The launch's own brief is not
 sent again. `--brief TEXT` or `--brief-file FILE` (one of them, the file read as a launch's
@@ -434,6 +439,80 @@ as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once. While a relaunch, exit or recycle of the
 launch is under way, the resume is refused `run-open` (exit 3), naming the run.
+
+**Park.** `moxi launcher park` gets the slots ready for a reboot. It exits every session
+the launcher launched into a slot, records which session was in which slot (a park
+entry), and reserves each of those slots with a slots hold `park-<id>` that lasts until
+it is released, so no other launch takes the slot. It holds the slot before it exits the
+session, so the slot is never free between the two. Each exit is exit-session's, with
+three differences: it waits for the session to be quiet, up to `park.wait_s` (300 s, or
+`--wait-s`); it does not count a client's activity as a person, at the quiet read or at
+the exit dialog, since the person parking is the one at the panes; and it exits
+regardless of background shells and Monitors, which Claude's exit dialog stops, since the
+reboot would end them anyway. Copy mode in the pane still holds, as do an open turn,
+subagents, a draft and a read that failed. Each slot gets one line:
+
+- `exited`: the session ended.
+- `not-exited`, with the reason: the wait ran out or the exit failed. The session still
+  runs; its entry and reservation stay, so a reboot ends it and running park again tries
+  its exit again.
+- `left-running`: a Codex session, which offers no exit. It is recorded and reserved, and
+  the reboot ends it.
+- The session park itself runs in is recorded `not-exited: the session running park` and
+  left for you to exit.
+- A live run the launcher did not launch is `left alone`; a session launched into a
+  terminal is listed `not in a slot; left running`; a slot taken by something else since
+  park found it is `changed; left alone`; a slot another holder holds is `held by H; left
+  running`.
+
+Park exits 0 when every session it found got an entry, and 1 when a slot could not be
+reserved or an entry could not be written. `--dry-run` says what park would do and
+writes nothing. Park removes no slot. Only one park runs at a time: a second waits 10 s
+for the first, then is refused `park or restore is running` (exit 75).
+
+**Restore.** After the reboot, `moxi launcher restore` resumes each parked session into
+its reserved slot, making the slot's tmux session again first; `moxi launcher restore 3
+5` restores only those slots. Nothing restores by itself: you run it. Restore sends no
+first turn: each session comes back as `moxi launcher resume --plain` brings it, a `go`
+launch's too. Sessions go one at a time, in slot order, each with one line:
+
+- `restored`: resumed into its slot under the reservation, which the start ends. When its
+  slot can't take it (something else runs there, or slots won't make it again), it goes
+  to the lowest slot that can, and the reservation is released.
+- `still running`: park left it `not-exited` and no reboot came; the entry stays.
+- `liveness unread`: whether it runs can't be read; the entry stays.
+- `refused`, with the reason: the resume was refused before anything started, such as
+  `comms is offline` when the comms daemon is not up yet. The entry and reservation stay;
+  run restore again.
+- A session resumed some other way since is marked restored, and its slot let go.
+
+A launch that fails after it was placed takes the reservation again, so the entry stays
+open; if something took the slot in between, the entry is closed and the line names the
+`moxi launcher resume` command for the session. Restore exits 0 when every entry it took
+was restored, else 1, and `--dry-run` says what it would do and writes nothing.
+`moxi launcher resume SESSION_ID` of a parked session takes the same path: it goes back
+into its reserved slot, or, with `--slot N`, into slot N with the reservation released.
+Its `--brief`, `--brief-file` or `--plain` goes with it, and a `go` launch's resume with
+none is refused before the whole-run park lock is taken and before its slot is touched.
+The launch's own crash discovery runs before that check, under the park lock it takes
+around itself, and may reserve crashed slots.
+
+**When the machine went down with no park**, the launcher still finds the sessions that
+were running in slots: slots records how each run in a slot ended, and a run that was
+still going when its tmux server went down reads `crashed`. Before any launch into a slot,
+and at the start of park, restore and unpark, the launcher turns each crashed slot whose
+last launch was its own into a park entry with a reservation, so no fresh launch takes the
+slot and `restore` brings the session back; a resume of the session, or a relaunch
+repair, runs this before it chooses a slot. A launch that names such a slot is refused
+`held by park-<id>`, with the hint to restore or unpark it. A Codex session quit by hand
+in the two minutes before an unplanned shutdown, and a run whose window was killed by
+hand, read crashed too; unpark them.
+
+**Unpark.** `moxi launcher unpark 3` gives up slot 3's reservation without restoring its
+session, and `moxi launcher unpark --all` every one. The session stays resumable with
+`moxi launcher resume`. A slot given up, by unpark or by restore, that reads crashed (a
+session park left running that the reboot ended) is settled, so it is not reserved
+again.
 
 **Recycle.** Two launch options let a session be cleared or compacted on the launcher's
 own reads:
@@ -578,9 +657,13 @@ set up, `Preset` on the same line applies a seat or a project preset; a project 
 there, or the one Home opens on, applies that project's own preset, and a preset that
 names a place, `Scratch` among them, moves the line there. The chip in the box sets the
 harness, the model and the effort. The button names where the launch runs, and its caret
-opens the choices: each slot with its state, your terminal, or headless. With slots it
-starts at the lowest free slot, without slots at your terminal, and the choice is not
-kept from one visit to the next. A launch from the box runs where its button says,
+opens the choices: each slot with its state, your terminal, or headless. A missing slot
+reads `missing, made again at launch` and can be picked; a slot the next launch reserves
+for the session that was running in it when the machine went down reads `crashed,
+reserved at the next launch`; a reserved slot names its holder and, for a park's
+reservation, the parked session. With slots it starts at the slot a launch naming none
+would take (the lowest with no session running and no hold), without slots at your
+terminal, and the choice is not kept from one visit to the next. A launch from the box runs where its button says,
 whatever `[defaults]` or the preset sets for `target` and `slot`; every other row is
 filled from the preset and `[defaults]` as the page's form is. The first turn is what
 Home shows: the text in the box, and a handoff on its line under the box. A brief your
@@ -717,6 +800,9 @@ nothing has used it for a while.
 | `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N] [--brief TEXT \| --brief-file FILE \| --plain]` | launch a past session again, resumed, the brief its first turn; with `--plain`, none |
+| `moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]` | exit the sessions in slots and reserve their slots |
+| `moxi launcher restore [SLOT ...] [--dry-run] [--json]` | resume parked sessions into their reserved slots |
+| `moxi launcher unpark SLOT ... \| --all [--json]` | give up parked slots without restoring them |
 | `moxi launcher clear-expired [--session ID] [--dry-run] [--json]` | the expiry ask of every live launch that recycles on expiry, or of the one whose current session is ID, now |
 | `moxi launcher keep-warm --session ID [--dry-run] [--json]`, `keep-warm --dry-run [--json]` | the keep-warm ask of one session now; with `--dry-run` alone, of every live launch keep-warm is on for |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
@@ -832,6 +918,7 @@ Set with `moxi config set launcher <key> <value>`:
   a Claude slot launch takes this long before it returns.
 - `runs.keep_days` (30): how long run logs, prompt files and settings run files are kept.
 - `relaunch.wait_s` (900): how long a self relaunch waits for its session to be quiet.
+- `park.wait_s` (300): how long park waits for each session to be quiet.
 - `relaunch.person_s` (120): how recently a person's use of the pane, or a turn no
   delivery opened, holds an act.
 - `relaunch.dialog_s` (60): how long a relaunch or an exit waits at the exit dialog.
@@ -857,8 +944,8 @@ Set with `moxi config set launcher <key> <value>`:
   directs.
 - `keep_warm.directing_texts`: the nudges for a covered director with no open hold, in
   order, the last repeating; the agents at work are named after each.
-- `records.keep_days` (90): how long ended runs, their events, exits and released holds
-  are kept.
+- `records.keep_days` (90): how long ended runs, their events, exits, released holds and
+  closed park entries are kept. Open park entries are never deleted by age.
 - `name.template` (`<date>-<time>-<project>-<agent>`) and `name.templates` (empty):
   the template a launch's session name is made from, and a project's own by project key
   (see "The session's name").
