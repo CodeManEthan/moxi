@@ -7,6 +7,17 @@
   spelled long. A store spelled inside the profile that leads out of it through a
   junction is now refused, since the profile's access list doesn't reach it there, and a
   short (8.3) spelling of a place inside the profile is now accepted.
+
+## 0.3.1 (2026-11-21)
+
+- Every digest comms hands turns, on Claude Code and on Codex, by `deliver` or `steer`,
+  carries `by="comms"` and `senders`, the qualified name of each message's sender, once
+  each in the digest's order; the `deliver` a refused steer falls back to carries the
+  same. A session's `prompt` listeners read them as the prompt's `delivery_by` and
+  `delivery_senders`. A headless Codex launch's brief carries neither.
+- comms and its `codex` extra need moxi-turns 0.2.5 or later, the first whose `deliver`
+  and `steer` take `by` and `senders`. With an older turns every hand-in fails and no
+  mail reaches the session.
 - The comms daemon replaces a Claude Code session's adapter that died while the session
   runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
   for its claim socket to stop answering, and starts a new adapter with the environment
