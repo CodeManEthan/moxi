@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- A launch follows its Claude session when Claude Code replaces the session's turns
+  endpoint (each plugin reload does). A held Claude claim moves only to an endpoint whose
+  parent process is the launch's own `claude`, the row's `pid` and `pid_started`
+  compared by pid and start time, once the endpoint that held it has ended. No session id
+  moves a Claude claim any more, so a session started from inside a launched one never
+  takes it, even by naming a known id; a row with no `pid_started` never moves. The
+  `reclaimed` event's detail gains `"by": "parent"`. A Codex launch keeps the known-id
+  move.
+- The ready recorder listens for turns' `load`, raised when an endpoint first learns its
+  session id, so the replacing endpoint claims the launch at its own start. An id first
+  learned there is recorded with the new source `load`, until a `ready` of the same
+  endpoint names that id and gives it the `ready`'s source.
+- When the replacing endpoint starts before the old one has ended, its `load` and `ready`
+  events are queued in arrival order and handled once the old one ends, checked every
+  100 ms for up to 5 s; if it outlives the wait, the next event moves the claim.
+- Launches stuck on an ended endpoint heal at their next endpoint start after the
+  update, with no repair step. A limit crossing a seat passed while stuck is not
+  replayed.
+- The `changed` refusal's hint for a claim not yet moved says it moves within seconds.
+- The `turns` extra needs moxi-turns 0.2.5 or later: an older turns refuses a listener
+  row naming `load`, and with it every launcher listener.
+
 - Crash discovery: before every slot launch, a slot slots reads crashed (its run was
   going when its tmux server went down) whose last launch is a launcher slot launch with
   a session no one has taken up since is reserved for that session (an open-ended hold

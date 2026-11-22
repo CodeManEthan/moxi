@@ -31,6 +31,10 @@
   --moxi-attention-soft: light-dark(#f1f1ef, #232323);
   --moxi-add-soft: light-dark(#f1f1ef, #232323);
   --moxi-del-soft: light-dark(#f1f1ef, #232323);
+  --moxi-state-done: light-dark(#2a7049, #5fbf8a);
+  --moxi-state-yours: light-dark(#8a6100, #e0b24a);
+  --moxi-state-yours-soft: light-dark(#f7efdb, #2a2414);
+  --moxi-state-failed: light-dark(#b3261e, #ff7a6b);
   --moxi-series-1: light-dark(#1d1d1b, #e4e4e0);
   --moxi-series-2: light-dark(#454543, #bfbfbb);
   --moxi-series-3: light-dark(#646462, #a2a29f);
@@ -76,6 +80,10 @@
   --moxi-attention-soft: light-dark(#fbf3dc, #1f1a14);
   --moxi-add-soft: light-dark(#e6f4ea, #13261f);
   --moxi-del-soft: light-dark(#fbe9e6, #2b1424);
+  --moxi-state-done: light-dark(#2a7049, #5ee6b5);
+  --moxi-state-yours: light-dark(#7d5c09, #ffd25e);
+  --moxi-state-yours-soft: light-dark(#fbf3dc, #1f1a14);
+  --moxi-state-failed: light-dark(#a63a26, #ff7461);
   --moxi-series-1: light-dark(#6a4fd6, #ff9f45);
   --moxi-series-2: light-dark(#c03c86, #ff4f9a);
   --moxi-series-3: light-dark(#c8682a, #c77dff);
