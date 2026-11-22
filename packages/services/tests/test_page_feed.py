@@ -16,6 +16,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_services import acts, pagehandlers
 
 from page_kit import Stream, send, served
@@ -70,7 +71,7 @@ def gathers(monkeypatch):
     return found
 
 
-def until(check, within: float = 5.0) -> None:
+def until(check, within: float = PROC_WAIT_S) -> None:
     deadline = time.monotonic() + within
     while not check():
         assert time.monotonic() < deadline, "timed out"
@@ -82,7 +83,7 @@ def settled(feed) -> bool:
     return feed.thread is not None and not feed.thread.is_alive()
 
 
-async def until_async(check, within: float = 5.0) -> None:
+async def until_async(check, within: float = PROC_WAIT_S) -> None:
     deadline = time.monotonic() + within
     while not check():
         assert time.monotonic() < deadline, "timed out"
@@ -98,13 +99,13 @@ def test_the_first_event_is_every_row_and_a_change_comes_at_the_next_tick(monkey
     async def go():
         stream = Stream(served())
         try:
-            name, data = await stream.next(5)
+            name, data = await stream.next(PROC_WAIT_S)
             assert stream.status == 200 and name == "rows"
             assert data["state"] == "up"
             assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
                 == [("services/web", "active", None)]
             await asyncio.to_thread(acts.stop, "web")
-            _, data = await stream.next(5)
+            _, data = await stream.next(PROC_WAIT_S)
             assert [(r["id"], r["state"], r["verdict"]["cause"]) for r in data["rows"]] \
                 == [("services/web", "inactive", "stopped")]
         finally:
@@ -120,7 +121,7 @@ def test_a_tick_that_changes_nothing_sends_no_event(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            await stream.next(5)
+            await stream.next(PROC_WAIT_S)
             assert await stream.none_within(0.4)
         finally:
             await stream.close()
@@ -135,7 +136,7 @@ def test_the_poller_starts_with_the_first_stream_and_keeps_running_after_it(monk
     async def go():
         assert pagehandlers._current is None and gathers.calls == []
         stream = Stream(served())
-        await stream.next(5)
+        await stream.next(PROC_WAIT_S)
         feed = pagehandlers._current
         await stream.close()
         seen = len(gathers.calls)
@@ -255,7 +256,7 @@ def test_a_store_that_cannot_be_read_is_published_as_state_error(monkeypatch, to
     async def go():
         stream = Stream(served())
         try:
-            _, data = await stream.next(5)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["state"] == "error" and "newer than" in data["detail"]
         finally:
             await stream.close()
@@ -272,7 +273,7 @@ def test_the_poller_holds_nothing_the_idle_exit_reads_while_it_gathers(monkeypat
 
     async def go():
         stream = Stream(app)
-        await stream.next(5)
+        await stream.next(PROC_WAIT_S)
         await stream.close()
         feed = pagehandlers._current
         await until_async(lambda: settled(feed))
