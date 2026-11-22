@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 import sys
 import textwrap
 import time
@@ -323,6 +324,53 @@ def test_a_drop_removes_the_places_a_rewritten_record_names(rewritten):
                         run_by="planner")
 
     assert not made.worktree.exists() and not made.scratch.exists()
+
+
+@pytest.fixture
+def in_scratch(rewritten):
+    """The rewritten record's B1, with a process whose working folder is its scratch
+    folder. Returns `(log, the commission, the process)`."""
+    path, made = rewritten
+    proc = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                            cwd=made.scratch, stdin=subprocess.PIPE)
+    try:
+        yield path, made, proc
+    finally:
+        proc.communicate(timeout=30)
+
+
+def test_a_process_in_a_rewritten_records_scratch_is_found(in_scratch):
+    path, made, proc = in_scratch
+
+    found = sweeping.scratch_users(commissioned(path))
+
+    assert found is not None and found.unread is None
+    assert found.place == made.scratch
+    assert any(one.startswith(f"pid {proc.pid} (") for one in found.users)
+
+
+def test_the_finish_gate_refuses_for_a_rewritten_records_scratch_in_use(in_scratch):
+    path, made, proc = in_scratch
+    state = folded(path)
+
+    unmet, unread = sweeping.scratch_gate(state, [builds.current(state, "B1")],
+                                          again="again")
+
+    assert unread == () and unmet is not None
+    assert unmet.reason.startswith(
+        f"B1's scratch folder {made.scratch} is in use by pid {proc.pid} (")
+
+
+def test_a_drop_leaves_a_rewritten_records_scratch_in_use(in_scratch):
+    _path, made, proc = in_scratch
+
+    done = dropping.drop_build(ROUND, "B1", by="operator", record="comms:1234567",
+                               run_by="planner")
+
+    assert not made.worktree.exists() and made.scratch.is_dir()
+    [kept] = done.kept
+    assert kept.place == made.scratch and kept.check == "D"
+    assert any(one.startswith(f"pid {proc.pid} (") for one in kept.work)
 
 
 def test_a_tilde_word_of_a_command_step_runs_as_the_path_under_home(

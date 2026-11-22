@@ -10906,6 +10906,9 @@ rounds	packages/rounds/tests/test_home_paths.py	assert cli.main(["projects", "se
 rounds	packages/rounds/tests/test_home_paths.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(tmp_path / "ann") + os.sep)	keep	HOME	HOME
+rounds	packages/rounds/tests/test_home_paths.py	proc.communicate(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in found.users)	keep	any	any
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in kept.work)	keep	any	any
 rounds	packages/rounds/tests/test_index.py	"build.dropped", {"stage": "B1", "by": "operator", "record": "comms:30"}))	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT, "numbers": None}	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT}	keep	record	record

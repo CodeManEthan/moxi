@@ -603,9 +603,11 @@ def scratch_users(commissioned: Mapping) -> ScratchUsers | None:
     from this process and every one it runs under, so the shell or the wrapper that
     runs the verb is not named."""
     named = commissioned.get(removal.SCRATCH)
-    if not named or not Path(str(named)).is_dir():
+    if not named:
         return None
-    place = Path(str(named))
+    place = Path(places.expand_home(named))
+    if not place.is_dir():
+        return None
     import psutil
 
     try:
