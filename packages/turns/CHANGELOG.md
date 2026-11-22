@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 (unreleased)
 
 - A new request, `fork {text, by, ref?}` (the client's `fork(text, by=, ref=)`), and a new
   capability, `fork`: start a fork of the session's main loop with `text` as its task. It
