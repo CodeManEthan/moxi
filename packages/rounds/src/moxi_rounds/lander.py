@@ -21,7 +21,7 @@ end with the builder's session; where that can't be run, in a new session of its
 (`setsid`). Either way it runs the interpreter that started it, `python -m moxi rounds
 land --repo KEY`, in the repo's root, with the starter's `PATH`, `HOME`, git's and gh's
 credentials (`SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`), the XDG
-roots and every `MOXI_` variable (`ENV_KEPT`, `MOXI_PREFIX`), since a user unit starts
+roots and every `MOXI_` variable (`ENV_KEPT`, `KEPT_PREFIX`), since a user unit starts
 from the user manager's environment and not the caller's. Its output goes to
 `lander.log` in the repo's queue folder.
 
@@ -63,7 +63,7 @@ POLL_S = 60.0
 ENV_KEPT = ("PATH", "HOME", "USER", "LANG", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN",
             "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
             "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "VIRTUAL_ENV")
-MOXI_PREFIX = "MOXI_"
+KEPT_PREFIX = "MOXI_"
 
 
 def lock_file(repo: str, env=None) -> Path:
@@ -118,7 +118,7 @@ def lander_env(env=None) -> dict[str, str]:
     of `env` (the process's own when left out)."""
     source = os.environ if env is None else env
     return {key: value for key, value in source.items()
-            if key in ENV_KEPT or key.startswith(MOXI_PREFIX)}
+            if key in ENV_KEPT or key.startswith(KEPT_PREFIX)}
 
 
 def argv(repo: str) -> list[str]:
@@ -228,6 +228,6 @@ def _work(repo, *, step, poll_s, sleep, env) -> None:
         sleep(poll_s)
 
 
-__all__ = ["LOCK_FILE", "LOG_FILE", "TAKE_S", "POLL_S", "ENV_KEPT", "MOXI_PREFIX",
+__all__ = ["LOCK_FILE", "LOG_FILE", "TAKE_S", "POLL_S", "ENV_KEPT", "KEPT_PREFIX",
            "lock_file", "log_file", "holding", "held", "seen_running", "lander_env", "argv", "Started",
            "start", "ensure", "queue_repos", "settled", "run"]

@@ -747,6 +747,28 @@ roots and every `MOXI_` variable, and appends its output to `lander.log` beside 
 lock. It exits once nothing keeps it: it releases the lock, reads the queue again, and
 goes on if a member joined meanwhile and no other lander took the lock.
 
+**A batch.** Each minute the lander takes the members that wait (the urgent ones alone
+when there are any) and merges each one's joined tip, in turn and with `--no-ff`, onto
+the target's head on a branch `queue-<M12>-<n>` in its own worktree, `<worktree_dir>/
+<repo>/.queue`. A member that conflicts is ejected with the member before it that it
+conflicts with, one a commit hook refuses with the hook's output, and one whose branch
+moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
+template filled with that branch), runs `ci.local` at it, and reads its CI each minute.
+A push refusal that names a member's tip or path ejects it; one that names none is tried
+again once, then pauses the queue. A cancelled run is rerun once and an absent one
+pushed again once under the next number; a second of either pauses the queue, as do
+five failed reads in a row. A repo with no `ci` setting pauses its queue. When the run is
+green and `ci.local` passed, the lander takes the repo's finish lock and reads again:
+the target still at the candidate's base, the checkout that has it clean, and each
+member still in the batch at its tip with every finish gate but the check, drift and
+target. A target that moved rebuilds the batch on it; a member that fails leaves with
+the gate, and the rest are rebuilt; a checkout not clean is waited on. Then it
+fast-forwards that checkout to the candidate (`git merge --ff-only`), writes each
+member's `ci.read` and `check.local` records at its joined tip naming the candidate,
+which meet the check gate, and finishes each one with its own merge found as its
+landing. A red run ejects its members. A lander that dies after the fast-forward is
+finished by the next one from the queue file and git.
+
 `moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
 runs, a pause and its reason, the running batch and its CI reading, the members still in
 the queue in the order they are taken, and the target's last full run. `--resume` lifts

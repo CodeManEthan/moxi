@@ -1837,12 +1837,12 @@ def _declare_land(verbs) -> None:
 
 
 def _land(args, out) -> int:
-    from . import lander
+    from . import batching, lander
 
     def say(line: str) -> None:
         print(line, file=out, flush=True)
 
-    lander.run(args.repo, say=say)
+    lander.run(args.repo, say=say, step=lambda repo: batching.step(repo, say=say))
     return codes.OK
 
 

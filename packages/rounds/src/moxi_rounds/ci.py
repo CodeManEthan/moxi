@@ -65,6 +65,8 @@ READ = "ci.read"
 #: The step name the short local run is recorded under. No step of the user's own
 #: has a dot in its name, so none is read for it.
 LOCAL = "check.local"
+#: The job name a candidate's `check.local` run is read under.
+LOCAL_JOB = "local"
 #: What `local` says for a repo whose CI does all of its check.
 NONE = "none"
 #: The default command that lists a commit's CI runs, and the one that maps workflow
@@ -354,6 +356,13 @@ def _jobs(argv: Sequence[str], found: list[dict]) -> list[dict]:
 def read(found: Declared, *, values: Mapping[str, str], cwd) -> Reading:
     """Read CI at the tip `values["tip"]` with the setting `found`, running its
     commands in `cwd`. Raises `ReadFailed` for a failed read."""
+    return read_runs(found, values=values, cwd=cwd)[0]
+
+
+def read_runs(found: Declared, *, values: Mapping[str, str],
+              cwd) -> tuple[Reading, tuple[dict, ...]]:
+    """`read`'s reading, and the runs at the tip that each workflow read (the newest of
+    its file's runs there), as the `status` command printed them."""
     status = tuple(checking.fill(found.status, values))
     ids = tuple(checking.fill(found.ids, values))
     runs = _runs(status, _json(status, cwd=cwd, timeout_s=found.status_timeout_s))
@@ -369,7 +378,9 @@ def read(found: Declared, *, values: Mapping[str, str], cwd) -> Reading:
         return _jobs(argv, _json(argv, cwd=cwd, timeout_s=found.status_timeout_s))
 
     each, whole = reading(found.workflows, by_path, runs, values["tip"], jobs_of=jobs_of)
-    return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs))
+    urls = {one.get("url") for one in each if one.get("url")}
+    read_by = tuple(run for run in runs if run.get("url") in urls)
+    return Reading(values["tip"], status, ids, each, whole, tuple(jobs_argvs)), read_by
 
 
 # -- what the gate reads -----------------------------------------------------------------
@@ -408,6 +419,26 @@ def why_not(state: states.State, stage: str, *, tip: str, now: Now) -> str | Non
     return None
 
 
+def candidate_why_not(state: states.State, stage: str, *, tip: str) -> str | None:
+    """Why a queue member's check is not met at `tip` by its candidate, in words; None
+    when it is: the newest `ci.read` at `tip` names a candidate and reads green, or red
+    only on failures excused as the target's own, and the newest `check.local` at `tip`,
+    where one names that candidate, passed."""
+    found = newest(state, stage, tip)
+    if found is None or not found.get("candidate"):
+        return f"no candidate of {stage}'s at {tip[:12]} was read"
+    if found.get("reading") != GREEN and not (found.get("reading") == RED
+                                              and found.get("excused")):
+        return (f"the candidate {str(found['candidate'])[:12]} reads "
+                f"{found.get('reading')}")
+    local = checking.newest(state, stage, LOCAL)
+    if (local is not None and local.get("commit") == tip
+            and local.get("candidate") == found["candidate"]
+            and local.get("exit_code") != 0 and LOCAL_JOB not in (found.get("excused") or ())):
+        return f"{LOCAL} exited {local.get('exit_code')} at the candidate"
+    return None
+
+
 def _named(recorded: Mapping) -> tuple[str, tuple[str, ...] | None]:
     """A workflow of a `ci.read` record as the setting names one: its path, and the
     names of the jobs read, None where the whole run was read."""
@@ -430,4 +461,5 @@ def met(state: states.State, stage: str, *, tip: str, now: Now) -> bool:
 __all__ = ["READ", "LOCAL", "NONE", "STATUS", "IDS", "JOBS", "BRANCH", "STATUS_TIMEOUT_S",
            "GREEN", "PENDING", "RED", "ABSENT", "Workflow", "Declared", "declared",
            "ref_problem", "overlap_problem", "prefix_of", "ref_for", "RUN", "Now", "now_of",
-           "ReadFailed", "Reading", "reading", "read", "newest", "why_not", "met"]
+           "ReadFailed", "Reading", "reading", "read", "read_runs", "newest", "why_not", "met",
+           "LOCAL_JOB", "candidate_why_not"]
