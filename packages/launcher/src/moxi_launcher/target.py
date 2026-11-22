@@ -23,12 +23,16 @@ turns' Codex host the two are one process. The pid must be the one the claim nam
 that process must still be the one that claimed it: `moxi.proc.alive` on the claim's pid
 and start time, which allows for a start time read a little apart. Never string equality.
 
-**A claim moves only at the new endpoint's next event.** Claude starts a new endpoint for a
-session when its plugins reload, and the new endpoint takes the launch over at its next
-session event (a start, a resume, a clear or a compaction), not before. Between the two the
-held endpoint is gone and a live one serves the session; `find` refuses that `changed` too,
-with `reclaim_pending` set and words that say so, and does not wait: the next event may be
-far off. Nothing here writes the claim; only the endpoint itself does, from its own event.
+**A claim moves at the new endpoint's `load`, by parent.** Claude Code starts a new
+endpoint for a session when its plugins reload, a child of the same `claude`. The new
+endpoint raises `load` as soon as it learns its session id, and takes the launch over then
+because its parent is the launch's own `claude` (`store.claim`). When the old endpoint is
+still ending, the new one waits for it for up to `listen_ready.OVERLAP_WAIT_S`; when the old
+one outlives the wait, the claim moves at the new endpoint's next session event (a start, a
+resume, a clear or a compaction). Until it moves, a live endpoint the claim does not name
+serves the session; `find` refuses that `changed` too, with `reclaim_pending` set (once the
+held endpoint is gone) and words that say so, and does not wait. Nothing here writes the
+claim; only the endpoint itself does, from its own event.
 
 turns and slots are optional links, reached as part 1 reaches them (`first.turns_api`,
 `slots.api`), so a test gives fakes on the same seams.
@@ -88,7 +92,8 @@ class Changed(catalog.Refused):
     """The live session is served by an endpoint other than the one the claim names.
 
     `reclaim_pending` is True when the claimed endpoint is gone and a live one serves the
-    launch's session id: the new endpoint takes the launch at its next session event."""
+    launch's session id: the new endpoint takes the launch within seconds, or at its next
+    session event when the old one outlived its wait."""
 
     code = "changed"
 
@@ -100,8 +105,8 @@ class Changed(catalog.Refused):
             problem = (f"the endpoint that claimed launch {request_id} ({claimed}) is gone, "
                        f"and a new one ({serving}) serves its session but has not claimed "
                        "it yet")
-            hint = ("the new endpoint claims the launch at the session's next start, "
-                    "clear or compaction; try again after one")
+            hint = ("the new endpoint claims the launch within seconds, else at the "
+                    "session's next start, clear or compaction; try again in a moment")
         else:
             problem = (f"launch {request_id} was claimed by endpoint {claimed}, but its "
                        f"session is served by {serving or 'an endpoint that names no process'}")

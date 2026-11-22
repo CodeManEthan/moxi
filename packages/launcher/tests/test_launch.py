@@ -116,6 +116,23 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
 
 
 @POSIX
+def test_a_terminal_launch_records_the_process_that_runs_claude(tmp_path, work, harness):
+    # A held claim moves only to an endpoint whose parent is the row's pid and
+    # pid_started, so both must name the `claude` process itself: the launcher execs it,
+    # which keeps the pid and the start time.
+    req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r1",
+           "session_id": SID, "actor": "ann"}
+    code, seen = run_child(tmp_path, req)
+    run = harness.one()
+    assert code == 0, seen["stderr"]
+    assert Path(run["argv"][0]).name == "claude"
+    got = row()
+    assert got.pid == run["pid"]
+    assert run["started"] is not None and got.pid_started is not None
+    assert abs(got.pid_started - run["started"]) < 1.0
+
+
+@POSIX
 def test_a_terminal_launch_with_turns_starts_the_deliverer_before_it_execs(
         tmp_path, work, harness, turns):
     req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r2",
