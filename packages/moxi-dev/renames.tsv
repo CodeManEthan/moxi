@@ -16271,6 +16271,7 @@ usage	packages/usage/src/moxi_usage/limits.py	a time it was already read at, nor
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/limits.py	return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))	keep	any	any
 usage	packages/usage/src/moxi_usage/limits.py	there is none; `fit` counts the readings it fitted. `opened` is when the window	keep	opened	opened
+usage	packages/usage/src/moxi_usage/limits.py	"project", "period", "opened", "label", "model_family", "dollars", "harness_rows",	keep	opened	opened
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	-	name	WARN_AT	WARN_AT_ENV
 usage	packages/usage/src/moxi_usage/mark.py	_said: set[str] = set()	keep	set	set
@@ -16340,6 +16341,8 @@ usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, items=SESSION_REF))	keep	nullable	nullable
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
+usage	packages/usage/src/moxi_usage/page.py	#: names none. `used` is this machine's sessions of the harness with requests since the	keep	used	used
+usage	packages/usage/src/moxi_usage/page.py	#: models, with a null `opened`, and when there is no index to read.	keep	opened	opened
 usage	packages/usage/src/moxi_usage/page.py	`folder` each take one key or several, one to a line, and keep the files any of them	keep	folder	folder
 usage	packages/usage/src/moxi_usage/page.py	_PLACES = lb.Field("string", required=False, max=16384)	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"folder": _PLACES,	keep	folder	folder
@@ -16378,6 +16381,9 @@ usage	packages/usage/src/moxi_usage/pagehandlers.py	origins = _origins(sorted(go
 usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened) if main and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	with a known `opened`, else null. The sessions module is asked once, for the	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	work_dir = item["folder"]	keep	folder	folder
+usage	packages/usage/src/moxi_usage/pagehandlers.py	names one. `used` is the sessions of the harness since the window opened, with a	keep	used	used
+usage	packages/usage/src/moxi_usage/pagehandlers.py	known `opened`, for the harness's main limit and for a limit with a `model_family`,	keep	opened	opened
+usage	packages/usage/src/moxi_usage/pagehandlers.py	used = _used(harness, row.opened, family) if counted and row.opened is not None else None	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	# A `project` or `folder` the page sends: one key, or several on lines of their own.	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": _places(query.get("folder")), "model": query.get("model"),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/prices.py	"""Fetch, convert, compare and (unless `dry_run`) write the snapshot layer.	keep	dry_run	dry_run
@@ -16751,6 +16757,7 @@ usage	packages/usage/tests/test_browser_questions.py	return Path(shell.env["HOME
 usage	packages/usage/tests/test_browser_questions.py	seeded	name	folder	work_dir
 usage	packages/usage/tests/test_browser_questions.py	t.assistant("Done.", usage=T.usage(input=200, cache_read=6000, cache_write=1000, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	timeout=30_000)	keep	timeout	timeout
+usage	packages/usage/tests/test_browser_questions.py	ON_OPUS = {"harness": "claude", "session": session_id(31), "requests": 2, "folder": "proj-a",	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	(work / spec["folder"]).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder	test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_the_folders_table_has_no_project_column	test_the_dirs_table_has_no_project_column
@@ -17016,6 +17023,12 @@ usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1
 usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
+usage	packages/usage/tests/test_page.py	assert body["opened"] == limits.iso(opened) and body["model_family"] == "opus"	keep	opened	opened
+usage	packages/usage/tests/test_page.py	used = body["used"]	keep	used	used
+usage	packages/usage/tests/test_page.py	assert (week["used"]["count"], week["used"]["requests"]) == (2, 4)	keep	used	used
+usage	packages/usage/tests/test_page.py	assert body["opened"] is not None	keep	opened	opened
+usage	packages/usage/tests/test_page.py	assert (body["model_family"], body["used"]) == (None, None)	keep	used	used
+usage	packages/usage/tests/test_page.py	assert main["model_family"] is None and main["used"] is not None	keep	used	used
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool") == 3 and count(folder="/w/loose-a") == 1	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="/w/tool\n/w/loose-a") == 4	keep	folder	folder
 usage	packages/usage/tests/test_page.py	assert count(folder="\n") == count() == 8	keep	folder	folder
