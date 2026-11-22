@@ -166,11 +166,85 @@ def test_a_turns_change_reaches_comms_but_not_cache(repo):
     assert picked(repo) == ["turns", "comms"]
 
 
-@pytest.mark.parametrize("path", ["uv.lock", "README.md", ".github/workflows/ci.yml",
-                                  "packages/NOTES", "packages/gone/x.py"])
+@pytest.mark.parametrize("path", ["uv.lock", "tools/x.py", "LICENSE", "packages/NOTES",
+                                  "packages/gone/x.py"])
 def test_a_path_outside_a_package_picks_every_package(repo, path):
     commit_file(repo, path)
     assert picked(repo) == list(LAYOUT)
+
+
+def test_the_root_pyproject_picks_every_package(repo):
+    commit_file(repo, "pyproject.toml", (repo / "pyproject.toml").read_text() + "# x\n")
+    assert picked(repo) == list(LAYOUT)
+
+
+@pytest.mark.parametrize("path", ["README.md", "CONTRIBUTING.md",
+                                  ".github/workflows/ci.yml", "docs/queue.md"])
+def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
+    commit_file(repo, path)
+    assert picked(repo) == []
+    commit_file(repo, "packages/turns/x.py")
+    assert picked(repo) == ["turns", "comms"]
+
+
+def test_a_check_change_picks_every_package(repo):
+    commit_file(repo, "packages/moxi-dev/src/moxi_dev/x.py")
+    assert picked(repo) == list(LAYOUT)
+
+
+# The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
+# publishing; connector's dev group takes ui, whose pages its browser tests drive.
+DEV_LAYOUT = {
+    "moxi": ("moxi", [], {}, {"dev": ["pytest", "moxi-dev"]}),
+    "publishing": ("moxi-publishing", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "turns": ("moxi-turns", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "comms": ("moxi-comms", ["moxi-turns>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "ui": ("moxi-ui", ["moxi>=0.1,<0.2"], {"testing": ["pytest"]}, {"dev": ["moxi-dev"]}),
+    "connector": ("moxi-connector", ["moxi>=0.1,<0.2"], {},
+                  {"dev": ["moxi-dev", "moxi-ui[testing]"]}),
+    "moxi-dev": ("moxi-dev", ["moxi", "moxi-publishing", "pytest"], {}, {}),
+}
+
+
+@pytest.fixture
+def dev_repo(tmp_path):
+    root = tmp_path / "d"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write_workspace(root, DEV_LAYOUT)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    git(root, "switch", "-q", "-c", "work")
+    return root
+
+
+def test_picking_ignores_the_edges_to_the_check(dev_repo):
+    commit_file(dev_repo, "packages/turns/src/moxi_turns/x.py")
+    assert picked(dev_repo) == ["turns", "comms"]
+
+
+def test_a_change_the_check_requires_picks_the_check_not_everything(dev_repo):
+    commit_file(dev_repo, "packages/publishing/x.py")
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+def test_another_dev_group_edge_still_picks(dev_repo):
+    commit_file(dev_repo, "packages/ui/x.py")
+    assert picked(dev_repo) == ["ui", "connector"]
+
+
+def test_with_every_dev_group_naming_the_check_its_change_picks_every_package(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+    git(dev_repo, "reset", "-q", "--hard", "main")
+    commit_file(dev_repo, "packages/moxi/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+
+
+def test_the_rename_table_picks_the_check_alone(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/renames.tsv", "a\tb\n")
+    assert picked(dev_repo) == ["moxi-dev"]
 
 
 def test_no_change_picks_nothing(repo):
@@ -183,8 +257,8 @@ def test_working_tree_changes_count_staged_unstaged_and_untracked(repo):
     assert picked(repo) == ["cache", "comms"]
     (repo / "packages/turns/tests/test_it.py").write_text("# edited\n")   # unstaged
     assert picked(repo) == ["turns", "cache", "comms"]
-    (repo / "packages/moxi-dev/new.py").write_text("untracked\n")        # untracked
-    assert picked(repo) == ["turns", "cache", "comms", "moxi-dev"]
+    (repo / "packages/sessions/new.py").write_text("untracked\n")        # untracked
+    assert picked(repo) == ["sessions", "turns", "cache", "comms"]
 
 
 def test_ignored_files_do_not_count(repo):
@@ -258,9 +332,16 @@ def test_the_real_workspace_picks_by_the_same_rule():
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
-        "sessions", "cache", "comms", "launcher", "usage", "memory"}
+        "sessions", "cache", "comms", "launcher", "usage", "memory", "rounds"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
+    assert of("packages/moxi-dev/src/moxi_dev/check.py") == dirs
     assert of("uv.lock") == dirs
+    assert of(".github/workflows/ci.yml") == []
+    # Every package lists moxi-dev in its dev group, so only the edges to it would have
+    # carried these to every package.
+    assert len(of("packages/turns/src/moxi_turns/__init__.py")) < len(dirs)
+    assert len(of("packages/publishing/src/moxi_publishing/__init__.py")) < len(dirs)
+    assert "connector" in of("packages/ui/src/moxi_ui/__init__.py")
 
 
 # --- the steps -------------------------------------------------------------------------

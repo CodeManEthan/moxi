@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `moxi-dev check` picks fewer packages. Closing over dependents leaves out edges to
+  `moxi-dev`, which every package lists in its dev group, so a change to a package
+  `moxi-dev` requires no longer picks them all; other dev-group edges still count (a ui
+  change picks connector). A change in `moxi-dev` still picks every package, except one
+  to its rename table alone, which picks `moxi-dev`. A change to `.github/`, `docs/`,
+  `CONTRIBUTING.md` or `README.md` picks no package; the lock, the root `pyproject.toml`
+  and the other root files still pick every one.
 - The test fence keeps `MOXI_TEST_REAL_SUPERVISOR` as pytest started with it, and leaves
   it unset when it was. Before, a fenced test lost it at call time, so every proof row on
   a real supervisor failed with `SupervisorRefused` (or skipped, where the row read it in
