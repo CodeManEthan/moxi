@@ -123,7 +123,7 @@ CAPABILITIES = {
     "usage": (True, True, False),
     "mcp-token": (False, True, False),
     "environ": (True, True, True),
-    "fork": (False, False, False),
+    "fork": (True, False, False),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys

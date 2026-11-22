@@ -18,7 +18,7 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 4, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+    {"op": "hello", "leg": 5, "mod_sock": "<absolute path>", "stop_wait_ms": n,
      "listen_wait_ms": n, "prompt_wait_ms": n, "endpoint_version": "…",
      "pid": <endpoint pid>, "stop_after_clear": bool, "guards": [<entry>, ...],
      "after_tool_wait_ms": n, "floors": {"<row id>": n, ...}}
@@ -60,7 +60,7 @@ or a context not known yet (none since the last SessionStart), skips none.
 
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 4, "error": "<words>"}
+    {"op": "failed", "leg": 5, "error": "<words>"}
 
 Then, in any order:
 
@@ -93,6 +93,31 @@ Then, in any order:
         Every after-tool row's floor, sent each time one changes: at a `ready` (before
         its `/ask/context` answer) or after a call of the row's listener. It replaces the
         map the runner holds.
+    {"op": "fork", "delivery": id, "text": "…"}
+        Start a fork of the main loop with `text` as its task (the `fork` request). The
+        runner spawns it with `$.agent.spawn({subagentType: "fork", prompt: <warm-up>,
+        description: "subconscious"})`, where the warm-up is the runner's own one-line
+        task asking for one word and saying the task follows, so that the task runs as
+        the fork's first resumed round: Claude Code announces a resumed round's answer to
+        the main loop and not the first answer of a fork a plugin spawned. A spawn
+        answered `{deny}`, or one that throws or names no agent, reports `fork.lost`
+        `denied: …`. Else the runner holds the fork's agent id, reports `fork.started`,
+        and waits for the fork's first `turn.complete`, at most `WARM_UP_WAIT_MS`
+        (30 s); it reports nothing of the warm-up's answer. A warm-up that does not
+        complete in that time, or ends other than `answer`, reports `fork.lost`
+        `gone: …`. Then it sends `text` with `$.session.send({to: {agentId}, text})`; a
+        send that throws or is not delivered reports `fork.lost` `gone: …`. The round's
+        `turn.complete`, within `ROUND_WAIT_MS` (600 s), reports `fork.done`; none in
+        that time reports `fork.lost` `gone: …`.
+
+        The runner holds a fork's agent id from its spawn until the fork's delivery has
+        settled (`fork.done` or `fork.lost` reported). While it holds the id, each tool
+        call carrying it is the fork's: the guards judge it as any call, at the call
+        step and the ask step, and the runner makes no after-tool ask for it. A call
+        counts as the runner's own, judged by no guard, only when it carries no
+        `agentId` at all; a call with an id the runner does not hold is judged and asked
+        after as any other. The runner leaves the engine's notice of a finished round as
+        the engine sends it.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -116,6 +141,16 @@ own count from 1 for this load, and `kind`:
     append.done    {delivery}                       a steer appended: `$.session.append`
                                                     resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
+    fork.started   {delivery, agent_id}             the fork's spawn resolved with its
+                                                    agent id
+    fork.done      {delivery, answer, reason, is_aborted}
+                                                    the fork's task round completed:
+                                                    `answer` is its final text, `reason`
+                                                    and `is_aborted` the round's
+                                                    `turn.complete`'s
+    fork.lost      {delivery, reason}               the fork never answered its task:
+                                                    `reason` starts `denied` (the spawn
+                                                    was refused) or `gone`
     command.done   {request, state, reason, new_session_id, shells?}
                                                     `$.command.run` settled: `state` is
                                                     `ran`, `refused` or `failed`. With
@@ -125,7 +160,9 @@ own count from 1 for this load, and `kind`:
                                                     stop is done
 
 Reports are keyed by their window's delivery: an end for a window that is not the open
-one is logged and changes nothing. The bound is a report, not a close: the endpoint fails
+one is logged and changes nothing. A `fork.*` report names a delivery handed to the
+runner on a `fork` line; one naming any other delivery, or one already settled, is
+logged and changes nothing. The bound is a report, not a close: the endpoint fails
 the open window by it only while its prompt is not admitted (entry, below).
 
 A report is applied once, in `seq` order. One whose `seq` the endpoint has already
@@ -230,7 +267,7 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 4
+LEG = 5
 
 #: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
 #: find a task through `TaskStop` once `/clear` has run; until a live session shows it
@@ -244,6 +281,7 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
 LINE_AGENTS, LINE_GUARDS, LINE_FLOORS = "agents", "guards", "floors"
+LINE_FORK = "fork"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
@@ -265,8 +303,10 @@ R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.comple
 R_SUBMIT_CLOSE, R_SUBMIT_BOUND = "submit.close", "submit.bound"
 R_APPEND_DONE, R_APPEND_FAILED = "append.done", "append.failed"
 R_COMMAND_DONE = "command.done"
+R_FORK_STARTED, R_FORK_DONE, R_FORK_LOST = "fork.started", "fork.done", "fork.lost"
 REPORTS = (R_SESSION, R_TURN_START, R_TURN_COMPLETE, R_SUBMIT_CLOSE, R_SUBMIT_BOUND,
-           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE)
+           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE, R_FORK_STARTED, R_FORK_DONE,
+           R_FORK_LOST)
 
 #: A submit window's three ends.
 END_RESOLVE, END_DROP, END_FAIL = "resolve", "drop", "fail"
@@ -435,12 +475,12 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "PATH_REPORT",
+           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "LINE_FORK", "PATH_REPORT",
            "PATH_LIVE", "PATH_AGENTS", "PATH_STOP", "PATH_CONTEXT", "PATH_GUARD",
            "PATH_AFTER_TOOL", "PATH_USAGE",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
            "R_APPEND_FAILED",
-           "R_COMMAND_DONE", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
+           "R_COMMAND_DONE", "R_FORK_STARTED", "R_FORK_DONE", "R_FORK_LOST", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
            "BadRequest", "LineWriter", "LegServer"]

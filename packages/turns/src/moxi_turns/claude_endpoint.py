@@ -48,7 +48,7 @@ The first id it learns raises the `load` listener event, once per endpoint proce
 the runner's `session` line, or, when that line carries no id, just before the next
 SessionStart's `ready`.
 
-Lines and the adapter's lock: `submit`, `append` and `command` come from the endpoint's
+Lines and the adapter's lock: `submit`, `append`, `fork` and `command` come from the endpoint's
 ordered worker, and each writes a line through `LineWriter.write`, which blocks while the
 runner's pipe is full. No line is written while the adapter's lock is held, so a write
 the runner does not read holds the worker and nothing else: the reports, the gate's asks
@@ -78,6 +78,13 @@ window's delivery, whose `by` and `senders` the event carries.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+
+A fork goes to the runner on a `fork` line and holds no window. It reads `Started`, with
+the fork's agent id, at the runner's `fork.started`; `Ended`, with the answer of the
+fork's task round, at `fork.done`; and `Lost` at `fork.lost`, its reason starting
+`denied` or `gone` (one starting with neither is read as `gone`). The runner bounds the
+fork's warm-up and its round (`claude_leg`, the `fork` line), so an open fork always
+settles; the endpoint's own end settles one still open `gone`.
 
 Session commands: the runner runs `/clear`, `/exit` and `/compact` through
 `$.command.run`, and the gate re-checks each (`/gate/command`). `exit` settles `passed` at
@@ -110,7 +117,7 @@ from . import listeners as turns_listeners
 from .guards import ToolCall
 from .guards.run import GuardRunner, prompts_of
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_DENIED, LOST_GONE, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
                       LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
@@ -152,7 +159,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                      "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ"})
+                     "environ", "fork"})
     live_wait_s = LIVE_WAIT_S
 
     @staticmethod
@@ -185,6 +192,8 @@ class ClaudeHarness(Harness):
         self._gate_refused: set[str] = set()
         #: Closed windows by nonce: (delivery, how it closed), to name a late entry.
         self._closed: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        #: The fork deliveries handed to the runner and not yet settled by a report.
+        self._forks: set[str] = set()
         self.session_known = threading.Event()
         #: Set once this process raised `load`.
         self._loaded = False
@@ -319,6 +328,16 @@ class ClaudeHarness(Harness):
     def append(self, delivery: Delivery) -> None:
         if not self._lines.write({"op": leg.LINE_APPEND, "delivery": delivery.id,
                                   "text": delivery.text}):
+            raise OSError("the runner's line is closed")
+
+    def fork(self, delivery: Delivery) -> None:
+        """The runner spawns the fork and reports its start and its end (`fork.*`)."""
+        with self._lock:
+            self._forks.add(delivery.id)
+        if not self._lines.write({"op": leg.LINE_FORK, "delivery": delivery.id,
+                                  "text": delivery.text}):
+            with self._lock:
+                self._forks.discard(delivery.id)
             raise OSError("the runner's line is closed")
 
     def command(self, request: CommandRequest) -> None:
@@ -465,6 +484,31 @@ class ClaudeHarness(Harness):
                 ep.on_refused(delivery, "idle")
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
+        elif kind in (leg.R_FORK_STARTED, leg.R_FORK_DONE, leg.R_FORK_LOST):
+            self._fork_report(kind, body)
+
+    def _fork_report(self, kind: str, body: dict[str, Any]) -> None:
+        """Under the lock: a `fork.*` report settles the fork delivery it names."""
+        ep, delivery = self.endpoint, body.get("delivery")
+        if not isinstance(delivery, str) or delivery not in self._forks:
+            log.info("%s for %r, which is no open fork; it changes nothing", kind, delivery)
+            return
+        if kind == leg.R_FORK_STARTED:
+            agent_id = body.get("agent_id")
+            if not isinstance(agent_id, str) or not agent_id:
+                raise leg.BadRequest('fork.started needs "agent_id", a non-empty string')
+            ep.fork_started(delivery, agent_id)
+            return
+        self._forks.discard(delivery)
+        if kind == leg.R_FORK_DONE:
+            answer = body.get("answer")
+            ep.fork_ended(delivery, answer if isinstance(answer, str) and answer else None,
+                          outcome=_outcome(body))
+            return
+        reason = _opt_str(body, "reason") or "the runner gave no reason"
+        if not reason.startswith((LOST_DENIED, LOST_GONE)):
+            reason = f"{LOST_GONE}: {reason}"
+        ep.lost(delivery, reason)
 
     def _learn(self, session_id: str | None) -> None:
         if not session_id:

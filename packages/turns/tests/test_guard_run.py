@@ -606,10 +606,10 @@ def leg_rig(turns_env, rig):
         w.close()
 
 
-def test_the_hello_carries_claudes_table_and_the_leg_is_4(leg_rig):
+def test_the_hello_carries_claudes_table_and_the_leg_is_5(leg_rig):
     ep, runner, r = leg_rig(judged("a", lambda c: None, match={"command": "rm"}),
                             data_only("b", "no", calls=("Agent",)))
-    assert leg.LEG == 4 and runner.first["leg"] == 4
+    assert leg.LEG == 5 and runner.first["leg"] == 5
     assert leg.PATH_GUARD == "/ask/guard" and leg.PATH_GUARD in leg.PATHS
     assert runner.first["guards"] == [
         {"id": "t.a", "calls": ["Bash"], "who": "any", "match": {"command": "rm"},

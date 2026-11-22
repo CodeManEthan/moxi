@@ -14029,6 +14029,8 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	"prompt_wait_ms": int(rou
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	while not self.ended.is_set() and not any(e.is_set() for e in events):	keep	any	any
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._loaded = False	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	first, self._loaded = not self._loaded, True	keep	_loaded	_loaded
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ", "fork"})	keep	environ	environ
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._forks: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_leg.py	`ran`, `refused` or `failed`. With	keep	refused	refused
 turns	packages/turns/src/moxi_turns/claude_leg.py	`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop	keep	changed	changed
 turns	packages/turns/src/moxi_turns/claude_leg.py	and any answer but `allow` reports `refused` `unsupported` with nothing run.	keep	refused	refused
@@ -14096,6 +14098,7 @@ turns	packages/turns/src/moxi_turns/client.py	the session started, resumed, was 
 turns	packages/turns/src/moxi_turns/client.py	timeout=READ_S)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/client.py	wait_ready	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	wanted = [(directory, hello) for directory, hello, version in _candidates()	use	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/client.py	`deliver`, `steer`, `fork`, `environ`, and the look-up by `ref` of a hand-in whose answer never	keep	environ	environ
 turns	packages/turns/src/moxi_turns/codex.py	"""Apply a collab item's notices to `record`, in order. An agent's latest status is	keep	record	record
 turns	packages/turns/src/moxi_turns/codex.py	"mcp-token", "environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/codex.py	CodexHarness	name	_completed	_on_completed
@@ -14264,6 +14267,7 @@ turns	packages/turns/src/moxi_turns/endpoint.py	thread.join(timeout=OPEN_WAIT_S)
 turns	packages/turns/src/moxi_turns/endpoint.py	while it waited. A skipped steer goes to the adapter's `expired`, so it lets go of	keep	expired	expired
 turns	packages/turns/src/moxi_turns/endpoint.py	while it waited. A skipped steer goes to the adapter's `expired`, so it lets go of	use	`expired`	`on_expired`
 turns	packages/turns/src/moxi_turns/endpoint.py	while len(self._settled) > SETTLED_KEPT:	keep	_settled	_settled
+turns	packages/turns/src/moxi_turns/endpoint.py	skip = d.state not in (_INFLIGHT, _STEERING, _FORKING) or d.expired	keep	expired	expired
 turns	packages/turns/src/moxi_turns/guards/__init__.py	#: `any`, `main` or `agents`.	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	WHO = ("any", "main", "agents")	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/__init__.py	elif entry not in known and not any(p.id == entry for p in problems):	keep	any	any
@@ -14472,6 +14476,7 @@ turns	packages/turns/src/moxi_turns/results.py	after `compact`, None. `shells` r
 turns	packages/turns/src/moxi_turns/results.py	is the wall-clock time of the read. `stale` is True when the turn ledger moved while	keep	stale	stale
 turns	packages/turns/src/moxi_turns/results.py	tells the endpoint's own two apart: True for `untied` and `expired`, where the	keep	expired	expired
 turns	packages/turns/src/moxi_turns/results.py	turn's `deliveries`, `how` it joined the turn (`opened` or `steered`, `DELIVERY_HOW`).	keep	opened	opened
+turns	packages/turns/src/moxi_turns/results.py	"mcp-token", "environ", "fork")	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._env,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._environ,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	#: A name `environ` may ask: an environment variable's name.	keep	environ	environ
@@ -14482,6 +14487,7 @@ turns	packages/turns/src/moxi_turns/rpc.py	in_thread.settle	kwonly	ok	ok
 turns	packages/turns/src/moxi_turns/rpc.py	name, if_turn_number=if_turn_number, timeout=timeout, stop_shells=stop_shells))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/rpc.py	params)`, and `rpc.closed(conn)` once a connection has closed."""	use	rpc.closed(	rpc.on_closed(
 turns	packages/turns/src/moxi_turns/rpc.py	self._needs("environ")	keep	environ	environ
+turns	packages/turns/src/moxi_turns/rpc.py	first `await`, and so does `fork`. `environ` reads the endpoint's own copy of the session's environment and answers at once.	keep	environ	environ
 turns	packages/turns/tests/claude_runner.py	FakeRunner.turn_complete	kwonly	is_aborted	is_aborted
 turns	packages/turns/tests/claude_runner.py	line = self.lines.get(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/claude_runner.py	return self.lines.get(timeout=timeout)	keep	timeout	timeout
@@ -14632,6 +14638,8 @@ turns	packages/turns/tests/test_claude_endpoint.py	runner.report(leg.R_COMMAND_D
 turns	packages/turns/tests/test_claude_endpoint.py	runner.turn_complete("T1", reason="aborted", is_aborted=True)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).start()	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_claude_endpoint.py	out = [SEEN.get(timeout=timeout) for _ in range(count)]	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_endpoint.py	"environ", "fork"})	keep	environ	environ
+turns	packages/turns/tests/test_claude_endpoint.py	is_aborted=False)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	use	"folder"	"plugin_dir"

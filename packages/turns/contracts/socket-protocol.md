@@ -102,7 +102,7 @@ The session's capabilities:
 | `usage` | yes | yes | no | Claude Code reports its usage to `usage` listener rows; the Codex host hands each rate-limits reading to `codex_limits` rows and answers `usage.codex_limits` |
 | `mcp-token` | no | yes | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |
-| `fork` | no | no | no | `fork` |
+| `fork` | yes | no | no | `fork` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode

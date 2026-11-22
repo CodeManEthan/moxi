@@ -7,7 +7,21 @@
   runs beside the main loop's turns and holds no slot. Its `started` value carries the
   fork's `agent_id` (a new field of `started`, null for every other delivery), its
   `ended` the fork's answer, and a fork the harness refused or that went away reads
-  `lost` with a reason starting `denied` or `gone`. No harness offers `fork` yet.
+  `lost` with a reason starting `denied` or `gone`.
+- Claude Code sessions offer `fork`. The runner spawns a background fork of the main
+  loop with a one-word warm-up, then sends the task as the fork's first resumed round,
+  whose answer Claude Code announces to the main loop as it announces any finished
+  subagent; the runner leaves that notice as Claude Code sends it. The delivery's answer
+  is that round's. A refused spawn reads `lost` `denied`; a warm-up that does not
+  complete within 30 s or ends other than with an answer, a task Claude Code does not
+  deliver, and a round with no end within 600 s read `lost` `gone`.
+- The Claude runner tells a fork's tool calls from its own by the call's `agentId`. A
+  call counts as the runner's own, judged by no guard, only when it carries no `agentId`;
+  every call of a fork the runner started is judged by the guards at the call step and
+  the ask step, and gets no after-tool ask. The runner holds a fork's id until the fork's
+  delivery has settled; a call with an id it does not hold is judged and asked after as
+  any agent's. The runner speaks leg 5 and is version 0.3.0, so `moxi install turns`
+  updates an install at user scope.
 
 ## 0.2.5 (2026-11-22)
 
