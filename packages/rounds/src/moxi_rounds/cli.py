@@ -136,8 +136,10 @@ at the project's root) and takes the target's head as the build's base, cuts the
 stage's branch from it and adds its worktree under `worktree_dir` as
 `<repo>/<branch>`, makes its scratch folder in rounds' cache directory, writes a
 marker naming the build in each, and records the build. A `/` or `%` in a branch is
-written `%2F` or `%25` in a path. `--existing` builds on a branch that is there, and
-is refused when it shares commits with another open build. A repo's branch has one
+written `%2F` or `%25` in a path. `--existing` builds on a branch that is there: one
+strictly inside or around another open build's branch is taken, and `finish` orders the
+two; one that overlaps another open build's, or that came onto the target by another
+build's finish, is refused. A repo's branch has one
 open build at a time, across every round. In a flow that does not verify its design,
 a round builds one stage in a repo, and `commission ROUND --repo KEY --branch NAME`
 declares the stage as it commissions it, under the lowest `B<n>` the round has not
@@ -1212,8 +1214,9 @@ def _declare_commission(verbs) -> None:
                         help="a pointer to where the operator gave the go, when he did")
     parser.add_argument("--existing", action="store_true",
                         help="build on the stage's branch that is already there, in "
-                             "place of cutting it; refused when it shares commits with "
-                             "another open build")
+                             "place of cutting it; refused when it overlaps another "
+                             "open build (a branch inside or around one is taken), or "
+                             "came onto the target by another build's finish")
     _writes(parser)
 
 

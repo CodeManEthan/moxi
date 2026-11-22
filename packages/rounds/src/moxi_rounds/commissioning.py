@@ -23,7 +23,10 @@ having made nothing, while any of these does not hold:
   the project's root, which must not be a detached head or an open build's branch;
   the target branch is in the repo, and its head is the build's **base**;
 - the branch is a name git takes; it is not there yet, or, with `existing`, it is
-  there and shares no commit with another open build of the repo and target;
+  there, and, read as a build cut at the base now, it overlaps no other open build of
+  the repo and target (a range strictly inside or around another build's is taken, and
+  the finish gate orders the two; equal ranges overlap) and it did not come onto the
+  target by another build's recorded landing;
 - nothing is at the worktree's place but the worktree of this commission's own stopped
   run (below).
 
@@ -479,7 +482,7 @@ def _read_git(found: _Look, git: Git, view, *, name: str, stage, existing: bool,
                                f"{repo}", again.replace(" --existing", "")))
     if existing and tip is not None:
         unmet += _shares(found, git, name=name, stage=stage, opened=opened,
-                         settings=settings)
+                         settings=settings, again=again)
     return unmet
 
 
@@ -541,30 +544,57 @@ def _adopted_base(found: _Look, git: Git, tip: str | None, *, again: str) -> Unm
     return None
 
 
-def _shares(found: _Look, git: Git, *, name: str, stage, opened,
-            settings) -> list[Unmet]:
-    """The unmet condition of a branch taken with `--existing` that shares commits with
-    another open build of the repo and target, read as a build cut at the base now."""
+def _shares(found: _Look, git: Git, *, name: str, stage, opened, settings,
+            again: str) -> list[Unmet]:
+    """The unmet condition of a branch taken with `--existing`, read as a build cut at
+    the base now: one that overlaps another open build of the repo and target, or that
+    holds nothing of its own because another build's landing on record brought it onto
+    the target. A branch strictly inside or around another build's is taken: the
+    finish gate orders the two."""
     candidate = builds.Build(stage=stage.id, repo=found.repo, branch=found.branch,
                              base=found.base, target=found.target, n=0)
     homes, _unresolved = folders.homes(settings)
-    landed = [one.landing for one in index.landings(homes, repo=found.repo,
-                                                    target=found.target)]
-    status = builds.read(candidate, git, landings=landed)
+    landed = index.landings(homes, repo=found.repo, target=found.target)
+    status = builds.read(candidate, git, landings=[one.landing for one in landed])
+    if status.state == builds.EMPTY and not status.has_own_commits:
+        return _landed_already(found, git, status, landed, name=name, again=again)
     if status.state not in builds.RANGED:
         return []
     statuses = {(one.round, one.build.stage): one.status for one in opened().builds
                 if one.status is not None and one.build.target == found.target}
     key = (name, stage.id)
     statuses[key] = status
-    shared = [other for other, _how in builds.sharing(git, statuses)[key]]
+    shared = [other for other, how in builds.sharing(git, statuses)[key]
+              if how == builds.OVERLAPS]
     if not shared:
         return []
     said = ", ".join(f"{other} {other_stage}" for other, other_stage in shared)
-    return [Unmet(f"the branch {found.branch} shares commits with the open build of "
-                  f"{said}; a build's branch holds no other build's work",
+    return [Unmet(f"the branch {found.branch} overlaps the open build of {said}: they "
+                  "share commits and neither range holds the other whole, so neither "
+                  "could finish; a build's branch holds no other build's work but a "
+                  "stack inside or around it",
                   f"cut the work onto a branch of its own, or end that build first: "
                   f"moxi rounds show {shared[0][0]}")]
+
+
+def _landed_already(found: _Look, git: Git, status: builds.Status, landed, *, name: str,
+                    again: str) -> list[Unmet]:
+    """The unmet condition of a branch taken with `--existing` that reads empty with
+    nothing of its own, when a landing on record brought its head onto the target: the
+    build it would make could never finish. None when no landing did."""
+    head = status.head
+    under = [one for one in landed if head is not None
+             and git.is_ancestor(head, one.landing.landing)
+             and not git.is_ancestor(head, one.landing.target_before)]
+    if not under:
+        return []
+    by = under[0]
+    return [Unmet(f"the branch {found.branch} came onto {found.target} by the finish of "
+                  f"{by.round} {by.landing.stage}, at {by.landing.landing[:12]}: a build "
+                  "of it would hold nothing of its own and could not finish",
+                  f"drop the round, as its work is on the target: moxi rounds drop {name} "
+                  "--by lead --record PTR; or, for work still to do, cut a branch of its "
+                  f"own: {again.replace(' --existing', '')}")]
 
 
 # -- the act ------------------------------------------------------------------------------

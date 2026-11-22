@@ -231,20 +231,62 @@ def test_existing_takes_the_branch_that_is_there(repo, opened):
     assert repo.git("-C", str(made.worktree), "rev-parse", "HEAD") == tip
 
 
-def test_existing_on_a_branch_that_shares_commits_with_an_open_build_is_refused(
-        repo, opened):
-    opened()
+def _other_build(repo, opened) -> Path:
+    """The open build of OTHER's B1 on `first`, with two commits of work; returns its
+    worktree."""
     opened(name=OTHER, stages=(("B1", "first"),))
     first = commissioning.commission(OTHER, "B1", builder="coder", by="planner")
-    (first.worktree / "shared.txt").write_text("shared\n", encoding="utf-8")
-    repo.git("-C", str(first.worktree), "add", "shared.txt")
-    repo.git("-C", str(first.worktree), "commit", "-q", "-m", "shared work")
-    repo.git("branch", "work", "first")
+    for name in ("one.txt", "two.txt"):
+        (first.worktree / name).write_text(f"{name}\n", encoding="utf-8")
+        repo.git("-C", str(first.worktree), "add", name)
+        repo.git("-C", str(first.worktree), "commit", "-q", "-m", f"work {name}")
+    return first.worktree
+
+
+@pytest.mark.parametrize("cut, taken", [
+    ("inside", True), ("contains", True), ("overlaps", False), ("equal", False)])
+def test_existing_takes_a_branch_inside_or_around_an_open_build_and_refuses_an_overlap(
+        repo, opened, cut, taken):
+    opened()
+    worktree = _other_build(repo, opened)
+    if cut == "inside":
+        repo.git("branch", "work", "first~1")
+    elif cut == "equal":
+        repo.git("branch", "work", "first")
+    else:
+        repo.git("switch", "-q", "-c", "work", "first" if cut == "contains" else "first~1")
+        repo.commit("own.txt", "work of its own")
+        repo.git("switch", "-q", "main")
+
+    if taken:
+        made = commissioning.commission(ROUND, "B1", builder="coder", by="planner",
+                                        existing=True)
+        assert repo.git("-C", str(made.worktree), "rev-parse", "HEAD") == repo.rev("work")
+        return
+    [reason] = refused(existing=True)
+    assert reason.startswith(f"the branch work overlaps the open build of {OTHER} B1: "
+                             "they share commits and neither range holds the other whole")
+    assert worktree.is_dir()
+
+
+def test_existing_on_a_branch_another_build_s_finish_brought_onto_the_target_is_refused(
+        repo, opened, tmp_path):
+    path = opened()
+    other = log.round_log(tmp_path / "notes" / "rounds" / "b-round")
+    _other_build(repo, opened)
+    repo.git("branch", "work", "first~1")
+    before, tip = repo.rev("main"), repo.rev("first")
+    landing = repo.merge("first")
+    log.append(other, "finish.action",
+               {"stage": "B1", "tip": tip, "id": "merge", "kind": "merge", "state": "ok",
+                "landing": landing, "target_before": before}, by="coder")
+    log.append(other, "finish.done", {"stage": "B1", "tip": tip}, by="coder")
 
     [reason] = refused(existing=True)
 
-    assert reason.startswith("the branch work shares commits with the open build of "
-                             f"{OTHER} B1")
+    assert reason.startswith(f"the branch work came onto main by the finish of {OTHER} "
+                             f"B1, at {landing[:12]}: a build of it would hold nothing")
+    assert events(path, "build.commissioned") == []
 
 
 def test_a_detached_root_with_no_into_is_refused(repo, opened):
