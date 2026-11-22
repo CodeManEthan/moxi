@@ -494,7 +494,10 @@ can't read says so on a dim third line in turns' words (`Moxi can't read its liv
 since 18:34`), `Agents` (each subagent, teammate and shell with its state) and `Prompt
 box` lines. A launch turns has no session for says nothing of it. Without turns, and
 through the phone gateway, none of this is drawn and turns is not read. With sessions
-installed, turns' `Live sessions` leaves the band of pages; `/m/turns/` still opens it.
+installed, turns' `Live sessions` leaves the band of pages, and the list links it instead:
+`Live sessions`, worded with turns' page title, at the right of the filter line before the
+count, or under the sentence of a machine with no session. The link opens `/m/turns/`. It
+is drawn only with turns installed, and not through the phone gateway.
 
 A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
 can be open at once. The session is read when its row is opened. Opened, a row shows the

@@ -1,9 +1,9 @@
 """turns' live state on sessions' page, in a browser, through a real shell that starts
 sessions' real page server: a running row's state word, what is busy and its trouble line;
 the opened row's `Now`, `Agents` and `Prompt box`; the line each launch says when turns'
-list can't be read; the band without `Live sessions`, whose address still opens turns'
-panel. A small install without turns draws none of it and never reads turns; one without
-sessions keeps `Live sessions` in the band.
+list can't be read; the band without `Live sessions`, and the list's link to turns' panel
+in its place, beside the count. A small install without turns draws none of it, no link,
+and never reads turns; one without sessions keeps `Live sessions` in the band.
 
 Launcher's `running` and turns' `sessions` routes are answered in the browser, and the
 shell's push stream is kept from bringing either module's real topic, so each test sets the
@@ -174,14 +174,19 @@ def test_when_turns_cant_be_read_each_launch_with_a_session_says_so(full_shell, 
     expect(launched_row(view, "r-4")).not_to_have_attribute("note", re.compile(""))
 
 
-def test_live_sessions_leaves_the_band_and_its_address_still_opens_it(full_shell, ui_contexts):
+def test_live_sessions_leaves_the_band_and_the_list_links_it(full_shell, ui_contexts):
     page = ui_contexts(full_shell).pages[0]
     TurnsStub(page, [])
     LauncherStub(page, [])
-    open_list(page)
+    view = open_list(page)
     names = band(page)
     assert "Sessions" in names and "Live sessions" not in names, names
-    page.goto("/m/turns/")
+    filters = view.locator('[data-part="filters"]')
+    link = filters.get_by_role("link", name="Live sessions")
+    expect(link).to_have_attribute("href", "/m/turns/")
+    expect(filters.locator(".n")).to_have_text(re.compile(r"^Live sessions\s*·\s*\d+ sessions$"))
+    link.click()
+    expect(page).to_have_url(re.compile(r"/m/turns/$"))
     expect(page.locator("#moxi-panel > moxi-turns-page")).to_be_attached()
     expect(page.locator("#moxi-pages-button")).to_have_accessible_name("Live sessions")
     expect(page).to_have_title("Live sessions - Moxi")
@@ -204,6 +209,8 @@ def test_without_turns_nothing_of_it_is_drawn_and_turns_is_never_read(no_turns_s
     view = open_list(page)
     row = launched_row(view, "r-1")
     expect(row).to_have_attribute("name", "planner")
+    expect(view.locator('a[data-action="turns"]')).to_have_count(0)
+    expect(view.locator('[data-part="filters"] .n')).to_have_text(re.compile(r"^\d+ sessions?$"))
     expect(row).not_to_have_attribute("lead", re.compile(""))
     expect(row).not_to_have_attribute("note", re.compile(""))
     row.get_by_role("button", name="Open").click()

@@ -40,14 +40,16 @@
 // With turns installed, at the desk, the list also reads turns' `/api/sessions` with each
 // read of the list and follows turns' topic `sessions`. Each running row then says what
 // turns says of its session (`live.ts`): its state word and what is busy, its trouble,
-// and, opened, turns' `Now`, `Agents` and `Prompt box` lines. turns' routes are not the
-// gateway's, so the phone reads none of it.
+// and, opened, turns' `Now`, `Agents` and `Prompt box` lines. The filter line also links
+// turns' page, worded with its title (`Live sessions`), before the count; a list with no
+// session links it under its empty state's sentence. turns' routes are not the gateway's,
+// so the phone reads none of it and draws no link.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, gateway, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, components, gateway, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import { addressLine, LIST_PATH, memoryOf, readAddress, withMemory } from "./address.ts";
 import { Feed } from "./feed.ts";
@@ -107,6 +109,7 @@ const STYLES = css`
   .filt button.set { color: var(--moxi-text); }
   .filt .v { margin-left: 6px; font-size: 15px; line-height: 0; position: relative; top: 1px; color: var(--moxi-text-dim); }
   .filt .n { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .filt .n .x { color: var(--moxi-text); }
   .filt { position: relative; }
   .anchor { position: relative; display: inline-block; }
   /* The Folder menu drops under its button. The other two drop at the line's right end,
@@ -719,13 +722,13 @@ export class SessionsList extends LitElement {
     if (state === null) return html`${address}${status !== null ? this.#status(status) : nothing}`;
     const desk = !gateway();
     const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk,
-                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead });
+                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead, turnsTitle: this.#turnsTitle() });
     const filters = filterLine(state, this.#filters());
     return html`${address}
-      ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count)}` : nothing}
+      ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count, view.turnsLink)}` : nothing}
       ${status !== null ? this.#status(status) : nothing}
       ${reader?.moreStatus != null ? this.#status(reader.moreStatus) : nothing}
-      ${view.empty !== null ? this.#empty(view.empty)
+      ${view.empty !== null ? this.#empty(view.empty, filters === null ? view.turnsLink : null)
         : view.groups.length || view.running !== null ? html`<div class="grps" data-part="groups">
             ${view.running !== null ? this.#runningGroup(view.running, desk) : nothing}
             ${repeat(view.groups, (group) => group.key, (group) => this.#group(group))}</div>` : nothing}
@@ -748,7 +751,7 @@ export class SessionsList extends LitElement {
     </div>`;
   }
 
-  #filt(line: FilterLine, count: string | null) {
+  #filt(line: FilterLine, count: string | null, turnsLink: string | null) {
     return html`<div class="filt" data-part="filters" @keydown=${(event: KeyboardEvent) => {
         if (event.key === "Escape" && this.#menu !== null) this.#openMenu(null);
       }}>
@@ -764,8 +767,26 @@ export class SessionsList extends LitElement {
         ${line.clear !== null ? html`<span class="f"><button type="button" data-action="clear"
           @click=${() => this.#pick({ folder: null, harness: null, when: { kind: "any" } })}>${line.clear}</button></span>` : nothing}
       </span>
-      ${count !== null ? html`<span class="n" data-line="count">${count}</span>` : nothing}
+      ${count !== null || turnsLink !== null ? html`<span class="n">${turnsLink !== null ? this.#turnsLink(turnsLink, "x")
+        : nothing}${turnsLink !== null && count !== null ? html`<span class="sep">·</span>` : nothing}${count !== null
+        ? html`<span data-line="count">${count}</span>` : nothing}</span>` : nothing}
     </div>`;
+  }
+
+  /** The link to turns' page, worded with its title; a plain click shows it in place. */
+  #turnsLink(title: string, tone: string) {
+    return html`<a class=${tone} href="/m/turns/" data-action="turns" @click=${(event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigate("turns", "");
+    }}>${title}</a>`;
+  }
+
+  /** turns' page's title, where the list links it: turns' page is there, at the desk (turns'
+   * routes are not the gateway's). */
+  #turnsTitle(): string | null {
+    if (gateway()) return null;
+    return components("turns").find((one) => one.place === "page")?.title ?? null;
   }
 
   #item(item: MenuItem<unknown>, pick: () => void) {
@@ -811,7 +832,7 @@ export class SessionsList extends LitElement {
       ${menu.line !== null ? html`<p class="say" data-line="folders">${menu.line}</p>` : nothing}</div>`;
   }
 
-  #empty(empty: EmptyView) {
+  #empty(empty: EmptyView, turnsLink: string | null) {
     if (empty.sentence === null) {
       return html`<div class="grps" data-part="groups"><p class="one d" data-line="empty">${empty.line}</p></div>`;
     }
@@ -820,7 +841,8 @@ export class SessionsList extends LitElement {
         ${empty.start !== null ? html`<p><a class="x" href="/m/ui/" data-action="home" @click=${(event: Event) => {
           event.preventDefault();
           navigate("ui", "");
-        }}>${empty.start}</a></p>` : nothing}</div>`;
+        }}>${empty.start}</a></p>` : nothing}
+        ${turnsLink !== null ? html`<p>${this.#turnsLink(turnsLink, "x")}</p>` : nothing}</div>`;
   }
 
   #line(line: LineView, name: string, act: () => void, tone = "one d", expanded: boolean | null = null) {

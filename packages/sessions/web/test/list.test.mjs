@@ -487,7 +487,7 @@ test("the count is M sessions, and N of M sessions when a filter or the find fie
 test("a machine with no session reads No sessions yet, with the link only where the launcher is", () => {
   const state = stateOf([recent([])], { all: 0, total: 0, harnesses: [] });
   assert.deepEqual(draw(state), {
-    count: null, running: null, groups: [], notices: [], unlisted: null,
+    count: null, running: null, groups: [], notices: [], unlisted: null, turnsLink: null,
     empty: { line: "No sessions yet.", sentence: NO_SESSIONS_SENTENCE, start: null },
   });
   assert.equal(draw(state, { launcher: true }).empty.start, "Start one from Home");

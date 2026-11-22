@@ -760,6 +760,10 @@ export interface ListView {
   /** The line for Codex sessions left out because their files are compressed; null when
    * there is none, or they were not counted. */
   unlisted: string | null;
+  /** The words of the link to turns' page, its own title (`Live sessions`), drawn in the
+   * list's head beside the count, or under an empty list's sentence where there is no
+   * filter line; null where turns' page is not linked. */
+  turnsLink: string | null;
 }
 
 export const RUNNING = "Running";
@@ -983,11 +987,13 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
  * `No sessions yet.` is drawn only when the machine holds no session and every root was
  * read: with a root unread, an empty list says nothing of what is there. A list that a
  * filter or the find field leaves empty reads `No sessions match.`.
+ *
+ * `turnsTitle` is turns' page's title, where the list links that page.
  */
 export function listView(state: ListState, { launcher = false, zone = LOCAL, running = null, presses = NO_PRESSES, desk = true,
-                                            readsTurns = false, turnsRead = null }:
+                                            readsTurns = false, turnsRead = null, turnsTitle = null }:
   { launcher?: boolean; zone?: Zone; running?: RunningRead | null; presses?: Presses; desk?: boolean; readsTurns?: boolean;
-    turnsRead?: LiveRead | null } = {}): ListView {
+    turnsRead?: LiveRead | null; turnsTitle?: string | null } = {}): ListView {
   const shown = runningGroup(state, launcher ? running : null, presses,
                              { desk, zone, turnsRead: readsTurns ? turnsRead : null });
   const groups = state.groups.map((group) => groupView(group, state, zone, shown.taken))
@@ -1008,7 +1014,7 @@ export function listView(state: ListState, { launcher = false, zone = LOCAL, run
     group = null;
   }
   return { count: countLine(state), running: group, groups: empty === null ? groups : [], empty, notices,
-           unlisted: unlistedLine(state) };
+           unlisted: unlistedLine(state), turnsLink: turnsTitle !== null && turnsTitle !== "" ? turnsTitle : null };
 }
 
 // -- the find field and the filter line -----------------------------------------------------
