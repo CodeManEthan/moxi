@@ -33,9 +33,10 @@ outside comms.
 * Reads: `attributed(message_id)`, `session(identity)`, `session_of(identity)`,
   `roster()` (a `Roster`: `bound`, `standing`, and `waiting`, one `Waiting` per name
   with mail queued), `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
-  roster joined with each live name's session, its cache (a `CacheFact`) and whom it
-  awaits). A send-only entry of either carries `holder`: `module`, `program`, or None
-  for a name an older comms kept,
+  roster joined with each live name's session, its cache (a `CacheFact`), whom it
+  awaits and, for the connector's binding, comms' words for it in `via`). A send-only
+  entry of either carries `holder`: `module`, `program`, or None for a name an older
+  comms kept,
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
@@ -68,10 +69,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+from moxi import modules as _modules
+
 from .. import cache as _cache
 from .. import claimfile as _claimfile
 from .. import config as _config
 from .. import directory as _directory
+from .. import kinds as _kinds
 from .. import machine_line as _machine_line
 from .. import paths as _paths
 from .. import reserved as _reserved_mod
@@ -491,7 +495,10 @@ class RosterRow:
     (the daemon's clock, epoch seconds), `awaiting` (whom that session waits on) and
     `cache` (a `CacheFact`) are a live row's, empty when the daemon couldn't say. `cache`
     is None too for any read but `warm` or `cold`, and for one with no age or lifetime,
-    so it is None for every row on a box without the cache module."""
+    so it is None for every row on a box without the cache module. `via` is comms' words
+    for what a live row's binding is when its adapter kind says so: `Claude's apps,
+    through the connector` for the connector's kind while the connector module is
+    installed; None for every other row."""
 
     qualified: str
     name: str
@@ -507,6 +514,19 @@ class RosterRow:
     awaiting: tuple = ()
     cache: CacheFact | None = None
     holder: str | None = None
+    via: str | None = None
+
+
+#: The module that hosts comms' tools in the Claude apps, which bind as the connector kind.
+_CONNECTOR_MODULE = "connector"
+
+
+def _via(adapter: str | None) -> str | None:
+    """comms' words for a binding of kind `adapter`: the connector's words for its kind
+    while the connector module can be imported here, else None."""
+    if adapter != _kinds.CONNECTOR_KIND or not _modules.available(_CONNECTOR_MODULE):
+        return None
+    return _kinds.CONNECTOR_VIA
 
 
 def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
@@ -517,7 +537,8 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
     `waiting` too asks the daemon for `agents` once.
 
     A bound name is a live row, carrying its standing row's `kind` and `module` when it
-    has one; a standing name nobody holds is a standing row. Live rows come first, then
+    has one, and `via` when its adapter kind is the connector's; a standing name nobody
+    holds is a standing row. Live rows come first, then
     each group by `qualified`. `timeout_s` goes to every daemon call.
 
     Raises `DaemonOffline` the first time any call does, making no further call, and
@@ -542,7 +563,8 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
             module=getattr(kept, "module", None) if kept else None,
             tier=agent.tier, adapter=agent.adapter, directors=tuple(agent.directors),
             session_id=session_id, bound_at=bound_at, awaiting=awaiting, cache=cache,
-            holder=getattr(kept, "holder", None) if kept else None))
+            holder=getattr(kept, "holder", None) if kept else None,
+            via=_via(agent.adapter)))
     for row in standing.values():
         rows.append(RosterRow(
             qualified=row.qualified, name=row.name, scope=row.scope, live=False,

@@ -470,13 +470,13 @@ def test_personal_data_holds_the_budget(eng_name, monkeypatch, timed_reading):
 # -- redact ---------------------------------------------------------------------------------
 
 def test_redact_scans_once_without_hits_and_twice_with_them(monkeypatch):
-    real = scan_mod.scan
+    real = scan_mod._seen_hits
     seen = [0]
 
     def counting(*args, **kwargs):
         seen[0] += 1
         return real(*args, **kwargs)
-    monkeypatch.setattr(scan_mod, "scan", counting)
+    monkeypatch.setattr(scan_mod, "_seen_hits", counting)
     for text, scans in ((prose(corpus.rng(70), SIZE), 1), (shape("hit dense"), 2)):
         seen[0] = 0
         redact(text, ("credentials",))

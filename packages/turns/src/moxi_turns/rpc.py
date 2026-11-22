@@ -133,15 +133,17 @@ class Rpc:
         # Recorded, checked and handed to the worker before this handler's first await.
         d = self.ep.deliver(text, ref=ref, only_if_idle=only_if_idle,
                             if_turn_number=if_turn_number, refuse_draft=refuse_draft,
-                            refuse_agents=refuse_agents)
+                            refuse_agents=refuse_agents, by=_by(params),
+                            senders=_senders(params))
         await self._hook("deliver", d)
         return self._handed(d)
 
     async def _steer(self, conn, params: dict) -> dict:
         text = _text(params)
         ref = _ref(params)
+        by, senders = _by(params), _senders(params)
         self._needs("steer")
-        d = self.ep.steer(text, ref=ref)
+        d = self.ep.steer(text, ref=ref, by=by, senders=senders)
         await self._hook("steer", d)
         return self._handed(d)
 
@@ -315,6 +317,24 @@ def _ref(params: dict) -> str | None:
         return check_ref(params.get("ref"))
     except ValueError as exc:
         raise invalid(str(exc)) from None
+
+
+def _by(params: dict) -> str | None:
+    """`by`: the module that asked, a non-empty string, or absent."""
+    value = params.get("by")
+    if value is not None and (not isinstance(value, str) or not value):
+        raise invalid("by is a non-empty string or null")
+    return value
+
+
+def _senders(params: dict) -> tuple[str, ...]:
+    """`senders`: the names the text speaks for, a list of non-empty strings."""
+    value = params.get("senders")
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise invalid("senders is a list of non-empty strings")
+    return tuple(value)
 
 
 def _bool(params: dict, key: str) -> bool:

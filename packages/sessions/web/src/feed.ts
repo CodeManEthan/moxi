@@ -209,8 +209,9 @@ export function refusedText(data: unknown): string | null {
   return null;
 }
 
-type Wait = (ms: number) => Promise<void>;
-const sleep: Wait = (ms) => new Promise((done) => setTimeout(done, ms));
+/** Waits `ms` before a 503 is asked again; tests pass one that doesn't. */
+export type Wait = (ms: number) => Promise<void>;
+export const sleep: Wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
 /**
  * The data one part of the view shows. `refresh()` reads the route.

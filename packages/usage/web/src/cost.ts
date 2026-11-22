@@ -93,7 +93,7 @@ export class UsageCost extends LitElement {
         ${this.#total("Last 7 days", found.week)}
       </div>
       <table>
-        <thead><tr><th>Day</th><th class="num">Cost</th><th class="num">Tokens</th></tr></thead>
+        <thead><tr><th>Day</th><th class="num">Est. cost</th><th class="num">Tokens</th></tr></thead>
         <tbody>${found.days.slice().reverse().map((day) => html`
           <tr data-day=${day.day}><td>${day.day}</td>
             <td class="num">${fmtCost(day.cost)}${this.#flag(day)}</td>

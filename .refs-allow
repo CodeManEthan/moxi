@@ -53,4 +53,4 @@ packages/ui/src/moxi_ui/loopback/serve.py	cr_version	the version field of macOS'
 packages/ui/src/moxi_ui/testing/phone.py	SSLSocket.shutdown	the shutdown method of the ssl module's SSLSocket class
 packages/ui/tests/squatter.py	Server.close_clients	the asyncio Server method added in Python 3.13
 packages/ui/web/src/passkey.ts	toJSON	the WebAuthn method that gives a credential as JSON
-packages/memory/src/moxi_memory/rows.py	--env-file	an example of a flag joined to a path by "=", as container tools take it
+packages/secrets/src/moxi_secrets/paths.py	--env-file	an example of a flag joined to a path by "=", as container tools take it

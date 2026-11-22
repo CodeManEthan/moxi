@@ -33,7 +33,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 
-from .. import directory
+from .. import directory, kinds
 from ..client import DaemonClient, DaemonError, DaemonOffline, backoff_delays
 from ..paths import comms_db, daemon_socket
 from ..provision import add_standing
@@ -45,7 +45,7 @@ CAPABILITY = "connector"
 log = logging.getLogger("comms.connector.link")
 
 #: The adapter kind the identity binds as.
-KIND = "connector"
+KIND = kinds.CONNECTOR_KIND
 #: Seconds between tries while another binding holds the name, or the daemon refused it.
 HELD_RETRY = 30.0
 #: Seconds a read on a short connection may take.

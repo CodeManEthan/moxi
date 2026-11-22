@@ -16,7 +16,8 @@ import pytest
 from moxi_sessions import api
 from test_ingest import NO_LAUNCHER, TOKEN, claude, config, run, texts
 
-from moxi_memory import cli, doctor, index, ingest, roots, search, state, status, table
+from moxi_memory import (cli, connector, doctor, index, ingest, roots, search, state,
+                         status, table)
 
 T = api.testing
 ONE = "0190b000-0000-7000-8000-0000000000b1"
@@ -245,6 +246,164 @@ def test_a_compressed_only_codex_session_counts_as_found_and_its_rows_are_copied
     report = run("rebuild")
     assert report.dropped == 0 and report.kept == 1
     assert "codex words before compression" in texts()
+
+
+# -- sources waiting on a folder -------------------------------------------------------
+
+def forget_writers():
+    """Make every row one stored before rows recorded their writer."""
+    with index.writer() as w:
+        conn = w.connect()
+    try:
+        with conn:
+            conn.execute("UPDATE rows SET writer = NULL")
+    finally:
+        conn.close()
+
+
+def writerless():
+    with index.open_read() as rd:
+        return rd.conn.execute("SELECT count(*) FROM rows WHERE writer IS NULL").fetchone()[0]
+
+
+def waiting():
+    sc = state.connect()
+    try:
+        return state.read_waiting(sc)
+    finally:
+        sc.close()
+
+
+def index_row():
+    return {r.name: r for r in doctor.rows()}["index"]
+
+
+def search_row():
+    _, level, text = connector.search_row(dict(os.environ))
+    return level, text
+
+
+def offline_once(archive_dir):
+    """sessions' archive test standing in for `archive_dir` the first time only:
+    offline."""
+    asked = {"n": 0}
+
+    def stand_in(path, *, fresh):
+        if str(path) != str(archive_dir):
+            return None
+        asked["n"] += 1
+        return api.ArchiveAnswer(path, ok=False, reason="unplugged") if asked["n"] == 1 else None
+
+    return stand_in
+
+
+def failing_read(monkeypatch, target, *, times=None):
+    """sessions' `records_since` raising a read error for `target`'s file, the first
+    `times` calls (every call with None)."""
+    real = api.records_since
+    calls = {"n": 0}
+
+    def records_since(item, cursor, **kw):
+        src = item if isinstance(item, api.Source) else item.source
+        if str(src.path) == str(target):
+            calls["n"] += 1
+            if times is None or calls["n"] <= times:
+                raise api.Unreadable("Input/output error")
+        return real(item, cursor, **kw)
+
+    monkeypatch.setattr(api, "records_since", records_since)
+
+
+@pytest.mark.parametrize("kind", ["offline", "read-error"])
+def test_a_reindex_whose_root_fails_once_and_then_answers_ends_with_every_row_written(
+        arch, monkeypatch, hold, kind):
+    t = in_archive(arch, ONE, "words kept in the archive")
+    live = claude(TWO, serial=300)
+    live.user("a live prompt")
+    live.write()
+    run()
+    forget_writers()
+    assert writerless() > 0
+    if kind == "offline":
+        hold(stand_in=offline_once(arch / "claude"))
+    else:
+        failing_read(monkeypatch, t.path, times=1)
+    report = run("rebuild")
+    assert writerless() == 0 and waiting() == []
+    assert report.kept == 0
+    assert "words kept in the archive" in texts() and "a live prompt" in texts()
+    assert recorded()[str(arch / "claude")].answered
+    assert "waiting" not in index_row().detail
+
+
+@pytest.mark.parametrize("kind", ["offline", "read-error"])
+def test_a_root_still_failing_leaves_its_session_waiting_and_a_walk_reads_it_unchanged(
+        arch, monkeypatch, kind):
+    t = in_archive(arch, ONE, "words kept in the archive")
+    run()
+    forget_writers()
+    with monkeypatch.context() as m, contextlib.ExitStack() as stack:
+        if kind == "offline":
+            stack.enter_context(T.archive_tests(never_answer=True))
+        else:
+            failing_read(m, t.path)
+        report = run("rebuild")
+        assert report.kept == 1
+        assert "words kept in the archive" in texts() and writerless() > 0
+        [w] = waiting()
+        assert (w.harness, w.session_id, w.lookup) == ("claude", ONE, ONE)
+        assert (w.source, w.root_dir) == (str(t.path), str(arch / "claude"))
+        assert "1 session waiting on a folder that didn't answer" in index_row().detail
+        level, text = search_row()
+        assert level == "warn" and "1 sessions wait on a folder that didn't answer" in text
+        assert "reindex" not in text                  # a reindex wouldn't help them
+        run()                                         # a walk while it still fails
+        assert [x.source for x in waiting()] == [str(t.path)] and writerless() > 0
+    T.forget_archive_answers()
+    os.utime(t.path, (1_000_000_000, 1_000_000_000))  # older than every last walk
+    run()
+    assert waiting() == [] and writerless() == 0
+    assert "words kept in the archive" in texts()
+    assert "waiting" not in index_row().detail
+    assert search_row()[0] == "ok"
+
+
+def test_a_waiting_source_whose_file_is_gone_stops_waiting_once_its_root_answers(arch):
+    t = in_archive(arch, ONE, "words kept in the archive")
+    run()
+    forget_writers()
+    with T.archive_tests(never_answer=True):
+        run("rebuild")
+        assert [w.source for w in waiting()] == [str(t.path)]
+    T.forget_archive_answers()
+    os.remove(t.path)
+    run()
+    assert waiting() == []
+    assert recorded()[str(arch / "claude")].answered
+
+
+def test_a_compressed_rollout_keeps_no_writer_never_waits_and_is_never_a_hit(arch):
+    from test_connector import search as chat_search
+
+    r = T.CodexRollout(api.root("codex"))
+    r.turn()
+    r.user("codex words before compression")
+    r.write()
+    run()
+    forget_writers()
+    Path(str(r.path) + ".zst").write_bytes(b"\x28\xb5\x2f\xfd")
+    os.remove(r.path)
+    for mode in ("rebuild", "walk", "rebuild"):
+        run(mode)
+        assert "codex words before compression" in texts()
+        assert writerless() == 1 and waiting() == []
+    assert "1 row of compressed Codex rollouts" in index_row().detail
+    assert "stored before rows recorded their writer" not in index_row().detail
+    level, text = search_row()
+    assert level == "ok" and "1 rows of compressed Codex rollouts record no writer" in text
+    assert "reindex" not in text and "wait" not in text
+    result, _ = chat_search({"words": "compression"})
+    assert result.structured["hits"] == []
 
 
 # -- a folder that fails during a run --------------------------------------------------

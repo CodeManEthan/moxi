@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+- The comms daemon replaces a Claude Code session's adapter that died while the session
+  runs at once, with no prompt: it sees the adapter's connection drop, waits up to 10 s
+  for its claim socket to stop answering, and starts a new adapter with the environment
+  `claude` started with, so mail that waited is delivered and starts a turn in an idle
+  session. At its start the daemon does the same for adapters that died while it was
+  down. Run as a systemd service, it starts the adapter in a scope of its own
+  (`systemd-run --user --scope`), outside the service's cgroup. It replaces one session's
+  adapter at most 3 times in 10 minutes. The session's next start or prompt says once
+  that its adapter had stopped, at what time, and that a new one bound it; the listener's
+  own replacement at a start or prompt stays as the fallback.
+- A Claude Code session whose comms adapter dies while the session runs gets a new one
+  with no relaunch: at its next start or prompt, comms' listener starts an adapter that
+  watches the same `claude`, reads the claim file and binds the same name, and says so
+  in one line before the start's layer one and roster or the prompt's roster changes,
+  which the session still gets. When none can be started or its bind is refused, the
+  line is `comms: mail has stopped for <name>` with why. `moxi comms doctor` prints an `adapter` line and
+  `moxi doctor` a fail row for each session whose adapter is gone. An adapter whose
+  watch on `claude` fails keeps its claim file, so it is replaced too.
+- `[archive] record` and `[archive] identities` name an older comms' record and
+  identities files, which comms reads in place and never writes. `moxi comms history`
+  and a session's `history` tool list the older record's messages before comms.db's, the
+  tool with the state `archived` and a `skip` to page back past the newest messages it
+  reads at once; `explain <name> <id>` of an older message says whether the older queue
+  still held it for that name and whether that name's older cursor file stood at or past
+  it, and that the rest of its delivery is not read; `reply` and every read by id find
+  an older message by its own id, because the daemon moves comms.db's counter past the
+  older ids once at its start (an older id comms.db had already used stays comms.db's
+  message by id, and the older message under it is reached through `history`); and every
+  name the older identities file retired is refused at bind and as a recipient again.
+- `moxi comms opencode <identity>` launches an OpenCode session with comms mail, as
+  `moxi comms claude` and `moxi comms codex` launch theirs. It runs the OpenCode wrapper
+  `moxi-comms-opencode`, whose script is not on PATH, and names itself as typed.
+- comms declares the `speech` adapter kind again, as a person kind: a binding of it (voice
+  binds the operator's name as `speech`) has its mail delivered live, never held for a
+  cold cache, and its cache is never read.
+- The connector's `send` and `send_and_wait` are no longer refused while an agent waits on
+  a single reply from the Claude app. The message posts, and the answer ends with a note
+  listing the asks still open from its recipients: newest first, at most three and a
+  count of the rest, each with its age and its first line. A reply through the connector
+  lists the others the same way, leaving out the ask it answers. Both tools now speak every
+  note of their send, and `send_and_wait` returns a `notes` field. The connector's refusals
+  name only its own tools and parameters (`sending.CURES_CONNECTOR`). Agent sessions'
+  tools and `moxi comms send` keep the refusal and its text.
+- With turns installed, comms' page reads turns' `/api/sessions` while a send box is
+  open, with each check and every 30 s, and joins each session whose turn is open to its
+  address by session id. A message the dry run would deliver to that session now reads
+  `Delivered. <name> is working; it reads this when its turn ends.` Without turns, or
+  for a name whose turn isn't open, the line is as before.
+- The Comms page says what the connector's name is: the row of the name that comms' tools
+  in the Claude apps bind reads `Claude's apps, through the connector` after the name. Each live row of
+  `api.roster_rows()`, `agents --json` and the page's roster carries `via`, comms' words
+  for a binding of the connector's kind while the connector module is installed, and null
+  for every other row.
 - Any program or service, not only a Moxi module, can hold a send-only name: `moxi comms
   send-only add NAME` registers it, `moxi comms send --as NAME` and
   `moxi_comms.api.send_under` send under it from outside every session, and `send-only
@@ -164,6 +217,17 @@
   offline, tried to bind the name it already held, read the refusal as another session
   holding it, and stayed offline for the rest of the session. A close from a connection
   the shim has already replaced now changes nothing.
+- The Comms page says where an agent works when launcher doesn't: with sessions installed,
+  a bound name's row reads its session's folder, when it started and its harness
+  (`atlas-api · started today 12:45 · claude`), and its opened row's `Session` line names
+  the session and links to it on the Sessions page; opening the row asks sessions again,
+  so a name typed in the harness since shows there. Launcher's where still wins for a
+  session it runs. Each row of the page's roster carries `harness`, the harness its
+  binding's adapter kind is a session of, or null.
+- The Comms page says which project a name leads: with projects installed, a standing
+  name in `Other names` that leads a project reads `leads <key>` on its shown row
+  (`leads harbor-infra`), from projects' list of projects. A name that leads nothing, or
+  an install without projects, shows nothing of it.
 
 ## 0.3.0 (2026-11-08)
 

@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { catchRefuses, catchRefusesAsk, decide, globRegex, parseTable } from '../hooks/register'
+import { NO_TABLE_DENY, catchRefuses, catchRefusesAsk, decide, globRegex, noTableRefuses, parseTable } from '../hooks/register'
 import TABLE from './guard-cases'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -662,5 +662,97 @@ describe('the ask step', () => {
     expect(catchRefusesAsk(table, { tool_name: 'Write', tool_input: { file_path: '/a' } })).toBe(true)
     expect(catchRefuses(table, { tool: 'Write', file_path: '/a' })).toBe(false)
     expect(decide(table, 'Bash', null, {}, 'ask').covering).toEqual([])
+  })
+})
+
+describe('no table yet', () => {
+  /** Question mode's entry as the endpoint sends it. */
+  const QUESTION = entry('turns.question-mode', { calls: ['AskUserQuestion'], wants: ['prompts'], on_error: 'deny', deadline_ms: 3000 })
+  const ask = ($: E, fields: Json = {}) => $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q1', questions: [], ...fields })
+
+  test('AskUserQuestion is refused with the named reason, a subagent\'s too, with no trip', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect(await ask($)).toEqual({ deny: NO_TABLE_DENY })
+    expect(await ask($, { agentId: 'a1' })).toEqual({ deny: NO_TABLE_DENY })
+    expect(NO_TABLE_DENY).toBe("turns' guards aren't loaded, so question mode can't check this call; ask in prose")
+    expect(ran(w)).toEqual([])
+    expect(asks(w)).toEqual([])
+  })
+
+  test('another tool runs as before', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect((await $.tool.call({ tool: 'Bash', command: 'ls' })).deny).toBeUndefined()
+    expect(ran(w)).toEqual(['Bash'])
+    expect(asks(w)).toEqual([])
+  })
+
+  test('a hello with no table, or a guards line that is not a list, is no table', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello()
+    expect(await ask($)).toEqual({ deny: NO_TABLE_DENY })
+    await w.line({ op: 'guards', table: 'nonsense' })
+    expect(await ask($)).toEqual({ deny: NO_TABLE_DENY })
+    expect(ran(w)).toEqual([])
+  })
+
+  test('an endpoint that ends before its first line leaves it refused', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.end()
+    expect(await ask($)).toEqual({ deny: NO_TABLE_DENY })
+  })
+
+  test('an empty table says question mode is off: the call runs', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [])
+    expect((await ask($)).deny).toBeUndefined()
+    expect(ran(w)).toEqual(['AskUserQuestion'])
+  })
+
+  test('once the table arrives, question mode judges as before', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect(await ask($)).toEqual({ deny: NO_TABLE_DENY })
+    await w.hello({ guards: [QUESTION] })
+    w.answers['/ask/guard'] = { ok: true, deny: 'nothing you typed mentions a question', lines: [], broken: [] }
+    expect(await ask($)).toEqual({ deny: 'nothing you typed mentions a question' })
+    w.answers['/ask/guard'] = { ok: true, lines: [], broken: [] }
+    expect((await ask($)).deny).toBeUndefined()
+    expect(asks(w).map(b => b.guards)).toEqual([['turns.question-mode'], ['turns.question-mode']])
+    expect(ran(w)).toEqual(['AskUserQuestion'])
+  })
+
+  test('a guards line brings the table too', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello()
+    await w.line({ op: 'guards', table: [] })
+    expect((await ask($)).deny).toBeUndefined()
+  })
+
+  test('the table stays when the endpoint ends: its break refuses as before', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [QUESTION])
+    await w.end()
+    expect((await ask($)).deny).toBe("turns could not check this call with guard turns.question-mode (turns' endpoint is not running)")
+  })
+
+  test('a headless session is not refused', async ($: E, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: false })
+    expect((await ask($)).deny).toBeUndefined()
+    expect(ran(w)).toEqual(['AskUserQuestion'])
+  })
+
+  test('the rule the hook and its catch share', () => {
+    expect(noTableRefuses('AskUserQuestion', false, undefined)).toBe(true)
+    expect(noTableRefuses('AskUserQuestion', false, false)).toBe(true)
+    expect(noTableRefuses('AskUserQuestion', true, false)).toBe(false)
+    expect(noTableRefuses('AskUserQuestion', false, true)).toBe(false)
+    expect(noTableRefuses('Bash', false, false)).toBe(false)
+    expect(noTableRefuses(undefined, false, false)).toBe(false)
   })
 })

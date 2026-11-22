@@ -67,9 +67,10 @@ from datetime import datetime
 from moxi.config import ConfigError
 
 from . import claude, view
-from .archives import archive_answers, archive_dirs
+from .archives import archive_dirs
 from .errors import Unreadable
 from .find import Found, find
+from .locate import locate
 from .shape import CLAUDE, CODEX, HARNESSES, document
 from .source import root, root_origin
 
@@ -321,25 +322,6 @@ def _iso(value: str) -> float:
     return moment.timestamp()
 
 
-def _probed(found) -> str:
-    return "; ".join(f"{probe.root}: {probe.outcome}" for probe in found.probes)
-
-
-def _pick(found):
-    """The source to read of what `find` found: the first that isn't compressed, else the
-    first, whose read then says why it can't be read."""
-    hits = found.hits
-    return next((h for h in hits if not h.compressed), hits[0]).source
-
-
-def _offline(asked, asked_dirs) -> list[str]:
-    """`folder (why)` for each archive folder in `asked_dirs` that one of the finds in
-    `asked` probed and that didn't answer."""
-    return [f"{probe.root} ({probe.outcome.partition(': ')[2] or probe.outcome})"
-            for found in asked for probe in found.probes
-            if probe.root in asked_dirs and probe.outcome.startswith(claude.UNREADABLE)]
-
-
 def _unknown(prog: str, session: str, offline: list[str]) -> str:
     return (f"{prog} read: session {session} is unknown: no folder asked holds it, and "
             f"{'; '.join(offline)} didn't answer, so it may be there")
@@ -347,47 +329,27 @@ def _unknown(prog: str, session: str, offline: list[str]) -> str:
 
 def _source(harness: str | None, session: str, prog: str):
     """The harness and source to read, or the reason and the exit code when there is none.
-
-    With `harness` named, that harness's live root is asked, then its archive folders.
-    Without it, every harness's live root is asked in turn with `find`, which looks at
-    names and, for OpenCode, one row, never a whole transcript; only when none holds the
-    session are the archive folders of every harness tested together, once, and asked.
-    The one harness that holds the session is read, and more than one is refused."""
-    if harness is not None:
-        found = find(harness, session, include_archives=True)
-        offline = _offline([found], set(archive_dirs(harness)))
-        if not found.found and offline:
-            return None, None, _unknown(prog, session, offline), 1
-        if not found.found:
-            return None, None, (f"{prog} read: no {harness} session {session} was found "
-                                f"({_probed(found)})"), 1
-        return harness, _pick(found), None, 0
-    asked = [find(each, session) for each in HARNESSES]
-    held = [found for found in asked if found.found]
-    asked_dirs: list[str] = []
-    if not held:
-        asked_dirs = [archive_dir for each in HARNESSES for archive_dir in archive_dirs(each)]
-        if asked_dirs:
-            archive_answers(asked_dirs)
-            asked = [find(each, session, include_archives=True) for each in HARNESSES]
-            held = [found for found in asked if found.found]
-    if len(held) == 1:
-        offline = _offline([found for found in asked if not found.found], set(asked_dirs))
-        if offline:
-            print(f"{prog} read: {held[0].harness} holds session {session}; "
+    `locate` says which roots are asked; the one harness that holds the session is read,
+    and more than one is refused."""
+    at = locate(harness, session)
+    offline = [f"{archive_dir} ({why})" for archive_dir, why in at.offline]
+    if at.source is not None:
+        if offline and harness is None:
+            print(f"{prog} read: {at.harness} holds session {session}; "
                   f"{'; '.join(offline)} didn't answer, so whether another harness holds "
                   "it too is not known", file=sys.stderr)
-        return held[0].harness, _pick(held[0]), None, 0
-    if held:
-        names = " and ".join(found.harness for found in held)
+        return at.harness, at.source, None, 0
+    if len(at.held) > 1:
+        names = " and ".join(at.held)
         return None, None, (f"{prog} read: session {session} is held by {names}; give "
                             "--harness to say which to read"), 2
-    offline = _offline(asked, set(asked_dirs))
     if offline:
         return None, None, _unknown(prog, session, offline), 1
-    probed = "; ".join(f"{found.harness}: {_probed(found)}" for found in asked)
+    if harness is not None:
+        return None, None, (f"{prog} read: no {harness} session {session} was found "
+                            f"({at.probed})"), 1
     return None, None, (f"{prog} read: no session {session} was found in any harness "
-                        f"({probed})"), 1
+                        f"({at.probed})"), 1
 
 
 def _shown_line(shown: view.Shown, count: int) -> str:

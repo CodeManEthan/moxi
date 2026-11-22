@@ -13,7 +13,7 @@ const NOW = at("19:10");
 const row = (qualified, fields = {}) => ({
   qualified, name: qualified.split("@")[0], scope: qualified.includes("@") ? qualified.split("@")[1] : null,
   live: false, kind: "agent", module: null, tier: null, adapter: null, directors: [], session_id: null,
-  bound_at: null, awaiting: [], cache: null, ...fields,
+  bound_at: null, awaiting: [], cache: null, via: null, ...fields,
 });
 const bound = (qualified, fields = {}) =>
   row(qualified, { live: true, kind: null, tier: "worker", adapter: "claude", session_id: `s-${qualified}`,
@@ -103,9 +103,19 @@ test("a scoped address with neither mail nor a session goes to Other names, the 
   assert.deepEqual(rows[0].addresses.map((a) => a.qualified), ["planner"]);
   assert.deepEqual(rows[0].note.lines, []);
   assert.deepEqual(others, [
-    { qualified: "ops-watch", sentBy: null, writable: true },
-    { qualified: "ops-watch@x", sentBy: null, writable: true },
-    { qualified: "planner@kestrel-web", sentBy: null, writable: true },
+    { qualified: "ops-watch", sentBy: null, writable: true, speaksFor: "ops-watch" },
+    { qualified: "ops-watch@x", sentBy: null, writable: true, speaksFor: null },
+    { qualified: "planner@kestrel-web", sentBy: null, writable: true, speaksFor: null },
+  ]);
+});
+
+test("an idle name speaks through its first entry in Other names, its bare address when it has one", () => {
+  const r = roster([row("main@proj-b"), row("main@proj-a"), row("herald"), row("herald@x"), bound("planner"),
+                    row("planner@kestrel-web"), row("console", { kind: "send-only", module: "launcher" })]);
+  const { others } = agents(r);
+  assert.deepEqual(others.map((other) => [other.qualified, other.speaksFor]), [
+    ["console", null], ["herald", "herald"], ["herald@x", null], ["main@proj-a", "main"], ["main@proj-b", null],
+    ["planner@kestrel-web", null],
   ]);
 });
 
@@ -113,14 +123,14 @@ test("a send-only name is in Other names with its module and no Message", () => 
   const r = roster([row("console", { kind: "send-only", module: "ui" }), row("relay", { kind: "send-only" })]);
   const { rows, others } = agents(r);
   assert.deepEqual(rows, []);
-  assert.deepEqual(others, [{ qualified: "console", sentBy: "ui", writable: false },
-                            { qualified: "relay", sentBy: null, writable: false }]);
+  assert.deepEqual(others, [{ qualified: "console", sentBy: "ui", writable: false, speaksFor: null },
+                            { qualified: "relay", sentBy: null, writable: false, speaksFor: null }]);
 });
 
 test("a send-only name a program registered is sent by a program", () => {
   const r = roster([row("ticker", { kind: "send-only", module: null, holder: "program" })]);
   const { others } = agents(r);
-  assert.deepEqual(others, [{ qualified: "ticker", sentBy: "a program", writable: false }]);
+  assert.deepEqual(others, [{ qualified: "ticker", sentBy: "a program", writable: false, speaksFor: null }]);
 });
 
 test("an owed author with no other fact is a row of its own, with Reply", () => {
@@ -414,6 +424,31 @@ test("without launcher: no where, comms' cache fact, no loud case", () => {
   assert.equal(got.where, null);
   assert.deepEqual(got.fact, { text: "warm until 19:22", heavy: false });
   assert.equal(got.case, "idle");
+});
+
+// --- comms' words for the connector's binding ----------------------------------------------------
+
+const CONNECTOR = "Claude's apps, through the connector";
+
+test("the connector's binding has comms' words for it as its where, with or without launcher", () => {
+  const app = bound("claude-app", { adapter: "connector", via: CONNECTOR });
+  const r = roster([app, bound("builder-1", { cache: warm("19:22") })]);
+  const read = mail({ last: [{ qualified: "claude-app", at: at("18:21") }] });
+  const got = agents(r, read);
+  assert.deepEqual(got.rows.map((x) => [x.name, x.where]), [["claude-app", CONNECTOR], ["builder-1", null]]);
+  const claude = got.rows[0];
+  assert.equal(claude.fact, null);
+  assert.equal(claude.line.lead, "no mail waiting");
+  // Launcher's where for another row stays its own; the binding's words win on its own row.
+  const join = new Map([["builder-1", launched({ fact: null, uncovered: false, waits: null })],
+                        ["claude-app", launched({ where: "terminal · elsewhere", fact: null, uncovered: false, waits: null })]]);
+  assert.deepEqual(agents(r, read, { launched: join }).rows.map((x) => [x.name, x.where]),
+                   [["claude-app", CONNECTOR], ["builder-1", "slot 4 · atlas-api"]]);
+});
+
+test("a connector-kind row without comms' words has no where", () => {
+  const got = only(roster([bound("claude-app", { adapter: "connector" })]), mail());
+  assert.equal(got.where, null);
 });
 
 test("from you: the server's mark decides, not the author's name", () => {

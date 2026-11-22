@@ -109,7 +109,7 @@ def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypa
     assert (got.state, got.pid, got.target) == ("started", run["pid"], "terminal")
     assert got.pid_started is not None and got.session_id == SID
     assert got.argv == seen["preview"]
-    assert got.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert got.env == {"MOXI_USAGE_WARN_AT": "2x", "MOXI_LAUNCHER_REQUEST": "r1"}
     prompt = common.prompt_path(targets.runs_dir(), "r1")
     assert Path(prompt).exists() and "--append-system-prompt-file" in run["argv"]
     assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600
@@ -553,6 +553,10 @@ def test_a_launch_with_a_handoff_key_makes_its_handoff_dir_after_the_row(
         work, harness, monkeypatch):
     from moxi_launcher import handoffs
 
+    # Without notes, so the folder is the launcher's own.
+    available = handoffs.modules.available
+    monkeypatch.setattr(handoffs.modules, "available",
+                        lambda name: name != "notes" and available(name))
     handoff_dir = handoffs.own_handoffs_dir(create=False)
     seen = []
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(
@@ -857,15 +861,21 @@ def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkey
 # -- scratch -------------------------------------------------------------------------------
 
 
+#: The name every scratch launch here gets: the shipped template at the tests' one time,
+#: with no project and no agent.
+SCRATCH_NAME = "20261108-1245"
+
+
 @POSIX
 def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
-    assert not common.scratch_dir("r9").exists()
+    where = common.scratch_dir(SCRATCH_NAME)
+    assert not where.exists()
     api.preview(req)
-    assert not common.scratch_dir("r9").exists()
+    assert not where.exists()
     result = api.launch(req)
-    where = common.scratch_dir("r9")
+    assert row("r9").values["name"] == SCRATCH_NAME
     assert where.is_dir() and stat.S_IMODE(where.stat().st_mode) == 0o700
     run = harness.one()
     assert run["cwd"] == str(where) and "--skip-git-repo-check" in run["argv"]
@@ -874,20 +884,132 @@ def test_a_scratch_launch_makes_its_dir_and_never_removes_it(harness, tmp_path):
     assert where.is_dir()
 
 
-@POSIX
-def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path):
-    import tempfile
+def test_a_scratch_launch_given_a_notes_dir_is_refused_by_name(harness, tmp_path):
+    # A scratch launch has no notes home, and refuses a notes_dir by name.
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF, "notes_dir": str(tmp_path / "notes")},
+                        cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.ScratchNotes) as caught:
+        api.preview(req)
+    assert (caught.value.code, caught.value.row) == ("scratch-notes", "notes_dir")
+    assert caught.value.problem == "a scratch launch keeps no notes, so it takes no notes_dir"
+    [refused] = api.check(req)
+    assert isinstance(refused, presets.ScratchNotes)
+    with pytest.raises(presets.ScratchNotes):
+        api.launch(req)
+    assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
 
+
+def test_a_go_launch_with_no_brief_is_refused_before_anything_is_written(harness,
+                                                                          tmp_path):
+    # A go launch with no brief is refused on preview and launch, before any row.
+    req = LaunchRequest(typed={"harness": "codex", "posture": "go", "target": "headless"},
+                        cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.PostureBrief) as caught:
+        api.preview(req)
+    assert caught.value.code == "posture-brief"
+    [refused] = api.check(req)
+    assert isinstance(refused, presets.PostureBrief)
+    with pytest.raises(presets.PostureBrief):
+        api.launch(req)
+    assert nothing_written("r9")
+
+
+def test_a_notes_dir_from_the_defaults_is_left_out_of_a_scratch_launch(harness, tmp_path):
+    write_presets(f'[defaults]\nnotes_dir = "{tmp_path / "notes"}"\n')
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    assert api.preview(req).values["notes_dir"] == ""
+
+
+def test_a_scratch_dir_notes_would_give_a_home_is_refused(harness, tmp_path, monkeypatch):
+    # The scratch folder is put to the notes resolver, and one that gets a home is refused.
+    from moxi import modules
+
+    homes = []
+
+    def handoffs_dir(path, *, create=False, override=None):
+        homes.append(path)
+        return tmp_path / "notes-home" / "handoffs"
+
+    found = SimpleNamespace(state=modules.PRESENT, ok=True, reason="",
+                            api=SimpleNamespace(handoffs_dir=handoffs_dir))
+    real, real_load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        found if name == "notes" else real_load(name, interface=interface))
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    with pytest.raises(presets.ScratchNotes) as caught:
+        api.preview(req)
+    assert (caught.value.code, caught.value.row) == ("scratch-notes", "scratch")
+    assert f"resolves to a notes home ({tmp_path / 'notes-home'})" in caught.value.problem
     root = common.scratch_root()
-    assert root == Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}"
+    assert caught.value.hint == (f"keep notes out of {root} (moxi config set notes exclude "
+                                 f"--add {root}), or launch in a folder of your own")
+    assert homes == [str(common.scratch_dir(SCRATCH_NAME))]
+    with pytest.raises(presets.ScratchNotes):
+        api.launch(req)
+    assert nothing_written("r9") and not common.scratch_dir(SCRATCH_NAME).exists()
+
+
+@POSIX
+def test_scratch_launches_go_under_tmp_scratch_uid_whatever_tmpdir_says(
+        tmp_path, monkeypatch, real_scratch_tmp):
+    # The launcher's own parent, not the tests' stand-in: names only, nothing made.
+    assert real_scratch_tmp == Path("/tmp")
+    monkeypatch.setattr(common, "SCRATCH_TMP", real_scratch_tmp)
+    for temp in ("/var/tmp", str(tmp_path / "elsewhere")):
+        monkeypatch.setenv("TMPDIR", temp)
+        assert common.scratch_root() == Path(f"/tmp/scratch-{os.getuid()}")
+        assert common.scratch_dir("planner-1") == Path(f"/tmp/scratch-{os.getuid()}/planner-1")
+
+
+@POSIX
+def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path,
+                                                              own_scratch_tmp):
+    root = common.scratch_root()
+    assert root == own_scratch_tmp / f"scratch-{os.getuid()}"
     assert not root.exists()
     req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
                                "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
     assert api.check(req) == []
     api.launch(req)
-    # A missing parent is made private, and the launch's folder in it.
+    # A missing parent is made private, and the launch's folder in it, by its name.
     assert stat.S_IMODE(root.stat().st_mode) == 0o700 and root.stat().st_uid == os.getuid()
-    assert common.scratch_dir("r9").parent == root
+    assert row("r9").cwd == str(root / SCRATCH_NAME)
+
+
+@POSIX
+def test_a_scratch_dir_is_named_by_the_session_name_and_a_second_launch_reuses_it(
+        harness, tmp_path):
+    typed = {"harness": "codex", "scratch": True, "target": "headless", "brief": BRIEF,
+             "name": "spike-1"}
+    api.launch(LaunchRequest(typed=typed, cwd=str(tmp_path), request_id="r1"))
+    where = common.scratch_root() / "spike-1"
+    assert row("r1").cwd == str(where) and where.is_dir()
+    (where / "left.txt").write_text("from the first\n")
+    api.launch(LaunchRequest(typed=typed, cwd=str(tmp_path), request_id="r2"))
+    assert row("r2").cwd == str(where) and (where / "left.txt").exists()
+
+
+@POSIX
+@pytest.mark.parametrize(("name", "dir_name"), [
+    ("my spike", "my-spike"), ("../x", "x"), ("a/b", "a-b"), ("..", "launch"),
+    (".", "launch"), ("Fix: the  pager!", "fix-the-pager"), ("Foo_Bar", "foo-bar"),
+    ("v1.2", "v1-2")])
+def test_a_scratch_launch_folds_its_session_name_for_its_dir(
+        harness, tmp_path, name, dir_name):
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF, "name": name}, cwd=str(tmp_path),
+                        request_id="r9")
+    shown = api.preview(req)
+    where = common.scratch_root() / dir_name
+    assert (shown.values["name"], shown.values["cwd"]) == (name, str(where))
+    api.launch(req)
+    # The session keeps its name; only the folder's is folded, and it stays in the parent.
+    assert (row("r9").values["name"], row("r9").cwd) == (name, str(where))
+    assert where.is_dir() and where.parent == common.scratch_root()
 
 
 def scratch_request(tmp_path, rid: str = "r9") -> LaunchRequest:
@@ -901,7 +1023,7 @@ def refused_before_the_row(tmp_path, words: str) -> None:
     assert refused.exit_code == exits.REFUSED and words in refused.problem
     with pytest.raises(api.ScratchRoot):
         api.launch(scratch_request(tmp_path))
-    assert row("r9") is None and not common.scratch_dir("r9").exists()
+    assert row("r9") is None and not common.scratch_dir(SCRATCH_NAME).exists()
 
 
 @POSIX
@@ -951,6 +1073,70 @@ def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
     assert result.state == "failed" and result.reason == targets.SPAWN_FAILED
     assert "symbolic link" in result.line and list(elsewhere.iterdir()) == []
     assert harness.runs() == []
+
+
+def recycling_scratch(monkeypatch, tmp_path, recycle: str) -> LaunchRequest:
+    """A scratch slot launch set to recycle at its limit, on an install that offers it."""
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    return LaunchRequest(typed={"scratch": True, "target": "slot",
+                                "recycle_at_limit": recycle},
+                         cwd=str(tmp_path), request_id="r9", session_id=SID)
+
+
+@POSIX
+def test_a_scratch_launch_set_to_recycle_itself_is_refused_before_the_row(
+        harness, tmp_path, monkeypatch):
+    req = recycling_scratch(monkeypatch, tmp_path, "relaunch")
+    [refused] = [r for r in api.check(req) if r.code == "scratch-recycle"]
+    assert isinstance(refused, api.ScratchRecycle) and refused.exit_code == exits.REFUSED
+    assert refused.row == "recycle_at_limit"
+    assert refused.problem == "a scratch launch can't recycle itself"
+    assert refused.hint == "recycle with compact, or launch in a directory"
+    # Ahead of the target's own checks, so the launch raises it.
+    with pytest.raises(api.ScratchRecycle):
+        api.launch(req)
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_launch_whose_preset_sets_relaunch_is_refused(harness, tmp_path,
+                                                                 monkeypatch):
+    recycling_scratch(monkeypatch, tmp_path, "off")
+    write_presets('[seat.s]\nscratch = true\ntarget = "slot"\n'
+                  'recycle_at_limit = "relaunch"\n')
+    req = LaunchRequest(seat="s", cwd=str(tmp_path), request_id="r9", session_id=SID)
+    assert "scratch-recycle" in {r.code for r in api.check(req)}
+    with pytest.raises(api.ScratchRecycle):
+        api.launch(req)
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_launch_holds_a_defaults_relaunch_off(harness, tmp_path, monkeypatch):
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: module != "comms")
+    write_presets('[defaults]\nrecycle_at_limit = "relaunch"\n')
+    req = scratch_request(tmp_path)
+    assert api.check(req) == []
+    result = api.launch(req)
+    assert presets.SCRATCH_RECYCLE_OFF in result.warnings
+    assert row("r9").values["recycle_at_limit"] == "off"
+    assert row("r9").values["sources"]["recycle_at_limit"] == presets.LEFT_OUT
+
+
+@POSIX
+def test_a_scratch_launch_may_compact_at_its_limit(harness, tmp_path, monkeypatch):
+    for recycle in ("compact", "off"):
+        req = recycling_scratch(monkeypatch, tmp_path, recycle)
+        assert "scratch-recycle" not in {r.code for r in api.check(req)}
+
+
+@POSIX
+def test_a_launch_outside_a_scratch_may_recycle_itself(harness, work, monkeypatch):
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    req = request(work, target="slot", recycle_at_limit="relaunch")
+    assert "scratch-recycle" not in {r.code for r in api.check(req)}
 
 
 # -- the run-log sweep ---------------------------------------------------------------------
@@ -1073,11 +1259,15 @@ def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
     assert not common.scratch_root().exists()
 
 
-def test_the_scratch_dir_of_a_request_id_that_is_not_a_plain_name_is_refused():
-    for rid in ("../x", "a/b", "..", "."):
-        with pytest.raises(ValueError):
-            common.scratch_dir(rid)
-    assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"
+def test_the_scratch_dir_of_any_name_is_folded_into_the_parent():
+    root = common.scratch_root()
+    for name, dir_name in (("../x", "x"), ("a/b", "a-b"), ("a\\b", "a-b"),
+                           ("..", "launch"), (".", "launch"), ("", "launch"),
+                           ("-/-", "launch"), ("My Spike", "my-spike"),
+                           ("x" * 70 + " y", "x" * 63), ("r-1.a_b", "r-1-a-b"),
+                           ("Foo_Bar", "foo-bar"), ("_", "launch"),
+                           ("planner-1", "planner-1")):
+        assert common.scratch_dir(name) == root / dir_name
 
 
 def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tmp_path):

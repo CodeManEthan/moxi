@@ -9,6 +9,8 @@
     GET  /api/more       the next rows of one group of that list
     GET  /api/session    one session of the list, opened
     GET  /api/folders    the folders the listed sessions ran in
+    GET  /api/projects   the sessions folded into projects, and this week's folders that
+                         no project holds
 
 All are reads, and none writes anything. A session is named by `harness` and
 `session`, the harness's own id, which `find()` resolves under the harness's root as the
@@ -43,7 +45,7 @@ its reasons kept free of paths first.
 
 **The list.** The four list routes read through one catalog the page server keeps for
 its life (`moxi_sessions.catalog.shared()`), so what one request read the next reuses.
-They list main sessions only: a subagent is counted on its session's row. Their answers
+They (and `/api/projects`) list main sessions only: a subagent is counted on its session's row. Their answers
 are stated here, once. `null` stands for a fact that was not read, never for zero or an
 empty text; a time is epoch seconds; each answer starts with `shape`.
 
@@ -53,13 +55,14 @@ number; `folder`, an absolute path a session's own record names (compared as wri
 but for the slashes at its end); `find`, text of 2 characters or more that a session's id
 starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,
 `find` and `/api/folders` read the head of every session not read yet, once for the
-server's life; no other request does.
+server's life; so does `/api/projects`, and no other request.
 
 *A row* (`LIST_ROW`): `harness`, `session`, `path`, `changed` (the last change, null for
 an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (how many;
 null where the session's subagents folder could not be listed),
 `folder`, `started`, `by_program` (true where the record says a program started the
-session, else null), `name` (one typed for the session in the harness, else null),
+session, false where it says a person did, null where it says neither: every Codex and
+OpenCode session, and a Claude Code session whose head was not read), `name` (one typed for the session in the harness, else null),
 `model`, `activity` (`{at, who, text}`: the newest thing said in the last turn, whoever
 said it, `who` being `you`, `agent` or null, `text` cut at 300 bytes; or null), `prompt`
 (`{at, text, truncated}`: the newest message of the whole session that its record marks
@@ -143,10 +146,38 @@ an unknown one) is refused.
 *`/api/folders`*: `folders` (`{folder, count, changed}`, newest change first, at most 200,
 `count` of both kinds) and `more`, how many folders were left off.
 
+*`/api/projects`* takes nothing and answers `now`, `today` and `home` as the list does,
+`recently_s` (the setting `list.recent_s` it was cut with), `state` and `detail`,
+`projects`, `folders` and `more`. `state` is `up`; `off` when projects is not installed or
+is older than its read API's interface 2, the one with `for_paths`; or `error` when
+projects' store can't be read, or when a session can't be read, since it would be in no
+count: a harness's root (as a list's `roots` names one with a `reason`) can't be listed,
+a folder or a file under a root that may hold a session can't be listed, or a session's
+first lines can't be read. A session's subagents folder that can't be listed holds no
+session and is no error, nor is a harness that is not on the machine, which has no
+sessions. `detail` is a fixed sentence for `off` and `error` that names no file, else
+null; with either, the three lists are empty and `more` is 0. The folding is projects'
+own: one `for_paths` call over the distinct folders the sessions ran in says which
+project holds each. A session is named by a claim,
+`<harness>/<session id>`, the id being the one the harness writes (a Codex thread id).
+
+* `projects`: `{key, at, all, week, recent}` for each project that holds a session, by
+  key: `at` the newest change among its sessions, `all` how many it holds, `week` the
+  claims of those changed in the last seven days and `recent` of those changed within
+  `recently_s`, newest first. A session a program started counts in `at` and `all`, and
+  is in neither `week` nor `recent`, as it is never in the list's `recent`.
+* `folders`: `{folder, at, week}` for each folder that no project holds and where a
+  session not started by a program changed in the last seven days, `week` how many
+  such sessions, `at` as a project's; newest `at` first, at most 20, `more` how many
+  were left off.
+
+It reads the head of every session not read yet, once for the server's life, as
+`/api/folders` does.
+
 A filter, group, kind or `before` that is not one, and a config that cannot be read, are
 refused with the reason. Text a person or model wrote, a typed name, a subagent's
 description and a root's reason are marked `redact`; folders, paths, roots and `home` are
-marked `path`.
+marked `path`; a claim and a project's key are ids, and carry no mark.
 
 The page's assets are what the repository's web build writes from `packages/sessions/web/`
 into this package's `web/`: `page.js`, the page, and `window.js`, the block other pages
@@ -457,6 +488,23 @@ WORK_DIRS = {
     "more": _INT,
 }
 
+#: `/api/projects` (see the module).
+PROJECT_FACTS = {
+    "shape": _INT,
+    "now": lb.Out("float"),
+    "today": _TEXT,
+    "home": _MAYBE_PATH,
+    "recently_s": _INT,
+    "state": _TEXT,
+    "detail": _MAYBE,
+    "projects": lb.Out("list", items=lb.Out("table", items={
+        "key": _TEXT, "at": _MAYBE_FLOAT, "all": _INT, "week": _WORDS,
+        "recent": _WORDS})),
+    "folders": lb.Out("list", items=lb.Out("table", items={
+        "folder": _PATH, "at": _MAYBE_FLOAT, "week": _INT})),
+    "more": _INT,
+}
+
 _HARNESS = lb.Field("enum", values=HARNESSES)
 _ID = lb.Field("string", max=ID_MAX)
 _MAYBE_ID = lb.Field("string", required=False, max=ID_MAX)
@@ -525,12 +573,14 @@ PAGE = lb.Page(
                  returns=SESSION),
         lb.Route("/api/folders", "read", _target("work_dirs"), query=WORK_DIRS_QUERY,
                  returns=WORK_DIRS),
+        lb.Route("/api/projects", "read", _target("projects"), returns=PROJECT_FACTS),
     ),
 )
 
 __all__ = ["AT", "BUDGET", "FIND_MAX", "WORK_DIRS", "WORK_DIRS_QUERY", "WORK_DIR_MAX", "GROUP",
            "GROUP_MAX", "HEADER", "ID_MAX", "LIMIT_WINDOW", "LIST", "LIST_QUERY",
-           "LIST_ROW", "MESSAGE", "MORE", "MORE_QUERY", "PAGE", "PLACE_MAX", "RECORD",
+           "LIST_ROW", "MESSAGE", "MORE", "MORE_QUERY", "PAGE", "PLACE_MAX",
+           "PROJECT_FACTS", "RECORD",
            "SAID", "SECONDS_MAX", "SESSION", "SESSION_QUERY", "SESSION_SUBAGENT",
            "SUBAGENT", "SUBAGENTS", "SUBAGENTS_QUERY", "TEXT_MAX", "TURNS_DEFAULT",
            "TURNS_MAX", "UNREADABLE_PART", "WINDOW", "WINDOW_QUERY"]

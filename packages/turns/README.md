@@ -9,10 +9,13 @@ Other modules call it to put input into a session (a new turn, a delivery held u
 running turn ends, a steer into the running turn, `/clear`, `/compact` and `/exit`,
 optionally stopping the session's background shells) and to take session events out: the
 session ready, a turn started, steered or ended, naming each delivery it took by the
-caller's `ref`, and the session gone. A caller can also read the session's subagents,
-teammates and Codex background terminals; the list says `complete` false when turns could
-not read it whole. A holder can be asked at each Stop before the turn ends, and a
-registered module can add context at a session's start or at a prompt.
+caller's `ref`, and the session gone. A delivery can name the module that asked and the
+names its text speaks for, and its end carries the turn's final text. A caller can also
+read the session's subagents, teammates and Codex background terminals; the list says
+`complete` false when turns could not read it whole. A holder can be asked at each Stop
+before the turn ends, and a registered module can add context at a session's start or at
+a prompt. A prompt says whether the person typed it, which delivery it is when turns
+handed it in, and whether it opens a turn or joins one already running.
 
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the
@@ -74,11 +77,17 @@ its switch, for example `moxi config set turns guards.removal true`:
 - **Question mode** (`turns.question-mode`, switch `guards.question_mode`): lets Claude
   Code's `AskUserQuestion` run only in a turn where you typed something that mentions a
   question, and never from a subagent. A prompt that asks to go through open questions
-  gets a one-line reminder of this.
+  gets a one-line reminder of this. Until the session's endpoint has sent its guards,
+  Claude Code's runner can't tell whether question mode is on, so it refuses every
+  `AskUserQuestion` call and tells the agent to ask in prose.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
-guards that run beyond the switches: guard ids or paths to guard files.
+guards that run beyond the switches: guard ids or paths to guard files. A module's guard
+can also name the sessions it runs in, by a function of the session's environment that
+turns asks once, when the session starts; it then runs in those sessions with no switch
+and no entry on `guards.run`. `moxi doctor turns` asks that function in its own
+environment, so a guard on only in certain sessions reads off there.
 
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse
@@ -98,7 +107,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `stop_handler.wait_ms`: how long a Stop waits for the session's stop handler, in
   milliseconds. Default 2000.
 - `listen.wait_ms`: how long an event waits for the registered listeners, in
-  milliseconds. Default 2000.
+  milliseconds. Default 2000. A module's prompt listener can ask for a longer wait on a
+  prompt in the sessions it serves; that session's prompt then waits the longer bound,
+  on Claude Code and Codex alike.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
   compacted, in order: module names, file paths and run entries. A module not installed
   is skipped. A run entry, `run:<path>`, runs that program at each start, with the
@@ -118,13 +129,18 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   Default 3000.
 - `after_tool.wait_ms`: how long the after-tool listeners may take on one tool call,
   together, in milliseconds. Default 300.
-- `question_mode.origins`: the prompt origins question mode counts as yours. Default
-  `["composer"]`, a prompt typed at this terminal.
+- `prompt.own_origins`: the prompt origins that count as yours, which question mode and
+  every prompt listener read (a `prompt` event's `own`). Default `["composer", "bridge"]`:
+  `composer` is a prompt typed at this terminal, `bridge` one sent from the Claude apps
+  through Remote Control. On Codex a prompt typed in the window is `composer`, except
+  while a delivery the host handed in is still out and the prompt's text matches none:
+  then it carries no origin.
 - `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
-  question-mode reminder. Default `["prose"]`.
+  question-mode reminder. Default `["prose", "pros"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
-`stop_handler.wait_ms` instead.
+`stop_handler.wait_ms` instead. `question_mode.origins` is renamed: a file that still sets
+it is told to set `prompt.own_origins` instead.
 
 ## The panel
 

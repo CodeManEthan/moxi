@@ -1,7 +1,8 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is Home, drawn by
 // <moxi-ui-home>. With `route` "modules" it is the modules view: every module's block
 // that asks for home and has no seat on Home, then every installed module with its state,
-// its page and its components, and a Check that shows the doctor's rows for it. With
+// its page and its components, and a Check that shows the doctor's rows for it, then the
+// shell's page servers block. With
 // `route` "settings" or under it, it is the Settings page, drawn by <moxi-ui-settings>,
 // where ui's Phone group pairs a phone.
 //
@@ -23,6 +24,10 @@ import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from ".
 import type { DoctorRow, ModuleView } from "./views.ts";
 
 const TAG = "moxi-ui-page";
+/** The block the modules view places last, under the Installed list: its list of page
+ * servers is tall and comes over the push stream, so it may be drawn after the rest, and
+ * placed last it moves nothing already drawn when it grows. */
+const LAST_BLOCK = "ui.servers";
 interface Check {
   busy: boolean;
   rows: DoctorRow[];
@@ -96,7 +101,7 @@ export class UiPage extends LitElement {
   checks = new Map<string, Check>();
   #view: "home" | "modules" | "settings" | "none" = "none";
   #route = "";
-  #stop: (() => void) | null = null;
+  #stops: Array<() => void> = [];
   #placed = "";
   #placing = 0;
 
@@ -107,7 +112,11 @@ export class UiPage extends LitElement {
       this.#view = "home";
     } else if (route === "modules") {
       this.#view = "modules";
-      this.#stop = subscribe("ui", "modules", (data) => { this.modules = data; });
+      this.#stops.push(subscribe("ui", "modules", (data) => { this.modules = data; }));
+      // Asked for with the modules, so the stream's first open brings the page servers too
+      // and the servers block, placed once the modules come, mostly draws its list with its
+      // first paint.
+      this.#stops.push(subscribe("ui", "servers", () => {}));
     } else if (route === "settings" || route.startsWith("settings/")) {
       this.#view = "settings";
       this.#route = route;
@@ -118,8 +127,8 @@ export class UiPage extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.#stop?.();
-    this.#stop = null;
+    for (const stop of this.#stops) stop();
+    this.#stops = [];
   }
 
   render() {
@@ -155,7 +164,8 @@ export class UiPage extends LitElement {
       <h2>Installed</h2>
       ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
-      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>`;
+      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
+      <div class="grid" id="last"></div>`;
   }
 
   #moduleCard(mod: ModuleView) {
@@ -204,10 +214,12 @@ export class UiPage extends LitElement {
     this.checks = new Map(this.checks).set(module, result);
   }
 
-  /** Places every block again when the set of them changes. */
+  /** Places every block again when the set of them changes: each in the grid at the top,
+   * and `LAST_BLOCK` under the Installed list. */
   async #placeHome(): Promise<void> {
     const home = this.renderRoot.querySelector("#home");
-    if (home === null || this.modules === null) return;
+    const last = this.renderRoot.querySelector("#last");
+    if (home === null || last === null || this.modules === null) return;
     const blocks = homeBlocks(this.modules.modules).filter((block) => installed(block.module));
     const sig = JSON.stringify(blocks.map((block) => [block.module, block.name,
       components(block.module).find((comp) => comp.name === block.name)?.url ?? ""]));
@@ -215,6 +227,7 @@ export class UiPage extends LitElement {
     this.#placed = sig;
     const mine = (this.#placing += 1);
     home.replaceChildren();
+    last.replaceChildren();
     for (const block of blocks) {
       const card = document.createElement("section");
       card.className = "card";
@@ -223,7 +236,7 @@ export class UiPage extends LitElement {
       title.textContent = block.title;
       const host = document.createElement("div");
       card.append(title, host);
-      home.append(card);
+      (card.dataset.block === LAST_BLOCK ? last : home).append(card);
       // A script that gave no element and answers fine gets one more try; one with no
       // script declared has nothing to fetch again.
       const url = components(block.module).find((comp) => comp.name === block.name)?.url;

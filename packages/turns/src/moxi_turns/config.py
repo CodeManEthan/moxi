@@ -39,6 +39,8 @@ COMMANDS_ENV = "MOXI_TURNS_COMMANDS"
 BOUND = ":"
 #: The stop handler's wait.
 STOP_WAIT = "stop_handler.wait_ms"
+#: The prompt origins that count as the person's own: a `prompt` event's `own`.
+OWN_ORIGINS = "prompt.own_origins"
 
 
 def schema() -> moxi_config.Schema:
@@ -112,5 +114,5 @@ def unknown_commands(settings_allow: Iterable[object]) -> list[str]:
     return [str(n) for n in settings_allow if n not in COMMANDS]
 
 
-__all__ = ["MODULE", "COMMANDS_ENV", "BOUND", "STOP_WAIT", "schema", "reader", "load", "grant",
-           "granted", "allowed", "unknown_commands"]
+__all__ = ["MODULE", "COMMANDS_ENV", "BOUND", "STOP_WAIT", "OWN_ORIGINS", "schema", "reader",
+           "load", "grant", "granted", "allowed", "unknown_commands"]

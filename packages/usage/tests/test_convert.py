@@ -151,3 +151,18 @@ def test_shipped_table_is_the_converters_shape():
     assert len(table["models"]) > 1000
     for key in ("claude-opus-5-5", "gpt-5.3-codex", "claude-haiku-4-5"):
         assert table["models"][key]["input"] > 0
+
+
+def test_the_shipped_table_holds_the_supplements_own_rows_as_the_converter_lays_them():
+    """A supplement row with no LiteLLM row is a row of its own in the shipped table,
+    exactly as converting the shipped supplement lays it, so the table was made from the
+    supplement in the repository."""
+    shipped = json.loads((DATA / "models.json").read_text(encoding="utf-8"))
+    laid = convert.convert(litellm(), tomllib.loads(
+        (DATA / "supplement.toml").read_text(encoding="utf-8")), date="d", sha256="s")
+    own = [key for key, row in laid["models"].items()
+           if row["provenance"]["source"] == "supplement"]
+    assert {"claude-fable-5-2", "claude-mythos-5-2", "big-pickle",
+            "minimax-m3.1-flash-free", "space-bunny-free"} <= set(own)
+    for key in own:
+        assert shipped["models"][key] == laid["models"][key]

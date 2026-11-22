@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- On the Modules view the Page servers block now sits last, under the Installed list, and
+  its list is mostly drawn with the rest of the page. When the list arrives late it no
+  longer pushes the blocks and links already on the page down by a few hundred pixels, so
+  a click that lands on a link just as the list arrives opens what it pressed.
+- A page's push stream closes as the page leaves. In Firefox, a reload or a navigation
+  within about 50 ms of the view's topics changing could leave the shell holding a push
+  stream no page read, beside the new page's own, for 30 s and more. Each such stream
+  took one of the shell's 16 stream slots, and enough of them would make the shell answer
+  `busy` and stop live updates. Nothing showed on screen.
+- On Windows a process sample counts open handles as `handles`, and has no `fds`: in
+  `/m/ui/api/servers`, a page server's `sample` and the shell's own carry `handles` there
+  in place of `fds`, and `moxi ui doctor` shows `N open handles`. A handle count also
+  holds events, threads and registry keys, so it is never compared with a budget's `fds`:
+  the doctor no longer warns `232 open fds over its 64` for the shell on Windows. Other
+  systems keep `fds` and its warning as before.
 - On a wide page a Settings row's control stays on its label's first line in any sans
   face: the label and key take the width left beside the control and wrap there, the key
   on a line of its own when it doesn't fit. A row laid out for Adwaita Sans's widths no

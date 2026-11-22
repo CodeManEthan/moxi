@@ -40,6 +40,7 @@ from typing import Any
 from .shape import (BAD_STRUCTURE, CLAUDE, NOT_OBJECT, UNDECODABLE, UNKNOWN, Malformed,
                     Marker, Message, Other, Record, Request, ToolCall, ToolResult,
                     tool_summary)
+from .writer import opening
 
 #: The `type` of an entry for a line that would not decode. It carries `lineno` and `raw`.
 MALFORMED = "<malformed>"
@@ -598,13 +599,23 @@ def _origin(entry: dict) -> Any:
     return _text(entry, "userType")
 
 
+def _origin_kind(entry: dict) -> str | None:
+    """The kind the line's own `origin` object names; None when it has no such object or
+    names no kind."""
+    origin = entry.get("origin")
+    if isinstance(origin, dict) and isinstance(origin.get("kind"), str):
+        return origin["kind"]
+    return None
+
+
 def _injected(entry: dict, role: str, text: str, *, synthetic: bool) -> Any:
     """Whether something other than the person at the prompt submitted a line's message.
 
     A composed flag (`COMPOSED_FLAGS`) makes it true. The model's own message is false,
     and one Claude Code made up itself (`SYNTHETIC_MODEL`) true. A user message with an
     `origin` takes its kind's value (`ORIGIN_KINDS`), unknown for a kind not listed. With
-    no origin, a fixed wrapper or interrupt line makes it true; anything else is unknown,
+    no origin, a fixed wrapper (after the opening characters, `writer.opening`) or an
+    interrupt line makes it true; anything else is unknown,
     a typed command line and a prompt sent through Claude Code's SDK among them."""
     if any(entry.get(flag) is True for flag in COMPOSED_FLAGS):
         return True
@@ -616,7 +627,7 @@ def _injected(entry: dict, role: str, text: str, *, synthetic: bool) -> Any:
         origin = entry["origin"]
         kind = origin.get("kind") if isinstance(origin, dict) else None
         return ORIGIN_KINDS.get(kind, UNKNOWN) if isinstance(kind, str) else UNKNOWN
-    if text.lstrip().startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
+    if opening(text).startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
         return True
     return UNKNOWN
 
@@ -647,6 +658,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
     flags = {key: value for key, value in entry.items()
              if isinstance(value, bool) and key != "isSidechain"}
     origin = _origin(entry)
+    origin_kind = _origin_kind(entry)
     out: list[Record] = []
     texts: list[str] = []
     kinds: list[str] = []
@@ -678,6 +690,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
                 out.append(Message(**common, role=role, reasoning=True,
                                    text=thought if isinstance(thought, str) else "",
                                    content_kinds=(btype,), flags=flags, origin=origin,
+                                   origin_kind=origin_kind,
                                    synthetic=synthetic,
                                    injected=_injected(entry, role, "", synthetic=synthetic)))
             else:
@@ -690,6 +703,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
         text = "\n".join(texts)
         out.insert(slot, Message(**common, role=role, text=text,
                                  content_kinds=tuple(kinds), flags=flags, origin=origin,
+                                 origin_kind=origin_kind,
                                  synthetic=synthetic,
                                  injected=_injected(entry, role, text, synthetic=synthetic)))
     return out
@@ -898,7 +912,12 @@ class Mapper:
     kept, builds no marker or other record unless one is kept, works out a request's
     common fields only for the line it is handed on from, and `skip` passes by the lines
     that can give no kept record. The kept records,
-    `final`, `closed` and `open_key` are the same as without it.
+    `final`, `closed`, `open_key` and `started` are the same as without it.
+
+    `started` lists the `promptId`s the lines moved the turn to, in order: one comes
+    again only when another came between, and the turn handed in as `prompt_id` is not
+    listed. Fed every line of a file from the start, it names every prompt id the file
+    wrote, a prompt that drew no request included, with no decode beyond the turn's.
     """
 
     def __init__(self, *, session_id: str | None = None, agent_id: str | None = None,
@@ -911,6 +930,7 @@ class Mapper:
         self.prompt_id = prompt_id
         self.open_key = open_key
         self.closed: list[str] = []
+        self.started: list[str] = []
         self._held: tuple | None = None
         self.kinds = frozenset(kinds) if kinds is not None else None
         self._content = self.kinds is None or not self.kinds.isdisjoint(CONTENT_KINDS)
@@ -972,16 +992,22 @@ class Mapper:
         if b'"turn_duration"' in raw:
             return False
         if b'"promptId"' in raw:
-            self.prompt_id = turn_after(raw, self.prompt_id)
+            self._turn(turn_after(raw, self.prompt_id))
         return True
+
+    def _turn(self, prompt_id: str | None) -> None:
+        if prompt_id is not None and prompt_id != self.prompt_id:
+            self.started.append(prompt_id)
+        self.prompt_id = prompt_id
 
     def feed(self, raw: bytes | str, *, line: int, offset: int,
              unterminated: bool = False) -> list[Record]:
         """One line, `line` its 1-based number and `offset` the byte offset of its start.
         Returns the records ready to hand on, in order."""
-        pending, records, self.prompt_id, ends = _map_line(
+        pending, records, prompt_id, ends = _map_line(
             raw, {"line": line, "offset": offset}, self.session_id, self.agent_id,
             self.prompt_id, keep_raw=self.keep_raw, unterminated=unterminated, content=self._content, others=self._others)
+        self._turn(prompt_id)
         out: list[Record] = []
         if pending is not None:
             key = pending[4]

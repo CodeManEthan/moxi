@@ -36,8 +36,10 @@ Context (`moxi_usage.context`):
   is, or one of its agents', from its newest request, as a `Context`: `tokens` (the
   whole prompt), `window` (the one the harness reported, else the model table's) and
   `percent`, each `UNKNOWN` with a `reason` when it cannot be said; `text()` prints
-  the line with its denominator. `harness` None asks Claude, Codex and OpenCode in that
-  order. It reads through sessions alone, so it works without turns.
+  the line with its denominator. `harness` None asks Claude, Codex and OpenCode, and a
+  session more than one holds is not taken: `found` is false, as for a session or agent
+  not found, and `reason` names the harnesses. It reads through sessions alone, so it
+  works without turns.
 
 The restart point (`moxi_usage.measure`, `moxi_usage.thresholds`):
 
@@ -64,7 +66,8 @@ Reports (`moxi_usage.reports`):
   index's pass runs first. `tz` is the zone days are cut in, local time when None.
   Under interface 2, `work_dir` is a folder's whole path and keeps the files whose `cwd`
   it is, whatever project key they carry, and the `projects` kind with `by="folder"`
-  groups by `cwd` alone.
+  groups by `cwd` alone. `project` and `work_dir` each take one key or a sequence of
+  them, and keep the files any of them matches.
   Cost is worked out when the report runs; tokens the table cannot price are counted in
   `unpriced_tokens`, never as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
   row gives, with `harness` to tell two harnesses apart), by agent and model; it needs

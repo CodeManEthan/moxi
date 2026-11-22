@@ -78,12 +78,14 @@ def with_store(run):
 
 
 def seed(request_id="r1", *, target_name="slot", harness="claude", session_id=SID,
-         slot="3", live=False, pid=True, identity=None, at=None) -> None:
+         slot="3", live=False, pid=True, identity=None, at=None,
+         posture="operator") -> None:
     """A launch in the log, its process ended unless `live`; with no `pid`, none recorded."""
     def insert(conn):
         store.insert(conn, request_id=request_id, by="ann", harness=harness,
-                     target=target_name, cwd="/work", values={"model": "opus"},
-                     argv=[harness], env={}, posture="operator",
+                     target=target_name, cwd="/work",
+                     values={"model": "opus", "posture": posture},
+                     argv=[harness], env={}, posture=posture,
                      session_id=session_id if harness == "claude" else None,
                      slot=slot if target_name == "slot" else None, identity=identity,
                      at=at)
@@ -209,6 +211,73 @@ def test_a_terminal_launch_is_answered_with_the_command_to_copy():
     assert no_request_files() and with_store(lambda c: len(store.log(c))) == 1
 
 
+def test_a_terminal_launchs_command_carries_the_brief_or_brief_file():
+    seed(target_name="terminal", posture="go")
+    said = resumed({"session": SID, "brief": "Carry on, then report."})
+    assert said == {"refused": None, "command": f"moxi launcher resume {SID} --brief "
+                                                "'Carry on, then report.'"}
+    said = resumed({"session": SID, "brief_file": "/w/brief.md"})
+    assert said["command"] == f"moxi launcher resume {SID} --brief-file /w/brief.md"
+    assert no_request_files()
+
+
+@pytest.mark.parametrize("target_name", ["slot", "terminal"])
+@pytest.mark.parametrize("posture, body, code", [
+    ("go", {}, "posture-brief"),
+    ("go", {"brief": "  "}, "posture-brief"),
+    ("go", {"plain": False}, "posture-brief"),
+    ("with:lead", {"brief": "Go.", "plain": True}, "posture-brief"),
+    ("with:lead", {"brief": "Go."}, "posture-brief"),
+    ("go", {"brief": "Go.", "brief_file": "/w/brief.md"}, "bad-value"),
+    ("go", {"brief_file": "brief.md"}, "bad-value"),
+])
+def test_a_brief_that_doesnt_fit_the_resume_is_refused_in_the_route(target_name, posture,
+                                                                     body, code):
+    seed(target_name=target_name, posture=posture)
+    assert refused_code({"session": SID, **body}) == code
+    assert no_request_files() and with_store(lambda c: len(store.log(c))) == 1
+
+
+def test_a_go_resumes_refusal_says_it_needs_a_brief():
+    seed(posture="go")
+    refused = resumed({"session": SID})["refused"]
+    assert refused["row"] == "brief"
+    assert refused["problem"].startswith("posture go needs a brief on a resume")
+    assert refused["hint"] == "give the resume --brief or --brief-file"
+
+
+def test_a_plain_resume_of_a_go_launch_goes_ahead_with_no_brief(monkeypatch):
+    """`plain`, which Home's continue sends with an empty box, lets a `go` launch resume
+    with no brief: the job's request carries it, and a terminal launch's command to copy
+    carries `--plain`."""
+    monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
+    monkeypatch.setattr(pagehandlers, "_new_request_id", lambda: "r9")
+    seed(posture="go")
+    status, said = post("/api/resume", {"session": SID, "plain": True})
+    assert (status, said) == (202, {"status": "/api/launches?request=r9"})
+    assert json.loads(targets.request_file("r9").read_text()) == {
+        "act": "resume", "request_id": "r9", "session": SID, "slot": None, "plain": True}
+    seed("r2", target_name="terminal", session_id=OTHER, posture="go")
+    assert resumed({"session": OTHER, "plain": True}) == {
+        "refused": None, "command": f"moxi launcher resume {OTHER} --plain"}
+
+
+@pytest.mark.parametrize("posture", ["operator", "with:lead"])
+def test_a_plain_resume_of_a_terminal_launch_copies_plain_under_any_posture(posture):
+    seed(target_name="terminal", posture=posture)
+    assert resumed({"session": SID, "plain": True}) == {
+        "refused": None, "command": f"moxi launcher resume {SID} --plain"}
+
+
+def test_a_terminal_launchs_command_with_a_brief_has_no_plain():
+    """A brief goes on the command as it is, `plain` or not: `--plain` takes none."""
+    seed(target_name="terminal", posture="go")
+    said = resumed({"session": SID, "brief": "Go.", "plain": True})
+    assert said["command"] == f"moxi launcher resume {SID} --brief Go."
+    said = resumed({"session": SID, "brief_file": "/w/brief.md", "plain": True})
+    assert said["command"] == f"moxi launcher resume {SID} --brief-file /w/brief.md"
+
+
 def test_a_slot_named_for_a_terminal_launch_is_refused():
     seed(target_name="terminal")
     said = resumed({"session": SID, "slot": "4"})
@@ -292,6 +361,17 @@ def test_a_slot_launch_is_resumed_by_the_launch_job_202(monkeypatch):
     assert call["output"] == targets.run_log("r9")
 
 
+def test_a_slot_resumes_brief_goes_to_the_job_in_its_request(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
+    monkeypatch.setattr(pagehandlers, "_new_request_id", lambda: "r9")
+    seed(posture="go")
+    status, _ = post("/api/resume", {"session": SID, "brief": "Carry on."})
+    assert status == 202
+    assert json.loads(targets.request_file("r9").read_text()) == {
+        "act": "resume", "request_id": "r9", "session": SID, "slot": None,
+        "brief": "Carry on."}
+
+
 def test_a_slot_resume_with_no_slot_named_leaves_the_slot_to_the_job(monkeypatch):
     monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
     seed()
@@ -358,6 +438,35 @@ def test_the_job_resumes_the_session_under_the_request_id():
     assert (request.request_id, request.resume_of, request.session_id) == ("r9", "r1", SID)
     assert request.row.request_id == "r1" and str(request.slot) == "4"
     assert not path.exists()
+
+
+def test_the_job_hands_the_requests_brief_to_the_resume():
+    seed(posture="go")
+    resume_file(brief_file="/w/brief.md")
+    launch = Launch()
+    assert job.run_request("r9", launch=launch) == "started"
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None,
+                                                                         "/w/brief.md")
+    resume_file("r10", brief="Carry on.")
+    assert job.run_request("r10", launch=launch) == "started"
+    assert (launch.requests[1].brief, launch.requests[1].brief_file) == ("Carry on.", None)
+
+
+def test_the_job_refuses_a_go_resume_with_no_brief():
+    seed(posture="go")
+    resume_file()
+    launch = Launch()
+    job.run_request("r9", launch=launch)
+    assert launch.requests == []
+    assert requested("r9")["refused"]["code"] == "posture-brief"
+
+
+def test_the_job_resumes_a_go_launch_with_no_brief_when_its_request_is_plain():
+    seed(posture="go")
+    resume_file(plain=True)
+    launch = Launch()
+    assert job.run_request("r9", launch=launch) == "started"
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None, None)
 
 
 def test_the_job_without_a_slot_goes_back_to_the_launchs_own():
@@ -481,3 +590,35 @@ def test_a_slot_resume_from_the_page_goes_back_to_its_slot(tmp_path, harness, ri
     job.run_request("r2")
     assert len(rig.calls("start")) == 2
     assert with_store(lambda c: len(store.log(c))) == 2
+
+
+@POSIX
+def test_a_plain_resume_of_a_go_launch_from_the_page_starts_with_no_first_turn(
+        tmp_path, harness, rig, monkeypatch):
+    """Home's continue with an empty box on a `go` session: refused without `plain`, and
+    with it resumed into its slot with no brief and no first turn."""
+    work = tmp_path / "work"
+    work.mkdir()
+    rig.plan(slots={"3": {"state": "free", "launchable": True}})
+    api.launch(api.LaunchRequest(typed={"target": "slot", "slot": "3", "posture": "go",
+                                        "brief": "Build it."},
+                                 cwd=str(work), request_id="r1", session_id=SID, actor="ann"))
+    with_store(lambda c: c.execute("UPDATE launches SET pid_started = ? WHERE "
+                                   "request_id = 'r1'", (ENDED,)))
+    rig.plan(slots={"3": {"state": "ended", "launchable": True}})
+    assert any("Build it." in word for word in rig.calls("start")[-1]["argv"])
+    spawned = Spawned(run=True)
+    monkeypatch.setattr(pagehandlers, "_spawn", spawned)
+    monkeypatch.setattr(pagehandlers, "_new_request_id", lambda: "r2")
+    assert refused_code({"session": SID}) == "posture-brief"
+    status, said = post("/api/resume", {"session": SID, "plain": True})
+    assert (status, said) == (202, {"status": "/api/launches?request=r2"})
+    spawned.join()
+    [resumed_row] = requested("r2")["launches"]
+    assert (resumed_row["resume_of"], resumed_row["session_id"]) == ("r1", SID)
+    start = rig.calls("start")[-1]
+    assert start["slot"] == 3 and start["argv"][1:3] == ["--resume", SID]
+    # No first turn: the launch's own brief is not sent again, and none was given.
+    assert not any("Build it." in word or word.startswith("Brief from launcher")
+                   for word in start["argv"]), start["argv"]
+    assert with_store(lambda c: store.get(c, "r2")).brief in (None, "")

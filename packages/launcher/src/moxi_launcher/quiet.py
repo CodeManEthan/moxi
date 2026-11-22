@@ -10,12 +10,17 @@ that holds the act is a word, and the words come in this order:
 | `turn` | `facts().turn_open` | a turn is open |
 | `subagents` | `agents()`: `subagent` or `teammate` entries not final, in `pending`, `running`, `waiting` or `unknown` | any, or the list is incomplete |
 | `draft` | `facts().draft` | a draft is in the prompt box |
-| `person` | slot: `pane_use` (copy mode, or a client or the pane active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
+| `person` | slot: `pane_use` (copy mode, or an attached client active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
 | `unreadable` | any read failed, or `facts().stale` | always |
 
-**A `shell` entry never counts as live work**, whichever harness reports it: background
-shells stop at Claude's exit dialog, or with a clear or compact's stop, so they hold
-nothing.
+**A `shell` entry never counts as live work** in this read, whichever harness reports
+it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
+Exit-session reads them itself after this read (`exits.background_shells`), and holds
+for them until the session has been idle an hour.
+
+**The pane's own output never holds.** `pane_use` also gives the pane's activity, which
+any output moves: Claude Code redrawing its spinner and status line, or its exit dialog
+drawing itself. It says nothing of a person, so the read takes no account of it.
 
 **A turn no delivery opened holds as a person's, whatever way it came.** turns marks such
 a turn with `opening` and `command` both None, in `facts().turn` and as a `turn.started`
@@ -160,15 +165,9 @@ def reread_person(last: Reading, *, slot: str | int | None = None,
 
 def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
           failures: Mapping[str, str] | None = None, person_turn_at: float | None = None,
-          now: float, person_s: float = PERSON_S,
-          own_output_from: float | None = None) -> Reading:
+          now: float, person_s: float = PERSON_S) -> Reading:
     """What holds, from what was read: the words in `WORDS` order, each with its words for
-    a person.
-
-    `own_output_from` is the time from which the pane's output is the harness's own and
-    never a person's (at the exit dialog, the second the exit command was sent: the
-    dialog drawing itself is pane output). Copy mode and a client's activity hold
-    whenever they come."""
+    a person."""
     failures = dict(failures or {})
     holds: list[Hold] = []
     if facts is not None and facts.turn_open:
@@ -187,7 +186,7 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
         holds.append(Hold("draft", "a draft is in the prompt box"))
     if facts is not None and person_turn(facts.turn):
         person_turn_at = _latest(person_turn_at, facts.turn.started_at)
-    if person := _person(pane, person_turn_at, now, person_s, own_output_from):
+    if person := _person(pane, person_turn_at, now, person_s):
         holds.append(Hold("person", person))
     if facts is not None and facts.stale:
         failures.setdefault("facts", "the facts moved while they were read (stale)")
@@ -196,18 +195,13 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
     return Reading(tuple(holds), facts, agents, pane, failures, person_turn_at, now)
 
 
-def _person(pane: Any | None, turn_at: float | None, now: float, person_s: float,
-            own_output_from: float | None = None) -> str | None:
+def _person(pane: Any | None, turn_at: float | None, now: float,
+            person_s: float) -> str | None:
     if pane is not None and getattr(pane, "pane_id", None) is not None:
         if pane.pane_in_mode:
             return "the pane is in copy mode"
         if pane.client_activity is not None and now - pane.client_activity < person_s:
             return f"a client was active {_ago(now, pane.client_activity)} ago"
-        output = pane.pane_activity
-        if own_output_from is not None and output is not None and output >= own_output_from:
-            output = None
-        if output is not None and now - output < person_s:
-            return f"the pane was active {_ago(now, output)} ago"
     if turn_at is not None and now - turn_at < person_s:
         return f"a turn no delivery opened, {_ago(now, turn_at)} ago"
     return None

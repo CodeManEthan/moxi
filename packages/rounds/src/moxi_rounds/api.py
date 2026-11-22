@@ -14,7 +14,7 @@ computed by the same functions:
 
 - `rounds(project=None, status="open")`: the rounds of every project, or of one, as
   `moxi rounds list [PROJECT] [--closed] --json` gives them.
-- `round(name)`: one round's whole state, as `moxi rounds show ROUND --json` gives it.
+- `round_data(name)`: one round's whole state, as `moxi rounds show ROUND --json` gives it.
 - `waiting()`: what waits on the operator across every project, as `moxi rounds list
   --waiting --json` gives it.
 - `questions(name, view=None)`: the questions of one round or one project written
@@ -52,8 +52,10 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
     ones, with `"closed"` the ones that have ended.
 
     Gives `{"computed", "project", "ended", "rounds", "unreadable", "no_folder"}`.
-    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "step",
-    "counts", "standing", "ended"}`, where `step` is the step the round is at as
+    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "lead",
+    "step", "counts", "standing", "ended"}`, where `lead` is the round's lead as
+    `{"name", "from"}`, `from` being `"round"` for the round's own and `"project"` for
+    its project's, or None with neither, and `step` is the step the round is at as
     `{"step", "stage", "state"}`, or None for a round at no step. A round whose log
     can't be read is `{"name", "project", "folder", "unreadable": {"reason", "fix"}}`;
     such a round is in both listings, since nothing says which it belongs in. `unreadable` names each project whose own log can't be
@@ -71,13 +73,14 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
 
 def round_data(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
-    `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
-    `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
-    `register_unreadable`) and its records (`builds`, `waits`, `decisions`,
+    `folder`, `notice`, `status`, `ended`, `description`, `lead`, `parent`,
+    `inherits`, `flow`, `steps`, `step`, `close`, `skips`, `stages`, `versions`,
+    `standing`, `trace`, `threads`, `register_unreadable`) and its records (`builds`, `waits`, `decisions`,
     `questions`, `rulings`, `verdicts`, `history`). `close` is None for a round that has ended;
     for an open one it is `{"waits"}`, what its close waits for, a line each. The
     record `waits` holds the round's waiting items, open and done, and `decisions`
-    its decisions, open and ruled.
+    its decisions, open and ruled. `lead` is the round's lead as `rounds()` gives
+    it: `{"name", "from"}`, or None.
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing

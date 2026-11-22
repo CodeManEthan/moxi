@@ -229,7 +229,6 @@ def test_the_subagent_words_count_the_live_ones():
 @pytest.mark.parametrize("use, words", [
     (PaneUse(pane_in_mode=True), "the pane is in copy mode"),
     (PaneUse(attached=1, client_activity=NOW - 40), "a client was active 40 s ago"),
-    (PaneUse(pane_activity=NOW - 5), "the pane was active 5 s ago"),
 ])
 def test_a_person_at_the_pane_holds(use, words):
     reading = judge(pane=use)
@@ -238,24 +237,43 @@ def test_a_person_at_the_pane_holds(use, words):
 
 
 def test_activity_older_than_the_window_holds_nothing():
-    use = PaneUse(attached=1, client_activity=NOW - 200, pane_activity=NOW - 121)
+    use = PaneUse(attached=1, client_activity=NOW - 200)
     assert judge(pane=use).quiet
     assert judge(pane=use, person_s=300).words == ("person",)
 
 
-def test_pane_output_from_the_harness_own_time_holds_nothing():
-    own = NOW - 10
-    assert judge(pane=PaneUse(pane_activity=own), own_output_from=own).quiet
-    assert judge(pane=PaneUse(pane_activity=NOW - 1), own_output_from=own).quiet
-    held = judge(pane=PaneUse(pane_activity=own - 1), own_output_from=own)
-    assert str(held.first) == "person: the pane was active 11 s ago"
+def test_pane_output_never_holds():
+    """Claude Code redraws its spinner and status line all the time, so the pane's
+    activity reads now at every read; with no other sign of a person, nothing holds."""
+    for output_at in (NOW, NOW - 1, NOW - 5):
+        use = PaneUse(attached=1, client_activity=NOW - 600, pane_activity=output_at)
+        assert judge(pane=use).quiet
+        held = judge(pane=use, person_s=3600)
+        assert str(held.first) == "person: a client was active 600 s ago"
 
 
-@pytest.mark.parametrize("use", [PaneUse(pane_in_mode=True, pane_activity=NOW - 1),
-                                 PaneUse(attached=1, client_activity=NOW - 1,
-                                         pane_activity=NOW - 1)])
-def test_copy_mode_and_a_client_hold_whatever_the_harness_own_time(use):
-    assert judge(pane=use, own_output_from=NOW - 10).words == ("person",)
+@pytest.mark.parametrize("facts, use, words", [
+    (None, PaneUse(), ()),
+    (None, PaneUse(pane_in_mode=True), ("person",)),
+    (None, PaneUse(attached=1, client_activity=NOW - 1), ("person",)),
+    (Facts(draft=True), PaneUse(), ("draft",)),
+    (Facts(turn_open=True, turn=person(NOW - 30)), PaneUse(), ("turn", "person")),
+], ids=["output-alone", "copy-mode", "client", "draft", "person-turn"])
+def test_with_pane_output_now_only_a_person_sign_holds(facts, use, words):
+    use = PaneUse(use.slot, use.pane_id, use.pane_in_mode, use.attached,
+                  use.client_activity, pane_activity=NOW)
+    reading = judge(facts, pane=use)
+    assert reading.words == words
+    assert "the pane was active" not in " ".join(h.detail for h in reading.holds)
+
+
+def test_the_whole_read_and_the_re_read_take_no_pane_output():
+    slots = FakeSlots(use=PaneUse(pane_activity=NOW))
+    last = quiet.read(FakeSession(), slot=3, slots_api=slots, clock=lambda: NOW)
+    assert last.quiet
+    slots.use = PaneUse(pane_activity=NOW + 2)
+    again = quiet.reread_person(last, slot=3, slots_api=slots, clock=lambda: NOW + 2)
+    assert again.quiet and slots.asked == [3, 3]
 
 
 def test_a_pane_that_is_gone_holds_nothing():

@@ -88,3 +88,17 @@ def limits(event):
 def gone_late(event):
     time.sleep(0.3)
     CALLS.append(("gone_late", event.session_id))
+
+
+def hold_ms(env):
+    """A prompt row's own wait: the session's `HOLD_MS`, or none."""
+    value = env.get("HOLD_MS")
+    return None if value is None else int(value)
+
+
+def bad_wait(env):
+    return "nine seconds"
+
+
+def broken_wait(env):
+    raise RuntimeError("a bug in the wait")

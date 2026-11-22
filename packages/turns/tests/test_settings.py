@@ -21,7 +21,7 @@ GROUPS = {
               "after_tool.wait_ms"],
 }
 #: The keys with no sub-head, in the order More names them.
-LOOSE = ["start.limit_chars", "claude.endpoint", "question_mode.origins",
+LOOSE = ["start.limit_chars", "claude.endpoint", "prompt.own_origins",
          "question_mode.prose_words"]
 
 
