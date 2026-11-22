@@ -8,7 +8,7 @@ import re
 import time
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
@@ -771,7 +771,7 @@ def test_starters_return_before_their_child_finishes(tmp_path, monkeypatch):
         began = time.monotonic()
         go()
         assert time.monotonic() - began < 1 and not done.exists()
-    wait_for(done.exists, timeout=10)
+    wait_for(done.exists, timeout=PROC_WAIT_S)
 
 
 def test_a_turn_starts_at_most_one_child_per_session_per_minute(monkeypatch):
