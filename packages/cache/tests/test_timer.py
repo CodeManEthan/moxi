@@ -16,6 +16,7 @@ from conftest import claude_config, write_cache_config
 
 from moxi_cache import cli, timer, watch
 from moxi_cache.timer import Refusal, Subscription, Timer
+from moxi_dev.testing import PROC_WAIT_S
 
 A = "aaaaaaaa-1111-4111-8111-111111111111"
 B = "bbbbbbbb-2222-4222-8222-222222222222"
@@ -630,7 +631,7 @@ def test_the_run_starts_detached_with_no_shell(tmp_path):
                                                    "{pid}"]})
     t = Timer(config_entries=lambda: [], modules=[s], log_file=tmp_path / "timer.jsonl")
     (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
-    deadline = time.time() + 10
+    deadline = time.time() + PROC_WAIT_S
     while not t.pending == [] and time.time() < deadline:
         time.sleep(0.05)
         t.reap()
@@ -700,7 +701,7 @@ def test_a_detached_asks_poll_reads_its_exit_status(tmp_path):
 
     pid = proc.spawn([sys.executable, "-c", "import sys; sys.exit(4)"], detached=True)
     ask = timer.Detached(pid)
-    deadline = time.time() + 10
+    deadline = time.time() + PROC_WAIT_S
     code = ask.poll()
     while code is None and time.time() < deadline:
         time.sleep(0.05)
