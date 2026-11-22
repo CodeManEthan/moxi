@@ -34,7 +34,7 @@ from typing import Literal
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.types import CallToolResult, TextContent
 
-from .. import attribution, config, directory, machine_line, sending
+from .. import archive, attribution, config, directory, machine_line, sending
 from ..client import DaemonError, DaemonOffline
 from ..provision import NAMES
 from ..roster_view import SEND_ONLY, render_agents
@@ -100,7 +100,8 @@ def descriptions(expiry: str = "24h") -> dict[str, str]:
             "An identity is a name only one session can hold at a time."),
         "history": (
             "Read recent messages to and from an identity, newest last, with who really "
-            "sent each. A message that expired or was withdrawn is shown as such."),
+            "sent each. A message that expired or was withdrawn is shown as such. To read "
+            "further back, skip that many of the newest messages."),
         "remove": (
             "Withdraw a message you sent from every recipient who hasn't had it yet. One "
             "already delivered can't be withdrawn; the result says who had it."),
@@ -158,6 +159,7 @@ INPUTS: dict[str, dict] = {
         "identity": {"type": "string", "description": "default: yours"},
         "limit": {"type": "integer", "minimum": HISTORY_LIMIT[0],
                   "maximum": HISTORY_LIMIT[1], "default": HISTORY_DEFAULT},
+        "skip": {"type": "integer", "minimum": 0, "default": 0},
     }},
     "remove": {"type": "object", "properties": {"message_id": _ID},
                "required": ["message_id"]},
@@ -191,7 +193,8 @@ OUTPUTS: dict[str, dict] = {
         "id": _STR, "from": _STR, "to": _STRS, "text": _STR, "at": _STR,
         "attribution": _STR,
         "state": {"type": "string",
-                  "enum": ["delivered", "waiting", "expired", "withdrawn"]}})}}),
+                  "enum": ["delivered", "waiting", "expired", "withdrawn",
+                           "archived"]}})}}),
     "remove": _object({"message_id": _STR, "withdrawn": _STRS, "delivered": _STRS,
                        "expired": _STRS}),
 }
@@ -351,10 +354,14 @@ class Tools:
         if not HISTORY_LIMIT[0] <= limit <= HISTORY_LIMIT[1]:
             return refused("limit-shape", f"limit {limit} is outside "
                            f"{HISTORY_LIMIT[0]}-{HISTORY_LIMIT[1]}. Nothing was read.")
+        skip = params.get("skip") or 0
+        if not isinstance(skip, int) or isinstance(skip, bool) or skip < 0:
+            return refused("skip-shape", f"skip {skip} is not a count of messages. "
+                           "Nothing was read.")
         who = identity_of(params.get("identity") or identity)
         try:
             return _history(self.daemon, self._context(), who, limit,
-                            self._read)
+                            self._read, skip=skip)
         except DaemonError as exc:
             return _read_refused(exc)
 
@@ -407,9 +414,10 @@ class Tools:
         async def whoami() -> CallToolResult:
             return await call(self.whoami, {})
 
-        async def history(identity: str | None = None,
-                          limit: int = HISTORY_DEFAULT) -> CallToolResult:
-            return await call(self.history, {"identity": identity, "limit": limit})
+        async def history(identity: str | None = None, limit: int = HISTORY_DEFAULT,
+                          skip: int = 0) -> CallToolResult:
+            return await call(self.history, {"identity": identity, "limit": limit,
+                                             "skip": skip})
 
         async def delete(message_id: str | int) -> CallToolResult:
             return await call(self.delete, {"message_id": message_id})
@@ -445,14 +453,19 @@ def _read_refused(e: DaemonError) -> CallToolResult:
 
 # --------------------------------------------------------------------------- history
 
-#: What one message in `history` came to.
+#: What one message in `history` came to. `archived` is a message from an older comms'
+#: record, whose delivery comms.db's books do not hold.
 DELIVERED, WAITING, EXPIRED, WITHDRAWN = "delivered", "waiting", "expired", "withdrawn"
+ARCHIVED = "archived"
 
 
-def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
+def _history(daemon, ctx: sending.Context, identity: str, limit: int, read, *,
+             skip: int = 0):
     """`moxi comms history <identity> --limit <limit>`'s rows, in its words, with each
     message's state: withdrawn by its author, waiting for a recipient, expired before
-    reaching one, or delivered.
+    reaching one, delivered, or archived (from an older comms' record). `skip` passes
+    over the newest messages first (`archive.timeline`), so a page reaches further back
+    than `HISTORY_LIMIT` allows in one.
 
     The verb's rendering lives in the CLI, which nothing in the daemon may import (it
     reads cards); its row is spelled again here, and a test holds the two lines equal."""
@@ -465,7 +478,9 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             return _result(text, {"messages": []})
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.record.history(room["room_id"], limit=limit) if room else []
+        # An older comms' record (`[archive] record`) reads as the start of this one.
+        msgs, from_archive = archive.timeline(ctx.record, room["room_id"] if room else None,
+                                              limit, skip=skip)
         rows, effective = [], {}
         for m in msgs:
             ml = machine_line.parse(m.content)
@@ -480,13 +495,16 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
-        ids = [m.id for m, *_ in rows]
+        # comms.db's books hold no row for an older message, and a row under its id is
+        # another message's.
+        ids = [m.id for m, *_ in rows if not from_archive(m)]
         dropped = _dropped(db, ids)
         waiting = _waiting(db, ids)
     lines = [] if rows else [f"no {NAMES} history for {identity}."]
     messages = []
     for m, ml, author, direction in rows:
-        gone = dropped.get(str(m.id), {})
+        older = from_archive(m)
+        gone = {} if older else dropped.get(str(m.id), {})
         lines.append(f"{m.id}  {m.timestamp}  {direction:<4} {author.qualified} "
                      f"({author.tier}, {attribution.rendered(author.attribution)})"
                      f"  -> {', '.join(ml.recipients)}"
@@ -497,7 +515,7 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             "id": str(m.id), "from": author.qualified, "to": list(ml.recipients),
             "text": ml.text, "at": str(m.timestamp),
             "attribution": attribution.rendered(author.attribution),
-            "state": _state(m, gone, waiting=str(m.id) in waiting)})
+            "state": ARCHIVED if older else _state(m, gone, waiting=str(m.id) in waiting)})
     if window is not None:
         lines.append(f"(time-scoped to the {identity} binding: {window[0]} .. "
                      f"{window[1] if window[1] is not None else 'now'})")

@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+- `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
+  `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
+  `prompt` event carries `own`, true when its origin is on that list, and question mode's
+  reminder reads it. The old key is not read as an alias: while a turns config file still
+  sets `question_mode.origins`, every turns endpoint refuses to start (a session then has
+  no guards and takes no deliveries) and names the key to set. Move the value to
+  `prompt.own_origins`, or, when it is the default `["composer", "bridge"]`, delete the
+  old key.
+  On Codex a prompt typed in the window now carries the origin `composer`, and one the
+  host handed in for a delivery carries none. The host places a prompt by its text: one
+  that matches no hand-in of its own while any is still out carries no origin either.
+- `deliver` and `steer` take `by`, the module that asked, and `senders`, the names the
+  text speaks for (the client's `deliver(..., by=, senders=)` and `steer(...)` too). A
+  `prompt` event carries `delivery_by` and `delivery_senders` from the delivery that is
+  the prompt, both None for a prompt turns did not hand in, and `opens`, false when the
+  prompt joins a main-loop turn already running.
+- A delivery's `ended` value carries `answer`, the final text of the turn that took it:
+  on Claude Code the assistant's final visible text, on Codex the turn's last agent
+  message; null when the turn had no text, on both, and where the harness gave none.
+- A listener row takes the option `wait_ms`, a function of the session's environment that
+  returns the row's own bound on `prompt` for that session, in milliseconds. The session's
+  prompt bound, decided at its start, is the longest of `listen.wait_ms` and those: the
+  endpoint asks the prompt listeners within it, the Claude runner waits it plus its margin
+  (the endpoint's first line carries `prompt_wait_ms`), and a Codex launch bakes it into
+  its UserPromptSubmit hook command. The runner plugin is version 0.2.2, so `moxi install
+  turns` updates an install at user scope.
+- A guard takes `sessions`, `"package.module:function"`: a function of the session's
+  environment that answers True to turn the guard on in that session, beside
+  `guards.run` and its switch. An endpoint asks it once, at the session's start, and keeps
+  the answer through every `ready`. One that does not import, raises or answers something
+  other than a bool reads off, is logged, and fails its `moxi doctor turns` row. A custom
+  guard file can name none, since the list already turns its guards on.
+- Question mode's prompt reminder leaves the agent to judge whether the questions are
+  wanted now ("If they are asking now, ..."), and asks it to count any new questions at the
+  end of its output once they are answered. "pros", as voice input spells "prose", now
+  asks for prose too: the default of `question_mode.prose_words` is `["prose", "pros"]`.
+  Question mode's judge may take up to 3000 ms on a call, still clamped by
+  `guards.max_wait_ms`, before the call is refused.
+- Until a Claude Code session's endpoint has sent its guard table, the runner refuses
+  every `AskUserQuestion` call, a subagent's too, with "turns' guards aren't loaded, so
+  question mode can't check this call; ask in prose", since it can't tell whether
+  question mode is on. Other tools pass as before, and a headless session is not refused.
+- Question mode counts a prompt sent from the Claude apps through Remote Control
+  (origin `bridge`) as the person's own: the default of `question_mode.origins` is now
+  `["composer", "bridge"]`, so such a prompt that mentions a question lets
+  `AskUserQuestion` run and gets the question-mode reminder. A `plugin` prompt and one
+  with no origin are still refused. To count only prompts typed at the terminal again, set
+  `question_mode.origins = ["composer"]`.
+- The panel at `/m/turns/` is redrawn as groups of rows. Sessions fall under `problem`,
+  `idle` and `working`, latest change first, each row with its name (a launched
+  session's launch name with launcher installed, else its folder and start), how long it
+  has been in its state, and what is busy or in trouble. `Open` opens one row at a time at
+  `session/<key>`, with `Now`, `Agents`, `Prompt box`, `Session`, `Details` and `Copy id`.
+  A reach line at the foot says which sessions show here and which don't, with `Copy` on
+  `moxi install turns` where it applies, and `Settings › turns` beside it. The page says
+  when a read failed, a scan failed, no session runs or an address names none; a row
+  whose session's watch is down while its reads answer keeps its group and says
+  `read every 30 s` on a dim line of its own. The page
+  server sends each session's turn start time, session id, whether it has a prompt box,
+  when it ended its last turn, since when it can't be read, and the `reach`; it reads
+  every session again within 30 s, and reads `reach` on a thread of its own.
 - The Claude runner now takes a session as headless only when Claude Code's own
   `session.start` says nobody is at the prompt (`isInteractive` false). It used to read
   the session's surfaces in whichever start hook ran first, and Claude Code usually runs

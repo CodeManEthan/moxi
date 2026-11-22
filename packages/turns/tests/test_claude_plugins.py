@@ -21,6 +21,13 @@ PLUGINS = ("moxi-turns", "moxi-turns-gate")
 needs_claude = pytest.mark.skipif(shutil.which("claude") is None, reason="Claude Code is not on PATH")
 
 
+@pytest.fixture(autouse=True)
+def stub_claude():
+    """These tests run Claude Code's own plugin checks on the package's folders, so they
+    keep the `claude` PATH finds in place of conftest's stand-in. Each runs in the fence's
+    tmp home."""
+
+
 def test_the_local_marketplace_lists_both_plugins_by_relative_path():
     doc = json.loads((CLAUDE_DIR / ".claude-plugin" / "marketplace.json").read_text())
     assert doc["name"] == "moxi-turns"
@@ -42,7 +49,7 @@ def test_the_runner_reports_the_version_its_manifest_names():
 #: The runner version that speaks each leg. Claude Code runs a user-scope plugin from a
 #: cache kept per version, so a runner on a new leg needs a new version, or an install
 #: made before it keeps running the old leg.
-RUNNER_VERSION_OF_LEG = {4: "0.2.1"}
+RUNNER_VERSION_OF_LEG = {4: "0.2.2"}
 
 
 def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():

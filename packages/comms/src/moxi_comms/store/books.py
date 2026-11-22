@@ -444,6 +444,14 @@ class Books:
                          expired=sorted(n for n, why in before.items() if why == EXPIRED),
                          written=True)
 
+    def archive_skipped(self) -> tuple[int, int] | None:
+        """The message ids comms.db's counter skipped for an older comms' record
+        (`archive.skipped`), or None."""
+        from .. import archive
+
+        with self._lock:
+            return archive.skipped(self._conn)
+
     def dropped_reason(self, name: str, message_id) -> str | None:
         """Why `message_id` left `name`'s queue undelivered, or None."""
         with self._lock:
@@ -662,6 +670,23 @@ def read_dropped(name: str, message_id, *, path=None, env=None) -> str | None:
     finally:
         conn.close()
     return None if row is None else row[0]
+
+
+def read_archive_skipped(*, path=None, env=None) -> tuple[int, int] | None:
+    """`Books.archive_skipped` from a read-only open, for a process that isn't the
+    daemon; None when the store isn't there."""
+    from .. import archive
+
+    try:
+        conn = open_read(Path(path) if path else None, env=env)
+    except sqlite3.Error:
+        return None
+    try:
+        return archive.skipped(conn)
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def dropped_by_message(conn, ids) -> dict[str, dict[str, str]]:

@@ -17,7 +17,7 @@ import pytest
 from moxi_sessions.shape import (KINDS, MARKERS, OTEL_CONVENTIONS, SHAPE, UNKNOWN,
                                  LimitWindow, Limits, Malformed, Marker, Message, Other,
                                  Request, ToolCall, document, from_json, known, to_json,
-                                 tool_summary)
+                                 squeezed_first, tool_summary)
 
 
 # --- unknown ----------------------------------------------------------------------------
@@ -164,6 +164,21 @@ def test_a_summary_names_the_tool_and_its_identifying_argument():
 def test_a_summary_cuts_its_argument_at_160_characters_and_says_so():
     summary = tool_summary("Bash", {"command": "x" * 200})
     assert summary == "Bash(" + "x" * 160 + "... [+40 chars])"
+
+
+def test_a_redaction_makes_the_summary_s_line_and_only_the_cut_follows():
+    """Nothing changes the redaction's answer but the cut: a squeeze after it could join a
+    value to its key's name in a shape it never saw."""
+    def keep(text):
+        return text
+
+    assert tool_summary("Bash", {"command": "a\n  b"}, redact=keep) == "Bash(a\n  b)"
+    assert tool_summary("Bash", {"command": "a\n  b"},
+                        redact=squeezed_first(keep)) == "Bash(a b)"
+    seen = []
+    tool_summary("Bash", {"command": "a\n  b"},
+                 redact=squeezed_first(lambda text: seen.append(text) or text))
+    assert seen == ["Bash", "a b"]
 
 
 def test_the_readme_names_the_shape_version_and_the_conventions_release():

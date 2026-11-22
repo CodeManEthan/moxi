@@ -225,7 +225,7 @@ def test_slots_that_cant_be_read_are_said_under_the_box_and_no_slots_are_not(fak
     expect(piece.locator(".said")).not_to_contain_text("slots")
 
 
-def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_picked(
+def test_the_menu_lists_each_slot_with_its_state_and_only_a_choosable_one_can_be_picked(
         fake, ui_page, ui_shell):
     # The launch in slot 1 is another user's, so it is no place of this shell's user.
     with kit.launch_log(ui_shell) as conn:
@@ -257,12 +257,12 @@ def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_pick
     expect(words("Slot 3")).to_have_text("free")
     expect(words("Slot 4")).to_have_text("taken")
     expect(words("Slot 5")).to_have_text(re.compile(f"^held for reviewer until {HOUR}$"))
-    expect(words("Slot 6")).to_have_text("not running")
+    expect(words("Slot 6")).to_have_text("missing, made again at launch")
     expect(words("Your terminal")).to_have_text("copies the command for you to paste")
     expect(words("Headless")).to_have_text("no terminal, runs in the background")
-    for lead in ("Slot 1", "Slot 4", "Slot 5", "Slot 6"):
+    for lead in ("Slot 1", "Slot 4", "Slot 5"):
         assert menu.locator(f'[data-run="{lead}"]').evaluate("row => row.localName") == "div"
-    for lead in ("Slot 2", "Slot 3", "Your terminal", "Headless"):
+    for lead in ("Slot 2", "Slot 3", "Slot 6", "Your terminal", "Headless"):
         expect(menu.locator(f'button[data-run="{lead}"]')).to_be_enabled()
     # The tick is on the default, and a hairline parts the slots from the rest.
     current = menu.locator('.row[data-current="true"]')
@@ -436,7 +436,7 @@ def test_an_empty_box_sends_no_brief_file_though_the_defaults_name_one(
         file.unlink()
 
 
-def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text_in_it(
+def test_a_handoff_the_defaults_name_shows_under_the_box_is_sent_alone_and_clear_leaves_it_out(
         fake, ui_page, ui_shell, harness, tmp_path):
     words = "the last watch left the lamps lit"
     typed = "ring the harbour bell"
@@ -450,19 +450,28 @@ def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text
         return words not in " ".join(argv) and str(handoff) not in " ".join(argv)
 
     try:
-        # The box empty, in a slot: the session starts with no first turn.
+        # The defaults' handoff is on its line under the box; the box stays on.
         piece = kit.open_home(ui_page)
         box = piece.locator("textarea")
         expect(box).to_have_value("")
-        body = press(ui_page, piece)
-        assert not {"handoff", "brief"} & set(body["values"]), body
-        assert {"handoff", "brief"} <= set(body["leave_out"]), body
-        expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
-        row = kit.newest_launch(ui_shell)
-        assert (row.brief, row.handoff_path) == (None, None) and unsent(row.argv), row
-        # Text in the box, in the background: the first turn is that text alone.
-        box.fill(typed)
+        expect(box).to_be_enabled()
+        line = piece.locator("[data-handoff]")
+        expect(line.locator(".k")).to_have_text("Handoff from a file")
+        expect(line.locator(".file")).to_have_text(str(handoff))
+        # The box empty, in the background: the handoff alone is the first turn.
         pick_run(piece, "Headless")
+        body = press(ui_page, piece)
+        assert body["values"]["handoff"] == str(handoff) and "brief" not in body["values"], body
+        expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
+        row = kit.newest_launch(ui_shell)
+        assert (row.brief, row.handoff_path) == (None, str(handoff)), row
+        # It stays for the next launch, as the defaults give it. Cleared, the box's text
+        # alone is the first turn, and the defaults can't give the handoff.
+        expect(line).to_be_visible()
+        line.get_by_role("button", name="Clear the handoff").click()
+        expect(line).to_have_count(0)
+        expect(box).to_be_focused()
+        box.fill(typed)
         body = press(ui_page, piece)
         assert body["values"]["brief"] == typed and "handoff" not in body["values"], body
         assert "handoff" in body["leave_out"], body
@@ -472,7 +481,6 @@ def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text
         assert unsent(run["argv"]), run["argv"]
         row = kit.newest_launch(ui_shell)
         assert (row.brief, row.handoff_path) == (typed, None), row
-        assert all(unsent(run["argv"]) for run in harness.runs())
     finally:
         file.unlink()
 

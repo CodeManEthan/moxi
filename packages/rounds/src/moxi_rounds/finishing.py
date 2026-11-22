@@ -4,8 +4,11 @@
 tip as read (its head, once the branch is gone), in this order:
 
 1. Under the round's lock, read the round and evaluate every gate of `finish_gates` at
-   `T`. Refuse with every unmet one. A build already finished or dropped is refused
-   before any gate: nothing is left to do, and no second `finish.done` is written.
+   `T`, and the scratch gate (`sweeping.scratch_gate`): no process uses the build's
+   scratch folder. Refuse with every unmet one. A build already finished or dropped is
+   refused before any gate: nothing is left to do, and no second `finish.done` is
+   written. Where the processes can't be read, the scratch gate is not run, and
+   `Finished` says so.
 2. Take the repo's finish lock (`finish_lock`), recording `lock.cleared` when the take
    swapped out a dead holder.
 3. Read the round, the target's head `M` and the branch's tip again. Refuse when the
@@ -29,9 +32,11 @@ tip as read (its head, once the branch is gone), in this order:
    worktree, then its scratch folder, then delete the branch with `git branch -d`,
    unless the repo's `keep_branch` is set or its worktree was kept. With no such merge
    the work is not on the target: the worktree and the branch stay, and only the scratch
-   folder is removed. Each removal obeys the removal rule (`removal`). A folder it keeps,
-   or a branch git won't delete, is named with why in `Finished`, and the finish stands:
-   a later sweep takes the folder once the rule holds.
+   folder is removed. Each removal obeys the removal rule (`removal`), and a scratch
+   folder a process came to use after step 1 is not moved
+   (`sweeping.remove_build_dirs`). A folder kept, or a branch git won't delete, is named
+   with why in `Finished`, and the finish stands: a later sweep takes the folder once
+   the rule holds and no process uses it.
 7. Remove CI's own refs from the remote, those the build's check recorded pushing and
    those its repo's `ci` templates (`ref`, `full_ref`) give its branch, under the keep
    rule (`ci_refs.remove`). A ref it could not remove is named with why in `Finished`,
@@ -185,8 +190,9 @@ class Finished:
     the log already held one), the after-append callbacks that failed, and what the
     cleanup did: the folders it `removed`, those it `kept` with why, and the branch:
     `deleted`, or why it stayed (None when the repo keeps its branches or no merge put
-    the work on the target); and what became of each of CI's own `refs` the build
-    pushed."""
+    the work on the target); what became of each of CI's own `refs` the build
+    pushed; and `unscanned`, a line saying the scratch gate was not run, where the
+    processes could not be read."""
 
     name: str
     stage: str
@@ -200,6 +206,7 @@ class Finished:
     kept: tuple[removal.Kept, ...] = ()
     branch: str | None = None
     refs: tuple = ()
+    unscanned: tuple[str, ...] = ()
 
 
 def finish(name: str, stage: str, *, by: str, settings=None,
@@ -240,6 +247,9 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                                               name=name, repo=build.repo)
     found += finish_actions.blocked(view.state, build, tip, actions, name=name,
                                     worktree_gone=seen.tree is None, again=again)
+    in_use, unscanned = sweeping.scratch_gate(view.state, [build], again=rerun)
+    if in_use is not None:
+        found.append(in_use)
     if found:
         raise Refused(found)
 
@@ -351,7 +361,8 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
                     released=released, failed=written.failed, removed=cleaned.removed,
-                    kept=cleaned.kept, branch=cleaned.branch, refs=refs)
+                    kept=cleaned.kept, branch=cleaned.branch, refs=refs,
+                    unscanned=tuple(dict.fromkeys(unscanned + cleaned.unscanned)))
 
 
 def _acts(recorded: list[str], done: list[Action], build: builds.Build,
@@ -382,18 +393,18 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
     the finish."""
     commissioned = checking.commission_of(state, build)
     merged = any(one.kind == own.MERGE and one.state in (OK, FOUND) for one in done)
-    there = {kind: Path(str(commissioned[kind]))
-             for kind in (removal.WORKTREE, removal.SCRATCH)
-             if commissioned.get(kind) and Path(str(commissioned[kind])).is_dir()}
+    recorded = {kind: Path(places.expand_home(commissioned[kind]))
+                for kind in (removal.WORKTREE, removal.SCRATCH) if commissioned.get(kind)}
+    there = {kind: place for kind, place in recorded.items() if place.is_dir()}
     if not merged:
-        cleaned = removal.removes(name, commissioned, (removal.SCRATCH,),
-                                  settings=settings, env=env,
-                                  **sweeping.trash_log(name, commissioned, env=env))
+        cleaned, unread = sweeping.remove_build_dirs(
+            name, commissioned, (removal.SCRATCH,), stage=build.stage,
+            settings=settings, env=env, after_gate=True)
         stays = tuple(removal.Kept(there[kind], "no merge", "no merge action put the "
                                    "work on the target, so the worktree and the "
                                    "branch stay", kind=kind)
                       for kind in there if kind == removal.WORKTREE)
-        return _Cleaned(cleaned.removed, stays + cleaned.kept)
+        return _Cleaned(cleaned.removed, stays + cleaned.kept, unscanned=unread)
     try:
         now = Git(root).branch(build.branch)
         why = (f"the branch {build.branch} is gone" if now is None else
@@ -406,20 +417,20 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
                                                 "and the branch stay", kind=kind)
                                    for kind, place in there.items()))
     keep_branch = own.build_setting(settings, build.repo, "keep_branch")
-    cleaned = removal.removes(name, commissioned, settings=settings, env=env,
-                              deletes=None if keep_branch else build.branch,
-                              **sweeping.trash_log(name, commissioned, env=env))
+    cleaned, unread = sweeping.remove_build_dirs(
+        name, commissioned, stage=build.stage, settings=settings, env=env,
+        deletes=None if keep_branch else build.branch, after_gate=True)
     if keep_branch:
-        return _Cleaned(cleaned.removed, cleaned.kept)
+        return _Cleaned(cleaned.removed, cleaned.kept, unscanned=unread)
     if any(one.kind == removal.WORKTREE for one in cleaned.kept):
         return _Cleaned(cleaned.removed, cleaned.kept,
                         "kept: its worktree was kept, and git deletes no branch a "
-                        "worktree has checked out")
+                        "worktree has checked out", unread)
     try:
         Git(root)._run("branch", "-d", build.branch)
     except GitError as exc:
-        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {exc.reason}")
-    return _Cleaned(cleaned.removed, cleaned.kept, "deleted")
+        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {exc.reason}", unread)
+    return _Cleaned(cleaned.removed, cleaned.kept, "deleted", unread)
 
 
 @dataclass(frozen=True)
@@ -427,6 +438,7 @@ class _Cleaned:
     removed: tuple[Path, ...] = ()
     kept: tuple[removal.Kept, ...] = ()
     branch: str | None = None
+    unscanned: tuple[str, ...] = ()
 
 
 # -- reading the build -------------------------------------------------------------------
@@ -582,7 +594,8 @@ def _remote_holds(root: Path, remote: str, target: str, landing: str) -> str | N
 def _command(state: states.State, name: str, build: builds.Build, root: Path, tip: str,
              action: Mapping) -> Action:
     """Run a command action in the build's worktree, its output the caller's own."""
-    worktree = Path(str(checking.commission_of(state, build).get("worktree")))
+    commissioned = checking.commission_of(state, build)
+    worktree = Path(places.expand_home(commissioned.get("worktree")))
     argv = checking.fill(action["argv"], checking.values(name, build, root=root, tip=tip))
     timeout_s = action.get("timeout_s")
     try:

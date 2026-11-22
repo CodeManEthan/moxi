@@ -9,6 +9,7 @@ import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -393,6 +394,31 @@ def test_a_build_drop_writes_its_trash_entry_to_the_sweeps_log_proving_a_and_b(m
         assert (one["round"], one["stage"], one["repo"], one["branch"], one["build"]) == (
             ROUND, "B1", "proj-a", "work", event["build"])
         assert one["proven"] == ["A", "B"]
+
+
+@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])
+def test_a_drop_leaves_a_scratch_a_process_uses_and_moves_the_rest(made, whole):
+    # Core's abandon was not refused for its scratch folder: the folder in use was not
+    # moved and stayed for the sweep, and the worktree went as before.
+    _path, _tree, event = made
+    scratch = Path(event["scratch"])
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                            cwd=scratch, stdin=subprocess.PIPE)
+    try:
+        if whole:
+            dropped = dropping.drop(ROUND, by="operator", record=POINTER,
+                                    run_by="planner")
+        else:
+            dropped = dropping.drop_build(ROUND, "B1", by="operator", record=POINTER,
+                                          run_by="planner")
+    finally:
+        proc.communicate(timeout=30)
+
+    assert dropped.removed == (Path(event["worktree"]),)
+    [kept] = dropped.kept
+    assert (kept.kind, kept.place, kept.check) == ("scratch", scratch, "D")
+    assert len(kept.work) == 1 and kept.work[0].startswith(f"pid {proc.pid} (")
+    assert scratch.is_dir() and files.read_records(sweeping.log_file()) == []
 
 
 def test_a_round_drop_keeps_a_worktree_holding_an_ignored_env_and_says_b3(made):

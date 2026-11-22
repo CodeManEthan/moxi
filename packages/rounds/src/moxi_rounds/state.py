@@ -8,9 +8,10 @@ same way, so a log with a later version's events still folds. `folding(events)` 
 same fold, giving the state after each event in turn.
 
 The state holds what the round's first event set (its description, its flow's name and
-the steps recorded for it, its parent, and its status), the rulings recorded in the log,
-its questions, each with every change made to it, the options it offers and the key its
-answer chose, and the whole history. A ruling of a question is one event: the ruling's
+the steps recorded for it, its parent, its lead, and its status), the lead the newest
+change of it names, the rulings recorded in the log, its questions, each with every
+change made to it, the options it offers and the key its answer chose, and the whole
+history. A ruling of a question is one event: the ruling's
 own record names the question and says what it becomes, and the fold changes the
 question from it. A question that was moved to another log stays in this one as moved,
 naming the record it became; the one that arrived names the record it was.
@@ -374,6 +375,10 @@ class State:
     #: The ids of the project's standing rulings the round starts from, as it was
     #: opened with them.
     inherits: list[str] = field(default_factory=list)
+    #: The agent who leads the round, from its opening or the newest change of its
+    #: lead; None while the log names none. `leads.of` gives the lead to use, which
+    #: falls back to the project's.
+    lead: str | None = None
     #: `OPEN`, `CLOSED` or `DROPPED`, or None for a log that opened no round.
     status: str | None = None
     #: How the round ended, or None while it has not.
@@ -429,7 +434,15 @@ def _round_opened(state: State, event: dict) -> None:
     state.steps = copy.deepcopy(event["steps"])
     state.parent = event.get("parent")
     state.inherits = list(_ids(event.get("inherits")))
+    state.lead = event["lead"] if isinstance(event.get("lead"), str) else None
     state.status = OPEN
+
+
+def _lead_changed(state: State, event: dict) -> None:
+    """The round is led by the agent the event names, from then on. An event that
+    names nobody changes no lead."""
+    if isinstance(event.get("lead"), str) and event["lead"]:
+        state.lead = event["lead"]
 
 
 def _flow_changed(state: State, event: dict) -> None:
@@ -903,6 +916,7 @@ def with_rereads(state: State) -> Iterable[dict]:
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
     "flow.changed": _flow_changed,
+    "lead.changed": _lead_changed,
     "design.frozen": _design_frozen,
     "verdict.recorded": _verdict_recorded,
     "question.asked": _question_asked,

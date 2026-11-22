@@ -86,7 +86,7 @@ def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
 
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
         assert snapshot(conn) == before
         assert [r[0] for r in conn.execute("SELECT base_env_json FROM launches")] == [None] * 4
         assert all(row.base_env_json is None and row.base_env is None
@@ -429,7 +429,8 @@ def test_prune_deletes_old_ended_runs_with_their_events_and_exits(conn):
     conn.execute("INSERT INTO warm_holds VALUES ('r2', 'new', ?, ?)",
                  (at(-20 * 86400), at(-10 * 86400)))
     counts = store.prune(conn, 90, at=at())
-    assert counts == {"run_events": 2, "exits": 1, "runs": 1, "warm_holds": 1}
+    assert counts == {"run_events": 2, "exits": 1, "runs": 1, "warm_holds": 1,
+                      "park_entries": 0}
     assert store.get_run(conn, gone.run_id) is None
     assert store.get_run(conn, kept_recent.run_id) is not None
     assert store.get_run(conn, kept_open.run_id).state == "armed"
@@ -447,11 +448,11 @@ def test_prune_takes_at_most_its_limit_of_each_table_and_finishes_later(conn):
     assert conn.execute("SELECT count(*) FROM run_events").fetchone()[0] == 0
 
 
-def test_a_newer_store_than_version_2_is_refused(tmp_path):
+def test_a_newer_store_than_this_launchers_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute(f"PRAGMA user_version = {len(store.STEPS) + 1}")
     conn.close()
     with pytest.raises(core_store.StoreTooNew):
         store.connect(db)

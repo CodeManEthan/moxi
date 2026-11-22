@@ -6,7 +6,8 @@ themselves answer. A caller that must write nothing at all says `refresh=False`:
 index is then left as it is, and the answer is the same.
 
 **The rounds** (`rounds`): the open rounds of every project, or of one, each with its
-flow, the step it is at and its counts; or, when the ended ones are asked for, the
+flow, its lead (as data only: its own, else its project's, `leads.of`), the step it is
+at and its counts; or, when the ended ones are asked for, the
 rounds that are open no longer, each with how it ended and when, and for a dropped
 one by whom and on what pointer. A round whose
 log can't be read is listed as unreadable, in either listing,
@@ -42,8 +43,8 @@ from datetime import datetime
 
 from moxi import store
 
-from . import (builds, checking, decisions, export, folders, index, log, open_builds,
-               questions, shown, steps, waits)
+from . import (builds, checking, decisions, export, folders, index, leads, log,
+               open_builds, questions, shown, steps, waits)
 from . import numbers as counted
 from . import settings as own
 from . import state as states
@@ -149,6 +150,9 @@ class Round:
     #: has since (`how`), whose act it was (`by`), the pointer it carried (`record`)
     #: and when (`at`). None for an open round.
     ended: Mapping | None = None
+    #: Its lead, as `leads.of` gives it: `{"name", "from"}`, or None with neither its
+    #: own nor its project's.
+    lead: Mapping | None = None
 
     def data(self) -> dict:
         if self.unreadable is not None:
@@ -156,6 +160,7 @@ class Round:
                     "unreadable": _error(self.unreadable)}
         return {"name": self.name, "project": self.project, "folder": self.round_dir,
                 "status": self.status, "flow": self.flow,
+                "lead": None if self.lead is None else dict(self.lead),
                 "step": None if self.step is None else dict(self.step),
                 "counts": dict(self.counts),
                 "standing": self.standing,
@@ -213,6 +218,7 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                 listed.append(Round(
                     summary.name, summary.project, str(summary.log_dir),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
+                    lead=leads.chosen(summary.lead, one.home.lead),
                     step=_step(summary, one, opened),
                     standing=next((item.body.get("standing")
                                    for item in summary.of(index.VERSION)), None),

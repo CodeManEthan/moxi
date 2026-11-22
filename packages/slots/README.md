@@ -66,8 +66,10 @@ is yours, and slots ignores it. A slot is `free` (no run window), `occupied` (th
 pane is live), `ended` (the run pane is dead and its last screen stays), or `missing`
 (registered, but the session is gone, as after a reboot).
 
-A **hold** reserves a slot for a holder, a word you choose, for up to a day. A held slot
-takes a launch only from its holder, and a start by the holder ends the hold.
+A **hold** reserves a slot for a holder, a word you choose, for up to a day or until the
+holder releases it. A held slot takes a launch only from its holder, and a start by the
+holder ends the hold. A missing slot can be held too: the hold reserves the number, and
+stays when the slot is made again.
 
 A **job** is a command that outlives its caller. It runs in its own window of session
 `moxi-jobs`, and the window goes when the job ends.
@@ -84,6 +86,7 @@ A **job** is a command that outlives its caller. It runs in its own window of se
 | `moxi slots rename N\|NAME NAME`, `... --clear` | names a slot, or clears its name |
 | `moxi slots attach N\|NAME [--print]` | attaches this terminal, making the slot when it has no session. `--print` prints the tmux command instead |
 | `moxi slots hold N\|NAME --holder H --for S` | holds a slot for S seconds, at most a day |
+| `moxi slots hold N\|NAME --holder H --until-released` | holds a slot until `moxi slots release` ends the hold |
 | `moxi slots release N\|NAME --holder H` | ends your hold |
 | `moxi slots jobs [--json]` | the detached jobs |
 | `moxi slots screen N\|NAME [--json]` | which known screen the slot's run pane shows, and why. It sends nothing |
@@ -111,11 +114,24 @@ isn't answering yet.
   could read), `show`, `job`, `jobs`, and `supported()`, which says whether slots runs
   here.
 - Changes, each under the module lock: `create`, `remove`, `rename`, `hold`, `release`,
-  and `attach_argv` for the attach command.
+  `settle`, and `attach_argv` for the attach command.
 - `start(slot, argv, env=, cwd=, label=, ...)` and `respawn` place a launch in a slot,
   and `run_job(name, argv, env=, cwd=)` runs a detached one. The environment goes through
   a private file the pane's first command reads, never through tmux. Each returns once the
-  command has started or hasn't. `wait_ended` waits for a run pane to end.
+  command has started or hasn't. `wait_ended` waits for a run pane to end. The slot's
+  `last` records each run's token, the tmux server it was placed under and, once its
+  pane dies, how it ended (`ended`: when, and its exit status or signal), which `moxi
+  slots show` prints. `status_trusted=False` records that a command's exit status
+  doesn't tell a clean end from a kill.
+- Each slot reads `crashed` when its last run was going when its tmux server went down:
+  no end was seen, or the run ended within 120 s before the server did, and it didn't
+  end by itself with status 0 and a trusted status. `moxi slots list` shows it in the
+  state column, as `missing, crashed`. slots never acts on it; `settle(slot, why)` ends
+  the reading without a run. The reading needs Linux's boot id
+  (`/proc/sys/kernel/random/boot_id`), so on macOS no slot reads crashed. A run end the
+  `pane-died` hook fails to write, or could not write because the hook did not start or
+  a signal ended it, is logged to `hooks.log` in the state directory, and `moxi doctor` warns of it: that run
+  reads crashed after the next server start.
 - `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
   `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`, `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME`
   and `CLAUDE_CHROME_DIALOG` the run pane shows. `answer_screen(slot, screen, wait_s)`
@@ -129,4 +145,4 @@ server of its own by setting `MOXI_HOME`.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-slots-v0.1.0/packages/slots/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-slots-v0.1.1/packages/slots/LICENSE).

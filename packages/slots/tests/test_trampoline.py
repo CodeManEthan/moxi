@@ -74,11 +74,17 @@ def test_the_launch_leaves_the_file_as_soon_as_it_is_taken(tmp_path):
     script = str(paths.script("moxi-slots-exec"))
     proc = subprocess.Popen([script, str(path)], env=PANE)
     try:
+        # The trampoline rewrites the file in place (truncate, then write) under a lock
+        # this test doesn't take, so a read can land between the two and see it empty.
+        # Each poll reads once, an empty read counts as not yet written, and both checks
+        # judge that same last read.
         deadline = time.monotonic() + 5
-        while content(path).startswith("{") and time.monotonic() < deadline:
+        seen = content(path)
+        while (seen == "" or seen.startswith("{")) and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert "s3cret" not in open(path).read()
-        assert content(path) in (TAKEN, EXEC)
+            seen = content(path)
+        assert "s3cret" not in seen
+        assert seen in (TAKEN, EXEC)
     finally:
         proc.kill()
         proc.wait()

@@ -119,8 +119,7 @@ def page_row(data: Mapping[str, Any], *, now: float | None = None,
         if isinstance(data.get("uptime_s"), (int, float)):
             detail += f", up {health._uptime(data['uptime_s'])}"
         if sample:
-            detail += (f", RSS {sample['rss'] / 1024**2:.0f} MB, {sample['fds']} fds, "
-                       f"CPU {sample['cpu_s']:.1f} s")
+            detail += f", {health._sample_text(sample)}"
         opened = data.get("open")
         if isinstance(opened, Mapping):
             detail += (f", {opened.get('requests', 0)} open requests, "

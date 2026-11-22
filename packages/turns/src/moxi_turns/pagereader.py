@@ -8,13 +8,40 @@ first read or subscribe, and it runs until the page server stops:
   of endpoints exists; each scan also refreshes what every held session's `session` answer
   says (its session id after a `/clear`, its `trouble`);
 - per session, one thread holds its `watch()` and one reads its `facts()` and `agents()`:
-  once when the session is first seen, again once the watch has started, and again after
-  each `session.ready`, `turn.started`, `turn.steered` and `turn.ended`. Events that come
-  while a read runs share the one read after it.
+  once when the session is first seen, again once the watch has started, again after
+  each `session.ready`, `turn.started`, `turn.steered` and `turn.ended`, and again when
+  `REREAD_S` seconds pass with none, or `UNREAD_S` seconds while the session is unread.
+  Events that come while a read runs share the one read after it. A facts reading taken
+  while the ledger moved (`stale`) is read again at once, up to `STALE_REREADS` times;
+  the last is kept.
+
+A session is unread while its last facts or agents read failed, or its last facts reading
+has `agents` null (the live part did not read). `unread_since` is the reader's wall clock
+when such a run began, null when none runs; it changes only at a run's start and end, so a
+retry that fails again publishes nothing. A watch that could not start is not a read that
+failed: the timer still reads the session, and `read_error` says what shows may be up to
+`REREAD_S` seconds old. A reading that differs from the one held only in its `at` replaces
+it without telling the listeners, so the topic publishes nothing for it.
+
+When the watch sees a `turn.ended`, the reader stamps the session with its own wall clock
+and the event's session id and turn number. The row sends that time as `ended_at` only
+while the latest facts reading shows no turn open at that same session id and turn number:
+a turn opened since, a new session id, or a turn that ended while no watch was held each
+leave it null until the watch sees the next end. Nothing guesses an end it did not see.
 
 The library is blocking, and each of its calls is bounded by the library's own timeouts.
 Each session's calls run on that session's own threads, so a slow or dead endpoint holds up
 only its own row: never the scan, the other sessions, the page's read or its topic.
+
+One more thread reads the reach: whether a Claude Code session started by hand runs with
+turns here (`claude_setup.reach`), and whether launched Codex sessions can run under turns'
+host (`codex_host_available`). It is null on the list until its first read answers. Then,
+at each scan's pace, the thread looks at the cheap facts the reach rests on (`claude` on
+PATH, and the placed `endpoint.json`'s modification time and size, or its absence) and reads
+the reach again at once when they changed; it also reads again `REACH_SOON_S` seconds after
+a read that answered `setup` or could not tell, and `REACH_LATER_S` seconds after any other.
+A changed answer is published; an unchanged one is not. The reach is never read on a
+request.
 
 A session leaves the list when its watch ends (its `session.gone`, or the connection
 closing), or when a scan no longer finds it while no watch of it is open. A session whose
@@ -34,6 +61,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -47,9 +76,23 @@ RESCAN_S = 2.0
 RETRY_S = 2.0
 #: Seconds a session dropped after its watch ended stays out of the list.
 HOLD_S = 5.0
+#: The longest a session goes without a read.
+REREAD_S = 30.0
+#: The longest an unread session goes without a read.
+UNREAD_S = 5.0
+#: How many times in a row a stale facts reading is read again.
+STALE_REREADS = 3
+#: Seconds until the reach is read again after a read that asks him to act or can't tell.
+REACH_SOON_S = 30.0
+#: Seconds until the reach is read again after any other read.
+REACH_LATER_S = 300.0
 
 #: The reads that can fail, in the order `read_error` names them.
 _READS = ("watch", "facts", "agents")
+
+#: The harnesses whose prompt box turns reads. Only Claude Code's runner reads the box;
+#: the Codex and OpenCode hosts have none, and their `draft` is always false.
+BOX_HARNESSES = frozenset({"claude"})
 
 
 def _text(value: Any) -> str | None:
@@ -86,13 +129,19 @@ def facts_row(facts: Any) -> dict[str, Any]:
     ready = facts.ready
     ready_row = None
     if ready is not None:
-        ready_row = {"source": _text(ready.source), "at": _number(ready.at)}
+        ready_row = {"source": _text(ready.source), "session_id": _text(ready.session_id),
+                     "at": _number(ready.at)}
     agents = facts.agents
     if agents is not None:
         agents = _need(agents, _int, "facts.agents")
+    started_at = None
+    if facts.turn is not None:
+        started_at = _need(facts.turn.started_at, _number, "facts.turn.started_at")
     return {
+        "session_id": _text(facts.session_id),
         "turn_number": _need(facts.turn_number, _int, "facts.turn_number"),
         "turn_open": _need(facts.turn_open, _flag, "facts.turn_open"),
+        "turn_started_at": started_at,
         "agents": agents,
         "draft": _need(facts.draft, _flag, "facts.draft"),
         "stale": _need(facts.stale, _flag, "facts.stale"),
@@ -140,17 +189,36 @@ def info_row(key: str, info: dict[str, Any], capabilities: frozenset[str]) -> di
     }
 
 
-def read_error(failed: set[str]) -> str | None:
-    """The sentence the page shows for the reads that failed, or None when none did."""
+def ended_at(ended: tuple[float, str | None, int | None] | None,
+             facts: dict[str, Any] | None) -> float | None:
+    """The time of the turn end `ended` names, while the reading `facts` is still at that
+    turn: no turn open, the same session id (never a null one) and the same turn number.
+    None otherwise."""
+    if ended is None or facts is None or facts["turn_open"]:
+        return None
+    at, session_id, turn_number = ended
+    if session_id is None or facts["session_id"] != session_id:
+        return None
+    return at if facts["turn_number"] == turn_number else None
+
+
+#: What `read_error` calls each read.
+_WHAT = {"facts": "turn", "agents": "agents"}
+
+
+def read_error(failed: set[str], *, reread_s: float = REREAD_S) -> str | None:
+    """The sentence the page shows for the reads that failed, or None when none did. With
+    the watch alone down the timer still reads the session every `reread_s` seconds."""
     names = [name for name in _READS if name in failed]
     if not names:
         return None
     if names == ["watch"]:
-        return "turns could not watch this session; it tries again"
-    what = " and ".join(name for name in names if name != "watch")
+        return (f"Moxi can't watch it, so what shows is read every {reread_s:g} s and may "
+                f"be up to {reread_s:g} s old")
+    what = " and ".join(_WHAT[name] for name in names if name != "watch")
     if "watch" in names:
-        return f"turns could not watch this session or read its {what}; it tries again"
-    return f"turns could not read this session's {what}; what is shown may be old"
+        return f"Moxi can't watch it or read its {what}, and tries again"
+    return f"its {what} could not be read, so what shows may be old"
 
 
 class _Held:
@@ -166,6 +234,10 @@ class _Held:
         self.facts: dict[str, Any] | None = None
         self.agents: dict[str, Any] | None = None
         self.failed: set[str] = set()
+        #: The last turn end the watch saw: `(at, session_id, turn_number)`, or None.
+        self.ended: tuple[float, str | None, int | None] | None = None
+        #: When the run of unread readings began, or None.
+        self.unread_since: float | None = None
         self.watch: Any = None
         self.watching = False
         #: Set once the first read of facts and agents has finished, read or not.
@@ -199,13 +271,22 @@ class _Held:
         out = info_row(self.key, self.info, self.capabilities)
         out["facts"] = self.facts
         out["agents"] = self.agents
-        out["read_error"] = read_error(self.failed)
+        out["read_error"] = read_error(self.failed, reread_s=self.reader.reread_s)
+        out["ended_at"] = ended_at(self.ended, self.facts)
+        out["has_box"] = out["harness"] in BOX_HARNESSES
+        out["unread_since"] = self.unread_since
         return out
+
+    def is_unread(self) -> bool:
+        """Under the reader's lock: whether the last facts or agents read failed, or the
+        last facts reading has `agents` null."""
+        return (bool(self.failed & {"facts", "agents"})
+                or (self.facts is not None and self.facts["agents"] is None))
 
     # -- the watch thread ----------------------------------------------------------------
 
     def _watching(self) -> None:
-        from .results import Gone
+        from .results import Gone, TurnEnded
 
         while not self.stopped.is_set():
             try:
@@ -229,6 +310,8 @@ class _Held:
                     if isinstance(event, Gone):
                         gone = True
                         break
+                    if isinstance(event, TurnEnded):
+                        self.reader._on_turn_ended(self, event)
                     self.dirty.set()
             except Exception as exc:  # noqa: BLE001 - a broken stream ends the watch
                 log.info("the watch of %s failed: %s", self.key, exc)
@@ -245,15 +328,27 @@ class _Held:
 
     def _reading(self) -> None:
         while True:
-            self.dirty.wait()
+            with self.reader._lock:
+                pace = self.reader.unread_s if self.is_unread() else self.reader.reread_s
+            self.dirty.wait(pace)
             if self.stopped.is_set():
                 self.first.set()
                 return
             self.dirty.clear()
-            self._read("facts", self.session.facts, facts_row)
+            self._read("facts", self.read_facts, facts_row)
             if "agents" in self.capabilities:
                 self._read("agents", self.session.agents, agents_row)
             self.first.set()
+
+    def read_facts(self) -> Any:
+        """The session's facts, read again at once while the reading is stale, at most
+        `STALE_REREADS` times; the last reading is kept whatever it says."""
+        facts = self.session.facts()
+        for _ in range(STALE_REREADS):
+            if facts.stale is not True:
+                break
+            facts = self.session.facts()
+        return facts
 
     def _read(self, name: str, call: Callable[[], Any], row: Callable[[Any], dict]) -> None:
         try:
@@ -263,6 +358,48 @@ class _Held:
                 self.reader._on_failed(self, name, exc)
             return
         self.reader._read_ok(self, name, value)
+
+
+def _claude_reach() -> str | None:
+    from . import claude_setup
+
+    return claude_setup.reach(claude_setup.REACH_TIMEOUT_S)
+
+
+def _cheap_facts() -> tuple[Any, ...]:
+    """What the reach rests on that is cheap to look at: where PATH finds `claude`, and the
+    placed `endpoint.json`'s modification time and size, or None when it is absent."""
+    from . import claude_setup
+
+    try:
+        path = claude_setup.plugin_dir(claude_setup.RUNNER, claude_setup.placed_root()) \
+            / claude_setup.ENDPOINT_FILE
+        info = path.stat()
+        written: Any = (info.st_mtime_ns, info.st_size)
+    except Exception:  # noqa: BLE001 - absent, or not readable: either is a fact
+        written = None
+    return shutil.which("claude"), written
+
+
+def _only_at_differs(old: dict[str, Any] | None, new: dict[str, Any] | None) -> bool:
+    """Whether two readings differ in nothing but their `at`."""
+    if old is None or new is None or "at" not in old:
+        return False
+    return {k: v for k, v in old.items() if k != "at"} == {
+        k: v for k, v in new.items() if k != "at"}
+
+
+def _mark_unread(held: _Held) -> bool:
+    """Under the reader's lock: start or end `held`'s run of unread readings. True when
+    `unread_since` changed."""
+    unread = held.is_unread()
+    if unread and held.unread_since is None:
+        held.unread_since = time.time()
+        return True
+    if not unread and held.unread_since is not None:
+        held.unread_since = None
+        return True
+    return False
 
 
 def _capabilities(session: Any) -> frozenset[str]:
@@ -279,10 +416,19 @@ class Reader:
     closes every watch."""
 
     def __init__(self, *, rescan_s: float | None = None, retry_s: float | None = None,
-                 hold_s: float | None = None):
+                 hold_s: float | None = None, reread_s: float | None = None,
+                 unread_s: float | None = None,
+                 reach: Callable[[], str | None] | None = None,
+                 reach_soon_s: float | None = None, reach_later_s: float | None = None):
         self.rescan_s = RESCAN_S if rescan_s is None else rescan_s
         self.retry_s = RETRY_S if retry_s is None else retry_s
         self.hold_s = HOLD_S if hold_s is None else hold_s
+        self.reread_s = REREAD_S if reread_s is None else reread_s
+        self.unread_s = UNREAD_S if unread_s is None else unread_s
+        self.reach_soon_s = REACH_SOON_S if reach_soon_s is None else reach_soon_s
+        self.reach_later_s = REACH_LATER_S if reach_later_s is None else reach_later_s
+        self._read_reach = _claude_reach if reach is None else reach
+        self._reach: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self._held: dict[str, _Held] = {}
         self._dropped: dict[str, float] = {}
@@ -293,6 +439,8 @@ class Reader:
         self._started = False
         self._scanner = threading.Thread(target=self._scanning, name="turns page scan",
                                          daemon=True)
+        self._reacher = threading.Thread(target=self._reaching, name="turns page reach",
+                                         daemon=True)
 
     # -- the outside ------------------------------------------------------------------------
 
@@ -302,6 +450,7 @@ class Reader:
                 return
             self._started = True
         self._scanner.start()
+        self._reacher.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -339,12 +488,45 @@ class Reader:
         return True
 
     def value(self) -> dict[str, Any]:
-        """The list now: `listed`, `detail` and `sessions`, newest first."""
+        """The list now: `listed`, `detail`, `home`, `reach` and `sessions`, newest
+        first."""
         with self._lock:
             rows = [one.row() for one in self._held.values()]
             listed, detail = self._listed.is_set(), self._detail
+            reach = None if self._reach is None else dict(self._reach)
         rows.sort(key=lambda row: (-(row["started"] or 0.0), row["key"]))
-        return {"listed": listed, "detail": detail, "sessions": rows}
+        return {"listed": listed, "detail": detail, "home": os.path.expanduser("~"),
+                "reach": reach, "sessions": rows}
+
+    # -- the reach -----------------------------------------------------------------------
+
+    def _reaching(self) -> None:
+        from .codex_host import codex_host_available
+
+        seen: Any = None
+        due = 0.0
+        while not self._stop.is_set():
+            cheap = _cheap_facts()
+            if self._reach is None or cheap != seen or time.monotonic() >= due:
+                seen = cheap
+                try:
+                    claude = self._read_reach()
+                except Exception as exc:  # noqa: BLE001 - a reach that fails can't tell
+                    log.warning("reading the reach failed: %s", exc, exc_info=exc)
+                    claude = None
+                if claude not in ("start", "setup", "absent"):
+                    claude = None
+                value = {"claude": claude, "codex": codex_host_available()}
+                pace = self.reach_later_s if claude in ("start", "absent") else \
+                    self.reach_soon_s
+                due = time.monotonic() + pace
+                with self._lock:
+                    changed = value != self._reach
+                    self._reach = value
+                if changed and not self._stop.is_set():
+                    self._notify()
+            if self._stop.wait(self.rescan_s):
+                return
 
     # -- the scanner ---------------------------------------------------------------------
 
@@ -428,9 +610,17 @@ class Reader:
                 return
             first = name not in held.failed
             held.failed.add(name)
+            _mark_unread(held)
         if first:
             log.info("turns' page could not read the %s of %s: %s", name, held.key, err)
             self._notify()
+
+    def _on_turn_ended(self, held: _Held, event: Any) -> None:
+        with self._lock:
+            if self._held.get(held.key) is not held:
+                return
+            held.ended = (time.time(), _text(event.session_id), _int(event.turn_number))
+        self._notify()
 
     def _read_ok(self, held: _Held, name: str, value: dict[str, Any] | None = None) -> None:
         with self._lock:
@@ -438,9 +628,12 @@ class Reader:
                 return
             changed = name in held.failed
             held.failed.discard(name)
-            if name != "watch" and getattr(held, name) != value:
-                setattr(held, name, value)
-                changed = True
+            if name != "watch":
+                held_now = getattr(held, name)
+                if held_now != value:
+                    setattr(held, name, value)
+                    changed = changed or not _only_at_differs(held_now, value)
+            changed = _mark_unread(held) or changed
         if changed:
             self._notify()
 
@@ -465,5 +658,6 @@ class Reader:
                 log.warning("a listener of turns' page failed: %s", exc, exc_info=exc)
 
 
-__all__ = ["HOLD_S", "RESCAN_S", "RETRY_S", "Reader", "agents_row", "facts_row", "info_row",
-           "read_error"]
+__all__ = ["BOX_HARNESSES", "HOLD_S", "REACH_LATER_S", "REACH_SOON_S", "REREAD_S", "RESCAN_S",
+           "RETRY_S", "STALE_REREADS", "UNREAD_S", "Reader", "agents_row", "ended_at", "facts_row",
+           "info_row", "read_error"]

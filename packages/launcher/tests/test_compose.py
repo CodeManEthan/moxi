@@ -112,7 +112,8 @@ def test_every_claude_row_composed_at_once_in_its_order():
         "--permission-mode", "acceptEdits", "--verbose", "--debug", "api"]
     # With turns the brief is the first turn, not the opening prompt.
     assert got.prompt is None and got.first == "Brief from launcher, launched by ann\n\nb"
-    assert got.env == {"MOXI_TURNS_COMMANDS": "exit", "MOXI_LAUNCHER_REQUEST": "r1"}
+    assert got.env == {"MOXI_TURNS_COMMANDS": "exit", "MOXI_USAGE_WARN_AT": "2x",
+                       "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
 def test_the_claude_order_covers_every_row():

@@ -12,7 +12,10 @@ keys and sessions' cursor. `requests` holds one row per request per file, keyed 
 count is NULL and its column is named in `unknown`; 0 means the harness wrote 0. `marks`
 holds the compaction markers the harness wrote, one row per `(file_id, seq, kind)`, and
 `files.marks_read` is 1 when the index holds every marker of the reads that gave the
-file's requests. `meta` holds `index_version`, the last pass and the lanes.
+file's requests. `prompts` holds the prompt ids a Claude transcript wrote, one row per
+`(file_id, turn_id)`, a prompt that drew no request included, and `files.prompts_read` is
+1 when it holds every one the file's reads met. `meta` holds `index_version`, the last
+pass and the lanes.
 
 **The claim.** One request can sit in several files: an archive copy of a transcript, a
 resumed session that repeats its parent's requests. Each key is counted once, by the copy
@@ -141,6 +144,19 @@ CREATE TABLE marks (
 UPDATE files SET marks_read = 1 WHERE excluded IS NOT NULL;
 """
 
+#: Version 3: the prompt ids each Claude transcript wrote. A Claude row's `prompts_read`
+#: starts at 0, so the next read of that file is from no cursor and brings in every prompt
+#: id; an excluded row, and a Codex or OpenCode row, whose reads give none, is settled at
+#: once.
+SCHEMA_3 = """
+ALTER TABLE files ADD COLUMN prompts_read INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE prompts (
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  turn_id TEXT NOT NULL,
+  PRIMARY KEY (file_id, turn_id)) WITHOUT ROWID;
+UPDATE files SET prompts_read = 1 WHERE excluded IS NOT NULL OR harness != 'claude';
+"""
+
 
 @dataclass(frozen=True)
 class Step:
@@ -153,7 +169,7 @@ class Step:
 
 
 #: The schema steps, in order; the store's version is how many have run.
-STEPS: tuple[Step, ...] = (Step(SCHEMA_1), Step(SCHEMA_2))
+STEPS: tuple[Step, ...] = (Step(SCHEMA_1), Step(SCHEMA_2), Step(SCHEMA_3))
 INDEX_VERSION = len(STEPS)
 
 
@@ -302,7 +318,7 @@ def all_meta(conn: sqlite3.Connection) -> dict[str, str]:
 FILE_COLUMNS = ("lane", "harness", "path", "part", "rank", "kind", "session_id", "agent_id",
                 "parent_session", "cwd", "title", "origin", "originator", "project", "size",
                 "mtime_ns", "dev", "ino", "cursor", "first_ts", "last_ts", "excluded",
-                "held", "read_at", "marks_read")
+                "held", "read_at", "marks_read", "prompts_read")
 #: The columns that place a file in the claim's order or take it out of the claim.
 ORDER_COLUMNS = frozenset({"first_ts", "size", "rank", "path", "part", "excluded"})
 
@@ -616,6 +632,27 @@ def settle_marks(conn: sqlite3.Connection, *, lane: str) -> None:
                  (lane,))
 
 
+# --- prompts ----------------------------------------------------------------------------
+
+def add_prompts(conn: sqlite3.Connection, file_id: int, turn_ids: Iterable[str]) -> int:
+    """Store each prompt id under `file_id`; one already there is left as it is, so a
+    prompt that two reads both meet is one row. Returns how many were new."""
+    _require_transaction(conn)
+    before = conn.total_changes
+    conn.executemany("INSERT OR IGNORE INTO prompts (file_id, turn_id) VALUES (?, ?)",
+                     [(file_id, turn_id) for turn_id in turn_ids])
+    return conn.total_changes - before
+
+
+def delete_prompts(conn: sqlite3.Connection, file_ids: Iterable[int]) -> int:
+    """Delete every prompt id of the given files; the rows stay. Returns how many went."""
+    _require_transaction(conn)
+    count = 0
+    for file_id in set(file_ids):
+        count += conn.execute("DELETE FROM prompts WHERE file_id = ?", (file_id,)).rowcount
+    return count
+
+
 # --- the claim --------------------------------------------------------------------------
 
 def claim(conn: sqlite3.Connection, keys: Iterable[int]) -> int:
@@ -750,5 +787,5 @@ __all__ = [
     "get_file", "files", "upsert_file", "update_file", "delete_files", "file_keys",
     "request_row", "unknown_columns", "upsert_requests", "delete_requests",
     "COMPACTION", "MarkRow", "mark_row", "marker_line", "upsert_marks", "delete_marks",
-    "settle_marks", "claim", "claim_all", "check",
+    "settle_marks", "add_prompts", "delete_prompts", "claim", "claim_all", "check",
 ]

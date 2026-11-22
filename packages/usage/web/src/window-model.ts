@@ -7,7 +7,7 @@ import { costWords, countWords } from "./cost-model.ts";
 import { LOCAL, seconds, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { OpenedWindow, SessionRef, Window } from "./feed.ts";
-import { percentWords } from "./limits-model.ts";
+import { capital, percentWords } from "./limits-model.ts";
 
 /** One labelled line: `Window  opened 16:34, resets 21:34 · 52% of it gone, 49% used`. */
 export interface OpenedLine {
@@ -32,7 +32,8 @@ export interface UsedBy {
   label: string;
   /** The dearest sessions that have a name to show; none while no name is read. */
   rows: UsedLine[];
-  /** `6 sessions, 63 requests since 16:34`. */
+  /** `6 sessions, 63 requests since 16:34`; `2 sessions, 9 Opus requests since Mon
+   * 23:58` for a limit that counts one family of models. */
   total: string;
   cost: string;
 }
@@ -87,8 +88,9 @@ function pair(a: number | null, b: number | null, today: string, clock: Clock): 
  *   <session>` when the row's own reading names a session. A reading with no percent
  *   is left out, and with none left the line is absent.
  * - `Used by`: the sessions the answer lists that have a name, then the count of
- *   sessions and requests since the window opened with their cost. Absent when the
- *   answer carries no such report.
+ *   sessions and requests since the window opened with their cost. A limit that counts
+ *   one family of models counts only its requests, and the total names the family.
+ *   Absent when the answer carries no such report.
  */
 export function openedLimit(facts: OpenedFacts, clock: Clock = LOCAL): OpenedLimit {
   const { window, row, now } = facts;
@@ -145,7 +147,8 @@ export function openedLimit(facts: OpenedFacts, clock: Clock = LOCAL): OpenedLim
       rows.push({ name: called, requests: countWords(item.requests, "request"),
                   cost: costWords({ cost: item.cost, complete: item.cost !== null }) });
     }
-    const counts = `${countWords(window.used.count, "session")}, ${countWords(window.used.requests, "request")}`;
+    const family = window.model_family ? `${capital(window.model_family)} request` : "request";
+    const counts = `${countWords(window.used.count, "session")}, ${countWords(window.used.requests, family)}`;
     by = {
       label: USED_BY, rows,
       total: since === null ? counts : `${counts} since ${whenWord(since, today, clock)}`,

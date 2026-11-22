@@ -5,7 +5,7 @@ import {
   choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
   HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
   parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
-  quote, refusalLine, requestOf, shownValue, sourceNote, statusOf,
+  quote, refusalLine, requestOf, resumeBody, shownValue, sourceNote, statusOf,
 } from "../src/panel.ts";
 
 const T = "2026-10-31T10:01:02.123456Z";
@@ -466,4 +466,12 @@ test("the past sessions add the older pages after the first, each launch once", 
   assert.equal(pastView(feed(null, { loading: true })).state, "loading");
   assert.deepEqual(parsePasts({ state: "up", detail: null, sessions: [PAST, { nope: 1 }] }).sessions, [PAST]);
   assert.equal(parsePasts({ state: "up", detail: null }), null);
+});
+
+test("a resume's body carries the brief or brief file typed beside it, and nothing blank", () => {
+  assert.deepEqual(resumeBody("s1", "", ""), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "  \n", " "), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "Carry on.\n", ""), { session: "s1", brief: "Carry on.\n" });
+  assert.deepEqual(resumeBody("s1", "", " /w/brief.md "), { session: "s1", brief_file: "/w/brief.md" });
+  assert.deepEqual(resumeBody("s1", "Go.", "/w/brief.md"), { session: "s1", brief: "Go.", brief_file: "/w/brief.md" });
 });

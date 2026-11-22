@@ -8,10 +8,11 @@ set` never writes a file the connector would refuse:
 - `public_url` is empty, or `https://` with a DNS name and no path (`origin.parse`);
 - `port` is a port, 1 to 65535;
 - each of `redirect_uris` is an absolute `https://` URL with no fragment;
-- `refresh_days` is at least 1.
+- `refresh_days` is at least 1;
+- each of `tools.withheld` is a tool name: not empty, no whitespace.
 
-`enabled` is the daemon's switch, read at each use. `port`, `redirect_uris` and
-`refresh_days` are read once, at the process's start. `public_url` is read with every read
+`enabled` is the daemon's switch, read at each use. `port`, `redirect_uris`,
+`refresh_days` and `tools.withheld` are read once, at the process's start. `public_url` is read with every read
 of the origin (`origin.read`).
 """
 
@@ -70,6 +71,10 @@ def check(text: str) -> None:
     if settings["refresh_days"] < 1:
         raise ConfigError(None, "refresh_days", "a sign-in must last at least a day",
                           "set 1 or more")
+    for name in settings["tools.withheld"]:
+        if not name or any(ch.isspace() for ch in name):
+            raise ConfigError(None, "tools.withheld", f"{name!r} is not a tool name",
+                              "list tool names as moxi connector status shows them")
 
 
 __all__ = ["MODULE", "check", "enabled", "load", "schema"]

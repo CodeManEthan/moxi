@@ -137,8 +137,11 @@ def test_the_page_keeps_the_contract(shell, rig, ui_contexts, ui_component_check
     roster_kit.current(shell, holding([]))
     page = ui_contexts().pages[0]
     # The page's accent is in the roster it places, whose script the home view loaded. It
-    # reads launcher's running sessions, with launcher installed.
-    check = ui_component_check(page, "comms", "page", allow=("cache", "launcher"))
+    # reads launcher's running sessions, with launcher installed, and projects' list while
+    # an idle name is in `Other names` (the rig's standing names), with projects installed.
+    # sessions and turns it reads only for a live session and an open send box, and this
+    # page has neither.
+    check = ui_component_check(page, "comms", "page", allow=("cache", "launcher", "projects"))
     assert check.element == "moxi-comms-page"
     assert any(roster_kit.ROSTER in url for url in check.requests), check.requests
 

@@ -1,6 +1,7 @@
 """What every test of the launcher shares: the one time its launches are named at, a
-short startup watch, and the `slot_target` mark, which skips a test of the slot target on
-native Windows unless the test is also marked `on_windows`."""
+short startup watch, a `/tmp` of its own for scratch launches, and the `slot_target` mark,
+which skips a test of the slot target on native Windows unless the test is also marked
+`on_windows`."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import pytest
 from moxi import config
 
 from moxi_launcher import names, settings, startup
+from moxi_launcher.compose import common
 
 #: Why a test marked `slot_target` is skipped on native Windows.
 SLOT_TARGET_SKIP = ("the slot target needs slots, which runs on Linux, macOS and WSL2, "
@@ -41,6 +43,26 @@ def one_naming_time(monkeypatch):
     """A launch's name holds the minute it was made in, so a test's launches are all
     named at one time: a preview and the launch it previews can't fall in two minutes."""
     monkeypatch.setattr(names, "now", lambda: NAMED_AT)
+
+
+#: `common.SCRATCH_TMP` as the launcher has it, before any test puts a stand-in there.
+_REAL_SCRATCH_TMP = common.SCRATCH_TMP
+
+
+@pytest.fixture
+def real_scratch_tmp():
+    """The folder the launcher makes scratch parents in outside a test."""
+    return _REAL_SCRATCH_TMP
+
+
+@pytest.fixture(autouse=True)
+def own_scratch_tmp(tmp_path, monkeypatch):
+    """A scratch launch made in this process goes under the test's own stand-in for
+    `/tmp`, so `scratch_root()` is `<tmp_path>/tmp/scratch-<uid>`, never the real one."""
+    stand_in = tmp_path / "tmp"
+    stand_in.mkdir()
+    monkeypatch.setattr(common, "SCRATCH_TMP", stand_in)
+    return stand_in
 
 
 #: The startup watch's bound, in seconds, in a test whose launcher config doesn't set

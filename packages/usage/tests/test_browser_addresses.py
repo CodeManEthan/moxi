@@ -1,7 +1,8 @@
 """The addresses of usage's page and its opened limit row in a browser, through a real
-shell that starts usage's real page server: each address opened directly, the address
-rewritten in place when a piece opens or closes (so Back leaves the page and Forward
-comes back to the piece), a reload landing on the same piece, the range, the filters and
+shell that starts usage's real page server: each address opened directly, a new history
+entry when a move goes to another view of the page (Sessions, a session, its subagents,
+Prices) and the address rewritten in place when it opens or closes a limit row, Models
+or Kinds, a reload landing on the same piece, the range, the filters and
 the measure kept from one placement of the page to the next and never written into the
 address, an address the page does not have, and a limit row opened with every line, with
 each line absent, while its read is out, when it fails and when it is refused, and at a
@@ -29,13 +30,15 @@ pytestmark = [pytest.mark.browser,
 
 MODEL = "claude-sonnet-4-5"
 OTHER_MODEL = "claude-haiku-4-5"
+OPUS_MODEL = "claude-opus-4-5"
 FIRST = "0190b000-0000-7000-8000-0000000000a1"
 SECOND = "0190b000-0000-7000-8000-0000000000a2"
 AGENT = "a0190b00000000a1"
 #: Two sessions of three requests each, on two models. The first began an hour ago,
-#: inside Claude's 5-hour window, and has a subagent of two requests.
+#: inside Claude's 5-hour window, and has a subagent of two requests on Opus.
 SESSIONS = [
-    {"session": FIRST, "project": "proj-a", "hours_ago": 1, "agent": AGENT, "model": MODEL},
+    {"session": FIRST, "project": "proj-a", "hours_ago": 1, "agent": AGENT, "model": MODEL,
+     "agent_model": OPUS_MODEL},
     {"session": SECOND, "project": "proj-b", "hours_ago": 30, "agent": None, "model": OTHER_MODEL},
 ]
 
@@ -59,7 +62,7 @@ for spec in json.loads(sys.argv[1]):
         for m in range(2):
             child.user("Look into it.")
             child.assistant("Found it.", usage=T.usage(input_tokens=100, output=400),
-                            request_id=f"req_{spec['agent'][-4:]}{m}", model=spec["model"])
+                            request_id=f"req_{spec['agent'][-4:]}{m}", model=spec["agent_model"])
     t.write()
 """
 
@@ -67,8 +70,10 @@ for spec in json.loads(sys.argv[1]):
 #: - Claude's 5-hour window opened two hours ago and has three readings: every line.
 #: - Claude's weekly window has one reading at 0%: its start is not known, so it says
 #:   only its reset, and nothing of who used it.
-#: - Claude's weekly Opus window has one reading at 33%: a scoped limit, so its start is
-#:   known and nothing says who used it.
+#: - Claude's weekly Opus window has one reading at 33%: a limit scoped to Opus, so its
+#:   start is known and it was used by the first session's subagent alone.
+#: - Claude's weekly oauth-apps window has one reading at 12%: a scoped limit whose
+#:   reading names no models, so it says no `Used by`.
 READINGS = """
 import time
 from moxi_usage import readings
@@ -80,6 +85,7 @@ found = [
 ] + [
     Reading("claude", "plan", 10080, "seven_day", 0.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
     Reading("claude", "opus", 10080, "seven_day_opus", 33.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
+    Reading("claude", "apps", 10080, "seven_day_oauth_apps", 12.0, now + 5 * 86400, now - 240, "session-usage", "s1"),
 ]
 conn = readings.open_store()
 try:
@@ -145,8 +151,13 @@ def lines_of(panel):
 
 
 def session_row(panel, session: str):
-    """A row of the Sessions section, by the harness and session it opens."""
-    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
+    """The Sessions table's row of a session, by the harness and session it opens."""
+    return panel.locator(f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{session}"]')
+
+
+def placed_row(panel, session: str):
+    """The row of the session opened in the Sessions section, first in it."""
+    return panel.locator(f'section[data-group=sessions] [data-list=placed] moxi-ui-row[data-key="claude/{session}"]')
 
 
 def price_table(panel):
@@ -170,7 +181,7 @@ def test_the_page_alone_has_nothing_opened(seeded, page):
 
 #: Each section's address, the address the page keeps for it, and what it shows.
 SECTIONS = {
-    "sessions": ("sessions", f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]'),
+    "sessions": ("sessions", f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{FIRST}"]'),
     f"sessions/claude/{FIRST}": (f"sessions/claude/{FIRST}", "[data-part=session] [data-line=subagents]"),
     f"sessions/claude/{FIRST}/{AGENT}": (f"sessions/claude/{FIRST}/{AGENT}",
                                          "[data-part=agent] svg[data-part=session-chart] rect.bar"),
@@ -243,9 +254,13 @@ def test_a_limit_address_whose_window_has_no_fresh_row_closes_to_the_page(seeded
     expect(lines_of(panel)).to_have_count(0)
 
 
-# --- the address is rewritten in place -----------------------------------------------------
+# --- a history entry for each view -----------------------------------------------------------
 
-def test_opening_and_closing_rewrite_the_address_and_add_no_history_entry(seeded, page):
+def section_count(panel, key: str):
+    return panel.locator(f"[data-part=below] section[data-group={key}] [data-part=count]")
+
+
+def test_a_limit_row_models_and_kinds_add_no_history_entry_and_the_page_stays_placed(seeded, page):
     panel = open_page(page)
     expect(limit(panel, FIVE)).to_be_visible()
     entries = page.evaluate("history.length")
@@ -257,23 +272,47 @@ def test_opening_and_closing_rewrite_the_address_and_add_no_history_entry(seeded
     expect(page).to_have_url(f"{seeded.url}/m/usage/limit/claude/opus/10080")
     expect(limit(panel, FIVE)).to_have_attribute("aria-expanded", "false")
     expect(opened(panel)).to_have_count(1)
-    # A section takes the row's place.
-    panel.locator("[data-group=cost]").get_by_role("link", name="Prices").click()
-    expect(page).to_have_url(f"{seeded.url}/m/usage/prices")
-    expect(price_table(panel)).to_be_visible()
+    # Models and Kinds take the row's place, and the row theirs.
+    section_count(panel, "models").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/models")
     expect(opened(panel)).to_have_count(0)
-    # And a row takes the section's.
+    section_count(panel, "kinds").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/kinds")
     limit(panel, OPUS).click()
-    expect(price_table(panel)).to_have_count(0)
+    expect(page).to_have_url(f"{seeded.url}/m/usage/limit/claude/opus/10080")
     limit(panel, OPUS).get_by_text("Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/")
     expect(opened(panel)).to_have_count(0)
+    # Each rewrote the entry the page is on.
     assert page.evaluate("history.length") == entries
     # The page was not placed again for any of it.
     assert panel.evaluate("el => el.isConnected")
 
 
-def test_back_leaves_the_page_and_forward_comes_back_to_the_opened_piece(seeded, page):
+def test_prices_adds_a_history_entry_and_back_returns_to_the_row_that_was_open(seeded, page):
+    panel = open_page(page)
+    expect(limit(panel, FIVE)).to_be_visible()
+    entries = page.evaluate("history.length")
+    limit(panel, FIVE).click()
+    expect(opened(panel)).to_have_count(1)
+    panel.locator("[data-group=cost]").get_by_role("link", name="Prices").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/prices")
+    expect(price_table(panel)).to_be_visible()
+    # A row over the price table is the page again: one more entry.
+    limit(panel, OPUS).click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/limit/claude/opus/10080")
+    expect(price_table(panel)).to_have_count(0)
+    assert page.evaluate("history.length") == entries + 2
+    assert panel.evaluate("el => el.isConnected")
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/prices")
+    expect(price_table(panel_of(page))).to_be_visible()
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/limit/claude/plan/300")
+    expect(limit(panel_of(page), FIVE)).to_have_attribute("aria-expanded", "true")
+
+
+def test_back_leaves_the_page_from_a_limit_row_and_forward_comes_back_to_it(seeded, page):
     page.goto("/m/ui/modules")
     panel = open_page(page)
     limit(panel, FIVE).click()
@@ -306,7 +345,7 @@ def test_a_reload_lands_on_the_piece_that_was_open(seeded, page):
 def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     panel = open_page(page, "sessions")
     entries = page.evaluate("history.length")
-    session_row(panel, FIRST).get_by_role("link", name="Open").click()
+    session_row(panel, FIRST).get_by_role("link").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
     panel.locator("[data-line=subagents]").get_by_role("button", name="Show").click()
     row = panel.locator(f'[data-part=agents] moxi-ui-row[data-agent="{AGENT}"]')
@@ -316,9 +355,33 @@ def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     # The agent's act closes it back to the session, and the session's to the section.
     row.get_by_role("link", name="Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
-    session_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
+    placed_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
-    assert page.evaluate("history.length") == entries
+    # The session, its subagent, the session and the section are four views, four entries.
+    assert page.evaluate("history.length") == entries + 4
+
+
+def test_back_from_a_session_opened_from_the_table_returns_to_the_table(seeded, page):
+    page.goto("/m/ui/modules")
+    panel = open_page(page)
+    panel.locator("section[data-group=sessions] [data-part=count]").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
+    table = panel.locator("section[data-group=sessions] table[data-table=sessions]")
+    table.locator(f'tr[data-row="claude/{FIRST}"] td').last.click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
+    expect(placed_row(panel, FIRST)).to_have_attribute("open", "")
+    # Back: the table, with no session opened over it.
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
+    panel = panel_of(page)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]").first).to_be_visible()
+    expect(panel.locator("section[data-group=sessions] [data-list=placed]")).to_have_count(0)
+    # Back again: the page with nothing open, then the page before it.
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/")
+    expect(panel_of(page).locator("section[data-group=sessions] table")).to_have_count(0)
+    page.go_back()
+    expect(page).to_have_url(f"{seeded.url}/m/ui/modules")
 
 
 # --- the range, the filters and the measure ------------------------------------------------
@@ -371,7 +434,7 @@ def test_the_range_and_filters_are_kept_across_a_new_placement_and_stay_out_of_t
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     panel = panel_of(page)
     expect_filters_set(panel)
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(1)
     # Another address of the page keeps them too.
     page.evaluate("async () => (await import('/m/ui/client.js')).navigate('usage', 'models')")
     panel = panel_of(page)
@@ -385,7 +448,7 @@ def test_a_new_document_opens_on_the_last_thirty_days_with_no_filter(seeded, pag
     set_filters(panel)
     page.reload()
     panel = panel_of(page)
-    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(2)
+    expect(panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")).to_have_count(2)
     expect(range_button(panel)).to_have_text("last 30 days▾")
     expect(panel.locator("[data-part=filters] [data-filter=model] button.pick")).to_have_text("all▾")
     expect(panel.locator("[data-part=measure]").get_by_role("button", name="Cost")).to_have_attribute(
@@ -441,12 +504,25 @@ def test_a_window_whose_start_is_not_known_says_its_reset_and_no_who(seeded, pag
     expect(lines.locator("[data-opened=note]")).to_have_text([re.compile(r"^No fill time: .+")])
 
 
-def test_a_scoped_limit_says_its_window_and_one_reading_and_not_who_used_it(seeded, page):
+def test_a_scoped_limit_says_its_window_one_reading_and_whose_opus_requests_count(seeded, page):
     panel = open_page(page, "limit/claude/opus/10080")
     lines = opened(panel)
     expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(
         rf"^opened {WHEN}, resets {WHEN} · \d+% of it gone, 33% used$"))
     expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^33% at {WHEN}{LAST_FROM}$"))
+    used = lines.locator("[data-opened=used]")
+    expect(used.locator(".k")).to_have_text("Used by")
+    # Only the subagent's two Opus requests count; the Sonnet and Haiku ones do not.
+    expect(used.locator("[data-part=used-row]")).to_have_text(
+        [re.compile(rf"^\s*proj-a · started {WHEN} · 2 requests\s*(at least )?\$\d+\.\d\d$")])
+    expect(used.locator("[data-part=used-total] span").first).to_have_text(
+        re.compile(rf"^1 session, 2 Opus requests since {WHEN}$"))
+
+
+def test_a_scoped_limit_whose_reading_names_no_models_says_no_who(seeded, page):
+    panel = open_page(page, "limit/claude/apps/10080")
+    lines = opened(panel)
+    expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(r"12% used$"))
     expect(lines.locator("[data-opened=used]")).to_have_count(0)
 
 

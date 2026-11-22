@@ -89,9 +89,11 @@ interface Answered<A> {
 const heldCold = (answer: SendAnswer | null): boolean =>
   answer !== null && answer.outcome === "would-send" && answer.recipients.some((one) => one.delivery === "held-cold");
 
-/** The words of a line the box shows, by the act that gave it; `to` is the box's address. */
-export function checkLine(answered: Answered<SendAnswer>, when: (at: number) => string, to: string | null = null): Said {
-  return answered.status === 200 && answered.answer !== null ? checkWords(answered.answer, when, to)
+/** The words of a line the box shows, by the act that gave it; `to` is the box's address,
+ * and `working` whether an address's session has a turn open now. */
+export function checkLine(answered: Answered<SendAnswer>, when: (at: number) => string, to: string | null = null,
+                          working: (qualified: string) => boolean = () => false): Said {
+  return answered.status === 200 && answered.answer !== null ? checkWords(answered.answer, when, to, working)
     : transportWords("check", answered.status);
 }
 
@@ -292,8 +294,11 @@ export class SendBox {
     this.#options.onActed("take-back");
   }
 
-  /** What the box shows, with `queue` the address's queue as the page holds it now. */
-  view({ when, queue = null }: { when: (at: number) => string; queue?: Queue | null }): BoxView {
+  /** What the box shows, with `queue` the address's queue as the page holds it now and
+   * `working` whether an address's session has a turn open now, as turns read it. */
+  view({ when, queue = null, working = () => false }: {
+    when: (at: number) => string; queue?: Queue | null; working?: (qualified: string) => boolean;
+  }): BoxView {
     const checkAnswer = this.checked?.answer ?? null;
     let deliver: BoxView["deliver"] = null;
     if (this.#options.hasCache) {
@@ -302,7 +307,7 @@ export class SendBox {
             menu: DELIVERIES.map((one) => ({ value: one.held, label: one.word, says: null, current: one.held === this.held })) };
     }
     let line: Said | null = null;
-    if (this.lineFrom === "check" && this.checked !== null) line = checkLine(this.checked, when, this.to);
+    if (this.lineFrom === "check" && this.checked !== null) line = checkLine(this.checked, when, this.to, working);
     else if (this.lineFrom === "send" && this.sent !== null) {
       const read = queue !== null && queue !== this.queueAtSend ? waitingIn(queue, this.to) : null;
       line = sendLine(this.sent, when, read, this.to);

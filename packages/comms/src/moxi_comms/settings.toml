@@ -209,6 +209,22 @@ label = "Oldest a name with no cursor gets"
 line = "Read only when comms 0.2's files move."
 unit = "hours"
 
+[archive.record]
+type = "path"
+default = ""
+doc = "An older comms' record file (its record.db), read in place and never written: history lists its messages before comms.db's, and reply finds a message by an id comms.db skipped. Empty: none."
+read = "start"
+label = "Older record file"
+line = "Read in place, never written. Empty: none."
+
+[archive.identities]
+type = "path"
+default = ""
+doc = "An older comms' identities file (its directory.db), read in place and never written: every identity it retired is refused at bind and as a recipient. Empty: none."
+read = "start"
+label = "Older identities file"
+line = "Read in place, never written. Empty: none."
+
 # Keys an earlier comms read, kept declared so a file that still sets one is told what
 # to do rather than refused as unknown.
 

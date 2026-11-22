@@ -260,6 +260,8 @@ def test_an_older_comms_leaves_a_live_wrapper_started(conn, monkeypatch):
      "identity coder@moxi is held by claude session other"),
     (state("reserved", module="launcher"), targets.IDENTITY_TAKEN, exits.REFUSED,
      "identity coder@moxi is reserved for launcher"),
+    (state("reserved", registered=True), targets.IDENTITY_TAKEN, exits.REFUSED,
+     "identity coder@moxi is a send-only name a program registered"),
     (state("free"), targets.COMMS_FAILED, exits.ERROR, None),
     (DaemonError("garbled"), targets.COMMS_FAILED, exits.ERROR,
      "comms could not say why: garbled")])

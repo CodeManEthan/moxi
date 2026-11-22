@@ -2,6 +2,26 @@
 
 ## 0.1.11 (unreleased)
 
+- A `moxi.ipc` Unix server closed within a second of an accept failing at the
+  file-descriptor limit no longer logs errors after close: `close()` cancels the accept
+  retries asyncio still holds for its listener, each of which logged
+  `Invalid file descriptor: -1` with a traceback when it ran on the closed socket.
+- `moxi.proc.run` takes `first_signal` and `grace_s`: on POSIX a timed-out run sends its
+  group that signal first (`"SIGINT"`, which test runners stop cleanly on) and waits
+  `grace_s` seconds before the SIGKILL. The defaults, SIGTERM and `KILL_GRACE`, are
+  unchanged. A module that passes them needs `moxi>=0.1.11`.
+- On Windows `moxi doctor --costs` shows a module's daemons' open handles in a row of its
+  own, `cost handles`, as `N open handles`, and never compares them with the module's
+  `fds` budget, a POSIX fd limit: a handle count also holds events, threads and registry
+  keys, so the doctor no longer warns `232 open files, over its budget 64` with nothing
+  wrong. A Windows `Measure` has `handles` and `fds` None; elsewhere `handles` is None
+  and `fds` and its warning are unchanged.
+- On Windows, removing a unit (`moxi uninstall`, or a unit a module no longer declares)
+  ends its task and waits, up to 5 s, until the task no longer reads `Running` before it
+  deletes it, so the uninstall's package step no longer meets the daemon still holding
+  its `.exe` shim (os error 32). A task still running at 5 s is deleted anyway, with a
+  line saying so. When the task's state can't be read (no PowerShell, or a read that
+  fails, as over ssh), it is deleted without the wait, with a line saying why.
 - `moxi.proc.exec_env(lifeline_fd, env=None)` gives a process about to exec into a
   program the `"fd"` lifeline `spawn` gives a child it starts: it makes the pipe's read
   end inheritable and returns the environment with `MOXI_LIFELINE_FD` naming it, so the

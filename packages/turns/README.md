@@ -9,10 +9,13 @@ Other modules call it to put input into a session (a new turn, a delivery held u
 running turn ends, a steer into the running turn, `/clear`, `/compact` and `/exit`,
 optionally stopping the session's background shells) and to take session events out: the
 session ready, a turn started, steered or ended, naming each delivery it took by the
-caller's `ref`, and the session gone. A caller can also read the session's subagents,
-teammates and Codex background terminals; the list says `complete` false when turns could
-not read it whole. A holder can be asked at each Stop before the turn ends, and a
-registered module can add context at a session's start or at a prompt.
+caller's `ref`, and the session gone. A delivery can name the module that asked and the
+names its text speaks for, and its end carries the turn's final text. A caller can also
+read the session's subagents, teammates and Codex background terminals; the list says
+`complete` false when turns could not read it whole. A holder can be asked at each Stop
+before the turn ends, and a registered module can add context at a session's start or at
+a prompt. A prompt says whether the person typed it, which delivery it is when turns
+handed it in, and whether it opens a turn or joins one already running.
 
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the
@@ -74,11 +77,17 @@ its switch, for example `moxi config set turns guards.removal true`:
 - **Question mode** (`turns.question-mode`, switch `guards.question_mode`): lets Claude
   Code's `AskUserQuestion` run only in a turn where you typed something that mentions a
   question, and never from a subagent. A prompt that asks to go through open questions
-  gets a one-line reminder of this.
+  gets a one-line reminder of this. Until the session's endpoint has sent its guards,
+  Claude Code's runner can't tell whether question mode is on, so it refuses every
+  `AskUserQuestion` call and tells the agent to ask in prose.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
-guards that run beyond the switches: guard ids or paths to guard files.
+guards that run beyond the switches: guard ids or paths to guard files. A module's guard
+can also name the sessions it runs in, by a function of the session's environment that
+turns asks once, when the session starts; it then runs in those sessions with no switch
+and no entry on `guards.run`. `moxi doctor turns` asks that function in its own
+environment, so a guard on only in certain sessions reads off there.
 
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse
@@ -98,7 +107,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `stop_handler.wait_ms`: how long a Stop waits for the session's stop handler, in
   milliseconds. Default 2000.
 - `listen.wait_ms`: how long an event waits for the registered listeners, in
-  milliseconds. Default 2000.
+  milliseconds. Default 2000. A module's prompt listener can ask for a longer wait on a
+  prompt in the sessions it serves; that session's prompt then waits the longer bound,
+  on Claude Code and Codex alike.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
   compacted, in order: module names, file paths and run entries. A module not installed
   is skipped. A run entry, `run:<path>`, runs that program at each start, with the
@@ -118,28 +129,73 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   Default 3000.
 - `after_tool.wait_ms`: how long the after-tool listeners may take on one tool call,
   together, in milliseconds. Default 300.
-- `question_mode.origins`: the prompt origins question mode counts as yours. Default
-  `["composer"]`, a prompt typed at this terminal.
+- `prompt.own_origins`: the prompt origins that count as yours, which question mode and
+  every prompt listener read (a `prompt` event's `own`). Default `["composer", "bridge"]`:
+  `composer` is a prompt typed at this terminal, `bridge` one sent from the Claude apps
+  through Remote Control. On Codex a prompt typed in the window is `composer`, except
+  while a delivery the host handed in is still out and the prompt's text matches none:
+  then it carries no origin.
 - `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
-  question-mode reminder. Default `["prose"]`.
+  question-mode reminder. Default `["prose", "pros"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
-`stop_handler.wait_ms` instead.
+`stop_handler.wait_ms` instead. `question_mode.origins` is renamed: a file that still sets
+it is told to set `prompt.own_origins` instead.
 
 ## The panel
 
 With the `ui` extra (`moxi-ui`), turns has a panel in the browser UI shell at `/m/turns/`:
-the live list of every running session turns can reach. Each row shows the session's
-harness, the start of its session id, its working directory, when it started, its turn
-number and whether a turn is open, how many agents are busy, a draft in the prompt box,
-its last ready and its versions; a reading taken while the turn moved is marked stale. A
-session's trouble, and any session turns can't watch or read, are said on its row, and
-its agents are listed under it with their state and whether it is final. The list follows
-the sessions as they start, turn and end, through the shell's push channel.
+the live list of every running session turns can reach. It only reads: nothing on it puts
+input into a session or acts on one. Its page server finds sessions by rescanning turns'
+runtime directory every 2 s and holds one watch per session; turns adds no daemon for it.
 
-The panel only reads: nothing on it puts input into a session or acts on one. Its page
-server finds sessions by rescanning turns' runtime directory every 2 s and holds one watch
-per session; turns adds no daemon for it.
+- **Groups and order.** A session is in the first group that holds: `problem` (its link to
+  Moxi has trouble, or Moxi can't read its live state), `idle` (read, no turn open) or
+  `working` (read, a turn open). The labels are `1 problem` or `<n> problems`, `<n> idle`
+  and `<n> working`; a group with no row isn't drawn. Within a group the latest change
+  comes first. A session with no first read yet isn't drawn until it has one.
+- **A row.** Line one is the session's name, a dim `where`, and at the right when it
+  came into its state (`since 09:40`, with a day word when it isn't today); a problem
+  row says its state there too (`idle since 09:40`). The name is the working directory's
+  last segment and when the session started (`parser · started today 08:20`); a session
+  with no directory is `Claude Code session` or its harness's name. Line two is what is
+  busy: `1 subagent busy` and `1 teammate busy` with the entry's description,
+  `<n> shells running`, `may hold a draft` for a Claude Code session whose prompt box may
+  hold text. A problem row says its lead and reason instead (`Its link to Moxi has
+  trouble`, `Moxi can't read its live state`, then why). A row with nothing to say is one
+  line.
+- **The opened row.** `Open` opens one row at a time and writes `session/<key>` to the
+  address, so a link opens that row and Back leaves the page; the address survives a
+  `/clear`. The opened row adds a line each for `Now` (`working on turn 4 since 09:40`),
+  `Agents` (each subagent, teammate and shell with its state, busy ones in the text
+  colour, and `not known` when the list could not be read whole), `Prompt box` (`empty`
+  or `may hold a draft`), `Session` (harness, start, working directory) and `Details`
+  (process id, ready time and source, turns' version and the runner's), and `Copy id`,
+  which copies the session id.
+- **The reach line.** Under the list, one dim line says which sessions show here and
+  which don't, from what turns finds: an interactive Claude Code session shows from its
+  start once its plugins are installed, a Claude Code session started by hand before
+  `moxi install turns` can't show yet, and a Codex or OpenCode session shows only when
+  Moxi launched it in a terminal or a slot, a Codex one only with turns' Codex host
+  installed (the `codex` extra). With Claude Code missing it says to run
+  `moxi install turns` once it is installed. Where the line names the command it carries
+  `Copy`. `Settings › turns` sits at its right.
+- **Launcher's join.** With `moxi-launcher` installed, a session Moxi launched in a
+  terminal or a slot takes its launch's name (`kestrel-builder`) and its `where`
+  (`slot 2 · kestrel-web`), paired by session id. A launch with no session id, or an id
+  two rows share, names nothing.
+- **States.** A read still out after 400 ms shows `Reading…`. When the page server stops
+  answering, the first row says `Moxi can't read the live sessions` and what it answered,
+  with when the list was last read, and the last rows stay dim with no `Open`. A scan that
+  fails says `Moxi couldn't look for sessions` over the rows last read. With no session,
+  `No session is running.` and the reach line; with Claude Code missing and no launcher,
+  `No session can show here yet.` An address that names no listed session opens the list
+  with `That session isn't running now.` While a session's watch is down but its reads
+  answer, its row keeps its group and says `read every 30 s` on a dim line of its own:
+  the page server reads every session again within 30 s.
+- **Reading.** The list follows the shell's push channel as sessions start, turn and end,
+  is read again when the tab is shown, and is redrawn once a minute for its day words.
+  A Claude Code run with no window (headless) spawns no endpoint and is not listed.
 
 ## Requirements
 

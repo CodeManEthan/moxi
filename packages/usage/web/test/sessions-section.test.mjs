@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  contextWords, SessionList, sessionLine, sessionsClosed, sessionsTable, spanWords,
+  BOARD_PAGE, BOARD_START, boardWindow, contextWords, LOAD_MORE, moveCursor, nextOrder, SessionList, sessionLine, sessionsBoard, sessionsClosed, spanWords,
 } from "../src/sessions-section.ts";
-import { earlierLine, sessionLists, sessionsPath } from "../src/sessions-model.ts";
+import { boardPath, listRead, sessionsPath } from "../src/sessions-model.ts";
 import { START } from "../src/filter-model.ts";
 
 const UTC = {
@@ -20,7 +20,7 @@ const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_rea
 const row = (id, cost, extra = {}) => ({ ...sums({ cost, requests: 15, tokens: 1200 }), harness: "claude",
   session_id: id, name: null, folder: "/work/proj-a", started: at("2026-11-03 08:52"), known: true,
   cwd: "/work/proj-a", project: null, models: ["m-a"], first_ts: at("2026-11-03 08:52"),
-  last_ts: at("2026-11-03 10:20"), context: null, ...extra });
+  last_ts: at("2026-11-03 10:20"), turns: null, subagent_share: null, context: null, ...extra });
 const answer = (rows, extra = {}) => ({ since: null, until: null, tz: "UTC", filters: [], rows,
   total: sums({ cost: 20 }), unpriced_models: [], rules: [], index: { passed: false, last_pass: 1, note: null },
   today: TODAY, top: rows.length, skip: 0, count: rows.length, more: 0, ...extra });
@@ -93,39 +93,137 @@ test("a row with no model and a cost not whole leaves the models out and says wh
   assert.match(line.why, /tokens have no price/);
 });
 
-test("the table holds every figure of the rows shown, naming the list when two show rows", () => {
-  const one = sessionsTable([{ label: "This week", rows: [row("s-1", 5.35, { context: { tokens: 10, window: 100 } })] },
-                             { label: "Earlier", rows: [] }], TODAY, false, null, UTC);
-  assert.deepEqual(one.columns.map((column) => column.label),
-    ["Session", "Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens", "Cost"]);
-  assert.deepEqual(one.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
-                                       "Tue 10:20", "10 of 100", "15", "1.20k", "$5.35"]);
-  const two = sessionsTable([{ label: "This week", rows: [row("s-1", 2, { project: "proj-b" })] },
-                             { label: "Earlier", rows: [row("s-1", 1, { unpriced_tokens: 9, complete: false })] }],
-                            TODAY, true, null, UTC);
-  assert.deepEqual(two.columns.map((column) => column.label).slice(0, 4), ["List", "Session", "Project", "Folder"]);
-  assert.equal(two.columns.at(-1).label, "Not whole");
-  // A session on both sides of the cut is a row of each list, kept apart.
-  assert.deepEqual(two.rows.map((line) => [line.key, line.cells[0], line.cells[2]]),
-                   [["0:claude/s-1", "This week", "proj-b"], ["1:claude/s-1", "Earlier", ""]]);
+test("the table: project or folder, session, start, active, turns, the four classes, share and cost", () => {
+  const list = listRead(answer([row("s-1", 5.35, { context: { tokens: 10, window: 100 }, fresh_input: 300, cache_write: 400,
+                                                cache_read: 200, output: 300, turns: 4, subagent_share: 0.25 })],
+                               { count: 54, more: 53 }));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  assert.deepEqual(board.columns.map((column) => [column.label, column.sort]), [
+    ["Folder", "project"], ["Session", null], ["Started", "started"], ["Active", "active"], ["Turns", "turns"],
+    ["Input", "fresh_input"], ["Cache create", "cache_write"], ["Cache read", "cache_read"], ["Output", "output"],
+    ["Subagent share", "subagent_share"], ["Est. cost", "cost"]]);
+  assert.deepEqual(board.rows[0].cells, ["proj-a", "proj-a · started Nov 3 08:52", "Tue 08:52", "1h 28m", "4",
+                                         "300", "400", "200", "300", "", "$5.35"]);
+  assert.equal(board.nameAt, 1);
+  assert.equal(board.rows[0].badge, null);
+  // The subagent share is a meter in its column, named for a reader that cannot see it.
+  assert.deepEqual(board.rows[0].share, { value: 0.25, label: "Subagent share 25%" });
+  // Active and Turns say what they count on hover; no other column has a hover.
+  assert.deepEqual(board.columns.filter((column) => column.title !== null).map((column) => [column.label, column.title]),
+                   [["Active", "First → last request (not the file's mtime)"],
+                    ["Turns", "Prompts in the main session file; never summed with subagents"]]);
+  assert.equal(board.rows[0].key, "claude/s-1");
+  assert.deepEqual(board.rows[0].session, { harness: "claude", id: "s-1" });
+  // The column sorted by says its direction; the others say none; one with no sort says nothing.
+  const cost = board.columns.find((column) => column.label === "Est. cost");
+  assert.deepEqual([cost.aria, cost.arrow], ["descending", "↓"]);
+  assert.deepEqual([board.columns[4].aria, board.columns[4].arrow], ["none", null]);
+  assert.equal(board.columns[1].aria, null);
+  assert.equal(board.line, "54 sessions · showing 1");
+  assert.equal(board.more, true);
+});
+
+test("with projects the project column takes the project sort; a cost not whole says why", () => {
+  const list = listRead(answer([row("s-1", 2, { project: "proj-b" }), row("s-2", 1, { unpriced_tokens: 9, complete: false })]));
+  const board = sessionsBoard(list, { sort: "started", order: "asc" }, TODAY, true, null, UTC);
+  assert.deepEqual(board.columns.slice(0, 3).map((column) => [column.label, column.sort]),
+                   [["Project", "project"], ["Session", null], ["Started", "started"]]);
+  assert.deepEqual([board.columns[2].aria, board.columns[2].arrow], ["ascending", "↑"]);
+  // The cost column is the last; a row not whole carries why, for the mark in that cell.
+  assert.equal(board.columns.at(-1).label, "Est. cost");
+  assert.deepEqual(board.rows.map((line) => [line.cells[0], line.cells.at(-1), line.why]),
+                   [["proj-b", "$2.00", null], ["", "at least $1.00", "9 tokens have no price"]]);
+  assert.deepEqual([board.line, board.more], ["2 sessions · showing 2", false]);
+});
+
+test("a session with no turn ids counts 0 turns; a share not known has no meter", () => {
+  const list = listRead(answer([row("s-1", 2), row("s-2", 1, { turns: 0, subagent_share: 0 }),
+                                row("s-3", 1, { turns: 12, subagent_share: 0.004 })]));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  const at = (label) => board.columns.findIndex((column) => column.label === label);
+  assert.deepEqual(board.rows.map((line) => [line.cells[at("Turns")], line.cells[at("Subagent share")]]),
+                   [["0", ""], ["0", ""], ["12", ""]]);
+  assert.deepEqual(board.rows.map((line) => line.share),
+                   [null, { value: 0, label: "Subagent share 0%" }, { value: 0.004, label: "Subagent share 0%" }]);
+});
+
+test("each token class cell has a bar against its column's most among the rows read, in the class's shade", () => {
+  const list = listRead(answer([row("s-1", 2, { fresh_input: 300, cache_write: 0, cache_read: 50, output: 10 }),
+                                row("s-2", 1, { fresh_input: 150, cache_write: 0, cache_read: 200, output: 40 })]));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  const classes = ["Input", "Cache create", "Cache read", "Output"].map(
+    (label) => board.columns.findIndex((column) => column.label === label));
+  assert.deepEqual(board.rows.map((line) => classes.map((at) => line.bars[at].fraction)),
+                   [[1, 0, 0.25, 0.25], [0.5, 0, 1, 1]]);
+  assert.deepEqual(classes.map((at) => board.rows[0].bars[at].shade), [4, 2, 3, 1]);
+  // No other cell has a bar.
+  assert.deepEqual(board.rows[0].bars.map((bar, at) => (bar === null ? null : at)).filter((at) => at !== null), classes);
+  assert.equal(board.rows[0].bars.length, board.rows[0].cells.length);
+});
+
+test("a Codex session's name has a badge that says how it is priced", () => {
+  const list = listRead(answer([row("s-1", 2, { harness: "codex" }), row("s-2", 1)]));
+  const board = sessionsBoard(list, BOARD_START, TODAY, false, null, UTC);
+  assert.deepEqual(board.rows.map((line) => line.badge),
+                   [{ text: "codex", title: "A Codex session, priced at OpenAI list rates" }, null]);
+});
+
+test("a click on the sorted column turns it around; another column starts highest first", () => {
+  assert.deepEqual(nextOrder(BOARD_START, "cost"), { sort: "cost", order: "asc" });
+  assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "cost"), { sort: "cost", order: "desc" });
+  assert.deepEqual(nextOrder({ sort: "cost", order: "asc" }, "started"), { sort: "started", order: "desc" });
+});
+
+test("a table row with no session id opens nothing", () => {
+  const list = listRead(answer([row(null, 2, { folder: null, cwd: "/work/loose" })]));
+  assert.equal(sessionsBoard(list, BOARD_START, TODAY, false, null, UTC).rows[0].session, null);
 });
 
 test("the table writes a folder from the home folder, and as its last segment with no home read", () => {
-  const rows = [row("s-1", 2, { folder: "/home/alice/work/proj-a" }), row("s-2", 1, { folder: "/srv/proj-b" })];
-  const folders = (home) => sessionsTable([{ label: "This week", rows }], TODAY, false, home, UTC).rows.map((line) => line.cells[1]);
+  const list = listRead(answer([row("s-1", 2, { folder: "/home/alice/work/proj-a" }), row("s-2", 1, { folder: "/srv/proj-b" })]));
+  const folders = (home) => sessionsBoard(list, BOARD_START, TODAY, false, home, UTC).rows.map((line) => line.cells[0]);
   assert.deepEqual(folders("/home/alice"), ["~/work/proj-a", "/srv/proj-b"]);
   assert.deepEqual(folders("/home/alice/"), ["~/work/proj-a", "/srv/proj-b"]);
   assert.deepEqual(folders(null), ["proj-a", "proj-b"]);
 });
 
-test("a range of seven days or fewer has no earlier line", () => {
-  for (const kind of ["today", "7d"]) {
-    const lists = sessionLists({ kind }, TODAY);
-    assert.equal(lists.earlier, null);
-    assert.equal(earlierLine(lists, answer([row("s-1", 1)], { count: 4 })), null);
-  }
-  const lists = sessionLists({ kind: "custom", since: "2026-11-02", until: "2026-11-08" }, TODAY);
-  assert.equal(lists.earlier, null);
+test("the table is read over the whole range in its order, a page at a time", async () => {
+  const state = { ...START, harness: "claude" };
+  assert.equal(boardPath(state, TODAY, { sort: "started", order: "asc" }, BOARD_PAGE),
+               "api/sessions?since=2026-10-10&until=2026-11-08&harness=claude&sort=started&order=asc&top=500");
+  assert.equal(boardPath({ ...START, range: { kind: "all" } }, TODAY, BOARD_START, BOARD_PAGE, 500),
+               "api/sessions?sort=cost&order=desc&top=500&skip=500");
+  const { ask, asked } = server(many(1100));
+  const board = new SessionList(ask, (top, skip) => boardPath(START, TODAY, BOARD_START, top, skip), BOARD_PAGE,
+                                () => {}, BOARD_PAGE);
+  await board.refresh();
+  await board.show();
+  assert.equal(board.feed.value.rows.length, 1000);
+  assert.equal(board.feed.value.more, 100);
+  assert.deepEqual(asked.map((item) => item.replace(/^.*&sort/, "sort")),
+                   ["sort=cost&order=desc&top=500", "sort=cost&order=desc&top=500&skip=500"]);
+  assert.equal(LOAD_MORE, "Load more");
+});
+
+test("the table draws the rows in view and six more each side, and reads on near the end", () => {
+  // A box 480 px tall shows 12 rows of 40 px.
+  assert.deepEqual(boardWindow(500, 0, 480), { start: 0, end: 24, above: 0, below: 476 * 40, near: false });
+  assert.deepEqual(boardWindow(500, 4000, 480), { start: 94, end: 118, above: 94 * 40, below: 382 * 40, near: false });
+  // The last row drawn within 20 of the end reads the next page.
+  assert.equal(boardWindow(500, 18_400, 480).near, false);
+  assert.equal(boardWindow(500, 18_600, 480).near, true);
+  assert.equal(boardWindow(30, 0, 480).near, true);
+  // A box not yet measured is taken as 400 px.
+  assert.equal(boardWindow(500, 0, 0).end, 22);
+  assert.deepEqual(boardWindow(0, 0, 480), { start: 0, end: 0, above: 0, below: 0, near: true });
+});
+
+test("the arrow keys move the row cursor one row, within the rows", () => {
+  assert.equal(moveCursor(0, "ArrowDown", 3), 1);
+  assert.equal(moveCursor(2, "ArrowDown", 3), 2);
+  assert.equal(moveCursor(0, "ArrowUp", 3), 0);
+  assert.equal(moveCursor(2, "ArrowUp", 3), 1);
+  assert.equal(moveCursor(1, "Enter", 3), 1);
 });
 
 // A page server for the list: answers `/api/sessions` paths from rows dearest first.
@@ -176,4 +274,36 @@ test("a list read again after a pass keeps its depth, and a failed Show keeps it
   await failing.show();
   assert.equal(failing.feed.value.rows.length, 10);
   assert.notEqual(failing.feed.failure, null);
+});
+
+test("a failed next page is read again only by a scroll or a press, never as the rows are drawn", async () => {
+  const { ask } = server(many(1100));
+  const asked = [];
+  let fail = true;
+  const failing = async (path) => {
+    asked.push(path);
+    return fail && path.includes("skip") ? { status: 500, data: null } : ask(path);
+  };
+  const board = new SessionList(failing, (top, skip) => boardPath(START, TODAY, BOARD_START, top, skip), BOARD_PAGE,
+                                () => {}, BOARD_PAGE);
+  await board.refresh();
+  await board.showNear();
+  assert.equal(asked.length, 2);
+  assert.notEqual(board.feed.failure, null);
+  // Each draw near the end asks nothing more while the last read failed.
+  await board.showNear();
+  await board.showNear();
+  assert.equal(asked.length, 2);
+  // A refresh reads the rows held again, not the next page.
+  await board.refresh();
+  assert.deepEqual(asked.slice(2).map((item) => item.replace(/^.*&sort/, "sort")), ["sort=cost&order=desc&top=500"]);
+  // A scroll or a press reads the page again; once it answers, a draw near the end reads on.
+  await board.show();
+  assert.equal(asked.length, 4);
+  fail = false;
+  await board.show();
+  assert.equal(board.feed.value.rows.length, 1000);
+  assert.equal(board.feed.failure, null);
+  await board.showNear();
+  assert.equal(board.feed.value.rows.length, 1100);
 });

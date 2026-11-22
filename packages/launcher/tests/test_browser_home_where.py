@@ -1,9 +1,10 @@
 """The launcher's piece on Home in a browser, through a real shell that starts the
 launcher's real page server: the piece in Home's main spot with Home's rows under it, and
 the line above the box that says where the session starts: the newest place when Home
-opens, the menu of places, a typed folder, a project picked from projects' own picker, a
-Home that never launched with no project, one and several, and an install without
-projects and without slots, where every place is a folder and the button copies.
+opens, the menu of places, a typed folder, a project picked from projects' own picker,
+Scratch as the launch's one place, a Home that never launched with no project, one and
+several, and an install without projects and without slots, where every place is a folder
+and the button copies.
 
 Every shell here runs the fake slots in slots' place and a fake `claude` first on its
 `PATH`, so no launch starts a real session. A shell's launch log is seeded once, before a
@@ -14,6 +15,7 @@ newest place.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -211,6 +213,67 @@ def test_a_project_picked_from_all_projects_is_the_line_and_the_launch_names_it(
     # The launch made it a place, and the places are read again as the menu opens.
     menu = open_where(piece)
     expect(menu.locator('.places .row[data-current="true"] .name')).to_have_text("proj-b")
+
+
+@pytest.fixture(scope="module")
+def scratch_made():
+    """The scratch dirs this module's launches made in the real `/tmp/scratch-<uid>` (the
+    page server's shell has no stand-in for it): each one a test adds that lies in that
+    parent is removed when the module ends, and the parent too when it wasn't there
+    before. Only empty dirs go, so nothing a session wrote is lost. Module scope, since
+    the test fence refuses a test's own write outside its tmp."""
+    parent = Path(f"/tmp/scratch-{os.getuid()}")
+    had_parent = parent.exists()
+    made: list[Path] = []
+    yield made
+    gone = [each for each in made if each.parent == parent]
+    for each in [*gone, *([] if had_parent else [parent])]:
+        try:
+            each.rmdir()
+        except FileNotFoundError:
+            pass
+
+
+def test_scratch_picked_on_the_line_is_the_launchs_one_place_and_a_dir_turns_it_off(
+        page, shell, scratch_made):
+    piece = kit.open_home(page)
+    menu = open_where(piece)
+    scratch = menu.locator('.others .row[data-place="scratch"]')
+    expect(scratch.locator(".name")).to_have_text("Scratch")
+    expect(scratch.locator(".t")).to_have_text("a throwaway folder")
+    expect(scratch).to_have_attribute("data-current", "false")
+    scratch.click()
+    expect(menu).to_have_count(0)
+    expect(where(piece)).to_have_attribute("data-word", "Scratch")
+    expect(where(piece).locator(".face")).to_contain_text("a throwaway folder")
+    expect(piece.locator("textarea")).to_be_focused()
+    # A scratch folder has no past session: the + says so and offers no other place's.
+    piece.get_by_role("button", name="More ways to start").click()
+    entry = piece.locator('[data-menu="plus"] [data-plus="continue"]')
+    expect(entry).to_contain_text("none to continue in a throwaway folder")
+    expect(entry).to_have_attribute("aria-disabled", "true")
+    page.keyboard.press("Escape")
+    body = previewed(page, piece)
+    assert body["values"]["scratch"] == "true", body
+    assert "cwd" not in body["values"] and "project" not in body["values"], body
+    assert "cwd" in body["leave_out"] and "project" in body["leave_out"], body
+    expect(piece.locator('[data-line="started"]')).to_be_visible()
+    row = kit.newest_launch(shell)
+    scratch_made.append(Path(row.cwd))
+    assert row.values.get("scratch") is True and row.project_key is None, row
+    # The folder is named by the session name under this user's own parent in /tmp,
+    # whatever the shell's TMPDIR says.
+    assert row.cwd == f"/tmp/scratch-{os.getuid()}/{row.values['name']}", row
+    # The tick is on Scratch; a folder picked again sends the folder alone.
+    menu = open_where(piece)
+    expect(menu.locator('.row[data-current="true"]')).to_have_attribute("data-place", "scratch")
+    expect(menu.locator('.places .row[data-current="true"]')).to_have_count(0)
+    menu.locator(".places .row", has_text="~/work/notes").click()
+    expect(where(piece)).to_have_attribute("data-word", "Folder")
+    body = previewed(page, piece)
+    assert body["values"]["cwd"] == str(root(shell, "notes")) and "scratch" not in body["values"], body
+    assert "scratch" in body["leave_out"], body
+    expect(piece.locator('[data-line="started"]')).to_be_visible()
 
 
 def test_a_typed_dir_is_taken_only_as_an_absolute_path_or_one_from_home(page, shell):

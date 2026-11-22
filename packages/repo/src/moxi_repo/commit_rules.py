@@ -5,7 +5,7 @@ It runs on commit-msg, fail closed, order 10, and is in no repo until someone ad
     moxi repo git-hooks add PATH repo/commit-rules \\
         --set refused-trailer=KEY --set tag-pattern=REGEX --set 'rule=TEXT'
 
-Its three settings live in that repo's git config, each with any number of values:
+Its settings live in that repo's git config. The first three take any number of values:
 
 - `refused-trailer`: trailer keys this repo refuses, matched ignoring case;
 - `tag-pattern`: regular expressions (Python's `re`) a tag matches. With none, there is no
@@ -14,6 +14,12 @@ Its three settings live in that repo's git config, each with any number of value
 - `rule`: the repo's own rules for a committer, free text, one line each. The piece
   checks none of them; `moxi repo rules` prints them under the lines it makes from the
   other two settings (`rule_lines`).
+
+`tag-check-trailers` takes one value, `true` or `false` as git spells a bool (`yes`, `on`,
+`1`, `no`, `off`, `0`, any case). When true, the tag patterns are matched against the
+trailer block's lines too, continuation lines included. Unset or empty, it is false. A
+value that is neither reads as true and refuses every commit, naming the fix, since the
+piece fails closed.
 
 What it checks, refusing with the rule named:
 
@@ -28,7 +34,8 @@ What it checks, refusing with the rule named:
   body. Every trailer has a value. A refused key is refused.
 - **No tags.** The subject and body, without the trailer block, comment lines and anything
   below the scissors line (commit-msg sees the message before git cleans it up), are
-  matched against the repo's tag patterns.
+  matched against the repo's tag patterns; with `tag-check-trailers` true, the trailer
+  block's lines are matched too.
 
 The piece runs inside the git hook, so this module imports the standard library only.
 """
@@ -46,13 +53,18 @@ COMMIT_RULES = {
     "fail": "closed",
     "order": 10,
     "doc": "Check a commit message's trailer shape, and refuse tags in its subject and body.",
-    "settings": {"refused-trailer": "multi", "tag-pattern": "multi", "rule": "multi"},
+    "settings": {"refused-trailer": "multi", "tag-pattern": "multi", "rule": "multi",
+                 "tag-check-trailers": "one"},
 }
 
 PIECE_ID = "repo/commit-rules"
 REFUSED_TRAILER = "refused-trailer"
 TAG_PATTERN = "tag-pattern"
 RULE = "rule"
+TAG_CHECK_TRAILERS = "tag-check-trailers"
+#: How git spells a bool, read ignoring case.
+_TRUE = ("true", "yes", "on", "1")
+_FALSE = ("false", "no", "off", "0")
 
 #: The separator git reads between a trailer's key and value when `trailer.separators`
 #: sets none.
@@ -71,10 +83,8 @@ def commit_msg(ctx) -> Outcome:
     with open(ctx.message_path, "rb") as fh:
         text = fh.read().decode("utf-8", "replace")
     comment, configured, separators = git_settings(ctx)
-    problems = check_message(text, refused=ctx.settings.get(REFUSED_TRAILER, ()),
-                             patterns=ctx.settings.get(TAG_PATTERN, ()),
-                             comment=comment, root=ctx.root, configured=configured,
-                             separators=separators)
+    problems = _judge(text, ctx.settings, comment=comment, root=ctx.root,
+                      configured=configured, separators=separators)
     if problems:
         return Outcome.refuse(*problems)
     return Outcome.ok()
@@ -140,9 +150,42 @@ def commit_rules_problems(root, text: str) -> list[str]:
     _comment, configured, separators = _read_settings(
         [(k, v) for k, v in pairs if not k.startswith(PIECE_PREFIX)])
     # No comment prefix: nothing is skipped and no line reads as the scissors line.
-    return check_message(text, refused=settings.get(REFUSED_TRAILER, ()),
-                         patterns=settings.get(TAG_PATTERN, ()), comment="",
-                         root=str(root), configured=configured, separators=separators)
+    return _judge(text, settings, comment="", root=str(root), configured=configured,
+                  separators=separators)
+
+
+def _judge(text: str, settings: dict[str, list[str]], *, comment: str, root: str | None,
+           configured, separators: str) -> list[str]:
+    """`check_message` with the piece's settings in a repo, as the hook and
+    `commit_rules_problems` both read them."""
+    tag_check_trailers, why = read_tag_check_trailers(settings)
+    problems = [] if why is None else [
+        f"{TAG_CHECK_TRAILERS} {why}; fix it with: moxi repo git-hooks add "
+        f"{root or 'PATH'} {PIECE_ID} --set {TAG_CHECK_TRAILERS}=true"]
+    return problems + check_message(
+        text, refused=settings.get(REFUSED_TRAILER, ()),
+        patterns=settings.get(TAG_PATTERN, ()), comment=comment, root=root,
+        configured=configured, separators=separators, tag_check_trailers=tag_check_trailers)
+
+
+def switch_problem(value: str) -> str | None:
+    """Why `value` can't be the `tag-check-trailers` setting, or None. Empty means unset."""
+    if value.strip().lower() in ("", *_TRUE, *_FALSE):
+        return None
+    return f"{value!r} is not true or false"
+
+
+def read_tag_check_trailers(settings: dict[str, list[str]]) -> tuple[bool, str | None]:
+    """(whether the tag patterns reach the trailer block, why the value can't be read or
+    None). The last non-empty value counts; none is false. One that is neither true nor
+    false reads as true, so the piece checks more, not less."""
+    values = [v for v in settings.get(TAG_CHECK_TRAILERS, ()) if v.strip()]
+    if not values:
+        return False, None
+    why = switch_problem(values[-1])
+    if why is not None:
+        return True, why
+    return values[-1].strip().lower() in _TRUE, None
 
 
 def comment_prefix(ctx) -> str:
@@ -166,25 +209,28 @@ def pattern_problem(pattern: str) -> str | None:
 
 def rule_lines(settings: dict[str, list[str]]) -> list[str]:
     """What `moxi repo rules` prints for this piece in a repo with these settings: the
-    trailer keys it refuses on one line, a line for each tag pattern, then each of the
-    repo's own `rule` values as written. An empty value gives no line."""
+    trailer keys it refuses on one line, a line for each tag pattern (saying the trailers
+    are included where `tag-check-trailers` reads as true), then each of the repo's own
+    `rule` values as written. An empty value gives no line."""
     lines = []
     refused = [key for key in settings.get(REFUSED_TRAILER, ()) if key]
     if refused:
         lines.append(f"- trailers this repo refuses: {', '.join(refused)}")
-    lines += [f"- no text matching: {pattern}" for pattern in settings.get(TAG_PATTERN, ())
-              if pattern]
+    scope = ", trailers included" if read_tag_check_trailers(settings)[0] else ""
+    lines += [f"- no text matching{scope}: {pattern}"
+              for pattern in settings.get(TAG_PATTERN, ()) if pattern]
     lines += [f"- {rule}" for rule in settings.get(RULE, ()) if rule]
     return lines
 
 
 def check_message(text: str, *, refused=(), patterns=(), comment: str = "#",
                   root: str | None = None, configured=(),
-                  separators: str = SEPARATORS) -> list[str]:
+                  separators: str = SEPARATORS, tag_check_trailers: bool = False) -> list[str]:
     """Every rule `text` breaks, one line each, in the order the lines appear; empty when
     it passes. Line numbers count the message as written, comment lines included.
     `configured` holds the trailer keys the repo's `trailer.*` config names, and
-    `separators` its `trailer.separators`."""
+    `separators` its `trailer.separators`. With `tag_check_trailers`, the tag patterns
+    read the trailer block's lines too."""
     lines = _kept_lines(text, comment)
     paragraphs = _paragraphs(lines)
     refused_keys = {k.lower() for k in refused if k}
@@ -193,7 +239,7 @@ def check_message(text: str, *, refused=(), patterns=(), comment: str = "#",
     block, read_by_git = _trailer_block(paragraphs, shape, refused_keys | configured_keys)
     problems: list[tuple[int, str]] = []
 
-    in_block: set[int] = set()  # the block's trailer lines, which no tag check reads
+    in_block: set[int] = set()  # the block's trailer lines; tag-checked if tag_check_trailers
     block_keys: set[str] = set()
     trailer = None  # the key of the trailer a continuation line would belong to
     for n, line in block:
@@ -248,7 +294,7 @@ def check_message(text: str, *, refused=(), patterns=(), comment: str = "#",
         compiled.append(re.compile(pattern))
     if compiled:
         for n, line in lines:
-            if n in in_block:
+            if n in in_block and not tag_check_trailers:
                 continue
             for regex in compiled:
                 found = regex.search(line)
@@ -402,5 +448,6 @@ def _trailer_block(paragraphs, shape: _Shape, known: set[str]
     return [], False
 
 
-__all__ = ["COMMIT_RULES", "PIECE_ID", "check_message", "commit_msg", "git_settings",
-           "pattern_problem", "rule_lines"]
+__all__ = ["COMMIT_RULES", "PIECE_ID", "TAG_CHECK_TRAILERS", "check_message", "commit_msg",
+           "git_settings", "pattern_problem", "read_tag_check_trailers", "rule_lines",
+           "switch_problem"]

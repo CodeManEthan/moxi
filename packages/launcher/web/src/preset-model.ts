@@ -10,8 +10,8 @@
 // project the line opens on, applies that project's preset: the one named like the
 // project, else the first by name whose place is that project, else none. While a seat is
 // applied a picked place is only the place: the seat stays. A preset picked from the menu
-// moves the line to the place it names, when it names one the line can show. Without
-// projects a project preset names no place.
+// moves the line to the place it names, when it names one the line can show, a scratch
+// folder among them. Without projects a project preset names no place.
 //
 // Every string here goes into the page as text.
 
@@ -21,7 +21,7 @@ import { NO_PRESET } from "./panel.ts";
 import type { Choice, Preset } from "./panel.ts";
 import { isDanger, rowLabel, valueNow } from "./options-model.ts";
 import type { OffRow, PanelField, Word } from "./options-model.ts";
-import { tilde, typedFolder } from "./prompt-model.ts";
+import { SCRATCH_PICK, SCRATCH_SAYS, tilde, typedFolder } from "./prompt-model.ts";
 import type { Pick } from "./prompt-model.ts";
 
 /** The word in front of the item on the line above the box. */
@@ -68,13 +68,15 @@ export function homeIsPath(home: string): boolean {
 }
 
 /**
- * The place a preset puts the launch, as the line above the box would pick it: a seat's
- * `home`, else the preset's `project`, else its `cwd`. A project's key is a place only with
- * projects, and a path only when it is absolute or starts with `~`. Without projects a
- * project preset names no place. Null when there is none the line can show.
+ * The place a preset puts the launch, as the line above the box would pick it: a scratch
+ * folder when it sets `scratch`, else a seat's `home`, else the preset's `project`, else its
+ * `cwd`. A project's key is a place only with projects, and a path only when it is absolute
+ * or starts with `~`. Without projects a project preset names no place. Null when there is
+ * none the line can show.
  */
 export function presetPlace(preset: Preset, projects: boolean): Pick | null {
   if (preset.kind === "project" && !projects) return null;
+  if (presetValue(preset, "scratch") === "true") return SCRATCH_PICK;
   const home = preset.kind === "seat" ? presetValue(preset, "home") : null;
   if (home !== null && !homeIsPath(home)) return projects ? { kind: "project", key: home } : null;
   const project = home === null ? presetValue(preset, "project") : null;
@@ -131,9 +133,11 @@ export function presetSets(preset: Preset, fields: readonly PanelField[]): Word[
 }
 
 /** Where a menu row says a preset puts the launch: `this project` for the project on the
- * line now, `in <project>` or `in <folder>` for another place, "" for none. */
+ * line now, `in <project>`, `in <folder>` or `in a throwaway folder` for another place, ""
+ * for none. */
 export function placeWords(place: Pick | null, pick: Pick | null, home: string): string {
   if (place === null || place.kind === "choose") return "";
+  if (place.kind === "scratch") return `in ${SCRATCH_SAYS}`;
   if (place.kind === "project") return pick?.kind === "project" && pick.key === place.key ? THIS_PROJECT : `in ${place.key}`;
   return `in ${tilde(place.path, home)}`;
 }
@@ -205,9 +209,15 @@ export function presetOff(applied: Choice, fields: readonly PanelField[], option
 }
 
 /** The query `/api/last` and `/api/recents` take for what the line above the box names: the
- * seat while one is applied, else the project, else the folder; null while no place is picked. */
+ * seat while one is applied, else the project, else the folder; null while no place is
+ * picked, and for a scratch folder, which no launch is filled from or run again in. A seat
+ * goes with the project picked, if any, which the default comms identity reads; the seat
+ * still keys the launches. */
 export function lastQuery(applied: Choice, pick: Pick | null): string | null {
-  if (applied.kind === "seat") return new URLSearchParams({ seat: applied.name }).toString();
-  if (pick === null || pick.kind === "choose") return null;
+  if (applied.kind === "seat") {
+    return new URLSearchParams({ seat: applied.name, ...(pick?.kind === "project" ? { project: pick.key } : {}) })
+      .toString();
+  }
+  if (pick === null || pick.kind === "choose" || pick.kind === "scratch") return null;
   return new URLSearchParams(pick.kind === "project" ? { project: pick.key } : { cwd: pick.path }).toString();
 }

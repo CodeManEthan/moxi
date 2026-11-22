@@ -256,6 +256,11 @@ export interface OtherName {
   sentBy: string | null;
   /** `Message` writes to it; false for a send-only name. */
   writable: boolean;
+  /** The idle name this entry speaks for, which a project may name as its lead: set on the
+   * first of the entries of a name none of whose addresses has a session, mail or an
+   * `owed` message (its bare address when that is one); null on its other entries, on a
+   * scoped address whose name has a row, and on a send-only name. */
+  speaksFor: string | null;
 }
 
 /** The agents part of the page: `N agents` is `rows.length`. */
@@ -530,6 +535,12 @@ function actsOf(kind: Case | null, addresses: readonly Address[], lead: Address)
   return [message];
 }
 
+/** Line one's dim words for the lead: comms' own words for its binding when its kind says what
+ * it is (the connector's), else where launcher says its launch runs; null with neither. */
+function whereOf(lead: Address): string | null {
+  return lead.row?.via ?? lead.launched?.where ?? null;
+}
+
 function rowOf(name: string, addresses: Address[], full: ReadonlySet<string>, asks: readonly Ask[], words: Words)
   : AgentRow {
   const lead = leadOf(addresses);
@@ -550,7 +561,7 @@ function rowOf(name: string, addresses: Address[], full: ReadonlySet<string>, as
   }
   return {
     name, lead: lead.qualified, addresses, case: first, second,
-    where: lead.launched?.where ?? null,
+    where: whereOf(lead),
     fact: top.fact, line: top.line,
     note: { second: note, lines },
     acts: actsOf(first, addresses, lead),
@@ -618,21 +629,22 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
   const full = namedInFull(roster);
   const rows: AgentRow[] = [];
   const others: OtherName[] = [];
-  const other = (address: Address): void => {
+  const other = (address: Address, idle: string | null = null): void => {
     const row = address.row as RosterRow;
     const sendOnly = row.kind === "send-only";
-    others.push({ qualified: address.qualified, sentBy: sendOnly ? sentBy(row) : null, writable: !sendOnly });
+    others.push({ qualified: address.qualified, sentBy: sendOnly ? sentBy(row) : null, writable: !sendOnly,
+                  speaksFor: sendOnly ? null : idle });
   };
   for (const [name, all] of names) {
     const sendOnly = all.filter((address) => address.row?.kind === "send-only" && !address.bound
       && !holdsMail(address) && address.owed.length === 0 && address.qualified !== keep);
     const addresses = all.filter((address) => !sendOnly.includes(address));
-    sendOnly.forEach(other);
+    sendOnly.forEach((address) => other(address));
     if (addresses.length === 0) continue;
     const isRow = addresses.some((address) => address.bound || holdsMail(address) || address.owed.length > 0
       || address.qualified === keep);
     if (!isRow) {
-      addresses.filter((address) => address.row !== null).forEach(other);
+      addresses.filter((address) => address.row !== null).forEach((address) => other(address, name));
       continue;
     }
     const idle = addresses.filter((address) =>
@@ -640,9 +652,17 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
       && address.owed.length === 0 && address.qualified !== keep);
     const lead = leadOf(addresses);
     const under = addresses.filter((address) => address === lead || !idle.includes(address));
-    idle.filter((address) => address !== lead).forEach(other);
+    idle.filter((address) => address !== lead).forEach((address) => other(address));
     rows.push(rowOf(name, under, full, kept?.asks ?? [], words));
   }
   others.sort((a, b) => byText(a.qualified, b.qualified));
+  // An idle name speaks through its first entry alone: the bare address sorts before its
+  // scoped ones.
+  const spoken = new Set<string>();
+  for (const entry of others) {
+    if (entry.speaksFor === null) continue;
+    if (spoken.has(entry.speaksFor)) entry.speaksFor = null;
+    else spoken.add(entry.speaksFor);
+  }
   return { rows: order(rows), others };
 }

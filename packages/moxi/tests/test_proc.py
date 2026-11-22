@@ -237,6 +237,37 @@ def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monke
     assert time.monotonic() - start < 4
 
 
+@POSIX
+def test_a_timed_out_run_can_send_sigint_first_and_wait_its_own_grace(tmp_path):
+    """A child that stops cleanly on SIGINT gets it first; one that ignores it gets
+    SIGKILL once the run's own grace is out."""
+    caught = tmp_path / "caught"
+    clean = f"""
+        import signal, sys, time
+        def stop(signum, frame):
+            open({str(caught)!r}, "w").write(signal.Signals(signum).name)
+            sys.exit(0)
+        signal.signal(signal.SIGINT, stop)
+        print("ready", flush=True)
+        time.sleep(60)
+    """
+    with pytest.raises(subprocess.TimeoutExpired):
+        proc.run([PY, script(tmp_path, "clean.py", clean)], timeout_s=1,
+                 first_signal="SIGINT", grace_s=10)
+    assert caught.read_text() == "SIGINT"
+
+    deaf = """
+        import signal, time
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        time.sleep(60)
+    """
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        proc.run([PY, script(tmp_path, "deaf.py", deaf)], timeout_s=1,
+                 first_signal="SIGINT", grace_s=1.5)
+    assert 2.4 <= time.monotonic() - start < 6
+
+
 # -- spawn with a lifeline -----------------------------------------------------------------
 
 def test_a_stdin_child_sees_eof_when_the_lifeline_closes(tmp_path):

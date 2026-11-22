@@ -9,7 +9,7 @@ import shutil
 import pytest
 
 from moxi_rounds import (api, asking, brake, dropping, freezing, index, listing, log,
-                         opening, ruling, state, steps, verdicts)
+                         opening, ruling, state, steps, verdicts, versions)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -254,17 +254,45 @@ def test_the_leads_decision_on_a_thread_verifies_the_design(round_dir):
     assert step(round_dir, "verify-design").state == steps.DONE
 
 
-def test_a_version_that_fails_its_trace_rows_and_stands_verified_is_done(opened):
+def test_a_design_that_stands_verified_waits_while_its_version_fails_the_trace_check(
+        opened):
+    # Core never set a design's standing while trace-check refused it.
     round_dir = opened(config=TRACED)
-    trace_fails(round_dir)
-    verdict(round_dir, "publishable")
-    assert step(round_dir, "verify-design").state == steps.DONE
+    rule(text="Agent-read times follow the settings.")
+    sent_back_twice(round_dir)
+    brake.decide(ROUND, "the-holds", brake.CLOSE, record="file:notes.md#why",
+                 by="planner")
+    assert versions.standing(folded(round_dir)).word == versions.LEAD_DECISION
+
+    found = step(round_dir, "verify-design")
+
+    assert found.state == steps.WAITING
+    assert [(one.reason, one.fix) for one in found.waits] == [
+        ("trace: v3 fails: no row for C1; a version whose rows pass is waited for",
+         f"give design.md the rows, then {FOLD}")]
 
 
 # -- the questions step ------------------------------------------------------------------
 
 def test_the_questions_step_is_done_while_no_question_is_open(round_dir):
     assert step(round_dir, "docket").state == steps.DONE
+
+
+def test_the_questions_step_waits_while_the_current_version_fails_the_trace_check(
+        opened):
+    # Core's docket refused on anything but a trace-check pass.
+    round_dir = opened(config=TRACED)
+    trace_fails(round_dir)
+    ask()
+
+    found = step(round_dir, "docket")
+
+    assert (found.state, found.questions) == (steps.WAITING, ("Q1",))
+    assert [(one.reason, one.fix) for one in found.waits] == [
+        ("trace: v1 fails: no row for C1; a version whose rows pass is waited for",
+         f"give design.md the rows, then {FOLD}")]
+    fold(round_dir, row("C1"))
+    assert step(round_dir, "docket").state == steps.READY
 
 
 def test_the_questions_step_is_ready_while_a_question_is_open_and_names_it(round_dir):

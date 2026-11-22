@@ -3,11 +3,12 @@
     GET  /api/limits    each plan window now (`limits()`, with no pull), with the
                         server's `now`
     GET  /api/window    one plan window opened (`harness=&limit_id=&minutes=`): when it
-                        started, its period's readings, and the sessions it was used by
+                        started, which models it counts where its reading says, its
+                        period's readings, and the sessions it was used by
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
-    GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
-                        how many there are and how many come after, each with its context
-                        and what names it
+    GET  /api/sessions  tokens and cost by session, dearest first or by `sort` and
+                        `order`: the `top` after `skip`, how many there are and how many
+                        come after, each with its context and what names it
     GET  /api/session   one session by agent and model (`session=ID`), with its context
                         and what names it
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
@@ -35,7 +36,9 @@ the measure's file and the model table and writes nothing. The one act starts a 
 
 A report route takes the filters `since` and `until` (`YYYY-MM-DD`, both days included),
 `harness`, `project`, `folder` (a folder's whole path: the files
-whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
+whose `cwd` it is, whatever project key they carry), `model` and `utc`; `project` and
+`folder` each take one key or several, one to a line, and keep the files any of them
+matches. Days are cut in
 the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
 keys it reads.
 
@@ -81,8 +84,13 @@ LIMIT_HARNESSES = ("claude", "codex")
 #: The most sessions `/api/window` lists under a window's total.
 USED_MAX = 10
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
-TOP_MAX = 200
+TOP_MAX = 500
 TOP_DEFAULT = 200
+#: What `/api/sessions` sorts by: a sum of the row, `started` (its first request), `active`
+#: (its first request to its last), `turns`, `subagent_share` or `project` (its project
+#: key, else its `cwd`).
+SESSION_SORTS = ("cost", "tokens", "requests", "fresh_input", "cache_write", "cache_read",
+                 "output", "started", "active", "turns", "subagent_share", "project")
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -93,6 +101,7 @@ _INT = lb.Out("int")
 _MAYBE_INT = lb.Out("int", nullable=True)
 _FLOAT = lb.Out("float")
 _WHEN = lb.Out("float", nullable=True)
+_MAYBE_FLOAT = lb.Out("float", nullable=True)
 _BOOL = lb.Out("bool")
 _MAYBE_BOOL = lb.Out("bool", nullable=True)
 _WORDS = lb.Out("list", items=_TEXT)
@@ -106,13 +115,15 @@ def _named(value: lb.Out) -> lb.Out:
 
 _DATE = lb.Field("string", required=False, max=10)
 _ANY = lb.Field("string", required=False, max=4096)
+#: Several project keys or folders, one to a line.
+_PLACES = lb.Field("string", required=False, max=16384)
 #: The filters of every report route but `status` and `cost`.
 FILTERS = {
     "since": _DATE,
     "until": _DATE,
     "harness": lb.Field("enum", required=False, values=HARNESSES),
-    "project": _ANY,
-    "folder": _ANY,
+    "project": _PLACES,
+    "folder": _PLACES,
     "model": _ANY,
     "utc": lb.Field("bool", required=False),
 }
@@ -203,7 +214,10 @@ SESSION_REF = {
 #: One session: what names it, its main file's `cwd` and project, its models, its first
 #: and last request in range, and its context. `session_id` is null for a file with no
 #: session id: no route reads such a row by id, so it has no session view, a null
-#: `context` and a null `known`.
+#: `context` and a null `known`. `turns` is how many distinct turns its main file's
+#: requests carry, whatever the range, 0 when none carries a turn id;
+#: `subagent_share` the part of its cost in range its subagents ran up, 0 to 1, 0 when
+#: its cost is 0 and null when its cost or its subagents' is not known.
 SESSION_ROW = {
     **SESSION_REF,
     "cwd": _MAYBE_PATH,
@@ -211,6 +225,8 @@ SESSION_ROW = {
     "models": _WORDS,
     "first_ts": _WHEN,
     "last_ts": _WHEN,
+    "turns": _INT,
+    "subagent_share": _MAYBE_FLOAT,
     "context": CONTEXT,
     **ROW_SUMS,
 }
@@ -476,13 +492,16 @@ LIMITS = {
 _READING = {"at": _TEXT, "used_percent": _WHEN}
 #: One window opened: the row `/api/limits` shows for it, when it started, the readings
 #: of its period and the sessions it was used by. Times are ISO 8601 UTC, as a limits
-#: row's are, but `now`. `readings.last` is the reading the row is from and `first` the
-#: period's earliest, null when that is the same one; `last.session` is what names the
-#: session the reading came from, null when the reading names none. `used` is this
-#: machine's sessions of the harness with requests since the window opened: how many
+#: row's are, but `now`. `model_family` is the family of models a scoped limit counts,
+#: as the reading's kind names it (`opus` for Claude's weekly Opus limit), null where
+#: the reading does not say which models count. `readings.last` is the reading the row
+#: is from and `first` the period's earliest, null when that is the same one;
+#: `last.session` is what names the session the reading came from, null when the reading
+#: names none. `used` is this machine's sessions of the harness with requests since the
+#: window opened, of the family's models only when `model_family` is set: how many
 #: (`count`), their requests and cost since then, and the ten dearest, each with what
-#: names it; null for a limit that is not the harness's main one, with a null `opened`,
-#: and when there is no index to read.
+#: names it; null for a limit that is neither the harness's main one nor names its
+#: models, with a null `opened`, and when there is no index to read.
 OPENED_WINDOW = {
     "now": _FLOAT,
     "today": _TEXT,
@@ -492,6 +511,7 @@ OPENED_WINDOW = {
     "resets_at": _TEXT,
     "used_percent": _FLOAT,
     "opened": _MAYBE,
+    "model_family": _MAYBE,
     "readings": lb.Out("table", nullable=True, items={
         "count": _INT,
         "first": lb.Out("table", nullable=True, items=_READING),
@@ -531,7 +551,10 @@ SUMMARY = {
 #: for when it names no model), `tokens` the context size past which carrying on costs
 #: more than restarting, and `reason` why there is none: no measure, no row for the
 #: model, or a price the model table lacks. Exactly one of `tokens` and `reason` is null.
-RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "reason": _MAYBE_SAYS}
+#: `borrowed_from` names the model whose measured row `tokens` was worked out from when
+#: the model borrows one (`thresholds.BORROWED_ROW`), else null.
+RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "borrowed_from": _MAYBE,
+                 "reason": _MAYBE_SAYS}
 
 #: The index topic: whether a pass started here runs now, the last pass, and its note.
 INDEX_TOPIC = {"running": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS}
@@ -551,7 +574,10 @@ PAGE = lb.Page(
                  returns=DAILY),
         lb.Route("/api/sessions", "read", "moxi_usage.pagehandlers:sessions",
                  query={"top": lb.Field("int", required=False, max=TOP_MAX),
-                        "skip": lb.Field("int", required=False), **FILTERS},
+                        "skip": lb.Field("int", required=False),
+                        "sort": lb.Field("enum", required=False, values=SESSION_SORTS),
+                        "order": lb.Field("enum", required=False, values=("asc", "desc")),
+                        **FILTERS},
                  returns=SESSIONS),
         lb.Route("/api/session", "read", "moxi_usage.pagehandlers:session",
                  query={"session": lb.Field("string", max=512), **FILTERS},
@@ -596,6 +622,6 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
            "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS",
-           "SESSION_REF", "SESSION_ROW",
+           "SESSION_REF", "SESSION_ROW", "SESSION_SORTS",
            "SPLIT", "SUMMARY", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]

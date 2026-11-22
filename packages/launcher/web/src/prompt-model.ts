@@ -2,8 +2,8 @@
 // tests can drive it. prompt.ts draws it.
 //
 // The piece is a launch form with a few rows drawn: the box is the row `brief`, the line
-// above it is the place (`project` or `cwd`), and the chip is `harness`, `model` and
-// `effort`. Every other row keeps the value `/api/form` gives it.
+// above it is the place (`project`, `cwd` or `scratch`), and the chip is `harness`, `model`
+// and `effort`. Every other row keeps the value `/api/form` gives it.
 //
 // Whether projects is there is one value, `withProjects`, worked out once when the piece
 // opens. Every project thing hangs on it: the line's face, how a place is drawn and what
@@ -12,8 +12,8 @@
 //
 // The button says where the launch runs and nothing else decides it: the request always
 // carries `target`, and `slot` only for a slot picked by its number. A launch in the slot
-// the button names by default sends no slot, so the launcher takes the lowest free one when
-// it starts, and a number that went stale between two reads can only mislabel the button.
+// the button names by default sends no slot, so the launcher takes the lowest slot with no
+// session running when it starts, and a number that went stale between two reads can only mislabel the button.
 //
 // Every string here goes into the page as text.
 
@@ -79,12 +79,20 @@ export function projectKeys(data: unknown): string[] | null {
 
 // --- the pick ------------------------------------------------------------------------------
 
-/** Where the launch starts: a project by its key, a folder by its path, or `choose` while
- * there are several projects and none is picked yet. */
+/** Where the launch starts: a project by its key, a folder by its path, a scratch folder
+ * the launcher makes, or `choose` while there are several projects and none is picked yet. */
 export type Pick =
   | { kind: "project"; key: string }
   | { kind: "folder"; path: string }
+  | { kind: "scratch" }
   | { kind: "choose" };
+
+/** The pick of a scratch folder: a throwaway folder the launcher makes for the session. */
+export const SCRATCH_PICK: Pick = { kind: "scratch" };
+
+/** The word for a scratch pick, and what it is, as the line and its menu say them. */
+export const SCRATCH = "Scratch";
+export const SCRATCH_SAYS = "a throwaway folder";
 
 /** The home folder, as a launch takes it. */
 export const HOME = "~";
@@ -143,9 +151,16 @@ export function placed(pick: Pick): boolean {
   return pick.kind !== "choose";
 }
 
-/** The place rows a pick sets: the one it names, with the other emptied. */
+/** The place rows a pick sets: the one it names, with the others emptied, so a launch
+ * never names two places. */
 export function pickValues(pick: Pick): Record<string, FormValue> {
-  return { project: pick.kind === "project" ? pick.key : null, cwd: pick.kind === "folder" ? pick.path : null };
+  return { project: pick.kind === "project" ? pick.key : null, cwd: pick.kind === "folder" ? pick.path : null,
+           scratch: pick.kind === "scratch" ? "true" : "false" };
+}
+
+/** Whether the harness's form has the row `scratch`, so the line's menu offers Scratch. */
+export function takesScratch(fields: readonly FieldDescriptor[]): boolean {
+  return fields.some((field) => field.name === "scratch" && field.needs_absent !== true);
 }
 
 // --- folders -------------------------------------------------------------------------------
@@ -213,18 +228,19 @@ export function typedFolder(said: string): string | null {
 
 /** The line above the box: the word, then the dim part and the name of what is picked. */
 export interface WhereFace extends FolderFace {
-  word: "Project" | "Folder";
+  word: "Project" | "Folder" | typeof SCRATCH;
 }
 
 export function whereFace(pick: Pick, home: string): WhereFace {
   if (pick.kind === "project") return { word: "Project", dim: "", name: pick.key };
   if (pick.kind === "choose") return { word: "Project", dim: "", name: "choose" };
+  if (pick.kind === "scratch") return { word: SCRATCH, dim: "", name: SCRATCH_SAYS };
   return { word: "Folder", ...folderFace(pick.path, home) };
 }
 
 function pickKey(pick: Pick, home: string): string {
   return pick.kind === "project" ? `project ${pick.key}`
-    : pick.kind === "folder" ? `folder ${tilde(pick.path, home)}` : "";
+    : pick.kind === "folder" ? `folder ${tilde(pick.path, home)}` : pick.kind === "scratch" ? "scratch" : "";
 }
 
 /** Whether two picks name the same place. */
@@ -382,15 +398,20 @@ export function chipMenu(fields: readonly FieldDescriptor[], harness: string, mo
 
 // --- where it runs -------------------------------------------------------------------------
 
-/** One slot of `/api/targets`. `taken` is what the session in it is called, when the launch
- * log knows it; `holder` and `until` (seconds since the epoch) are a live hold's. */
+/** One slot of `/api/targets`. `choosable` is whether a launch may name it now, a missing
+ * one made again at launch; `crashed` that the next launch reserves it for the session that
+ * was running in it. `taken` is what the session in it is called, when the launch log knows
+ * it; `holder` and `until` (seconds since the epoch) are a live hold's, and `parked` what
+ * the session a park reservation keeps the slot for is called. */
 export interface Slot {
   number: number;
   state: string;
-  launchable: boolean;
+  choosable: boolean;
+  crashed: boolean;
   holder: string | null;
   until: number | null;
   taken: string | null;
+  parked: string | null;
 }
 
 /** Where a launch runs: a slot (by number, or a new one with `slot` null), the user's own
@@ -430,16 +451,17 @@ export function parseTargets(data: unknown): Targets {
     if (!isTable(row) || typeof row.number !== "number" || !Number.isInteger(row.number)) continue;
     slots.push({
       number: row.number, state: typeof row.state === "string" ? row.state : "",
-      launchable: row.launchable === true,
+      choosable: row.choosable === true, crashed: row.crashed === true,
       holder: typeof row.holder === "string" && row.holder !== "" ? row.holder : null,
       until: typeof row.until === "number" ? row.until : null,
       taken: isTable(row.taken_by) && typeof row.taken_by.label === "string" ? row.taken_by.label : null,
+      parked: isTable(row.parked) && typeof row.parked.label === "string" ? row.parked.label : null,
     });
   }
   slots.sort((a, b) => a.number - b.number);
   const first = isTable(data.default) ? data.default : {};
   if (first.target !== "slot" || data.new_slot !== true) return { slots, default: { target: "terminal" }, unread: false };
-  const free = slots.find((slot) => slot.launchable && slot.number === first.slot);
+  const free = slots.find((slot) => slot.choosable && slot.number === first.slot);
   return { slots, default: { target: "slot", slot: free ? free.number : null, named: false }, unread: false };
 }
 
@@ -459,7 +481,7 @@ function sameRun(a: Run, b: Run): boolean {
 export function runOf(targets: Targets, picked: Run | null): Run {
   if (picked === null) return targets.default;
   if (picked.target !== "slot") return picked;
-  return targets.slots.some((slot) => slot.number === picked.slot && slot.launchable) ? picked : targets.default;
+  return targets.slots.some((slot) => slot.number === picked.slot && slot.choosable) ? picked : targets.default;
 }
 
 /** The button's words: the act and where it runs. */
@@ -484,27 +506,30 @@ export interface RunMenu {
   others: RunRow[];
 }
 
-/** What a slot's row says: `free`, `taken · <label>`, `held for <holder> until <time>` or
- * `not running`. */
+/** What a slot's row says: `free`, `taken · <label>`, `crashed, reserved at the next
+ * launch`, `held for <holder> until <time>` (with ` · parked <label>` for a park's
+ * reservation), `missing, made again at launch` or `not running`. */
 export function slotWords(slot: Slot, hour: Clock = HOUR): string {
   if (slot.state === "occupied") return slot.taken === null ? "taken" : `taken · ${slot.taken}`;
-  if (slot.state === "missing") return "not running";
+  if (slot.crashed) return "crashed, reserved at the next launch";
   if (slot.holder !== null) {
-    return `held for ${slot.holder}${slot.until === null ? "" : ` until ${hour(new Date(slot.until * 1000))}`}`;
+    const until = slot.until === null ? "" : ` until ${hour(new Date(slot.until * 1000))}`;
+    return `held for ${slot.holder}${until}${slot.parked === null ? "" : ` · parked ${slot.parked}`}`;
   }
-  return slot.launchable ? "free" : "not free";
+  if (slot.state === "missing") return slot.choosable ? "missing, made again at launch" : "not running";
+  return slot.choosable ? "free" : "not free";
 }
 
 /**
  * The menu for the listing and the choice made now. Each slot in number order, clickable
- * while it can be launched in. `A new slot` is offered only while no slot is free: a
- * launch that names no slot takes the lowest free one, so with one free the row would
+ * while a launch may name it. `A new slot` is offered only while no slot can be chosen: a
+ * launch that names no slot takes the lowest such one, so with one there the row would
  * not do what it says. Then the terminal and the background, which need no slot.
  */
 export function runMenu(targets: Targets, run: Run, hour: Clock = HOUR): RunMenu {
   const slots: RunRow[] = targets.slots.map((slot) => ({
     lead: `Slot ${slot.number}`, words: slotWords(slot, hour),
-    run: slot.launchable ? { target: "slot", slot: slot.number, named: true } : null,
+    run: slot.choosable ? { target: "slot", slot: slot.number, named: true } : null,
     current: run.target === "slot" && run.slot === slot.number,
   }));
   if (targets.default.target === "slot" && targets.default.slot === null) {
@@ -535,6 +560,49 @@ export function briefFileOf(set: Readonly<Record<string, FormValue>>): string | 
   return typeof file === "string" && file.trim() !== "" ? file.trim() : null;
 }
 
+/**
+ * The handoff the launch sends: the one set through the `+` (`set.handoff`; "" is one
+ * cleared there), else the one the form is filled with, from the user's defaults or the
+ * applied preset. Null for none, and where the form has no `handoff` row. The line under
+ * the box shows exactly this, so what is sent is what Home shows.
+ */
+export function handoffOf(fields: readonly FieldDescriptor[], set: Readonly<Record<string, FormValue>>): string | null {
+  const field = offered(fields, "handoff");
+  if (field === undefined) return null;
+  const value = Object.hasOwn(set, "handoff") ? set.handoff : shownValue(field);
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/**
+ * The handoff the piece holds (as `handoffOf` reads it from `set.handoff`) once a preset is
+ * picked or applied, another or the same again: a cleared one ("") is let go, so the handoff
+ * the form is filled with for that preset, or by the user's defaults, shows and is sent. A
+ * handoff set through the `+` stays, as a brief file set there does.
+ */
+export function handoffAtPreset(handoff: string | null): string | null {
+  return handoff === "" ? null : handoff;
+}
+
+/**
+ * The handoff the piece holds once a launch started, given the one it held at the press
+ * (`sent`): one set through the `+`, or a Clear ("") made for that launch, is let go, unless
+ * it was changed since, so the form's own shows again and goes with the next launch. A
+ * Clear covers the one launch it was made for.
+ */
+export function handoffAtLaunch(handoff: string | null, sent: string | null): string | null {
+  return sent !== null && handoff === sent ? null : handoff;
+}
+
+/**
+ * The handoff the piece holds once a launch went out as a copied command, given the one it
+ * held at the press (`sent`): a Clear ("") made for that launch is let go, as after a launch
+ * that started, so the form's own shows again and goes with the next launch. One set through
+ * the `+` stays, as a brief file and the box's text do after a copy.
+ */
+export function handoffAtCopy(handoff: string | null, sent: string | null): string | null {
+  return sent === "" && handoff === "" ? null : handoff;
+}
+
 /** The built-in tools the Options panel draws a line for, in its order. No route lists a
  * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
 export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
@@ -544,11 +612,13 @@ export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", 
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
  * where the form has the row. The first turn is what the piece shows: a brief file set
- * through the `+` (`set.brief_file`), else the box's text. Of the rows in `FIRST_TURN` the
- * request holds `brief_file` alone while a file is set, else `brief` alone, with the box's
- * text, and only while the box has text. Every other such row the form has is left out,
- * whatever the form filled it with or withheld, so nothing the piece does not show is sent
- * as the first turn. Any other
+ * through the `+` (`set.brief_file`), else the box's text, and beside either the handoff
+ * the line under the box shows (`handoffOf`). Of the rows in `FIRST_TURN` the request holds
+ * `brief_file` alone while a file is set, else `brief` alone, with the box's text, and only
+ * while the box has text; and `handoff` while one is shown. Every other such row the form
+ * has is left out, whatever the form filled it with or withheld, so nothing the piece does
+ * not show is sent as the first turn; a handoff cleared is left out, so the user's defaults
+ * or the preset can't give it. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
  * The request names the one preset `choice` applies, whose values `fields` are filled
  * with. It says it starts off the user's usual permissions exactly when one of its
@@ -565,7 +635,7 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   for (const name of PLACED) delete values[name];
   const file = briefFileOf(set);
   const box = file === null && typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
-  const turn: Record<string, string | null> = { brief: box, brief_file: file };
+  const turn: Record<string, string | null> = { brief: box, brief_file: file, handoff: handoffOf(fields, set) };
   for (const name of FIRST_TURN) if (name in values) values[name] = turn[name] ?? null;
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
   const kept = new Set([...withheld].filter((name) => !(FIRST_TURN as readonly string[]).includes(name)));

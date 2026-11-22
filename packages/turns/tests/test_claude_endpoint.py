@@ -75,6 +75,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     first = runner.first
     assert first["op"] == "hello" and first["leg"] == leg.LEG
     assert first["stop_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["prompt_wait_ms"] == 2000
     assert first["stop_after_clear"] is leg.STOP_AFTER_CLEAR
     assert first["mod_sock"] == str(ep.dir / protocol.MOD_SOCK)
     assert turns.sessions() == []                # no socket until the id comes
@@ -105,11 +106,38 @@ def test_an_idle_start_is_tied_at_the_resolve_and_its_events_wait(claude):
         d.wait_started(0.1)
     runner.close(d.id, leg.END_RESOLVE)
     assert bare(d.wait_started(2)) == turns.Started("T1")
-    runner.turn_complete("T1")
-    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer")
+    runner.turn_complete("T1", answer="hi back")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="hi back")
     got = drain(events)
     assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded"]
     assert opener(got[0]) == d.id and opener(got[1]) == d.id
+
+
+def test_a_prompt_with_no_origin_in_an_admitted_window_is_that_windows_delivery(claude):
+    events = []
+
+    def answer(event):
+        events.append(event)
+
+    ep, runner = claude(registry=Registry((Listener("sample", frozenset({"prompt"}),
+                                                    "sample.module:answer", _fn=answer),)))
+    s = turns.find(session_id="s-1")
+    d = s.deliver("digest", by="comms", senders=["ann"])
+    line = runner.next_line()
+
+    def ask(text, origin, *, opens=True):
+        runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                       "text": text, "origin": origin, "opens": opens})
+
+    ask("digest", None)                          # the window is not admitted yet
+    assert runner.enter(line["nonce"], draft=False, agents=0)["verdict"] == "pass"
+    ask("digest", None)
+    ask("typed meanwhile", "composer")
+    runner.turn_start("T1")
+    ask("joined", "composer", opens=False)
+    assert [(e.text, e.delivery_by, e.delivery_senders, e.opens) for e in events] == [
+        ("digest", None, None, True), ("digest", "comms", ("ann",), True),
+        ("typed meanwhile", None, None, True), ("joined", None, None, False)]
 
 
 def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claude):
@@ -125,6 +153,17 @@ def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claud
     assert bare(d.wait_ended(2)) == turns.Ended("T1", "aborted")
     assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", d.id), ("TurnEnded", d.id)]
+
+
+def test_a_turn_with_no_final_text_ends_its_delivery_with_no_answer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("quiet")
+    runner.next_line()
+    runner.turn_start("T1")
+    runner.turn_complete("T1", answer="")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert d.wait_ended(2).answer is None
 
 
 def test_a_person_turn_in_the_window_is_released_by_the_later_turn_start(claude):

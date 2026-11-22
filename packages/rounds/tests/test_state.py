@@ -105,7 +105,8 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
-                             "round.closed", "flow.changed", "design.frozen", "stage.declared",
+                             "round.closed", "flow.changed", "lead.changed",
+                             "design.frozen", "stage.declared",
                              "stage.changed", "verdict.recorded",
                              "thread.decided"})
 

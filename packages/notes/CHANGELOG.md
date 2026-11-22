@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- notes' tools in the Claude apps need the secrets release with `chat_redact` and the
+  connector release with `Limit`. Neither is released yet; notes' floors on them rise
+  when they are.
+- `search_notes` in the Claude apps finds notes by words in their path or text: whole
+  words, case ignored, every word needed, path hits first and then the newest, at most
+  20. Its walk never follows a link and opens only files `read_note` would read, at most
+  1 MiB each, and stops at 6 seconds; each match is read again, put through the chat
+  redaction and kept only when every word still matches, until 16 seconds after the call
+  began. A word that sits only inside a redacted secret finds nothing.
+- Two tools in the Claude apps, with the `connector` extra: `list_notes` lists one folder
+  of the notes root (folders by name, then files newest first, 200 a page, and a count of
+  what it hides), and `read_note` reads a text file a page at a time (400 lines and 40,000
+  characters, a line cut at 4,000). A note is read whole, at most 2 MiB, and put through
+  secrets' chat redaction whole before it is split or cut; line numbers count the
+  redacted text. Each tool refuses `redaction-off` when a chat set can't run, never
+  returns a text secrets couldn't scan, runs at most two calls at once, and ends a call
+  at 20 seconds.
+- A `connector` extra and a provider for the connector, the public MCP host, so notes can
+  give tools to the Claude apps. The `connector` extra brings the host and python-stdnum,
+  which secrets' personal-data set runs with, so the tools redact with every chat set
+  from `connector` alone; a `secrets` extra names that set and adds nothing more. The
+  install line is `moxi-notes[connector,secrets]`. The provider reads only the notes root, judges every path by one
+  set of rules (relative, no dot part, no secret path, no name the chat redaction would
+  change, links followed and judged again, plain files of one link, text only, a size
+  cap, and the file read checked against the file judged), and shows a `root` and a
+  `redaction` status row.
+- Under `action = redact`, the committed copy redacts a secret beside a `gitleaks:allow`
+  mark or on a line a rule's line allowlist names, which the gates still pass, and a
+  token an invisible character splits, which the gates now refuse too; only an allowlist
+  line keeps a value whole. A note that is one split secret with no line end is left
+  out. notes' code is unchanged: it follows secrets' `redact` and `scan`.
 - `moxi notes home-paths [--apply] [--json] [--limit N]`: across the notes folder's files,
   each path under your home folder becomes `~` and each Claude Code session path becomes
   its session id, and links into the notes folder become relative. A dry run unless

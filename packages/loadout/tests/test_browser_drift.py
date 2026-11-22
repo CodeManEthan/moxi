@@ -169,7 +169,8 @@ def test_a_manifest_that_cant_be_read_shows_its_line_and_no_count(loadout_dir, u
 
 def test_the_blocks_link_on_the_modules_view_opens_the_page(loadout_dir, ui_page):
     ui_page.goto("/m/ui/modules")
-    link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift h2 a")
+    home = ui_page.locator("#moxi-panel > moxi-ui-page #home")
+    link = home.locator("moxi-loadout-drift h2 a")
     expect(link).to_have_text("Loadout")
     expect(link).not_to_have_attribute("aria-current", "page")
     link.click()

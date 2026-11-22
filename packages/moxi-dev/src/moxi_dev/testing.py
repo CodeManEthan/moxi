@@ -9,9 +9,11 @@ package that names the plugin is fenced.
 
 The fence, around every test (the autouse fixture `fence`):
 
-- The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`) and the
+- The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`), the
   variables pytest and xdist set for themselves (`PYTEST_CURRENT_TEST`, `PYTEST_VERSION`,
-  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`). Then
+  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`) and
+  `MOXI_TEST_REAL_SUPERVISOR`, which opts a run into the system's real supervisor: a
+  test sees it at call time as pytest started with it, and doesn't when it was unset. Then
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
   homes under `tmp_path / "home"`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it, and
   `XDG_RUNTIME_DIR` and each installed module's `MOXI_<MODULE>_HOME` in a short
@@ -325,11 +327,14 @@ HARNESS_HOMES = {
     "CODEX_HOME": ".codex",
 }
 
+#: `1`: a proof row may drive the system's real supervisor (systemd, launchd, Task
+#: Scheduler); the core's units fence refuses a real supervisor call under pytest without it.
 REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"
 
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
-            "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
+            "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID",
+            REAL_SUPERVISOR_ENV)
 
 #: Whether this is Windows, where the fence also moves the user's folders and keeps the
 #: system's variables; tests replace it.
