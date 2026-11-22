@@ -799,6 +799,7 @@ def test_a_slot_resume_makes_its_missing_slot_first(work, harness, rig):
     assert rig.calls("start")[-1]["slot"] == 3
 
 
+@pytest.mark.slot_target
 def test_a_restored_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
     # Restore resumes a parked session through the slot target, so the new launch's row
     # names its own `claude` by pid and start time, the process its endpoints are
