@@ -85,8 +85,12 @@ test("then what is busy, by kind, in turns' order and words; a finished one is n
 test("a kind another lead already counts is left out", () => {
   const waiting = one({ facts: facts({ turn_open: false }), agents: { complete: true, entries: [
     agent("a1", "subagent"), agent("a2", "subagent"), agent("s1", "shell")] } });
-  assert.equal(liveRow(waiting, "subagent").words, "1 shell running");
-  assert.equal(liveRow(one({ facts: facts({ turn_open: false, agents: 2 }), agents: null }), "subagent").words, null);
+  assert.equal(liveRow(waiting, ["subagent"]).words, "1 shell running");
+  const both = one({ facts: facts({ turn_open: false }), agents: { complete: true, entries: [
+    agent("a1", "subagent"), agent("t1", "teammate"), agent("s1", "shell")] } });
+  assert.equal(liveRow(both, ["subagent", "teammate"]).words, "1 shell running");
+  assert.equal(liveRow(both, []).words, "1 subagent busy · 1 teammate busy · 1 shell running");
+  assert.equal(liveRow(one({ facts: facts({ turn_open: false, agents: 2 }), agents: null }), ["subagent"]).words, null);
 });
 
 test("trouble is one dim line in turns' words, each problem in turns' order", () => {
@@ -211,6 +215,25 @@ test("after launcher's heavy lead turns' words come second, without the subagent
   const v = rows.find((one) => one.request === "v");
   assert.deepEqual([w.lead, w.leadHeavy, w.leadMore], ["waiting on 2 subagents", true, "1 shell running"]);
   assert.deepEqual([v.lead, v.leadHeavy, v.leadMore], ["waiting on 1 agent", true, "2 subagents busy · 1 shell running"]);
+});
+
+test("after waiting on n subagents, a busy teammate is not counted again either", () => {
+  const waiting = (request, count) => entry(request, { waits: { kind: "subagents", count }, coverable: { cap: 3 } });
+  const directed = (request) => entry(request, { waits: { kind: "agents", count: 1 }, coverable: { cap: 3 } });
+  const busy = (id, ...kinds) => session(`k-${id}`, { session_id: `s-${id}`, facts: facts({ turn_open: false }), agents: {
+    complete: true, entries: kinds.map((kind, index) => agent(`${id}${index}`, kind)) } });
+  const rows = rowsOf(turnsUp([busy("both", "subagent", "teammate"), busy("sub", "subagent"), busy("mate", "teammate"),
+                               busy("shell", "shell"), busy("named", "teammate")]),
+                      [waiting("both", 2), waiting("sub", 1), waiting("mate", 1), waiting("shell", 1), directed("named")]);
+  const row = (request) => rows.find((one) => one.request === request);
+  // One subagent and one teammate are launcher's two.
+  assert.deepEqual([row("both").lead, row("both").leadMore], ["waiting on 2 subagents", null]);
+  assert.deepEqual([row("sub").lead, row("sub").leadMore], ["waiting on 1 subagent", null]);
+  assert.deepEqual([row("mate").lead, row("mate").leadMore], ["waiting on 1 subagent", null]);
+  // Launcher never counts a shell.
+  assert.deepEqual([row("shell").lead, row("shell").leadMore], ["waiting on 1 subagent", "1 shell running"]);
+  // The agents of `waiting on n agents` are comms names, not turns' agents.
+  assert.deepEqual([row("named").lead, row("named").leadMore], ["waiting on 1 agent", "1 teammate busy"]);
 });
 
 test("a refused press's words come before turns' trouble on the third line", () => {

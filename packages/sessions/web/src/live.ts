@@ -230,17 +230,18 @@ const KINDS: readonly { kind: string; one: string; many: string }[] = [
 
 /** What turns counts busy, in its panel's order: `1 subagent busy`, `2 teammates busy`,
  * `3 shells running`, and `2 agents busy` when it has the count and no list. A kind with
- * none says nothing. `without` leaves out one kind's phrase. */
-export function busyWords(session: LiveSession, without: string | null = null): string[] {
+ * none says nothing. `without` leaves out the phrases of its kinds, and the count, which
+ * can't be split by kind. */
+export function busyWords(session: LiveSession, without: readonly string[] = []): string[] {
   const words: string[] = [];
   if (session.agents !== null) {
     for (const { kind, one, many } of KINDS) {
-      if (kind === without) continue;
+      if (without.includes(kind)) continue;
       const busy = session.agents.entries.filter((agent) => agent.kind === kind && isBusy(agent)).length;
       if (busy > 0) words.push(busy === 1 ? `1 ${one}` : `${busy} ${many}`);
     }
   } else if (session.facts !== null && session.facts.agents !== null && session.facts.agents > 0
-             && without === null) {
+             && without.length === 0) {
     words.push(`${session.facts.agents} agents busy`);
   }
   return words;
@@ -277,9 +278,9 @@ const problemText = (problem: Problem): string => `${problem.lead}: ${problem.re
 /**
  * A running row's live words from its turns session: `working` while a turn is open, then
  * what is busy, each only when true; and the session's problems on one line. `without`
- * leaves out the phrase of one kind another lead already counts.
+ * leaves out the phrases of the kinds another lead already counts.
  */
-export function liveRow(session: LiveSession, without: string | null = null): LiveRow {
+export function liveRow(session: LiveSession, without: readonly string[] = []): LiveRow {
   const words = [...(session.facts?.turn_open === true ? [WORKING] : []), ...busyWords(session, without)];
   const problems = problemsOf(session);
   return {

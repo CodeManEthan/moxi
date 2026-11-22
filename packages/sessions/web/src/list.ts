@@ -13,7 +13,7 @@
 import { charCount, cutAt, fmtCount, HARNESS_LABELS, isHarness, routeOf } from "./views.ts";
 import type { FeedState } from "./views.ts";
 import type { FoldersAnswer, Group, ListAnswer, ListRow, MoreAnswer, Root } from "./list-feed.ts";
-import { factOf, keepWarmOf, lastAt, leadOf, NO_PRESSES, ordered, whereText } from "./running.ts";
+import { countedKinds, factOf, keepWarmOf, lastAt, leadOf, NO_PRESSES, ordered, whereText } from "./running.ts";
 import type { Presses, RunningEntry, RunningRead } from "./running.ts";
 import { liveOpened, liveRow, pairsOf, unreadRow } from "./live.ts";
 import type { LiveOpened, LiveRead, LiveSession } from "./live.ts";
@@ -855,10 +855,10 @@ export function runningRowView(entry: RunningEntry, state: ListState, presses: P
   const key = runningKey(entry);
   const fact = factOf(entry, zone.clock);
   const lead = leadOf(entry);
-  // Launcher's heavy lead counts the subagents a waiting session waits on, from turns' own
-  // list, so turns' count of them is not said twice.
+  // Launcher's heavy lead counts the agents a waiting session waits on from turns' own
+  // list, so turns' phrases for the kinds it counts are not said twice.
   const said = turns === null ? null
-    : turns.session !== null ? liveRow(turns.session, lead !== null && entry.waits?.kind === "subagents" ? "subagent" : null)
+    : turns.session !== null ? liveRow(turns.session, countedKinds(entry))
       : turns.failure !== null && entry.session_id !== null ? unreadRow(turns.failure) : null;
   const words = said?.words ?? null;
   const note = [desk ? presses.notes[entry.request_id] ?? null : null, said?.trouble ?? null]

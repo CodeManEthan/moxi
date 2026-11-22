@@ -487,10 +487,10 @@ starts with `Active recently`.
 session, paired by session id as turns' Live sessions panel pairs them: `working` while a
 turn is open, and no state word while it is idle, since its time says since when; then
 what is busy (`1 subagent busy`, `2 teammates busy`, `3 shells running`, Codex's background
-terminals among the shells). After a heavy `waiting on 2 subagents` the subagents aren't
-counted again. A session turns can't read says so on a dim third line in turns' words
-(`Moxi can't read its live state: …`), and so does every launch with a session id when
-turns' list can't be read. An opened running row adds turns' `Now` (`working on turn 9
+terminals among the shells). After a heavy `waiting on 2 subagents`, which counts
+subagents and teammates, neither is counted again; shells still are. A session turns
+can't read says so on a dim third line in turns' words (`Moxi can't read its live state:
+…`), and so does every launch with a session id when turns' list can't be read. An opened running row adds turns' `Now` (`working on turn 9
 since 18:34`), `Agents` (each subagent, teammate and shell with its state) and `Prompt
 box` lines. A launch turns has no session for says nothing of it. Without turns, and
 through the phone gateway, none of this is drawn and turns is not read. With sessions
