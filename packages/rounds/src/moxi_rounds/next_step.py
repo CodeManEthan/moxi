@@ -61,8 +61,8 @@ import json
 from collections.abc import Callable
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               leads, model_tiers, places, queue_file, rendering, report_block, showing, sizing,
-               stages, steps, tracing, versions)
+               leads, model_tiers, places, queue_file, queue_view, rendering,
+               report_block, showing, sizing, stages, steps, tracing, versions)
 from . import numbers as counted
 from . import settings as own
 from . import shown as showings
@@ -252,7 +252,8 @@ def _finish(found: showing.Shown, step: steps.Step) -> dict:
                                                                         step.stage),
                          "batch": member.batch if member.state == queue_file.IN_BATCH
                          else None, "paused": queue.paused,
-                         "lead": leads.of(found.state, found.project_lead) is not None}
+                         "lead": leads.of(found.state, found.project_lead) is not None,
+                         "red": queue_view.spell_line(queue)}
     return said
 
 
@@ -504,6 +505,8 @@ def _queue_line(place: dict) -> str:
         said.append(f"in batch {place['batch']}, CI pending")
     if place.get("paused") is not None:
         said.append(f"queue paused: {place['paused']}")
+    if place.get("red"):
+        said.append(place["red"])
     if place.get("lead") is False:
         said.append("the round has no lead: the lander tells the builder alone")
     return "; ".join(said)

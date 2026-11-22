@@ -20,12 +20,17 @@ The kinds:
   their own: the halves of a split, or a half rebuilt without a member or on a moved
   target).
 - `run`: what the lander read of a batch's CI run or did to it, or, with `head` and no
-  batch, of the target's full run at `head`.
+  batch, of the target's full run at `head`: a read, a rerun, `ci.local` there, a push
+  of the head to the target's `ci` ref, and giving the head up after two pushes showed
+  no run.
 - `landed`, `ejected`: a member's end in a batch, with its `landing` or `reason`.
 - `waiting`: the lander waits on something outside the queue (`reason`).
 - `paused`, `resumed`: the queue stopped taking members that are not urgent, with its
   `reason`, and started again.
-- `red`, `green`: a full run on the target as the lander read it.
+- `red`, `green`: a full run on the target at `head` as the lander read it, with its
+  `run`, the landings it `covers` and, for red, its `failures` and its red spell: the
+  head the spell started at (`since`), main's `owner` and the build that makes it the
+  owner (`owning`), and `starts` on the run that starts the spell.
 - `told`: a message the lander sent or could not send, with what comms reported.
 
 Several batches run at once only while a red batch is split (`running_batches`); a
@@ -133,7 +138,8 @@ class Batch:
     built on, its local `branch`, its `members` as `(name, stage, tip)` in merge order,
     the `candidate` commit, whether it has `ended` and why (`why`), the newest `run`
     event about it and every one (`runs`), the group of an ended batch it was built
-    from (`source`), and the groups its end named (`regroups`)."""
+    from (`source`), the groups its end named (`regroups`), and the branch it lands on
+    (`target`)."""
 
     id: str
     n: int
@@ -147,6 +153,7 @@ class Batch:
     runs: list[dict] = field(default_factory=list)
     source: tuple[str, int] | None = None
     regroups: list[tuple[tuple[str, str, str], ...]] = field(default_factory=list)
+    target: str | None = None
 
 
 @dataclass
@@ -272,7 +279,8 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
                       members=tuple((str(one["round"]), str(one["stage"]), str(one["tip"]))
                                     for one in event.get("members") or ()),
                       candidate=event.get("candidate"),
-                      source=(tuple(event["source"]) if event.get("source") else None))
+                      source=(tuple(event["source"]) if event.get("source") else None),
+                      target=event.get("target"))
         queue.batches.append(batch)
         queue.waiting_on = None
         for name, stage, tip in batch.members:

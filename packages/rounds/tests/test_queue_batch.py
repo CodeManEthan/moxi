@@ -25,13 +25,18 @@ SCOPED = shlex.join([sys.executable, "-c", "import sys; print(sys.argv)", "--bas
 
 
 class FakeCi:
-    """The candidate's CI: what it reads (`word`, or `words` by commit), what a push says
+    """The candidate's CI: what it reads (`word` for a commit pushed as a candidate,
+    `main_word` for any other, `words` by commit, and `landed_word`, when set, for the
+    target's head as `main_of()` gives it), what a push says
     (`refusal`, None for a push that goes), the local run's exit code (`local_code`, or
     `local_codes` by commit), and a red run's failures (`failed`, or `failed_at` by
     commit)."""
 
     def __init__(self):
         self.word = ci.GREEN
+        self.main_word = ci.GREEN
+        self.landed_word: str | None = None
+        self.main_of = None
         self.words: dict[str, str] = {}
         self.refusal: str | None = None
         self.local_code = 0
@@ -60,7 +65,13 @@ class FakeCi:
                               str(place / "local.log"))
 
     def read(self, place, commit):
-        return queue_ci.Read(self.words.get(commit, self.word), ("101",))
+        if self.landed_word is not None and self.main_of is not None \
+                and commit == self.main_of() and commit not in self.words:
+            return queue_ci.Read(self.landed_word, ("202",))
+        if commit in self.words:
+            return queue_ci.Read(self.words[commit], ("101",))
+        candidate = any(pushed == commit and "queue-" in ref for pushed, ref in self.pushes)
+        return queue_ci.Read(self.word if candidate else self.main_word, ("101",))
 
     def failures(self, place, commit, read):
         return [dict(one) for one in self.failed_at.get(commit, self.failed)]
@@ -494,11 +505,9 @@ def test_a_failure_mains_run_at_m_has_blames_no_member_and_lands_excused(
     lander_pass(0.0)
     lander_pass(0.0)
     lander_pass(0.0)
-    assert len(fake.reruns) == 1 and queue().running() is not None
+    # main's own run at M is read and rerun from the first pass, beside the candidate's
+    assert fake.reruns == [(("101",), True)] * 2 and queue().running() is not None
     lander_pass(batching.ABSENT_S)
-    assert fake.reruns == [(("101",), True)] * 2
-    assert "full run of main" in queue().waiting_on["reason"]
-    lander_pass(2 * batching.ABSENT_S)
     assert queue().main_at(main_head)["failures"] == [IN_LINUX]
     assert queue().member(ROUND, "B1").state == queue_file.LANDED
     assert events(tmp_path, ROUND, "queue.landed")[-1]["excused"] == [IN_SCOPED]

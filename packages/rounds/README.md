@@ -746,7 +746,7 @@ Either way it runs the interpreter of its starter in the repo's root, with its s
 `PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, the XDG
 roots and every `MOXI_` variable, and appends its output to `lander.log` beside the
 lock. It exits once nothing keeps it (no member waits, no message is still being
-tried): it releases the lock, reads the queue again, and
+tried, the target's head's full run read): it releases the lock, reads the queue again, and
 goes on if a member joined meanwhile and no other lander took the lock.
 
 **A batch.** Each minute the lander takes the members that wait (the urgent ones alone
@@ -786,6 +786,28 @@ two or more, the batch splits in two by join order, each half built on the targe
 head and run side by side by the same rule; the earlier half lands first, and a later
 half whose target moved is rebuilt on it. Members that join meanwhile wait until the
 split is done.
+
+**Main afterwards.** The target's head always gets a full run, and the queue cancels
+none. Each pass the lander reads the full run at the head; a head whose candidate's run
+already covers it needs nothing more. A head with no run is pushed, forced, to the
+target's own `ci` ref (`ci/main` for moxi), but not while a run pushed there earlier is
+still going: when that ends it is read, and then the newest head is pushed. A push that
+shows no run after ten minutes is made once more; after a second the head is given up,
+the director told, and `queue` says so. A red run's failed jobs are rerun once before
+main counts as red, and the lander records `red` or `green` at the head, with the
+landings since the run read before (`covers`), which a red candidate's comparison reads
+too. A red run after green (or after none) starts a red spell: main's owner is the lead
+of the earliest covered landing whose round has a lead, every covered lead is told, and
+a spell no landing with a lead covers goes to the director. Before each message to the
+owner the lander reads comms' `identity_state`: a name a live session holds gets it;
+any other state (or a read that raises) still gets it, kept by comms, and the director
+gets a notice of what happened, who owns it, and how to bring that lead back (`moxi
+launcher sessions`, `moxi launcher resume SESSION_ID --brief-file FILE`). Red after red
+keeps the owner and tells it only when the failures differ; a member that lands past
+main's own failures is told to the owner; green ends the spell and tells the owner. The
+lander does not exit while the head's full run has not ended and been read. `queue`,
+and `next` for each queued member, say the spell and its owner, or that neither the
+owner nor the director has a running session and the notice waits.
 
 **Telling.** With comms installed, the lander sends its news under the send-only name
 `rounds`, which rounds reserves, and only to names something records: a member's end

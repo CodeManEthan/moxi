@@ -125,6 +125,8 @@ SPLIT_WHY = "split"
 PUSHED, LOCAL, READ, RERUN = "pushed", "local", "read", "rerun"
 PUSH_FAILED, READ_FAILED = "push failed", "read failed"
 FAILURES, EXCUSED = "failures", "excused"
+#: A target's head whose pushes showed no run, no longer waited for.
+GAVE_UP = "gave up"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
 READ_FAILS_MAX = 5
 #: The finish gates the landing re-read does not read.
@@ -195,6 +197,14 @@ class _Pass:
                 self.pause(f"{self.repo} has no ci setting, so a candidate has no CI to "
                            "be read by", queue.running())
             return
+        try:
+            self.batches(queue)
+        finally:
+            self.main_afterwards()
+
+    def batches(self, queue: queue_file.Queue) -> None:
+        """Advance each running batch, build each waiting group, and take new members
+        when neither exists."""
         running = queue.running_batches()
         for batch in running:
             now = queue_file.read(self.repo, self.env)
@@ -283,7 +293,7 @@ class _Pass:
         candidate = there.head()
         queue_file.append(self.repo, {
             "event": queue_file.BATCH, "state": queue_file.BUILT, "id": batch_id, "n": n,
-            "main": main, "branch": branch, "candidate": candidate,
+            "main": main, "branch": branch, "candidate": candidate, "target": str(target),
             "members": [{"round": one.name, "stage": one.stage, "tip": one.tip}
                         for one, _build in merged],
             **({} if source is None else {"source": list(source)})}, self.env)
@@ -541,40 +551,13 @@ class _Pass:
         return self.clock() - float(rerun.get("at_s") or 0) >= ABSENT_S
 
     def target_failures(self, batch: queue_file.Batch, *, local: bool) -> list[dict] | None:
-        """The target's failures at the batch's `M`: those of its full run there, read
-        once it has ended and, when red, after one rerun of its failed jobs, and, with
-        `local`, `local` when `ci.local` fails at `M`. None until all are known."""
+        """The target's failures at the batch's `M`: those of its full run there
+        (`read_head`), and, with `local`, `local` when `ci.local` fails at `M`. None until
+        all are known."""
         head = batch.main
-        queue = queue_file.read(self.repo, self.env)
-        known = queue.main_at(head)
+        known = self.read_head(head)
         if known is None:
-            read = self.ci.read(self.place, head)
-            runs = [one for one in queue.head_runs if one.get("head") == head]
-            last = _newest(runs, READ)
-            if last is None or last.get("reading") != read.word:
-                runs.append(queue_file.append(self.repo, {
-                    "event": queue_file.RUN, "head": head, "kind": READ,
-                    "reading": read.word, "runs": list(read.runs)}, self.env))
-            if read.word == ci.GREEN:
-                known = queue_file.append(self.repo, {
-                    "event": queue_file.GREEN, "head": head, "run": list(read.runs)},
-                    self.env)
-            elif read.word == ci.RED:
-                rerun = _newest(runs, RERUN)
-                if rerun is None:
-                    said = self.ci.rerun(self.place, read.runs, failed=True)
-                    queue_file.append(self.repo, {
-                        "event": queue_file.RUN, "head": head, "kind": RERUN,
-                        "runs": list(read.runs), "at_s": self.clock(), "code": said.code,
-                        "said": said.said}, self.env)
-                    return None
-                if not self.rerun_over(runs, rerun):
-                    return None
-                known = queue_file.append(self.repo, {
-                    "event": queue_file.RED, "head": head, "run": list(read.runs),
-                    "failures": self.ci.failures(self.place, head, read)}, self.env)
-            else:
-                return None
+            return None
         own = list(known.get("failures") or [])
         if local:
             ran = _newest([one for one in queue_file.read(self.repo, self.env).head_runs
@@ -584,6 +567,239 @@ class _Pass:
             if ran is not None and ran.get("exit_code") != 0:
                 own.append({"job": LOCAL_JOB, "test": None})
         return own
+
+    # -- the target's full runs ---------------------------------------------------------
+
+    def read_head(self, head: str, *, push: bool = False) -> dict | None:
+        """The target's full run at `head` as read: its `green` or `red` event, read once
+        the run has ended and, when red, after one rerun of its failed jobs. None until
+        then. With `push`, a head with no run is pushed to the target's `ci` ref, again
+        once when no run shows `ABSENT_S` after the push; then it is given up on
+        (`GAVE_UP`) and the director is told."""
+        queue = queue_file.read(self.repo, self.env)
+        known = queue.main_at(head)
+        if known is not None:
+            return known
+        runs = [one for one in queue.head_runs if one.get("head") == head]
+        if _newest(runs, GAVE_UP) is not None:
+            return None
+        read = self.ci.read(self.place, head)
+        last = _newest(runs, READ)
+        if last is None or last.get("reading") != read.word:
+            runs.append(queue_file.append(self.repo, {
+                "event": queue_file.RUN, "head": head, "kind": READ,
+                "reading": read.word, "runs": list(read.runs)}, self.env))
+        if read.word == ci.GREEN:
+            return self.main_read(queue_file.GREEN, head, read, [])
+        if read.word == ci.RED:
+            rerun = _newest(runs, RERUN)
+            if rerun is None:
+                said = self.ci.rerun(self.place, read.runs, failed=True)
+                queue_file.append(self.repo, {
+                    "event": queue_file.RUN, "head": head, "kind": RERUN,
+                    "runs": list(read.runs), "at_s": self.clock(), "code": said.code,
+                    "said": said.said}, self.env)
+                return None
+            if not self.rerun_over(runs, rerun):
+                return None
+            return self.main_read(queue_file.RED, head, read,
+                                  self.ci.failures(self.place, head, read))
+        if push and read.word in (ci.ABSENT, queue_ci.CANCELLED):
+            self.push_head(head, runs)
+        return None
+
+    def push_head(self, head: str, runs: list[dict]) -> None:
+        """Push `head` to the target's `ci` ref, forced, when it has no run: once, again
+        once `ABSENT_S` after the push, then give it up."""
+        target = self.target_name()
+        if self.ref_template is None or target is None:
+            return
+        pushes = [one for one in runs if one.get("kind") == PUSHED]
+        if pushes and self.clock() - float(pushes[-1].get("pushed_s") or 0) < ABSENT_S:
+            return
+        ref = ci.ref_for(self.ref_template, target)
+        if len(pushes) >= 2:
+            queue_file.append(self.repo, {"event": queue_file.RUN, "head": head,
+                                          "kind": GAVE_UP, "ref": ref}, self.env)
+            self.tell_director(
+                "main run", f"gave up:{head}",
+                f"{target}'s full run at {head[:12]} never started: {ref} was pushed "
+                f"twice and no run showed {int(ABSENT_S)} s after either push. The "
+                f"lander stopped waiting for it. Push {ref} by hand to run it.")
+            return
+        pushed = self.ci.push(self.place, head, ref)
+        queue_file.append(self.repo, {"event": queue_file.RUN, "head": head,
+                                      "kind": PUSHED, "ref": ref, "pushed_s": self.clock(),
+                                      "code": pushed.code, "said": pushed.said}, self.env)
+        self.say(f"lander of {self.repo}: pushed {head[:12]} to {ref}"
+                 + ("" if pushed.code == 0 else f", refused: {pushed.said}"))
+
+    def target_name(self) -> str | None:
+        """The target the queue lands on: the newest batch's."""
+        for batch in reversed(queue_file.read(self.repo, self.env).batches):
+            target = batch.target or self.target_of(batch)
+            if target:
+                return target
+        return None
+
+    def main_afterwards(self) -> None:
+        """The target's head always gets a full run, and none is cancelled: each pushed
+        head not yet read is read, oldest first, and while one has not ended nothing is
+        pushed; then the head, when it has no run read, is read or pushed."""
+        if self.ci is None:
+            return
+        target = self.target_name()
+        head = None if target is None else QueueGit(self.root).branch(target)
+        if head is None:
+            return
+        queue = queue_file.read(self.repo, self.env)
+        for older in owed_heads(queue):
+            if older != head and self.read_head(older) is None:
+                return
+        try:
+            self.read_head(head, push=True)
+        except ci.ReadFailed as exc:
+            self.say(f"lander of {self.repo}: {target}'s run at {head[:12]} can't be "
+                     f"read: {exc}")
+
+    def main_read(self, kind: str, head: str, read: queue_ci.Read,
+                  failures: list[dict]) -> dict:
+        """Record the target's full run at `head` as read, `green` or `red`, with the
+        landings it covers and, for red, its spell: where it started (`since`), its owner
+        and the build that owns it; and tell who section 6.5 names."""
+        queue = queue_file.read(self.repo, self.env)
+        before = queue.mains[-1] if queue.mains else None
+        covers = self.covers(queue, head)
+        fields: dict = {"event": kind, "head": head, "run": list(read.runs),
+                        "covers": covers}
+        if kind == queue_file.RED:
+            fields["failures"] = failures
+            if before is not None and before.get("event") == queue_file.RED:
+                fields.update({"since": before.get("since") or before.get("head"),
+                               "owner": before.get("owner"),
+                               "owning": before.get("owning")})
+            else:
+                owner, owning = self.owner_of(covers)
+                fields.update({"since": head, "owner": owner, "owning": owning,
+                               "starts": True})
+        event = queue_file.append(self.repo, fields, self.env)
+        self.tell_main(event, before)
+        return event
+
+    def covers(self, queue: queue_file.Queue, head: str) -> list[dict]:
+        """The landings since the head of the full run read before: each member landed
+        at a commit `head` has and that head has not, in the order they landed."""
+        git = QueueGit(self.root)
+        before = next((one.get("head") for one in reversed(queue.mains)
+                       if one.get("head") != head and git.present([str(one.get("head"))])
+                       and git.is_ancestor(str(one.get("head")), head)), None)
+        found = []
+        for event in queue.events:
+            landing = event.get("landing")
+            if event.get("event") != queue_file.LANDED or not landing \
+                    or not git.present([landing]) or not git.is_ancestor(landing, head):
+                continue
+            if before is not None and git.is_ancestor(landing, before):
+                continue
+            found.append({"round": event.get("round"), "stage": event.get("stage"),
+                          "landing": landing})
+        return found
+
+    def owner_of(self, covers: list[dict]) -> tuple[str | None, list | None]:
+        """Main's owner for a spell that starts at a run covering `covers`: the lead of
+        the earliest covered landing whose round has a lead recorded; None when none has
+        (only hand commits, or no lead anywhere), and the director is told instead."""
+        for one in covers:
+            _builder, lead = self.people(str(one["round"]), str(one["stage"]))
+            if lead is not None:
+                return lead, [one["round"], one["stage"]]
+        return None, None
+
+    def tell_main(self, event: dict, before: dict | None) -> None:
+        """Tell what a full run on the target means: a spell's start to every covered
+        lead and its owner (or the director); a red run that differs from the one before
+        to the owner; a green one after red to the owner, the spell over."""
+        head = str(event["head"])
+        if event["event"] == queue_file.GREEN:
+            if before is not None and before.get("event") == queue_file.RED:
+                self.reach_owner(before, "green", f"green:{head}",
+                                 f"main is green again at {head[:12]}, run "
+                                 f"{_runs(event)}: the red spell since "
+                                 f"{str(before.get('since'))[:12]} is over.")
+            return
+        failures = failing.said(event.get("failures") or []) or "no failure listed"
+        said = (f"main is red at {head[:12]}, run {_runs(event)}, after its one rerun: "
+                f"{failures}.")
+        owner = event.get("owner")
+        if event.get("starts"):
+            owns = (f"{owner} owns the fix, as the lead of the earliest landing it "
+                    f"covers ({' '.join(event.get('owning') or [])})" if owner else
+                    "no landing with a lead owns the fix, so the director gives it to a lead")
+            for one in event.get("covers") or []:
+                _builder, lead = self.people(str(one["round"]), str(one["stage"]))
+                if lead is not None and lead != owner:
+                    self.teller.tell(lead, "red", f"red:{head}:{lead}",
+                                     f"{said} It covers your landing of {one['round']} "
+                                     f"{one['stage']} at {str(one['landing'])[:12]}. {owns}.")
+            self.reach_owner(event, "red", f"red:{head}",
+                             f"{said} {owns}. Land the fix with moxi rounds finish "
+                             "--urgent; the queue keeps landing builds that add no new "
+                             "failure meanwhile.")
+            return
+        if sorted(map(str, event.get("failures") or [])) != sorted(
+                map(str, (before or {}).get("failures") or [])):
+            self.reach_owner(event, "red", f"red:{head}",
+                             f"{said} Its failures differ from the run before. The red "
+                             f"spell since {str(event.get('since'))[:12]} is still yours.")
+
+    def reach_owner(self, red: dict, about: str, key: str, text: str) -> None:
+        """Send `text` to the owner of the spell `red` names, and, when comms reads no
+        running session for the owner (or no owner is recorded), the director's notice.
+        comms offline: the owner's message is recorded and tried again, no notice."""
+        owner = red.get("owner")
+        state = self.identity(owner) if owner else "no owner"
+        if owner:
+            self.teller.tell(owner, about, f"{key}:{owner}", text, owner_state=state)
+        if state in ("held", "offline") or self.teller.comms is None:
+            return
+        director = self.director()
+        self.teller.tell(director, "director", f"{key}:director:{director}",
+                         self.director_notice(red, text, owner, state),
+                         why_nobody="no director set", owner=owner, owner_state=state,
+                         director_state=self.identity(director) if director else None)
+
+    def identity(self, name: str) -> str:
+        """What comms reads of `name`: one of its identity states, or `error` when the
+        read raised, which reads as no running session."""
+        try:
+            return str(self.teller.comms.identity_state(name).state)
+        except Exception:  # noqa: BLE001  (a read that raises reads as no session)
+            return "error"
+
+    def director_notice(self, red: dict, text: str, owner: str | None, state: str) -> str:
+        """The director's notice about a red main whose owner has no running session."""
+        lines = [f"For the director of {self.repo}: {text}"]
+        covers = red.get("covers") or []
+        if covers:
+            lines.append("The run covers: " + "; ".join(
+                f"{one['round']} {one['stage']} at {str(one['landing'])[:12]} (lead "
+                f"{self.people(str(one['round']), str(one['stage']))[1] or 'none'})"
+                for one in covers) + ".")
+        else:
+            lines.append("The run covers no landing of the queue: only commits made by "
+                         "hand.")
+        if owner:
+            lines.append(f"{owner} owns the fix, and comms reads no running session for "
+                         f"that name ({state}).")
+            lines.append(f"Bring {owner} back (moxi launcher sessions lists its launches; "
+                         "moxi launcher resume SESSION_ID --brief-file FILE brings one "
+                         "back with this notice as its brief), or give the fix to another "
+                         "lead.")
+        else:
+            lines.append("No landing with a lead owns the fix: give it to a lead.")
+        lines.append("The fix lands with moxi rounds finish --urgent, at the front of the "
+                     "queue; the queue keeps landing builds that add no new failure.")
+        return " ".join(lines)
 
     def regroups_of(self, batch: queue_file.Batch) -> list | None:
         """For a half of a split, its members still in it, as the one group to rebuild;
@@ -868,6 +1084,20 @@ class _Pass:
                              why_nobody=f"{member.name} has no lead recorded",
                              member=[member.name, member.stage])
 
+    def tell_excused(self, member: queue_file.Member, who: str, fields: dict) -> None:
+        """Tell main's owner, while a red spell holds, that a member landed past the
+        target's own failures."""
+        mains = queue_file.read(self.repo, self.env).mains
+        red = mains[-1] if mains and mains[-1].get("event") == queue_file.RED else None
+        if red is None or not red.get("owner"):
+            return
+        owner = str(red["owner"])
+        self.teller.tell(owner, "excused", f"excused:{who}:{member.line}:{owner}",
+                         f"{who} landed in {self.repo}'s queue at "
+                         f"{str(fields.get('landing') or '')[:12]} past failures main has "
+                         f"too, in the red spell since {str(red.get('since'))[:12]} you "
+                         f"own: {failing.said(fields['excused'])}.")
+
     def tell_end(self, member: queue_file.Member, kind: str, fields: dict) -> None:
         """Tell a member's end, and tell each member ejected for a conflict with it
         that its blocker is out of the way."""
@@ -879,6 +1109,7 @@ class _Pass:
             if fields.get("excused"):
                 text += (" It landed past failures the target has too: "
                          f"{failing.said(fields['excused'])}.")
+                self.tell_excused(member, who, fields)
         elif kind == queue_file.EJECTED:
             text = f"{who} was ejected from {self.repo}'s queue: {fields.get('reason')}."
         else:
@@ -918,6 +1149,41 @@ def _newest(runs: list[dict], kind: str, **fields) -> dict | None:
                  and all(one.get(key) == value for key, value in fields.items())), None)
 
 
+def _runs(event: dict) -> str:
+    return ", ".join(map(str, event.get("run") or [])) or "unknown"
+
+
+def owed_heads(queue: queue_file.Queue) -> list[str]:
+    """The target's heads pushed for a full run and not read yet nor given up, oldest
+    first."""
+    found: list[str] = []
+    for one in queue.head_runs:
+        head = str(one.get("head"))
+        if one.get("kind") == PUSHED and head not in found:
+            found.append(head)
+    given_up = {str(one.get("head")) for one in queue.head_runs
+                if one.get("kind") == GAVE_UP}
+    return [head for head in found
+            if queue.main_at(head) is None and head not in given_up]
+
+
+def main_owed(repo: str, queue: queue_file.Queue) -> bool:
+    """Whether the target's head has no full run read yet, nor given up on, so the
+    lander stays; False before any batch was built, since no target is known."""
+    target = next((one.target for one in reversed(queue.batches) if one.target), None)
+    if target is None:
+        return False
+    try:
+        _key, root = folders.root(repo)
+        head = QueueGit(root).branch(target)
+    except (RoundsError, GitError):
+        return False
+    if head is None or queue.main_at(head) is not None:
+        return False
+    return not any(one.get("kind") == GAVE_UP and one.get("head") == head
+                   for one in queue.head_runs)
+
+
 def _where(name: str, settings) -> write.Where:
     project, slug = folders.split(name)
     home = folders.home(project, settings)
@@ -937,4 +1203,5 @@ class QueueGit(finishing.MergeGit):
 
 
 __all__ = ["LANDER", "QUEUE_PLACE", "BRANCH_PREFIX", "ABSENT_S", "LOCAL_JOB", "NOT_REREAD",
-           "READ_FAILS_MAX", "place_of", "take", "step", "QueueGit"]
+           "READ_FAILS_MAX", "GAVE_UP", "place_of", "take", "step", "owed_heads",
+           "main_owed", "QueueGit"]

@@ -48,7 +48,37 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
         last = queue.mains[-1]
         said.append(f"main's last full run: {last['event']} at "
                     f"{str(last.get('head'))[:12]}, run {last.get('run')}")
+    spell = spell_line(queue)
+    if spell is not None:
+        said.append(spell)
+    for one in queue.head_runs:
+        if one.get("kind") == "gave up":
+            said.append(f"main's full run at {str(one.get('head'))[:12]} never started: "
+                        f"{one.get('ref')} was pushed twice")
     return said + told_lines(queue)
+
+
+def spell_line(queue: queue_file.Queue) -> str | None:
+    """The red spell main is in, as `queue` and `next` say it: since which head and who
+    owns the fix, and, when comms read no running session for the owner nor for the
+    director, that the notice waits. None when main's last full run read is not red."""
+    red = queue.mains[-1] if queue.mains else None
+    if red is None or red.get("event") != queue_file.RED:
+        return None
+    since = str(red.get("since") or red.get("head"))[:12]
+    owner = red.get("owner")
+    notice = next((one for one in reversed(queue.told)
+                   if one.get("about") == "director"
+                   and str(one.get("key", "")).startswith(f"red:{red.get('since')}")), None)
+    if notice is not None and notice.get("director_state") not in (None, "held"):
+        return (f"main red since {since}; {owner or 'no owner'} and {notice.get('to')} "
+                "have no running session; the notice waits")
+    if notice is not None and notice.get("delivery") == telling.NOBODY:
+        return (f"main red since {since}; {owner or 'no owner'} has no running session "
+                "and no director is set")
+    if owner:
+        return f"main red since {since}: {owner} owns the fix"
+    return f"main red since {since}: no landing with a lead owns it; the director gives it"
 
 
 def told_lines(queue: queue_file.Queue) -> list[str]:
@@ -73,4 +103,4 @@ def told_lines(queue: queue_file.Queue) -> list[str]:
     return said
 
 
-__all__ = ["UNDELIVERED_SHOWN", "lines", "told_lines"]
+__all__ = ["UNDELIVERED_SHOWN", "lines", "spell_line", "told_lines"]

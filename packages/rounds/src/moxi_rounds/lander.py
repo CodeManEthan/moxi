@@ -25,8 +25,9 @@ roots and every `MOXI_` variable (`ENV_KEPT`, `KEPT_PREFIX`), since a user unit 
 from the user manager's environment and not the caller's. Its output goes to
 `lander.log` in the repo's queue folder.
 
-**When it exits** (`run`): when `settled` says nothing keeps it: no member waits, and
-no message comms could not take is still being tried. To exit it releases the lock, then reads the queue again: if a member waits and the
+**When it exits** (`run`): when `settled` says nothing keeps it: no member waits, no
+message comms could not take is still being tried, and the target's head has a full run
+that has ended and been read (or one the lander gave up on, pushed twice with no run). To exit it releases the lock, then reads the queue again: if a member waits and the
 lock is free, it takes the lock again and goes on. A `finish` that appends after that
 read starts its own lander, which finds the lock free. So while a member waits, a lander
 runs, or the next command that reads the queue starts one.
@@ -48,7 +49,7 @@ from pathlib import Path
 
 from moxi import files
 
-from . import folders, queue_file, telling
+from . import batching, folders, queue_file, telling
 from . import settings as own
 
 #: The lander lock's file and the lander's log, in the repo's queue folder.
@@ -190,9 +191,12 @@ def queue_repos(settings=None) -> list[str]:
 # -- the run -----------------------------------------------------------------------------
 
 def settled(repo: str, queue: queue_file.Queue, *, env=None) -> bool:
-    """Whether nothing keeps the lander: no member waits, and no message comms could
-    not take is still being tried (`telling.trying`, bounded by `telling.UNSENT_S`)."""
-    return not queue.queued() and not telling.trying(queue)
+    """Whether nothing keeps the lander: no member waits, no message comms could not
+    take is still being tried (`telling.trying`, bounded by `telling.UNSENT_S`), and the
+    target's head has a full run that has ended and been read, or one given up on
+    (`batching.main_owed`)."""
+    return (not queue.queued() and not telling.trying(queue)
+            and not batching.main_owed(repo, queue))
 
 
 def run(repo: str, *, say: Callable[[str], None] = print,

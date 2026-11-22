@@ -25,6 +25,13 @@ class FakeComms:
         self.sent: list[tuple[str, str, tuple[str, ...], str]] = []
         self.outcome: dict[str, str] = {}
         self.delivery: dict[str, str] = {}
+        self.states: dict[str, str] = {}
+
+    def identity_state(self, name):
+        state = self.states.get(name, "held")
+        if state == "raises":
+            raise ValueError(f"{name!r} is not a name")
+        return SimpleNamespace(state=state)
 
     def send_as(self, module_name, name, to, text):
         self.sent.append((module_name, name, tuple(to), text))
@@ -78,10 +85,11 @@ def told(about: str | None = None) -> list[dict]:
     return [one for one in queue().told if about is None or one.get("about") == about]
 
 
-def config_text(*, defaults: str = "", table: str = "") -> str:
+def config_text(*, defaults: str = "", table: str = "", ref: bool = False) -> str:
+    ref_text = ', ref = "ci/{branch}", remote = "origin"' if ref else ""
     return (f"[defaults]\n{defaults}\n[projects.proj-a]\nland = \"queue\"\n"
             f"check = {{ command = {json.dumps(FULL)}, scoped = {json.dumps(SCOPED)} }}\n"
-            f"ci = {{ workflows = [\"ci.yml\"], local = \"none\" }}\n{table}\n")
+            f"ci = {{ workflows = [\"ci.yml\"], local = \"none\"{ref_text} }}\n{table}\n")
 
 
 # -- a member's news ---------------------------------------------------------------------
