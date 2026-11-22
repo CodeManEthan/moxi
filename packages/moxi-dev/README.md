@@ -16,8 +16,9 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   share of them and the change against the newest record on `main` (one record per
   commit, kept under git's own directory).
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
-  the fence around each test, the tier markers, the durations each run writes and the
-  helpers tests share (`Seam` for a seam with two implementations among them).
+  the fence around each test, the tier markers, the durations each run writes, where a
+  run keeps its temp files (see below) and the helpers tests share (`Seam` for a seam
+  with two implementations among them).
 - `moxi_dev.contract` holds the module contract check each package's
   `tests/test_contract.py` runs. `moxi-dev contract [--staged] [PATH]` runs it from a
   shell over any module's directory, inside the repository or not; `--staged` judges
@@ -227,6 +228,36 @@ stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it e
 #!/bin/sh
 exec uv run --locked moxi-dev stamp --staged
 ```
+
+## Where tests keep their temp files
+
+`MOXI_TEST_TEMP` decides where a test run keeps pytest's temp root and the kit's short
+directories (sockets, per-test homes). Set it once in your shell profile or your
+harness's environment; nothing else needs setting.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| `disk` (the default, and what unset means) | `/var/tmp` | pytest's own (`$TMPDIR`) | pytest's own (`%TEMP%`) |
+| `ram` | `/dev/shm` | as `disk`, saying so | as `disk`, saying so |
+
+Any other value stops the run before a test runs. A `ram` run on Linux goes to disk, and
+says why, when `/dev/shm` isn't tmpfs, has too little free space, or the machine or the
+run's memory limit can't spare what the run needs. In memory, a passed test's files go
+when it ends and the whole run's, failed tests' and browser traces included, when the
+run ends; keep `disk` to look at them afterwards. pytest's header says where the temp is
+and why (`moxi-dev temp: ...`).
+
+A check keeps its tests' temp on disk whatever is set, so `ram` serves only runs
+outside a check (a plain `pytest`, a targeted run): `moxi-dev check` gives its suites
+`MOXI_TEST_TEMP=disk` and names the reason in its summary's `temp` field, and
+`moxi-dev timed`, whose results the checks are held to, does the same.
+
+A `--basetemp` you pass is pytest's alone. A `PYTEST_DEBUG_TEMPROOT` you set is used when
+`MOXI_TEST_TEMP` is unset; a set `MOXI_TEST_TEMP` overrides it, and the header says so.
+
+Each run sweeps, at its start, what earlier runs that were killed left behind: only
+directories this kit made, beside its own owner record, once no process holds that
+record's lock and the directory is over a minute old. It never touches anything else.
 
 ## Timed tests
 

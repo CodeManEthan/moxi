@@ -741,3 +741,20 @@ def test_json_carries_the_package(repo, rec, monkeypatch, capsys):
     assert [row["test"] for row in body["machines"][0]["tests"]] == ["c1"]
     assert timed_show.main(["--record-dir", str(rec), "--json"]) == 1
     assert json.loads(capsys.readouterr().out)["package"] is None
+
+
+def test_a_timed_run_keeps_its_temp_on_disk(repo, monkeypatch, capsys):
+    """Its record is what checks, which keep their temp on disk, are held to."""
+    from moxi_dev import temp
+
+    linux = temp.Places(platform="linux", mountinfo=str(repo / "no-mountinfo"))
+    monkeypatch.setattr(temp, "_PLACES", linux)
+    stand = Stand(PLAN)
+    assert go(repo, stand, env={"MOXI_TEST_TEMP": "ram"}).code == 0
+    assert stand.sessions() and all(env["MOXI_TEST_TEMP"] == "disk"
+                                    for _, _, env in stand.sessions())
+    assert "moxi-dev timed: temp disk (ram asked; a check keeps its temp on disk)" \
+        in capsys.readouterr().out
+    bad = go(repo, Stand(PLAN), env={"MOXI_TEST_TEMP": "RAM"})
+    assert bad.code == 2
+    assert "MOXI_TEST_TEMP must be disk or ram" in capsys.readouterr().err

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -236,3 +237,97 @@ def test_a_nested_run_chooses_records_and_sweeps_nothing(pytester, machine, monk
     assert {root: machine.contents(root) for root in before} == before
     assert [name for name in os.listdir(fence.short)
             if name.endswith(temp.RECORD_SUFFIX)] == []
+
+
+# --- live: real roots --------------------------------------------------------------------
+
+LIVE_TESTS = '''
+import os, sys, time
+from pathlib import Path
+
+def test_shows_its_dirs(tmp_path, fence):
+    parent = tmp_path.parent
+    base = parent.parent if parent.name.startswith("popen-gw") else parent
+    print("BASETEMP", base, flush=True)
+    print("PROCESS_DIR", Path(fence.short).parent, flush=True)
+    if os.environ.get("LIVE_HANG"):
+        time.sleep(600)
+'''
+
+
+def _live_child(pytester: pytest.Pytester, setting: str, *,
+                hang: bool = False) -> subprocess.Popen:
+    """A real top-level run: no MOXI_TEST_FENCED, no --basetemp, the real roots."""
+    pytester.makeconftest("pytest_plugins = ['moxi_dev.testing']\n")
+    pytester.makepyfile(test_live_child=LIVE_TESTS)
+    env = {key: value for key, value in os.environ.items()
+           if key not in (FENCED_ENV, TEMPROOT_ENV)}
+    env[TEMP_ENV] = setting
+    if hang:
+        env["LIVE_HANG"] = "1"
+    return subprocess.Popen([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-s",
+                             str(pytester.path)], cwd=pytester.path, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
+def _read_dirs(child: subprocess.Popen) -> tuple[Path, Path, list[str]]:
+    lines: list[str] = []
+    found: dict[str, Path] = {}
+    while len(found) < 2:
+        line = child.stdout.readline()
+        if not line:
+            break
+        lines.append(line.rstrip("\n"))
+        for key in ("BASETEMP", "PROCESS_DIR"):
+            if f"{key} " in line:                  # after pytest's progress, under -s
+                found[key] = Path(line.split(f"{key} ", 1)[1].strip())
+    assert len(found) == 2, "\n".join(lines)
+    return found["BASETEMP"], found["PROCESS_DIR"], lines
+
+
+def _ram_or_skip(lines: list[str]) -> None:
+    header = next((line for line in lines if line.startswith("moxi-dev temp: ")), "")
+    if not header.startswith("moxi-dev temp: ram, /dev/shm"):
+        pytest.skip(f"this machine can't run in RAM now: {header}")
+
+
+@pytest.mark.live
+def test_live_a_ram_run_uses_shm_and_leaves_nothing(pytester):
+    child = _live_child(pytester, "ram")
+    basetemp, process_dir, lines = _read_dirs(child)
+    rest, _ = child.communicate(timeout=120)
+    _ram_or_skip(lines)
+    assert child.returncode == 0, "\n".join(lines) + rest
+    assert basetemp.is_relative_to("/dev/shm") and process_dir.parent == Path("/dev/shm")
+    for path in (basetemp, process_dir):
+        assert not path.exists() and not temp.record_of(path).exists()
+
+
+@pytest.mark.live
+def test_live_a_killed_run_is_swept_by_the_next(pytester):
+    child = _live_child(pytester, "ram", hang=True)
+    try:
+        basetemp, process_dir, lines = _read_dirs(child)
+        _ram_or_skip(lines)
+    finally:
+        child.kill()
+        child.communicate(timeout=60)
+    for path in (basetemp, process_dir):
+        assert path.is_dir() and temp.record_of(path).is_file()
+    time.sleep(temp.SWEEP_MIN_AGE_S + 2)           # the sweep's floor on a dir's age
+    after = _live_child(pytester, "ram")
+    out, _ = after.communicate(timeout=120)
+    assert after.returncode == 0, out
+    assert "left by runs that ended without cleaning up" in out
+    for path in (basetemp, process_dir):
+        assert not path.exists() and not temp.record_of(path).exists()
+
+
+@pytest.mark.live
+def test_live_a_disk_runs_short_dirs_are_in_var_tmp_and_go(pytester):
+    child = _live_child(pytester, "disk")
+    _, process_dir, lines = _read_dirs(child)
+    rest, _ = child.communicate(timeout=120)
+    assert child.returncode == 0, "\n".join(lines) + rest
+    assert process_dir.parent == Path("/var/tmp")
+    assert not process_dir.exists() and not temp.record_of(process_dir).exists()

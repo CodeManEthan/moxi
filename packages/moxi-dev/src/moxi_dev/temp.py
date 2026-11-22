@@ -610,7 +610,7 @@ def _keep(held: Held) -> Held:
 
 
 def _create_record(record: Path) -> int | None:
-    """Create `record` anew and lock it; `None` when the name is taken."""
+    """Create the record anew and lock it; `None` when the name is taken."""
     try:
         fd = os.open(record, _OPEN_FLAGS | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
@@ -713,7 +713,7 @@ def _mine(stats: os.stat_result) -> bool:
 
 
 def _open_free(record: Path) -> int | None:
-    """Open `record`, a regular file of this user's, and take its lock without waiting;
+    """Open the record, a regular file of this user's, and take its lock without waiting;
     `None` when it isn't one or its owner still holds it."""
     try:
         stats = os.lstat(record)
@@ -796,7 +796,7 @@ def _sweep_one(path: Path, now: float, swept: Swept, *, has_workers: bool) -> No
 
 
 def _sweep_orphan(record: Path) -> None:
-    """Remove `record` when the path it held is gone and its lock is free, parsed or
+    """Remove the record when the path it held is gone and its lock is free, parsed or
     not."""
     path = record.with_name(record.name[:-len(RECORD_SUFFIX)])
     if os.path.lexists(path):
