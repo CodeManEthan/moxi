@@ -1627,7 +1627,7 @@ comms	packages/comms/tests/fixtures/comms-0.2/make.py	tier="standing", adapter="
 comms	packages/comms/tests/pty_kit.py	alive	name	f	fh
 comms	packages/comms/tests/pty_kit.py	return self.proc.wait(timeout=timeout)	keep	timeout	timeout
 comms	packages/comms/tests/pty_kit.py	self._reader.join(timeout=2)	keep	timeout	timeout
-comms	packages/comms/tests/pty_kit.py	self.proc.wait(timeout=10)	keep	timeout	timeout
+comms	packages/comms/tests/pty_kit.py	self.proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/roster_kit.py	clock_records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/roster_kit.py	put_clock	name	directory	clock_records_dir
 comms	packages/comms/tests/roster_kit.py	return events.until(lambda name, data: name == "comms.roster" and check(data))[1]	keep	ok	ok
@@ -1865,7 +1865,7 @@ comms	packages/comms/tests/test_claude_launch.py	-	name	test_turns_endpoint_comm
 comms	packages/comms/tests/test_claude_launch.py	assert any(ln.startswith("waiting") and "none" in ln for ln in out.splitlines()), out	keep	any	any
 comms	packages/comms/tests/test_claude_launch.py	config.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_claude_launch.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
-comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=15)	keep	timeout	timeout
+comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/test_claude_launch.py	proc.wait(timeout=30)	keep	timeout	timeout
 comms	packages/comms/tests/test_claude_launch.py	seen.update(session=s, binary=found, cmd=cmd, env=env)	keep	env	env
 comms	packages/comms/tests/test_claude_launch.py	shim = rig.shim(name="reviewer", scope="proj-a", start=False)	keep	start	start
@@ -1936,7 +1936,7 @@ comms	packages/comms/tests/test_codex_wrapper.py	-	name	test_the_hosts_environme
 comms	packages/comms/tests/test_codex_wrapper.py	_, err = proc.communicate(timeout=30)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	assert not any(codex_wrapper.sessions_dir().glob("codex-*"))	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	assert not codex_wrapper.sessions_dir().exists() or not any(	keep	any	any
-comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")), 10)	keep	any	any
+comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")),	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	proc.communicate(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	run_wrapper	name	environ	env
 comms	packages/comms/tests/test_codex_wrapper.py	return host.out.exists() and any(ln == word or ln.startswith(word + " ")	keep	any	any
@@ -2342,7 +2342,7 @@ comms	packages/comms/tests/test_mcp_listen.py	test_systemds_variables_for_anothe
 comms	packages/comms/tests/test_mcp_listen.py	test_the_daemon_serves_an_inherited_socket_on_another_port_and_revokes_nothing	name	environ	env
 comms	packages/comms/tests/test_mcp_tokens.py	-	name	test_a_claim_key_names_a_file_in_the_claim_directory_only	test_a_claim_key_names_a_file_in_the_claim_dir_only
 comms	packages/comms/tests/test_mcp_tokens.py	assert not any(token in cell for cell in cells)	keep	any	any
-comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0), timeout=WAIT)	keep	timeout	timeout
+comms	packages/comms/tests/test_mcp_tokens.py	host.run_on_loop(asyncio.sleep(0), timeout=PROC_WAIT_S)	keep	timeout	timeout
 comms	packages/comms/tests/test_mcp_tokens.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)	keep	record	record
 comms	packages/comms/tests/test_mcp_tokens.py	self.broken: set = set()	keep	set	set
 comms	packages/comms/tests/test_mcp_tools.py	"REPLY_OWN_UNREADABLE_TOOL", "INTERRUPT_IGNORED_OPERATOR_TOOL"} <= set(texts)	keep	set	set
