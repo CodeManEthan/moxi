@@ -1,13 +1,16 @@
 """The ready recorder: the session resolver's feed, for Claude and Codex alike.
 
-turns calls it at every `ready` (a session's start, resume, clear or compaction) and at
-`gone`, in the session's endpoint process, and ignores its answer. For a launch this
-endpoint holds (`listeners.claim`):
+turns calls it at every `ready` (a session's start, resume, clear or compaction), at
+`load` (a Claude endpoint first learned its session id) and at `gone`, in the session's
+endpoint process, and ignores its answer. For a launch this endpoint holds
+(`listeners.claim`):
 
 - at `ready`, the event's session id joins the launch's ids, with the event's source, and
   becomes the row's id when it has none; the row moves to `ready` when it is still
   `spawning` or `started`. So a clear, a resume or a compaction in the launched session
   adds its new id, and a nested session's ids never join;
+- at `load`, nothing more: the claim itself is the point, so an endpoint that replaced
+  the launch's own takes the launch at its start;
 - at `gone`, an event `gone` is added, with turns' reason.
 """
 
@@ -17,8 +20,8 @@ from . import listeners, store
 
 
 def observe(event) -> None:
-    """Record a `ready` or `gone` of the launched session. Answers nothing."""
-    if event.event not in ("ready", "gone"):
+    """Record a `ready`, `load` or `gone` of the launched session. Answers nothing."""
+    if event.event not in ("ready", "load", "gone"):
         return None
     conn = listeners.open_store()
     if conn is None:
@@ -34,7 +37,7 @@ def observe(event) -> None:
                 store.learn_session(conn, row.request_id, session_id,
                                     source if source in store.SOURCES else "startup")
             store.set_state(conn, row.request_id, "ready")
-        else:
+        elif event.event == "gone":
             store.add_event(conn, "gone", {"reason": getattr(event, "reason", None)},
                             request_id=row.request_id, session_id=session_id)
     finally:
