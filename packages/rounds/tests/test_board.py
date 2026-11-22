@@ -166,7 +166,7 @@ def test_a_design_sent_back_at_its_version_is_failed(kit):
     assert (made["state"], made["word"]) == ("failed", "back")
 
 
-def test_a_docket_with_an_open_question_is_his_with_its_count(kit):
+def test_a_docket_with_an_open_question_is_the_operators_with_its_count(kit):
     round_dir = kit()
     verified(round_dir, question("Q1"), question("Q2"), stage("B1"))
     items = board.Items(questions=("Q1", "Q2"))
@@ -174,7 +174,7 @@ def test_a_docket_with_an_open_question_is_his_with_its_count(kit):
     assert (made["state"], made["count"], made["by"]) == ("yours", 2, "operator")
 
 
-def test_a_docket_all_ruled_with_a_ruling_not_read_back_is_his_before_done(kit):
+def test_a_docket_all_ruled_with_a_ruling_not_read_back_is_the_operators_before_done(kit):
     round_dir = kit()
     verified(round_dir, question("Q1"), stage("B1"))
     ruling.rule(ROUND, item="Q1", text="Yes.", record=PTR, by="lead")
@@ -298,14 +298,14 @@ def test_a_stage_whose_repo_declares_no_check_has_no_check_cell(kit):
     assert ("check", "B1") not in board.cells(made, board.Items())
 
 
-def test_close_holds_his_jobs_then_a_fix_owed(kit):
+def test_close_holds_the_operators_jobs_then_a_fix_owed(kit):
     kit()
     made = part()
     assert board.close_cell(made, board.Items(jobs=("B1.W1",)))["state"] == "yours"
     assert board.close_cell(made, board.Items())["state"] == "todo"
 
 
-def test_ratify_with_majors_not_ruled_is_his(kit):
+def test_ratify_with_majors_not_ruled_is_the_operators(kit):
     kit()
     made = cell_of(part(), "ratify", items=board.Items(decisions=("B1.M1",)))
     assert (made["state"], made["count"], made["by"]) == ("yours", 1, "operator")
@@ -386,7 +386,7 @@ def group_of(made, items=board.Items()):
     return board.group(made, board.cells(made, items), items)
 
 
-def test_a_round_holding_his_items_is_yours_before_stuck(kit):
+def test_a_round_holding_the_operators_items_is_yours_before_stuck(kit):
     round_dir = kit()
     fold(round_dir, stage("B1"))
     verdict(round_dir, "fold-first", kind='"design"', design=1)
@@ -478,7 +478,7 @@ def test_a_round_whose_retro_is_ready_is_wrapping(kit):
     assert group_of(made) == "wrapping"
 
 
-def test_the_board_orders_his_rounds_by_his_items_then_the_oldest_first():
+def test_the_board_orders_the_operators_rounds_by_the_operators_items_then_the_oldest_first():
     rows = [{"name": "a", "group": "moving", "mine": 0, "last_at": "2026-01-03"},
             {"name": "b", "group": "yours", "mine": 1, "last_at": "2026-01-01"},
             {"name": "c", "group": "yours", "mine": 3, "last_at": "2026-01-02"},
@@ -489,7 +489,7 @@ def test_the_board_orders_his_rounds_by_his_items_then_the_oldest_first():
 
 # -- the phrase --------------------------------------------------------------------------
 
-def test_the_phrase_puts_his_items_then_what_went_wrong_then_what_moves(kit):
+def test_the_phrase_puts_the_operators_items_then_what_went_wrong_then_what_moves(kit):
     round_dir = kit()
     verified(round_dir, stage("B1"), stage("B2"))
     commission(round_dir, "B1")
@@ -581,6 +581,8 @@ def test_every_type_of_event_rounds_writes_has_a_place_in_the_table():
 @pytest.mark.parametrize(("event", "expected"), [
     ({"type": "build.dropped", "stage": "B2"}, ("commission", "B2")),
     ({"type": "ruling.recorded", "rules": "B1.M2"}, ("ratify", None)),
+    ({"type": "decision.settled", "id": "B1.M2"}, ("ratify", None)),
+    ({"type": "decision.raised", "id": "B1.M2"}, ("ratify", None)),
     ({"type": "ruling.recorded", "rules": "Q1"}, ("docket", None)),
     ({"type": "question.asked", "id": "Q1"}, ("docket", None)),
     ({"type": "verdict.recorded", "kind": "build", "stage": "B1"},
@@ -753,7 +755,7 @@ def test_the_close_record_gives_what_the_close_waits_for_as_the_close_reads_it(k
                                      ratify=closing.ratify_of(settings, ROUND)))
 
 
-def test_his_cells_count_what_waits_on_him_for_the_round(kit):
+def test_the_operators_cells_count_what_waits_on_the_operator_for_the_round(kit):
     _kit_rounds(kit)
     waited = listing.waiting(refresh=False).data()
     value = {"questions": waited["open"], "not_shown": waited["not_shown"],

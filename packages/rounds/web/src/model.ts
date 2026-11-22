@@ -1,7 +1,7 @@
 // What rounds' page says and decides, worked out with no DOM so the Node tests can read
 // it: times and ages, each marker's attributes and accessible name, the groups and the
-// order they keep while a popover is open, the filters and folds, what waits on him and
-// the order the walk takes it in, the addresses both ways, every popover's sections, the
+// order they keep while a popover is open, the filters and folds, what waits on the
+// operator and the order the walk takes it in, the addresses both ways, every popover's sections, the
 // key, the strip, the foot and the phone's words. The page draws what this returns and
 // decides nothing about a step: the board gives every cell, and this only words it. Every
 // string goes into the page as text, never as markup. The clock is passed in, so the
@@ -380,12 +380,12 @@ export function unreadableWords(one: Unreadable): string {
   return one.fix ? `${one.reason} ${one.fix}` : one.reason;
 }
 
-// --- what waits on him ---------------------------------------------------------------------
+// --- what waits on the operator ------------------------------------------------------------
 
-/** The four kinds of his items, as the address and the record route name them. */
+/** The four kinds of the operator's items, as the address and the record route name them. */
 export type ItemKind = "question" | "decision" | "wait" | "shown";
 
-/** One item of his, with where it is drawn. */
+/** One item of the operator's, with where it is drawn. */
 export interface Item {
   kind: ItemKind;
   /** The round (`<project>/<slug>`) or the project that holds it. */
@@ -403,7 +403,7 @@ export const ITEM_COLUMN: Record<ItemKind, string> = {
 
 const ITEM_ORDER: ItemKind[] = ["question", "shown", "decision", "wait"];
 
-/** Every item of his, in the walk's order: the rounds in the board's order, and in each
+/** Every item of the operator's, in the walk's order: the rounds in the board's order, and in each
  * its questions, its rulings to read back, its decisions and its jobs; then the items of
  * a project, or of a round not on the board, in that order by kind. */
 export function itemsOf(board: Board, order: readonly string[] = board.rounds.map((one) => one.name)): Item[] {
@@ -625,7 +625,7 @@ export interface Context {
   clock?: Clock;
   /** A Live sessions row whose folder is this worktree, when exactly one is. */
   sessionAt?: (worktree: string) => string | null;
-  /** The kind of one of his items in a round, by its id. */
+  /** The kind of one of the operator's items in a round, by its id. */
   kindOf?: (round: string, id: string) => ItemKind | null;
 }
 
@@ -738,8 +738,8 @@ function factRow(fact: { key: string; value: string }, ctx: Context, facts: read
 }
 
 /** A step record's sections, in the record's order: facts, CI, checks run, verdicts, open
- * findings, drift, finish gates, decisions, his items, settled questions, fixes owed,
- * what the close waits for, the next step, and what happened. */
+ * findings, drift, finish gates, decisions, the operator's items, settled questions,
+ * fixes owed, what the close waits for, the next step, and what happened. */
 export function stepSections(record: RecordValue, ctx: Context): Section[] {
   const made: (Section | null)[] = [];
   const round = record.round ?? "";
