@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from fake_harness import FakeHarness
 import listener_targets
@@ -676,7 +677,7 @@ def test_at_the_bound_turns_stops_waiting_and_kills_the_programs_group(tmp_path)
     assert listeners.ask(reg, ev, 0.8) == "comms at start"
     assert time.monotonic() - began < 3
     program, child = map(int, pids.read_text().split())
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + PROC_WAIT_S
     while (_alive(program) or _alive(child)) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(program) and not _alive(child)
@@ -692,7 +693,7 @@ def test_a_detached_child_outlives_the_bound(tmp_path):
         "time.sleep(30)"))
     reg = registry(order=(f"run:{starter}",))
     assert listeners.ask(reg, event("start", source="startup"), 0.5) is None
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while not done.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert done.read_text() == "ran"
@@ -723,7 +724,7 @@ def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
             return dict(m.removeprefix("start list entry ").split(" adds nothing: ", 1)
                         for m in (r.message for r in caplog.records) if "adds nothing" in m)
 
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + PROC_WAIT_S
         while len(logged()) < 3 and time.monotonic() < deadline:
             time.sleep(0.05)
         assert logged() == {

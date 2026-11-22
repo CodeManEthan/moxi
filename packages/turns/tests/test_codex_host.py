@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
 from moxi_turns import codex as codex_module
@@ -253,7 +254,7 @@ def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
     try:
         harness.app_server.alive = False
         first.connected = False
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + PROC_WAIT_S
         while harness.ws is first and time.monotonic() < deadline:
             time.sleep(0.02)
         assert harness.ws is not first

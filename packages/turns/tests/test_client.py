@@ -17,6 +17,7 @@ import time
 import pytest
 
 from moxi import ipc
+from moxi_dev.testing import PROC_WAIT_S
 
 import moxi_turns as turns
 from conftest import bare
@@ -356,7 +357,7 @@ def test_an_unanswered_stop_answer_is_logged_and_read_as_neither(scripted, caplo
     asked = threading.Event()
     h = s.handle_stops(lambda facts: asked.set() or "go on")
     assert asked.wait(2)
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + PROC_WAIT_S
     while "unknown" not in caplog.text and time.monotonic() < deadline:
         time.sleep(0.05)
     assert "whether it was taken is unknown" in caplog.text

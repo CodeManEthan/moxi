@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from fake_harness import FakeHarness
 from moxi_turns import endpoint
@@ -33,7 +34,7 @@ def in_thread(fn):
     return t, out
 
 
-def until(cond, timeout=3.0):
+def until(cond, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while not cond() and time.monotonic() < deadline:
         time.sleep(0.01)

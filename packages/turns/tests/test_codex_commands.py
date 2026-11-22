@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns import codex as codex_module
 from moxi_turns import codex_protocol as proto
 from moxi_turns import protocol
@@ -332,7 +333,7 @@ def test_a_compaction_with_no_ready_expires_and_a_late_ready_stops_nothing(codex
     assert app.terminals == ["p1"]
 
 
-def until(cond, timeout=3.0):
+def until(cond, timeout=PROC_WAIT_S):
     deadline = time.monotonic() + timeout
     while not cond() and time.monotonic() < deadline:
         time.sleep(0.01)

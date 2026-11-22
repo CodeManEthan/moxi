@@ -18,6 +18,7 @@ import os
 import threading
 import time
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns.harness import CommandRequest, Delivery, Harness, Live
 from moxi_turns.results import Agent, Agents, Ran, Shells
 
@@ -128,7 +129,7 @@ class FakeHarness(Harness):
         except Exception:  # noqa: BLE001 - an unreadable list reads as unknown
             return None
 
-    def handed(self, count: int, timeout: float = 5.0) -> list[Delivery]:
+    def handed(self, count: int, timeout: float = PROC_WAIT_S) -> list[Delivery]:
         """The deliveries submitted so far, once there are `count` of them or the timeout
         has passed. The endpoint's worker hands them over after the call has answered."""
         deadline = time.monotonic() + timeout
