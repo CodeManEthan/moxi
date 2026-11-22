@@ -20,6 +20,11 @@ named options. The events:
 - `ready` is the same moment, observe only: every row naming it is called, on the list or
   not, and its answer is ignored. A module that only wants to know a session started
   needs no place on the list.
+- `load`: a Claude Code endpoint learned its session's id for the first time, once per
+  endpoint process. That is normally the runner's `session` line at the endpoint's own
+  start, so a module hears of an endpoint that replaced another before the session's
+  next start, resume, clear or compaction. When that line carries no id, `load` comes
+  just before the first `ready`. Observe only, like `ready`.
 - `prompt` adds context at each prompt: the texts, joined in module-name order.
 - `turn` (a main-loop turn ended) and `gone` (the endpoint is ending); answers ignored.
 - `after-tool`: a tool call ran; the text answer is added to what the model reads after
@@ -123,7 +128,8 @@ log = logging.getLogger("moxi.turns.listeners")
 #: The entry-point group.
 GROUP = "moxi.turns.listeners"
 #: The events a listener may name.
-EVENTS = ("ready", "start", "prompt", "turn", "gone", "after-tool", "usage", "codex_limits")
+EVENTS = ("ready", "start", "prompt", "turn", "gone", "after-tool", "usage", "codex_limits",
+          "load")
 #: Event names kept for a later turns; a registration naming one is refused.
 RESERVED = ("tool",)
 #: The options a row's third item may name.
@@ -636,10 +642,10 @@ def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
 
     A `ready` or `start` event is the start moment: every `ready` row is told, and the
     start list's entries are asked; the result is the start context, or None. For
-    `prompt`, the texts joined in module-name order, or None. For `turn` and `gone` the
-    answers are ignored and this returns None at once, the calls running on, unless
-    `wait` asks it to wait for them up to `wait_s` too (the endpoint's own end, so a
-    `gone` call is not cut off by the process exiting). `after`, when given, is called in
+    `prompt`, the texts joined in module-name order, or None. For `load`, `turn` and
+    `gone` the answers are ignored and this returns None at once, the calls running on,
+    unless `wait` asks it to wait for them up to `wait_s` too (the endpoint's own end, so
+    a `gone` call is not cut off by the process exiting). `after`, when given, is called in
     each listener's thread once its call returned (the endpoint reads floors there).
     """
     if event.event in ("ready", "start"):

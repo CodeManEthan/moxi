@@ -1,0 +1,13 @@
+{
+  "name": "moxi-rounds-web",
+  "private": true,
+  "description": "The rounds module's web sources: its page, every open round as a line of its steps.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

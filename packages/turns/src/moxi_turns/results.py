@@ -542,7 +542,8 @@ class SessionEvent:
     """What a listener is called with: the event and the session's facts.
 
     `event` is `ready` (observe only), `start` (adds start context), `prompt`, `turn`,
-    `gone`, `after-tool`, `usage` or `codex_limits`; `source` is a `ready`'s or a
+    `gone`, `after-tool`, `usage`, `codex_limits` or `load` (observe only: a Claude Code
+    endpoint learned its session's id for the first time); `source` is a `ready`'s or a
     `start`'s source; `turn_id` and `outcome` are a `turn`'s; `reason` is a `gone`'s.
     `env` is the session's environment, which the endpoint inherited from the session.
 

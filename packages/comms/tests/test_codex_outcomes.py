@@ -9,8 +9,9 @@ What is held here:
 - interrupt mail goes into a running turn by `steer`, marked `[interrupt]`, while plain
   mail waits for the turn's end; to an idle thread it is delivered unmarked; a session
   without `steer` takes it at the boundary;
-- a steer refused `idle` or `loading` falls back to one `deliver` with the same text and
-  ref;
+- every hand-in carries `by="comms"` and the digest's senders, each once;
+- a steer refused `idle` or `loading` falls back to one `deliver` with the same text,
+  ref and senders;
 - each outcome of a hand-in, row by row: refused `gone`, never written, unknown
   (resolved on the same connection or a new one, or never), settled lost;
 - the race: a steer the harness takes past the library's read bound is acked once and
@@ -142,6 +143,8 @@ def test_interrupt_mail_is_steered_into_the_running_turn_and_acked_at_its_end(
     assert method == "steer" and "stop and look" in text
     assert "plain, mid turn" not in text, "only the interrupt mail is steered"
     assert "[interrupt]" in text, "the frame line says why it came mid-turn"
+    assert (ep.deliveries[did]["by"], ep.deliveries[did]["senders"]) == (
+        "comms", ["main@proj-a"]), "a steer names comms and its senders"
     assert ep.turn["deliveries"] == [(did, "steered")], "the turn took it"
     assert wait_until(lambda: started_at(ref) is not None), "turn.steered marks it started"
     assert a.queue and not turn_frames(frames, "handled_ids"), "plain mail waits"
@@ -194,6 +197,8 @@ def test_a_steer_refused_idle_or_loading_falls_back_to_one_deliver_with_the_same
     (steer, deliver) = ep.calls
     assert (steer[0], deliver[0]) == ("steer", "deliver")
     assert steer[2] == deliver[2] and steer[3] == deliver[3], "same text, same ref"
+    assert ep.deliveries[deliver[1]]["by"] == "comms"
+    assert ep.deliveries[deliver[1]]["senders"] == ["main@proj-a"], "same senders"
     assert not turn_frames(frames, "unhandled_ids"), "the digest stays open"
     ep.end_turn("answer")                 # the delivery opens the next turn
     assert wait_until(lambda: ep.turn is not None and ep.turn["opening"] == deliver[1])
@@ -202,6 +207,26 @@ def test_a_steer_refused_idle_or_loading_falls_back_to_one_deliver_with_the_same
     time.sleep(0.3)
     assert len(ep.calls) == 2, "the text ran once"
     assert len(turn_frames(frames, "handled_ids")) == 1
+
+
+def test_a_digest_goes_in_by_comms_with_every_messages_sender(rig, adapter, endpoints):
+    """turns gets `by="comms"` and the digest's senders, each once, in id order, which a
+    session's `prompt` listeners read as `delivery_by` and `delivery_senders`."""
+    ep = endpoints()
+    a = adapter(ep)
+    running(a, ep)                        # the mail waits for the turn's end, one digest
+    send(rig, "from main")
+    code, out = rig.send(IDENTITY, "from the builder", sender=dict(name="builder",
+                                                                   scope="proj-a"))
+    assert code == 0, out
+    send(rig, "main again")
+    assert wait_until(lambda: len(a.queue) == 3)
+    ep.end_turn("answer")
+    assert wait_until(lambda: len(ep.calls) == 1)
+    (method, did, _, text) = ep.calls[0]
+    assert method == "deliver" and "from the builder" in text
+    d = ep.deliveries[did]
+    assert (d["by"], d["senders"]) == ("comms", ["main@proj-a", "builder@proj-a"])
 
 
 # --------------------------------------------------------------------------- outcomes

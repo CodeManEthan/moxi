@@ -247,6 +247,20 @@ def test_the_harness_runs_in_the_slot_with_the_launch_env(work, harness, rig):
     assert row().pid_started is not None
 
 
+def test_a_slot_launch_records_the_process_that_runs_claude(work, harness, rig):
+    # A held claim moves only to an endpoint whose parent is the row's pid and
+    # pid_started. In a slot the pane's process is the harness (slots' trampoline execs
+    # it), and the launcher records that pane's pid with its start time.
+    rig.plan(run=True)
+    api.launch(request(work))
+    run = harness.one()
+    assert Path(run["argv"][0]).name == "claude"
+    got = row()
+    assert got.pid == run["pid"]
+    assert run["started"] is not None and got.pid_started is not None
+    assert abs(got.pid_started - run["started"]) < 1.0
+
+
 def test_an_unconfirmed_start_is_started_and_says_so(work, harness, rig):
     rig.plan(exec="unconfirmed", exec_line="taken")
     got = api.launch(request(work))

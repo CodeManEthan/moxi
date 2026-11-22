@@ -217,6 +217,13 @@ def test_the_after_tool_usage_and_codex_limits_events_load():
     assert listeners.RESERVED == ("tool",)
 
 
+def test_a_row_naming_load_registers_beside_ready_and_gone():
+    reg = registry(Entry("launcher", [(("ready", "load", "gone"),
+                                       "listener_targets:silent")]))
+    assert reg.broken == () and reg.notices == ()
+    assert [ls.module for ls in reg.naming("load")] == ["launcher"]
+
+
 def test_a_two_item_row_has_no_floor_and_a_third_item_carries_one():
     reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
                    Entry("usage", [("after-tool", "listener_targets:silent",
