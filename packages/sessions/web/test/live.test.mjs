@@ -254,9 +254,3 @@ test("when turns' list can't be read, each launch with a session says so; withou
     assert.deepEqual([row.lead, row.leadMore, row.note, row.liveLines], [null, null, null, null], JSON.stringify(options));
   }
 });
-
-test("the list links turns' page in its own title where it is given one, and not otherwise", () => {
-  assert.equal(listView(state, { turnsTitle: "Live sessions" }).turnsLink, "Live sessions");
-  assert.equal(listView(state, {}).turnsLink, null);
-  assert.equal(listView(state, { turnsTitle: "" }).turnsLink, null);
-});

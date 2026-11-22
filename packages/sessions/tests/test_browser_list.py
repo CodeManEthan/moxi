@@ -549,9 +549,9 @@ def test_a_machine_with_no_session_says_so_and_draws_no_field_or_filter(bare_she
     launcher = page.evaluate("async () => (await import('/m/ui/client.js')).installed('launcher')")
     home = view.get_by_role("link", name="Start one from Home")
     expect(home).to_have_count(1 if launcher else 0)
-    # With no filter line, turns' page is linked under the sentence.
+    # With no filter line, turns' page is linked on a line of its own.
     turns = page.evaluate("async () => (await import('/m/ui/client.js')).installed('turns')")
-    link = view.locator('.first a[data-action="turns"]')
+    link = view.locator('[data-line="turns"] a[data-action="turns"]')
     expect(link).to_have_count(1 if turns else 0)
     if turns:
         expect(link).to_have_text("Live sessions")

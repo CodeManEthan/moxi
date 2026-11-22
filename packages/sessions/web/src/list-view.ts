@@ -40,10 +40,11 @@
 // With turns installed, at the desk, the list also reads turns' `/api/sessions` with each
 // read of the list and follows turns' topic `sessions`. Each running row then says what
 // turns says of its session (`live.ts`): its state word and what is busy, its trouble,
-// and, opened, turns' `Now`, `Agents` and `Prompt box` lines. The filter line also links
-// turns' page, worded with its title (`Live sessions`), before the count; a list with no
-// session links it under its empty state's sentence. turns' routes are not the gateway's,
-// so the phone reads none of it and draws no link.
+// and, opened, turns' `Now`, `Agents` and `Prompt box` lines. In every state of the list
+// it also links turns' page, worded with its title (`Live sessions`): at the filter line's
+// right end before the count, or alone at the right of a line of its own where no filter
+// line is drawn. turns' routes are not the gateway's, so the phone reads none of it and
+// draws no link.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -718,17 +719,22 @@ export class SessionsList extends LitElement {
     const address = html`${this.line !== null && this.line !== ""
       ? html`<p class="status" data-line="unknown" role="status">${this.line}</p>` : nothing}${said !== null
       ? html`<p class="status dim" data-line="address" role="status">${said}</p>` : nothing}`;
-    if (status?.state === "gone") return html`${address}${this.#status(status)}`;
-    if (state === null) return html`${address}${status !== null ? this.#status(status) : nothing}`;
+    // turns' page is linked in every state of the list: beside the count, or alone where no
+    // filter line is drawn.
+    const turnsTitle = this.#turnsTitle();
+    const alone = turnsTitle !== null ? html`<div class="filt" data-line="turns"><span class="fs"></span><span class="n">${
+      this.#turnsLink(turnsTitle)}</span></div>` : nothing;
+    if (status?.state === "gone") return html`${address}${alone}${this.#status(status)}`;
+    if (state === null) return html`${address}${alone}${status !== null ? this.#status(status) : nothing}`;
     const desk = !gateway();
     const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk,
-                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead, turnsTitle: this.#turnsTitle() });
+                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead });
     const filters = filterLine(state, this.#filters());
     return html`${address}
-      ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count, view.turnsLink)}` : nothing}
+      ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count, turnsTitle)}` : alone}
       ${status !== null ? this.#status(status) : nothing}
       ${reader?.moreStatus != null ? this.#status(reader.moreStatus) : nothing}
-      ${view.empty !== null ? this.#empty(view.empty, filters === null ? view.turnsLink : null)
+      ${view.empty !== null ? this.#empty(view.empty)
         : view.groups.length || view.running !== null ? html`<div class="grps" data-part="groups">
             ${view.running !== null ? this.#runningGroup(view.running, desk) : nothing}
             ${repeat(view.groups, (group) => group.key, (group) => this.#group(group))}</div>` : nothing}
@@ -767,15 +773,15 @@ export class SessionsList extends LitElement {
         ${line.clear !== null ? html`<span class="f"><button type="button" data-action="clear"
           @click=${() => this.#pick({ folder: null, harness: null, when: { kind: "any" } })}>${line.clear}</button></span>` : nothing}
       </span>
-      ${count !== null || turnsLink !== null ? html`<span class="n">${turnsLink !== null ? this.#turnsLink(turnsLink, "x")
+      ${count !== null || turnsLink !== null ? html`<span class="n">${turnsLink !== null ? this.#turnsLink(turnsLink)
         : nothing}${turnsLink !== null && count !== null ? html`<span class="sep">·</span>` : nothing}${count !== null
         ? html`<span data-line="count">${count}</span>` : nothing}</span>` : nothing}
     </div>`;
   }
 
   /** The link to turns' page, worded with its title; a plain click shows it in place. */
-  #turnsLink(title: string, tone: string) {
-    return html`<a class=${tone} href="/m/turns/" data-action="turns" @click=${(event: MouseEvent) => {
+  #turnsLink(title: string) {
+    return html`<a class="x" href="/m/turns/" data-action="turns" @click=${(event: MouseEvent) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       navigate("turns", "");
@@ -832,7 +838,7 @@ export class SessionsList extends LitElement {
       ${menu.line !== null ? html`<p class="say" data-line="folders">${menu.line}</p>` : nothing}</div>`;
   }
 
-  #empty(empty: EmptyView, turnsLink: string | null) {
+  #empty(empty: EmptyView) {
     if (empty.sentence === null) {
       return html`<div class="grps" data-part="groups"><p class="one d" data-line="empty">${empty.line}</p></div>`;
     }
@@ -841,8 +847,7 @@ export class SessionsList extends LitElement {
         ${empty.start !== null ? html`<p><a class="x" href="/m/ui/" data-action="home" @click=${(event: Event) => {
           event.preventDefault();
           navigate("ui", "");
-        }}>${empty.start}</a></p>` : nothing}
-        ${turnsLink !== null ? html`<p>${this.#turnsLink(turnsLink, "x")}</p>` : nothing}</div>`;
+        }}>${empty.start}</a></p>` : nothing}</div>`;
   }
 
   #line(line: LineView, name: string, act: () => void, tone = "one d", expanded: boolean | null = null) {

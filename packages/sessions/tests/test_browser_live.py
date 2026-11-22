@@ -2,7 +2,7 @@
 sessions' real page server: a running row's state word, what is busy and its trouble line;
 the opened row's `Now`, `Agents` and `Prompt box`; the line each launch says when turns'
 list can't be read; the band without `Live sessions`, and the list's link to turns' panel
-in its place, beside the count. A small install without turns draws none of it, no link,
+in its place, beside the count or, with no filter line, alone. A small install without turns draws none of it, no link,
 and never reads turns; one without sessions keeps `Live sessions` in the band.
 
 Launcher's `running` and turns' `sessions` routes are answered in the browser, and the
@@ -190,6 +190,25 @@ def test_live_sessions_leaves_the_band_and_the_list_links_it(full_shell, ui_cont
     expect(page.locator("#moxi-panel > moxi-turns-page")).to_be_attached()
     expect(page.locator("#moxi-pages-button")).to_have_accessible_name("Live sessions")
     expect(page).to_have_title("Live sessions - Moxi")
+
+
+@pytest.fixture(scope="module")
+def unlisted_shell(ui_shells, tmp_path_factory):
+    """A shell with every installed module on a machine where no session is listed."""
+    return ui_shells(**env_of(tmp_path_factory.mktemp("live-unlisted")))
+
+
+def test_with_a_launch_running_and_no_session_listed_the_link_stands_alone(unlisted_shell, ui_contexts):
+    page = ui_contexts(unlisted_shell).pages[0]
+    TurnsStub(page, [])
+    LauncherStub(page, [launch("r-1", sid(1), "planner")])
+    view = open_list(page)
+    expect(launched_row(view, "r-1")).to_have_attribute("name", "planner")
+    expect(view.locator('[data-part="filters"]')).to_have_count(0)
+    link = view.locator('[data-line="turns"]').get_by_role("link", name="Live sessions")
+    expect(link).to_have_attribute("href", "/m/turns/")
+    link.click()
+    expect(page.locator("#moxi-panel > moxi-turns-page")).to_be_attached()
 
 
 @pytest.fixture(scope="module")
