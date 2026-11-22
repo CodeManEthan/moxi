@@ -134,7 +134,7 @@ None when the harness gives no notice to read. A list it could not read whole is
 
 A fork holds no slot and runs beside the main loop's turns; the core keeps no bound on
 it, so the adapter bounds each wait of its own (`PENDING_TTL_S` does not apply), and the
-endpoint's own end settles a fork still open `Lost`.
+endpoint's own end settles a fork still open `Lost`, its reason starting `gone`.
 
 A `submit`, `append`, `fork` or `command` that
 raises counts as settled (the delivery is refused, the command fails). Until it settles,

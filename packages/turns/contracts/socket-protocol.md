@@ -448,8 +448,8 @@ cannot fork now (`unsupported`).
 Its values: `started` once the harness has started the fork, with `agent_id` naming it
 (`turn_id` is null); `ended` once the fork has answered its task, with `outcome` and
 `answer`, the fork's final text (`turn_id` null); or `lost`, with a reason starting
-`denied` when the harness refused to start the fork, `gone` when the fork went away with
-no answer, or the endpoint's own reason when the endpoint ended first. A fork has no
+`denied` when the harness refused to start the fork, or `gone` when the fork went away
+with no answer, the endpoint's end among them (`gone: ` and the endpoint's reason). A fork has no
 endpoint bound of 300 s: the harness's half bounds its own waits.
 
 `by` names the asker to turns. The fork's answer comes back to the session by the

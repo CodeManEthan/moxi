@@ -118,8 +118,10 @@ def test_the_endpoints_end_settles_an_open_fork_lost(forking):
     assert until(lambda: len(h.forked) == 1)
     ep.fork_started(h.forked[0].id, "agent-1")
     ep.stop("the session ended")
-    ended = d.wait_ended(5)
+    assert isinstance(d.wait_ended(5), results.Lost)
+    ended = ep.wait(d.id, "ended", 0)
     assert isinstance(ended, results.Lost) and ended.ref == "r-9"
+    assert ended.reason == f"{results.LOST_GONE}: the session ended"
 
 
 def test_a_late_word_on_a_settled_fork_changes_nothing(forking):

@@ -88,7 +88,7 @@ from . import listeners as turns_listeners
 from . import protocol
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
 from .ledger import Reading, Turn, TurnLedger
-from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_UNKNOWN, OUTCOMES,
+from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_GONE, LOST_UNKNOWN, OUTCOMES,
                       SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
                       LeftShell, Lost, OpenTurn, Passed, Ran, Ready, Refused, SessionEvent,
                       Shells, Started, StopFacts, TurnEnded, TurnStarted, TurnSteered)
@@ -491,10 +491,13 @@ class Endpoint:
             self._gone = reason
             self._stopping.set()
             lost = Lost(reason)
+            # A fork is gone with its session: its reason says so, as a fork's own does.
+            fork_lost = Lost(f"{LOST_GONE}: {reason}")
             for d in list(self._deliveries.values()):
                 if d.state != _DONE:
-                    self._settle(d, started=lost if d.started is None else None,
-                                 ended=lost)
+                    end = fork_lost if d.spec.kind == "fork" else lost
+                    self._settle(d, started=end if d.started is None else None,
+                                 ended=end)
             for c in self._commands.values():
                 if c.result is None:
                     c.result = Failed(reason)
