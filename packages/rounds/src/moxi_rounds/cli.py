@@ -34,6 +34,7 @@
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark ROUND B<n> --resync [--as NAME]
     moxi rounds mark ROUND REPORT.md --reread [--as NAME]
+    moxi rounds mark ROUND --restamp --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
@@ -129,7 +130,10 @@ target still has, only after the target's history was rewritten under it; `mark 
 REPORT.md --reread` reads a recorded report again at the bytes its verdict recorded
 and adds the findings, waiting items and decisions its record lacks, and is refused
 when it would take away or change anything. Neither names a ruling, a skip or a
-verdict word.
+verdict word. `mark ROUND --restamp --record PTR` re-stamps the design's current
+version with the digest of its frozen copy, when an edit outside the round rewrote
+the copy and `design.md` alike; `--record` names where the lead said what edited them.
+It changes no standing, and is the one repair an ended round takes.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -704,7 +708,8 @@ def _declare_mark(verbs) -> None:
             "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
             "verification, size a worker's brief, say that rulings were shown to the "
             "operator as recorded, with a pointer to where, or repair a record: "
-            "read a build's base again from git, or a recorded report again.")
+            "read a build's base again from git, a recorded report again, or the "
+            "frozen copy of the design's current version for its digest.")
     parser = verbs.add_parser("mark", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round, <project>/<slug>; with --shown, the round "
@@ -722,7 +727,8 @@ def _declare_mark(verbs) -> None:
                              "several separated by commas; with --resync, a stage, "
                              "B<n>; with --brief, the stage the brief is of, B<n>; "
                              "with --reread, a recorded report's file; left "
-                             "out with --flow and --lead, which mark the round")
+                             "out with --flow, --lead and --restamp, which mark the "
+                             "round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -784,6 +790,12 @@ def _declare_mark(verbs) -> None:
                            "the findings, waiting items and decisions its block "
                            "holds and the record lacks; refused when it would take "
                            "away or change anything")
+    form.add_argument("--restamp", action="store_true",
+                      help="re-stamp the design's current version: when design.md "
+                           "and its frozen copy hold the same bytes and neither holds "
+                           "the digest recorded at its freeze, record the copy's "
+                           "digest as the version's; needs --record; changes no "
+                           "standing, and an ended round takes it")
     parser.add_argument("--commit", metavar="SHA", action="append", default=[],
                         help="with --fixed, a commit of the fix, on the build's "
                              "branch; once for each")
@@ -800,6 +812,8 @@ def _declare_mark(verbs) -> None:
                              "<session>@<UTC time>, an https:// URL, file:<path "
                              "in the round's folder>#<anchor>, or page:<page>/<act "
                              "id>@<UTC time>; "
+                             "with --restamp, a pointer to where the lead named what "
+                             "edited the design, of those shapes; "
                              "with --shown, a pointer to where he was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
                              "time>, the https:// URL of a page that listed them, or "
@@ -817,6 +831,8 @@ def _mark(args, out) -> int:
         return _mark_flow(args, out)
     if args.lead is not None:
         return _mark_lead(args, out)
+    if args.restamp:
+        return _mark_restamp(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
@@ -866,6 +882,19 @@ def _mark_repair(args, out) -> int:
         done = repairs.resync(args.target, args.id, by=_actor(args))
     else:
         done = repairs.reread(args.target, args.id, by=_actor(args))
+    print(f"{done.name}: {done.said}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_restamp(args, out) -> int:
+    """`mark ROUND --restamp`: the lead's re-stamp of the design's current version."""
+    from . import repairs
+
+    if args.id is not None:
+        raise BadArgument("--restamp re-stamps the round's current version of its "
+                          "design, and names nothing else", "leave the ID out")
+    done = repairs.restamp(args.target, record=args.record, by=_actor(args))
     print(f"{done.name}: {done.said}", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK

@@ -380,19 +380,25 @@ def _repairs(found: Shown) -> list:
     old and new value, what it read, and who made it and when."""
     return [{"n": event.get("n"), "at": event.get("at"), "actor": event.get("actor"),
              "what": event.get("what"), "stage": event.get("stage"),
-             "verdict": event.get("verdict"), "fields": event.get("fields"),
-             "read": event.get("read")}
+             "verdict": event.get("verdict"), "version": event.get("version"),
+             "fields": event.get("fields"), "read": event.get("read"),
+             "record": event.get("record")}
             for event in found.state.history if event.get("type") == "repair"]
 
 
 def repair_line(one: dict) -> str:
-    """A repair in words: `base of B2: 1a2b3c4d5e6f to 0f9e8d7c6b5a`, or `verdict on
-    line 12 (designs/r.md): added finding L<n>, waiting item W<n>`."""
+    """A repair in words: `base of B2: 1a2b3c4d5e6f to 0f9e8d7c6b5a`, `digest of v8:
+    1a2b3c4d5e6f to 0f9e8d7c6b5a, record comms:1234`, or `verdict on line 12
+    (designs/r.md): added finding L<n>, waiting item W<n>`."""
     fields = one["fields"] if isinstance(one.get("fields"), dict) else {}
     if one.get("what") == states.BASE:
         change = fields.get("base") or {}
         return (f"base of {one.get('stage')}: {str(change.get('was'))[:12]} to "
                 f"{str(change.get('now'))[:12]}")
+    if one.get("what") == states.DIGEST:
+        change = fields.get("digest") or {}
+        return (f"digest of v{one.get('version')}: {str(change.get('was'))[:12]} to "
+                f"{str(change.get('now'))[:12]}, record {one.get('record')}")
     added = []
     for key, called in (("findings", "finding"), ("waits", "waiting item"),
                         ("decisions", "decision")):
@@ -837,10 +843,12 @@ def stage_line(one: dict) -> str:
 
 
 def _versions(state: states.State) -> list[dict]:
-    """The design's frozen versions, oldest first: each one's number and digest, who
+    """The design's frozen versions, oldest first: each one's number and digest (and
+    the digest it was re-stamped with, None for none), who
     froze it and when, whether as a change of records only, what its trace check
     found, and what it took away, which waits."""
-    return [{"version": version.n, "digest": version.digest, "by": version.actor,
+    return [{"version": version.n, "digest": version.digest,
+             "restamped": version.restamped, "by": version.actor,
              "at": version.at, "records_only": version.records_only,
              "record": version.record, "trace": version.trace,
              "pending": [_taken_away(one) for one in version.pending],
@@ -882,8 +890,10 @@ def version_lines(listed: list[dict], standing: str | None = None,
     if not listed:
         return []
     newest = listed[-1]
+    restamped = newest.get("restamped")
     lines = [f"design: v{newest['version']}, frozen {newest['at']} by {newest['by']}, "
-             f"sha256 {newest['digest']}"]
+             + (f"sha256 {newest['digest']}" if restamped is None else
+                f"sha256 {restamped} (re-stamped from {str(newest['digest'])[:12]})")]
     lines += [f"records only: v{one['version']}, {one['at']} by {one['by']}   "
               f"record: {one['record']}" for one in listed if one["records_only"]]
     if standing is not None:
