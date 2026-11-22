@@ -2084,6 +2084,7 @@ comms	packages/comms/tests/test_connector_tools.py	tools.record = GetFails()	kee
 comms	packages/comms/tests/test_connector_tools.py	for tool in set(mcp_tools.INPUTS) - set(tools_mod.NAMES):	keep	set	set
 comms	packages/comms/tests/test_connector_tools.py	assert set(NOT_SHOWN) <= set(texts)	keep	set	set
 comms	packages/comms/tests/test_connector_tools.py	pairs = [(rig.record.get_message(i), SimpleNamespace(qualified="planner@proj-a"))	keep	record	record
+comms	packages/comms/tests/test_connector_tools.py	shim = rig.shim(name="reviewer", scope="proj-a", start=False)	keep	start	start
 comms	packages/comms/tests/test_console_identity.py	assert not any(CONSOLE in a["open"] for a in console.daemon.asks.values())	keep	any	any
 comms	packages/comms/tests/test_console_identity.py	c.send(RELAY, "any", machine_line.compose([PLANNER], "x"))	keep	fail	fail
 comms	packages/comms/tests/test_console_identity.py	msg = console.record.get_message(mid)	keep	record	record
