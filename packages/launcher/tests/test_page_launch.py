@@ -363,17 +363,25 @@ def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
     assert "approval" in said["not_applied"]
 
 
-def test_limit_at_at_its_shipped_word_is_not_refused_for_its_companion(work, monkeypatch):
+def test_limit_at_at_its_shipped_default_is_not_refused_for_its_companion(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
     write_presets(f'[seat.lead]\ncwd = "{work}"\n')
     body = filled({"seat": "lead"})
-    assert (body["values"]["limit_at"], body["values"]["recycle_at_limit"]) == ("1x", "off")
+    assert (body["values"].get("limit_at", ""), body["values"]["recycle_at_limit"]) == (
+        "", "off")
     request, _ = pagehandlers.launch_request(body, "r1")
     assert "limit_at" not in request.typed
-    assert job.placed(request).values["limit_at"] == "1x"
+    assert job.placed(request).values["limit_at"] == ""
     # Typed, the same word would be refused: limit_at needs recycle_at_limit.
     with pytest.raises(catalog.Refused, match="limit_at"):
         job.placed(dataclasses.replace(request, typed={"limit_at": "1x"}))
+
+
+def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
+    write_presets('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n')
+    said = previewed(filled({"seat": "scratchy"}))
+    assert codes(said) == ["scratch-recycle"] and said["ticket"] is None
 
 
 def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
@@ -387,7 +395,7 @@ def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
     assert tuple(request.left_out) == ("limit_at",)
     resolved = job.placed(request)
     assert resolved.values["recycle_at_limit"] == "off"
-    assert (resolved.values["limit_at"], resolved.sources["limit_at"]) == ("1x", "left-out")
+    assert (resolved.values["limit_at"], resolved.sources["limit_at"]) == ("", "left-out")
 
 
 def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(

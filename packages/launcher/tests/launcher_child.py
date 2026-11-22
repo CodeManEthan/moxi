@@ -44,7 +44,7 @@ def main(spec_path: str) -> int:
     if spec.get("scratch_tmp"):
         compose.common.SCRATCH_TMP = Path(spec["scratch_tmp"])
     if spec.get("free_identity"):
-        api._identity_taken = lambda name, scope: None
+        api._identity_taken = lambda name, scope, replacing=None: None
     first.deliverer_argv = lambda rid, pid: [sys.executable, "-c", DELIVER, rid, "--pid",
                                              str(pid)]
     request = api.LaunchRequest(**spec["request"])

@@ -1189,3 +1189,64 @@ def test_show_and_the_round_note_give_a_build_s_verdict_and_findings(built, caps
     assert line in text and line in note
     assert "finding B1.L1: major, open: a line is unclear" in text
     assert "finding B1.L1: major, open: a line is unclear" in note
+
+
+# -- the trace check ---------------------------------------------------------------------
+
+@pytest.fixture
+def traced(opened, write_config):
+    """A round whose project asks for the trace check, with a ruling of the round, C1,
+    that the design owes a row; the version frozen has none, so it fails the check."""
+    write_config("""\
+        [projects.proj-a]
+        trace = true
+        """)
+    round_dir = opened()
+    ruling.rule(ROUND, record="comms:1234567", by="planner",
+                text="Agent-read times follow the settings.")
+    fold(round_dir)
+    return round_dir
+
+
+def test_a_publishable_report_on_a_version_that_fails_its_trace_check_is_refused(
+        traced):
+    # Core's verdict refused a PUBLISHABLE design report while trace-check refused.
+    before = raw(traced)
+
+    with pytest.raises(Refused) as refused:
+        record(report(traced))
+
+    [unmet] = refused.value.unmet
+    assert unmet.reason.startswith("trace: v1 fails: no row for C1: a publishable report")
+    assert unmet.fix == f"give design.md the rows, then moxi rounds fold {ROUND}"
+    assert raw(traced) == before
+
+
+def test_a_fold_first_report_on_a_version_that_fails_its_trace_check_is_recorded(
+        traced):
+    # Core recorded a FOLD FIRST design report while trace-check refused.
+    done = record(report(traced, "fold-first"))
+    assert done.verdict.verdict == "fold-first"
+    assert str(done.standing) == "fold-first@v1"
+
+
+@pytest.mark.parametrize("word", ["publishable", "fold-first"])
+def test_every_report_on_a_version_the_trace_check_did_not_run_on_is_refused(
+        traced, word):
+    # Core refused every design report when trace-check's run failed.
+    path = log.round_log(traced)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    frozen = json.loads(lines[-1])
+    assert frozen["type"] == "design.frozen"
+    del frozen["trace"]
+    lines[-1] = json.dumps(frozen) + "\n"
+    path.write_text("".join(lines), encoding="utf-8")
+
+    with pytest.raises(Refused) as refused:
+        record(report(traced, word))
+
+    [unmet] = refused.value.unmet
+    assert unmet.reason.startswith(
+        "trace: v1 holds no result: the check did not run on it; no report of v1 is "
+        "recorded")
+    assert unmet.fix.endswith(f"moxi rounds fold {ROUND}")

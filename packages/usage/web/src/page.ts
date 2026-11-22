@@ -29,7 +29,7 @@
 //   div[data-part=below]        the groups under the filter line:
 //     section[data-group=chart]    one bar a day or a month, stacked by token class by cost;
 //                                  by tokens the cache reads and the billable work as two
-//                                  charts; its sentence and its table
+//                                  charts; its sentence, and each chart's own table
 //     section[data-group=heat]     each day's cost over the 53 weeks to today, whatever the
 //                                  range, under the place filter; a day is a button that
 //                                  sets the range to it
@@ -58,20 +58,29 @@
 // filter line is asked with it.
 //
 // One piece is open at a time, a limit row or a section, and the address names it
-// (`address-model.ts`). The page is placed with the route the address gave. When a piece
-// opens or closes the page rewrites the address of the history entry it is on and adds no
-// entry, so Back leaves the page, and a reload or a new placement opens the same piece.
+// (`address-model.ts`). The page is placed with the route the address gave. When the
+// person opens or closes a piece and so moves to another view of the page (the page
+// itself, Sessions, one session, its subagents, Projects or Folders, Prices), the page
+// adds a history entry at its address, so Back returns to the view that was open before;
+// the page itself is not placed again until Back or Forward places it. A limit row,
+// Models and Kinds are the page itself and add no entry: opening or closing one, or
+// closing a piece the page closes itself, rewrites the entry it is on. A reload or a
+// new placement opens the piece the address names.
 
 import { css, html, LitElement, nothing, svg } from "lit";
+import { Directive, directive, PartType } from "lit/directive.js";
+import type { ElementPart, PartInfo } from "lit/directive.js";
+import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import {
-  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
+  addressPath, addressWrite, addsHistoryEntry, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress,
+  SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { CHART, chartDraw, chartGroup, TABLE } from "./chart-model.ts";
-import type { ChartDraw, ChartGroup, ChartModel, Series, Table } from "./chart-model.ts";
+import type { ChartDraw, ChartGroup, ChartModel, ChartPart, Series, Table } from "./chart-model.ts";
 import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
@@ -231,7 +240,8 @@ const STYLES = css`
                         border-radius: var(--moxi-radius); background: var(--moxi-bg); color: var(--moxi-text);
                         font: inherit; font-size: var(--moxi-font-size-sm); }
   .menu .custom button { color: var(--moxi-text); }
-  .grps.below { margin-top: 0; }
+  .grps.below { margin-top: 0; transition: opacity 180ms ease; }
+  .grps.below.stale { opacity: 0.6; }
   .chartl { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0 2px;
             font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
   .chartl button.act { flex: none; color: inherit; }
@@ -267,6 +277,10 @@ const STYLES = css`
            line-height: 18px; color: var(--moxi-text-dim); }
   .scale svg:first-of-type { margin-left: 3px; } .scale svg:last-of-type { margin-right: 3px; }
   .chartn { padding: 10px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text); }
+  .charth { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; padding: 10px 0 0;
+            font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .charth .chartn { padding: 0; }
+  .charth button.act { flex: none; color: inherit; }
   .chartc { padding: 0 0 4px; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
   .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0 0 6px; list-style: none;
             font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
@@ -401,6 +415,27 @@ const STYLES = css`
   }
 `;
 
+/** An element's height in px, written to the element's own style. The shell's style
+ * policy (style-src 'self') refuses a style attribute in markup, and Lit's
+ * styleMap writes one on its first draw; a write to the element's style is allowed. */
+class HeightPx extends Directive {
+  constructor(info: PartInfo) {
+    super(info);
+    if (info.type !== PartType.ELEMENT) throw new Error("heightPx goes on an element");
+  }
+
+  render(_px: number) {
+    return nothing;
+  }
+
+  override update(part: ElementPart, [px]: [number]) {
+    (part.element as HTMLElement).style.height = `${px}px`;
+    return nothing;
+  }
+}
+
+const heightPx = directive(HeightPx);
+
 export class UsagePage extends LitElement {
   static styles = STYLES;
 
@@ -410,7 +445,7 @@ export class UsagePage extends LitElement {
     copied: { state: true },
     menu: { state: true },
     custom: { state: true },
-    asTable: { state: true },
+    tabled: { state: true },
     heatTable: { state: true },
     sectionTable: { state: true },
     boardBy: { state: true },
@@ -433,8 +468,10 @@ export class UsagePage extends LitElement {
   menu: Menu["key"] | null = null;
   /** The Range menu shows the two days of `From … to …`. */
   custom = false;
-  /** The chart's table stands in its place. */
-  asTable = false;
+  /** The charts whose tables stand in their place, by `ChartPart` key. Each chart goes
+   * back to its chart, the heat map with them, whenever what they show is drawn again:
+   * a new address, range, filter, measure or split, or a pass that read the index. */
+  tabled: ReadonlySet<string> = new Set();
   /** The heat map's table stands in its place. */
   heatTable = false;
   /** The opened section whose table is shown under its rows. */
@@ -530,6 +567,12 @@ export class UsagePage extends LitElement {
   /** The state and folders the reads under the filter line were asked under. */
   #askedFilters: string | null = null;
   #askedAllTime: string | null = null;
+  /** The address and state the charts were last drawn for. */
+  #drawnFor: string | null = null;
+  /** The range the chart's reads were last asked under, and the one before it, which a
+   * held chart is drawn under until its read answers. */
+  #chartRange: PageState["range"] | null = null;
+  #heldChartRange: PageState["range"] | null = null;
   #resize: ResizeObserver | null = null;
   #stops: (() => void)[] = [];
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -617,8 +660,9 @@ export class UsagePage extends LitElement {
     return this.#at;
   }
 
-  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. The
-   * address of the history entry the page is on is rewritten to name it. */
+  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. A move
+   * to another view adds a history entry (`addsHistoryEntry`), so Back returns to the view
+   * that was open; a move within one rewrites the entry the page is on. */
   open(address: Address): void {
     const next = settled(address, this.#folders());
     if (sameAddress(next, this.#at)) return;
@@ -635,14 +679,18 @@ export class UsagePage extends LitElement {
     this.agentPart = null;
     if (next.piece !== "sessions") this.#placed = null;
     this.#closePart();
-    this.#setAt(next);
+    this.#setAt(next, { push: addsHistoryEntry(was, next) });
     this.requestUpdate();
   }
 
-  #setAt(address: Address): void {
+  /** Makes `address` the open piece and writes it to the browser's address: in a new
+   * history entry with `push`, else in place of the entry the page is on. */
+  #setAt(address: Address, { push = false }: { push?: boolean } = {}): void {
     this.#at = address;
     const path = addressWrite(address, location.pathname);
-    if (path !== null) history.replaceState(history.state, "", path);
+    if (path === null) return;
+    if (push) history.pushState(null, "", path);
+    else history.replaceState(history.state, "", path);
   }
 
   #closeWindow(): void {
@@ -715,6 +763,7 @@ export class UsagePage extends LitElement {
     this.#closeBoard();
     this.#closePart();
     this.#asked = this.#askedFilters = this.#askedAllTime = null;
+    this.#chartRange = this.#heldChartRange = null;
   }
 
   /** Whether the project filter is by folder: projects is not installed. */
@@ -737,6 +786,11 @@ export class UsagePage extends LitElement {
         ? { harness: at.harness, id: at.session } : null;
     }
     this.#followWindow();
+    const drawnFor = JSON.stringify([this.#at, heldState()]);
+    if (drawnFor !== this.#drawnFor) {
+      if (this.#drawnFor !== null) this.#showCharts();
+      this.#drawnFor = drawnFor;
+    }
     const status = this.#status;
     if (status === null || !hasBelow(status)) return;
     const update = () => this.requestUpdate();
@@ -753,16 +807,27 @@ export class UsagePage extends LitElement {
       // Under the same filters the paths change only with a new day. The menus' lists
       // then keep their last value until the new reads answer, so the filter line keeps
       // every filter, and a menu the person opened stays open, while the lists reload.
+      // Everything under the filter line keeps its last value, drawn faded, until its new
+      // read answers: a list a section shares with a menu keeps it under new filters too.
       const filters = JSON.stringify([state, this.#folders()]);
       const sameFilters = filters === this.#askedFilters;
       this.#askedFilters = filters;
-      const heldPlaces = sameFilters ? this.#places?.value ?? null : null;
-      const heldModels = sameFilters ? this.#models?.value ?? null : null;
+      const last = <V>(feed: Feed<V> | null): V | null => feed?.value ?? null;
+      const heldPlaces = sameFilters ? last(this.#places)
+        : paths.placesSection === paths.places ? last(this.#placesSection) : null;
+      const heldModels = sameFilters ? last(this.#models)
+        : paths.modelsSection === paths.models ? last(this.#modelsSection) : null;
+      const held = { chart: last(this.#chart), chartTerms: last(this.#chartTerms), heat: last(this.#heat),
+                     placesSection: last(this.#placesSection), modelsSection: last(this.#modelsSection),
+                     terms: last(this.#terms), sessions: last(this.#sessionsTop) };
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
-      this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
-      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update);
-      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update);
+      this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update).hold(held.chart);
+      this.#heldChartRange = this.#chartRange;
+      this.#chartRange = state.range;
+      this.#chartTerms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.chartTerms), parseReport, update)
+        .hold(held.chartTerms);
+      this.#heat = new Feed<Report<DayRow>>(() => api("usage", paths.heat), parseReport, update).hold(held.heat);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
@@ -770,11 +835,13 @@ export class UsagePage extends LitElement {
       this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update)
         .hold(heldModels);
       this.#placesSection = paths.placesSection === paths.places ? this.#places
-        : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update);
+        : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update).hold(held.placesSection);
       this.#modelsSection = paths.modelsSection === paths.models ? this.#models
-        : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update);
-      this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update);
-      this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update);
+        : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update).hold(held.modelsSection);
+      this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update)
+        .hold(held.terms);
+      this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update)
+        .hold(held.sessions);
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
     }
     this.#followBoard(state, today);
@@ -912,12 +979,19 @@ export class UsagePage extends LitElement {
     this.#event = event;
     this.#events += 1;
     if (!event.running) {
+      this.#showCharts();
       void this.#status?.refresh();
       void this.#daily?.refresh();
       for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#board,
                           ...this.#openedFeeds()]) void feed?.refresh();
     }
     this.requestUpdate();
+  }
+
+  /** Every chart shows its chart again, not its table. */
+  #showCharts(): void {
+    if (this.tabled.size > 0) this.tabled = new Set();
+    this.heatTable = false;
   }
 
   async #askPass(): Promise<void> {
@@ -1009,8 +1083,10 @@ export class UsagePage extends LitElement {
       allTime: this.#allTime?.value ?? null, places: this.#places?.value ?? null, folders: this.#folders(),
       models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
     });
+    // A held chart is drawn as it was, under the range it was read for.
+    const chartRange = chart?.loading === true && this.#heldChartRange !== null ? this.#heldChartRange : state.range;
     const group = !frame.below || report === null ? null
-      : chartGroup(report, state.range, state.measure, today, this.asTable, this.#chartTerms?.value ?? null, state.split);
+      : chartGroup(report, chartRange, state.measure, today, this.tabled, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
@@ -1022,7 +1098,11 @@ export class UsagePage extends LitElement {
     ].filter((drawn) => drawn !== nothing);
     // The heat map is the range's neighbour, not its part: it is drawn whatever the range holds.
     const heatReport = frame.below ? this.#heat?.value ?? null : null;
-    const heat = heatReport === null ? null : heatModel(heatReport, today, state.range);
+    const heat = heatReport === null ? null : { model: heatModel(heatReport, today, state.range), report: heatReport };
+    // Everything under the filter line is drawn faded while a read of it is out over what
+    // it shows.
+    const stale = [this.#chart, this.#chartTerms, this.#heat, this.#placesSection, this.#modelsSection, this.#terms,
+                   this.#prices, this.#sessionsTop].some((feed) => feed?.stale === true);
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -1032,8 +1112,8 @@ export class UsagePage extends LitElement {
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
-      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
-        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat)}${sections}</div>`}
+      ${group === null && heat === null && sections.length === 0 ? nothing : html`<div class=${stale ? "grps below stale" : "grps below"} data-part="below">${
+        group === null ? nothing : this.#chartGroup(group)}${heat === null ? nothing : this.#heatGroup(heat.model, heat.report)}${sections}</div>`}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1197,8 +1277,8 @@ export class UsagePage extends LitElement {
     </form>`;
   }
 
-  /** The chart's group: its sentence and one of the chart, its table, or the sentence
-   * that nothing was used. */
+  /** The chart's group: its sentence and its charts, each under its name with its own
+   * Table or Chart, or the sentence that nothing was used. */
   #chartGroup(group: ChartGroup) {
     // The group's label column is beside the chart only on a wide page.
     const wide = !window.matchMedia("(max-width: 720px)").matches;
@@ -1209,25 +1289,39 @@ export class UsagePage extends LitElement {
       <div class="gk">${group.label}</div>
       <div class="gl">
         ${group.nothing === null ? nothing : html`<p class="none" data-part="none">${group.nothing}</p>`}
-        ${group.sentence === null && group.toggle === null ? nothing : html`<div class="chartl">
-          <span data-part="sentence">${group.sentence ?? nothing}</span>
-          ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
-            @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
-        ${group.charts.map((chart) => this.#oneChart(chart, width, hang))}
-        ${group.table === null ? nothing : this.#table(group.table)}
+        ${group.sentence === null ? nothing : html`<div class="chartl"><span data-part="sentence">${group.sentence}</span></div>`}
+        ${group.parts.map((part) => this.#chartPart(part, width, hang))}
       </div>
     </section>`;
   }
 
+  /** One chart of the group: its name and its Table or Chart, which switches it alone,
+   * then the chart or its table. */
+  #chartPart(part: ChartPart, width: number, hang: number) {
+    const flip = () => {
+      const tabled = new Set(this.tabled);
+      if (!tabled.delete(part.key)) tabled.add(part.key);
+      this.tabled = tabled;
+    };
+    const head = part.name === null && part.toggle === null ? nothing
+      : html`<div class="charth" data-chart=${part.key}>${part.name === null ? html`<span></span>`
+        : html`<p class="chartn" data-part="chart-name">${part.name}</p>`}${part.toggle === null ? nothing
+        : html`<button type="button" class="act" data-part="table-toggle" @click=${flip}>${part.toggle}</button>`}</div>`;
+    return html`${head}
+      ${part.chart === null ? nothing : this.#oneChart(part.chart, width, hang)}
+      ${part.table === null ? nothing : this.#table(part.table)}`;
+  }
+
   /** The heat map's group: its name, its sentence and the map, or its table in the
-   * map's place. */
-  #heatGroup(model: HeatModel) {
+   * map's place. The map is drawn anew for each report, so a cell's focus does not
+   * outlast the read it came from. */
+  #heatGroup(model: HeatModel, report: Report<DayRow>) {
     const draw = heatDraw(model);
     const pick = (day: string) => {
       const range = customRange(day, day);
       if (range !== null) holdState({ range });
     };
-    const keyed = (event: KeyboardEvent, day: string) => {
+    const pickByKey = (event: KeyboardEvent, day: string) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       pick(day);
@@ -1239,7 +1333,7 @@ export class UsagePage extends LitElement {
         <div class="chartl"><span data-part="sentence">${model.sentence}</span>
           <button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.heatTable = !this.heatTable; }}>${this.heatTable ? CHART : TABLE}</button></div>
-        ${this.heatTable ? this.#table(model.table) : html`<div class="scroll heat">
+        ${this.heatTable ? this.#table(model.table) : keyed(report, html`<div class="scroll heat">
           <svg class="ch hm" data-part="heat" role="group" aria-label=${model.aria} width=${draw.width}
             height=${draw.height} viewBox="0 0 ${draw.width} ${draw.height}">${svg`
             ${draw.months.map((month) => svg`<text x=${month.x} y=${HEAT_SIZE.months - 3}>${month.text}</text>`)}
@@ -1247,18 +1341,17 @@ export class UsagePage extends LitElement {
             ${draw.cells.map((cell) => svg`<rect class="hc h${cell.step}" data-day=${cell.day} data-used=${String(cell.used)}
                 x=${cell.x} y=${cell.y} width=${draw.cell} height=${draw.cell} rx="2" tabindex="0" role="button"
                 aria-label=${cell.aria} @click=${() => pick(cell.day)}
-                @keydown=${(event: KeyboardEvent) => keyed(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
+                @keydown=${(event: KeyboardEvent) => pickByKey(event, cell.day)}><title>${cell.hover}</title></rect>`)}`}</svg></div>
           <p class="scale" data-part="scale" aria-hidden="true">${LESS}${[1, 2, 3, 4, 5].map((step) =>
-            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`}
+            html`<svg width="10" height="10"><rect class="hc h${step}" width="10" height="10" rx="2"></rect></svg>`)}${MORE}</p>`)}
       </div>
     </section>`;
   }
 
-  /** One chart of the group: its name and caption where it has them, the chart, and the
-   * legend of what its bars are stacked by. */
+  /** One chart of the group: the chart, its caption where it has one, and the legend of
+   * what its bars are stacked by. */
   #oneChart(chart: ChartModel, width: number, hang: number) {
-    return html`${chart.name === null ? nothing : html`<p class="chartn" data-part="chart-name">${chart.name}</p>`}
-      ${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
+    return html`${this.#chartSvg(chartDraw(chart, width, hang), chart.aria)}
       ${chart.caption === null ? nothing : html`<p class="chartc" data-part="caption">${chart.caption}</p>`}
       ${chart.series.length === 0 ? nothing : this.#legend(chart.series)}`;
   }
@@ -1453,7 +1546,7 @@ export class UsagePage extends LitElement {
         row?.focus();
       });
     };
-    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" style="height: ${px}px"></tr>` : nothing);
+    const pad = (px: number) => (px > 0 ? html`<tr class="pad" aria-hidden="true" ${heightPx(px)}></tr>` : nothing);
     return html`<div class="scroll board" data-part="board" @scroll=${scrolled}><table class="tbl" data-part="table"
       data-table="sessions" aria-rowcount=${count + 1}>
       <thead><tr>${board.columns.map((column) => html`<th class=${column.num ? "n" : ""}

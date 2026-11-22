@@ -22,7 +22,7 @@ sentence names the same item, and adds no second one. A new item takes an id tha
 earlier report of its stage used, a dropped build's included, as a new finding does.
 An item keeps its key when its build is dropped: what waits on the operator still does.
 
-**The pointer** that shows an item done is one of the four shapes, or the id of a
+**The pointer** that shows an item done is one of the five shapes, or the id of a
 commit (7 to 40 hex digits) that the repo of its stage's build holds; the mark records
 that commit's whole id.
 

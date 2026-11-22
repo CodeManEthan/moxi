@@ -158,8 +158,11 @@ def _seed_commit_rules() -> dict[str, list[str]]:
 
 
 def _check_commit_rules(name: str, values: list[str]) -> str | None:
-    from moxi_repo.commit_rules import pattern_problem
+    from moxi_repo.commit_rules import TAG_CHECK_TRAILERS, pattern_problem, switch_problem
 
+    if name == TAG_CHECK_TRAILERS:
+        why = switch_problem(values[-1]) if values else None
+        return None if why is None else f"--set {name}: {why}"
     if name != "tag-pattern":
         return None
     for value in values:

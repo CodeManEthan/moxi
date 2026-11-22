@@ -226,8 +226,11 @@ exits 1 when no request of that agent is in range.
 Cost is worked out when the report runs, from the model table, so a new price or a
 `[[model]]` row applies to past requests too, each priced on its own time when the row has
 a price period. Tiers apply as the table gives them: a long prompt's price, a priority or
-flex service tier, fast mode (whose cache prices are the provider's multipliers over the
-fast input price). Two marks keep a total honest:
+flex service tier, fast mode (each fast tier carries its own cache prices, the model's
+caching multipliers over the fast input price as Anthropic's pricing page gives them: Opus
+5.5 reads its fast cache at $0.40 a million, 0.05x). A tier that leaves a cache price out
+gets the tier's input price times the provider's default multiplier. Two marks keep a total
+honest:
 
 - `u`, unpriced: tokens of a model the table cannot price are counted apart and left out
   of the cost, never priced at $0. Add a `[[model]]` row to price them.
@@ -420,13 +423,18 @@ sessions module. Top to bottom:
 - **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
   From … to …, All time), each range with its figure under the filters set; Project, or
   Folder where the projects module is not installed, which picks any number of them
-  (the button counts them: `1 project`, `2 projects`) and `all` to clear them; Harness
+  (the button counts them: `1 project`, `2 projects`), and `All projects` (`All folders`),
+  which the button reads with none picked, to clear them; Harness
   and Model, each drawn only when there is more than one to choose or one is set; and
   Cost / Tokens; and By class / By model, which says what the chart by cost is stacked by
-  and is off under Tokens. Everything under it follows them.
+  and is off under Tokens. Everything under it follows them. While its new reads are out,
+  after the range or a filter changes (a day picked on the heat map too) or a pass
+  finishes, everything under the line stays drawn as it was, faded, and each part is
+  drawn anew as its read answers.
 - **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
   sentence over it, each bar's value on hover, a dashed outline on a period whose figures
-  are not whole, and `Table`, its rows as a table. By cost and By class each bar is
+  are not whole, and `Table` beside its name, its rows as a table under the name, and
+  `Chart` back. By cost and By class each bar is
   stacked by token class (Input, Cache create, Cache read, Output), each part that class's
   own dollars from the cost terms; By model it is stacked by model, the six that cost most
   in the range each in a shade or a line fill of its own and the rest as one, `Other`.
@@ -436,7 +444,12 @@ sessions module. Top to bottom:
   (`Monthly` where its bars are months), and By model the line under it says `Per-model
   dollars, straight from the index.` By tokens there are two charts: `Cache reads` alone,
   with its share of all tokens, and `Billable work`, input, cache writes and output
-  stacked. A table's column of dollars reads `Est. cost`.
+  stacked; each has its own `Table` beside its name, which switches that chart alone to its
+  table, `Cache reads` with a `Cache read` column and `Billable work` with `Input`, `Cache
+  create` and `Output`. Every chart, and the heat map, shows its chart again, not its
+  table, each time the page draws it again: on a new address, range, filter, Cost /
+  Tokens or split, and after a pass. A table's
+  column of dollars reads `Est. cost`.
 - **The heat map.** `Daily estimated cost — trailing 53 weeks`: each day's estimated cost
   over the 53 weeks to today, whatever the range, under the project (or folder) filter
   alone, and drawn even when no day of them was used. Weeks are columns 13 px apart (on a
@@ -519,10 +532,15 @@ Its addresses, after `/m/usage/`:
 | `projects`, `folders` | the Projects or the Folders section, whichever the install has |
 | `models`, `kinds`, `prices` | that section |
 
-One piece is open at a time, and the address names it. The page rewrites the address in
-place as a piece opens or closes, adding no history entry, so Back leaves the page; a
-reload, or Back from the Sessions page, opens the same piece again, though not the scroll
-or how far it was shown. The range, the filters and Cost / Tokens are not part of the
+One piece is open at a time, and the address names it. A move to another view of the
+page adds a history entry at its address, so Back returns to the view that was open
+before: from a session opened from the table, to the table, and from the table to the
+page. The views are the page itself, Sessions, one session, a session's subagents,
+Projects (or Folders) and Prices. A limit row, Models and Kinds are the page itself:
+opening or closing one rewrites the address in place and adds no entry, as does opening
+another subagent of the same session. A reload, or Back and Forward, places the page
+again and opens the piece the address names, though not the scroll or how far it was
+shown. The range, the filters and Cost / Tokens are not part of the
 address: they are kept until the shell's page is reloaded, which starts again on the last
 30 days with no filter. An address the page does not have opens it with nothing opened
 and a line at the foot.

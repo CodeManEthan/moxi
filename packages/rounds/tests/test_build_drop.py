@@ -5,10 +5,13 @@ way, and the lead's is refused while one of them is not his to drop."""
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 from moxi_rounds import (builds, dropping, listing, log, opening, places, showing, stages,
-                         state)
+                         state, sweeping)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -167,6 +170,77 @@ def test_a_drop_keeps_dirs_outside_rounds_roots_and_names_the_check(a_round, git
                                                                  (scratch, "A2")]
     assert dropped.removed == ()
     assert worktree.is_dir() and scratch.is_dir()
+
+
+@pytest.fixture
+def scratch_in_use(a_round, git_repo, tmp_path):
+    """B1 commissioned again with a scratch folder that a live process has as its
+    working folder. Returns the folder and the process."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    log.append(a_round, "build.dropped", {"stage": "B1", "by": "lead",
+                                          "record": "comms:1234567", "tips": []},
+               by="planner")
+    log.append(a_round, "build.commissioned", {
+        "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
+        "target": "main", "builder": "coder", "scratch": str(scratch),
+        "host": places.host()}, by="planner")
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                            cwd=scratch, stdin=subprocess.PIPE)
+    yield scratch, proc
+    proc.communicate(timeout=30)
+
+
+@pytest.mark.parametrize("whole", [False, True], ids=["build", "round"])
+def test_a_drop_goes_through_while_a_process_uses_the_builds_scratch_and_leaves_it(
+        a_round, scratch_in_use, whole):
+    # Core never refused an abandon for its scratch folder: the folder in use stayed
+    # for the sweep, with one line naming the process.
+    scratch, proc = scratch_in_use
+
+    if whole:
+        dropped = dropping.drop(ROUND, by="operator", record="comms:7654321",
+                                run_by="planner")
+    else:
+        dropped = operator_drops()
+
+    assert dropped.event["type"] == ("round.dropped" if whole else "build.dropped")
+    [kept] = [one for one in dropped.kept if one.kind == "scratch"]
+    assert (kept.place, kept.check, kept.why) == (scratch, "D",
+                                                  "a running process uses it")
+    assert kept.work[0].startswith(f"pid {proc.pid} (")
+    assert scratch.is_dir()
+
+
+def test_the_command_names_the_process_that_keeps_a_dropped_builds_scratch(
+        a_round, scratch_in_use, capsys):
+    scratch, proc = scratch_in_use
+
+    assert main(["drop", ROUND, "B1", "--by", "operator", "--record",
+                 "comms:7654321"]) == 0
+
+    [line] = [one for one in capsys.readouterr().out.splitlines()
+              if one.startswith(f"kept {scratch}:")]
+    assert line.startswith(f"kept {scratch}: D: a running process uses it (pid "
+                           f"{proc.pid} (")
+    assert line.endswith("; it is left for the sweep of leftover folders")
+
+
+def test_where_the_processes_cant_be_read_the_drop_says_the_gate_was_not_run(
+        a_round, scratch_in_use, monkeypatch):
+    # Core noted the scratch gate as not run and went on; the drop does the same
+    # before it moves the folder.
+    def unreadable(**_how):
+        raise OSError("no /proc")
+
+    monkeypatch.setattr(sweeping, "_process_table", unreadable)
+    scratch, _proc = scratch_in_use
+
+    dropped = operator_drops()
+
+    assert dropped.unscanned == (
+        f"the scratch gate was not run on B1's scratch folder {scratch}: the processes "
+        "could not be read: no /proc",)
 
 
 @pytest.mark.parametrize(("stage", "said"), [

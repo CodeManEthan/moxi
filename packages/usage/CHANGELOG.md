@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Every fast tier in the shipped model table carries its own cache prices, read from
+  Anthropic's pricing page (platform.claude.com/docs/en/about-claude/pricing) on
+  2026-11-21: Opus 5.5 fast cache reads $0.40, 5-minute writes $10, 1-hour $16; Opus 5 and
+  Opus 4.8 fast $1, $12.50 and $20. Opus 5.5's fast cache reads were filled at 0.1x the
+  fast input price ($0.80), where Anthropic charges 0.05x; it is the only price that
+  moves. Fable and Mythos 5.2 already carried theirs.
+- While the reads under the filter line are out, after a day is picked on the heat map, a
+  filter or the range is changed, or a pass finishes, everything under the line (the
+  chart, the heat map and the sections) stays drawn as it was, faded, and each part is
+  drawn anew as its read answers. The chart, the heat map and the sections were gone, or
+  read `Reading…`, until then.
+- The Sessions table scrolls to every row it has read. Under the shell's style policy
+  (`style-src 'self'`) its spacer rows' height was refused, so the box stopped after
+  about 30 rows, and each draw logged a console error. The page writes no style
+  attribute now.
+- A move to another view of the page (Sessions, one session, a session's subagents,
+  Projects or Folders, Prices, or the page itself) adds a history entry, so Back returns
+  to the view that was open before: from a session opened from the Sessions table, to
+  the table, and from the table to the page. The page rewrote its address in place, so
+  Back left it. A limit row, Models and Kinds still rewrite the address in place.
+- The project filter reads `All projects` (`All folders` by folder) on its first item
+  and on its button with none picked, where it read `all`.
+- Under Tokens each chart has its own table: `Cache reads` with a Cache read column, and
+  `Billable work` with Input, Cache create and Output, in the order its chart stacks
+  them. One table held all four classes.
+- Each chart has its own `Table` beside its name, which switches that chart alone; the
+  chart by cost keeps its name over its table. One `Table` beside the sentence switched
+  every chart of the group.
+- Every chart, and the heat map, shows its chart again, not its table, each time the page
+  draws it again: on a new address, range, filter, Cost / Tokens or split, and after a
+  pass. A table stayed in a chart's place until its `Chart` was clicked.
 - A cost on the page that is not whole is marked in its own cell: a dim `*`, why on
   hover, and `, not whole: <why>` in the cell's text for a screen reader. The tables
   that gave it a `Not whole` column (Sessions, Projects or Folders, Models, the chart's

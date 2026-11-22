@@ -96,7 +96,13 @@ def holder():
 
     yield start
     for proc in procs:
-        proc.communicate(timeout=30)
+        if not proc.stdin.closed:
+            proc.communicate(timeout=30)
+            continue
+        # A test closed stdin to let the lock go; before Python 3.13, communicate
+        # flushes stdin first and raises on a closed one.
+        proc.wait(timeout=30)
+        proc.stdout.close()
 
 
 class GitRepo:

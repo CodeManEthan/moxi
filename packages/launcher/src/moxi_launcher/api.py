@@ -57,7 +57,11 @@ builds.
 preset read, and its own request id (and, but for a resume, its own Claude session id). It
 keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
 install no longer offers, or whose value's needs it no longer meets, goes back to its
-default with a warning, as a comms name does without comms. It never sends the row's
+default with a warning, as a comms name does without comms; so does a scratch row's
+`recycle_at_limit = relaunch`, recorded before a scratch launch was refused it. A
+relaunch's model pin (`pin.choose`) is its model only when the stored values name none;
+the new row records the stored model and a `model-pin` event, never the pin as a value.
+It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
 launcher, relaunched by <actor>: <path>`, a director's relaunch sends none, and a resume
 sends the brief it was given, if any, as a launch sends its own. **A replay's environment is built from the row and the settings only**: the row's recorded
@@ -113,8 +117,8 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import (catalog, compose, first, handoffs, identity, live, names, presets, slots, store,
-               targets)
+from . import (catalog, compose, first, handoffs, identity, live, names, presets, recycle, slots,
+               store, targets)
 from .compose import Composition, common
 from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
@@ -148,6 +152,10 @@ class ScratchRoot(Refusal):
     not a folder, another user's, or open to other users."""
 
     code = "scratch-root"
+
+
+#: A scratch launch set to recycle itself, refused where its values are checked.
+ScratchRecycle = catalog.ScratchRecycle
 
 
 @dataclass(frozen=True)
@@ -201,7 +209,17 @@ class ReplayRequest:
     in the slot's ended run pane, keeping the pane (a relaunch); `chain` is the first
     request id of the chain of relaunches, which the slot's `meta` keeps (default: the
     first launch reached through `relaunch_of`, for a relaunch; else the new launch's
-    own id)."""
+    own id).
+
+    `model_pin` is the model a relaunch comes back on (`pin.choose`): it is the launch's
+    model only when the stored values name none, it never reaches the new row's
+    `values_json` (so a resume of the new launch runs the row's own model), and the new
+    launch records it as a `model-pin` event.
+
+    `replacing` is the session id of the session the replay takes over, for `check`
+    before a relaunch exits it: comms' name held by that session, and the slot whose run
+    pane is the row's own, are not refused. A holder that has reported no session id
+    can't be told apart from another session, so its name is still refused."""
 
     row: store.LaunchRow
     relaunch_of: str | None = None
@@ -219,6 +237,8 @@ class ReplayRequest:
     director: bool = False
     brief: str | None = None
     brief_file: str | None = None
+    model_pin: str | None = None
+    replacing: str | None = None
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -227,9 +247,13 @@ class ReplayRequest:
 @dataclass(frozen=True)
 class Replayed(presets.Resolved):
     """A replay's values, as `presets.resolve` gives a fresh launch's, with the slot hold
-    the replay comes with."""
+    the replay comes with, the model pin it applied (None when it applied none), and the
+    session it takes over with that session's run pane (`ReplayRequest.replacing`)."""
 
     hold: str | None = None
+    model_pin: str | None = None
+    replacing: str | None = None
+    replacing_pane: str | None = None
 
 
 @dataclass(frozen=True)
@@ -318,6 +342,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             return _stored(inserted.row)
 
         rid = ids.request_id
+        model_pin = getattr(resolved, "model_pin", None)
+        if model_pin is not None:
+            store.add_event(conn, MODEL_PIN, {"model": model_pin, "how": "pinned"},
+                            request_id=rid)
         warnings = _warnings(resolved, composition)
         if base == "no-credentials":
             warnings += (NO_CREDENTIALS,)
@@ -347,8 +375,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
 def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
-    busy, a posture off its default), a directory that does not exist, a scratch folder's
-    parent this user can't trust (a link, another user's, or open to others), a slot
+    busy, a posture off its default, a scratch launch set to recycle itself:
+    `recycle_at_limit = relaunch`, `compact` being open to one), a directory that does
+    not exist, a scratch folder's parent this user can't trust (a link, another user's,
+    or open to others), a slot
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
@@ -386,6 +416,17 @@ def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
         composition = compose.build(request, resolved, env=env)
     return dataclasses.replace(composition,
                                warnings=_warnings(resolved, composition))
+
+
+def prepare(request, composition: Composition,
+            env: Mapping[str, str] | None = None) -> str:
+    """The command `request`'s launch would run, as its target finds it in the child's
+    environment (`preview`'s `composition`). Raises the target's refusal (a harness that
+    is not on the child's `PATH`); starts and writes nothing."""
+    caller = dict(os.environ if env is None else env)
+    child, _ = _child_base(request, caller)
+    launch_env = common.child_env(child, composition, moxi_modules.session_env())
+    return targets.get(composition.target).prepare(composition, launch_env)
 
 
 def exit_code(error: BaseException) -> int:
@@ -443,6 +484,8 @@ def _live_names(env: Mapping[str, str] | None) -> frozenset[str]:
 #: The source recorded for a typed row whose value the caller filled in from an earlier
 #: launch.
 LAST = "last"
+#: The event a relaunch's launch records when it runs on a model pin: `model`, `how`.
+MODEL_PIN = "model-pin"
 #: What a replay does not take from the stored values as values: the composer's own
 #: record of the mode and the rows it left out, `--off-posture`, which goes back on
 #: its own field, and a fresh launch's record of what its request gave.
@@ -450,10 +493,20 @@ _NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
 
 
 def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
-    """The values a launch's row records: `values` as they are for a replay; for a fresh
-    launch, with `sources` and `filled` (see the module's text)."""
+    """The values a launch's row records: `values` as they are for a replay, the stored
+    model put back over a model pin it applied; for a fresh launch, with `sources` and
+    `filled` (see the module's text)."""
     if getattr(request, "replay", False):
-        return values
+        if getattr(resolved, "model_pin", None) is None:
+            return values
+        # The pin is the relaunch's alone: the row keeps the stored model.
+        kept = dict(values)
+        stored = request.row.values
+        if "model" in stored:
+            kept["model"] = stored["model"]
+        else:
+            kept.pop("model", None)
+        return kept
     sources = dict(resolved.sources)
     for name in getattr(request, "left_out", None) or ():
         sources.setdefault(str(name), presets.LEFT_OUT)
@@ -493,7 +546,9 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
 
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
-    the replay's (none but a resume's), its handoff the replay's, its slot the replay's, with the mode worked out
+    the replay's (none but a resume's), its handoff the replay's, its slot the replay's,
+    its model the replay's `model_pin` when the stored values name none, with the mode
+    worked out
     again for the modules installed now. A comms identity is dropped, with a warning, when
     comms is no longer installed, as a fresh launch's is."""
     row = request.row
@@ -507,6 +562,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
     values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
     values.update(brief=request.brief or "", brief_file=request.brief_file or "",
                   handoff=request.handoff or "")
+    model_pin = request.model_pin if request.model_pin and not values.get("model") else None
+    if model_pin is not None:
+        values["model"] = model_pin
     slot = request.slot if request.slot is not None else (
         row.slot if request.respawn else None)
     if slot is not None:
@@ -522,6 +580,10 @@ def _replayed(request: ReplayRequest) -> Replayed:
         dropped = _unoffered_option(harness, target, values, name)
         if dropped is not None:
             warnings.append(dropped)
+    if recycle.is_scratch_relaunch(values):
+        values["recycle_at_limit"] = "off"
+        warnings.append(f"recycle_at_limit relaunch is not applied: "
+                        f"{recycle.SCRATCH_RECYCLE[0]}")
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
     if request.posture is not None:
@@ -544,7 +606,9 @@ def _replayed(request: ReplayRequest) -> Replayed:
         scratch=bool(values.get("scratch")), project_key=row.project_key, agents=(),
         identity=identity, scope=scope, posture=str(posture or ""), target=target,
         off_posture=bool(stored.get("off_posture", False)), links=frozenset(links),
-        warnings=tuple(warnings), hold=request.hold)
+        warnings=tuple(warnings), hold=request.hold, model_pin=model_pin,
+        replacing=request.replacing,
+        replacing_pane=row.pane_id if request.replacing else None)
 
 
 def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
@@ -637,6 +701,10 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
             found.append(ScratchRoot(
                 "scratch", f"a scratch launch can't use its folder: {problem}",
                 "move that folder away, or launch in a directory of your own"))
+        try:
+            catalog.refuse_scratch_recycle(getattr(resolved, "values", {}) or {})
+        except ScratchRecycle as exc:
+            found.append(exc)
     named = targets.named_slot(getattr(resolved, "values", {}) or {})
     if named is not None and resolved.target != "slot":
         found.append(catalog.BadValue(
@@ -644,16 +712,18 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
                     "and only a slot launch takes a slot",
             "launch with --target slot, or name no slot"))
     if resolved.identity:
-        taken = _identity_taken(resolved.identity, resolved.scope)
+        taken = _identity_taken(resolved.identity, resolved.scope,
+                                replacing=getattr(resolved, "replacing", None))
         if taken is not None:
             found.append(taken)
     found += targets.get(resolved.target).check(resolved)
     return found
 
 
-def _identity_taken(name: str, scope: str | None) -> Refusal | None:
+def _identity_taken(name: str, scope: str | None, *,
+                    replacing: str | None = None) -> Refusal | None:
     """comms' word on whether `name` is free for this launch (`identity.check`)."""
-    return identity.check(name, scope, _comms_api())
+    return identity.check(name, scope, _comms_api(), replacing=replacing)
 
 
 def _comms_api():
@@ -844,9 +914,9 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "LAST", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "RELAUNCH_ENV",
-           "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
-           "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
-           "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",
-           "launch", "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold",
-           "running"]
+__all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV",
+           "RELAUNCH_ENV", "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline",
+           "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
+           "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
+           "ScratchRecycle", "ScratchRoot", "check", "exit_code", "launch", "launch_kind",
+           "launch_kinds", "open_hold", "prepare", "preview", "release_hold", "running"]

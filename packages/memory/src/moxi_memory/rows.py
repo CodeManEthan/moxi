@@ -10,6 +10,9 @@ module only decides which of them count and what text each row holds.
   is not a compaction summary. A message sessions marks `injected` as unknown is kept;
 - each tool call, as its summary line and its input.
 
+Each tier 1 row records its writer, from sessions' `writer(record)`: `person`, `model`
+(a tool call's too), `unknown`, or the kind of a message sessions doesn't mark injected.
+
 **Tier 2** (`Tail`, the `tails` table) holds the end of each main-session tool result,
 `tail_chars` characters long, with whether the tool failed. A subagent's results give no
 tail.
@@ -33,10 +36,11 @@ They read past the characters secrets sees through (`moxi_secrets.seen_through`)
 the text still holds them: those count nothing toward `edge_chars`, and none ends the span,
 so a control character Python reads as whitespace can't stop it inside a token it splits.
 
-**The secret-path rule.** A tool call is a secret-path call when any whitespace-separated
-word of any string in its input is a path `moxi_secrets.is_secret_path` names; strings
-inside lists and nested objects count, and so does a string that holds a JSON object or
-list. Such a call keeps one line, the tool's name and the path, and loses its input; its
+**The secret-path rule.** A tool call is a secret-path call when
+`moxi_secrets.secret_path` finds a path in its input: any whitespace-separated word of
+any string in it that `moxi_secrets.is_secret_path` names, strings inside lists and
+nested objects counted, and a string that holds a JSON object or list read into. Such a
+call keeps one line, the tool's name and the path, and loses its input; its
 result gives no tail. The path shown is the matched word alone, never a run of text with
 whitespace in it, so a heredoc or a patch into a secret file doesn't reach the index.
 
@@ -53,9 +57,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any
 
 #: The record kinds a read asks sessions for. A record's place among its line's records
@@ -81,13 +84,6 @@ TOOL = "tool"
 #: The placeholder secrets writes for a text it could not scan.
 UNSCANNED = "[REDACTED:unscanned]"
 
-#: The characters stripped from each end of a word before it is tested as a path.
-_PUNCTUATION = "\"'`()[]{}<>,;:|&"
-#: The characters a word is split at, so that a path joined to an assignment, a shell
-#: redirection or other text (`--env-file=.env`, `cat<.env`, `x>/a/.env`,
-#: `{"path":"/a/.env","content":"A=1"}`) is tested, and shown, alone.
-_JOINS = re.compile(r"[=<>|;&,:\"'`()\[\]{}\x00]+")
-
 
 @dataclass(frozen=True)
 class Policy:
@@ -101,7 +97,8 @@ class Policy:
 @dataclass(frozen=True)
 class Row:
     """One tier 1 row. `session_id` is the main session's id; `agent_id` the subagent's
-    own id, None on a main session's row. `kind` is the message's role or `tool`."""
+    own id, None on a main session's row. `kind` is the message's role or `tool`.
+    `writer` is who the record's harness says wrote it (sessions' `writer`)."""
 
     key: str
     harness: str
@@ -112,6 +109,7 @@ class Row:
     turn_id: str | None
     kind: str
     text: str
+    writer: str | None
 
 
 @dataclass(frozen=True)
@@ -276,62 +274,25 @@ def recut_tail(text: str, limit: int, sets: Iterable[str], *, edge_chars: int = 
     return f"[... {gone} earlier characters cut] {clean[-limit:]}" if gone else clean
 
 
-# -- the secret-path rule --------------------------------------------------------------
+def hide_cut_edges(text: str, mark: str, *, edge_chars: int = EDGE_CHARS) -> str:
+    """A stored text with the text near each stored cut replaced by `mark`.
 
-@lru_cache(maxsize=65536)
-def _is_secret(word: str) -> bool:
-    import moxi_secrets
-
-    return moxi_secrets.is_secret_path(word)
-
-
-def _candidates(text: str) -> Iterable[str]:
-    """The words of `text` to test as paths, narrowest first: for each
-    whitespace-separated word, the pieces between the characters of `_JOINS`, then
-    the word with quotes and brackets taken off its ends, then the word itself. None of
-    them holds whitespace, so the path a call is shown with is never more than one word."""
-    for word in text.split():
-        bare = word.strip(_PUNCTUATION)
-        pieces = [p.strip(_PUNCTUATION) for p in _JOINS.split(bare)]
-        if len(pieces) > 1:
-            yield from (p for p in pieces if p)
-        if bare != word:
-            yield bare
-        yield word
-
-
-def secret_path(value: Any, _depth: int = 0) -> str | None:
-    """The first path in a tool's input that secrets says must not be read, or None.
-
-    Each whitespace-separated word of every string counts, inside lists and nested
-    objects too; a string that holds a JSON object or list is read into and searched the
-    same way. What comes back is one word, never a string with whitespace in it."""
-    if _depth > 32:
-        return None
-    if isinstance(value, str):
-        for word in _candidates(value):
-            if word and _is_secret(word):
-                return word
-        head = value.lstrip()[:1]
-        if head in ("{", "["):
-            try:
-                inner = json.loads(value)
-            except ValueError:
-                return None
-            if isinstance(inner, (dict, list)):
-                return secret_path(inner, _depth + 1)
-        return None
-    if isinstance(value, Mapping):
-        values: Iterable[Any] = value.values()
-    elif isinstance(value, (list, tuple)):
-        values = value
-    else:
-        return None
-    for item in values:
-        found = secret_path(item, _depth + 1)
-        if found is not None:
-            return found
-    return None
+    A text is head-cut when its whole text ends with the marker `keep_head` writes, and
+    tail-cut when it opens with the one `keep_tail` writes; a marker anywhere else is
+    plain text. From a head marker back to the first whitespace with at least
+    `edge_chars` counted characters after it, the marker included, is replaced; from a
+    tail marker forward to the first whitespace with at least that many before it, the
+    same. With no such whitespace the span runs to the text's other end. Characters
+    secrets sees through count nothing, as in `recut_head`."""
+    if match := _HEAD_CUT.fullmatch(text):
+        body = match.group(1)
+        end = _edge_head(body, edge_chars)
+        text = f"{body[:end + 1]}{mark}" if end else mark
+    if match := _TAIL_CUT.fullmatch(text):
+        body = match.group(2)
+        start = _edge_tail(body, edge_chars)
+        text = f"{mark}{body[start - 1:]}" if start < len(body) else mark
+    return text
 
 
 # -- the key ---------------------------------------------------------------------------
@@ -415,13 +376,17 @@ def _tool_name(record: Any) -> str:
 
 def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             agent_id: str | None, label: str | None, policy: Policy,
+            writer: Callable[[Any], str | None],
             secret_calls: set[str] | frozenset[str] = frozenset()) -> Converted:
     """The rows and tails one batch of records gives.
 
     `main_id` is the main session's id, which every row carries; `agent_id` is the
-    subagent's own id for a subagent's records, else None. `secret_calls` holds the call
+    subagent's own id for a subagent's records, else None. `writer` is sessions'
+    `writer`, which names each row's writer. `secret_calls` holds the call
     ids already known to be secret-path calls of this source, whose results give no
     tail. A subagent's records give tier 1 rows only."""
+    from moxi_secrets import secret_path
+
     records = list(records)
     out = Converted()
     known_secret = set(secret_calls)
@@ -437,7 +402,8 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
             if not tier_one_message(record):
                 continue
             text = keep_head(record.text, MESSAGE_CHARS, policy.sets)
-            out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text))
+            out.rows.append(Row(**common, agent_id=agent_id, kind=record.role, text=text,
+                                writer=writer(record)))
         elif record.kind == "tool_call":
             name = _tool_name(record)
             path = secret_path(record.input)
@@ -452,7 +418,8 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
                 body = _input_text(record.input)
                 text = keep_head(f"{summary}\n{body}" if body else summary, TOOL_CHARS,
                                  policy.sets)
-            out.rows.append(Row(**common, agent_id=agent_id, kind=TOOL, text=text))
+            out.rows.append(Row(**common, agent_id=agent_id, kind=TOOL, text=text,
+                                writer=writer(record)))
         elif record.kind == "tool_result":
             if agent_id is not None:
                 continue
@@ -469,6 +436,5 @@ def convert(records: Iterable[Any], *, source_key: str, main_id: str,
 
 __all__ = ["KINDS", "MESSAGE_CHARS", "TOOL_CHARS", "MARGIN", "EDGE_CHARS", "TOOL",
            "UNSCANNED", "Policy", "Row", "Tail", "Converted", "redact_version", "redact",
-           "keep_head", "keep_tail", "recut_head",
-           "recut_tail", "secret_path",
+           "keep_head", "keep_tail", "recut_head", "recut_tail", "hide_cut_edges",
            "line_id", "keys", "tier_one_message", "model_answer", "convert"]
