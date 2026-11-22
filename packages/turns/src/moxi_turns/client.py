@@ -32,18 +32,18 @@ When an answer does not come. The library reports a refusal only when it receive
 or when it never wrote the request:
 
 - Never written (nothing serves the address, or the connection failed during its
-  `rpc.hello` or `session`): `deliver`, `steer`, `fork` and `command` read
-  `Refused("gone")`; `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents`
+  `rpc.hello` or `session`): `deliver`, `steer`, `fork`, `fork_continue` and `command`
+  read `Refused("gone")`; `wait` reads `Lost` `unanswered`; `session`, `facts` and `agents`
   raise `TurnsError`.
-- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer`, `fork`
-  and `command`, `Lost` on `wait`, `TurnsError` on the reads.
+- The endpoint answered the `gone` error: `Refused("gone")` on `deliver`, `steer`, `fork`,
+  `fork_continue` and `command`, `Lost` on `wait`, `TurnsError` on the reads.
 - Written and not answered (the bound passed, or the connection closed): the outcome is
-  unknown. `deliver`, `steer` and `fork` give a `Delivery` whose `id` is None; its waits first
-  look the delivery up by its `ref` on the connection the request went on (the endpoint
-  serves that connection in order, so the answer follows the request's), or, when that
-  connection has closed, on a new one. `command` reads `Failed("unanswered")`, and the
-  command may still run. `wait` raises `TimeoutError`, as when the endpoint answers
-  `pending`. The reads raise `TurnsError`; asking again is safe.
+  unknown. `deliver`, `steer`, `fork` and `fork_continue` give a `Delivery` whose `id` is
+  None; its waits first look the delivery up by its `ref` on the connection the request
+  went on (the endpoint serves that connection in order, so the answer follows the
+  request's), or, when that connection has closed, on a new one. `command` reads
+  `Failed("unanswered")`, and the command may still run. `wait` raises `TimeoutError`, as
+  when the endpoint answers `pending`. The reads raise `TurnsError`; asking again is safe.
 
 A call whose bound passed leaves its connection open: `moxi.ipc` drops the late answer.
 """
@@ -514,6 +514,24 @@ class Session:
         if ref is not None:
             params["ref"] = ref
         return self._hand("fork", params, ref)
+
+    def fork_continue(self, delivery: str, text: str, *, ref: str | None = None) -> Delivery:
+        """Give the fork that `delivery` (its `fork`'s id or an earlier round's) started its
+        next round, with `text` as the round's task. The fork must have answered: a new
+        delivery whose `wait_started` reads `Started` with the fork's `agent_id` once the
+        round went in, and `wait_ended` reads `Ended` with the round's answer. It reads
+        `Lost` with a reason starting `gone` when the endpoint knows no such fork, the
+        fork never started or its round was lost, or the fork went away with no answer,
+        and `denied` while a round of the fork is still open. Its asker is the fork's.
+        Raises `TurnsError` with the `capability` code on a session that cannot fork."""
+        if not isinstance(delivery, str) or not delivery:
+            raise ValueError("delivery is the fork's delivery id, a non-empty string")
+        _check_text(text)
+        ref = check_ref(ref)
+        params: dict[str, Any] = {"delivery": delivery, "text": text}
+        if ref is not None:
+            params["ref"] = ref
+        return self._hand("fork.continue", params, ref)
 
     def _hand(self, method: str, params: dict[str, Any], ref: str | None) -> Delivery:
         try:

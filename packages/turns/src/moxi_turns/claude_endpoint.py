@@ -79,7 +79,9 @@ window's delivery, whose `by` and `senders` the event carries.
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
 
-A fork goes to the runner on a `fork` line and holds no window. It reads `Started`, with
+A fork goes to the runner on a `fork` line, and a fork's further round
+(`fork.continue`) on a `fork.continue` line naming the fork's agent id; neither holds a
+window. It reads `Started`, with
 the fork's agent id, at the runner's `fork.started`; `Ended`, with the answer of the
 fork's task round, at `fork.done`; and `Lost` at `fork.lost`, its reason starting
 `denied` or `gone` (one starting with neither is read as `gone`). The runner bounds the
@@ -331,11 +333,16 @@ class ClaudeHarness(Harness):
             raise OSError("the runner's line is closed")
 
     def fork(self, delivery: Delivery) -> None:
-        """The runner spawns the fork and reports its start and its end (`fork.*`)."""
+        """The runner spawns the fork, or gives a fork that answered its next round
+        (`delivery.agent_id`), and reports the delivery's start and end (`fork.*`)."""
         with self._lock:
             self._forks.add(delivery.id)
-        if not self._lines.write({"op": leg.LINE_FORK, "delivery": delivery.id,
-                                  "text": delivery.text}):
+        if delivery.agent_id is None:
+            line = {"op": leg.LINE_FORK, "delivery": delivery.id, "text": delivery.text}
+        else:
+            line = {"op": leg.LINE_FORK_CONTINUE, "delivery": delivery.id,
+                    "agent_id": delivery.agent_id, "text": delivery.text}
+        if not self._lines.write(line):
             with self._lock:
                 self._forks.discard(delivery.id)
             raise OSError("the runner's line is closed")

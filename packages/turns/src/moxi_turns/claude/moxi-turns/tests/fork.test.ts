@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { WARM_UP, heldFork, noteForkEnd, ownCall, runFork } from '../hooks/register'
+import { WARM_UP, heldFork, noteForkEnd, ownCall, runFork, runRound } from '../hooks/register'
 import type { Fork, ForkEngine } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,8 +75,11 @@ function stand(options: { spawn?: Json | 'throw'; send?: Json | 'throw' } = {}) 
   return Object.assign(s, {
     /** The endpoint's `fork` line. */
     fork(delivery = 'd1', text = 'recall what we said'): Promise<void> {
-      const done = runFork(engine, s.forks, delivery, text)
-      return done
+      return runFork(engine, s.forks, delivery, text)
+    },
+    /** The endpoint's `fork.continue` line. */
+    round(delivery: string, agentId: string, text: string): Promise<void> {
+      return runRound(engine, s.forks, delivery, agentId, text)
     },
   })
 }
@@ -218,6 +221,65 @@ describe('the fork', () => {
     noteForkEnd(forks, 'a9', { reason: 'answer', isAborted: false, answer: 'x' })
     noteForkEnd(forks, undefined, { reason: 'answer', isAborted: false, answer: 'x' })
     expect(forks.size).toBe(0)
+  })
+})
+
+describe('a further round', () => {
+  /** A fork `f1` whose task round answered. */
+  async function answered() {
+    const s = stand()
+    const done = s.fork()
+    await s.settle()
+    await s.end('f1', 'READY')
+    await s.end('f1', 'first answer')
+    await done
+    s.reports.length = 0
+    s.sends.length = 0
+    return s
+  }
+
+  test('a fork that answered is resumed with the text; started once delivered, done at its end', async () => {
+    const s = await answered()
+    const done = s.round('d2', 'f1', 'go on')
+    await s.settle()
+    expect(s.spawns.length).toBe(1)
+    expect(s.sends).toEqual([{ to: { agentId: 'f1' }, text: 'go on' }])
+    expect(s.reports).toEqual([{ kind: 'fork.started', delivery: 'd2', agent_id: 'f1' }])
+    expect(heldFork(s.forks, 'f1')).toBe(true)
+    await s.end('f1', 'second answer')
+    await done
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.done', delivery: 'd2', answer: 'second answer', reason: 'answer', is_aborted: false })
+    expect(heldFork(s.forks, 'f1')).toBe(false)
+  })
+
+  test('a round asked while one is open is lost, denied, and sends nothing; the open one goes on', async () => {
+    const s = await answered()
+    const open = s.round('d2', 'f1', 'go on')
+    await s.settle()
+    await s.round('d3', 'f1', 'and on')
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd3', reason: 'denied: a round of the fork is still open' })
+    expect(s.sends.length).toBe(1)
+    await s.end('f1', 'second answer')
+    await open
+    expect(s.reports.at(-1)).toMatchObject({ kind: 'fork.done', delivery: 'd2' })
+  })
+
+  test('a round the engine does not deliver is lost, gone, and never started', async () => {
+    const s = await answered()
+    s.sendAnswer = { isDelivered: false, reason: 'no such agent' }
+    await s.round('d2', 'f1', 'go on')
+    expect(s.reports).toEqual([{ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the task was not delivered: no such agent' }])
+    expect(heldFork(s.forks, 'f1')).toBe(false)
+  })
+
+  test('a round with no end in 600 s is lost, gone', async () => {
+    const s = await answered()
+    const done = s.round('d2', 'f1', 'go on')
+    await s.settle()
+    await s.advance(600_000)
+    await done
+    expect(s.reports.at(-1)).toEqual({ kind: 'fork.lost', delivery: 'd2', reason: 'gone: the fork did not answer within 600 s' })
+    expect(heldFork(s.forks, 'f1')).toBe(false)
   })
 })
 

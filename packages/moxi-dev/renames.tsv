@@ -14488,6 +14488,7 @@ turns	packages/turns/src/moxi_turns/rpc.py	name, if_turn_number=if_turn_number, 
 turns	packages/turns/src/moxi_turns/rpc.py	params)`, and `rpc.closed(conn)` once a connection has closed."""	use	rpc.closed(	rpc.on_closed(
 turns	packages/turns/src/moxi_turns/rpc.py	self._needs("environ")	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	first `await`, and so does `fork`. `environ` reads the endpoint's own copy of the session's environment and answers at once.	keep	environ	environ
+turns	packages/turns/src/moxi_turns/rpc.py	step, before the handler's first `await`, and so do `fork` and `fork.continue`. `environ`	keep	environ	environ
 turns	packages/turns/tests/claude_runner.py	FakeRunner.turn_complete	kwonly	is_aborted	is_aborted
 turns	packages/turns/tests/claude_runner.py	line = self.lines.get(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/claude_runner.py	return self.lines.get(timeout=timeout)	keep	timeout	timeout

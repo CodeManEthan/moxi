@@ -36,6 +36,8 @@
 //            (below) around it
 //   fork     {op, delivery, text}   a fork of the main loop with text as its task (the
 //            fork, below)
+//   fork.continue {op, delivery, agent_id, text}   the fork, which has answered, gets text
+//            as its next round (the fork, below)
 //
 // Runner to endpoint: HTTP POST with a JSON body to `mod_sock`, answered with a JSON object.
 //   /report  {seq, kind, ...} through one ordered queue, each sent once the one before it
@@ -55,7 +57,8 @@
 //              command.done   {request, state: ran|refused|failed, reason, new_session_id,
 //                             shells?}  with stop_shells a `ran` carries
 //                             shells: {stopped: [id], left: [{id, why}], complete}
-//              fork.started   {delivery, agent_id}  the fork's spawn resolved
+//              fork.started   {delivery, agent_id}  the fork's spawn resolved, or a
+//                             further round's text was delivered
 //              fork.done      {delivery, answer, reason, is_aborted}  its task round's
 //                             turn.complete
 //              fork.lost      {delivery, reason}  reason starts `denied` or `gone`
@@ -281,12 +284,16 @@
 // `gone: ...`. Then it sends the task with `$.session.send({to: {agentId}, text})`, and a
 // send that throws or is not delivered reports `fork.lost` `gone: ...`. The round's
 // turn.complete, within 600 s, reports `fork.done` with its answer; none in that time
-// reports `fork.lost` `gone: ...`. A fork's turn.complete is never reported as a turn.
+// reports `fork.lost` `gone: ...`. On a `fork.continue` line a fork that has answered gets
+// its next round: a fork the runner still holds (a round open) reports `fork.lost`
+// `denied: ...` and nothing is sent; else the runner holds the id for the new delivery and
+// sends the text the same way, `fork.started` once it is delivered, then `fork.done` or
+// `fork.lost` as for the task round. A fork's turn.complete is never reported as a turn.
 // The runner leaves the engine's notice of a finished round (a prompt of origin
 // `task-notification`) as the engine sends it.
 //
-// Held forks: the runner holds a fork's agent id from its spawn until it reports the
-// fork's `fork.done` or `fork.lost`. A tool call carrying a held id is the fork's: the
+// Held forks: the runner holds a fork's agent id from its spawn, and from a further
+// round's line, until it reports that delivery's `fork.done` or `fork.lost`. A tool call carrying a held id is the fork's: the
 // guards judge it at the call step and the ask step as any call, and the runner makes
 // no after-tool ask for it. A fork's calls reach this hook with this plugin as
 // `next.origin.plugin`, as the runner's own do, so origin alone tells nothing: a call is
@@ -779,28 +786,47 @@ export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, deli
     return lostBefore(`denied: the spawn failed: ${String(err)}`)
   }
   if (typeof agentId !== 'string' || agentId === '') return lostBefore('denied: the spawn named no agent')
-  const id = agentId
   const f: Fork = { delivery, ends: [], wake: null }
-  forks.set(id, f)
-  engine.report('fork.started', { delivery, agent_id: id })
-  const settle = (kind: 'fork.done' | 'fork.lost', fields: Json) => {
-    forks.delete(id)
-    engine.report(kind, { delivery, ...fields })
-  }
-  const lost = (why: string) => settle('fork.lost', { reason: `gone: ${why}` })
+  forks.set(agentId, f)
+  engine.report('fork.started', { delivery, agent_id: agentId })
   const warm = await forkEnd(engine, f, WARM_UP_WAIT_MS)
-  if (warm === undefined) return lost(`the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
-  if (warm.reason !== 'answer' || warm.isAborted) return lost(`the warm-up ended ${warm.isAborted ? 'aborted' : String(warm.reason)}`)
+  if (warm === undefined) return forkLost(engine, forks, agentId, f, `the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
+  if (warm.reason !== 'answer' || warm.isAborted) return forkLost(engine, forks, agentId, f, `the warm-up ended ${warm.isAborted ? 'aborted' : String(warm.reason)}`)
+  await round(engine, forks, agentId, f, text, false)
+}
+
+/** The `fork.continue` line: a fork that has answered gets `text` as its next round. */
+export async function runRound(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, agentId: string, text: string): Promise<void> {
+  if (forks.has(agentId)) {
+    engine.report('fork.lost', { delivery, reason: 'denied: a round of the fork is still open' })
+    return
+  }
+  const f: Fork = { delivery, ends: [], wake: null }
+  forks.set(agentId, f)
+  await round(engine, forks, agentId, f, text, true)
+}
+
+/** The fork's delivery settles lost, gone: the runner lets go of its id. */
+function forkLost(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, why: string): void {
+  if (forks.get(agentId) === f) forks.delete(agentId)
+  engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
+}
+
+/** One round of a held fork: send `text`, then its turn.complete is the delivery's end.
+ *  `started`: report the start once the engine took the text (a further round's). */
+async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, text: string, started: boolean): Promise<void> {
   let sent: { isDelivered: boolean; reason?: string }
   try {
-    sent = await engine.send({ to: { agentId: id }, text })
+    sent = await engine.send({ to: { agentId }, text })
   } catch (err) {
-    return lost(`the task was not sent: ${String(err)}`)
+    return forkLost(engine, forks, agentId, f, `the task was not sent: ${String(err)}`)
   }
-  if (!sent.isDelivered) return lost(`the task was not delivered: ${sent.reason ?? 'no reason given'}`)
+  if (!sent.isDelivered) return forkLost(engine, forks, agentId, f, `the task was not delivered: ${sent.reason ?? 'no reason given'}`)
+  if (started) engine.report('fork.started', { delivery: f.delivery, agent_id: agentId })
   const end = await forkEnd(engine, f, ROUND_WAIT_MS)
-  if (end === undefined) return lost(`the fork did not answer within ${ROUND_WAIT_MS / 1000} s`)
-  settle('fork.done', { answer: typeof end.answer === 'string' ? end.answer : null, reason: end.reason, is_aborted: end.isAborted })
+  if (end === undefined) return forkLost(engine, forks, agentId, f, `the fork did not answer within ${ROUND_WAIT_MS / 1000} s`)
+  if (forks.get(agentId) === f) forks.delete(agentId)
+  engine.report('fork.done', { delivery: f.delivery, answer: typeof end.answer === 'string' ? end.answer : null, reason: end.reason, is_aborted: end.isAborted })
 }
 
 /** The runner's own fork engine: `$`'s spawn, send and clock, and the report queue. */
@@ -1029,6 +1055,8 @@ async function onLine($: Dollar, line: string): Promise<void> {
     await agentList($, m.ask)
   } else if (op === 'fork' && delivery !== undefined) {
     await runFork(forkEngine($), held, delivery, str(m.text) ?? '')
+  } else if (op === 'fork.continue' && delivery !== undefined && str(m.agent_id) !== undefined && m.agent_id !== '') {
+    await runRound(forkEngine($), held, delivery, m.agent_id as string, str(m.text) ?? '')
   } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit' || m.name === 'compact')) {
     await command($, m.request as string, m.name, m.stop_shells === true && m.name !== 'exit')
   } else {

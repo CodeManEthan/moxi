@@ -563,6 +563,24 @@ def test_a_fork_goes_on_a_line_and_its_reports_start_and_end_it(claude):
     assert (ended.turn_id, ended.outcome, ended.answer) == (None, "answer", "two points")
 
 
+def test_a_further_round_goes_on_a_fork_continue_line_naming_the_agent(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on")
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on"}
+    runner.report(leg.R_FORK_STARTED, delivery=r.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=r.id, answer="two", reason="answer",
+                  is_aborted=False)
+    assert r.wait_ended(2).answer == "two"
+
+
 def test_a_fork_round_that_ended_in_an_error_or_with_no_text_reads_so(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")

@@ -110,8 +110,18 @@ Then, in any order:
         `turn.complete`, within `ROUND_WAIT_MS` (600 s), reports `fork.done`; none in
         that time reports `fork.lost` `gone: …`.
 
-        The runner holds a fork's agent id from its spawn until the fork's delivery has
-        settled (`fork.done` or `fork.lost` reported). While it holds the id, each tool
+    {"op": "fork.continue", "delivery": id, "agent_id": "…", "text": "…"}
+        Give the fork `agent_id`, which has answered, `text` as its next round (the
+        `fork.continue` request), a delivery of its own. A fork the runner still holds
+        (a round of it is open) reports `fork.lost` `denied: …` and nothing is sent.
+        Else the runner holds the id again for this delivery and sends `text` with
+        `$.session.send({to: {agentId}, text})`, which resumes the finished fork; a send
+        that throws or is not delivered reports `fork.lost` `gone: …`. A delivered send
+        reports `fork.started`, and the round's `turn.complete`, within `ROUND_WAIT_MS`,
+        `fork.done`; none in that time reports `fork.lost` `gone: …`.
+
+        The runner holds a fork's agent id from its spawn, and from a further round's
+        line, until that delivery has settled (`fork.done` or `fork.lost` reported). While it holds the id, each tool
         call carrying it is the fork's: the guards judge it as any call, at the call
         step and the ask step, and the runner makes no after-tool ask for it. A call
         counts as the runner's own, judged by no guard, only when it carries no
@@ -142,7 +152,8 @@ own count from 1 for this load, and `kind`:
                                                     resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
     fork.started   {delivery, agent_id}             the fork's spawn resolved with its
-                                                    agent id
+                                                    agent id, or a further round's task
+                                                    was delivered
     fork.done      {delivery, answer, reason, is_aborted}
                                                     the fork's task round completed:
                                                     `answer` is its final text, `reason`
@@ -161,7 +172,7 @@ own count from 1 for this load, and `kind`:
 
 Reports are keyed by their window's delivery: an end for a window that is not the open
 one is logged and changes nothing. A `fork.*` report names a delivery handed to the
-runner on a `fork` line; one naming any other delivery, or one already settled, is
+runner on a `fork` or `fork.continue` line; one naming any other delivery, or one already settled, is
 logged and changes nothing. The bound is a report, not a close: the endpoint fails
 the open window by it only while its prompt is not admitted (entry, below).
 
@@ -281,7 +292,7 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
 LINE_AGENTS, LINE_GUARDS, LINE_FLOORS = "agents", "guards", "floors"
-LINE_FORK = "fork"
+LINE_FORK, LINE_FORK_CONTINUE = "fork", "fork.continue"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
@@ -475,7 +486,7 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "LINE_FORK", "PATH_REPORT",
+           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "LINE_FORK", "LINE_FORK_CONTINUE", "PATH_REPORT",
            "PATH_LIVE", "PATH_AGENTS", "PATH_STOP", "PATH_CONTEXT", "PATH_GUARD",
            "PATH_AFTER_TOOL", "PATH_USAGE",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",

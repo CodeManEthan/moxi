@@ -20,7 +20,9 @@ The core calls the adapter:
     submit(delivery)      put the text in as a new turn
     append(delivery)      put the text into the running turn (a steer)
     fork(delivery)        start a fork of the session's main loop with the text as its
-                          task (only where `can` has `fork`)
+                          task, or, when `delivery.agent_id` is set, give that fork,
+                          which has answered, the text as its next round (only where
+                          `can` has `fork`)
     tool_points()         where the harness lets turns act at a tool call:
                           `{"pre": bool, "after": bool}` (the base has neither)
     command(request)      run `/clear`, `/exit` or a compaction, and with
@@ -216,7 +218,8 @@ class Delivery:
     `entering` re-checks it, and the refusal flags apply. `ref` is the caller's, carried
     for the adapter's logs; turns never acts on it. `by` is the module that asked and
     `senders` the names the text speaks for, as the caller gave them; the `prompt` event
-    the delivery raises carries both."""
+    the delivery raises carries both. A fork's further round is a "fork" with
+    `agent_id` naming the fork."""
 
     id: str
     text: str
@@ -227,6 +230,9 @@ class Delivery:
     ref: str | None = None
     by: str | None = None
     senders: tuple[str, ...] = ()
+    #: A fork's further round (`fork.continue`): the agent id of the fork it continues.
+    #: None for every other delivery, a new fork's included.
+    agent_id: str | None = None
 
 
 @dataclass(frozen=True)

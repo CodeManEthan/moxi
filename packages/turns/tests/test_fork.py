@@ -145,3 +145,44 @@ def test_a_fork_the_adapter_could_not_take_reads_unsupported(make_endpoint):
     assert until(lambda: ep.wait(d.id, "ended", 0) is not None)
     value = ep.wait(d.id, "ended", 0)
     assert isinstance(value, results.Refused) and value.reason == "unsupported"
+
+
+def test_a_further_round_goes_to_the_fork_that_answered_with_its_asker(forking):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    ep.fork_started(h.forked[0].id, "agent-1")
+    ep.fork_ended(h.forked[0].id, "first")
+    d.wait_ended(5)
+    r = s.fork_continue(d.id, "go on", ref="r-2")
+    assert until(lambda: len(h.forked) == 2)
+    spec = h.forked[1]
+    assert (spec.kind, spec.text, spec.agent_id, spec.by) == ("fork", "go on", "agent-1",
+                                                              "memory")
+    # A round asked while this one is open is denied at once.
+    busy = s.fork_continue(d.id, "and on")
+    assert busy.wait_ended(5).reason.startswith(results.LOST_DENIED)
+    ep.fork_started(spec.id, "agent-1")
+    ep.fork_ended(spec.id, "second")
+    assert r.wait_started(5).agent_id == "agent-1"
+    ended = r.wait_ended(5)
+    assert (ended.answer, ended.ref) == ("second", "r-2")
+
+
+@pytest.mark.parametrize("how", ["unknown", "open", "lost", "unstarted"])
+def test_a_further_round_with_no_fork_to_take_it_reads_lost(forking, how):
+    ep, h, s = forking()
+    d = s.fork("look", by="memory")
+    assert until(lambda: len(h.forked) == 1)
+    fork_id = h.forked[0].id
+    if how != "unstarted":
+        ep.fork_started(fork_id, "agent-1")
+    if how == "lost":
+        ep.lost(fork_id, "gone: no")
+    if how == "unstarted":
+        ep.fork_ended(fork_id, "answered with no start")
+    r = s.fork_continue("nobody" if how == "unknown" else d.id, "go on")
+    reason = r.wait_ended(5).reason
+    prefix = results.LOST_DENIED if how == "open" else results.LOST_GONE
+    assert reason.startswith(prefix), reason
+    assert len(h.forked) == 1

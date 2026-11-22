@@ -10,8 +10,8 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
   `hello.json` once it listens. The key is the launch's nonce, not the session id, so a
   `/clear` keeps the endpoint and `hello.json` follows the id;
 - answers the socket protocol (`contracts/socket-protocol.md`) through `rpc.Rpc`:
-  `session`, `facts`, `agents`, `deliver`, `steer`, `fork`, `wait`, `command`, `watch`,
-  `stops.handle` and `stops.answer`;
+  `session`, `facts`, `agents`, `deliver`, `steer`, `fork`, `fork.continue`, `wait`,
+  `command`, `watch`, `stops.handle` and `stops.answer`;
 - keeps the turn ledger the adapter feeds, ties deliveries to turns, holds a
   delivery made while a turn runs until that turn ends, and answers `wait` from the
   ledger alone;
@@ -88,8 +88,8 @@ from . import listeners as turns_listeners
 from . import protocol
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
 from .ledger import Reading, Turn, TurnLedger
-from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_GONE, LOST_UNKNOWN, OUTCOMES,
-                      SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
+from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_DENIED, LOST_GONE,
+                      LOST_UNKNOWN, OUTCOMES, SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
                       LeftShell, Lost, OpenTurn, Passed, Ran, Ready, Refused, SessionEvent,
                       Shells, Started, StopFacts, TurnEnded, TurnStarted, TurnSteered)
 
@@ -152,6 +152,14 @@ class Handed:
     #: The refusal the endpoint decided from its own record before it handed the
     #: delivery on, which the `deliver` or `steer` answer carries.
     early: Refused | None = None
+
+    @property
+    def agent(self) -> str | None:
+        """A fork's agent id: its round's own (`fork.continue`), else the one its start
+        named; None for any other delivery, and for a fork not started yet."""
+        if self.spec.agent_id is not None:
+            return self.spec.agent_id
+        return self.started.agent_id if isinstance(self.started, Started) else None
 
     @property
     def id(self) -> str:
@@ -1223,6 +1231,50 @@ class Endpoint:
             d.handed_at = time.monotonic()
             self._worker.put(self._handoff(d, self.harness.fork))
             return d
+
+    def fork_continue(self, of: str, text: str, *, ref: str | None = None) -> Handed:
+        """Give the fork that delivery `of` (its `fork` or an earlier round) started its
+        next round, with `text`. The fork must have answered: `of` ended with an answer
+        and no later round of the fork is still open. A new delivery, a `fork` naming the
+        fork's agent id, asked by the fork's own asker; its values are a fork's. `Lost`
+        at once, `gone`, when `of` names no fork this endpoint still knows, one that never
+        started, or one whose round was lost; `denied` while a round of the fork is still
+        open. `unsupported` in the answer when the session cannot fork."""
+        with self._lock:
+            prior = self._deliveries.get(of)
+            fork = prior if prior is not None and prior.spec.kind == "fork" else None
+            agent_id = fork.agent if fork is not None else None
+            d = self._new("fork", text, ref, by=fork.spec.by if fork is not None else None,
+                          agent_id=agent_id)
+            reason = self._unable("fork")
+            if reason is not None:
+                self._refuse(d, reason, early=True)
+                return d
+            problem = self._not_continuable(of, fork, d)
+            if problem is not None:
+                lost = Lost(problem)
+                self._settle(d, started=lost, ended=lost)
+                return d
+            d.state = _FORKING
+            d.handed_at = time.monotonic()
+            self._worker.put(self._handoff(d, self.harness.fork))
+            return d
+
+    def _not_continuable(self, of: str, fork: Handed | None, d: Handed) -> str | None:
+        """Under the lock: why the fork `of` names can't take a round now, or None."""
+        if fork is None:
+            return f"{LOST_GONE}: no fork delivery {of} on this endpoint"
+        if fork.agent is None:
+            return f"{LOST_GONE}: the fork of {of} never started"
+        if not isinstance(fork.ended, Ended):
+            if fork.ended is None:
+                return f"{LOST_DENIED}: the fork's round {of} has not ended"
+            return f"{LOST_GONE}: the fork's round {of} did not end with an answer"
+        for other in self._deliveries.values():
+            if (other is not d and other.spec.kind == "fork" and other.state != _DONE
+                    and other.agent == fork.agent):
+                return f"{LOST_DENIED}: the fork's round {other.id} has not ended"
+        return None
 
     def fork_started(self, delivery_id: str, agent_id: str) -> None:
         """The harness started the fork `delivery_id` asked for, as `agent_id`."""

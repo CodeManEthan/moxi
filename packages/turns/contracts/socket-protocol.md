@@ -327,6 +327,7 @@ Params are an object; a missing optional param takes its default. In short:
 | `deliver` | `{text, ref?, only_if_idle?, if_turn_number?, refuse_draft?, refuse_agents?}` | `{delivery, ref, result?}` |
 | `steer` | `{text, ref?}` | `{delivery, ref, result?}` |
 | `fork` | `{text, by, ref?}` | `{delivery, ref, result?}` |
+| `fork.continue` | `{delivery, text, ref?}` | `{delivery, ref, result?}` |
 | `wait` | `delivery` or `ref`, `until`, `timeout_ms` | `{result}` or `{pending: true}`, with `delivery` when asked by `ref` |
 | `command` | `{name, if_turn_number?, timeout_ms?, stop_shells?}` | `{result}` |
 | `watch` | `{}` | `{facts}`, then notifications |
@@ -339,7 +340,7 @@ Params are an object; a missing optional param takes its default. In short:
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
 
-**No answer waits on the harness.** `session`, `deliver`, `steer`, `fork`, `environ` and a `wait`
+**No answer waits on the harness.** `session`, `deliver`, `steer`, `fork`, `fork.continue`, `environ` and a `wait`
 with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
 bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`),
@@ -454,6 +455,23 @@ endpoint bound of 300 s: the harness's half bounds its own waits.
 
 `by` names the asker to turns. The fork's answer comes back to the session by the
 harness's own way, if it has one; turns adds no delivery of its own for it.
+
+### `fork.continue`
+
+Params: `delivery`, the id of a fork's delivery (its `fork`, or an earlier
+`fork.continue`); `text`, the round's task; `ref`. Needs `fork`.
+
+Gives the fork, which has answered, its next round: a new delivery, asked by the fork's
+own asker, that runs `text` in the fork's conversation as it stands. It answers as `fork`
+does. The fork must have answered: the named delivery ended with an answer and no later
+round of the fork is still open.
+
+Its values are a fork's: `started` once the round went in, with the fork's `agent_id`;
+`ended` with the round's `outcome` and `answer`; or `lost`, with a reason starting
+`gone` when the endpoint knows no fork by that delivery (an id it did not mint, or one
+settled long ago), the fork never started, the named round was lost, or the fork went
+away with no answer, and `denied` while a round of the fork is still open. Each round's
+answer comes back to the session by the harness's own way, as the fork's first did.
 
 ### `wait`
 
