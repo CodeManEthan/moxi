@@ -3,8 +3,9 @@
 Each fake (`claude`, `codex`, and `moxi-comms-fake` standing in for comms' wrapper) is a
 Python script run by its `#!` line. It records what it was started with (its argv,
 directory, environment, pid and open files) as one JSON file per run in the directory
-`LAUNCHER_FAKE_HARNESS` names, prints one line and exits with `LAUNCHER_FAKE_EXIT`
-(default 0).
+`LAUNCHER_FAKE_HARNESS` names (`runs-seen` beside its own `bin` when a replay's environment
+leaves that name out), prints one line and exits with `LAUNCHER_FAKE_EXIT` (default 0). Its `started` is its own start time as `moxi.proc.identity` reads it, so a test
+can compare the row's `pid` and `pid_started` with the process that ran.
 """
 
 from __future__ import annotations
@@ -29,9 +30,13 @@ if os.path.isdir("/proc/self/fd"):
             fds[fd] = os.readlink("/proc/self/fd/" + fd)
         except OSError:
             pass
+from moxi import proc
+me = proc.identity(os.getpid())
 record = {{"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ),
-          "pid": os.getpid(), "fds": fds}}
-out = os.environ["LAUNCHER_FAKE_HARNESS"]
+          "pid": os.getpid(), "started": me.started if me is not None else None,
+          "fds": fds}}
+out = os.environ.get("LAUNCHER_FAKE_HARNESS") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))), "runs-seen")
 tmp = os.path.join(out, ".%d.tmp" % os.getpid())
 with open(tmp, "w") as f:
     json.dump(record, f)

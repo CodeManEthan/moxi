@@ -87,8 +87,9 @@ LEAVES = {
 }
 #: The states a row may still be in when its launch is under way.
 UNDER_WAY = ("spawning", "sending")
-#: Where a session id came from.
-SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact")
+#: Where a session id came from. `load` is an id first learned when a new endpoint of the
+#: session loaded (the session was cleared or compacted while its endpoint was replaced).
+SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact", "load")
 #: How a handoff reached a launch: handed to it at insert, or shown at startup or resume.
 HOWS = ("given", "shown")
 #: The facts a write may set whatever the state.
@@ -709,7 +710,7 @@ def _write_facts(conn: sqlite3.Connection, request_id: str, facts: Mapping[str, 
 
 
 def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
-                  source: str, *, at: str | None = None) -> bool:
+                  source: str, *, at: str | None = None, replace_load: bool = False) -> bool:
     """Record a session id a launch is known by, whatever its state, and say whether it is
     new.
 
@@ -719,8 +720,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     the claim read the same owner. The table is keyed by the pair, which would hold the id
     for both; this write keeps it with the launch that has it, except for a resume: a
     launch made to resume (`resume_of` set) learns a `resume` id whoever holds it, and
-    `resolve` then finds it, the newest. A pair already there is left as it is. The state
-    is not touched.
+    `resolve` then finds it, the newest. A pair already there is left as it is, but for
+    `replace_load`: a pair learned at `load` then takes `source`, which the ready recorder
+    asks for at a `ready` of the id its own endpoint's `load` added. The state is not
+    touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
@@ -736,6 +739,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
             "WHERE session_id = ? AND request_id <> ?)",
             (session_id, request_id, source, at, shared, session_id, request_id))
         added = cursor.rowcount == 1
+        if replace_load and not added:
+            conn.execute("UPDATE session_ids SET source = ? WHERE session_id = ? "
+                         "AND request_id = ? AND source = 'load'",
+                         (source, session_id, request_id))
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
                      "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
                      "SELECT 1 FROM session_ids WHERE session_id = ? AND request_id = ?)",
@@ -744,8 +751,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
 
 
 def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
-          session_id: str | None, endpoint: str, at: str | None = None) -> LaunchRow | None:
-    """Claim a launch for the turns endpoint `endpoint`, and return the row when the launch
+          session_id: str | None, endpoint: str, parent: Any = None,
+          at: str | None = None) -> LaunchRow | None:
+    """Claim a launch for the turns endpoint `endpoint`, whose parent process is `parent`
+    (a `moxi.proc.ProcId`, or None when it is unknown), and return the row when the launch
     is that endpoint's, else None.
 
     A launch belongs to the one session process the launcher started for it. The first
@@ -755,15 +764,24 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
     claim, so of two endpoints only the first wins. Any other endpoint carrying the
     launch's stamp (a session started from inside the launched one) gets None.
 
-    A held launch is claimed again only when the endpoint holding it is gone and the new
-    endpoint's event names a session id the launch is known by: the row's own, or any
-    recorded for it in `session_ids` (only the endpoint holding a launch records its ids,
-    so an id there is the launch's own session after a clear or a compaction). So a
-    session whose endpoint was replaced (Claude starts a new one when its plugins reload)
-    keeps its launch, before or after a `/clear`. Gone
-    means the held endpoint's process has ended (`endpoint_gone`), never that it did not
-    answer once. The claim moves in one conditional update on the held endpoint, so of
-    two new endpoints only one takes it, and a `reclaimed` event records the move.
+    A held launch is claimed again only when the endpoint holding it is gone: its process
+    has ended (`endpoint_gone`), never that it did not answer once. Then:
+
+    - **Claude: by parent.** The new endpoint's parent must be the launch's own `claude`,
+      the row's `pid` and `pid_started` (`is_launch_parent`). Claude Code starts every
+      endpoint of a session as a direct child of that session's `claude`, and starts a new
+      one for the same session when its plugins reload, so the launch follows its session
+      across a reload, before or after a `/clear`. A session started from inside the
+      launched one (an agent's `claude -p`, a `claude --resume` in a subshell) runs in
+      another `claude` process, so its endpoint is that process's child and never takes
+      the launch, whatever session id it names. No session id moves a Claude claim. A row
+      with no `pid_started` never moves.
+    - **Codex: by a known id.** The new endpoint's event names a session id the launch is
+      known by: the row's own, or any recorded for it in `session_ids`.
+
+    The claim moves in one conditional update on the held endpoint, so of two new
+    endpoints only one takes it, and a `reclaimed` event records the move; a Claude move's
+    detail says `"by": "parent"`.
     """
     if harness not in HARNESSES:
         return None
@@ -777,21 +795,59 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
             (endpoint, moment, request_id, harness, session_id))
         row = get(conn, request_id)
         held = row.endpoint if row is not None else None
-        if (held is not None and held != endpoint and session_id is not None
-                and row.harness == harness and _known_by(conn, row, session_id)
-                and endpoint_gone(held)):
-            moved = conn.execute(
-                "UPDATE launches SET endpoint = ?, updated_at = ? "
-                "WHERE request_id = ? AND endpoint = ?",
-                (endpoint, moment, request_id, held))
-            if moved.rowcount == 1:
-                conn.execute(
-                    "INSERT INTO events (request_id, session_id, at, kind, detail_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (request_id, session_id, moment, RECLAIMED,
-                     _encode({"endpoint": endpoint, "was": held})))
-                row = get(conn, request_id)
+        if held is not None and held != endpoint and row.harness == harness:
+            if harness == "claude":
+                moves = is_launch_parent(row, parent) and endpoint_gone(held)
+                detail = {"endpoint": endpoint, "was": held, "by": "parent"}
+            else:
+                moves = (session_id is not None and _known_by(conn, row, session_id)
+                         and endpoint_gone(held))
+                detail = {"endpoint": endpoint, "was": held}
+            if moves:
+                moved = conn.execute(
+                    "UPDATE launches SET endpoint = ?, updated_at = ? "
+                    "WHERE request_id = ? AND endpoint = ?",
+                    (endpoint, moment, request_id, held))
+                if moved.rowcount == 1:
+                    conn.execute(
+                        "INSERT INTO events (request_id, session_id, at, kind, detail_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (request_id, session_id, moment, RECLAIMED, _encode(detail)))
+                    row = get(conn, request_id)
     return row if row is not None and row.endpoint == endpoint else None
+
+
+def is_launch_parent(row: LaunchRow, parent: Any) -> bool:
+    """Whether the process `parent` (a `moxi.proc.ProcId`) is the launch's own process,
+    the row's `pid` and `pid_started`: the same pid, and both name the one live process,
+    each start time within `moxi.proc.alive`'s tolerance of its own. Never by pid alone, so
+    a pid given to another process since never matches. False for a row with no
+    `pid_started` and for an unknown parent."""
+    from moxi import proc
+
+    if parent is None or row.pid is None or row.pid_started is None:
+        return False
+    if parent.pid != row.pid:
+        return False
+    return proc.alive(proc.ProcId(row.pid, row.pid_started)) and proc.alive(parent)
+
+
+def held_by_sibling(row: LaunchRow, endpoint: str, parent: Any) -> str | None:
+    """The endpoint holding the Claude launch `row` when it is a live sibling of the
+    endpoint `endpoint`, whose parent is `parent`: both are children of the launch's own
+    `claude` (`is_launch_parent`), and the held one has not ended. That is the moment
+    Claude Code replaces a session's endpoint, the new one started before the old one has
+    ended. None otherwise, a nested session's endpoint among them."""
+    from moxi import proc
+
+    held = row.endpoint
+    if (row.harness != "claude" or held is None or held == endpoint
+            or not is_launch_parent(row, parent) or endpoint_gone(held)):
+        return None
+    parsed = parse_endpoint(held)
+    if parsed is None or proc.parent(parsed[0]) != row.pid:
+        return None
+    return held
 
 
 def _known_by(conn: sqlite3.Connection, row: LaunchRow, session_id: str) -> bool:
@@ -1997,8 +2053,9 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "ENTRY_COLUMNS", "ENTRY_KINDS", "ENTR
            "SessionTaken", "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event",
            "advance_run", "chain",
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
-           "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "holds_log", "insert_run", "kinds", "launched_by", "learn_session", "log", "log_lines",
+           "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "held_by_sibling",
+           "holds", "insert",
+           "holds_log", "insert_run", "is_launch_parent", "kinds", "launched_by", "learn_session", "log", "log_lines",
            "made_by", "reading",
            "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
