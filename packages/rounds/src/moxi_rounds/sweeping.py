@@ -140,8 +140,8 @@ class Candidate:
 
     @property
     def place(self) -> Path:
-        """The path the record names."""
-        return Path(str(self.commissioned[self.kind]))
+        """The path the record names, a `~`-led one under the home folder."""
+        return Path(places.expand_home(self.commissioned[self.kind]))
 
     def names(self) -> dict:
         """The build the folder is of, as the account and the log name it."""
@@ -363,7 +363,7 @@ def trash_log(name: str, commissioned: Mapping, *, env=None) -> dict:
     trash entry's lines in this log as a sweep writes its own, so the account names the
     entry and a later sweep deletes one a stopped run left."""
     names = _names(name, commissioned)
-    place = Path(str(commissioned.get(removal.SCRATCH)))
+    place = Path(places.expand_home(commissioned.get(removal.SCRATCH)))
 
     def on_rename(entry: Path) -> None:
         # Raised here, the rename is not made and the folder is kept.
@@ -422,7 +422,7 @@ def _records(settings) -> _Records:
                     if not isinstance(recorded, str) or not recorded:
                         continue
                     if build.ended is None:
-                        for key in _keys(Path(recorded)):
+                        for key in _keys(Path(places.expand_home(recorded))):
                             held[key] = f"{name} {build.stage}"
                     else:
                         candidates.append(Candidate(
@@ -603,9 +603,11 @@ def scratch_users(commissioned: Mapping) -> ScratchUsers | None:
     from this process and every one it runs under, so the shell or the wrapper that
     runs the verb is not named."""
     named = commissioned.get(removal.SCRATCH)
-    if not named or not Path(str(named)).is_dir():
+    if not named:
         return None
-    place = Path(str(named))
+    place = Path(places.expand_home(named))
+    if not place.is_dir():
+        return None
     import psutil
 
     try:

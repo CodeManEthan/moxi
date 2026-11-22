@@ -63,8 +63,8 @@ relaunch's model pin (`pin.choose`) is its model only when the stored values nam
 the new row records the stored model and a `model-pin` event, never the pin as a value.
 It never sends the row's
 brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
-launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
-none. **A replay's environment is built from the row and the settings only**: the row's recorded
+launcher, relaunched by <actor>: <path>`, a director's relaunch sends none, and a resume
+sends the brief it was given, if any, as a launch sends its own. **A replay's environment is built from the row and the settings only**: the row's recorded
 base (`base_env_json`: the short list slots' server keeps, the core's locators, the
 keep-lists' and provider names classed recorded, on Windows the names a process needs
 to start; `common.base_env`), then each name the user lists, read from the replaying
@@ -101,6 +101,7 @@ and the result says that failure, with its exit code.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import os
@@ -161,7 +162,8 @@ ScratchRecycle = catalog.ScratchRecycle
 class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
     typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
-    `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
+    the words typed after `--` on the command line (`tail`, also in `extra`; the page
+    sends none), `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
     default whatever `[defaults]` or the preset sets), the typed rows whose value the
     caller filled in from an earlier launch (`filled`; a name that is no typed row counts
     for nothing), the caller's directory, and the request id, Claude session id and
@@ -171,6 +173,7 @@ class LaunchRequest:
     project_preset: str | None = None
     typed: Mapping[str, object] = field(default_factory=dict)
     extra: Sequence[str] = ()
+    tail: Sequence[str] = ()
     off_posture: bool = False
     cwd: str | None = None
     request_id: str | None = None
@@ -191,10 +194,14 @@ class ReplayRequest:
 
     `posture` is the start posture the identity block shows in place of the row's
     (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
-    in the new row's `posture` and never in its `values_json`. `handoff` is the handoff a
+    in the new row's `posture` and never in its `values_json`. A resume, which gives none,
+    shows the posture the launch was configured with, from the row's values, so a resume of
+    a relaunch's row shows that one, not the relaunch's. `handoff` is the handoff a
     self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
     `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
-    relaunch, whose credentials come from `relaunch.director_pass_env`.
+    relaunch, whose credentials come from `relaunch.director_pass_env`. `brief` and
+    `brief_file` are the brief a resume was given (at most one of them), sent as its first
+    turn; the row's own brief is never sent again.
 
     For a slot launch: `slot` is the slot it goes to, else the row's own when `respawn`,
     else the one the row's values name; `hold` is the slot hold the caller has, which
@@ -228,6 +235,8 @@ class ReplayRequest:
     respawn: bool = False
     chain: str | None = None
     director: bool = False
+    brief: str | None = None
+    brief_file: str | None = None
     model_pin: str | None = None
     replacing: str | None = None
 
@@ -373,7 +382,12 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
-    named slot that is held, occupied or missing)."""
+    named slot that is held, occupied or missing).
+
+    The composer's refusals are not among them, since this composes nothing: `preview` and
+    `launch` give those, such as a scratch folder notes would give a notes home
+    (`presets.ScratchNotes` from `compose.build`), a headless launch with no brief, or a
+    brief or handoff file that can't be read."""
     caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
@@ -532,8 +546,9 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
 
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
-    left out, its handoff the replay's, its slot the replay's, its model the replay's
-    `model_pin` when the stored values name none, with the mode worked out
+    the replay's (none but a resume's), its handoff the replay's, its slot the replay's,
+    its model the replay's `model_pin` when the stored values name none, with the mode
+    worked out
     again for the modules installed now. A comms identity is dropped, with a warning, when
     comms is no longer installed, as a fresh launch's is."""
     row = request.row
@@ -545,7 +560,8 @@ def _replayed(request: ReplayRequest) -> Replayed:
                                "replay it without respawn")
     stored = row.values
     values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
-    values.update(brief="", brief_file="", handoff=request.handoff or "")
+    values.update(brief=request.brief or "", brief_file=request.brief_file or "",
+                  handoff=request.handoff or "")
     model_pin = request.model_pin if request.model_pin and not values.get("model") else None
     if model_pin is not None:
         values["model"] = model_pin
@@ -570,7 +586,14 @@ def _replayed(request: ReplayRequest) -> Replayed:
                         f"{recycle.SCRATCH_RECYCLE[0]}")
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
-    posture = row.posture if request.posture is None else request.posture
+    if request.posture is not None:
+        posture = request.posture
+    elif request.resume_of:
+        # The posture the launch was configured with, which its values keep: a relaunch's
+        # row shows its own start posture in the column.
+        posture = str(stored.get("posture") or "")
+    else:
+        posture = row.posture
     links = {name for name, on in (
         ("turns", turns), ("comms", identity is not None),
         ("projects", bool(row.project_key)), ("slots", target == "slot"),
@@ -643,8 +666,8 @@ def _chain(conn, request, request_id: str) -> str:
 
 def _request_id_refusal(request_id: str | None) -> Refusal | None:
     """A refusal for a request id a caller gives that is not one plain file name, or None.
-    The id names the launch's scratch folder and run log, so one holding a separator or
-    `..` would put them outside the launcher's own folders."""
+    The id names the launch's run log, so one holding a separator or `..` would put it
+    outside the launcher's own folders."""
     if not request_id or common.plain_name(request_id):
         return None
     return catalog.BadValue("request_id", f"request id {request_id!r} is not a plain name",
@@ -765,8 +788,9 @@ def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
         files.private_dir(common.scratch_root())
         files.private_dir(where)
     if handoff_key and values.get("cwd"):
-        handoffs.handoff_dir(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
-                        env=env)
+        with contextlib.suppress(handoffs.NoNotesDir):
+            handoffs.handoff_dir(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
+                                 env=env)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
     if composition.settings_file is not None:

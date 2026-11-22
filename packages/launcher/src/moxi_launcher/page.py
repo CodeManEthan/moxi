@@ -164,11 +164,20 @@ FORM_MODE = _table(target=_text(), mode=_text(nullable=True))
 #: One value an earlier launch's own request gave, spelled as a preset's value is.
 HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
                 items=Out("list", items=Out("string", mark="redact"), nullable=True))
+#: The comms identity a form drawn for `harness` fills with: the name the newest launch of
+#: that harness bound, made `at`, retired or not; else the default, with a null `at`.
+#: `refused` is comms' refusal of a launch under that name (a retired name's among them),
+#: null when it lets one through. `note` says a live session holds the same name in a
+#: project scope, null when none does.
+LAST_IDENTITY = _table(harness=_text(), identity=_text(), at=_text(nullable=True),
+                       refused=Out("table", items=REFUSAL.items, nullable=True),
+                       note=_text(nullable=True))
 #: The newest launch of the key asked for: when it was made, its harness, and each value
-#: its own request gave for a row that may be filled from an earlier launch. `at` and
+#: its own request gave for a row that may be filled from an earlier launch but the comms
+#: identity and scope, which `identities` gives for each harness that has one. `at` and
 #: `harness` are null, and `values` empty, when the key has no such launch.
 LAST = {**STANDING, "at": _text(nullable=True), "harness": _text(nullable=True),
-        "values": Out("list", items=HANDED)}
+        "values": Out("list", items=HANDED), "identities": Out("list", items=LAST_IDENTITY)}
 
 #: An earlier launch that can be run again: `head` is the start of its brief, else its
 #: model and effort, else its harness; `target` and `slot` say where it ran.
@@ -461,7 +470,10 @@ PAGE = lb.Page(
                  body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
         lb.Route("/api/resume", "act", _target("resume"),
                  body={"session": Field("string", max=QUERY_MAX),
-                       "slot": Field("string", required=False, max=QUERY_MAX)},
+                       "slot": Field("string", required=False, max=QUERY_MAX),
+                       "brief": Field("string", required=False),
+                       "brief_file": Field("string", required=False, max=PATH_MAX),
+                       "plain": Field("bool", required=False)},
                  returns={**ACTED, "command": _text(nullable=True)}),
         lb.Route("/api/keep-warm", "act", _target("keep_warm"),
                  body={"request_id": Field("string", max=QUERY_MAX)}, returns=ACTED),

@@ -6,7 +6,8 @@ this terminal becomes the harness, so a test runs it here and reads what it left
 `SPEC` is a JSON file: `request` (the `LaunchRequest`'s fields), `out` (where this
 writes what it saw), and optionally `moxi` (the command comms' wrapper runs under, in
 place of this environment's `moxi`), and `free_identity` (when true, comms' identity check
-finds every name free: the test's comms has no daemon to ask). The deliverer runs the `deliver` function directly,
+finds every name free: the test's comms has no daemon to ask), and `scratch_tmp` (the
+test's stand-in for `/tmp`, where a scratch launch makes its parent). The deliverer runs the `deliver` function directly,
 from this environment's Python, since a test has no `moxi launcher deliver` to run.
 When the test hid the installed turns (`launcher_fake_turns.hide`), it is hidden here too.
 The launch is named at one fixed time, so the preview and the launch hold one name.
@@ -40,6 +41,8 @@ def main(spec_path: str) -> int:
     names.now = lambda: datetime(2026, 11, 8, 12, 45)
     if spec.get("moxi"):
         compose.moxi_command = lambda: spec["moxi"]
+    if spec.get("scratch_tmp"):
+        compose.common.SCRATCH_TMP = Path(spec["scratch_tmp"])
     if spec.get("free_identity"):
         api._identity_taken = lambda name, scope, replacing=None: None
     first.deliverer_argv = lambda rid, pid: [sys.executable, "-c", DELIVER, rid, "--pid",

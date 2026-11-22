@@ -153,6 +153,8 @@ def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, claim
 
 def go(conn, which=SID, *, session=None, slots_api=None, turns=None, **kw):
     clock = Clock()
+    kw.setdefault("read_shells", lambda pid: [])
+    kw.setdefault("cache", None)
     return exits.exit_session(
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(ended=True),
@@ -501,6 +503,80 @@ def test_the_newest_id_after_a_clear_is_the_one_exited(conn):
     result = go(conn, SID, turns=Turns(FakeSession()))
     assert seen == [OTHER] and result.run.session_id == OTHER
     assert logged(conn)[0].session_id == OTHER
+
+
+# -- background shells ------------------------------------------------------------------------
+# Exit-session holds while a background shell or Monitor runs, unless the session has
+# been idle an hour; only then does it answer the exit dialog with "Exit and stop tasks".
+
+
+def idle(age_s):
+    return SimpleNamespace(read=lambda harness, session_id, **kw: SimpleNamespace(
+        kind="cold", age_s=age_s))
+
+
+@pytest.mark.parametrize("cache", [idle(600), None], ids=["idle-10-minutes", "no-cache"])
+def test_background_shells_hold_an_exit_until_the_session_is_idle_an_hour(conn, cache):
+    session, slots_api = FakeSession(), FakeSlots(ended=True)
+    result = go(conn, session=session, slots_api=slots_api, cache=cache,
+                read_shells=lambda pid: [4101, 4102])
+    assert result.exit_code == 75 and result.data["word"] == "shells"
+    assert "2 background shells or Monitors run (pid 4101, 4102)" in result.data["detail"]
+    assert session.commands == [] and slots_api.calls == []
+    [row] = logged(conn)
+    assert (row.verdict, row.word) == ("held", "shells")
+
+
+def test_background_shells_of_a_session_idle_an_hour_stop_at_the_exit_dialog(conn):
+    seen = []
+    session, slots_api = FakeSession(exits=(Result("failed", "not-exited"),)), \
+        FakeSlots(ended=False, answer="ended")
+    result = go(conn, session=session, slots_api=slots_api, cache=idle(3600),
+                read_shells=lambda pid: seen.append(pid) or [4101])
+    assert result.data["outcome"] == "exited" and seen == [session.pid]
+    assert session.commands == [("exit", 4)] and ("answer", 0) in slots_api.calls
+    [shells] = [e for e in store.run_events(conn, result.run.run_id) if e.kind == "shells"]
+    assert shells.detail == {"pids": [4101], "idle_s": 3600.0}
+
+
+def test_shells_that_cant_be_read_hold_the_exit(conn):
+    def broken(pid):
+        raise OSError("no such process")
+    session = FakeSession()
+    result = go(conn, session=session, read_shells=broken)
+    assert result.data["word"] == "unreadable" and session.commands == []
+    assert "background shells can't be read: no such process" in result.data["detail"]
+
+
+def test_a_dry_run_says_shells_hold_or_would_be_stopped(conn):
+    held = go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert held.exit_code == 75 and held.data["word"] == "shells"
+    cold = go(conn, dry_run=True, cache=idle(4000), read_shells=lambda pid: [4101])
+    assert cold.exit_code == 0 and cold.data["shells"] == [4101]
+    assert cold.lines[0].endswith("stopping its 1 background shell or Monitor (idle an hour "
+                                  "or more)")
+    assert store.runs(conn) == [] and logged(conn) == []
+
+
+def test_a_tool_shell_is_one_that_sources_a_claude_shell_snapshot():
+    snapshot = "source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh 2>/dev/null"
+    assert exits.is_tool_shell(["/bin/bash", "-c", snapshot + " && sleep 60"])
+    assert exits.is_tool_shell(["/bin/zsh", "-c", snapshot])
+    assert not exits.is_tool_shell(["/bin/bash", "-c", "sleep 60"])
+    assert not exits.is_tool_shell(["python", "-m", "moxi_turns"])
+
+
+def test_background_shells_reads_the_children_of_the_process(tmp_path):
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert exits.background_shells(os.getpid()) == []
+    finally:
+        child.kill()
+        child.wait()
+    with pytest.raises(OSError):
+        exits.background_shells(2 ** 22 + 17)
 
 
 # -- the exit log ---------------------------------------------------------------------------

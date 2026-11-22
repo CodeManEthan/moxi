@@ -674,6 +674,25 @@ def test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir(conn, tmp_p
     assert arm(conn, handoff(handoff_dir)).data["outcome"] == "armed"
 
 
+def test_with_notes_installed_a_launch_with_no_notes_dir_is_refused(conn, tmp_path,
+                                                                    monkeypatch):
+    # A self relaunch with no notes directory for the launch is refused, and no handoff is
+    # read from anywhere else.
+    available, load = relaunch.modules.available, relaunch.modules.load
+    homeless = SimpleNamespace(state=relaunch.modules.PRESENT, ok=True, reason="",
+                               api=SimpleNamespace(handoffs_dir=lambda path, *, create=False,
+                                                   override=None: None))
+    monkeypatch.setattr(relaunch.modules, "available",
+                        lambda name: name == "notes" or available(name))
+    monkeypatch.setattr(relaunch.modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else load(name, interface=interface))
+    with pytest.raises(relaunch.Refused) as caught:
+        arm(conn, handoff(tmp_path))
+    assert caught.value.code == "handoff"
+    assert caught.value.problem.endswith("so it has no handoffs/ to read from")
+    assert not relaunch.handoffs.own_handoffs_dir(create=False).exists()
+
+
 # -- subagents ----------------------------------------------------------------------------
 
 

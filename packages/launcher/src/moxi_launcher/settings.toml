@@ -229,7 +229,7 @@ group = "Keep warm"
 
 [name.template]
 type = "string"
-default = "<project>-<model>-<date:mmm-dd hh:mm>"
+default = "<date>-<time>-<project>-<agent>"
 doc = "The template a launch's session name is made from, with the pieces <project>, <agent>, <model>, <identity>, <scope>, <instance>, <date[:format]> and <time[:format]>."
 read = "use"
 elsewhere = "The session-name template is edited in Home's Options."

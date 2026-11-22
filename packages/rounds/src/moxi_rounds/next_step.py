@@ -61,7 +61,7 @@ import json
 from collections.abc import Callable, Sequence
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               model_tiers, rendering, report_block, showing, sizing, stages, steps,
+               model_tiers, places, rendering, report_block, showing, sizing, stages, steps,
                tracing, versions)
 from . import numbers as counted
 from . import settings as own
@@ -170,7 +170,8 @@ def _build(found: showing.Shown, step: steps.Step) -> dict:
     build = builds.current(found.state, step.stage)
     if build is None or build.ended is not None:
         return {"reads": _named(step)}
-    worktree = checking.commission_of(found.state, build).get("worktree")
+    commissioned = checking.commission_of(found.state, build)
+    worktree = places.expand_home(commissioned.get("worktree"))
     return {"reads": _named(step),
             "write": f"the work, committed on {build.branch} in {worktree}"}
 

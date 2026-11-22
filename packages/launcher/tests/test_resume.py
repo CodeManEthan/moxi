@@ -19,6 +19,7 @@ import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import (api, catalog, first, presets, resume, slots, store, target,
                            targets)
+from moxi_launcher.compose import common
 
 TESTS = Path(__file__).resolve().parent
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -45,10 +46,12 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", harness="claude", target_name="slot", session_id=SID,
-             slot="3", identity=None, live=False, pid=None, at=None, values=None):
+             slot="3", identity=None, live=False, pid=None, at=None, values=None,
+             posture="operator"):
     store.insert(conn, request_id=request_id, by="ann", harness=harness,
-                 target=target_name, cwd="/work", values=values or {"model": "opus"},
-                 argv=[harness], env={}, posture="operator",
+                 target=target_name, cwd="/work",
+                 values=values or {"model": "opus", "posture": posture},
+                 argv=[harness], env={}, posture=posture,
                  session_id=session_id if harness == "claude" else None,
                  slot=slot if target_name == "slot" else None, identity=identity, at=at)
     if harness == "codex" and session_id:
@@ -466,6 +469,57 @@ def test_a_resume_replays_the_row_with_resume_of_and_its_newest_id(conn):
     assert result.data["session_id"] == SID2
 
 
+def test_a_resume_of_a_go_launch_with_no_brief_is_refused_and_nothing_launched(conn):
+    launched(conn, posture="go")
+    for given in ({}, {"brief": " \n"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            go(conn, **given)
+        assert caught.value.code == "posture-brief"
+        assert "posture go needs a brief on a resume" in caught.value.problem
+    assert launches(conn) == 1
+
+
+def test_a_resume_hands_its_brief_or_brief_file_to_the_replay(conn):
+    launched(conn, posture="go")
+    _, launch = go(conn, brief="Carry on.")
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == ("Carry on.", None)
+    _, launch = go(conn, brief_file="~/brief.md")
+    assert launch.requests[0].brief is None
+    assert launch.requests[0].brief_file == str(Path("~/brief.md").expanduser())
+    # Under operator a resume needs none, and sends none.
+    launched(conn, request_id="r2", session_id=SID2, posture="operator")
+    _, launch = go(conn, SID2)
+    assert (launch.requests[0].brief, launch.requests[0].brief_file) == (None, None)
+
+
+@pytest.mark.parametrize("shown", ["relaunched (handoff: /h.md)", "with:lead"])
+def test_a_resume_of_a_relaunched_go_launch_is_ruled_by_go_not_the_shown_posture(conn,
+                                                                                  shown):
+    # A relaunch shows its own posture in the row's column; its values keep the one it
+    # was launched with, and that is the one a resume is ruled by.
+    launched(conn, posture=shown, values={"model": "opus", "posture": "go"})
+    with pytest.raises(presets.PostureBrief) as caught:
+        go(conn)
+    assert "posture go needs a brief on a resume" in caught.value.problem
+    assert launches(conn) == 1
+    _, launch = go(conn, brief="Carry on.")
+    assert launch.requests[0].brief == "Carry on."
+
+
+@pytest.mark.parametrize("posture, given, code, row", [
+    ("with:lead", {"brief": "Go."}, "posture-brief", "brief"),
+    ("with:lead", {"brief_file": "/w/brief.md"}, "posture-brief", "brief"),
+    ("go", {"brief": "Go.", "brief_file": "/w/brief.md"}, "bad-value", "brief"),
+    ("go", {"brief_file": "brief.md"}, "bad-value", "brief_file"),
+])
+def test_a_brief_that_doesnt_fit_the_resume_is_refused(conn, posture, given, code, row):
+    launched(conn, posture=posture)
+    with pytest.raises(catalog.Refused) as caught:
+        go(conn, **given)
+    assert (caught.value.code, caught.value.row) == (code, row)
+    assert launches(conn) == 1
+
+
 def test_a_resume_mints_its_request_id(conn):
     launched(conn)
     _, launch = go(conn)
@@ -702,6 +756,73 @@ def test_a_slot_named_for_a_terminal_resume_is_refused(work, harness, no_exec):
         resume.resume(SID, slot=4, request_id="r2", turns=None, slots_api=None)
     assert api.exit_code(refused.value) == 2
     assert with_store(lambda c: store.get(c, "r2")) is None
+
+
+def test_a_resumes_brief_is_its_first_turn_and_a_go_resume_without_one_is_refused(
+        work, harness, no_exec, tmp_path):
+    first_launch(work, posture="go", brief="Build it.")
+    with pytest.raises(presets.PostureBrief):
+        resume.resume(SID, request_id="r2", turns=None, slots_api=None)
+    assert with_store(lambda c: store.get(c, "r2")) is None and not no_exec[1:]
+    resume.resume(SID, request_id="r2", brief="Carry on.", turns=None, slots_api=None)
+    argv = no_exec[-1]["argv"]
+    [turn] = [word for word in argv if word.startswith("Brief from launcher")]
+    assert turn.endswith("\n\nCarry on.") and "Build it." not in " ".join(argv)
+    assert with_store(lambda c: store.get(c, "r2")).brief == "Carry on."
+    ended("r2")
+    brief = tmp_path / "brief.md"
+    brief.write_text("Read the file.\n")
+    resume.resume(SID, request_id="r3", brief_file=str(brief), turns=None, slots_api=None)
+    [turn] = [w for w in no_exec[-1]["argv"] if w.startswith("Brief from launcher")]
+    assert turn.rstrip().endswith("Read the file.")
+
+
+def test_the_session_a_go_launch_relaunched_itself_into_resumes_only_with_a_brief(
+        work, harness, no_exec, tmp_path):
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("where the work stands\n")
+    first_launch(work, posture="go", brief="Build it.")
+    relaunched = with_store(lambda c: store.get(c, "r1"))
+    api.launch(api.ReplayRequest(relaunched, relaunch_of="r1", request_id="r2",
+                                 actor="ann", posture=common.RELAUNCHED.format(path=handoff),
+                                 handoff=str(handoff)))
+    ended("r2")
+    row = with_store(lambda c: store.get(c, "r2"))
+    assert row.posture.startswith("relaunched") and row.values["posture"] == "go"
+    with pytest.raises(presets.PostureBrief):
+        resume.resume(row.session_id, request_id="r3", turns=None, slots_api=None)
+    assert with_store(lambda c: store.get(c, "r3")) is None
+    resume.resume(row.session_id, request_id="r3", brief="Carry on.", turns=None,
+                  slots_api=None)
+    [turn] = [w for w in no_exec[-1]["argv"] if w.startswith("Brief from launcher")]
+    assert turn.endswith("\n\nCarry on.")
+
+
+@pytest.mark.parametrize("shown", ["relaunched (handoff: {path})", "with:lead"])
+def test_the_session_a_go_launch_was_relaunched_into_resumes_showing_go(
+        work, harness, no_exec, tmp_path, shown):
+    """The resumed launch's row and identity block show the posture the launch was
+    configured with, not the one its relaunch started on; the relaunch's row keeps its
+    own."""
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("where the work stands\n")
+    first_launch(work, posture="go", brief="Build it.")
+    shown = shown.format(path=handoff)
+    api.launch(api.ReplayRequest(with_store(lambda c: store.get(c, "r1")), relaunch_of="r1",
+                                 request_id="r2", actor="ann", posture=shown,
+                                 handoff=str(handoff) if shown.startswith("relaunched")
+                                 else None))
+    ended("r2")
+    relaunched = with_store(lambda c: store.get(c, "r2"))
+    assert relaunched.posture == shown
+    resume.resume(relaunched.session_id, request_id="r3", brief="Carry on.", turns=None,
+                  slots_api=None)
+    assert with_store(lambda c: store.get(c, "r2")).posture == shown
+    row = with_store(lambda c: store.get(c, "r3"))
+    assert (row.resume_of, row.posture) == ("r2", "go")
+    argv = no_exec[-1]["argv"]
+    block = Path(argv[argv.index("--append-system-prompt-file") + 1]).read_text()
+    assert "start posture: go" in block and shown not in block, block
 
 
 def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):

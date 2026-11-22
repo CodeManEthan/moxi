@@ -28,8 +28,14 @@ Find your handoff folder:
 2. Else run `moxi launcher handoff dir` in your session's shell. It prints the folder,
    or says your session has no handoff folder.
 
-If neither gives a folder, your session has no key (no comms name, seat or project), and
-a handoff written anywhere would not be shown to your next session. Say so and stop.
+If neither gives a folder, your session has none, and a handoff written anywhere would
+not be shown to your next session. `moxi launcher handoff dir` says which reason holds:
+
+- the session has no key (no comms name, seat or project);
+- or notes is installed and gives the launch no notes directory (no `notes_dir` is set,
+  and notes keeps none for the folder it works in).
+
+Say so and stop.
 
 ## The file name
 

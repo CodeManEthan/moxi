@@ -13,9 +13,10 @@ that holds the act is a word, and the words come in this order:
 | `person` | slot: `pane_use` (copy mode, or an attached client active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
 | `unreadable` | any read failed, or `facts().stale` | always |
 
-**A `shell` entry never counts as live work**, whichever harness reports it: background
-shells stop at Claude's exit dialog, or with a clear or compact's stop, so they hold
-nothing.
+**A `shell` entry never counts as live work** in this read, whichever harness reports
+it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
+Exit-session reads them itself after this read (`exits.background_shells`), and holds
+for them until the session has been idle an hour.
 
 **The pane's own output never holds.** `pane_use` also gives the pane's activity, which
 any output moves: Claude Code redrawing its spinner and status line, or its exit dialog

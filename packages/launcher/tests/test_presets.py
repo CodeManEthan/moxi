@@ -559,6 +559,119 @@ def test_the_with_posture_needs_comms():
         resolve(typed={"posture": "later"})
 
 
+def test_a_go_launch_with_nothing_to_start_on_is_refused():
+    # Go with no brief is refused, since nobody directs the session.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"})
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert "posture go needs a brief" in caught.value.problem
+    with pytest.raises(presets.PostureBrief):
+        resolve(typed={"posture": "go", "brief": "  \n"})
+
+
+@pytest.mark.parametrize("first", [{"brief": "Build it."}, {"brief_file": "/w/brief.md"},
+                                   {"handoff": "/w/handoff.md"}])
+def test_a_go_launch_with_a_first_turn_resolves(first):
+    assert resolve(typed={"posture": "go", **first}).posture == "go"
+
+
+def test_a_go_launch_with_no_identity_starts_on_the_words_typed_after_the_dashes():
+    # On a launch that binds no comms identity, any words typed after `--` carry the
+    # task, flags alone included: they go last on the harness's argv.
+    for tail in (["Carry on."], ["--verbose", "Carry on."], ["--verbose"]):
+        got = resolve(typed={"posture": "go"}, extra=tail, tail=tail)
+        assert got.posture == "go"
+    # comms not installed: the identity is ignored, so the launch binds none.
+    assert resolve(typed={"posture": "go", "identity": "builder"},
+                   extra=["Carry on."], tail=["Carry on."]).posture == "go"
+
+
+def test_a_go_launch_does_not_start_on_flags_passed_on_but_not_typed_after_the_dashes():
+    # Unknown flags typed before `--`, the page's field (both reach `extra` with no
+    # tail), a preset's `extra_flags` and `[defaults]`' carry no first turn.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"}, extra=["--add-dir", "Carry on."])
+    assert "or its task after --" in caught.value.hint
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\nextra_flags = ["--add-dir", "/x"]\n', seat="s")
+    with pytest.raises(presets.PostureBrief):
+        resolve('[defaults]\nextra_flags = ["--append-system-prompt", "be terse"]\n',
+                typed={"posture": "go"})
+
+
+def test_a_go_launch_that_binds_an_identity_does_not_start_on_words_passed_on():
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go", "identity": "builder"}, extra=["Carry on."],
+                tail=["Carry on."], available=only("comms"))
+    assert "after --" not in caught.value.hint
+
+
+def test_a_brief_under_with_is_refused():
+    # Under with:<agent> that agent sends the first message.
+    for first in ({"brief": "Build it."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            resolve(typed={"posture": "with:lead", **first}, available=only("comms"))
+        assert caught.value.code == "posture-brief"
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    got = resolve(typed={"posture": "with:lead"}, available=only("comms"))
+    assert got.posture == "with:lead"
+
+
+def test_a_handoff_under_with_is_sent_first_and_the_director_follows():
+    # A typed handoff is the session's first turn under any posture; under
+    # with:<agent> the director's message comes after it.
+    for posture in ("with:lead", "operator", ""):
+        got = resolve(typed={"posture": posture, "handoff": "/w/handoff.md"},
+                      available=only("comms"))
+        assert (got.posture, got.values["handoff"]) == (posture, "/w/handoff.md")
+
+
+def test_a_resume_of_a_go_launch_needs_a_brief():
+    # A resumed session does not wake itself either.
+    with pytest.raises(presets.PostureBrief) as caught:
+        presets.check_resume_brief("go", brief="  \n")
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert caught.value.problem == ("posture go needs a brief on a resume: a resumed "
+                                    "session does not wake itself either, so with no "
+                                    "first turn it sits idle")
+    assert caught.value.hint == "give the resume --brief or --brief-file"
+    presets.check_resume_brief("go", brief="Carry on.")
+    presets.check_resume_brief("go", brief_file="/w/brief.md")
+
+
+def test_a_resume_takes_the_brief_as_a_launch_does_under_each_posture():
+    for first in ({"brief": "Go."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            presets.check_resume_brief("with:lead", **first)
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    presets.check_resume_brief("with:lead")
+    for posture in ("operator", ""):
+        presets.check_resume_brief(posture)
+        presets.check_resume_brief(posture, brief="Read the design.")
+    with pytest.raises(presets.BadValue) as caught:
+        presets.check_resume_brief("go", brief="Go.", brief_file="/w/brief.md")
+    assert (caught.value.row, caught.value.problem, caught.value.hint) == (
+        "brief", "both brief and brief_file are given", "give one of them")
+
+
+def test_a_brief_under_operator_or_no_posture_is_sent():
+    # Under operator the session reads its brief and waits, as the operator ruled; with no
+    # posture the brief goes as it always did. Neither needs one.
+    for posture in ("operator", ""):
+        assert resolve(typed={"posture": posture, "brief": "Read the design."}).posture \
+            == posture
+        assert resolve(typed={"posture": posture}).posture == posture
+
+
+def test_a_go_posture_from_a_seat_needs_the_brief_too():
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\n', seat="s")
+    assert resolve('[seat.s]\nposture = "go"\n', seat="s",
+                   typed={"brief": "Go."}).posture == "go"
+
+
 @pytest.mark.parametrize("harness, target, links, mode, turns", [
     ("claude", "terminal", (), "interactive", False),
     ("claude", "slot", ("turns",), "interactive", True),

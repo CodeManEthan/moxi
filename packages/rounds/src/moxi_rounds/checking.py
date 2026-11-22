@@ -4,7 +4,9 @@ record the run; and what a gate compares.
 **What a gate compares.** A step's gate reads the newest `check.ran` of the build whose
 `step` is that step's name, and no other record (`newest`). It passes at tip `T` when that
 record's commit is `T`, its exit code is 0, and its argv is the argv the step's command
-gives now, its placeholders filled for the build at `T` (`passes`, `why_not`). For the
+gives now, its placeholders filled for the build at `T` (`passes`, `why_not`), both read
+word by word through `places.expand_home`: a run recorded with a path under the home
+folder as `~` counts against the command that names the whole path. For the
 repo's check that command is the repo's `check.command` as the settings have it when the
 gate is read (`argv_now`); for a command step of the user's own (`check --step NAME`),
 the `argv` of the step's entry in the round's recorded flow (`step_entry`). A pass at an
@@ -36,7 +38,8 @@ and to append:
    commit recorded is what ran. If either changed, nothing is recorded and the verb says
    so. Otherwise `check.ran` is appended with the stage, the step, `T`, the merge-base,
    the argv as it ran, the exit code (None for a run ended at its time limit), the
-   duration in seconds and the output file.
+   duration in seconds and the output file, each path under the home folder written
+   as `places.contract_home` gives it.
 
 A run the caller interrupts records nothing: the interrupt ends the run's tree and the
 verb before its append.
@@ -166,11 +169,23 @@ def why_not(state: states.State, stage: str, step: str, *, tip: str,
         code = run.get("exit_code")
         how = "was ended at its time limit" if code is None else f"exited {code}"
         return f"the newest run of {step} for {stage}, at {tip[:12]}, {how}"
-    if list(run.get("argv") or ()) != list(argv):
+    if _words(run.get("argv") or ()) != _words(argv):
         return (f"the newest run of {step} for {stage} passed at {tip[:12]}, but ran "
                 f"{shlex.join(run.get('argv') or ())}, and the command is now "
                 f"{shlex.join(argv)}")
     return None
+
+
+def _words(argv: Sequence[str]) -> list[str]:
+    """`argv` as a recorded argv and a current one are compared: each word read as a
+    path a record holds is read."""
+    return [places.expand_home(word) for word in argv]
+
+
+def recorded_argv(argv: Sequence[str]) -> list[str]:
+    """`argv` as a record holds it: each word that is a path under the home folder in
+    its `~` form."""
+    return [places.contract_home(str(word)) for word in argv]
 
 
 def passes(state: states.State, stage: str, step: str, *, tip: str,
@@ -272,7 +287,7 @@ def seen_of(state: states.State, name: str, *, settings,
                 f"{build.stage} can't be read from git: {why}", f"moxi rounds show {name}"))
             continue
         commissioned = commission_of(state, build)
-        worktree = Path(str(commissioned.get("worktree") or ""))
+        worktree = Path(places.expand_home(commissioned.get("worktree") or ""))
         try:
             _key, root = folders.root(build.repo)
             tip = tips.get(build.stage) or Git(root).branch(build.branch)
@@ -471,8 +486,9 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         code, duration_s, output = result
         return write.Entry(RAN, {
             "stage": stage, "step": run_as, "commit": before.tip,
-            "merge_base": before.merge_base, "argv": list(before.argv),
-            "exit_code": code, "duration_s": duration_s, "output": str(output)})
+            "merge_base": before.merge_base, "argv": recorded_argv(before.argv),
+            "exit_code": code, "duration_s": duration_s,
+            "output": places.contract_home(output)})
 
     def gate_and_keep(view):
         found = look(view)
@@ -488,9 +504,10 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         return _ci_checked(first[0], written, name=name, stage=stage)
     one = written.events[-1]
     return Ran(name=name, stage=stage, step=run_as, commit=one["commit"],
-               merge_base=one["merge_base"], argv=tuple(one["argv"]),
+               merge_base=one["merge_base"], argv=tuple(first[0].argv),
                exit_code=one["exit_code"], duration_s=one["duration_s"],
-               output=Path(one["output"]), event=one, failed=written.failed)
+               output=Path(places.expand_home(one["output"])), event=one,
+               failed=written.failed)
 
 
 @dataclass(frozen=True)
@@ -714,16 +731,18 @@ def _ci_entries(before: _Look, result: _ByCi, *, stage: str, name: str) -> list:
         code, duration_s, output = result.local
         entries.append(write.Entry(RAN, {
             "stage": stage, "step": ci.LOCAL, "commit": before.tip,
-            "merge_base": before.merge_base, "argv": list(before.local_argv),
-            "exit_code": code, "duration_s": duration_s, "output": str(output),
+            "merge_base": before.merge_base, "argv": recorded_argv(before.local_argv),
+            "exit_code": code, "duration_s": duration_s,
+            "output": places.contract_home(output),
             **pushed}))
     if result.reading is not None:
         found = result.reading
         jobs = {} if not found.jobs_argvs else {
-            "jobs_argvs": [list(one) for one in found.jobs_argvs]}
+            "jobs_argvs": [recorded_argv(one) for one in found.jobs_argvs]}
         entries.append(write.Entry(ci.READ, {
             "stage": stage, "commit": before.tip, "merge_base": before.merge_base,
-            "status_argv": list(found.status_argv), "ids_argv": list(found.ids_argv),
+            "status_argv": recorded_argv(found.status_argv),
+            "ids_argv": recorded_argv(found.ids_argv),
             **jobs, "workflows": [dict(one) for one in found.workflows],
             "reading": found.whole, **pushed}))
     if not entries and result.failed is not None:
@@ -814,7 +833,10 @@ def _command(state: states.State, build: builds.Build, step: str | None, *, name
         return None, None, Unmet(
             f"the flow {state.flow} of {name} has no step {step} that runs a command (its "
             f"command steps: {listed})", f"moxi rounds show {name}")
-    return [str(word) for word in entry["argv"]], entry.get("timeout_s"), None
+    # The step's words are read from the round's record, so `~` and a `~/`-led one name
+    # the home folder and a path under it.
+    return ([places.expand_home(word) for word in entry["argv"]], entry.get("timeout_s"),
+            None)
 
 
 def _look(view, *, name: str, stage: str, step: str | None, settings, again: str,
@@ -837,8 +859,8 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.unmet.append(missing)
         return found
     commissioned = commission_of(state, build)
-    worktree = Path(str(commissioned.get("worktree") or ""))
-    scratch = Path(str(commissioned.get("scratch") or ""))
+    worktree = Path(places.expand_home(commissioned.get("worktree") or ""))
+    scratch = Path(places.expand_home(commissioned.get("scratch") or ""))
     host = commissioned.get("host")
     if not places.made_here(commissioned, unrecorded_is_here=True):
         found.unmet.append(Unmet(
@@ -951,6 +973,6 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
            "GRACE_S", "LOCK_FILE", "lock_file", "fill", "declared",
-           "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
-           "report_steps", "commission_of",
+           "values", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
+           "step_entry", "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

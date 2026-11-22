@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+- Home fills the comms identity with the name the newest launch of the seat, project or
+  folder of the harness the form is drawn for bound (a project's include those made
+  through its seats), even one comms now reports retired, whatever harness the last launch
+  ran, always at the global scope, so a project scope is no longer carried. Where there is
+  no such name, and for any harness but Codex, it fills a default: a seat named for one of
+  its project's agents that sets no identity gets its own name, else a project of kind
+  `agent` its own key, else the project's `lead`, else `<key>-lead` when comms lists that
+  name. `/api/last` answers the identity apart from the values, once for each harness, in
+  `identities`. A filled identity comms refuses a launch under shows comms' refusal beside
+  it, so the page says why that name can't launch; each identity in `/api/last` carries it
+  as `refused`. One whose name a live session holds in a project scope shows a note naming
+  that binding (`note`). A harness picked by hand fills the comms identity for that
+  harness, unless the identity was set by hand.
+- `moxi launcher clear-expired [--session ID] [--dry-run]` and `moxi launcher keep-warm
+  --session ID [--dry-run]` make the expiry and keep-warm asks by hand; they run the same
+  ask cache's timer starts. `clear-expired --session ID` asks only of the launch whose
+  current session is ID, and says so and exits 0 when none is. `--dry-run` writes nothing
+  and prints each session's verdict and what a run would do, and `keep-warm --dry-run`
+  with no session reads every live launch keep-warm is on for.
+- Exit-session holds while the session runs a background shell or Monitor, until the
+  session has been idle an hour (`held`, word `shells`); only then does it exit and stop
+  them at Claude's exit dialog. `--dry-run` says which.
+- `moxi launcher resume` takes `--brief TEXT` or `--brief-file FILE`, and the page's
+  resume a brief or a brief file beside each past session; the brief is sent as the
+  resumed session's first turn, as a launch's is. A resume of a `go` launch with no brief
+  is refused before anything starts (`posture-brief`), since a resumed session does not
+  wake itself either, and a brief under `with:<identity>` is refused as on a launch. The
+  posture is the one the launch was configured with, so a `go` launch's relaunch needs a
+  brief to resume too, and the resumed launch shows that posture, where the relaunch
+  shows its own. A plain resume, `moxi launcher resume --plain` or Home's `Continue the
+  last session` with an empty box (`plain` on `/api/resume`), takes no brief and sends no
+  first turn, a `go` launch's too; `--plain` with `--brief` or `--brief-file` is refused
+  (`bad-value`). Without `--plain` the command line keeps the refusal, and so does the
+  page's resume. Home's continue of a session that ran in a terminal copies the resume
+  command with `--plain` when the box is empty.
+- The start posture checks the brief: `preview` and `run` refuse a `go` launch with no
+  brief, brief file or handoff, and a brief under `with:<identity>`, whose director
+  sends the first message (`posture-brief`). A handoff under `with:<identity>` is sent
+  as the first turn, before the director's message. On a launch that binds no comms
+  identity, any words typed after `--` on the command line count as the first turn,
+  flags alone included, since they go last on the harness's argv. Other flags passed on
+  (unknown flags typed before `--`, a preset's or `[defaults]`' `extra_flags`, the page's
+  field) don't count. A brief under `operator` is sent.
+- A scratch launch works in `/tmp/scratch-<uid>/<session name>`, a folder named by its
+  session name under a parent of the user's own, by the numeric uid, made 0700 if missing;
+  `TMPDIR` is no longer read. The folder's name is the session name folded to lowercase
+  letters, digits and single dashes (`Foo_Bar` works in `foo-bar`, `My spike` in
+  `my-spike`), so the folder stays in the parent. A later launch under the same name works
+  in the same folder. On Windows the parent is `scratch-<user name>` in the user's own
+  temporary folder.
+- A scratch launch keeps no notes: a `notes_dir` typed or set by its preset
+  is refused by name (`scratch-notes`), one from `[defaults]` is left out, and a scratch
+  folder notes would keep notes for is refused at preview and launch, with a hint that
+  names the `notes exclude` setting for the scratch parent.
+- With notes installed, a launch notes gives no notes directory (no `notes_dir` and none
+  for its folder) has no handoff folder: a self relaunch is refused, saying the launch has
+  no `handoffs/` to read from, `moxi launcher handoff dir` and `handoffs` refuse
+  (`no-notes-dir`), its start names no folder and points to no handoff, and the
+  moxi-handoff skill gives that reason beside a session with no key. The launcher's
+  own folder, which these fell back to, is used only without notes. A notes that can't be
+  read counts as giving no folder.
+- `name.template` ships as `<date>-<time>-<project>-<agent>`, so a launch that sets no
+  name is called, say, `20261108-1245-docs-planner`. It shipped as
+  `<project>-<model>-<date:mmm-dd hh:mm>`; a template set in the settings is kept.
 - A relaunch or repair job no longer fails as it ends: it read `relaunch.fallback` and
   `relaunch.notice_retry_s` in a way the launcher's settings don't support, so every
   note and notice was lost and the job crashed before it told anyone.
@@ -328,7 +392,10 @@
   its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
   time the menu opens, resumes the newest session the user made in the place the line
   names that can be resumed now, in a slot or by copying its resume command, with the
-  lines under the box saying how the resume went; the box keeps its text.
+  lines under the box saying how the resume went. The box's text goes as the resume's
+  brief, or the brief file while one is set, and a resume that starts empties the box as
+  a launch does; an empty box sends none and resumes the session with no first turn, a
+  `go` session too.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
