@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+- Stacked builds: of two open builds where one's commits are strictly part of the
+  other's, `finish` lets the one whose work reaches the target first go first and holds
+  the other until that work is on the target, in place of refusing both for sharing
+  commits. Normally the inner build goes first; an outer build already merged by hand
+  goes first and records the landing. Builds that overlap, or hold the same commits, are
+  refused as before. The rule holds under the finish lock too. `next` gives a held
+  finish as waiting with the build to finish first; `show`, `list` and the drop refusal
+  word each share as `inside`, `contains` or `shares with`, and each share in `--json`
+  gains `relation`.
+- `commission --existing` takes a branch strictly inside or around another open build's,
+  and refuses one that overlaps or holds the same commits, naming the build and the
+  relation, and one a recorded landing of another build already brought onto the
+  target.
+- A frozen copy edited after its freeze, as `design.md` was, is said to be so, with the
+  new repair `mark ROUND --restamp --record PTR`, in place of asking for a fold. It
+  records the copy's digest as the version's re-stamped one in a `repair` event,
+  changes no standing, and an ended round takes it. `show` lists it under Repairs and
+  on the versions line.
+- The numbers: the step times are labelled as overlapping, and the numbers gain
+  `round_time_s`, open to close, and `longest_gap`, the longest stretch with nothing
+  logged with the steps due across it. `show` computes both for a round that ended
+  before them; `list --numbers` sums `round_time_s` and says how many rounds hold it.
+- A decision is labelled his to rule only where it is put to him: the project's
+  `ratify` setting names its weight and the build that finished its stage declared it.
+  Elsewhere `show`, the note, `verdict` and `list --waiting` say it is not put to him,
+  and why, and in an ended round that it is left open. The write that closes a round
+  lists each decision of a finished build it left open, and `show` of an ended round
+  keeps the list.
+- Tests: the rounds tests fail at setup when the test fence is not loaded, and a config
+  path outside the test's own tmp fails the test.
+
 ## 0.1.1 (2026-11-21)
 
 - A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
