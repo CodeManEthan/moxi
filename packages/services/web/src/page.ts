@@ -349,7 +349,7 @@ export class ServicesPage extends LitElement {
     const rows = new Feed<Rows>(() => api("services", "api/rows"), parseRows, () => this.#listed());
     this.#rows = rows;
     void rows.refresh().then(() => {
-      if (this.#rows === rows) this.#stop = subscribe("services", "rows", (data) => rows.topic(data));
+      if (this.#rows === rows) this.#stop = subscribe("services", "rows", rows.listener());
     });
     if (!this.#phone) {
       this.#projects = new Feed<Projects>(() => api("services", "api/projects"), parseProjects, changed);

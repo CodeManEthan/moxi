@@ -159,6 +159,19 @@ test("a topic event that can't be read, or comes after a failure, reads the rout
   assert.equal(feed.value.rows.length, 0);
 });
 
+test("a subscription's first value reads the route again, and each later one is taken at once", async () => {
+  const { feed, reads } = feedOf([{ status: 200, data: rows([row()]) }, { status: 200, data: rows([]) }]);
+  await feed.refresh();
+  const listen = feed.listener();
+  listen(rows([row(), timer()]));
+  await settled();
+  assert.equal(reads.length, 2);
+  assert.equal(feed.value.rows.length, 0);
+  listen(rows([timer()]));
+  assert.equal(reads.length, 2);
+  assert.equal(feed.value.rows[0].id, "services/backup");
+});
+
 test("a closed feed drops every later answer and event", async () => {
   const { feed, changes } = feedOf([{ status: 200, data: rows([row()]) }]);
   const read = feed.refresh();

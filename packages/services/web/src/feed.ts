@@ -377,6 +377,8 @@ const sleep: Wait = (ms) => new Promise((done) => setTimeout(done, ms));
  *   route's refusal, and `said` holds its reason and fix.
  * - A topic event replaces the value at once while the last read succeeded; otherwise,
  *   or when the event can't be read, it reads the route again.
+ * - `listener()` reads the route again for a subscription's first value, the one the
+ *   server held, and passes each later one to `topic()`.
  */
 export class Feed<V> {
   /** The last value read, or null before the first. */
@@ -431,6 +433,22 @@ export class Feed<V> {
       }
     })();
     return this.#running;
+  }
+
+  /** The function to give `subscribe` after the first read. A subscription's first value
+   * is the one the server held when its stream opened, which can be older than that read
+   * (an act's change waits for the server's next poll), so it reads the route again; each
+   * later value goes to `topic()`. */
+  listener(): (data: unknown) => void {
+    let first = true;
+    return (data) => {
+      if (!first) {
+        this.topic(data);
+        return;
+      }
+      first = false;
+      if (!this.#closed) void this.refresh();
+    };
   }
 
   /** One topic event. */
