@@ -64,7 +64,7 @@ OUTCOMES = ("exited", "not-exited", "left-running", "left-alone", "failed")
 OWN = "the session running park"
 #: The reason recorded for a session of a harness park leaves running (`NO_EXIT`).
 LEFT_RUNNING = ("park leaves Codex sessions running and the reboot ends them; "
-                "moxi launcher exit-session stops one")
+                "moxi launcher exit-session stops one under turns' Codex host")
 
 
 @dataclass(frozen=True)
