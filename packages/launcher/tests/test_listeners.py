@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -109,6 +110,38 @@ def dead() -> str:
         child.wait()
     assert ident is not None and not proc.alive(ident)
     return f"{ident.pid}@{ident.started:.6f}"
+
+
+@pytest.fixture(autouse=True)
+def overlap_drained():
+    """Each test starts with no wait for a held endpoint under way, and ends once the one
+    it started, if any, has handled or dropped its queue."""
+    listen_ready._drainer = None
+    yield
+    if listen_ready._drainer is not None:
+        listen_ready._drainer.join(timeout=10)
+        assert not listen_ready._drainer.is_alive()
+    assert listen_ready._queue == []
+
+
+def drained():
+    """Wait for the overlap wait under way to finish."""
+    assert listen_ready._drainer is not None
+    listen_ready._drainer.join(timeout=10)
+
+
+@pytest.fixture
+def sibling():
+    """A live endpoint of the launched session that a replacing one is a sibling of: a
+    child of this test process, which plays the launch's `claude`. `.end()` ends it."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    ident = proc.identity(child.pid)
+
+    def end():
+        child.kill()
+        child.wait()
+    yield SimpleNamespace(name=f"{ident.pid}@{ident.started:.6f}", end=end)
+    end()
 
 
 @pytest.fixture
@@ -396,6 +429,156 @@ def test_a_codex_launch_is_reclaimed_by_an_id_learned_after_a_clear(conn, endpoi
     endpoint(NESTED)
     listen_ready.observe(ready("codex", "thr-cleared", "c1", source="resume"))
     assert store.get(conn, "c1").endpoint == NESTED
+
+
+LOADED_ID = "77777777-2222-4333-8444-555566667777"
+COMPACTED_ID = "c0c0c0c0-3333-4444-8555-666677778888"
+
+
+def held_by(conn, name, request_id="r1", session_id=CLAUDE_ID):
+    launch_claude(conn, request_id, session_id=session_id)
+    seated(conn, request_id)
+    assert store.claim(conn, request_id, harness="claude", session_id=session_id,
+                       endpoint=name) is not None
+
+
+def test_a_load_while_the_old_endpoint_ends_moves_the_claim_within_the_wait(
+        conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    began = time.monotonic()
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    assert time.monotonic() - began < 1                  # returns to turns at once
+    assert store.get(conn, "r1").endpoint == sibling.name
+    threading.Timer(0.3, sibling.end).start()
+    drained()
+    assert time.monotonic() - began < listen_ready.OVERLAP_WAIT_S
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "spawning")
+    [moved] = store.events(conn, "r1")
+    assert moved.detail == {"endpoint": NEW, "was": sibling.name, "by": "parent"}
+    # An id first learned at load (the session was cleared in the gap) says so.
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (LOADED_ID, "load")]
+
+
+def test_an_old_endpoint_alive_past_the_wait_keeps_the_claim_until_the_next_ready(
+        conn, endpoint, sibling, monkeypatch):
+    monkeypatch.setattr(listen_ready, "OVERLAP_WAIT_S", 0.5)
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", LOADED_ID, "r1"))
+    drained()
+    assert store.get(conn, "r1").endpoint == sibling.name
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+    assert listen_ready._queue == []
+    sibling.end()
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "ready")
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
+
+
+def test_a_clear_inside_the_overlap_is_learned_in_arrival_order(
+        conn, endpoint, sibling, monkeypatch):
+    # A long step, so the old endpoint ends and a third event arrives before the wait
+    # looks again.
+    monkeypatch.setattr(listen_ready, "OVERLAP_STEP_S", 1.0)
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+    sibling.end()
+    assert store.endpoint_gone(sibling.name)
+    listen_ready.observe(ready("claude", COMPACTED_ID, "r1", source="compact"))
+    assert len(listen_ready._queue) == 3
+    drained()
+    row = store.get(conn, "r1")
+    assert (row.endpoint, row.state) == (NEW, "ready")
+    assert store.session_ids(conn, "r1") == [
+        (CLAUDE_ID, "minted"), (CLEARED_ID, "clear"), (COMPACTED_ID, "compact")]
+    found = store.resolve(conn, CLEARED_ID)
+    assert found.request_id == "r1" and found.newest_session_id == COMPACTED_ID
+    assert [e.kind for e in store.events(conn, "r1")] == [store.RECLAIMED]
+
+
+def test_a_queued_clear_alone_is_the_newest_id(conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    sibling.end()
+    drained()
+    found = store.resolve(conn, CLEARED_ID)
+    assert found.request_id == "r1" and found.newest_session_id == CLEARED_ID
+    assert store.get(conn, "r1").state == "ready"
+
+
+@pytest.mark.parametrize("overlapping", [False, True])
+def test_a_load_and_a_ready_of_one_endpoint_arriving_at_once(
+        conn, endpoint, dead, overlapping):
+    # turns calls each listener on its own thread, so the two may run at the same time.
+    for n in range(8):
+        request_id, minted, cleared = f"r{n}", f"minted-{n}", f"cleared-{n}"
+        if overlapping:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+            ident = proc.identity(child.pid)
+            held_by(conn, f"{ident.pid}@{ident.started:.6f}", request_id, minted)
+        else:
+            held_by(conn, dead, request_id, minted)
+        endpoint(NEW, parent=SEAT)
+        barrier = threading.Barrier(2)
+
+        def arrive(event, barrier=barrier):
+            barrier.wait()
+            listen_ready.observe(event)
+
+        threads = [threading.Thread(target=arrive, args=(e,)) for e in (
+            load("claude", minted, request_id),
+            ready("claude", cleared, request_id, source="clear"))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        if overlapping:
+            child.kill()
+            child.wait()
+            drained()
+            listen_ready._drainer = None
+        row = store.get(conn, request_id)
+        assert (row.endpoint, row.state) == (NEW, "ready")
+        assert [e.kind for e in store.events(conn, request_id)] == [store.RECLAIMED]
+        assert store.session_ids(conn, request_id) == [(minted, "minted"), (cleared, "clear")]
+
+
+def test_a_live_held_endpoint_that_is_not_a_sibling_waits_for_nothing(conn, endpoint):
+    # The held endpoint runs, but its parent is not the launch's claude.
+    held_by(conn, LIVE)
+    endpoint(NEW, parent=SEAT)
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert listen_ready._drainer is None and listen_ready._queue == []
+    assert store.get(conn, "r1").endpoint == LIVE
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+
+
+def test_a_nested_endpoint_beside_a_live_sibling_neither_queues_nor_waits(
+        conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NESTED, parent=proc.identity(os.getppid()))
+    listen_ready.observe(load("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", NESTED_ID, "r1", source="clear"))
+    assert listen_ready._drainer is None and listen_ready._queue == []
+    sibling.end()
+    assert store.get(conn, "r1").endpoint == sibling.name
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+
+
+def test_a_start_never_queues(conn, endpoint, sibling):
+    held_by(conn, sibling.name)
+    endpoint(NEW, parent=SEAT)
+    assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
+    assert listen_ready._drainer is None and listen_ready._queue == []
 
 
 def test_the_held_endpoint_is_gone_only_when_its_process_has_ended(dead):
