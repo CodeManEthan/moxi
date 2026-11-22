@@ -90,7 +90,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import (brake, builds, checking, decisions, ending, findings, finish_gates, flows,
-               folders, model_tiers, open_builds, questions, report_block, stages,
+               folders, model_tiers, open_builds, places, questions, report_block, stages,
                stepping, tracing, versions, waits, write)
 from . import settings as own
 from . import state as states
@@ -219,12 +219,13 @@ def _entry(one: states.Pending) -> dict:
 
 def path(report: Path, round_dir: Path) -> str:
     """The report's file as the log names it: from the round's folder when it is in
-    it, so the record reads the same wherever the folder is, else the whole path."""
+    it, so the record reads the same wherever the folder is, else the whole path, under
+    the home folder as `places.contract_home` writes it."""
     whole = Path(os.path.abspath(report))
     try:
         return whole.relative_to(Path(os.path.abspath(round_dir))).as_posix()
     except ValueError:
-        return str(whole)
+        return places.contract_home(whole)
 
 
 def _again(state: states.State, block: report_block.ReportBlock,

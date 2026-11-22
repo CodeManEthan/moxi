@@ -10901,6 +10901,14 @@ rounds	packages/rounds/tests/test_holds.py	test_one_parked_until_a_round_holds_i
 rounds	packages/rounds/tests/test_holds.py	{"id": "C81", "record": "comms:14", "kind": "process", names: "C80"},	keep	record	record
 rounds	packages/rounds/tests/test_holds.py	{"id": "C90", "record": "comms:13", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_holds.py	{"id": ruling_id, "record": "comms:13", "kind": "process",	keep	record	record
+rounds	packages/rounds/tests/test_home_paths.py	"record": "comms:1234567"}, by="planner")	keep	record	record
+rounds	packages/rounds/tests/test_home_paths.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
+rounds	packages/rounds/tests/test_home_paths.py	assert main(["show", ROUND]) == 0	keep	show	show
+rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+rounds	packages/rounds/tests/test_home_paths.py	monkeypatch.setenv("HOME", str(tmp_path / "ann") + os.sep)	keep	HOME	HOME
+rounds	packages/rounds/tests/test_home_paths.py	proc.communicate(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in found.users)	keep	any	any
+rounds	packages/rounds/tests/test_home_paths.py	assert any(one.startswith(f"pid {proc.pid} (") for one in kept.work)	keep	any	any
 rounds	packages/rounds/tests/test_index.py	"build.dropped", {"stage": "B1", "by": "operator", "record": "comms:30"}))	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT, "numbers": None}	keep	record	record
 rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT}	keep	record	record
