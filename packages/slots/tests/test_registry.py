@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_slots import places, registry
 from moxi_slots.errors import RegistryError, TryAgain
 from moxi_slots.model import Hold, Last
@@ -103,6 +104,6 @@ def test_the_lock_not_had_in_its_wait_is_try_again():
                 pass
     finally:
         holder.kill()
-        holder.wait(timeout=5)
+        holder.wait(timeout=PROC_WAIT_S)
     with registry.locked(timeout=5):
         pass

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from moxi import config, paths
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_slots import places, tmux
 
 
@@ -57,7 +58,7 @@ def start_server(env: dict | None = None) -> subprocess.Popen:
                             start_new_session=True)
 
 
-def wait_answer(timeout: float = 5.0) -> int:
+def wait_answer(timeout: float = PROC_WAIT_S) -> int:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if (pid := tmux.ping(timeout=1.0)) is not None:
@@ -78,7 +79,7 @@ def kill(path: str, socket: str, proc: subprocess.Popen | None) -> None:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait(timeout=5)
+            proc.wait(timeout=PROC_WAIT_S)
     if os.path.exists(socket):
         os.remove(socket)
 
@@ -98,7 +99,7 @@ def pane_field(pane: str, name: str) -> str:
     return tmux.call("display-message", "-p", "-t", pane, f"#{{{name}}}").out.strip()
 
 
-def wait_for(check, timeout: float = 5.0, what: str = "the condition"):
+def wait_for(check, timeout: float = PROC_WAIT_S, what: str = "the condition"):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if value := check():
