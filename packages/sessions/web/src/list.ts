@@ -733,7 +733,7 @@ export interface RunningRowView extends RowView {
   /** The row's dim third line: a refused press's words, then turns' trouble; null for none. */
   note: string | null;
   /** turns' lines on the opened row, where turns has the session; null elsewhere. */
-  live: LiveOpened | null;
+  liveLines: LiveOpened | null;
 }
 
 /** The group of the launches running now, drawn first. */
@@ -844,22 +844,22 @@ function runningKey(entry: RunningEntry): string {
  * that message, `You:` before one he typed, or `launched` when none was read. A launch
  * whose session id is known opens in place as the list's rows do; one without has no act.
  *
- * With turns' part (`turns`), its words lead line two, after launcher's heavy lead where
+ * With turns' part (`turnsPart`), its words lead line two, after launcher's heavy lead where
  * there is one; its trouble is the dim third line, after a refused press's words; and the
  * opened row takes its lines. A launch with a session id says that turns can't read its
  * state when turns' list could not be read.
  */
 export function runningRowView(entry: RunningEntry, state: ListState, presses: Presses,
-                               { desk = true, zone = LOCAL, turns = null }:
-                               { desk?: boolean; zone?: Zone; turns?: TurnsOf | null } = {}): RunningRowView {
+                               { desk = true, zone = LOCAL, turnsPart = null }:
+                               { desk?: boolean; zone?: Zone; turnsPart?: TurnsPart | null } = {}): RunningRowView {
   const key = runningKey(entry);
   const fact = factOf(entry, zone.clock);
   const lead = leadOf(entry);
   // Launcher's heavy lead counts the agents a waiting session waits on from turns' own
   // list, so turns' phrases for the kinds it counts are not said twice.
-  const said = turns === null ? null
-    : turns.session !== null ? liveRow(turns.session, countedKinds(entry))
-      : turns.failure !== null && entry.session_id !== null ? unreadRow(turns.failure) : null;
+  const said = turnsPart === null ? null
+    : turnsPart.session !== null ? liveRow(turnsPart.session, countedKinds(entry))
+      : turnsPart.failure !== null && entry.session_id !== null ? unreadRow(turnsPart.failure) : null;
   const words = said?.words ?? null;
   const note = [desk ? presses.notes[entry.request_id] ?? null : null, said?.trouble ?? null]
     .filter((one): one is string => one !== null);
@@ -892,23 +892,24 @@ export function runningRowView(entry: RunningEntry, state: ListState, presses: P
     pressing: presses.waiting[entry.request_id] !== undefined,
     leadMore: lead !== null ? words : null,
     note: note.length > 0 ? note.join(" · ") : null,
-    live: turns?.session != null ? liveOpened(turns.session, (when) => timeWords(when, state.today, state.today, zone)) : null,
+    liveLines: turnsPart?.session != null
+      ? liveOpened(turnsPart.session, (when) => timeWords(when, state.today, state.today, zone)) : null,
   };
 }
 
 /** What turns says of one running launch: its paired session, or why turns' list could not
  * be read. Null where turns is not read. */
-export interface TurnsOf {
+export interface TurnsPart {
   session: LiveSession | null;
   failure: string | null;
 }
 
 /** turns' part for each launch of `entries`, by request id, from its read. Without a read
  * (turns not installed, or not read yet) there is none. */
-function turnsOf(entries: readonly RunningEntry[], live: LiveRead | null): (entry: RunningEntry) => TurnsOf | null {
-  if (live === null) return () => null;
-  if (live.value === null) return () => ({ session: null, failure: live.failure });
-  const pairs = pairsOf(entries, live.value);
+function turnsPartOf(entries: readonly RunningEntry[], turnsRead: LiveRead | null): (entry: RunningEntry) => TurnsPart | null {
+  if (turnsRead === null) return () => null;
+  if (turnsRead.value === null) return () => ({ session: null, failure: turnsRead.failure });
+  const pairs = pairsOf(entries, turnsRead.value);
   return (entry) => ({ session: pairs.get(entry.request_id) ?? null, failure: null });
 }
 
@@ -920,12 +921,12 @@ function turnsOf(entries: readonly RunningEntry[], live: LiveRead | null): (entr
  * nor before a read of launcher came. A read that failed draws `Running` and the line
  * that says so. A list with a filter set holds only the launches whose session the
  * filtered list holds; without one, every launch running. With no launch to draw there is
- * no group at all. `live` is turns' read, where turns is read: each row then carries what
+ * no group at all. `turnsRead` is turns' read, where turns is read: each row then carries what
  * turns says of its session.
  */
 export function runningGroup(state: ListState, read: RunningRead | null, presses: Presses = NO_PRESSES,
-                             { desk = true, zone = LOCAL, live = null }:
-                             { desk?: boolean; zone?: Zone; live?: LiveRead | null } = {})
+                             { desk = true, zone = LOCAL, turnsRead = null }:
+                             { desk?: boolean; zone?: Zone; turnsRead?: LiveRead | null } = {})
   : { group: RunningGroupView | null; taken: Set<string> } {
   const taken = new Set<string>();
   if (read === null || state.query.find !== null) return { group: null, taken };
@@ -934,8 +935,8 @@ export function runningGroup(state: ListState, read: RunningRead | null, presses
   }
   const kept = isFiltered(state.query) ? shownKeys(state.groups) : null;
   const entries = ordered(read.value.sessions).filter((entry) => kept === null || kept.has(runningKey(entry)));
-  const turns = turnsOf(entries, live);
-  const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone, turns: turns(entry) }));
+  const partOf = turnsPartOf(entries, turnsRead);
+  const rows = entries.map((entry) => runningRowView(entry, state, presses, { desk, zone, turnsPart: partOf(entry) }));
   for (const row of rows) taken.add(row.key);
   if (rows.length === 0) return { group: null, taken };
   return { group: { label: `${fmtCount(rows.length)} running`, rows, line: null, reason: null }, taken };
@@ -984,10 +985,11 @@ function groupView(group: GroupState, state: ListState, zone: Zone, taken: Set<s
  * filter or the find field leaves empty reads `No sessions match.`.
  */
 export function listView(state: ListState, { launcher = false, zone = LOCAL, running = null, presses = NO_PRESSES, desk = true,
-                                            turns = false, live = null }:
-  { launcher?: boolean; zone?: Zone; running?: RunningRead | null; presses?: Presses; desk?: boolean; turns?: boolean;
-    live?: LiveRead | null } = {}): ListView {
-  const shown = runningGroup(state, launcher ? running : null, presses, { desk, zone, live: turns ? live : null });
+                                            readsTurns = false, turnsRead = null }:
+  { launcher?: boolean; zone?: Zone; running?: RunningRead | null; presses?: Presses; desk?: boolean; readsTurns?: boolean;
+    turnsRead?: LiveRead | null } = {}): ListView {
+  const shown = runningGroup(state, launcher ? running : null, presses,
+                             { desk, zone, turnsRead: readsTurns ? turnsRead : null });
   const groups = state.groups.map((group) => groupView(group, state, zone, shown.taken))
     .filter((group): group is GroupView => group !== null);
   const notices = state.roots.map(noticeOf);

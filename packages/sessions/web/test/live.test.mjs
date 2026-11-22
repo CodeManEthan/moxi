@@ -51,11 +51,11 @@ test("a read is the value, a failure in turns' words, or nothing when turns is g
 });
 
 test("a launch pairs with the one turns session of its id; an id two of either carry pairs none", () => {
-  const live = parseLive(list([session("k1", { session_id: "a" }), session("k2", { session_id: "b" }),
-                               session("k3", { session_id: "b" }), session("k4", { session_id: "c" }),
-                               session("k5", { session_id: null })]));
+  const liveValue = parseLive(list([session("k1", { session_id: "a" }), session("k2", { session_id: "b" }),
+                                    session("k3", { session_id: "b" }), session("k4", { session_id: "c" }),
+                                    session("k5", { session_id: null })]));
   const paired = pairsOf([launch("r1", "a"), launch("r2", "b"), launch("r3", "c"), launch("r4", "c"),
-                          launch("r5", null), launch("r6", "d")], live);
+                          launch("r5", null), launch("r6", "d")], liveValue);
   assert.deepEqual([...paired].map(([request, s]) => [request, s.key]), [["r1", "k1"]]);
 });
 
@@ -183,26 +183,26 @@ const listAnswer = { shape: 1, now: at("19:10"), today: TODAY, all: 1, total: 1,
                      groups: [{ key: TODAY, count: 1, rows: [], before: null, program: { count: 0 } }] };
 const state = refresh(null, listAnswer, queryOf(NO_FILTERS, TODAY, UTC)).state;
 const turnsUp = (sessions) => liveRead({ status: 200, data: list(sessions) });
-const rowsOf = (live, entries, options = {}) =>
-  listView(state, { launcher: true, running: up(entries), zone: UTC, turns: true, live, ...options }).running.rows;
+const rowsOf = (turnsRead, entries, options = {}) =>
+  listView(state, { launcher: true, running: up(entries), zone: UTC, readsTurns: true, turnsRead, ...options }).running.rows;
 
 test("a running row leads line two with turns' words, its trouble on the third line", () => {
-  const live = turnsUp([
+  const turnsRead = turnsUp([
     session("k-a", { session_id: "s-a", agents: { complete: true, entries: [agent("x", "subagent")] } }),
     session("k-b", { session_id: "s-b", facts: facts({ turn_open: false }),
                      agents: { complete: true, entries: [agent("y", "shell")] } }),
     session("k-c", { session_id: "s-c", facts: facts({ turn_open: false }), read_error: "the session did not answer in time",
                      unread_since: at("19:00") }),
   ]);
-  const [a, b, c, d] = rowsOf(live, [entry("a"), entry("b", { activity: { at: iso("18:38"), by: "agent", text: "x" } }),
-                                     entry("c", { activity: { at: iso("17:20"), by: "agent", text: "y" } }),
-                                     entry("d", { activity: { at: iso("17:00"), by: "agent", text: "z" } })]);
+  const [a, b, c, d] = rowsOf(turnsRead, [entry("a"), entry("b", { activity: { at: iso("18:38"), by: "agent", text: "x" } }),
+                                          entry("c", { activity: { at: iso("17:20"), by: "agent", text: "y" } }),
+                                          entry("d", { activity: { at: iso("17:00"), by: "agent", text: "z" } })]);
   assert.deepEqual([a.lead, a.leadHeavy, a.leadMore, a.note], ["working · 1 subagent busy", false, null, null]);
   assert.deepEqual([b.lead, b.note], ["1 shell running", null]);
   assert.deepEqual([c.lead, c.note], [null, "Moxi can't read its live state: the session did not answer in time"]);
   // A launch turns has no session for says nothing of it.
-  assert.deepEqual([d.lead, d.note, d.live], [null, null, null]);
-  assert.equal(a.live.now, "working on turn 9 since 18:34");
+  assert.deepEqual([d.lead, d.note, d.liveLines], [null, null, null]);
+  assert.equal(a.liveLines.now, "working on turn 9 since 18:34");
 });
 
 test("after launcher's heavy lead turns' words come second, without the subagents it already counts", () => {
@@ -237,9 +237,10 @@ test("after waiting on n subagents, a busy teammate is not counted again either"
 });
 
 test("a refused press's words come before turns' trouble on the third line", () => {
-  const live = turnsUp([session("k-a", { session_id: "s-a", trouble: "it broke" })]);
+  const turnsRead = turnsUp([session("k-a", { session_id: "s-a", trouble: "it broke" })]);
   const presses = { waiting: {}, notes: { a: "Not kept warm: it is not waiting" } };
-  const [a] = listView(state, { launcher: true, running: up([entry("a")]), zone: UTC, turns: true, live, presses }).running.rows;
+  const [a] = listView(state, { launcher: true, running: up([entry("a")]), zone: UTC, readsTurns: true, turnsRead, presses })
+    .running.rows;
   assert.equal(a.note, "Not kept warm: it is not waiting · Its link to Moxi has trouble: it broke");
 });
 
@@ -247,9 +248,9 @@ test("when turns' list can't be read, each launch with a session says so; withou
   const [a, b] = rowsOf(liveRead({ status: 502, data: null }), [entry("a"), entry("b", { session_id: null })]);
   assert.deepEqual([a.lead, a.note], [null, "Moxi can't read its live state: turns' page server answered 502"]);
   assert.deepEqual([b.lead, b.note], [null, null]);
-  const live = turnsUp([session("k-a", { session_id: "s-a" })]);
-  for (const options of [{ turns: false }, { live: null }, { live: liveRead({ status: 404, data: null }) }]) {
-    const [row] = rowsOf(live, [entry("a")], options);
-    assert.deepEqual([row.lead, row.leadMore, row.note, row.live], [null, null, null, null], JSON.stringify(options));
+  const turnsRead = turnsUp([session("k-a", { session_id: "s-a" })]);
+  for (const options of [{ readsTurns: false }, { turnsRead: null }, { turnsRead: liveRead({ status: 404, data: null }) }]) {
+    const [row] = rowsOf(turnsRead, [entry("a")], options);
+    assert.deepEqual([row.lead, row.leadMore, row.note, row.liveLines], [null, null, null, null], JSON.stringify(options));
   }
 });

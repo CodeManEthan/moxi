@@ -293,7 +293,7 @@ export class SessionsList extends LitElement {
       this.#runningFirst = new Promise((done) => { this.#runningCame = done; });
       if (!gateway()) this.#stopRunning = subscribe("launcher", RUNNING_TOPIC, (data) => this.#takeRunning(data));
     }
-    if (this.#turns()) this.#stopTurns = subscribe("turns", LIVE_TOPIC, (data) => this.#takeTurns(data));
+    if (this.#readsTurns()) this.#stopTurns = subscribe("turns", LIVE_TOPIC, (data) => this.#takeTurns(data));
     this.#reader.place(address, memory.opened);
     void this.#readRunning();
     void this.#readTurns();
@@ -343,14 +343,14 @@ export class SessionsList extends LitElement {
   }
 
   /** Whether the list reads turns: with turns installed, at the desk. */
-  #turns(): boolean {
+  #readsTurns(): boolean {
     return installed("turns") && !gateway();
   }
 
   /** Reads turns' sessions, where the list reads turns; one read at a time, and one more
    * after it when another was asked for meanwhile. */
   async #readTurns(): Promise<void> {
-    if (!this.#turns()) {
+    if (!this.#readsTurns()) {
       this.#turnsRead = null;
       return;
     }
@@ -646,7 +646,7 @@ export class SessionsList extends LitElement {
       ${status !== null ? html`<p class=${status.state === "waiting" ? "st dim" : "st"} data-line=${status.state}
         role="status">${status.line}</p>` : nothing}
       ${said(view.prompt, "you")}${said(view.reply, "reply")}
-      ${this.#liveLines("live" in row ? (row as RunningRowView).live : null)}
+      ${this.#liveLines("liveLines" in row ? (row as RunningRowView).liveLines : null)}
       ${subagents !== null ? html`<div class="r" data-line="subagents"><span class="k">${subagents.label}</span><span class="f">
         ${subagents.items.map((sub) => html`<span class="sub" data-line="subagent"><span>${sub.name}</span>${
           sub.facts !== null ? html` <span class="d">· ${sub.facts}</span>` : nothing}${
@@ -719,7 +719,7 @@ export class SessionsList extends LitElement {
     if (state === null) return html`${address}${status !== null ? this.#status(status) : nothing}`;
     const desk = !gateway();
     const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk,
-                                   turns: this.#turns(), live: this.#turnsRead });
+                                   readsTurns: this.#readsTurns(), turnsRead: this.#turnsRead });
     const filters = filterLine(state, this.#filters());
     return html`${address}
       ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count)}` : nothing}

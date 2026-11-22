@@ -173,7 +173,7 @@ export function liveRead(answer: Answer): LiveRead | null {
  * turns session carry the same session id, as turns' panel pairs them. A launch with no
  * session id pairs with none.
  */
-export function pairsOf(entries: readonly RunningEntry[], live: Live): Map<string, LiveSession> {
+export function pairsOf(entries: readonly RunningEntry[], liveValue: Live): Map<string, LiveSession> {
   const paired = new Map<string, LiveSession>();
   const count = (ids: (string | null)[]): Map<string, number> => {
     const seen = new Map<string, number>();
@@ -181,11 +181,11 @@ export function pairsOf(entries: readonly RunningEntry[], live: Live): Map<strin
     return seen;
   };
   const launches = count(entries.map((entry) => entry.session_id));
-  const sessions = count(live.sessions.map((session) => session.session_id));
+  const sessions = count(liveValue.sessions.map((session) => session.session_id));
   for (const entry of entries) {
     const id = entry.session_id;
     if (!id || launches.get(id) !== 1 || sessions.get(id) !== 1) continue;
-    paired.set(entry.request_id, live.sessions.find((session) => session.session_id === id) as LiveSession);
+    paired.set(entry.request_id, liveValue.sessions.find((session) => session.session_id === id) as LiveSession);
   }
   return paired;
 }
