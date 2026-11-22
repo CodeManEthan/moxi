@@ -717,6 +717,7 @@ def test_a_headless_launch_hands_in_the_brief_first_and_mail_after_its_turn(
     adapter = headless()
     first = delivered(adapter.fake)[0]
     assert (first.text, first.ref, first.steer) == (BRIEF, "brief", False)
+    assert (first.by, first.senders) == (None, ()), "the brief is not mail"
     send(rig, "while the brief runs")
     assert rig.send(IDENTITY, "an interrupt while the brief runs", "--interrupt",
                     sender=dict(name="main", scope="proj-a"))[0] == 0
@@ -727,6 +728,7 @@ def test_a_headless_launch_hands_in_the_brief_first_and_mail_after_its_turn(
     rows = delivered(adapter.fake, 2)
     assert rows[1].steer is False and "waited for the bind" in rows[1].text
     assert "while the brief runs" in rows[1].text
+    assert (rows[1].by, rows[1].senders) == ("comms", ("main@proj-a",))
 
 
 def test_the_claim_records_headless_and_the_rule(rig, headless):
