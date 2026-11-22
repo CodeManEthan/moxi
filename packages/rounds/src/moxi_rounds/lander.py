@@ -9,8 +9,8 @@ only looks whether one runs (`held`, which takes the lock and frees it at once) 
 makes a starting lander exit.
 
 **Who starts it.** `finish` starts one every time a build joins, and the extra ones exit
-on the lock. `moxi rounds next` and `moxi rounds queue` start one when a member waits and
-no lander holds the lock, and say they did (`ensure`), so a lander that died (a crash, a
+on the lock. `moxi rounds next` and `moxi rounds queue` start one when something keeps a
+lander (`settled`) and no lander holds the lock, and say they did (`ensure`), so a lander that died (a crash, a
 reboot) is replaced by the next of these commands, not only by the next `finish`. Neither
 records anything for it. The doctor starts none: it only reads, and names `moxi rounds
 queue --repo KEY` as the fix for a member that waits with no lander.
@@ -25,8 +25,8 @@ roots and every `MOXI_` variable (`ENV_KEPT`, `KEPT_PREFIX`), since a user unit 
 from the user manager's environment and not the caller's. Its output goes to
 `lander.log` in the repo's queue folder.
 
-**When it exits** (`run`): when no member waits and `settled` says nothing else keeps
-it. To exit it releases the lock, then reads the queue again: if a member waits and the
+**When it exits** (`run`): when `settled` says nothing keeps it: no member waits, and
+no message comms could not take is still being tried. To exit it releases the lock, then reads the queue again: if a member waits and the
 lock is free, it takes the lock again and goes on. A `finish` that appends after that
 read starts its own lander, which finds the lock free. So while a member waits, a lander
 runs, or the next command that reads the queue starts one.
@@ -48,7 +48,7 @@ from pathlib import Path
 
 from moxi import files
 
-from . import folders, queue_file
+from . import folders, queue_file, telling
 from . import settings as own
 
 #: The lander lock's file and the lander's log, in the repo's queue folder.
@@ -173,9 +173,9 @@ def start(repo: str, *, env=None, spawn: Callable[[list[str], dict], None] | Non
 
 
 def ensure(repo: str, *, env=None, spawn=None) -> Started | None:
-    """Start a lander for `repo` when a member waits and none holds the lock; what was
-    started, None when nothing was."""
-    if not queue_file.read(repo).queued() or held(repo):
+    """Start a lander for `repo` when something keeps one (`settled`) and none holds
+    the lock; what was started, None when nothing was."""
+    if settled(repo, queue_file.read(repo, env)) or held(repo):
         return None
     return start(repo, env=env, spawn=spawn)
 
@@ -190,8 +190,9 @@ def queue_repos(settings=None) -> list[str]:
 # -- the run -----------------------------------------------------------------------------
 
 def settled(repo: str, queue: queue_file.Queue, *, env=None) -> bool:
-    """Whether nothing but the members keeps the lander: no member waits."""
-    return not queue.queued()
+    """Whether nothing keeps the lander: no member waits, and no message comms could
+    not take is still being tried (`telling.trying`, bounded by `telling.UNSENT_S`)."""
+    return not queue.queued() and not telling.trying(queue)
 
 
 def run(repo: str, *, say: Callable[[str], None] = print,

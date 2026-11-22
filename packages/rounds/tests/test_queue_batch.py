@@ -142,7 +142,8 @@ def lander_pass(fake):
 
     def run(now: float = 0.0) -> list[str]:
         start = len(said)
-        batching.step("proj-a", candidate_ci=fake, say=said.append, clock=lambda: now)
+        batching.step("proj-a", candidate_ci=fake, comms=None, say=said.append,
+                      clock=lambda: now)
         return said[start:]
 
     return run
@@ -409,7 +410,7 @@ def test_an_absent_run_is_pushed_again_under_the_next_number_then_pauses(
 def test_a_repo_with_no_ci_setting_pauses_its_queue(repo, ready, configure, capsys):
     configure("")
     ready()
-    batching.step("proj-a", say=lambda _line: None)
+    batching.step("proj-a", comms=None, say=lambda _line: None)
     assert "no ci setting" in queue().paused
 
 

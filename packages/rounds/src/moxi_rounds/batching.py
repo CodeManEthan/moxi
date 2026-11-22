@@ -74,6 +74,16 @@ pass rebuilds on the target's head then. Members that join meanwhile wait until 
 batch runs and no group waits to be built.
 
 When a batch ends, its ref is removed from the remote and its local branch deleted.
+
+**Telling** (`telling`, through comms where it is installed): a member's end (landed,
+ejected, left) goes to its builder, the name its commission recorded, and to its
+round's lead (`leads.of`: the round's own, else the project's); with no lead recorded,
+to the builder alone, and that is recorded. When a member ends, each member ejected for
+a conflict with it is told too, with what to do now: after a landing, merge the target
+and finish again; after an ejection or a leave, finish again as it is. A pause, and a
+wait on the target's checkout, go to the project's director (`director`), and "no
+director set" is recorded where none is. Each message is recorded once, as `told`, and
+one comms could not take is tried again at each pass for `telling.UNSENT_S`.
 """
 
 from __future__ import annotations
@@ -83,7 +93,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import (builds, checking, ci, finish_gates, finish_lock, finishing, folders,
-               places, queue_ci, queue_file, queue_log, removal, write)
+               leads, places, queue_ci, queue_file, queue_log, removal, telling, write)
 from . import failures as failing
 from . import settings as own
 from . import state as states
@@ -137,16 +147,17 @@ def take(queue: queue_file.Queue) -> list[queue_file.Member]:
 
 
 def step(repo: str, *, settings=None, candidate_ci=None, env=None,
-         say: Callable[[str], None] = print,
+         comms=telling.LOAD, say: Callable[[str], None] = print,
          clock: Callable[[], float] = time.time) -> None:
     """One pass of the lander over `repo`'s queue. `candidate_ci` stands in for the
-    candidate's CI (`queue_ci.QueueCi` from the repo's `ci` setting when left out), and
-    `clock` for the time now. A failure of rounds or git is said, and the next pass
-    tries again."""
+    candidate's CI (`queue_ci.QueueCi` from the repo's `ci` setting when left out),
+    `comms` for comms' API (None for none installed; loaded when left out), and `clock`
+    for the time now. A failure of rounds or git is said, and the next pass tries
+    again."""
     settings = own.load() if settings is None else settings
     try:
-        _Pass(repo, settings=settings, candidate_ci=candidate_ci, env=env, say=say,
-              clock=clock).run()
+        _Pass(repo, settings=settings, candidate_ci=candidate_ci, env=env, comms=comms,
+              say=say, clock=clock).run()
     except RoundsError as exc:
         say(f"lander of {repo}: {exc}")
 
@@ -161,9 +172,10 @@ class _MemberGone(Exception):
 
 
 class _Pass:
-    def __init__(self, repo: str, *, settings, candidate_ci, env, say, clock):
+    def __init__(self, repo: str, *, settings, candidate_ci, env, comms, say, clock):
         self.repo, self.settings, self.env, self.say, self.clock = (
             repo, settings, env, say, clock)
+        self.teller = telling.Teller(repo, env=env, comms=comms, clock=clock, say=say)
         _key, self.root = folders.root(repo)
         self.place = place_of(settings, repo)
         found = ci.declared(settings, repo)
@@ -176,6 +188,7 @@ class _Pass:
     # -- the pass ------------------------------------------------------------------------
 
     def run(self) -> None:
+        self.teller.retry()
         queue = queue_file.read(self.repo, self.env)
         if self.ci is None:
             if queue.queued() and queue.paused is None:
@@ -662,9 +675,14 @@ class _Pass:
             if there.has_changes() or there.head() != batch.main:
                 reason = f"{places.contract_home(str(checkout))} not clean"
                 if (queue.waiting_on or {}).get("reason") != reason:
-                    queue_file.append(self.repo, {"event": queue_file.WAITING,
-                                                  "reason": reason, "batch": batch.id},
-                                      self.env)
+                    waited = queue_file.append(self.repo, {
+                        "event": queue_file.WAITING, "reason": reason, "batch": batch.id},
+                        self.env)
+                    self.tell_director(
+                        "waiting", f"waiting:{waited['at']}",
+                        f"{self.repo}'s queue waits to land batch {batch.id}: {reason} "
+                        f"(it must be clean and at {batch.main[:12]}). The lander tries "
+                        "again each minute.")
                 return False
         return True
 
@@ -772,6 +790,7 @@ class _Pass:
                     | ({"by": LANDER} if mirrored == queue_log.LEFT else {}))
         self.say(f"lander of {self.repo}: {member.name} {member.stage} {kind}"
                  + (f": {fields['reason']}" if fields.get("reason") else ""))
+        self.tell_end(member, kind, fields)
 
     def mirror(self, name: str, stage: str, kind: str, fields: dict) -> None:
         try:
@@ -796,11 +815,89 @@ class _Pass:
             one.get("kind") == PUSHED for one in batch.runs) else None)
 
     def pause(self, reason: str, batch: queue_file.Batch | None) -> None:
-        queue_file.append(self.repo, {"event": queue_file.PAUSED, "reason": reason},
-                          self.env)
+        paused = queue_file.append(self.repo, {"event": queue_file.PAUSED,
+                                               "reason": reason}, self.env)
         if batch is not None:
             self.end_batch(batch, PAUSED_WHY)
         self.say(f"lander of {self.repo}: the queue is paused: {reason}")
+        self.tell_director(
+            "paused", f"paused:{paused['at']}",
+            f"{self.repo}'s queue is paused: {reason}. Only urgent members land until "
+            f"it is resumed: moxi rounds queue --repo {self.repo} --resume, once that "
+            "is dealt with.")
+
+    # -- telling -------------------------------------------------------------------------
+
+    def director(self) -> str | None:
+        """The project's director, None when none is set."""
+        return own.build_setting(self.settings, self.repo, "director") or None
+
+    def tell_director(self, about: str, key: str, text: str) -> None:
+        """Tell the project's director about the queue as a whole."""
+        to = self.director()
+        self.teller.tell(to, about, f"{key}:{to}", text, why_nobody="no director set")
+
+    def people(self, name: str, stage: str) -> tuple[str | None, str | None]:
+        """The build's builder, from its commission, and its round's lead; either None
+        when none is recorded or the round can't be read."""
+        try:
+            project, _slug = folders.split(name)
+            home = folders.home(project, self.settings)
+            view = write.look(_where(name, self.settings), env=self.env)
+        except RoundsError:
+            return None, None
+        build = builds.current(view.state, stage)
+        builder = None
+        if build is not None:
+            builder = next((one.get("builder") for one in view.state.history
+                            if one.get("n") == build.n), None)
+        lead = leads.of(view.state, home.lead)
+        return builder or None, None if lead is None else lead["name"]
+
+    def tell_member(self, member: queue_file.Member, about: str, key: str,
+                    text: str) -> None:
+        """Tell the member's builder and its round's lead, each once; with no lead
+        recorded, the builder alone, and that is recorded."""
+        builder, lead = self.people(member.name, member.stage)
+        names = [one for one in dict.fromkeys((builder, lead)) if one]
+        for to in names:
+            self.teller.tell(to, about, f"{key}:{to}", text,
+                             member=[member.name, member.stage])
+        if lead is None:
+            self.teller.tell(None, about, f"{key}:lead", text,
+                             why_nobody=f"{member.name} has no lead recorded",
+                             member=[member.name, member.stage])
+
+    def tell_end(self, member: queue_file.Member, kind: str, fields: dict) -> None:
+        """Tell a member's end, and tell each member ejected for a conflict with it
+        that its blocker is out of the way."""
+        who = f"{member.name} {member.stage}"
+        key = f"{kind}:{who}:{member.line}"
+        if kind == queue_file.LANDED:
+            text = (f"{who} landed in {self.repo}'s queue at "
+                    f"{str(fields.get('landing') or '')[:12]}, batch {fields.get('batch')}.")
+            if fields.get("excused"):
+                text += (" It landed past failures the target has too: "
+                         f"{failing.said(fields['excused'])}.")
+        elif kind == queue_file.EJECTED:
+            text = f"{who} was ejected from {self.repo}'s queue: {fields.get('reason')}."
+        else:
+            text = f"{who} left {self.repo}'s queue: {fields.get('reason')}."
+        self.tell_member(member, kind, key, text)
+        how = {queue_file.LANDED: "landed", queue_file.EJECTED: "was ejected",
+               queue_file.LEFT: "left the queue"}[kind]
+        queue = queue_file.read(self.repo, self.env)
+        for blocked in queue.members.values():
+            if blocked.state != queue_file.EJECTED or blocked.blocker != who:
+                continue
+            what = ("merge its target into the branch, run moxi rounds check, make any "
+                    "drift re-check owed, and finish again"
+                    if kind == queue_file.LANDED else
+                    "finish again as it is: the conflict may not come back")
+            self.tell_member(
+                blocked, "blocker", f"blocker:{blocked.name} {blocked.stage}:{blocked.line}",
+                f"{blocked.name} {blocked.stage} was ejected from {self.repo}'s queue for "
+                f"a conflict with {who}, which {how}. Next: {what}.")
 
     def drop_branch(self, branch: str, ref: str | None) -> None:
         """Remove a batch's ref from the remote, when it was pushed, and its local

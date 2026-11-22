@@ -8,7 +8,10 @@ Everything said is read from the queue file (`queue_file.read`); nothing is writ
 
 from __future__ import annotations
 
-from . import queue_file
+from . import queue_file, telling
+
+#: How many of the messages that reached no name are listed, newest last.
+UNDELIVERED_SHOWN = 5
 
 
 def lines(queue: queue_file.Queue, *, lander_runs: bool,
@@ -45,7 +48,29 @@ def lines(queue: queue_file.Queue, *, lander_runs: bool,
         last = queue.mains[-1]
         said.append(f"main's last full run: {last['event']} at "
                     f"{str(last.get('head'))[:12]}, run {last.get('run')}")
+    return said + told_lines(queue)
+
+
+def told_lines(queue: queue_file.Queue) -> list[str]:
+    """The messages the lander sent that reached no name: the newest
+    `UNDELIVERED_SHOWN`, each with what became of it, and a director not set said
+    once. A message to a round with no lead is said by `next`, not here."""
+    found = telling.undelivered(queue)
+    nobody = [one for one in found if one.get("delivery") == telling.NOBODY
+              and not one.get("member")]
+    rest = [one for one in found if one.get("delivery") != telling.NOBODY]
+    said = []
+    if nobody:
+        said.append(f"director: {nobody[-1].get('why')}; {len(nobody)} notice(s) about "
+                    "the queue went to nobody")
+    if rest:
+        said.append(f"messages not delivered: {len(rest)}")
+    for one in rest[-UNDELIVERED_SHOWN:]:
+        state = ("tried again each pass" if one.get("delivery") == telling.OFFLINE
+                 else one.get("delivery"))
+        why = f" ({one['why']})" if one.get("why") else ""
+        said.append(f"  {one.get('about')} to {one.get('to')}: {state}{why}")
     return said
 
 
-__all__ = ["lines"]
+__all__ = ["UNDELIVERED_SHOWN", "lines", "told_lines"]

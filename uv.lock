@@ -1303,6 +1303,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+comms = [
+    { name = "moxi-comms" },
+]
 notes = [
     { name = "moxi-notes" },
 ]
@@ -1319,12 +1322,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["notes", "turns"]
+provides-extras = ["notes", "turns", "comms"]
 
 [package.metadata.requires-dev]
 dev = [

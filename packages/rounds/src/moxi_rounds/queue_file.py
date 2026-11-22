@@ -100,7 +100,8 @@ class Member:
     who joined it (`by`), when (`joined_at`) and its join's line (`line`, from 1).
     `state` is `QUEUED`, `IN_BATCH`, or the kind of its end (`LANDED`, `EJECTED`,
     `LEFT`); `batch` the batch it is in or ended in; `reason` why it left or was
-    ejected; `landing` where it landed."""
+    ejected; `blocker`, for a conflict, the member (`<round> <stage>`) or target it
+    conflicts with; `landing` where it landed."""
 
     name: str
     stage: str
@@ -114,6 +115,7 @@ class Member:
     batch: str | None = None
     reason: str | None = None
     landing: str | None = None
+    blocker: str | None = None
     ended_at: str | None = None
 
     @property
@@ -261,6 +263,7 @@ def _apply(queue: Queue, event: dict, line: int) -> None:
         member.state = kind
         member.reason = event.get("reason")
         member.landing = event.get("landing")
+        member.blocker = event.get("blocker")
         member.batch = event.get("batch") or member.batch
         member.ended_at = event.get("at")
     elif kind == BATCH and event.get("state") == BUILT:

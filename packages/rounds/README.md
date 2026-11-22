@@ -737,14 +737,16 @@ reason is owed beside the step.
 `lander.lock` in the repo's queue folder, so a second one exits at once, and the system
 frees the lock when a lander dies. `finish` starts one each time a build joins; `moxi
 rounds next` and `moxi rounds queue` start one when a member waits and none runs, and
-say so, and record nothing for it. The doctor starts none: it warns of a member waiting
+say so, and record nothing for it; they start one too while a message is still being
+tried. The doctor starts none: it warns of a member waiting
 with no lander, and of a paused queue, read from the pid in the lock file without
 taking the lock. A lander is started in a transient user unit (`systemd-run --user
 --collect`), else in a session of its own, so it outlives the session that started it.
 Either way it runs the interpreter of its starter in the repo's root, with its starter's
 `PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, the XDG
 roots and every `MOXI_` variable, and appends its output to `lander.log` beside the
-lock. It exits once nothing keeps it: it releases the lock, reads the queue again, and
+lock. It exits once nothing keeps it (no member waits, no message is still being
+tried): it releases the lock, reads the queue again, and
 goes on if a member joined meanwhile and no other lander took the lock.
 
 **A batch.** Each minute the lander takes the members that wait (the urgent ones alone
@@ -785,10 +787,22 @@ head and run side by side by the same rule; the earlier half lands first, and a 
 half whose target moved is rebuilt on it. Members that join meanwhile wait until the
 split is done.
 
+**Telling.** With comms installed, the lander sends its news under the send-only name
+`rounds`, which rounds reserves, and only to names something records: a member's end
+(landed, ejected, left) to its builder, the name its commission recorded, and to its
+round's lead (the round's own, else the project's); a member ejected for a conflict, once
+the member it conflicts with lands, is ejected or leaves, with what to do now; a pause or
+a wait on the target's checkout to the project's `director`. Each message is recorded in
+the queue file as `told`, with what comms did with it. One comms could not take (its
+daemon down) is tried again each minute for an hour, and the lander does not exit while
+one is; a refusal (a name comms has never seen bound) or an error is recorded and not
+tried again. Where no director is set, or a round has no lead, that is recorded and
+said. Without comms nothing is sent, and `next` and `queue` are where the news shows.
+
 `moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
 runs, a pause and its reason, each running batch and its CI reading, the members still in
-the queue in the order they are taken, and the target's last full run. `--resume` lifts
-a pause.
+the queue in the order they are taken, the target's last full run, and the messages that
+reached nobody. `--resume` lifts a pause.
 
 ## Dropping a round
 
@@ -1148,7 +1162,7 @@ moxi install rounds
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
 second adds rounds beside it, with the projects module it needs, offers its optional
-extras, `notes` and `turns`, and offers to place its skill. The repository's README, at
+extras, `notes`, `turns` and `comms`, and offers to place its skill. The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 
