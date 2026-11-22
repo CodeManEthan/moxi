@@ -38,6 +38,7 @@ import time
 from pathlib import Path
 
 from fake_backend import FakeBackend, FakeSupervisor
+from moxi_dev.testing import PROC_WAIT_S
 
 HERE = Path(__file__).resolve()
 LOG = "MOXITEST_LOG"
@@ -169,7 +170,7 @@ def parent(argv: list[str]) -> int:
     from moxi import _settle, install
 
     if os.isatty(0):
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + PROC_WAIT_S
         while os.tcgetpgrp(0) != os.getpgrp() and time.monotonic() < deadline:
             time.sleep(0.02)
     replace = "--replace" in argv

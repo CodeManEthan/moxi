@@ -18,6 +18,7 @@ import moxi.cli as cli
 import moxi.install as install
 import moxi.modules as modules
 from moxi.install import InstallError, Req, receipt_entry, receipt_options, union
+from moxi_dev.testing import PROC_WAIT_S
 
 # -- requirements --------------------------------------------------------------------------
 
@@ -631,7 +632,7 @@ def test_a_second_install_waits_for_the_first(fake, capsys):
         assert holder.stdout.readline().strip() == "held"
         code, _, err = moxi_install(capsys, "turns", "--none")
     finally:
-        holder.wait(10)
+        holder.wait(PROC_WAIT_S)
     assert code == 0, err
     assert f"waiting for another install or uninstall (pid {holder.pid}) to finish" in err
 
