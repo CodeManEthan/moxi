@@ -104,7 +104,7 @@ index keeps the step the log alone gives, and marks it so (`at`).
   `Asked.seen` says of the stage's build.
 
 - `ratify`, of the round: ready while a decision that is the operator's is not ruled
-  (`decisions.his`: of a finished build, its weight named by the project's `ratify`
+  (`decisions.to_rule`: of a finished build, its weight named by the project's `ratify`
   setting), each named with the command that rules it; done once none is left and
   every stage of the plan is finished, and not due before then.
   The project's `ratify` setting of `off` makes it done where it would be ready. The
@@ -545,7 +545,7 @@ RATIFY_OFF = "off"
 
 def _ratify(state: states.State, about: Asked) -> Step:
     # The decisions that may be the operator's: open, of a finished build. Which are is
-    # read under the project's setting (`decisions.his`).
+    # read under the project's setting (`decisions.to_rule`).
     candidates = tuple(one for one in decisions.reached(state)
                        if one.state == decisions.OPEN)
     seen = (about.seen or {}).get(None)
@@ -557,15 +557,15 @@ def _ratify(state: states.State, about: Asked) -> Step:
     if seen is not None and seen.ratify == RATIFY_OFF and any(
             one.major for one in candidates):
         return Step(RATIFY, DONE)
-    his = () if not candidates else decisions.his(state, seen.ratify)
-    if not his:
+    to_rule = () if not candidates else decisions.to_rule(state, seen.ratify)
+    if not to_rule:
         planned = stages.in_plan(state)
         finished = questions.finished_stages(state)
         done = bool(planned) and all(stage.id in finished for stage in planned)
         return Step(RATIFY, DONE if done else NOT_DUE)
     return Step(RATIFY, READY, waits=tuple(
         Unmet(f"decision {one.key}, {one.weight} and not yet ruled: {one.text}",
-              decisions.rule_line(about.name, one.key)) for one in his))
+              decisions.rule_line(about.name, one.key)) for one in to_rule))
 
 RETRO = "retro"
 
@@ -686,8 +686,8 @@ def row_of(step: str, entry: Mapping | None) -> Row | None:
 
 def answer(name: str, question: states.Question) -> str:
     """The command that records the operator's answer to `question` of the round
-    `name`: he chooses a key where the question offers options, and says a sentence
-    where it offers none. Everything that prints the command for a question asks
+    `name`: the operator chooses a key where the question offers options, and says a
+    sentence where it offers none. Everything that prints the command for a question asks
     here, so the line is one that runs once its placeholders are filled."""
     how = "--chose K" if question.options else "--text TEXT"
     return f"moxi rounds rule {name} {question.id} {how} --record PTR"

@@ -17,11 +17,11 @@ since nothing says which it belongs in.
 question, each parked question with what it waits for, each open waiting item of an
 open round, each major decision of one not yet ruled (labelled the operator's to rule
 only where it is put to the operator, `decisions.not_put`) and each minor one that is
-the operator's, each project's rulings not yet
-shown to him, and each open build of its rounds that is idle, gone, empty or unclear,
-that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
-from the same function, so the two never differ. A waiting item is no question, and is
-in no export.
+the operator's, each project's rulings not yet shown to the operator, and each open
+build of its rounds that is idle, gone, empty or unclear, that shares commits with
+another, or that git could not read. The question rows are the ones a project's
+questions export holds, from the same function, so the two never differ. A waiting
+item is no question, and is in no export.
 
 **The numbers** (`numbers`): the numbers of every closed round, or of one project's,
 summed key by key, read from what each round's closing event holds as the index keeps
@@ -334,7 +334,7 @@ def _lists_data(lists: Sequence) -> list:
 def _list_lines(lists: Sequence, now: str) -> list[str]:
     lines = []
     for back in lists:
-        lines.append(f"  {back.project}, {back.heading}; once he has read them: moxi "
+        lines.append(f"  {back.project}, {back.heading}; once the operator has read them: moxi "
                      f"rounds rule {back.project} {shown.READBACK}{back.through} "
                      "--record PTR")
         for row in back.rows:
@@ -420,12 +420,12 @@ def _to_look_at(one) -> bool:
 WAITING: tuple[Kind, ...] = (
     Kind("open", "open questions", _questions_in(questions.OPEN), _entries_data,
          _question_lines),
-    Kind("parked", "parked questions, not put to him", _questions_in(questions.PARKED),
+    Kind("parked", "parked questions, not put to the operator", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
     Kind("waits", "open waiting items", _waits, _builds_data, _wait_lines),
     Kind("decisions", "major decisions not yet ruled", _decisions, _entries_data,
          _decision_lines),
-    Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines),
+    Kind("not_shown", "rulings not yet shown to the operator", _lists, _lists_data, _list_lines),
     Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
          _builds_to_look_at, _builds_data, _build_lines))
 

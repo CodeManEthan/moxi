@@ -9151,12 +9151,12 @@ rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `end
 rounds	packages/rounds/src/moxi_rounds/api.py	`own_commits` is true for an `empty` build that holds commits of its own. `idle`	use	`own_commits`	`has_own_commits`
 rounds	packages/rounds/src/moxi_rounds/api.py	and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/api.py	read, and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
-rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is his	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	_in_build	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/asking.py	`ask("<project>/<slug>", "one sentence", origin=..., actor=...)` appends one	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/asking.py	ask	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/asking.py	fields["record"] = record	keep	record	record
-rounds	packages/rounds/src/moxi_rounds/asking.py	is given with `record`, the pointer to where he asked it, and that pointer is its origin.	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/asking.py	is given with `record`, the pointer to where the operator asked it, and that pointer is	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
@@ -9239,7 +9239,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	frozen = freezing.freeze(args.roun
 rounds	packages/rounds/src/moxi_rounds/cli.py	frozen = freezing.freeze(args.round, by=_actor(args),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	given = [flag for flag, value in (("ROUND", args.round), ("--by", args.by),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go")	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go, when he did")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go, if the operator did")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator said it, one token: "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the question came from, one token: "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="a project's key, to keep the listing to that project; "	keep	help	help
@@ -9301,7 +9301,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is marked: a question, 
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is ruled, when it is a question: Q<n> (P<n> on a "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="who builds it")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="whose drop it is: the operator's, of any round or "	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --by operator, a pointer to where he dropped it; "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --by operator, a pointer to where the operator dropped it; "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --close or --accept-risk, a pointer to where the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --done, a pointer to the report, commit or "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --fixed, a commit of the fix, on the build's "	keep	help	help
@@ -9312,7 +9312,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, for a roun
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, write both forms into this folder, as "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --records-only, a pointer to the record of the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --shown, a pointer to where he was shown them, one "	keep	help	help
-rounds	packages/rounds/src/moxi_rounds/cli.py	help="with Q<n>, the key of the option he chose, one the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with Q<n>, the key of the option the operator chose, one the "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with an ID, take the option under this key out; to "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with no stage: one worker's piece of it, its id and "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="with no stage: the project whose repo the stage is "	keep	help	help
@@ -9334,7 +9334,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	name = args.round	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name = by_branch.find(os.getcwd(), verb="next").round	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name, stage = args.round, args.stage	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	name, stage = found.round, found.stage	keep	round	round
-rounds	packages/rounds/src/moxi_rounds/cli.py	one named, and `--json` gives it as data. `show` and `list` record nothing. A verb	keep	show	show
+rounds	packages/rounds/src/moxi_rounds/cli.py	project, or of the one named, and `--json` gives it as data. `show` and `list` record	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/cli.py	opened = opening.open_round(args.round, description=args.description,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("ask", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("check", help=said, description=said)	keep	help	help
@@ -9480,8 +9480,9 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	"by": by, "record": record,	k
 rounds	packages/rounds/src/moxi_rounds/dropping.py	"record": record, "tips": [_tip(build)]})	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	**Whose act.** `by` is `OPERATOR` or `LEAD`. The operator drops any round, and `record`	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	-	name	_remove_folders	_remove_dirs
-rounds	packages/rounds/src/moxi_rounds/dropping.py	- `record`: the operator's pointer to where he dropped it; for the lead's drop, a	keep	record	record
-rounds	packages/rounds/src/moxi_rounds/dropping.py	`by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where he dropped	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	-	name	his_acts	operator_acts
+rounds	packages/rounds/src/moxi_rounds/dropping.py	- `record`: the operator's pointer to where the operator dropped it; for the lead's	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	`by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where the operator	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	`drop("<project>/<slug>", by=..., record=..., actor=...)` withdraws a round. From then	use	actor=	run_by=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	and the `record` given, the `event` written, and the build's folders the removal	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	drop	name	actor	run_by
@@ -9492,12 +9493,12 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	finished[0] = any(one.entry i
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.project, home.folder, slug, env=env)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.project, home.folder, slug, env=env)	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
-rounds	packages/rounds/src/moxi_rounds/dropping.py	held.append(f"its opening, on his go ({event['record']})")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	held.append(f"its opening, on the operator's go ({event['record']})")	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if event["type"] == "round.opened" and event.get("record") is not None:	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if found.status.own_commits:	use	found.status.own_commits	found.status.has_own_commits
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if question.record is not None]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
-rounds	packages/rounds/src/moxi_rounds/dropping.py	operator's acts, and `record` points to why. What counts as his (`his_acts`): a ruling,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	none of the operator's acts, and `record` points to why. What counts as the operator's	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=run_by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=run_by,	use	home.folder	home.rounds_dir
@@ -9996,12 +9997,12 @@ rounds	packages/rounds/src/moxi_rounds/showing.py	if any(one.state == decisions.
 rounds	packages/rounds/src/moxi_rounds/showing.py	if isinstance(held, Mapping) and not {"round_time_s", "longest_gap"} <= set(held):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/showing.py	if any(one.state == decisions.OPEN for one in decisions.reached(state)):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/shown.py	_logs	name	error	exc
-rounds	packages/rounds/src/moxi_rounds/shown.py	`S4,S5`. `record` points to where he was shown them: the message, the moment in a	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/shown.py	`S4,S5`. `record` points to where the operator was shown them: the message, the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.number(record) < pointers.number(ruling.record)):	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.shape(ruling.record) == pointers.COMMS	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	.round_folder	.round_dir
 rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	home.round_folder	home.round_dir
-rounds	packages/rounds/src/moxi_rounds/shown.py	f"{record} came before {ruling.record}, where he said "	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/shown.py	f"{record} came before {ruling.record}, where the operator said "	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	for slug in folders.slugs(home.folder):	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/shown.py	for slug in folders.slugs(home.folder):	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/shown.py	for summary in (register, *index.rounds(home.project, home.folder, env=env)):	keep	folder	folder
@@ -10600,7 +10601,7 @@ rounds	packages/rounds/tests/test_corrections.py	"revokes": "C1", "record": "com
 rounds	packages/rounds/tests/test_corrections.py	"rules": "hold:B2"}, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_corrections.py	"state": "open", "revokes": "C1", "record": "comms:13", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"state": "open", "revokes": "S2", "record": "comms:13", "kind": "process",	keep	record	record
-rounds	packages/rounds/tests/test_corrections.py	"text": "He took it back.", "revokes": "C1", "record": "comms:13",	keep	record	record
+rounds	packages/rounds/tests/test_corrections.py	"text": "The operator took it back.", "revokes": "C1", "record": "comms:13",	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	@pytest.mark.parametrize("how", ["closed", "dropped"])	keep	closed	closed
 rounds	packages/rounds/tests/test_corrections.py	{"id": "C1", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_credit.py	"after": []}, actor="planner")	use	actor=	by=
@@ -11343,7 +11344,7 @@ rounds	packages/rounds/tests/test_rule.py	"record": "comms:12", "kind": "substan
 rounds	packages/rounds/tests/test_rule.py	"state": "parked", "record": "comms:12", "kind": "process", "rules": "park:Q1"}	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"state": "withdrawn", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	-	name	test_a_project_with_no_rounds_folder_yet_gets_its_register	test_a_project_with_no_rounds_dir_yet_gets_its_register
-rounds	packages/rounds/tests/test_rule.py	@pytest.mark.parametrize("record", [None, "he said so"])	keep	record	record
+rounds	packages/rounds/tests/test_rule.py	@pytest.mark.parametrize("record", [None, "the operator said so"])	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert (made["rules"], made["chose"], made["record"]) == ("Q1", "b", pointer)	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [(change.state, change.ruling, change.record) for change in found.changes] == [	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert [event["record"] for event in rulings(round_log(rounds))] == ["comms:13"]	keep	record	record

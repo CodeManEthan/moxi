@@ -145,8 +145,8 @@ class Ruling:
     replaced_by: str | None = None
     revoked_by: str | None = None
     #: The pointer to where the operator was shown it, from the first mark that named
-    #: it, or None while no mark has. His read-back of the project's list also makes a
-    #: ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
+    #: it, or None while no mark has. The operator's read-back of the project's list
+    #: also makes a ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
     shown: str | None = None
 
 
@@ -200,7 +200,7 @@ class Question:
     #: Who asked it, and when.
     by: str
     at: str
-    #: The operator's pointer, when the question is his own.
+    #: The operator's pointer, when the question is the operator's own.
     record: str | None = None
     #: What a parked question waits for, or None.
     until: str | None = None
@@ -501,10 +501,12 @@ def _ruling_recorded(state: State, event: dict) -> None:
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:
         _change(state, event, question_id=event["question"], ruling=event.get("id"))
-    # His ruling of the flow is the whole of the move, as the lead's event is of his.
+    # The operator's ruling of the flow is the whole of the move, as the lead's event is
+    # of the lead's.
     if (event.get("rules") or "").startswith(_FLOW):
         _flow_changed(state, event)
-    # His ruling that a stage waits for one stage fewer is the whole of that change.
+    # The operator's ruling that a stage waits for one stage fewer is the whole of that
+    # change.
     if (event.get("rules") or "").startswith(_UNAFTER):
         stage_id, _equals, waited = event["rules"][len(_UNAFTER):].partition("=")
         _waits(state, stage_id, gone=(waited,))

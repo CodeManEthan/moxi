@@ -173,7 +173,7 @@ def test_a_decision_holds_no_stage_and_no_question_s_place(built):
 
 # -- ruled --------------------------------------------------------------------------------
 
-def test_his_ruling_of_a_decision_is_one_event_of_substance_on_no_stage(built, capsys):
+def test_the_operators_ruling_of_a_decision_is_one_event_of_substance_on_no_stage(built, capsys):
     round_dir, tree = built
     verify(round_dir, tree.rev(), decision())
 

@@ -6,8 +6,8 @@ operator's rulings on it, and each project's standing rulings.
 A round is one proposal, from its design to the step that puts what was built where it
 goes. rounds is for anyone who directs agents that write code in git repos: one person,
 here called the operator, with a lead agent that runs the round and workers that build
-and check. Everything the operator decides is recorded as his, with a pointer to where he
-said it, and is shown back to him as it was recorded.
+and check. Everything the operator decides is recorded as the operator's, with a pointer
+to where it was said, and is shown back to the operator as it was recorded.
 
 ```sh
 moxi projects add alpha --root ~/code/alpha --notes-root ~/notes/alpha
@@ -82,13 +82,13 @@ lower-case letters, digits and `-`.
 | `moxi rounds rule ROUND --text TEXT --record PTR [--reason TEXT] [--stages B<n>[,...]]` | record a ruling of the round, as `C<n>`; `--stages` names the stages it applies to, when not all |
 | `moxi rounds rule ROUND --standing --text TEXT --record PTR [--scope SPEC]`, `rule PROJECT --text TEXT --record PTR [--scope SPEC]` | record a standing ruling in the project's register, as `S<n>` |
 | `moxi rounds rule ROUND\|PROJECT Q<n>\|P<n> (--text TEXT \| --chose K) --record PTR` | answer a question |
-| `moxi rounds rule ROUND\|PROJECT park:Q<n> --record PTR [--until round:ROUND]` | park a question, so it is not put to him until it is reopened; `--until` names another round it waits for |
+| `moxi rounds rule ROUND\|PROJECT park:Q<n> --record PTR [--until round:ROUND]` | park a question, so it is not put to the operator until it is reopened; `--until` names another round it waits for |
 | `moxi rounds rule ROUND park:Q<n> --record PTR --until B<n>` | park a question until a stage is finished |
 | `moxi rounds rule ROUND narrow:Q<n>=B<n>[,...]\|none --record PTR` | make a question hold up fewer stages, or nothing |
 | `moxi rounds rule ROUND\|PROJECT withdraw:Q<n> --record PTR` | withdraw a question |
 | `moxi rounds rule ROUND\|PROJECT ... --supersedes C<n>\|S<n>` | replace an earlier ruling of the same thing |
 | `moxi rounds rule ROUND\|PROJECT revoke:C<n>\|S<n> --record PTR` | take a ruling back and put nothing in its place |
-| `moxi rounds rule PROJECT readback=TIME --record PTR` | record that he read the list of rulings not yet shown to him through TIME |
+| `moxi rounds rule PROJECT readback=TIME --record PTR` | record that the operator read the list of rulings not yet shown to the operator through TIME |
 | `moxi rounds rule ROUND skip:STEP[:B<n>] --record PTR` | say that a step is not done, for the round or for one stage |
 | `moxi rounds rule ROUND skip-action:B<n>=ID --record PTR` | say that the finish action `ID` is not run for one stage: `finish` treats it as done and writes no record of it; the way out of a command that ran but whose result was lost, or that can't pass again |
 | `moxi rounds rule ROUND flow:NAME --record PTR` | move the round to another flow, whichever it is |
@@ -575,7 +575,7 @@ newest report is `publishable` and counts at the tip by the rule above, read on 
 step's reports alone; a report of the build does not do a report step, nor a step's
 report the build's verification.
 
-Work that can't be done without the operator, such as a check on his phone, is a
+Work that can't be done without the operator, such as a check on the operator's phone, is a
 `[[wait]]` in the report. When the report is recorded each is an open waiting item of
 the round, `B1.W1`, at once. It does not hold the build's finish; it holds the round's
 close, and `list --waiting` lists it, until `mark ROUND B1.W1 --done --record PTR` names
@@ -675,9 +675,9 @@ parked, ruled, withdrawn or moved.
 
 A round's question holds up every stage of the round, or the stages its `blocks`
 names, until the operator rules on it. One that holds up no stage still keeps the round
-from closing. Only he lets go of it: his answer, `park:`, `narrow:` and `withdraw:` are
-rulings. `mark` changes a question only towards holding up more, and reopens a parked
-one. A question comes from `ask` or from the design's block, where `fold` adds it.
+from closing. Only the operator lets go of it: the operator's answer, `park:`, `narrow:` and
+`withdraw:` are rulings. `mark` changes a question only towards holding up more, and
+reopens a parked one. A question comes from `ask` or from the design's block, where `fold` adds it.
 
 A project's list holds questions that have no round yet, and they hold up nothing.
 `--adopt` brings one into a round, where it holds up every stage. `--move` puts a
@@ -699,14 +699,14 @@ Every ruling is printed as it was recorded:
 ```text
 Recorded as C1: No, live notes only
 in answer to Q1: Should search read archived notes too?
-show him this under "Recorded as" in your next message, then:
+show the operator this under "Recorded as" in your next message, then:
   moxi rounds mark alpha/search C1 --shown --record <pointer to that message>
 ```
 
 Until `mark --shown` names it, a ruling is listed by `list --waiting` among the rulings
-not yet shown to him, with the project's own and its rounds' together. `rule PROJECT
-readback=TIME` records instead that he read that list through TIME, the time of the last
-ruling on it, and covers every ruling of the project recorded up to then.
+not yet shown to the operator, with the project's own and its rounds' together. `rule
+PROJECT readback=TIME` records instead that the operator read that list through TIME, the
+time of the last ruling on it, and covers every ruling of the project recorded up to then.
 
 ## The trace check
 
@@ -753,7 +753,7 @@ no `build` step the close waits for:
 $ moxi rounds rule alpha/ranking Q1 --chose b --record comms:21
 Recorded as C1: Only an exact title match
 in answer to Q1: Should a title match always rank above a body match?
-show him this under "Recorded as" in your next message, then:
+show the operator this under "Recorded as" in your next message, then:
   moxi rounds mark alpha/ranking C1 --shown --record <pointer to that message>
 closed alpha/ranking: nothing is left for its close to wait for
 $ moxi rounds mark alpha/ranking C1 --shown --record comms:22
@@ -835,12 +835,13 @@ numbers only, and the operator's `skip:retro` lets the round close without one.
 
 ## Dropping a round
 
-`drop --by operator` ends any round, with a pointer to where he said so. `drop --by lead`
-ends only a round that holds none of the operator's acts: no ruling, no question asked
-with his pointer, no opening on his go. The round's open and parked questions go to the
-project's list as they are, or with `--withdraw-questions`, which is the operator's
-alone, are withdrawn. Its open builds end with it, each branch's tip recorded, and
-the lead's drop is refused while one of them is not his to drop (below).
+`drop --by operator` ends any round, with a pointer to where the operator said so. `drop
+--by lead` ends only a round that holds none of the operator's acts: no ruling, no
+question asked with the operator's pointer, no opening on the operator's go. The round's
+open and parked questions go to the project's list as they are, or with
+`--withdraw-questions`, which is the operator's alone, are withdrawn. Its open builds
+end with it, each branch's tip recorded, and the lead's drop is refused while one of
+them is not the lead's to drop (below).
 
 A dropped round takes no new question and no new ruling. A correction of one of its
 rulings is still recorded, and its rulings are still marked as shown.

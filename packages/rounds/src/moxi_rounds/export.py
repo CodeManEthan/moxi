@@ -16,7 +16,7 @@ there. A bare question is written out bare.
 no view it holds both, the docket first:
 
 - **The docket**: every question of the round that reads as open, whatever else is
-  set, and after them the parked ones, which are not put to him.
+  set, and after them the parked ones, which are not put to the operator.
 - **The ratification**: the decisions not yet ruled of the builds that are finished
   when the export is computed, each the operator's by the one rule
   (`decisions.not_put`). It names those builds under `covers`. What it puts to the
@@ -81,7 +81,8 @@ DOCKET = "docket"
 RATIFY = "ratify"
 VIEWS = (DOCKET, RATIFY)
 
-#: The values of the project's `ratify` setting: what the ratification puts to him.
+#: The values of the project's `ratify` setting: what the ratification puts to the
+#: operator.
 MAJORS = "majors"
 MAJORS_AND_MINORS = "majors+minors"
 OFF = "off"
@@ -330,8 +331,8 @@ def _entries(summary: index.Summary, on_closed: Callable[[str], bool]) -> list[E
             continue
         entry = make(summary.name, item, on_closed)
         if entry.state == questions.OPEN and entry.until is not None:
-            # Its wait is over: it is put to him as any open question is, with no
-            # word of what it waited for.
+            # Its wait is over: it is put to the operator as any open question is,
+            # with no word of what it waited for.
             entry = replace(entry, until=None)
         if entry.state in (questions.OPEN, questions.PARKED):
             reads = questions.shown_as(entry.state, ended=ended)
@@ -400,7 +401,7 @@ def of_round(home: folders.Home, slug: str, *, view: str | None = None, settings
              env=None) -> Rows:
     """The rows of one round in `view`, both views when None: for the docket, every
     question of it that reads as open, then the parked ones; for the ratification,
-    the decisions it puts to him by the project's `ratify` setting, with the builds
+    the decisions it puts to the operator by the project's `ratify` setting, with the builds
     it covers and what it puts off to a later export. A round that has ended has no
     rows: its `ended` and `left` are given in their place. Raises `NoRound` for a
     round that was never opened and `Unreadable` for one whose log can't be read. It
@@ -654,7 +655,7 @@ def _read_back_lines(export: Export) -> list[str]:
                 ""]
     lines += [back.heading, "",
               "This list is read, not answered, and is none of the questions above. "
-              "Once he has read it:", "",
+              "Once the operator has read it:", "",
               f"    moxi rounds rule {export.project} {shown.READBACK}{back.through} "
               "--record PTR", ""]
     for row in back.rows:

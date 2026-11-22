@@ -1,6 +1,6 @@
 """`moxi rounds list ROUND|PROJECT --questions`: the questions that wait on the operator,
 written out as markdown, as data and as two files, with the rulings not yet shown to
-him after them."""
+the operator after them."""
 
 from __future__ import annotations
 
@@ -502,7 +502,7 @@ def test_a_projects_export_holds_no_question_of_a_round_that_was_dropped(
     rule(B, item="Q2", text="It is.", at=T3)
     dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T4)
     # An answer taken back after the drop leaves its question unanswered in a round
-    # that takes no answer: it is not put to him from there.
+    # that takes no answer: it is not put to the operator from there.
     rule(B, item="revoke:C1", at=T5)
 
     found = export.questions_of("proj-a")
@@ -813,7 +813,7 @@ def test_a_decision_that_forecloses_is_an_entry_of_its_own_in_every_view(
     assert all(one["alone"] for one in of_project["entries"] if one.get("forecloses"))
 
 
-def test_off_puts_no_decision_to_him_and_names_what_it_covers(
+def test_off_puts_no_decision_to_the_operator_and_names_what_it_covers(
         rounds, write_config, capsys):
     ratify_setting(write_config, "off")
     built(rounds, "B1")
@@ -860,7 +860,7 @@ def test_the_ratification_s_json_and_markdown_are_one_reading(rounds, capsys, tm
         encoding="utf-8")) == data
 
 
-def test_a_round_that_has_ended_puts_no_decision_to_him(rounds):
+def test_a_round_that_has_ended_puts_no_decision_to_the_operator(rounds):
     built(rounds, "B1")
     decided(rounds, "B1", ("M1", "major", False))
     log.append(log.round_log(rounds / "a-round"), "round.dropped",

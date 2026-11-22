@@ -1,5 +1,5 @@
-"""Decisions: as-built choices the operator would notice, because he gets something
-different from what he ruled.
+"""Decisions: as-built choices the operator would notice, because the operator gets
+something different from what was ruled.
 
 A report of a build declares each as a `[[decision]]`; a majors report declares the ones
 no build report will carry, each with its stage. When the report's verdict is recorded,
@@ -17,7 +17,7 @@ report removes or lowers a decision. A new decision takes an id no earlier repor
 its stage used. The sentence is the one it was declared with: a report that lists
 the id with another sentence is refused.
 
-**His ruling.** `rule ROUND B2.M1=accept|reject --record PTR [--text TEXT]` rules one;
+**The operator's ruling.** `rule ROUND B2.M1=accept|reject --record PTR [--text TEXT]` rules one;
 it is one `ruling.recorded` event, of substance, that applies to no stage. A second
 ruling of a decision replaces the first and names it, and `revoke:` takes one back,
 which leaves the decision open. A rejected decision owes a fix: it is also a waiting
@@ -34,11 +34,11 @@ build of the stage covers only the decisions its own reports declare.
 build declared it and that build is finished (`reached`). A decision holds no stage.
 What it holds, when it reached the target and is open, is the round's close: the
 close and the `ratify` step wait for the operator's ruling of each that is the
-operator's (`his`), and the close for the lead's settlement of each other minor one
+operator's (`to_rule`), and the close for the lead's settlement of each other minor one
 (`to_settle`). It is never parked, narrowed, moved or withdrawn: those rulings are of
 asked questions.
 
-**Whose it is.** One rule says it, and every reader reads it (`why_not`, `his`): an
+**Whose it is.** One rule says it, and every reader reads it (`why_not`, `to_rule`): an
 open decision is the operator's exactly when the close waits for the operator's ruling
 of it. That is when the round's flow has a `ratify` step that is not skipped
 (`not_ratified`), the project's `ratify` setting names its weight, its stage is
@@ -355,7 +355,7 @@ def why_not(state: states.State, setting: str) -> dict[str, str | None]:
             for one in of_round(state) if one.state == OPEN}
 
 
-def his(state: states.State, setting: str) -> tuple[Decision, ...]:
+def to_rule(state: states.State, setting: str) -> tuple[Decision, ...]:
     """The open decisions that are the operator's under `setting`: those the close
     waits for the operator to rule, in the order they reached the target."""
     why = why_not(state, setting)
@@ -427,6 +427,6 @@ __all__ = ["KEY", "ITEM", "ACCEPT", "REJECT", "OPTIONS", "BLOCKS", "OPEN", "RULE
            "SETTLED", "SETTLE", "RAISE", "LEAD", "RATIFY", "PUT_BY", "NOT_FINISHED",
            "Decision", "listed", "lighter", "of_round", "of_build", "finished",
            "finished_builds", "reached", "unruled_majors", "find", "item", "items",
-           "rule_line", "settle_line", "not_ratified", "not_put", "why_not", "his",
+           "rule_line", "settle_line", "not_ratified", "not_put", "why_not", "to_rule",
            "to_settle", "is_yet_to_come", "open_line", "settled_line", "left_open",
            "left_open_line"]

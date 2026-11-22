@@ -1,4 +1,4 @@
-"""Recording a ruling: what the operator decided, in a sentence, with where he said it.
+"""Recording a ruling: what the operator decided, in a sentence, with where it was said.
 
 `rule("<project>/<slug>", text=..., record=..., by=...)` appends one `ruling.recorded`
 event through the write path and returns the ruling as recorded.
@@ -10,8 +10,8 @@ numbers its own rulings from 1. A standing ruling recorded from a round takes th
 lock and then the project's, and appends to the project's log only.
 
 **The pointer.** Every ruling is the operator's, so every one carries a pointer to where
-he said it, one token of a shape `pointers` knows. A ruling with no pointer, or one of no
-known shape, is refused with nothing written.
+the operator said it, one token of a shape `pointers` knows. A ruling with no pointer, or
+one of no known shape, is refused with nothing written.
 
 **The two kinds.** A ruling of substance (`SUBSTANCE`) says what is built. An act on the
 process (`PROCESS`) changes a record: a skip, a park, a withdrawal and the like. The kind
@@ -29,7 +29,7 @@ the item.
 **Questions.** Four items are a question of the round, `Q<n>`, or of the project,
 `P<n>`. The question's id alone is its answer, a ruling of substance whose sentence is
 the answer and which applies to the stages the question held up. An answer may name,
-with `chose`, the key of the option he chose, one the question offers when it is
+with `chose`, the key of the option the operator chose, one the question offers when it is
 answered; it then needs no sentence of its own, and the option's line is the sentence
 recorded. `park:Q<n>` sets it
 aside, until a stage is finished or a round is closed when `until` says so;
@@ -40,7 +40,7 @@ withdrawn takes none of the four.
 **Skips and the flow.** `skip:<step>`, or `skip:<step>:<stage>` for a step of one
 stage, says the step is not done; `skips` has what may be skipped and what a skip of
 the questions step lets its stage past. `skip-action:<stage>=<id>` says one finish
-action is not run for one stage and counts as done. `credit:<stage>` is his word that
+action is not run for one stage and counts as done. `credit:<stage>` is the operator's word that
 what the target gained under the head of the stage's open build is the build's work,
 taken only for a build `unclear` because its target was fast-forwarded with no reading
 of the build's (`builds.credit_refusal`); it records the head it credits, and the build
@@ -75,11 +75,11 @@ names its line (`settlement`).
 
 **Shown.** A ruling is recorded by someone else than the operator, so what is returned
 holds the sentence as the appended event has it, and the sentence of the question it
-answers, for whoever recorded it to put in front of him; `shown` has the mark that says
-he saw it. `readback=TIME`, on a project, is his word that he read the project's list
-of rulings not yet shown through `TIME`. Each read-back is a ruling of its own, an act
-on the process: any number is recorded, the same time included, none names an earlier
-one, and none is taken back.
+answers, for whoever recorded it to put in front of the operator; `shown` has the mark
+that says the operator saw it. `readback=TIME`, on a project, is the operator's word of
+having read the project's list of rulings not yet shown through `TIME`. Each read-back
+is a ruling of its own, an act on the process: any number is recorded, the same time
+included, none names an earlier one, and none is taken back.
 """
 
 from __future__ import annotations
@@ -186,7 +186,8 @@ class Ruled:
     @property
     def read_back(self) -> str | None:
         """The time a read-back says the list was read through; None for any other
-        ruling. A read-back is his own word and is never itself shown to him."""
+        ruling. A read-back is the operator's own word and is never itself shown to the
+        operator."""
         rules = self.event.get("rules") or ""
         return rules[len(shown.READBACK):] if rules.startswith(shown.READBACK) else None
 
@@ -216,11 +217,12 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
       a stage for a step of one stage; `flow:` and a flow's name, to move the round
       to that flow; `unstage:` and a stage, to take it out of the plan; `unafter:`,
       a stage, `=` and a stage it waits for, to take that wait off; on a project,
-      `readback=` and a
-      time, his word that he read the list of rulings not yet shown through then.
+      `readback=` and a time, the operator's word of having read the list of rulings
+      not yet shown through then.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
-    - `chose`: with a question's id, the key of the option he chose. With no `text`
+    - `chose`: with a question's id, the key of the option the operator chose. With no
+      `text`
       the option's line is the sentence recorded.
     - `supersedes`: the id of the earlier ruling of the same thing that this one
       replaces, `C<n>` for a round's own and `S<n>` for one in the register.
@@ -262,7 +264,8 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
         raise BadArgument("--until says what a parked question waits for",
                           f"give it with {_PARK}Q<n>, or leave --until out")
     if chose is not None and not _QUESTION.fullmatch(item or ""):
-        raise BadArgument("--chose names the option he chose in answer to a question",
+        raise BadArgument("--chose names the option the operator chose in answer to a "
+                          "question",
                           "give it with the question's id, Q<n>, or leave --chose out")
     if supersedes is not None:
         if not _ID.fullmatch(supersedes):
@@ -315,7 +318,8 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
     def has_a_pointer(view):
         if record is None:
             return Unmet(
-                "a ruling is the operator's and needs a pointer to where he said it; "
+                "a ruling is the operator's and needs a pointer to where the operator "
+                "said it; "
                 f"PTR below is one token: {pointers.SHAPES}", again)
         return pointers.unmet(record, again)
 
@@ -333,12 +337,12 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
         if supersedes is not None:
             fields["supersedes"] = supersedes
         if _QUESTION.fullmatch(form.rules or ""):
-            # The question as he was asked it goes with its answer to whoever shows
-            # him the sentence recorded.
+            # The question as the operator was asked it goes with its answer to
+            # whoever shows the operator the sentence recorded.
             asked_as = questions.find(held, form.rules)
             answers[0] = None if asked_as is None else (asked_as.id, asked_as.text)
         elif decisions.item(form.rules) is not None:
-            # So does a decision, with what he chose of it.
+            # So does a decision, with what the operator chose of it.
             decided = decisions.find(held, decisions.item(form.rules))
             answers[0] = None if decided is None else (decided.key, decided.text)
         if corrects and not standing:
@@ -478,14 +482,14 @@ def _answer(item: str, asked: Asked) -> Form | None:
     chose = asked.chose
     if asked.text is None and chose is None:
         raise BadArgument("an answer needs its sentence",
-                          "say what he answered with --text TEXT, or name the option "
-                          "he chose with --chose K")
+                          "say what the operator answered with --text TEXT, or name "
+                          "the option the operator chose with --chose K")
     if asked.text is not None and not asked.text.strip():
         raise BadArgument("--text says nothing",
                           "give the sentence" + ("" if chose is None else
                                                  ", or leave --text out"))
 
-    def offers_what_he_chose(view):
+    def offers_the_key_chosen(view):
         question = questions.find(_held(view, asked), item)
         if question is None or choices.text_of(question, chose) is not None:
             return None
@@ -502,7 +506,8 @@ def _answer(item: str, asked: Asked) -> Form | None:
         question = questions.find(_held(view, asked), item)
         fields = {}
         if asked.text is None:
-            # He chose a line and said no more: the line is what was answered.
+            # The operator chose a line and said no more: the line is what was
+            # answered.
             fields["text"] = choices.text_of(question, chose)
         if not asked.standing:
             fields["stages"] = questions.stored(question.blocks)
@@ -512,7 +517,7 @@ def _answer(item: str, asked: Asked) -> Form | None:
     gates = [_can_be_ruled(item, asked, item=item, puts=questions.RULED)]
     if chose is not None:
         fields["chose"] = chose
-        gates.append(offers_what_he_chose)
+        gates.append(offers_the_key_chosen)
     fields.update(_becomes(item, state=questions.RULED))
     return Form(kind=SUBSTANCE, rules=item, fields=fields, gates=tuple(gates),
                 found=found)
@@ -671,7 +676,7 @@ def _revoke(item: str, asked: Asked) -> Form | None:
 # -- a decision --------------------------------------------------------------------------
 
 def _decide(item: str, asked: Asked) -> Form | None:
-    """His ruling of a decision: `accept` or `reject`, of substance, applying to no
+    """The operator's ruling of a decision: `accept` or `reject`, of substance, applying to no
     stage, since a decision holds none. Its sentence is optional."""
     matched = decisions.ITEM.fullmatch(item)
     if matched is None:
@@ -789,7 +794,7 @@ def _flow(item: str, asked: Asked) -> Form | None:
 # -- the operator's credit of a fast-forward --------------------------------------------
 
 def _credit(item: str, asked: Asked) -> Form | None:
-    """His credit of a fast-forward to the open build of a stage: the build is read
+    """The operator's credit of a fast-forward to the open build of a stage: the build is read
     from git under the lock, and the event holds the build's line and the head it
     credits, which is the whole of it."""
     if not item.startswith(corrections.CREDIT):
@@ -797,8 +802,8 @@ def _credit(item: str, asked: Asked) -> Form | None:
     stage_id = item[len(corrections.CREDIT):]
     if not STAGE.fullmatch(stage_id):
         raise BadArgument(f"{item!r} names no stage",
-                          f"say {corrections.CREDIT}B<n>, the stage whose build he "
-                          "credits")
+                          f"say {corrections.CREDIT}B<n>, the stage whose build the "
+                          "operator credits")
     _of_the_round(asked, "a credit of a fast-forward")
     if asked.supersedes is not None:
         raise BadArgument("a credit is taken back with revoke:, and no ruling replaces "
@@ -879,11 +884,11 @@ def _unafter(item: str, asked: Asked) -> Form | None:
                 gates=tuple(stages.unafter_gates(*parsed, name=asked.name)))
 
 
-# -- his word that he read the list -------------------------------------------------------
+# -- the operator's word of having read the list ------------------------------------------
 
 def _readback(item: str, asked: Asked) -> Form | None:
-    """A read-back: the operator's word that he read the project's list of rulings not
-    yet shown through a time. An act on the process, and a ruling of its own each
+    """A read-back: the operator's word of having read the project's list of rulings
+    not yet shown through a time. An act on the process, and a ruling of its own each
     time: it names no earlier one."""
     if not item.startswith(shown.READBACK):
         return None
@@ -896,7 +901,7 @@ def _readback(item: str, asked: Asked) -> Form | None:
                           f"{shown.READBACK}TIME --record PTR")
     if not shown.TIME.fullmatch(time):
         raise BadArgument(f"{time!r} is not a time a list is shown through",
-                          "give the time the list he read was headed with, as "
+                          "give the time the list the operator read was headed with, as "
                           f"{shown.READBACK}2026-01-02T03:04:05Z")
     if asked.supersedes is not None:
         raise BadArgument("a read-back replaces none before it: each is a ruling of "

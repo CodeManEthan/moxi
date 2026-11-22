@@ -101,7 +101,7 @@ def waiting() -> dict:
     gives it; `waits` each open waiting item of an open round, with its round;
     `decisions` each major decision of an open round not yet ruled, as its entry;
     `not_shown` holds, for each project that has any, its rulings not yet shown to
-    him; `builds` each open build to look at. `unreadable` names each log that can't
+    the operator; `builds` each open build to look at. `unreadable` names each log that can't
     be read, whose rows are not here."""
     return listing.waiting(refresh=False).data()
 

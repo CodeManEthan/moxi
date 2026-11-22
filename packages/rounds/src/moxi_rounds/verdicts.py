@@ -121,8 +121,9 @@ class Recorded:
     #: For a report of a build or of majors: each decision it lists, as the record
     #: now holds it.
     decisions: tuple[decisions.Decision, ...] = ()
-    #: Of those not yet ruled, by key, the line said under each: whether it is his to
-    #: rule and the command that records his ruling (`decisions.open_line`).
+    #: Of those not yet ruled, by key, the line said under each: whether it is the
+    #: operator's to rule and the command that records the operator's ruling
+    #: (`decisions.open_line`).
     open_as: Mapping[str, str] = field(default_factory=dict)
 
 

@@ -93,7 +93,7 @@ def added(path, before):
 
 # -- the operator's drop -----------------------------------------------------------------
 
-def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
+def test_the_operator_drops_a_round_that_holds_the_operators_rulings(rounds, capsys):
     rule(text=RULED)
     before = count(round_log(rounds))
 
@@ -238,31 +238,31 @@ def test_the_lead_drops_a_round_that_holds_nothing_of_the_operators(rounds, caps
 
 def a_ruling(rounds):
     rule(text=RULED)
-    return ["his ruling C1"]
+    return ["the operator's ruling C1"]
 
 
 def a_ruling_since_taken_back(rounds):
     rule(text=RULED)
     rule(item="revoke:C1")
-    return ["his rulings C1, C2"]
+    return ["the operator's rulings C1, C2"]
 
 
 def a_skip(rounds):
     append(rounds, "ruling.recorded", {"id": "C1", "record": "comms:12",
                                        "kind": "process", "rules": "skip:docket:B1",
                                        "covers": []})
-    return ["his skip C1"]
+    return ["the operator's skip C1"]
 
 
-def his_own_question(rounds):
+def the_operators_own_question(rounds):
     ask(record="comms:14")
-    return ["Q1, asked with his pointer"]
+    return ["Q1, asked with the operator's pointer"]
 
 
-def a_list_he_gave(rounds):
+def a_list_the_operator_gave(rounds):
     ask(target="proj-a")
     moving.adopt(A, "P1", blocks="B1", record="comms:15", by="planner")
-    return ["Q1, adopted with the list he gave (S1 of the project's register)"]
+    return ["Q1, adopted with the list the operator gave (S1 of the project's register)"]
 
 
 def a_finished_build(rounds):
@@ -292,13 +292,13 @@ def an_open_waiting_item(rounds):
     return ["the open waiting item B2.W1"]
 
 
-@pytest.mark.parametrize("holds_his", [
-    a_ruling, a_ruling_since_taken_back, a_skip, his_own_question, a_list_he_gave,
-    a_finished_build, a_merge_that_may_have_landed, a_decision_that_reached_the_target,
-    an_open_waiting_item])
+@pytest.mark.parametrize("holds_the_operators", [
+    a_ruling, a_ruling_since_taken_back, a_skip, the_operators_own_question,
+    a_list_the_operator_gave, a_finished_build, a_merge_that_may_have_landed,
+    a_decision_that_reached_the_target, an_open_waiting_item])
 def test_the_lead_is_refused_a_round_that_holds_an_act_of_the_operators(
-        rounds, capsys, holds_his):
-    said = holds_his(rounds)
+        rounds, capsys, holds_the_operators):
+    said = holds_the_operators(rounds)
     before = logs(rounds)
 
     assert main(["drop", A, "--by", "lead", "--record", "comms:31"]) == 3
@@ -309,7 +309,7 @@ def test_the_lead_is_refused_a_round_that_holds_an_act_of_the_operators(
     assert f"It holds: {'; '.join(said)}." in err
     assert f"run: moxi rounds drop {A} --by operator --record PTR" in err
     assert logs(rounds) == before
-    # And it is his to drop.
+    # And it is the operator's to drop.
     assert drop().by == "operator"
 
 
@@ -321,7 +321,7 @@ def test_the_lead_is_refused_a_round_opened_on_the_operators_go(rounds, capsys):
     with pytest.raises(Refused) as refused:
         drop(B, by="lead")
 
-    assert "It holds: its opening, on his go (comms:5)." in str(refused.value)
+    assert "It holds: its opening, on the operator's go (comms:5)." in str(refused.value)
     assert logs(rounds) == before
 
 
@@ -333,8 +333,8 @@ def test_a_refused_lead_is_told_everything_the_round_holds(rounds):
     with pytest.raises(Refused) as refused:
         drop(by="lead")
 
-    assert ("It holds: his ruling C1; Q1, asked with his pointer; the build of B1, "
-            "which is finished.") in str(refused.value)
+    assert ("It holds: the operator's ruling C1; Q1, asked with the operator's pointer; "
+            "the build of B1, which is finished.") in str(refused.value)
 
 
 def a_merge_that_failed(rounds):
@@ -359,12 +359,12 @@ def a_project_question_adopted_with_no_list(rounds):
     moving.adopt(A, "P1", by="planner")
 
 
-@pytest.mark.parametrize("holds_none_of_his", [
+@pytest.mark.parametrize("holds_none_of_the_operators", [
     a_merge_that_failed, a_waiting_item_that_is_done,
     a_decision_on_a_build_that_reached_nothing, a_project_question_adopted_with_no_list])
 def test_the_lead_drops_a_round_whose_records_are_not_the_operators(
-        rounds, holds_none_of_his):
-    holds_none_of_his(rounds)
+        rounds, holds_none_of_the_operators):
+    holds_none_of_the_operators(rounds)
 
     assert drop(by="lead").by == "lead"
     assert held(round_log(rounds)).status == "dropped"

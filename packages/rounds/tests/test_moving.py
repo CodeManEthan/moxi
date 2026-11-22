@@ -90,9 +90,9 @@ def count(path):
 
 def recorded_as(ruling_id, rules, holder):
     """What is printed for a move that is the operator's ruling: the ruling as
-    recorded, and how whoever recorded it says he was shown it."""
+    recorded, and how whoever recorded it says the operator was shown it."""
     return (f"Recorded as {ruling_id}: {rules}\n"
-            'show him this under "Recorded as" in your next message, then:\n'
+            'show the operator this under "Recorded as" in your next message, then:\n'
             f"  moxi rounds mark {holder} {ruling_id} --shown --record "
             "<pointer to that message>\n")
 
@@ -155,7 +155,7 @@ def test_an_adopted_question_keeps_where_it_came_from_who_asked_it_and_when(roun
                                              None)]
 
 
-def test_a_question_that_is_the_operators_own_stays_his_own_when_adopted(rounds):
+def test_a_question_that_is_the_operators_own_stays_the_operators_own_when_adopted(rounds):
     ask("proj-a", record="comms:15")
 
     moving.adopt(A, "P1", by="curator")
@@ -291,7 +291,7 @@ def test_a_question_that_came_from_a_round_is_adopted_holding_up_every_stage(rou
                                              "B3")] == ["Q1"]
 
 
-def test_a_list_for_a_question_that_came_from_a_round_is_refused_without_his_pointer(
+def test_a_list_for_a_question_that_came_from_a_round_is_refused_without_the_operators_pointer(
         rounds, capsys):
     from_a_round(rounds)
     before = logs(rounds)
@@ -310,7 +310,7 @@ def test_every_stage_named_outright_needs_no_pointer(rounds):
     assert moving.adopt(B, "P1", blocks="all", by="curator").question.blocks == "all"
 
 
-def test_a_list_with_his_pointer_is_taken_and_the_adoption_is_his_ruling(rounds):
+def test_a_list_with_the_operators_pointer_is_taken_and_the_adoption_is_the_operators_ruling(rounds):
     from_a_round(rounds)
     before = count(round_log(rounds, "b-round")), count(project_log(rounds))
 
@@ -329,7 +329,7 @@ def test_a_list_with_his_pointer_is_taken_and_the_adoption_is_his_ruling(rounds)
     assert (gone.state, gone.ruling, gone.moved_to) == ("moved", "S1", f"{B}:Q1")
 
 
-def test_an_adoption_that_is_his_ruling_is_printed_with_the_mark_that_says_he_saw_it(
+def test_an_adoption_that_is_the_operators_ruling_is_printed_with_the_mark_that_says_the_operator_saw_it(
         rounds, capsys):
     from_a_round(rounds)
 
@@ -344,7 +344,7 @@ def test_an_adoption_that_is_his_ruling_is_printed_with_the_mark_that_says_he_sa
     assert main(["mark", "proj-a", "S1", "--shown", "--record", "comms:30"]) == 0
 
 
-def test_a_move_that_is_not_his_ruling_prints_no_ruling(rounds, capsys):
+def test_a_move_that_is_not_the_operators_ruling_prints_no_ruling(rounds, capsys):
     ask(A, "B1")
     park(A, "Q1")
     finish(rounds, "B1")
@@ -564,7 +564,7 @@ def test_a_pointer_of_no_known_shape_is_refused_at_a_move(rounds, record):
     assert logs(rounds) == before
 
 
-# -- a move without his pointer ----------------------------------------------------------
+# -- a move without the operator's pointer -----------------------------------------------
 
 def test_a_parked_question_whose_stages_are_all_finished_is_moved_by_anyone(rounds):
     ask(A, "B1,B2")
@@ -603,7 +603,7 @@ def lead_moves(rounds, capsys):
     return code, capsys.readouterr().err
 
 
-def test_an_open_question_is_not_moved_without_his_pointer(rounds, capsys):
+def test_an_open_question_is_not_moved_without_the_operators_pointer(rounds, capsys):
     ask(A, "B1")
     finish(rounds, "B1")
     before = logs(rounds)
@@ -616,7 +616,7 @@ def test_an_open_question_is_not_moved_without_his_pointer(rounds, capsys):
     assert logs(rounds) == before
 
 
-def test_a_parked_question_that_holds_up_every_stage_is_not_moved_without_his_pointer(
+def test_a_parked_question_that_holds_up_every_stage_is_not_moved_without_the_operators_pointer(
         rounds, capsys):
     ask(A)
     park(A, "Q1")
@@ -632,7 +632,7 @@ def test_a_parked_question_that_holds_up_every_stage_is_not_moved_without_his_po
     assert logs(rounds) == before
 
 
-def test_a_parked_question_that_holds_up_no_stage_is_not_moved_without_his_pointer(
+def test_a_parked_question_that_holds_up_no_stage_is_not_moved_without_the_operators_pointer(
         rounds, capsys):
     ask(A, "none")
     park(A, "Q1")
@@ -645,7 +645,7 @@ def test_a_parked_question_that_holds_up_no_stage_is_not_moved_without_his_point
     assert logs(rounds) == before
 
 
-def test_a_question_is_not_moved_without_his_pointer_while_a_stage_it_lists_is_unfinished(
+def test_a_question_is_not_moved_without_the_operators_pointer_while_a_stage_it_lists_is_unfinished(
         rounds, capsys):
     ask(A, "B1,B2,B3")
     park(A, "Q1")
@@ -677,7 +677,7 @@ def test_a_refused_move_says_every_condition_it_falls_short_of(rounds, capsys):
     assert "Q1 is open; B2 is neither finished nor out of the plan" in err
 
 
-def test_a_question_parked_until_a_stage_that_is_finished_reads_open_and_is_his_to_move(
+def test_a_question_parked_until_a_stage_that_is_finished_reads_open_and_is_the_operators_to_move(
         rounds, capsys):
     ask(A, "B1,B2")
     park(A, "Q1", until="B1")
@@ -725,7 +725,7 @@ def test_a_moved_question_is_ruled_where_it_is_now(rounds):
     assert question(project_log(rounds), "P1").state == "ruled"
 
 
-def test_a_moved_question_waits_on_him_in_the_log_it_is_in_now(rounds):
+def test_a_moved_question_waits_on_the_operator_in_the_log_it_is_in_now(rounds):
     def waiting(slug=None):
         return [one.id for one in index.read("proj-a", rounds, slug).of("question")]
 
@@ -841,7 +841,7 @@ def test_an_adoption_that_was_stopped_is_not_finished_with_another_list(
     assert moving.adopt(A, "P1", blocks="B2", by="curator").finished
 
 
-def test_a_narrowed_adoption_that_was_stopped_is_not_finished_without_his_pointer(
+def test_a_narrowed_adoption_that_was_stopped_is_not_finished_without_the_operators_pointer(
         rounds, monkeypatch):
     from_a_round(rounds)
     stopped_after_one_append(

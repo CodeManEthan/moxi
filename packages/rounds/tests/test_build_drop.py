@@ -1,7 +1,7 @@
 """Dropping one build: who may drop it is read from git now (the lead a build with no
 work a drop could lose, the operator any), the drop records the branch's tip and
 deletes nothing, the stage stays owed; a round's drop ends its open builds the same
-way, and the lead's is refused while one of them is not his to drop."""
+way, and the lead's is refused while one of them is not the lead's to drop."""
 
 from __future__ import annotations
 
@@ -267,7 +267,7 @@ def test_a_rounds_drop_ends_its_open_builds_with_their_tips(a_round, git_repo):
     assert builds.current(folded(a_round), "B1").ended == builds.DROPPED
 
 
-def test_the_leads_round_drop_is_refused_while_a_build_is_not_his(a_round, git_repo):
+def test_the_leads_round_drop_is_refused_while_a_build_is_not_the_leads(a_round, git_repo):
     git_repo.switch("work", new_from="main")
     git_repo.commit("feature.txt")
     git_repo.switch("main")

@@ -12,7 +12,7 @@ that stopped short is made by the next write, whatever that write is.
   of its plan is finished; a flow with a `build` step needs at least one finished stage;
 - nothing is open: no build is open, no question holds the close (`holds.on_close`),
   none open or parked, and no waiting item is open (`waiting_items`);
-- every decision that is the operator's (`decisions.his`: the flow has a `ratify`
+- every decision that is the operator's (`decisions.to_rule`: the flow has a `ratify`
   step that is not skipped, the project's `ratify` setting names its weight, and a
   finished build declared it) is ruled, and every finished build has a report that
   declares its decisions, a build report or a majors report naming its stage; unless
@@ -23,7 +23,7 @@ that stopped short is made by the next write, whatever that write is.
   as a waiting item, which the second part reads.
 
 The `ratify` step is read in the third part and not as a step. Its row and that part
-read the same decisions (`decisions.his`); the part also waits for each finished
+read the same decisions (`decisions.to_rule`); the part also waits for each finished
 build's report that declares its decisions. The project's setting it reads
 is passed in (`ratify`), since nothing here reads the config. A round with a `retro`
 step waits for that step like any other; the step is due once the close waits for
@@ -122,13 +122,13 @@ def _ratified(state: states.State, on_closed: Closed, ratify: str) -> Iterator[s
     off."""
     if decisions.not_ratified(state) is not None or ratify == RATIFY_OFF:
         return
-    his = {one.key for one in decisions.his(state, ratify)}
+    to_rule = {one.key for one in decisions.to_rule(state, ratify)}
     for build in decisions.finished_builds(state):
         if not _declared(state, build):
             yield (f"a report that declares the decisions of {build.stage}'s build: a "
                    f"build report, or a majors report naming {build.stage}")
         for decision in decisions.of_build(state, build):
-            if decision.key in his:
+            if decision.key in to_rule:
                 yield f"decision {decision.key}, {decision.weight} and not yet ruled"
 
 

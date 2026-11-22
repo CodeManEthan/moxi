@@ -215,7 +215,7 @@ def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
     found = data(capsys, "--waiting")
     assert [(one["holder"], one["id"]) for one in found["open"]] == [(A, "Q1")]
     assert found["parked"] == []
-    # Its rulings are still his to be shown.
+    # Its rulings are still the operator's to be shown.
     assert {row["holder"] for row in found["not_shown"][0]["rows"]} == {B}
 
 
@@ -338,7 +338,7 @@ age: 3 days   options: a, b
     from: https://example.test/q   blocks: all   state: open   by: helper   \
 at: {T2}   age: 2 days   options: none
 
-parked questions, not put to him:
+parked questions, not put to the operator:
   {A} Q2: {OTHER}
     from: comms:11   blocks: B2   state: parked   by: scout   at: {T2}   until: B2
 
@@ -348,12 +348,12 @@ open waiting items:
 major decisions not yet ruled:
   none
 
-rulings not yet shown to him:
-  proj-a, not yet shown, through {T5}; once he has read them: moxi rounds rule \
+rulings not yet shown to the operator:
+  proj-a, not yet shown, through {T5}; once the operator has read them: moxi rounds rule \
 proj-a readback={T5} --record PTR
     {A} C1: park:Q2 (record: comms:12)
     {A} C2: {RULED} (record: comms:12)
-  proj-b, not yet shown, through {T3}; once he has read them: moxi rounds rule \
+  proj-b, not yet shown, through {T3}; once the operator has read them: moxi rounds rule \
 proj-b readback={T3} --record PTR
     proj-b S1: {RULED} (record: https://example.test/said)
 
@@ -438,7 +438,7 @@ def test_a_project_named_keeps_what_waits_to_its_own(rounds, capsys):
     assert [one["project"] for one in found["not_shown"]] == ["proj-b"]
     out = printed(capsys, "proj-b", "--waiting")
     assert out.startswith(f"waiting on the operator in proj-b, computed {NOW}\n")
-    assert "parked questions, not put to him:\n  none\n" in out
+    assert "parked questions, not put to the operator:\n  none\n" in out
     assert "proj-a" not in out
 
 
@@ -449,7 +449,7 @@ waiting on the operator, computed {NOW}
 open questions:
   none
 
-parked questions, not put to him:
+parked questions, not put to the operator:
   none
 
 open waiting items:
@@ -458,7 +458,7 @@ open waiting items:
 major decisions not yet ruled:
   none
 
-rulings not yet shown to him:
+rulings not yet shown to the operator:
   none
 
 builds idle, gone, empty, unclear, sharing or not read:

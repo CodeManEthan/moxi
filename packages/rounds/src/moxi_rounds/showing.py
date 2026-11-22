@@ -15,8 +15,8 @@ the operator was shown it; and its history, every event, oldest first.
 A round that is open is shown with what its close waits for, since no verb closes a
 round: it closes on the write that leaves nothing waited for. A round that has ended
 is shown with how it ended, each decision of a finished build it left open, and the
-numbers its ending event holds. A decision not yet ruled is labelled his to rule only
-where it is put to him (`decisions.why_not`). A question whose record still reads
+numbers its ending event holds. A decision not yet ruled is labelled the operator's to
+rule only where it is put to the operator (`decisions.why_not`). A question whose record still reads
 as open or parked there (a correction made after the end can leave one so) is shown as
 waiting for a new round, apart from the open and the parked ones: it is put to nobody
 on a round that has ended.
@@ -240,8 +240,8 @@ def _rulings(found: Shown) -> list:
         if ruling.shown is not None or (read is not None and ruling.at <= read):
             was_shown = True
         else:
-            # With the project's log unreadable his read-backs are not known, so a
-            # ruling with no mark is neither shown nor not.
+            # With the project's log unreadable the operator's read-backs are not
+            # known, so a ruling with no mark is neither shown nor not.
             was_shown = None if found.register is None else False
         listed.append({
             "id": ruling.id, "text": ruling.text, "record": ruling.record,
@@ -252,7 +252,8 @@ def _rulings(found: Shown) -> list:
             "supersedes": ruling.supersedes, "revokes": ruling.revokes,
             "replaced_by": ruling.replaced_by, "revoked_by": ruling.revoked_by,
             "shown": was_shown,
-            # Where he was shown it, when a mark says; a read-back names no place.
+            # Where the operator was shown it, when a mark says; a read-back names
+            # no place.
             "shown_record": ruling.shown,
             "read_back": read if was_shown and ruling.shown is None else None})
     return listed
@@ -724,9 +725,9 @@ def _wait_lines(listed: list) -> list[str]:
 
 def _decisions(found: Shown) -> list:
     """Every decision of the round, in the order declared, open or ruled. An open one
-    has `put`, whether it is put to him (`decisions.why_not`), `not_put`, why not,
-    `open_as`, the line said under it (`decisions.open_line`), and `to_rule`, the
-    command that records his ruling, None once the round has ended and takes no
+    has `put`, whether it is put to the operator (`decisions.why_not`), `not_put`, why
+    not, `open_as`, the line said under it (`decisions.open_line`), and `to_rule`, the
+    command that records the operator's ruling, None once the round has ended and takes no
     ruling."""
     state = found.state
     held = decisions.of_round(state)
@@ -974,7 +975,7 @@ def _ended(state: states.State, *,
     logged computed from its log where the event holds neither, the steps due read
     under the setting `ratify` gives (`numbers.with_clocks`). `left_open` is each
     decision of a finished build it left open, with whether that setting puts it to
-    him (`decisions.left_open`)."""
+    the operator (`decisions.left_open`)."""
     end = state.ended
     if end is None:
         return None
@@ -1064,7 +1065,7 @@ def as_text(found: Shown) -> str:
     if found.notice is not None:
         lines.append(found.notice)
     if found.register_unreadable is not None:
-        lines.append("what he has read back is not known: "
+        lines.append("what the operator has read back is not known: "
                      f"{found.register_unreadable.reason}")
     for section in SECTIONS:
         lines += ["", *section.lines(shown_as[section.key])]

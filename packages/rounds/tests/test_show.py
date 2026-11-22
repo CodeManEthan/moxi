@@ -467,7 +467,7 @@ def test_with_the_projects_log_unreadable_a_ruling_is_not_said_to_be_unshown(
     assert [one["shown"] for one in found["rulings"]] == [True, None]
     assert str(log.project_log(rounds)) in found["register_unreadable"]
     out = printed(capsys, A)
-    assert "what he has read back is not known: " in out and "shown: not known" in out
+    assert "what the operator has read back is not known: " in out and "shown: not known" in out
 
 
 # -- what is not shown -------------------------------------------------------------------

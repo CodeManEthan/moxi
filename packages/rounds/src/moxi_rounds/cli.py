@@ -53,7 +53,7 @@
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
 `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL, `file:<path>#<anchor>` or
-`page:<page>/<act id>@<UTC time>`, his act on a page.
+`page:<page>/<act id>@<UTC time>`, the operator's act on a page.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
@@ -76,10 +76,11 @@ A ruling is corrected by a later one: `--supersedes` names the earlier ruling of
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
 `rule` prints each ruling as it was recorded, for whoever recorded it to show the
-operator, and `mark --shown` records, with a pointer to the message, session or page
-that showed him, that he saw it; a ruling is named by the round or project that holds
-it and its id. On a project, the item `readback=TIME` is his own word that he read the
-list of rulings not yet shown through `TIME`, the time that list was headed with.
+operator, and `mark --shown` records that the operator saw it, with a pointer to the
+message, session or page that showed it; a ruling is named by the round or project that
+holds it and its id. On a project, the item `readback=TIME` is the operator's own word
+of having read the list of rulings not yet shown through `TIME`, the time that list was
+headed with.
 `fold` freezes the round's design: it copies `design.md` in the round's folder to
 `versions/design-v<N>.md` and records that version with what the design's data block
 declares. A question, a stage, a stage another waits for and a wider hold are added to
@@ -223,9 +224,10 @@ id adds options to it or retires them. `ask --adopt` brings a question of the pr
 list into a round, and `ask --move` puts a round's question on its project's list; the
 operator's pointer goes with a move that ends what the question holds up, and with a
 list of stages for a question that came from a round; a move or an adoption with
-his pointer is a ruling, and is printed as `rule` prints one. `list --questions` writes out
-the questions that wait on the operator, of one round or of one project with its open
-rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
+the operator's pointer is a ruling, and is printed as `rule` prints one. `list
+--questions` writes out the questions that wait on the operator, of one round or of one
+project with its open rounds, and after them the rulings not yet shown to the operator:
+as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
 A round's questions have two views, both with no `--view`: the docket, its open and
 parked questions; and the ratification, the decisions not yet ruled of its finished
@@ -246,16 +248,16 @@ build's worktree, `next` finds the open build on the branch checked out there an
 prints its round's next step. `next` records nothing.
 `show` shows one round: what it is for, its flow, the step it is at, what its close
 waits for, its stages and builds with their checks, verdicts, findings, waiting items
-and decisions, its questions by state, its rulings and whether each was shown to him,
-its history and, once it has ended, its numbers. `list` with no flag lists the open
+and decisions, its questions by state, its rulings and whether each was shown to the
+operator, its history and, once it has ended, its numbers. `list` with no flag lists the open
 rounds, each with its flow, its step and its counts, and with `--closed` the rounds
 that have ended; `list --waiting` lists what waits on the operator: the open and the
 parked questions, the open waiting items, the unruled major decisions and the minor ones
-that are the operator's, the builds to look at and the rulings not yet shown to him; `list --numbers` sums the numbers of
-the closed rounds. Each is of every project, or of the
-one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
-that writes takes `--as NAME`, who is doing it; without it that is the user the
-command runs as.
+that are the operator's, the builds to look at and the rulings not yet shown to the
+operator; `list --numbers` sums the numbers of the closed rounds. Each is of every
+project, or of the one named, and `--json` gives it as data. `show` and `list` record
+nothing. A verb that writes takes `--as NAME`, who is doing it; without it that is the
+user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
 says what stopped the verb and the command that fixes it, and has written nothing.
@@ -317,7 +319,7 @@ def _warn_of(failed, prog: str, verb: str) -> None:
 def _say_closed(writes, out) -> None:
     """Say, in a line, each round a write of the verb closed, then a line for each
     decision of a finished build it left open, with whether the project's `ratify`
-    setting puts it to him. No verb closes a round, so the verb's own lines never say
+    setting puts it to the operator. No verb closes a round, so the verb's own lines never say
     it: whichever write left the close nothing to wait for did."""
     from . import closing, decisions
     from . import settings as own
@@ -420,7 +422,7 @@ def _left(opened) -> list[str]:
 
 def _declare_rule(verbs) -> None:
     said = ("Record a ruling of the operator's: one plain sentence, with a pointer to "
-            "where he said it. On a round it is the round's own; with --standing, or on "
+            "where the operator said it. On a round it is the round's own; with --standing, or on "
             "a project, it goes in the project's register and outlasts the round. With "
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
             "up, or withdraws it. A later ruling corrects an earlier one: with "
@@ -433,9 +435,9 @@ def _declare_rule(verbs) -> None:
             "unafter:B<n>=B<m> takes one stage off what another waits for. "
             "B<n>.M<k>=accept or B<n>.M<k>=reject rules a decision a build's report "
             "declared; a rejected one is a waiting item until its fix is marked done. "
-            "The ruling is printed as it was recorded, to show him. On a project, "
-            "the ITEM readback=TIME records that he read the list of rulings not yet "
-            "shown to him through TIME.")
+            "The ruling is printed as it was recorded, to show the operator. On a "
+            "project, the ITEM readback=TIME records that the operator read the list "
+            "of rulings not yet shown to the operator through TIME.")
     parser = verbs.add_parser("rule", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the ruling is on, <project>/<slug>, or a "
@@ -460,18 +462,18 @@ def _declare_rule(verbs) -> None:
                              "that leaves the plan for good; unafter:B<n>=B<m>, a "
                              "stage B<n> that waits for B<m> no longer; or, on a "
                              "project, "
-                             "readback=TIME, the time the list of rulings he read "
+                             "readback=TIME, the time the list of rulings the operator read "
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, "
                              "file:<path in the round's folder>#<anchor>, or "
-                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
-                             "ruling without one is refused")
+                             "page:<page>/<act id>@<UTC time>, the operator's act on a "
+                             "page; a ruling without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
     parser.add_argument("--chose", metavar="K",
-                        help="with Q<n>, the key of the option he chose, one the "
+                        help="with Q<n>, the key of the option the operator chose, one the "
                              "question offers now; with no --text the option's line "
                              "is the sentence recorded")
     parser.add_argument("--reason", metavar="TEXT", help="why, in short")
@@ -522,16 +524,16 @@ def _recorded(ruled) -> list[str]:
     """What is printed for a ruling just recorded: its id and its sentence, exactly as
     the log now holds it, or what it rules when it has no sentence; the sentence of
     the question it answers; and what whoever recorded it does next, which is to show
-    him the sentence and then mark the ruling as shown. A read-back is his own word
-    and is not shown to him."""
+    the operator the sentence and then mark the ruling as shown. A read-back is the
+    operator's own word and is not shown to the operator."""
     from . import stages
 
     lines = [f"Recorded as {ruled.id}: "
              f"{ruled.event['rules'] if ruled.text is None else ruled.text}"]
     if ruled.read_back is not None:
         return [*lines, f"it covers every ruling of {ruled.holder} recorded at or "
-                        f"before {ruled.read_back}; a read-back is his own word, "
-                        "and is not itself shown to him"]
+                        f"before {ruled.read_back}; a read-back is the operator's own "
+                        "word, and is not itself shown to the operator"]
     if ruled.answers is not None:
         lines.append(f"in answer to {ruled.answers[0]}: {ruled.answers[1]}")
     if "covers" in ruled.event:
@@ -554,7 +556,7 @@ def _recorded(ruled) -> list[str]:
         lines.append(f"{stage} waits for {waited} no longer; anyone adds the wait "
                      f"again: moxi rounds mark {ruled.name} {stage} --after {waited}")
     return [*lines,
-            'show him this under "Recorded as" in your next message, then:',
+            'show the operator this under "Recorded as" in your next message, then:',
             f"  moxi rounds mark {ruled.holder} {ruled.id} --shown --record "
             "<pointer to that message>"]
 
@@ -588,9 +590,9 @@ def _declare_ask(verbs) -> None:
                              "refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
-                             "operator's own: a pointer to where he asked it; with "
-                             "--move, or with --adopt and a list, a pointer to where "
-                             "he said so")
+                             "operator's own: a pointer to where the operator asked it; "
+                             "with --move, or with --adopt and a list, a pointer to "
+                             "where the operator said so")
     parser.add_argument("--build", metavar="B<n>",
                         help="in place of --from, for a question that came up in the "
                              "open build of this stage: its builder told you, and you "
@@ -705,7 +707,7 @@ def _carry(args, out) -> int:
            if found.held is not None else "")
     print(f"moved from: {moved.source}{was}", file=out)
     if moved.ruling is not None:
-        # With his pointer the move is his ruling, in the log the question left: it
+        # With the operator's pointer the move is a ruling, in the log the question left: it
         # is printed as `rule` prints one, since its id is what a mark names.
         left = moved.events[-1]
         adopted = args.adopt is not None
@@ -850,10 +852,10 @@ def _declare_mark(verbs) -> None:
                              "where the lead wrote why, of those shapes; "
                              "with --restamp, a pointer to where the lead named what "
                              "edited the design, of those shapes; "
-                             "with --shown, a pointer to where he was shown them, one "
+                             "with --shown, a pointer to where the operator was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
                              "time>, the https:// URL of a page that listed them, or "
-                             "page:<page>/<act id>@<UTC time> for his act on a page "
+                             "page:<page>/<act id>@<UTC time> for the operator's act on a page "
                              "that showed them; never a file, the pointer of one of "
                              "the rulings, a message from before one of them was "
                              "said, or a page's act from before one was recorded")
@@ -1300,7 +1302,7 @@ def _declare_commission(verbs) -> None:
     parser.add_argument("--builder", metavar="NAME", required=True,
                         help="who builds it")
     parser.add_argument("--record", metavar="PTR",
-                        help="a pointer to where the operator gave the go, when he did")
+                        help="a pointer to where the operator gave the go, if the operator did")
     parser.add_argument("--existing", action="store_true",
                         help="build on the stage's branch that is already there, in "
                              "place of cutting it; refused when it overlaps another "
@@ -1550,7 +1552,7 @@ def _ci_way_on(name: str, stage: str, whole: str) -> list[str]:
 def _declare_drop(verbs) -> None:
     said = ("Drop a round, or with a stage the open build of that stage: end it short "
             "of its work. The operator drops any round or build, with a pointer to "
-            "where he said so; the lead drops only a round that holds none of the "
+            "where the operator said so; the lead drops only a round that holds none of the "
             "operator's acts, or a build that is gone or empty with no commit of its "
             "own, as git reads it now, with a pointer to why. A round's open and "
             "parked questions go to the project's list as they are, where they hold "
@@ -1571,18 +1573,19 @@ def _declare_drop(verbs) -> None:
                         help="whose drop it is: the operator's, of any round or "
                              "build, or the lead's, of a round that holds no ruling, "
                              "no skip, no question asked with the operator's "
-                             "pointer, no opening on his go, no build that reached "
-                             "its target or may have, no decision on such a build, "
-                             "no open waiting item and no open build he may not "
+                             "pointer, no opening on the operator's go, no build that "
+                             "reached its target or may have, no decision on such a "
+                             "build, "
+                             "no open waiting item and no open build the lead may not "
                              "drop; or of a build git reads as gone, or empty with "
                              "no commit of its own, that shares with no other")
     parser.add_argument("--record", metavar="PTR",
-                        help="with --by operator, a pointer to where he dropped it; "
+                        help="with --by operator, a pointer to where the operator dropped it; "
                              "with --by lead, a pointer to why; one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, "
                              "file:<path in the round's folder>#<anchor>, or "
-                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
-                             "drop without one is refused")
+                             "page:<page>/<act id>@<UTC time>, the operator's act on a "
+                             "page; a drop without one is refused")
     parser.add_argument("--withdraw-questions", action="store_true",
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "
@@ -1833,11 +1836,11 @@ def _declare_list(verbs) -> None:
     said = ("List rounds, or what waits on the operator. With no option: the open "
             "rounds of every project, or of the one named, each with its flow, the "
             "step it is at, how many questions it has open and parked and how many of "
-            "its rulings were not yet shown to him; with --closed, the rounds that "
+            "its rulings were not yet shown to the operator; with --closed, the rounds that "
             "have ended. With --waiting: every open question, every parked one, the "
             "open waiting items, the unruled major decisions and the minor ones "
             "that are the operator's, the builds to look at "
-            "and the rulings not yet shown to him. With --numbers: the numbers of the "
+            "and the rulings not yet shown to the operator. With --numbers: the numbers of the "
             "closed rounds, summed. With --questions: the questions of one round or "
             "one project written out, the open ones, then the parked ones, then the "
             "rulings not yet shown; a round's in two views, its docket and its "

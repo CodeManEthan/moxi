@@ -45,6 +45,8 @@
   major, one `decision.raised` event; a settlement lapses once the weight rises. The
   operator's ruling of a settled decision replaces it and names its line,
   `settlement`. The numbers gain `settled`, read as zero in numbers written before it.
+- User-facing wording names the operator neutrally: output, refusals, help, the export,
+  the README and the shipped skill say "the operator" in place of a pronoun.
 - `commission --existing` refused on a branch another build's landing brought onto the
   target now gives a second way that works: delete the branch, then commission without
   `--existing`.
@@ -284,7 +286,7 @@ decisions and the round's close.
   with no commit of its own and sharing with none, else the operator's. It records the
   branch's tip, deletes nothing and keeps the build's folders; the stage stays owed. A
   round's drop ends its open builds the same way, and the lead's is refused while one
-  is not his. `show` and `list --waiting` name who drops each build to look at.
+  is not the lead's. `show` and `list --waiting` name who drops each build to look at.
 - `rule ROUND credit:B<n>` credits to a build what its target gained by a fast-forward
   with no reading of the build's: the build reads `merged` until `revoke:` takes it
   back.

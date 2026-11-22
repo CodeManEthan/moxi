@@ -395,7 +395,7 @@ def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
     assert waits(round_dir) == ("step retro, ready",)
 
 
-# -- which decisions are his to rule, and what a close leaves open ----------------------
+# -- which decisions are the operator's to rule, and what a close leaves open -----------
 
 TWO = [("M1", "major"), ("M2", "minor")]
 
@@ -406,7 +406,7 @@ def ratify(write_config, setting):
 
 def facts(capsys) -> dict[str, str]:
     """Each open decision of the round, by id, with the line under it that says whether
-    it is his to rule, as show writes it; and the same from show's data."""
+    it is the operator's to rule, as show writes it; and the same from show's data."""
     shown = run(capsys, "show", ROUND).splitlines()
     data = {one["id"]: one for one in json.loads(run(capsys, "show", ROUND,
                                                      "--json"))["decisions"]

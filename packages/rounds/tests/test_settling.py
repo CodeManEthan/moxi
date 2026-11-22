@@ -453,7 +453,7 @@ def test_under_majors_and_minors_the_export_and_the_list_hold_the_operator_s_min
         opened, capsys):
     round_dir = opened(ratify="majors+minors")
     built(round_dir, decisions_=(("M1", "minor"), ("M2", "minor")))
-    assert [one.key for one in decisions.his(folded(round_dir), "majors+minors")] == [
+    assert [one.key for one in decisions.to_rule(folded(round_dir), "majors+minors")] == [
         "B1.M1", "B1.M2"]
 
     drawn = export.questions_of(ROUND, view="ratify")

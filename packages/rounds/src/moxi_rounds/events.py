@@ -49,7 +49,7 @@ TYPES = _types(
     # keep, not the operator's ruling, so it carries no pointer.
     EventType("lead.changed", ("lead", "was"), required=("lead",)),
     # The round moved to another flow: the name it had, the new name and its steps, and
-    # who moved it. The operator's move is his ruling, and that ruling's own event
+    # who moved it. The operator's move is a ruling, and that ruling's own event
     # holds the same three.
     EventType("flow.changed", ("was", "flow", "steps", "by")),
     # A design version was frozen: its number and digest, whether only records changed
@@ -76,7 +76,7 @@ TYPES = _types(
                "waits", "decisions", "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
-    # operator's pointer when the question is his own; it is then the origin too.
+    # operator's pointer when the question is the operator's own; it is then the origin too.
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
@@ -129,7 +129,7 @@ TYPES = _types(
                "settlement"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
-    # to where he was shown them.
+    # to where the operator was shown them.
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
     # is headed for, its worktree and scratch folder, its builder, the go pointer, the
