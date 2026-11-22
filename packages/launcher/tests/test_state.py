@@ -237,6 +237,20 @@ def test_recycle_shows_its_options_last_run_pending_compact_and_the_last_telling
     assert "on expiry clear, at limit compact (1.5x)" in line and "clear cleared" in line
 
 
+def test_an_unset_limit_at_shows_the_mark_stamped_at_launch(conn):
+    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_at_limit": "relaunch"}', '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.limit_at) == ("relaunch", "2x")
+    assert "at limit relaunch (2x)" in got.lines()[2]
+
+
+def test_a_launch_that_recycles_off_shows_no_stamped_mark(conn):
+    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_at_limit": "off"}', '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
+    assert read(conn).recycle.limit_at is None
+
+
 # -- the keep-warm part ------------------------------------------------------------------
 
 

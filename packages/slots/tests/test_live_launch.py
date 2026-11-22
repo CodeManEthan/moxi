@@ -17,7 +17,7 @@ import pytest
 from moxi.modules import Refused as UninstallRefused
 from moxi_slots import cli, doctor, jobs, launch, places, registry, setup, slots, tmux
 from moxi_slots.errors import Refused, TryAgain, UsageError
-from moxi_slots.model import ENDED, OCCUPIED
+from moxi_slots.model import ENDED, OCCUPIED, Last
 from moxi_slots.trampoline import TERM_NAMES
 
 from slots_kit import kill, pane_field, start_server, wait_answer, wait_for
@@ -80,6 +80,68 @@ def test_start_places_a_launch_in_the_lowest_launchable_slot(server, base, tmp_p
     assert (third.slot, third.exec) == (3, "started")
     assert sorted(registry.read().rows) == [1, 2, 3]
     assert launch_files() == []
+
+
+def test_start_with_create_takes_the_lowest_slot_with_no_session_running(server, base,
+                                                                         tmp_path):
+    slots.create(count=3)
+    slots.rename(1, "first")
+    reg = registry.read()
+    reg.rows[1].last = Last(5.0, "before", {"request_id": "r-0"})
+    with registry.locked():
+        registry.write(reg)
+    tmux.call("kill-session", "-t", "=slot-1")
+    tmux.call("kill-session", "-t", "=slot-3")
+    slots.hold(1, "park-1")
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path).slot == 2
+    with pytest.raises(Refused) as caught:
+        go(None, "sleep", "60", env=base, cwd=tmp_path)
+    assert caught.value.reason == "no-free-slot"
+    placed = go(None, "sleep", "60", env=base, cwd=tmp_path, create=True)
+    assert (placed.slot, placed.exec) == (3, "started")
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path, create=True).slot == 4
+    created = registry.read().rows[1].created
+    mine = go(None, "sleep", "60", env=base, cwd=tmp_path, create=True, hold="park-1",
+              label="back")
+    assert (mine.slot, mine.exec) == (1, "started")
+    one = slots.show(1)
+    assert (one.state, one.name, one.hold, one.pane_id) == (OCCUPIED, "first", None,
+                                                            mine.pane_id)
+    assert one.last.label == "back" and registry.read().rows[1].created > created
+    assert pane_field(mine.pane_id, "@moxi_slot_run") == "on"
+    assert sorted(registry.read().rows) == [1, 2, 3, 4]
+
+
+def test_a_missing_slot_comes_before_a_free_higher_one(server, base, tmp_path):
+    slots.create(count=2)
+    tmux.call("kill-session", "-t", "=slot-1")
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path).slot == 2
+    tmux.call("kill-session", "-t", "=slot-2")
+    slots.create([2])
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path, create=True).slot == 1
+
+
+def test_a_missing_slot_made_again_by_a_start_keeps_its_row(server, base, tmp_path):
+    slots.create(count=2)
+    slots.rename(2, "kept")
+    reg = registry.read()
+    reg.rows[2].last = Last(5.0, "before", {"request_id": "r-0"})
+    with registry.locked():
+        registry.write(reg)
+    go(1, "sleep", "60", env=base, cwd=tmp_path)
+    tmux.call("kill-session", "-t", "=slot-2")
+    slots.hold(2, "someone", 60)
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path, create=True).slot == 3
+    slots.release(2, "someone")
+    slots.hold(2, "park-1")
+    before = registry.read().rows[2]
+    placed = go(None, "sh", "-c", "exit 0", env=base, cwd=tmp_path, create=True,
+                hold="other")
+    assert placed.slot == 4
+    slots.release(2, "park-1")
+    assert go(None, "sleep", "60", env=base, cwd=tmp_path, create=True).slot == 2
+    after = registry.read().rows[2]
+    assert after.name == "kept" and after.created > before.created
 
 
 def test_start_with_create_makes_the_first_slot(server, base, tmp_path):

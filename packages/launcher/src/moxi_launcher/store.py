@@ -23,8 +23,11 @@ Schema version 2 adds the acts on a launched session and changes two things of v
   copied as they were, in the same order;
 - `launches` gains `base_env_json`, null on every row made before version 2.
 
-Schema version 3 adds `launches.fork_of`, the session id a fork launch (`moxi launcher
-fork`) copied, null on every other row and on every row made before version 3.
+Schema version 3 adds `park_entries`, one row per session park or crash discovery says
+belongs back in a slot, with at most one open entry per slot.
+
+Schema version 4 adds `launches.fork_of`, the session id a fork launch (`moxi launcher
+fork`) copied, null on every other row and on every row made before version 4.
 
 Each later version adds through `migrate`; no row of an earlier one is lost.
 
@@ -87,8 +90,9 @@ LEAVES = {
 }
 #: The states a row may still be in when its launch is under way.
 UNDER_WAY = ("spawning", "sending")
-#: Where a session id came from.
-SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact")
+#: Where a session id came from. `load` is an id first learned when a new endpoint of the
+#: session loaded (the session was cleared or compacted while its endpoint was replaced).
+SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact", "load")
 #: How a handoff reached a launch: handed to it at insert, or shown at startup or resume.
 HOWS = ("given", "shown")
 #: The facts a write may set whatever the state.
@@ -259,12 +263,36 @@ CREATE INDEX launches_resume_of ON launches(resume_of);
 """
 
 SCHEMA_3 = """
+CREATE TABLE park_entries (
+  entry_id TEXT PRIMARY KEY,
+  park_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('park','crash')),
+  created_at TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  slot INTEGER NOT NULL,
+  request_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  outcome TEXT CHECK (outcome IN ('exited','left-running','not-exited','crashed')
+                      OR outcome IS NULL),
+  detail TEXT,
+  state TEXT NOT NULL CHECK (state IN ('open','restored','dropped')),
+  restore_request_id TEXT,
+  closed_at TEXT
+);
+CREATE UNIQUE INDEX park_open ON park_entries(slot) WHERE state = 'open';
+CREATE INDEX park_entries_session ON park_entries(session_id);
+CREATE INDEX park_entries_closed_at ON park_entries(closed_at);
+"""
+
+SCHEMA_4 = """
 ALTER TABLE launches ADD COLUMN fork_of TEXT;
 CREATE INDEX launches_fork_of ON launches(fork_of);
 """
 
 #: The schema's steps, one per version; `PRAGMA user_version` counts those run.
-STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3)
+STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2, SCHEMA_3, SCHEMA_4)
 
 
 class TooLarge(store.StoreError):
@@ -700,7 +728,7 @@ def _write_facts(conn: sqlite3.Connection, request_id: str, facts: Mapping[str, 
 
 
 def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
-                  source: str, *, at: str | None = None) -> bool:
+                  source: str, *, at: str | None = None, replace_load: bool = False) -> bool:
     """Record a session id a launch is known by, whatever its state, and say whether it is
     new.
 
@@ -710,8 +738,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     the claim read the same owner. The table is keyed by the pair, which would hold the id
     for both; this write keeps it with the launch that has it, except for a resume: a
     launch made to resume (`resume_of` set) learns a `resume` id whoever holds it, and
-    `resolve` then finds it, the newest. A pair already there is left as it is. The state
-    is not touched.
+    `resolve` then finds it, the newest. A pair already there is left as it is, but for
+    `replace_load`: a pair learned at `load` then takes `source`, which the ready recorder
+    asks for at a `ready` of the id its own endpoint's `load` added. The state is not
+    touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
@@ -727,6 +757,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
             "WHERE session_id = ? AND request_id <> ?)",
             (session_id, request_id, source, at, shared, session_id, request_id))
         added = cursor.rowcount == 1
+        if replace_load and not added:
+            conn.execute("UPDATE session_ids SET source = ? WHERE session_id = ? "
+                         "AND request_id = ? AND source = 'load'",
+                         (source, session_id, request_id))
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
                      "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
                      "SELECT 1 FROM session_ids WHERE session_id = ? AND request_id = ?)",
@@ -735,8 +769,10 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
 
 
 def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
-          session_id: str | None, endpoint: str, at: str | None = None) -> LaunchRow | None:
-    """Claim a launch for the turns endpoint `endpoint`, and return the row when the launch
+          session_id: str | None, endpoint: str, parent: Any = None,
+          at: str | None = None) -> LaunchRow | None:
+    """Claim a launch for the turns endpoint `endpoint`, whose parent process is `parent`
+    (a `moxi.proc.ProcId`, or None when it is unknown), and return the row when the launch
     is that endpoint's, else None.
 
     A launch belongs to the one session process the launcher started for it. The first
@@ -746,15 +782,24 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
     claim, so of two endpoints only the first wins. Any other endpoint carrying the
     launch's stamp (a session started from inside the launched one) gets None.
 
-    A held launch is claimed again only when the endpoint holding it is gone and the new
-    endpoint's event names a session id the launch is known by: the row's own, or any
-    recorded for it in `session_ids` (only the endpoint holding a launch records its ids,
-    so an id there is the launch's own session after a clear or a compaction). So a
-    session whose endpoint was replaced (Claude starts a new one when its plugins reload)
-    keeps its launch, before or after a `/clear`. Gone
-    means the held endpoint's process has ended (`endpoint_gone`), never that it did not
-    answer once. The claim moves in one conditional update on the held endpoint, so of
-    two new endpoints only one takes it, and a `reclaimed` event records the move.
+    A held launch is claimed again only when the endpoint holding it is gone: its process
+    has ended (`endpoint_gone`), never that it did not answer once. Then:
+
+    - **Claude: by parent.** The new endpoint's parent must be the launch's own `claude`,
+      the row's `pid` and `pid_started` (`is_launch_parent`). Claude Code starts every
+      endpoint of a session as a direct child of that session's `claude`, and starts a new
+      one for the same session when its plugins reload, so the launch follows its session
+      across a reload, before or after a `/clear`. A session started from inside the
+      launched one (an agent's `claude -p`, a `claude --resume` in a subshell) runs in
+      another `claude` process, so its endpoint is that process's child and never takes
+      the launch, whatever session id it names. No session id moves a Claude claim. A row
+      with no `pid_started` never moves.
+    - **Codex: by a known id.** The new endpoint's event names a session id the launch is
+      known by: the row's own, or any recorded for it in `session_ids`.
+
+    The claim moves in one conditional update on the held endpoint, so of two new
+    endpoints only one takes it, and a `reclaimed` event records the move; a Claude move's
+    detail says `"by": "parent"`.
     """
     if harness not in HARNESSES:
         return None
@@ -768,21 +813,59 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
             (endpoint, moment, request_id, harness, session_id))
         row = get(conn, request_id)
         held = row.endpoint if row is not None else None
-        if (held is not None and held != endpoint and session_id is not None
-                and row.harness == harness and _known_by(conn, row, session_id)
-                and endpoint_gone(held)):
-            moved = conn.execute(
-                "UPDATE launches SET endpoint = ?, updated_at = ? "
-                "WHERE request_id = ? AND endpoint = ?",
-                (endpoint, moment, request_id, held))
-            if moved.rowcount == 1:
-                conn.execute(
-                    "INSERT INTO events (request_id, session_id, at, kind, detail_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (request_id, session_id, moment, RECLAIMED,
-                     _encode({"endpoint": endpoint, "was": held})))
-                row = get(conn, request_id)
+        if held is not None and held != endpoint and row.harness == harness:
+            if harness == "claude":
+                moves = is_launch_parent(row, parent) and endpoint_gone(held)
+                detail = {"endpoint": endpoint, "was": held, "by": "parent"}
+            else:
+                moves = (session_id is not None and _known_by(conn, row, session_id)
+                         and endpoint_gone(held))
+                detail = {"endpoint": endpoint, "was": held}
+            if moves:
+                moved = conn.execute(
+                    "UPDATE launches SET endpoint = ?, updated_at = ? "
+                    "WHERE request_id = ? AND endpoint = ?",
+                    (endpoint, moment, request_id, held))
+                if moved.rowcount == 1:
+                    conn.execute(
+                        "INSERT INTO events (request_id, session_id, at, kind, detail_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (request_id, session_id, moment, RECLAIMED, _encode(detail)))
+                    row = get(conn, request_id)
     return row if row is not None and row.endpoint == endpoint else None
+
+
+def is_launch_parent(row: LaunchRow, parent: Any) -> bool:
+    """Whether the process `parent` (a `moxi.proc.ProcId`) is the launch's own process,
+    the row's `pid` and `pid_started`: the same pid, and both name the one live process,
+    each start time within `moxi.proc.alive`'s tolerance of its own. Never by pid alone, so
+    a pid given to another process since never matches. False for a row with no
+    `pid_started` and for an unknown parent."""
+    from moxi import proc
+
+    if parent is None or row.pid is None or row.pid_started is None:
+        return False
+    if parent.pid != row.pid:
+        return False
+    return proc.alive(proc.ProcId(row.pid, row.pid_started)) and proc.alive(parent)
+
+
+def held_by_sibling(row: LaunchRow, endpoint: str, parent: Any) -> str | None:
+    """The endpoint holding the Claude launch `row` when it is a live sibling of the
+    endpoint `endpoint`, whose parent is `parent`: both are children of the launch's own
+    `claude` (`is_launch_parent`), and the held one has not ended. That is the moment
+    Claude Code replaces a session's endpoint, the new one started before the old one has
+    ended. None otherwise, a nested session's endpoint among them."""
+    from moxi import proc
+
+    held = row.endpoint
+    if (row.harness != "claude" or held is None or held == endpoint
+            or not is_launch_parent(row, parent) or endpoint_gone(held)):
+        return None
+    parsed = parse_endpoint(held)
+    if parsed is None or proc.parent(parsed[0]) != row.pid:
+        return None
+    return held
 
 
 def _known_by(conn: sqlite3.Connection, row: LaunchRow, session_id: str) -> bool:
@@ -1677,13 +1760,195 @@ def exits_log(conn: sqlite3.Connection, *, limit: int | None = None,
     return [ExitRow(*values) for values in conn.execute(sql, params)]
 
 
+# -- park entries ------------------------------------------------------------------------
+
+#: What made a park entry: `park`, or crash discovery for a session that was running when
+#: its server went down.
+ENTRY_KINDS = ("park", "crash")
+#: What park did with an entry's session, or `crashed` for a crash entry.
+ENTRY_OUTCOMES = ("exited", "left-running", "not-exited", "crashed")
+#: An entry's states: `open` while its session belongs back in its slot; `restored` once a
+#: launch took it up; `dropped` when given up without one.
+ENTRY_STATES = ("open", "restored", "dropped")
+#: The prefix of a park reservation's holder name in slots.
+HOLDER_PREFIX = "park-"
+
+
+class EntryOpen(store.StoreError):
+    """A slot that already has an open park entry was given another."""
+
+    def __init__(self, slot: int):
+        super().__init__(f"slot {slot} already has an open park entry")
+        self.slot = slot
+
+
+@dataclass(frozen=True)
+class ParkEntry:
+    """One `park_entries` row, its columns by name."""
+
+    entry_id: str
+    park_id: str
+    kind: str
+    created_at: str
+    actor: str
+    slot: int
+    request_id: str
+    session_id: str
+    harness: str
+    holder: str
+    outcome: str | None
+    detail: str | None
+    state: str
+    restore_request_id: str | None
+    closed_at: str | None
+
+    @property
+    def open(self) -> bool:
+        return self.state == "open"
+
+    def as_json(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+ENTRY_COLUMNS = tuple(f.name for f in fields(ParkEntry))
+_SELECT_ENTRY = "SELECT " + ", ".join(ENTRY_COLUMNS) + " FROM park_entries"
+
+
+def new_park_id() -> str:
+    """A park id: 8 hex digits from `secrets`."""
+    return secrets.token_hex(4)
+
+
+def park_holder(park_id: str) -> str:
+    """The slots holder name of a park's reservations."""
+    return HOLDER_PREFIX + park_id
+
+
+def add_entry(conn: sqlite3.Connection, *, park_id: str, kind: str, by: str, slot: int,
+              request_id: str, session_id: str, harness: str, holder: str | None = None,
+              outcome: str | None = None, detail: str | None = None,
+              at: str | None = None) -> ParkEntry:
+    """Write an open park entry and return it. `holder` defaults to the park's holder
+    name. A slot that already has an open entry raises `EntryOpen`."""
+    if kind not in ENTRY_KINDS:
+        raise ValueError(f"not a park entry's kind: {kind!r}")
+    if outcome is not None and outcome not in ENTRY_OUTCOMES:
+        raise ValueError(f"not a park entry's outcome: {outcome!r}")
+    made = ParkEntry(secrets.token_hex(8), park_id, kind, at or now(), by, int(slot),
+                     request_id, session_id, harness, holder or park_holder(park_id),
+                     outcome, cut(detail), "open", None, None)
+    try:
+        with _writing(conn):
+            conn.execute(f"INSERT INTO park_entries ({', '.join(ENTRY_COLUMNS)}) "
+                         f"VALUES ({', '.join('?' * len(ENTRY_COLUMNS))})",
+                         tuple(getattr(made, name) for name in ENTRY_COLUMNS))
+    except sqlite3.IntegrityError as exc:
+        if open_entry(conn, slot) is not None:
+            raise EntryOpen(int(slot)) from exc
+        raise
+    return made
+
+
+def get_entry(conn: sqlite3.Connection, entry_id: str) -> ParkEntry | None:
+    values = conn.execute(f"{_SELECT_ENTRY} WHERE entry_id = ?", (entry_id,)).fetchone()
+    return None if values is None else ParkEntry(*values)
+
+
+def open_entry(conn: sqlite3.Connection, slot: int) -> ParkEntry | None:
+    """The open park entry of a slot, or None."""
+    values = conn.execute(f"{_SELECT_ENTRY} WHERE state = 'open' AND slot = ?",
+                          (int(slot),)).fetchone()
+    return None if values is None else ParkEntry(*values)
+
+
+def open_entries(conn: sqlite3.Connection,
+                 slots: Iterable[int] | None = None) -> list[ParkEntry]:
+    """The open park entries in slot order, only those of `slots` when it is given."""
+    sql, params = f"{_SELECT_ENTRY} WHERE state = 'open'", []
+    if slots is not None:
+        wanted = [int(slot) for slot in slots]
+        sql += f" AND slot IN ({', '.join('?' * len(wanted))})"
+        params.extend(wanted)
+    return [ParkEntry(*values) for values in conn.execute(sql + " ORDER BY slot", params)]
+
+
+def entries_of(conn: sqlite3.Connection, request_ids: Iterable[str] = (),
+               session_ids: Iterable[str] = ()) -> list[ParkEntry]:
+    """The open park entries whose launch is one of `request_ids` or whose session is one
+    of `session_ids`, in slot order."""
+    ids, sessions = list(request_ids), list(session_ids)
+    if not ids and not sessions:
+        return []
+    clauses, params = [], []
+    if ids:
+        clauses.append(f"request_id IN ({', '.join('?' * len(ids))})")
+        params.extend(ids)
+    if sessions:
+        clauses.append(f"session_id IN ({', '.join('?' * len(sessions))})")
+        params.extend(sessions)
+    return [ParkEntry(*values) for values in conn.execute(
+        f"{_SELECT_ENTRY} WHERE state = 'open' AND ({' OR '.join(clauses)}) ORDER BY slot",
+        params)]
+
+
+def set_entry(conn: sqlite3.Connection, entry_id: str, *, outcome: str | None = None,
+              detail: str | None = None, request_id: str | None = None) -> bool:
+    """Write an open entry's outcome and detail, or the launch now last in its slot
+    (`request_id`). True when an open entry was written."""
+    if outcome is not None and outcome not in ENTRY_OUTCOMES:
+        raise ValueError(f"not a park entry's outcome: {outcome!r}")
+    sets, params = [], []
+    for name, value in (("outcome", outcome), ("detail", cut(detail)),
+                        ("request_id", request_id)):
+        if value is not None:
+            sets.append(f"{name} = ?")
+            params.append(value)
+    if not sets:
+        return False
+    with _writing(conn):
+        return conn.execute(f"UPDATE park_entries SET {', '.join(sets)} "
+                            "WHERE entry_id = ? AND state = 'open'",
+                            (*params, entry_id)).rowcount == 1
+
+
+def close_entry(conn: sqlite3.Connection, entry_id: str, state: str, *,
+                detail: str | None = None, restore_request_id: str | None = None,
+                at: str | None = None) -> bool:
+    """Close an open entry `restored` or `dropped`. True when this call closed it; an
+    entry already closed is left as it is."""
+    if state not in ENTRY_STATES or state == "open":
+        raise ValueError(f"not a closed park entry's state: {state!r}")
+    with _writing(conn):
+        return conn.execute(
+            "UPDATE park_entries SET state = ?, restore_request_id = ?, closed_at = ?, "
+            "detail = coalesce(?, detail) WHERE entry_id = ? AND state = 'open'",
+            (state, restore_request_id, at or now(), cut(detail), entry_id)).rowcount == 1
+
+
+def entries_log(conn: sqlite3.Connection, *, limit: int | None = None,
+                before: str | datetime | None = None) -> list[ParkEntry]:
+    """Every park entry, open or closed, newest first, at most `limit`, only those made
+    before `before` when it is given."""
+    sql, params = _SELECT_ENTRY, []
+    if before is not None:
+        moment = before if isinstance(before, datetime) else parse_time(before)
+        sql += " WHERE created_at < ?"
+        params.append(stamp(moment))
+    sql += " ORDER BY created_at DESC, entry_id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [ParkEntry(*values) for values in conn.execute(sql, params)]
+
+
 def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
           limit: int = PRUNE_LIMIT) -> dict[str, int]:
     """Delete what is older than `keep_days` and say how many rows of each table went:
     ended runs, with their events and `exits` rows, `exits` rows of an exit refused
-    before it had a run, and released holds. At most `limit` rows of each table go in
-    one call; a run whose events or exits are not all gone yet is kept for the next.
-    Open runs and open holds are never deleted by age."""
+    before it had a run, released holds, and closed park entries. At most `limit` rows
+    of each table go in one call; a run whose events or exits are not all gone yet is
+    kept for the next. Open runs, open holds and open park entries are never deleted by
+    age."""
     moment = parse_time(at) if at else datetime.now(timezone.utc)
     cutoff = stamp(moment - timedelta(days=keep_days))
     with _writing(conn):
@@ -1691,7 +1956,7 @@ def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
             "SELECT run_id FROM runs WHERE state = 'ended' AND updated_at < ? "
             "ORDER BY updated_at LIMIT ?", (cutoff, limit))]
         marks = ", ".join("?" * len(old))
-        gone = {"run_events": 0, "exits": 0, "runs": 0, "warm_holds": 0}
+        gone = {"run_events": 0, "exits": 0, "runs": 0, "warm_holds": 0, "park_entries": 0}
         if old:
             gone["run_events"] = conn.execute(
                 f"DELETE FROM run_events WHERE id IN (SELECT id FROM run_events "
@@ -1711,6 +1976,9 @@ def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
             "DELETE FROM warm_holds WHERE rowid IN (SELECT rowid FROM warm_holds "
             "WHERE released_at IS NOT NULL AND released_at < ? LIMIT ?)",
             (cutoff, limit)).rowcount
+        gone["park_entries"] = conn.execute(
+            "DELETE FROM park_entries WHERE entry_id IN (SELECT entry_id FROM park_entries "
+            "WHERE state <> 'open' AND closed_at < ? LIMIT ?)", (cutoff, limit)).rowcount
     return gone
 
 
@@ -1791,7 +2059,10 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
         conn.close()
 
 
-__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "ENTRY_COLUMNS", "ENTRY_KINDS", "ENTRY_OUTCOMES",
+           "ENTRY_STATES", "EXIT_COLUMNS", "EntryOpen", "HOLDER_PREFIX", "ParkEntry",
+           "add_entry", "close_entry", "entries_log", "entries_of", "get_entry",
+           "new_park_id", "open_entries", "open_entry", "park_holder", "set_entry", "FACTS", "FRESH_CONTEXT", "HARNESSES",
            "HOWS", "JOB_GONE", "KINDS", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PLACES_SCAN",
            "PRUNE_LIMIT", "RECLAIMED",
            "RUN_COLUMNS",
@@ -1801,8 +2072,9 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "SessionTaken", "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event",
            "advance_run", "chain",
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
-           "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "holds_log", "insert_run", "kinds", "launched_by", "learn_session", "log", "log_lines",
+           "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "held_by_sibling",
+           "holds", "insert",
+           "holds_log", "insert_run", "is_launch_parent", "kinds", "launched_by", "learn_session", "log", "log_lines",
            "made_by", "reading",
            "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",

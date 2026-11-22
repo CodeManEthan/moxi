@@ -22,7 +22,7 @@ def pane(session="slot-1", window="@1", index=0, *, home=False, run=False, pane_
          shell="/bin/bash") -> Pane:
     return Pane(session, "$1", attached, window, index, home, run,
                 pane_id or f"%{window[1:]}{pane_index}", pane_index, dead, status, pid,
-                shell, command)
+                shell, command, 900, 1000)
 
 
 def home(**kw) -> Pane:
@@ -37,7 +37,7 @@ def line(p: Pane) -> str:
     values = [p.session, p.session_id, str(p.attached), p.window_id, str(p.window_index),
               "on" if p.home else "", "on" if p.run else "", p.pane_id, str(p.pane_index),
               "1" if p.dead else "0", "" if p.dead_status is None else str(p.dead_status),
-              str(p.pid), p.shell, p.command]
+              str(p.pid), p.shell, str(p.server_pid), str(p.server_start), p.command]
     return "\t".join(values)
 
 
@@ -146,6 +146,19 @@ def test_read_of_a_server_with_no_session_is_no_panes(monkeypatch):
                                        "list-sessions": result(0, "")})
     assert panes.read() == []
     assert [c[0] for c in calls] == ["list-panes", "list-sessions"]
+
+
+def test_the_server_is_read_from_the_panes_or_asked_when_it_has_none(monkeypatch):
+    calls = fake_attempt(monkeypatch, {"list-panes": result(out=line(home()) + "\n")})
+    assert panes.read_server() == ([home()], panes.ServerNow(900, 1000))
+    assert len(calls) == 1
+    calls = fake_attempt(monkeypatch, {"list-panes": result(1, err="no current target"),
+                                       "list-sessions": result(0, ""),
+                                       "display-message": result(0, "77 1234\n")})
+    assert panes.read_server() == ([], panes.ServerNow(77, 1234))
+    assert [c[0] for c in calls] == ["list-panes", "list-sessions", "display-message"]
+    fake_attempt(monkeypatch, {"list-panes": result(1, err="no server running on /x")})
+    assert panes.read_server() == ([], None)
 
 
 def test_read_raises_on_another_failure(monkeypatch):

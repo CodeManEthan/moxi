@@ -64,7 +64,7 @@ Result = relaunch.Result
 #: The targets a fork runs in.
 TARGETS = ("terminal", "slot")
 #: The first turns whose Codex host takes `--fork`.
-CODEX_FORK_TURNS = "0.2.5"
+CODEX_FORK_TURNS = "0.2.6"
 #: The modules whose variables a fork's caller may not stamp: the launch stamps them
 #: itself.
 UNSTAMPED = ("launcher", "turns")

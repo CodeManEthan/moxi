@@ -17,7 +17,9 @@
 //   component placed beside each live one (the topic `sessions` says which are live).
 // - Past sessions: `/api/sessions`, read again when either topic moves. A slot session
 //   resumes through `/api/resume` (202, then followed by its status path); a terminal one
-//   is answered with the `moxi launcher resume` command to copy.
+//   is answered with the `moxi launcher resume` command to copy. Each resumable row takes
+//   a brief or a brief file, sent as the resumed session's first turn; a resume of a `go`
+//   launch is refused without one.
 
 import { css, html, LitElement, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
@@ -32,7 +34,7 @@ import {
   choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS,
   followedOf, formPath, HARNESS, keepLabel, launchBody, launchesView, NO_PRESET, olderPath, outcomeOf,
   parseCatalog, parseForm, parsePasts, parsePresets, parsePreview, pastView, presetLines, presetProblems,
-  presetsOf, refusalLine, requestOf,
+  presetsOf, refusalLine, requestOf, resumeBody,
 } from "./panel.ts";
 import type {
   Catalog, Choice, Followed, Form, LaunchBody, LaunchItem, Outcome, Past, PastItem, Pasts, Presets, Preview,
@@ -86,6 +88,11 @@ const STYLES = css`
   .list > li.mine { border-left: 3px solid var(--moxi-accent); padding-left: 6px; }
   .first { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
   .label { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+  .resume-brief { display: flex; flex-wrap: wrap; gap: var(--moxi-gap) calc(var(--moxi-gap) * 2); min-width: 0; }
+  .resume-brief label { display: grid; gap: 2px; flex: 1 1 14em; min-width: 0; font-size: var(--moxi-font-size-sm); }
+  .resume-brief textarea, .resume-brief input { width: 100%; min-width: 0; padding: 4px 8px; font: inherit; color: var(--moxi-text);
+                                                border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
+                                                background: var(--moxi-bg); }
   .tag { padding: 0 6px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
          font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
   .cell { display: inline-block; max-width: 100%; min-width: 0; }
@@ -104,6 +111,12 @@ interface Follow {
   state: Followed;
   /** Followed no longer: its row or refusal came, or its time ran out. */
   done: boolean;
+}
+
+/** The brief and brief file typed beside a past session's resume button. */
+interface ResumeBrief {
+  brief: string;
+  file: string;
 }
 
 /** What a resume button answered, by the past session's launch. */
@@ -161,6 +174,7 @@ export class LauncherPage extends LitElement {
   #outcome: Outcome | null = null;
   #follows = new Map<string, Follow>();
   #resumes = new Map<string, Resumed>();
+  #resumeBriefs = new Map<string, ResumeBrief>();
   #copied = "";
   // The `sessions` block: placed once, and whether the shell could place it.
   #sessionsPlaced = false;
@@ -467,10 +481,17 @@ export class LauncherPage extends LitElement {
     if (item.session === null || this.#resumes.get(item.request)?.busy) return;
     this.#resumes.set(item.request, { busy: true, outcome: null });
     this.requestUpdate();
-    const outcome = outcomeOf(await api("launcher", "api/resume", { session: item.session }));
+    const typed = this.#resumeBriefs.get(item.request) ?? { brief: "", file: "" };
+    const body = resumeBody(item.session, typed.brief, typed.file);
+    const outcome = outcomeOf(await api("launcher", "api/resume", body));
     this.#resumes.set(item.request, { busy: false, outcome });
     if (outcome.kind === "started") this.#follow(outcome.status.request, outcome.status.path, item.request);
     this.requestUpdate();
+  }
+
+  #typeBrief(request: string, key: keyof ResumeBrief, value: string): void {
+    const typed = this.#resumeBriefs.get(request) ?? { brief: "", file: "" };
+    this.#resumeBriefs.set(request, { ...typed, [key]: value });
   }
 
   async #more(): Promise<void> {
@@ -701,7 +722,7 @@ export class LauncherPage extends LitElement {
     else if (view.state === "failed") status = html`<p class="problem" data-line="failed" title=${view.detail ?? nothing}>Can't reach the launcher's page server.</p>`;
     return html`<section class="past" data-part="past" data-state=${view.state}>
       <h2>Past sessions</h2>
-      <p class="help">Each launch's session, newest first. A session in a slot resumes from here; one in a terminal gives the command to resume it in a terminal of your own.</p>
+      <p class="help">Each launch's session, newest first. A session in a slot resumes from here; one in a terminal gives the command to resume it in a terminal of your own. A brief, or a brief file, is sent as the resumed session's first turn; a session launched with posture go needs one.</p>
       ${status}
       ${view.rows.length ? html`<ul class="list">${repeat(view.rows, (row) => row.request, (row) => this.#pastRow(row))}</ul>` : nothing}
       ${view.rows.length ? html`<button class="more" data-action="older" ?disabled=${this.#olderBusy} @click=${() => void this.#more()}>Older</button>` : nothing}
@@ -730,6 +751,15 @@ export class LauncherPage extends LitElement {
       }
     }
     const label = row.resume === "slot" ? "Resume" : "Command to resume";
+    const typed = this.#resumeBriefs.get(row.request) ?? { brief: "", file: "" };
+    const brief = row.resume === "none" ? nothing : html`<div class="resume-brief">
+        <label>Brief
+          <textarea data-field="brief" rows="2" .value=${typed.brief}
+            @input=${(event: Event) => this.#typeBrief(row.request, "brief", (event.target as HTMLTextAreaElement).value)}></textarea></label>
+        <label>Brief from a file
+          <input type="text" data-field="brief-file" placeholder="an absolute path" .value=${typed.file}
+            @input=${(event: Event) => this.#typeBrief(row.request, "file", (event.target as HTMLInputElement).value)}></label>
+      </div>`;
     return html`<li data-request=${row.request} data-session=${row.session ?? nothing} data-resume=${row.resume}>
       <div class="first">
         <span class="label">${row.label}</span>
@@ -740,6 +770,7 @@ export class LauncherPage extends LitElement {
       <code data-field="cwd">${row.cwd}</code>
       <p class="dim">${row.when}${row.session ? ` · session ${row.session}` : ""}</p>
       ${row.why ? html`<p class="dim">${row.why}</p>` : nothing}
+      ${brief}
       <div data-field="resumed">${said}</div>
     </li>`;
   }

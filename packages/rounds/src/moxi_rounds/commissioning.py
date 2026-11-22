@@ -32,7 +32,8 @@ from the base, and its worktree, in one git call, at `<worktree_dir>/<repo>/<bra
 the worktree's marker, in the worktree's own git folder; the scratch folder,
 `<cache dir>/scratch/<repo>/<branch>/<build id>`, with a create that fails on a folder
 already there, and its marker first in it. Then it appends `build.commissioned` with
-both folders, the build id and this machine's host name, after the `stage.declared` of
+both folders, each under the home folder written `~/<rest>` (`places.contract_home`), the
+build id and this machine's host name, after the `stage.declared` of
 a stage declared here. A branch is percent-encoded in
 both paths (`places.encode`).
 
@@ -234,7 +235,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
                 "slices": [dict(one) for one in stage.slices]}))
         fields = {"stage": found.stage, "repo": found.repo, "branch": found.branch,
                   "base": found.base, "target": found.target,
-                  "worktree": str(found.worktree), "scratch": str(scratch),
+                  "worktree": places.contract_home(found.worktree),
+                  "scratch": places.contract_home(scratch),
                   "builder": builder, "host": places.host(), "build": build_id}
         if record is not None:
             fields["record"] = record
@@ -248,16 +250,18 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
     # The state the block is read from is the log as it stood under the lock with
     # this verb's own events: a stage declared here is in it.
     after = states.fold([*written.view.events, *written.events])
+    worktree = Path(places.expand_home(one["worktree"]))
+    scratch = Path(places.expand_home(one["scratch"]))
     made = commission_block.block(
         after, written.view.project_state, name=name, stage=one["stage"],
         repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
-        worktree=Path(one["worktree"]), scratch=Path(one["scratch"]), settings=settings)
+        worktree=worktree, scratch=scratch, settings=settings)
     limit = own.round_setting(settings, home.project, sizing.LIMIT)
     declared = [event for event in written.events if event["type"] == "stage.declared"]
     return Commissioned(
         name=name, stage=one["stage"], repo=one["repo"], branch=one["branch"],
-        base=one["base"], target=one["target"], worktree=Path(one["worktree"]),
-        scratch=Path(one["scratch"]), build=one["build"], host=one["host"],
+        base=one["base"], target=one["target"], worktree=worktree,
+        scratch=scratch, build=one["build"], host=one["host"],
         builder=builder, record=record, adopted=written.result[2], event=one,
         block=made, oversized=freezing.oversized({"stage": declared}, limit),
         slice_minutes=limit, failed=written.failed)

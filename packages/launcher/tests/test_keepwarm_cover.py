@@ -132,7 +132,7 @@ def test_on_is_the_launch_value_or_cover(conn):
 
 
 def test_the_record_adds_no_store_step():
-    assert len(store.STEPS) == 3
+    assert len(store.STEPS) == 4
 
 
 # -- the ask's first read ------------------------------------------------------------------
@@ -293,6 +293,14 @@ def test_nobody_at_work_on_lists_read_whole_ends_the_cover_and_the_next_ask_is_o
     again = ask_in(conn, w)
     assert (again.verdict.outcome, again.verdict.word) == (None, "off")
     assert w.comms.calls == [] and len(offs(conn)) == 1
+
+
+def test_a_dry_run_that_would_end_the_cover_writes_nothing(conn):
+    off(conn)
+    covered(conn)
+    got = ask_in(conn, world(), dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word) == (None, "idle")
+    assert offs(conn) == [] and keepwarm.cover(conn, row(conn), SID) is not None
 
 
 def test_comms_down_keeps_the_cover(conn):

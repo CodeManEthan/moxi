@@ -70,7 +70,8 @@ What this module gives the rest of the launcher:
 - `forked(harness, values)`: a fork's values from its parent's, by each row's `fork`
   class.
 - `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
-  `when` and `offered_with` state, each refused with its own words.
+  `when` and `offered_with` state, each refused with its own words, and the one rule no
+  row states: a scratch launch can't recycle itself (`refuse_scratch_recycle`).
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -1061,7 +1062,10 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
     - a row chosen for this launch (`chosen`: typed or from the preset) whose
       `offered_with` row is at its default, which leaves it nothing to do.
 
-    A row not in `values` is not offered here and is not looked at."""
+    A row not in `values` is not offered here and is not looked at. First
+    comes `refuse_scratch_recycle`, which no other value can fix, so a launch, its
+    preview and `presets check` all refuse that pair in its own words."""
+    refuse_scratch_recycle(values)
     avail = _available(available)
     chosen = frozenset(chosen)
     for name, value in values.items():
@@ -1077,6 +1081,27 @@ def refuse_values(harness: str, values: Mapping[str, object], *,
                                                                             other.default):
                 raise NeedsModule(row_, f"{name} needs {row_.offered_with}",
                                   f"set {row_.offered_with} too, or leave {name} out")
+
+
+#: Why a scratch launch may not recycle itself, and what to do instead: a scratch folder
+#: has no notes directory to keep a handoff in. `compact` stays open to a scratch.
+SCRATCH_RECYCLE = ("a scratch launch can't recycle itself",
+                   "recycle with compact, or launch in a directory")
+
+
+class ScratchRecycle(Refused):
+    """A scratch launch set to recycle itself (`recycle_at_limit = relaunch`): a scratch
+    folder has no notes directory to keep its handoff in."""
+
+    code = "scratch-recycle"
+
+
+def refuse_scratch_recycle(values: Mapping[str, object]) -> None:
+    """Refuse `ScratchRecycle` when `values` set `scratch` and `recycle_at_limit =
+    relaunch` together. `presets.resolve` has already set a `[defaults]` relaunch to
+    `off` on a scratch launch, so what reaches here was typed or set by the preset."""
+    if bool(values.get("scratch")) and values.get("recycle_at_limit") == "relaunch":
+        raise ScratchRecycle("recycle_at_limit", *SCRATCH_RECYCLE)
 
 
 def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],
@@ -1225,13 +1250,14 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
 @dataclass(frozen=True)
 class Parsed:
     """A launch's typed flags. `values` holds the rows typed, checked, by name;
-    `unknown` the flags the parser did not know, in order, and `extra` those with the
-    words after `--`, which go last on the harness's argv."""
+    `unknown` the flags the parser did not know, in order, `tail` the words after `--`,
+    and `extra` the unknown flags then the tail, which go last on the harness's argv."""
 
     harness: str
     values: Mapping[str, object]
     unknown: tuple[str, ...]
     extra: tuple[str, ...]
+    tail: tuple[str, ...] = ()
 
     @property
     def warning(self) -> str | None:
@@ -1266,7 +1292,8 @@ def parse(argv: Sequence[str], harness: str, *,
         values[name] = found.check(value) if found is not None else value
     extra = [*unknown, *tail]
     refuse_passthrough(harness, extra)
-    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra))
+    return Parsed(harness, MappingProxyType(values), tuple(unknown), tuple(extra),
+                  tuple(tail))
 
 
 def typed_harness(argv: Sequence[str]) -> str | None:

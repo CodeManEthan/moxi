@@ -123,9 +123,38 @@ export function limitAddress(harness: string, limit: string, minutes: number): A
   return { piece: "limit", harness, limit, minutes };
 }
 
-/** What the page does to the browser's address when the piece that is open changes: it
- * rewrites the entry it is on and adds none, so Back leaves the page. Null when the
- * address already says it, or when the document is not at the page. */
+/** The view of the page an address stands in, as far as history goes: the page itself
+ * (nothing open, a limit row, Models, Kinds, or an address it does not have), Sessions,
+ * one session, a session's subagents, Projects (or Folders), or Prices. Opening a limit
+ * row or a subagent of the one open moves to no other view. */
+export function historyView(address: Address): string {
+  switch (address.piece) {
+    case "none":
+    case "unknown":
+    case "limit":
+    case "models":
+    case "kinds":
+      return "";
+    case "sessions":
+      if (address.harness === null || address.session === null) return "sessions";
+      return ["sessions", address.harness, address.session, ...(address.agent === null ? [] : ["agents"])]
+        .map(encodeURIComponent).join("/");
+    case "projects":
+    case "folders":
+      return "projects";
+    default:
+      return address.piece;
+  }
+}
+
+/** Whether moving from one address to another adds a history entry: only when it moves
+ * to another view (`historyView`). Within a view the page rewrites the entry it is on. */
+export function addsHistoryEntry(from: Address, to: Address): boolean {
+  return historyView(from) !== historyView(to);
+}
+
+/** The browser address the page writes when the piece that is open changes. Null when
+ * the address already says it, or when the document is not at the page. */
 export function addressWrite(address: Address, pathname: string): string | null {
   if (!/^\/m\/usage(\/|$)/.test(pathname)) return null;
   const path = addressPath(address);

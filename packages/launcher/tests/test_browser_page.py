@@ -3,7 +3,8 @@ launcher's real page server: the contract check on the panel and both components
 session in the error colour, a session's state followed through a clear, the sessions
 block on the panel, the 360 px width check, the launch form filled from a preset and what
 an emptied field leaves out, a headless launch whose row arrives by push, a refusal met
-before a launch's row, and a past terminal session's command to resume.
+before a launch's row, and a past terminal session's command to resume, with the brief
+typed beside it.
 
 The shell runs with a fake `claude` first on its `PATH`, which prints a line and exits, so
 a launch from the panel runs that and nothing else. Every test seeds rows of its own in
@@ -432,3 +433,19 @@ def test_a_past_terminal_session_gives_the_command_to_resume(ui_shell, ui_page):
     expect(past.locator("[data-copy]")).to_have_text(f"moxi launcher resume {sid}")
     expect(past.locator('[data-field="resumed"]')).to_contain_text(
         "Run this in a terminal of your own")
+
+
+def test_a_past_go_session_resumes_only_with_a_brief_which_its_command_carries(ui_shell,
+                                                                               ui_page):
+    sid = kit.seed(ui_shell, "past-go", target="terminal", posture="go")
+    panel = kit.open_panel(ui_page)
+    past = panel.locator('section.past li[data-request="past-go"]')
+    resume = past.get_by_role("button", name="Command to resume")
+    resume.click()
+    refused = past.locator('[data-field="resumed"] [data-code]')
+    expect(refused).to_have_attribute("data-code", "posture-brief")
+    expect(refused).to_contain_text("posture go needs a brief on a resume")
+    past.get_by_label("Brief", exact=True).fill("Carry on.")
+    resume.click()
+    expect(past.locator("[data-copy]")).to_have_text(
+        f"moxi launcher resume {sid} --brief 'Carry on.'")

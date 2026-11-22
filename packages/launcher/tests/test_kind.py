@@ -230,7 +230,7 @@ def test_a_log_held_past_the_wait_raises_busy_and_writes_nothing():
 
 def test_a_log_a_newer_launcher_wrote_is_refused_not_read(conn):
     launch(conn, preset_kind="seat")
-    conn.execute("PRAGMA user_version = 4")
+    conn.execute(f"PRAGMA user_version = {len(store.STEPS) + 1}")
     with pytest.raises(core_store.StoreTooNew):
         api.launch_kind(CLAUDE_ID)
 

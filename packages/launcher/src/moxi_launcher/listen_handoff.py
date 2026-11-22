@@ -21,7 +21,8 @@ handoff picked.
 After the pointer come other seats' waiting handoffs in the same folder, one line each,
 newest first, at most `handoffs.OTHERS_SHOWN`, then how many more (`handoffs.others`). They
 mark nothing picked: each waits for its own seat. A session with no key gets no pointer and
-these lines for every waiting handoff in its folder.
+these lines for every waiting handoff in its folder. A session with no handoff folder (notes
+installed and no notes directory for it) gets nothing.
 """
 
 from __future__ import annotations
@@ -58,7 +59,10 @@ def _launched(event, conn) -> list[str]:
     if row is None or row.target == "headless" or row.fork_of:
         return []
     key = handoffs.key_of_row(row)
-    where = handoffs.handoff_dir_of_row(row, create=key is not None)
+    try:
+        where = handoffs.handoff_dir_of_row(row, create=key is not None)
+    except handoffs.NoNotesDir:
+        return []
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:
@@ -71,7 +75,10 @@ def _launched(event, conn) -> list[str]:
 
 def _by_hand(event, env, conn) -> list[str]:
     key = handoffs.key_of_env(env)
-    where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
+    try:
+        where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
+    except handoffs.NoNotesDir:
+        return []
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:

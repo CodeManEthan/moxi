@@ -86,7 +86,7 @@ def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
 
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
         assert snapshot(conn) == before
         assert [r[0] for r in conn.execute("SELECT base_env_json FROM launches")] == [None] * 4
         assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
@@ -96,6 +96,47 @@ def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_a_version_3_log_moves_to_4_with_fork_of_and_keeps_its_park_entries(
+        tmp_path, monkeypatch):
+    db = version_1(tmp_path / "launcher.db")
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "STEPS", store.STEPS[:3])
+        conn = store.connect(db)
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            store.add_entry(conn, park_id="p1", kind="park", by="someone", slot=3,
+                            request_id="r-slot", session_id=COMPACTED, harness="claude")
+            before = snapshot(conn)
+        finally:
+            conn.close()
+    assert "fork_of" not in [r[1] for r in sqlite3.connect(db).execute(
+        "PRAGMA table_info(launches)")]
+
+    conn = store.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+        assert snapshot(conn) == before
+        assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
+        assert [e.slot for e in store.open_entries(conn)] == [3]
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'index' "
+                            "AND name = 'launches_fork_of'").fetchone() is not None
+        launch(conn, "r-fork", fork_of=COMPACTED)
+        assert store.get(conn, "r-fork").fork_of == COMPACTED
+    finally:
+        conn.close()
+
+
+def test_a_fresh_log_is_made_at_version_4_with_fork_of(conn):
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(launches)")]
+    assert columns[-1] == "fork_of"
+    assert conn.execute("SELECT count(*) FROM park_entries").fetchone()[0] == 0
+    launch(conn, "r1")
+    launch(conn, "r2", fork_of="r1-0000-4000-8000-000000000000")
+    assert store.get(conn, "r1").fork_of is None
+    assert store.get(conn, "r2").fork_of == "r1-0000-4000-8000-000000000000"
 
 
 def test_the_carried_log_reads_as_it_did(tmp_path):
@@ -430,7 +471,8 @@ def test_prune_deletes_old_ended_runs_with_their_events_and_exits(conn):
     conn.execute("INSERT INTO warm_holds VALUES ('r2', 'new', ?, ?)",
                  (at(-20 * 86400), at(-10 * 86400)))
     counts = store.prune(conn, 90, at=at())
-    assert counts == {"run_events": 2, "exits": 1, "runs": 1, "warm_holds": 1}
+    assert counts == {"run_events": 2, "exits": 1, "runs": 1, "warm_holds": 1,
+                      "park_entries": 0}
     assert store.get_run(conn, gone.run_id) is None
     assert store.get_run(conn, kept_recent.run_id) is not None
     assert store.get_run(conn, kept_open.run_id).state == "armed"
@@ -448,11 +490,11 @@ def test_prune_takes_at_most_its_limit_of_each_table_and_finishes_later(conn):
     assert conn.execute("SELECT count(*) FROM run_events").fetchone()[0] == 0
 
 
-def test_a_newer_store_than_version_3_is_refused(tmp_path):
+def test_a_newer_store_than_this_launchers_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA user_version = 4")
+    conn.execute(f"PRAGMA user_version = {len(store.STEPS) + 1}")
     conn.close()
     with pytest.raises(core_store.StoreTooNew):
         store.connect(db)

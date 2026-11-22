@@ -17,6 +17,14 @@ folder rounds made from one it did not: a folder with no marker, or one naming a
 build, is never taken for a build's own.
 
 **The host** is this machine's name, recorded with the build that made folders here.
+
+**A path in a record.** A path rounds writes into a round's records is written `~` when
+it is the home folder and `~/<rest>` when it is under it, the rest with the separators
+the path has (`contract_home`); any other path is written as it is. A path read from a
+record is expanded before rounds acts on it (`expand_home`): `~`, and a path that
+starts with `~` and a separator, name the home folder; every other path, a relative one
+and a `~user` one included, is read as it is written.
+A record that holds the whole path reads the same as one that holds the `~` form.
 """
 
 from __future__ import annotations
@@ -77,6 +85,33 @@ def made_here(commissioned: Mapping, *, unrecorded_is_here: bool) -> bool:
     if recorded is None:
         return unrecorded_is_here
     return recorded == host()
+
+
+def expand_home(recorded: object) -> str:
+    """The path `recorded`, as a round's record holds it, as it names a place on this
+    machine: `~` itself, or `~` followed by a separator and the rest, with the home folder
+    in place of `~`; any other path, `~user` and `~user/<rest>` among them, as written."""
+    text = str(recorded)
+    seps = os.sep + (os.altsep or "")
+    if text == "~" or (len(text) > 1 and text[0] == "~" and text[1] in seps):
+        return os.path.expanduser(text)
+    return text
+
+
+def contract_home(path: str | os.PathLike) -> str:
+    """`path` as a round's record holds it: `~` for the home folder, `~` followed by the
+    rest for a path under it, any other path as it is. A path that only starts with the
+    home folder's name, as `/home/ann2` does with `/home/ann`, is not under it."""
+    text = os.fspath(path)
+    seps = os.sep + (os.altsep or "")
+    home = os.path.expanduser("~").rstrip(seps)
+    if not home or not os.path.isabs(home):
+        return text
+    if text == home:
+        return "~"
+    if text.startswith(home) and text[len(home)] in seps:
+        return "~" + text[len(home):]
+    return text
 
 
 def worktree_dir(settings, env=None) -> Path:
@@ -182,6 +217,6 @@ def worktree_marker(place: Path) -> Marker | None:
 
 
 __all__ = ["SCRATCH_DIR", "SCRATCH_MARKER", "WORKTREE_MARKER", "Marker", "encode",
-           "new_build_id", "is_build_id", "host", "worktree_dir", "scratch_root",
-           "worktree_place", "scratch_place", "marker", "read_marker", "write_marker",
-           "worktree_git_dir", "worktree_marker"]
+           "new_build_id", "is_build_id", "host", "expand_home", "contract_home",
+           "worktree_dir", "scratch_root", "worktree_place", "scratch_place", "marker",
+           "read_marker", "write_marker", "worktree_git_dir", "worktree_marker"]

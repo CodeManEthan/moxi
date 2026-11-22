@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.5 (unreleased)
+## 0.2.6 (unreleased)
 
 - The Codex host takes `--fork THREAD_ID` (`codex.launch(fork=...)`), beside and never
   with `--resume`: its first load forks that thread with `thread/fork`, live or not, into a
@@ -8,6 +8,17 @@
   is loaded as a resumed one, with no item injected, and its id names the session from
   the fork on, so a later load resumes it and the thread is never forked twice. Ready is
   `resume`, or `startup` when the forked thread has had no turn.
+
+## 0.2.5 (2026-11-22)
+
+- A new listener event, `load`, observe only like `ready`: a Claude Code endpoint raises
+  it once per endpoint process, the first time it learns its session's id. That is
+  normally the runner's `session` line at the endpoint's own start, so a module hears of
+  an endpoint that replaced another (Claude Code ends and restarts every endpoint when
+  its plugins reload) without waiting for the session's next start, resume, clear or
+  compaction. When that line carries no id, `load` comes just before the first `ready`.
+  Every row naming it is called with the session's id, harness and environment, and its
+  answer is ignored. A turns older than this refuses a registration that names `load`.
 - `question_mode.origins` is retired and replaced by `prompt.own_origins`, default still
   `["composer", "bridge"]`: the prompt origins that count as the person's own. Each
   `prompt` event carries `own`, true when its origin is on that list, and question mode's

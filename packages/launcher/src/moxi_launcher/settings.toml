@@ -81,6 +81,15 @@ label = "A launch from the page may take"
 group = "Waits"
 unit = "seconds"
 
+[park.wait_s]
+type = "int"
+default = 300
+doc = "How long park waits for each session to be quiet before it leaves it running, in seconds."
+read = "use"
+label = "Park waits for each session to be quiet"
+group = "Waits"
+unit = "seconds"
+
 [runs.keep_days]
 type = "int"
 default = 30
@@ -229,7 +238,7 @@ group = "Keep warm"
 
 [name.template]
 type = "string"
-default = "<project>-<model>-<date:mmm-dd hh:mm>"
+default = "<date>-<time>-<project>-<agent>"
 doc = "The template a launch's session name is made from, with the pieces <project>, <agent>, <model>, <identity>, <scope>, <instance>, <date[:format]> and <time[:format]>."
 read = "use"
 elsewhere = "The session-name template is edited in Home's Options."
@@ -245,7 +254,7 @@ elsewhere = "The session-name template is edited in Home's Options."
 [records.keep_days]
 type = "int"
 default = 90
-doc = "How many days ended runs, their events and exits, and released holds are kept."
+doc = "How many days ended runs, their events and exits, released holds and closed park entries are kept."
 read = "use"
 label = "Keep run records for"
 line = "Ended runs, their events and exits, and released holds."

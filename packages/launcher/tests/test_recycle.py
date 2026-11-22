@@ -18,6 +18,7 @@ from moxi_launcher import cachetimers, job, recycle, store
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+OTHER = "11111111-2222-4333-8444-555555555555"
 SETTINGS = {"relaunch.person_s": 120, "relaunch.wait_s": 900, "records.keep_days": 90,
             "recycle.limit_wait_s": 1800}
 
@@ -519,6 +520,93 @@ def test_a_fault_after_the_run_was_written_ends_it_error(conn):
     assert (run.state, run.outcome) == ("ended", "error")
 
 
+# -- by hand: clear-expired and its dry run -----------------------------------------------
+
+
+def test_a_dry_run_says_a_clear_would_run_and_writes_nothing(conn):
+    got = ask(conn, dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word) == (None, "would-clear")
+    assert "stopping its background shells" in got.verdict.detail
+    assert got.runs == [] and got.session.commands == []
+
+
+def test_a_dry_run_of_a_compact_or_a_short_idle_names_no_shells(conn):
+    got = ask(conn, cache=FakeCache(age=3599.0), dry_run=True)
+    assert got.verdict.word == "would-clear" and "shells" not in got.verdict.detail
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_on_expiry": "compact"}',))
+    assert ask(conn, dry_run=True).verdict.word == "would-compact"
+
+
+def test_a_dry_run_says_blocked_with_its_word_and_writes_no_run(conn):
+    got = ask(conn, session=FakeSession(facts_seq=[facts(draft=True)]), dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word, got.verdict.run_id) == (
+        "blocked", "draft", None)
+    assert got.runs == []
+
+
+def test_a_dry_run_ends_quietly_where_a_run_would(conn):
+    got = ask(conn, cache=FakeCache(kind="warm"), dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word) == (None, "warm")
+
+
+def sweep(conn, session, *, which=None, **kw):
+    return recycle.clear_expired(which, conn=conn, turns=FakeTurns(session),
+                                 slots_api=FakeSlots(), cache=FakeCache(),
+                                 settings=SETTINGS, **kw)
+
+
+def test_clear_expired_asks_every_live_launch_that_recycles_on_expiry(conn):
+    launched(conn, request_id="r2", session_id=NEW, values={"recycle_on_expiry": "off"})
+    launched(conn, request_id="r3", session_id=OTHER, claimed=False)
+    session = FakeSession()
+    got = sweep(conn, session)
+    assert got.exit_code == 0
+    assert [(s["request_id"], s["session_id"], s["outcome"]) for s in got.data["sessions"]] \
+        == [("r1", SID, "cleared")]
+    assert got.data["dry_run"] is False and session.commands == [("clear", 4,
+                                                                  {"stop_shells": True})]
+    assert got.lines == (f"session {SID} (launch r1): cleared: the session cleared; its "
+                         f"new session id is {NEW}",)
+
+
+def test_clear_expired_dry_run_prints_each_verdict_and_writes_nothing(conn):
+    session = FakeSession()
+    got = sweep(conn, session, dry_run=True)
+    assert got.exit_code == 0 and got.data["outcome"] == "dry-run"
+    [line] = got.lines
+    assert line.startswith(f"session {SID} (launch r1): nothing done (would-clear): a run "
+                           "would clear the session now")
+    assert store.runs(conn) == [] and session.commands == []
+
+
+def test_clear_expired_exits_1_on_a_verdict_someone_should_see(conn):
+    got = sweep(conn, FakeSession(facts_seq=[facts(draft=True)]), dry_run=True)
+    assert got.exit_code == 1 and got.data["sessions"][0]["word"] == "draft"
+
+
+def test_clear_expired_with_no_launch_that_recycles_says_so(conn):
+    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    got = sweep(conn, FakeSession())
+    assert (got.exit_code, got.lines, got.data["sessions"]) == (
+        0, ("no live launch recycles on expiry",), [])
+
+
+def test_clear_expired_with_a_session_asks_only_the_launch_last_known_by_it(conn):
+    launched(conn, request_id="r2", session_id=NEW, values={"recycle_on_expiry": "clear"})
+    got = sweep(conn, FakeSession(), which=NEW, dry_run=True)
+    assert [(s["request_id"], s["session_id"]) for s in got.data["sessions"]] == [
+        ("r2", NEW)]
+
+
+def test_clear_expired_with_a_session_no_launch_has_says_so_and_exits_0(conn):
+    session = FakeSession()
+    got = sweep(conn, session, which=OTHER)
+    assert (got.exit_code, got.lines, got.data["sessions"]) == (
+        0, (f"no live launch that recycles on expiry has current session {OTHER}",), [])
+    assert store.runs(conn) == [] and session.commands == []
+
+
 # -- the crossing handler ----------------------------------------------------------------
 
 
@@ -551,7 +639,7 @@ def limit(conn, value):
 def test_a_relaunch_crossing_tells_the_agent_and_records_that_it_was_told(conn):
     limit(conn, "relaunch")
     line = recycle.crossing_line(conn, crossing(), pid=os.getpid())
-    assert line == recycle.RELAUNCH_LINE and "relaunch --self --handoff" in line
+    assert line == recycle.relaunch_line("1x") and "relaunch --self --handoff" in line
     [told] = [e for e in store.events(conn, "r1") if e.kind == "recycle-told"]
     assert told.detail["crossing_key"] == f"{SID}|1x|2026-10-31T10:00:00Z"
     assert store.runs(conn, request_id="r1") == []
@@ -571,6 +659,20 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     limit(conn, "relaunch")
     assert recycle.crossing_line(conn, crossing(session_id=NEW), pid=os.getpid()) is None
     assert recycle.crossing_line(conn, crossing(), pid=os.getppid()) is None
+
+
+def test_an_older_scratch_row_set_to_relaunch_gets_no_line(conn, script):
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"scratch": true, "recycle_at_limit": "relaunch", "limit_at": "1x"}',))
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) is None
+    assert [e for e in store.events(conn, "r1") if e.kind == "recycle-told"] == []
+    # A scratch that compacts still compacts.
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 ('{"scratch": true, "recycle_at_limit": "compact", "limit_at": "1x"}',))
+    spawn = Spawned()
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid(),
+                                 spawn=spawn) == recycle.COMPACT_LINE
+    assert len(spawn.calls) == 1
 
 
 def test_a_compact_crossing_writes_its_run_and_spawns_its_job(conn, script, monkeypatch):
@@ -632,10 +734,25 @@ def through_usage(group, at):
     return group.mark.run_handlers(crossing, wait=5.0)
 
 
+def test_the_relaunch_line_says_the_launch_lets_the_agent_recycle_at_the_mark(conn):
+    limit(conn, "relaunch")
+    line = recycle.crossing_line(conn, crossing(mark="1.5x"), pid=os.getpid())
+    assert line.startswith("This launch lets you recycle yourself, now that its context "
+                           "has passed the 1.5x mark.")
+    assert "start nothing new" in line and "as your last act" in line
+    assert "don't recycle at the end of a task" in line
+    assert "background shells" not in line
+
+
+def test_a_crossing_with_no_mark_gets_the_line_without_its_clause():
+    assert recycle.relaunch_line(None).startswith(
+        "This launch lets you recycle yourself. Only if you are mid-work")
+
+
 def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
     limit(usage_group.conn, "relaunch")
-    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
-    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    assert recycle.relaunch_line("1x") in through_usage(usage_group, 1761904800.0)
+    assert recycle.relaunch_line("1x") not in through_usage(usage_group, 1761904800.0)
     told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
     assert len(told) == 1
 
@@ -824,7 +941,7 @@ def test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked(conn, tmp_p
     lock_conn = store.connect(tmp_path / "launcher.db")
     lock_conn.execute("BEGIN IMMEDIATE")
     try:
-        assert recycle.on_crossing(crossing()) == recycle.RELAUNCH_LINE
+        assert recycle.on_crossing(crossing()) == recycle.relaunch_line("1x")
     finally:
         lock_conn.execute("ROLLBACK")
         lock_conn.close()

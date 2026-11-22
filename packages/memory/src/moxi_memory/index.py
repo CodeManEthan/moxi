@@ -95,6 +95,11 @@ _DB_SUFFIXES = ("", "-wal", "-shm", "-journal")
 #: row's kind (a message's role, or a tool call). `key` names the one record the row
 #: came from. `time` is seconds since the epoch.
 #:
+#: Step 2 adds `writer`: who the record's harness says wrote it, as sessions' `writer`
+#: names it (`person`, `model`, `unknown`, or the kind of a message sessions doesn't
+#: mark injected). A row stored before the step has none (NULL) until a rebuild reads
+#: it again; `rows_no_writer` finds those rows without a scan.
+#:
 #: `tails` holds tier 2: the end of each main-session tool result, one row per record
 #: under that record's key, with whether the tool failed.
 #:
@@ -179,7 +184,15 @@ SCHEMA = (
     INSERT INTO meta (key, value) VALUES ('schema', '1'), ('tokenizer', '{TOKENIZER}'),
         ('first_read', '0');
     """,
+    """
+    ALTER TABLE rows ADD COLUMN writer TEXT;
+    CREATE INDEX rows_no_writer ON rows (id) WHERE writer IS NULL;
+    UPDATE meta SET value = '2' WHERE key = 'schema';
+    """,
 )
+
+#: The schema version whose rows record their writer.
+WRITER_SCHEMA = 2
 
 
 class IndexMissing(Exception):
@@ -302,6 +315,27 @@ def stored_redact_version(conn: sqlite3.Connection) -> int:
         return int(value) if value is not None else 1
     except ValueError:
         return 1
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    """A generation's schema version: how many steps of `SCHEMA` it has run."""
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+
+def has_writer(conn: sqlite3.Connection) -> bool:
+    """Whether a generation's `rows` table has the `writer` column: its schema is at
+    `WRITER_SCHEMA` or past it."""
+    return any(column[1] == "writer" for column in
+               conn.execute("PRAGMA table_info(rows)"))
+
+
+def rows_without_writer(conn: sqlite3.Connection) -> int | None:
+    """How many rows of a generation record no writer, or None for a generation at a
+    schema before the column (none of its rows does)."""
+    if not has_writer(conn):
+        return None
+    return int(conn.execute("SELECT count(*) FROM rows INDEXED BY rows_no_writer "
+                            "WHERE writer IS NULL").fetchone()[0])
 
 
 # -- readers --------------------------------------------------------------------------
@@ -672,5 +706,6 @@ __all__ = ["INDEX_DIR", "POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "
            "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",
            "current", "generations", "meta_get", "meta_set", "stored_redact_version",
+           "WRITER_SCHEMA", "schema_version", "has_writer", "rows_without_writer",
            "REDACT_VERSION_KEY", "open_read",
            "rebuild_running", "writer"]

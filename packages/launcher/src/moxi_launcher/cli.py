@@ -14,12 +14,19 @@ launched.
     moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]
     moxi launcher relaunch SESSION_ID|IDENTITY [--dry-run] [--json]
     moxi launcher relaunch --status RUN [--json]
+    moxi launcher relaunch --stop RUN [--json]
     moxi launcher relaunch --from-record RUN [--json]
     moxi launcher exit-session SESSION_ID [--dry-run] [--json]
     moxi launcher exits [--limit N] [--before TIME] [--json]
     moxi launcher sessions [--limit N] [--before TIME] [--json]
-    moxi launcher resume SESSION_ID [--slot N]
+    moxi launcher resume SESSION_ID [--slot N] [--brief TEXT | --brief-file FILE | --plain]
     moxi launcher fork SESSION_ID [--target slot|terminal] [--slot N] [--json]
+    moxi launcher park [--wait-s SECONDS] [--dry-run] [--json]
+    moxi launcher restore [SLOT ...] [--dry-run] [--json]
+    moxi launcher unpark SLOT ... | --all [--json]
+    moxi launcher clear-expired [--session ID] [--dry-run] [--json]
+    moxi launcher keep-warm --session ID [--dry-run] [--json]
+    moxi launcher keep-warm --dry-run [--json]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
     moxi launcher show [SESSION_ID] [--json]
 
@@ -33,13 +40,24 @@ newest launch. `deliver` is internal: the detached process that sends a terminal
 first turn.
 
 The acts on a launched session: `relaunch` arms a relaunch of this session (`--self`), or
-relaunches another as one of its directors, shows a run (`--status`), or launches again
-the session of a run that exited it and did not bring it back (`--from-record`).
+relaunches another as one of its directors, shows a run (`--status`), stops one
+(`--stop`), or launches again the session of a run that exited it and did not bring it
+back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
-lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `fork` starts a new session from a copy of a session's conversation, live or
-not, and prints the new session's id. `keep-warm` opens, releases and lists this session's named holds. `show` shows
-a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
+lists past launches and whether each can be resumed; `resume` launches one again, resumed,
+with `--brief` or `--brief-file` sent as its first turn (a `go` launch's resume needs
+one), or with `--plain` and no first turn, a `go` launch's too. `fork` starts a new
+session from a copy of a session's conversation, live or not, and prints the new
+session's id. `park` exits every launched session in a slot and reserves each slot for
+its session, so that `restore` brings them back after a reboot; `unpark` gives a slot's
+reservation up without bringing its session back. `clear-expired` makes the expiry ask
+of every live launch that recycles on expiry, now, or with `--session ID` of the one
+whose current session is ID;
+`keep-warm --session ID` makes the keep-warm ask of one session, now, and
+`keep-warm --dry-run` of every live launch keep-warm is on for. With `--dry-run` each ask
+takes its reads and writes nothing. `keep-warm hold`, `release` and `holds` open, release
+and list this session's named holds. `show` shows a launched session's relaunch, recycle
+and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
 against the catalog of the harness the launch starts: the one `--harness` names, else the
@@ -51,7 +69,8 @@ relaunch armed or relaunched, a session exited); 1 a start that failed, or a run
 ended in a failed outcome; 2 bad arguments or a bad value; 3 refused (before the launch's
 row is written nothing is written, after it the row says why); 75 a lock held past its
 wait, an act held by the session's state now, or a run still going past the follow
-bound: try again. A refusal prints one line ending in its short code, and a hint.
+bound or still open under `relaunch --status`: try again. A refusal prints one line
+ending in its short code, and a hint.
 `--json` prints the verb's data, with its outcome word.
 """
 
@@ -108,7 +127,7 @@ def _errors() -> tuple[type[BaseException], ...]:
     from . import catalog, first, handoffs
 
     return (catalog.Refused, ConfigError, core_store.StoreError, handoffs.NoKey,
-            first.HandoffUnreadable, NoPreset)
+            handoffs.NoNotesDir, first.HandoffUnreadable, NoPreset)
 
 
 def refusal_lines(error: BaseException) -> tuple[str, str | None]:
@@ -163,6 +182,7 @@ def _request(args: argparse.Namespace):
         _warn(parsed.warning)
     return api.LaunchRequest(seat=args.seat, project_preset=args.project_preset,
                              typed=dict(parsed.values), extra=tuple(parsed.extra),
+                             tail=parsed.tail,
                              off_posture=args.off_posture, left_out=left_out,
                              cwd=os.getcwd())
 
@@ -540,14 +560,14 @@ def _deliver(args: argparse.Namespace, prog: str) -> int:
 # -- acts on launched sessions --------------------------------------------------------------
 
 
-def _said(result, args: argparse.Namespace) -> int:
+def _said(result, args: argparse.Namespace, *, shown: bool = False) -> int:
     """Print a verb's result and return its exit code: with `--json` its data (the outcome
-    word among it) on stdout; else its lines, on stdout when it exits 0 and on stderr
-    otherwise."""
+    word among it) on stdout; else its lines, on stdout when it exits 0 or `shown` (a
+    verb that shows a thing, whose exit code reports on it) and on stderr otherwise."""
     if getattr(args, "json", False):
         print(_dump(dict(result.data)))
     else:
-        out = sys.stdout if result.exit_code == codes.OK else sys.stderr
+        out = sys.stdout if result.exit_code == codes.OK or shown else sys.stderr
         for line in result.lines:
             print(line, file=out)
     return result.exit_code
@@ -557,7 +577,9 @@ def _relaunch(args: argparse.Namespace, prog: str) -> int:
     from . import relaunch
 
     if args.status is not None:
-        return _said(relaunch.status(args.status), args)
+        return _said(relaunch.status(args.status), args, shown=True)
+    if args.stop is not None:
+        return _said(relaunch.stop_run(args.stop), args)
     if args.from_record is not None:
         return _said(relaunch.from_record(args.from_record), args)
     if args.self:
@@ -606,9 +628,46 @@ def _sessions(args: argparse.Namespace, prog: str) -> int:
 
 
 def _resume(args: argparse.Namespace, prog: str) -> int:
-    from . import resume
+    from . import catalog, resume
 
-    return _said(resume.resume(args.session_id, slot=args.slot, warn=_warn), args)
+    if args.plain and (args.brief is not None or args.brief_file is not None):
+        raise catalog.BadValue("plain", "--plain resumes with no first turn, and a brief "
+                                        "was given",
+                               "drop --plain to send the brief, or drop the brief")
+    # A brief file is read against this directory, as a launch's is.
+    brief_file = catalog.cli_path(args.brief_file) if args.brief_file is not None else None
+    return _said(resume.resume(args.session_id, slot=args.slot, brief=args.brief,
+                               brief_file=brief_file, plain=args.plain, warn=_warn), args)
+
+
+def _clear_expired(args: argparse.Namespace, prog: str) -> int:
+    from . import recycle
+
+    return _said(recycle.clear_expired(args.session, dry_run=args.dry_run), args)
+
+
+def _park(args: argparse.Namespace, prog: str) -> int:
+    from . import park
+
+    if args.wait_s is not None and args.wait_s < 0:
+        print(f"{prog} park: --wait-s takes seconds, 0 or more", file=sys.stderr)
+        return codes.USAGE
+    return _said(park.park(wait_s=args.wait_s, dry_run=args.dry_run), args)
+
+
+def _restore(args: argparse.Namespace, prog: str) -> int:
+    from . import restore
+
+    return _said(restore.restore(args.slots, dry_run=args.dry_run, warn=_warn), args)
+
+
+def _unpark(args: argparse.Namespace, prog: str) -> int:
+    from . import restore
+
+    if bool(args.slots) == args.every:
+        print(f"{prog} unpark: give the slots to unpark, or --all", file=sys.stderr)
+        return codes.USAGE
+    return _said(restore.unpark(args.slots, every=args.every), args)
 
 
 def _fork(args: argparse.Namespace, prog: str) -> int:
@@ -621,6 +680,8 @@ def _fork(args: argparse.Namespace, prog: str) -> int:
 def _keep_warm(args: argparse.Namespace, prog: str) -> int:
     from . import keepwarm
 
+    if args.action is None:
+        return _said(keepwarm.keep_warm(args.session, dry_run=args.dry_run), args)
     if args.action == "hold":
         return _said(keepwarm.hold(args.name), args)
     if args.action == "release":
@@ -649,6 +710,10 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "sessions": _sessions,
     "resume": _resume,
     "fork": _fork,
+    "park": _park,
+    "restore": _restore,
+    "unpark": _unpark,
+    "clear-expired": _clear_expired,
     "keep-warm": _keep_warm,
     "show": _state,
 }
@@ -674,6 +739,11 @@ def _launch_flags(parser: argparse.ArgumentParser) -> None:
 LAUNCH_EPILOG = ("Any flag of the launcher's or the harness's catalog may follow; "
                  "moxi launcher catalog lists them. A flag the catalog does not know is "
                  "passed on to the harness, after one warning.")
+#: `run --help`'s own line: where a slot launch goes.
+RUN_EPILOG = (f"{LAUNCH_EPILOG} --target slot --slot N runs the session in slot N, making "
+              "its tmux session again when it is missing; a slot held by another holder, a "
+              "park's reservation among them, is refused. Without --slot it takes the "
+              "lowest slot with no session running and no hold, else a new one.")
 
 
 def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
@@ -689,7 +759,7 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
     # parsers abbreviate nothing: `--project` must stay the catalog's, never become
     # `--project-preset`.
     run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,
-                           epilog=LAUNCH_EPILOG,
+                           epilog=RUN_EPILOG,
                            description="Launch a session from at most one preset and the "
                                        "flags typed. Flags after -- go to the harness last.")
     _launch_flags(run)
@@ -758,15 +828,20 @@ def _act_parsers(verbs) -> None:
         "relaunch", help="relaunch a session in its slot", allow_abbrev=False,
         description="Relaunch a session in its slot: this session with --self and a handoff "
                     "for the new one, or another as one of its directors. --status shows a "
-                    "run; --from-record launches again the session of a run that exited it "
-                    "and did not bring it back.")
+                    "run; --stop stops one; --from-record launches again the session of a "
+                    "run that exited it and did not bring it back.")
     relaunch.add_argument("target", nargs="?", metavar="SESSION_ID|IDENTITY",
                           help="the session to relaunch as its director: its session id or "
-                               "its comms name")
+                               "its comms name. The call follows the run for "
+                               "relaunch.follow_s (300 s shipped): run it with a Bash "
+                               "timeout of at least that plus 30 s")
     form = relaunch.add_mutually_exclusive_group()
     form.add_argument("--self", action="store_true",
                       help="arm a relaunch of the session this runs in")
     form.add_argument("--status", metavar="RUN", help="show the run RUN and its events")
+    form.add_argument("--stop", metavar="RUN",
+                      help="stop the run RUN: before the exit it ends stopped; from the exit "
+                           "on, it ends after the relaunch is tried")
     form.add_argument("--from-record", metavar="RUN",
                       help="launch again the session the run RUN exited")
     relaunch.add_argument("--handoff", metavar="FILE",
@@ -801,6 +876,62 @@ def _act_parsers(verbs) -> None:
                     "that can take it, else the lowest that can, or this terminal.")
     resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")
     resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")
+    resume.add_argument("--brief", metavar="TEXT",
+                        help="the brief, sent as the resumed session's first turn; a "
+                             "resume of a go launch needs one, or --plain")
+    resume.add_argument("--brief-file", metavar="FILE",
+                        help="a file holding the brief, sent as the resumed session's "
+                             "first turn")
+    resume.add_argument("--plain", action="store_true",
+                        help="resume with no first turn, a go launch too; takes no brief")
+
+    clear = verbs.add_parser(
+        "clear-expired", help="ask now whether each session that recycles on expiry is due",
+        allow_abbrev=False,
+        description="Make the expiry ask of every live launch that recycles on expiry, now: "
+                    "each is cleared or compacted when its cache is cold and it is quiet. "
+                    "Exit 1 when an ask ended blocked, failed or unconfirmed.")
+    clear.add_argument("--session", metavar="ID",
+                       help="ask only of the launch whose current session is ID")
+    clear.add_argument("--dry-run", action="store_true",
+                       help="print each session's verdict and what a run would do; writes "
+                            "nothing")
+    clear.add_argument("--json", action="store_true", help="print one JSON object")
+
+    park = verbs.add_parser(
+        "park", help="exit the sessions in slots and reserve their slots",
+        allow_abbrev=False,
+        description="Exit every launched session in a slot once it is quiet, record which "
+                    "session was in which slot, and reserve those slots for moxi launcher "
+                    "restore. A Codex session, and the session park runs in, are reserved "
+                    "and left running.")
+    park.add_argument("--wait-s", type=float, metavar="SECONDS",
+                      help="how long to wait for each session to be quiet (park.wait_s, "
+                           "300 by default)")
+    park.add_argument("--dry-run", action="store_true",
+                      help="say what park would do; write nothing")
+    park.add_argument("--json", action="store_true", help="print one JSON object")
+
+    restore = verbs.add_parser(
+        "restore", help="bring parked sessions back into their slots", allow_abbrev=False,
+        description="Resume each parked session in its reserved slot: every one, or those "
+                    "of the slots named. Crashed slots found since are reserved first.")
+    restore.add_argument("slots", nargs="*", type=int, metavar="SLOT",
+                         help="restore only these slots")
+    restore.add_argument("--dry-run", action="store_true",
+                         help="say what restore would do; write nothing")
+    restore.add_argument("--json", action="store_true", help="print one JSON object")
+
+    unpark = verbs.add_parser(
+        "unpark", help="give up parked slots without restoring them", allow_abbrev=False,
+        description="Release the reservation of each slot named, or of every parked slot "
+                    "with --all, and close its park entry. The session stays resumable by "
+                    "moxi launcher resume.")
+    unpark.add_argument("slots", nargs="*", type=int, metavar="SLOT",
+                        help="the slots to give up")
+    unpark.add_argument("--all", dest="every", action="store_true",
+                        help="give up every parked slot")
+    unpark.add_argument("--json", action="store_true", help="print one JSON object")
 
     fork = verbs.add_parser(
         "fork", help="start a new session from a copy of a session's conversation",
@@ -810,7 +941,7 @@ def _act_parsers(verbs) -> None:
                     "harness sends copied from its launch and no comms name, brief or "
                     "posture; print the new session's id. The session forked goes on as "
                     "it was. A Codex session is forked by turns' Codex host, from "
-                    "moxi-turns 0.2.5 on.")
+                    "moxi-turns 0.2.6 on.")
     fork.add_argument("session_id", metavar="SESSION_ID", help="the session to fork")
     fork.add_argument("--target", choices=("terminal", "slot"), default="terminal",
                       help="where the fork runs: this terminal (the default) or a slot")
@@ -819,11 +950,18 @@ def _act_parsers(verbs) -> None:
     fork.add_argument("--json", action="store_true", help="print one JSON object")
 
     keep_warm = verbs.add_parser(
-        "keep-warm", help="open, release or list this session's holds", allow_abbrev=False,
-        description="Open, release or list the named holds that keep this session's cache "
-                    "warm while work it handed out is running.")
+        "keep-warm", help="ask keep-warm about a session now, or open, release or list "
+                          "this session's holds", allow_abbrev=False,
+        description="With --session, make the keep-warm ask of that session now; with "
+                    "--dry-run alone, of every live launch keep-warm is on for. Or open, "
+                    "release or list the named holds that keep this session's cache warm "
+                    "while work it handed out is running.")
+    keep_warm.add_argument("--session", metavar="ID", help="the session to ask about")
+    keep_warm.add_argument("--dry-run", action="store_true",
+                           help="print each session's verdict and what a run would do; "
+                                "writes nothing")
+    keep_warm.add_argument("--json", action="store_true", help="print one JSON object")
     actions = keep_warm.add_subparsers(dest="action", metavar="ACTION")
-    actions.required = True
     for action, what in (("hold", "open the hold NAME"), ("release", "release the hold NAME")):
         one = actions.add_parser(action, help=what, allow_abbrev=False,
                                  description=what[0].upper() + what[1:] + ".")
@@ -846,16 +984,28 @@ def _act_parsers(verbs) -> None:
 def _check_relaunch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Refuse (exit 2) a relaunch that asks for none, or more than one, of its forms."""
     forms = [args.self, args.target is not None, args.status is not None,
-             args.from_record is not None]
+             args.stop is not None, args.from_record is not None]
     if sum(forms) != 1:
         parser.error("relaunch takes one of --self --handoff FILE, a SESSION_ID or "
-                     "IDENTITY, --status RUN or --from-record RUN")
+                     "IDENTITY, --status RUN, --stop RUN or --from-record RUN")
     if args.self and not args.handoff:
         parser.error("relaunch --self needs --handoff FILE")
     if args.handoff and not args.self:
         parser.error("--handoff goes with --self")
-    if args.dry_run and (args.status is not None or args.from_record is not None):
+    if args.dry_run and (args.status is not None or args.stop is not None
+                         or args.from_record is not None):
         parser.error("--dry-run goes with --self or a SESSION_ID or IDENTITY")
+
+
+def _check_keep_warm(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse (exit 2) a keep-warm that mixes the ask's flags with a hold action, or a live
+    ask that names no session."""
+    if args.action is not None:
+        if args.session is not None or args.dry_run:
+            parser.error(f"keep-warm {args.action} takes no --session or --dry-run")
+    elif args.session is None and not args.dry_run:
+        parser.error("keep-warm needs --session ID, or --dry-run to ask about every "
+                     "session, or one of hold, release or holds")
 
 
 def parse(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher"
@@ -872,6 +1022,8 @@ def parse(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher"
         parser.error("presets show needs a NAME")
     if args.verb == "relaunch":
         _check_relaunch(parser, args)
+    if args.verb == "keep-warm":
+        _check_keep_warm(parser, args)
     args.rest = rest
     return args
 

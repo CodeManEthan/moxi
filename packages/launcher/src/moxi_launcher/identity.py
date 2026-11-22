@@ -9,7 +9,7 @@ one of these of a name:
 | `free` | no one holds it | goes on |
 | `standing` | a standing identity's own name, not bound now | goes on: its session binds it |
 | `offline` | comms' daemon can't be asked | refused as a try-again: the wrapper would stop |
-| `held` | a live session holds it | refused, naming the holder |
+| `held` | a live session holds it | refused, naming the holder; not refused for a relaunch's check when the holder is the session it replaces |
 | `reserved` | a send-only name | refused, naming the module or a program |
 | `retired` | a scoped name comms no longer binds | refused, with comms' words |
 
@@ -28,6 +28,8 @@ from .catalog import Refused
 
 #: The states a launch is refused in: the name is someone else's, or not anyone's to take.
 TAKEN = ("held", "reserved", "retired")
+#: The holder a relaunch's check names when the name's binding has reported no session id.
+NO_SESSION_YET = "a binding that has reported no session yet"
 
 
 class IdentityTaken(Refused):
@@ -125,9 +127,11 @@ def ask(name: str, scope: str | None, comms: Any) -> Any:
     return None if call is None else call(name, scope=scope)
 
 
-def check(name: str, scope: str | None, comms: Any) -> Refused | None:
+def check(name: str, scope: str | None, comms: Any, *,
+          replacing: str | None = None) -> Refused | None:
     """The refusal a launch claiming `name` in `scope` meets, from `comms` (comms' API, or
-    None), or None when the launch goes on. See the module's text."""
+    None), or None when the launch goes on. See the module's text. `replacing` is the
+    session a relaunch takes over: the name held by it is not refused."""
     if comms is None or getattr(comms, "identity_state", None) is None:
         return None
     named = shown(name, scope)
@@ -143,6 +147,16 @@ def check(name: str, scope: str | None, comms: Any) -> Refused | None:
     if state.state not in TAKEN:
         return None
     holder = getattr(state, "holder", None)
+    if state.state == "held" and replacing:
+        held_by = getattr(holder, "session_id", None)
+        if held_by == replacing:
+            return None
+        if not held_by:
+            taken = IdentityTaken(getattr(state, "qualified", None) or named, "held",
+                                  NO_SESSION_YET)
+            taken.hint = ("arm the relaunch again once the session's comms binding has "
+                          "reported its session")
+            return taken
     return IdentityTaken(getattr(state, "qualified", None) or named, state.state,
                          str(holder) if holder else None,
                          module=getattr(state, "module", None),
@@ -156,5 +170,5 @@ def daemon_errors(comms: Any) -> tuple[type[BaseException], ...]:
     return (error,) if isinstance(error, type) and issubclass(error, BaseException) else ()
 
 
-__all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
-           "ask", "check", "daemon_errors", "shown", "words"]
+__all__ = ["NO_SESSION_YET", "TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+           "IdentityTaken", "ask", "check", "daemon_errors", "shown", "words"]

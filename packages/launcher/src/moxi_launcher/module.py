@@ -41,7 +41,8 @@ OPTIONAL = {
           "it the launcher is its command only.",
     "notes": "Handoffs in notes: a launch's handoff folder is the one notes keeps for its "
              "directory (or its notes_dir), where the handoff pointer looks and a "
-             "relaunch's handoff must be. Without it the launcher keeps its own folder.",
+             "relaunch's handoff must be; a launch with no notes directory has no "
+             "handoff folder. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
              "expires, as Keep warm on a running session's row does from the press on, "
              "and recycle_on_expiry clears or compacts an idle session once it has. "

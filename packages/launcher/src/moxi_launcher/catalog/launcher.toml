@@ -135,7 +135,7 @@ carry = false
 type = "string"
 default = ""
 requires = "slots"
-doc = "The tmux slot a slot launch goes into; the lowest free one when unset."
+doc = "The tmux slot a slot launch goes into, made again when missing; when unset, the lowest slot with no session running."
 fork = "own"
 label = "Slot"
 carry = false
@@ -223,11 +223,11 @@ hint = "launch it in a slot (--target slot) where tmux slots run, or recycle wit
 
 [limit_at]
 type = "enum"
-default = "1x"
+default = ""
 values = ["1x", "1.5x", "2x"]
 requires = "usage"
 offered_with = "recycle_at_limit"
-doc = "The context mark at which recycle_at_limit acts, such as 1x or 1.5x."
+doc = "The context mark at which recycle_at_limit acts; when unset, the mark usage warns this launch at, or 1x when it warns at none."
 fork = "drop"
 group = "lifecycle"
 sub = "Context"
