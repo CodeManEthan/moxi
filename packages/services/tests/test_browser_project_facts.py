@@ -1,9 +1,9 @@
 """services' `project-facts` in a browser, placed alone in a real shell whose services page
 server acts on a fake supervisor (`browser_kit`): given projects and an opened one, it
 reports each project's failed services and warnings and the opened one's `Services` row,
-from services' own verdicts; it follows the `rows` topic without reading the route again;
-a store services can't read reports null and the next good one puts the facts back; and
-once removed it reports nothing more.
+from services' own verdicts; past the subscription's first value it follows the `rows`
+topic without reading the route again; a store services can't read reports null and the
+next good one puts the facts back; and once removed it reports nothing more.
 """
 
 from __future__ import annotations
@@ -115,6 +115,18 @@ def _reported(page, check, what: str) -> Any:
     raise AssertionError(f"the last report is not {what}: {json.dumps(last)}")
 
 
+def _reads_of_rows(page, asked: list[str], least: int) -> int:
+    """Wait until `asked` holds at least `least` reads of `/api/rows`; return how many."""
+    deadline = time.monotonic() + WAIT_S
+    while True:
+        reads = sum(1 for url in asked if "/m/services/api/rows" in url)
+        if reads >= least:
+            return reads
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the component read /api/rows {reads} times, not {least}")
+        page.wait_for_timeout(50)
+
+
 def _atlas_section(report: dict) -> dict:
     return report["projects"]["atlas-api"]["sections"][0]
 
@@ -146,8 +158,9 @@ def test_it_reports_services_verdicts_for_the_given_projects_and_follows_the_top
     assert sorted(lines[3])[1].startswith("web running"), lines
     assert "sections" not in report["projects"]["kestrel-web"]
 
-    # A row added under kestrel-web comes by the topic, with no read of the route again.
-    reads = sum(1 for url in asked if "/m/services/api/rows" in url)
+    # Its first read, then one more for the subscription's first value, the one the server
+    # held. A row added under kestrel-web then comes by the topic, with no read of the route.
+    reads = _reads_of_rows(page, asked, 2)
     seed(ui_shell, written("api", project="kestrel-web"))
     report = _reported(page, lambda r: r["projects"]["kestrel-web"].get("parts")
                        == [{"text": "api failed", "heavy": True, "rank": 30}], "api failed")
