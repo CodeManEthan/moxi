@@ -105,7 +105,7 @@ LANDER = "rounds"
 #: The lander's worktree's folder name in `<worktree_dir>/<repo>`.
 QUEUE_PLACE = ".queue"
 #: The start of a candidate's local branch name.
-BRANCH_PREFIX = "queue-"
+BRANCH_PREFIX = queue_file.BRANCH_PREFIX
 #: How long after its push a candidate's run may read absent before it is pushed again.
 ABSENT_S = 600.0
 #: The local run's job name, as a red candidate names it.

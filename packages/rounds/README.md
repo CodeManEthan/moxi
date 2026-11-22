@@ -1023,7 +1023,11 @@ that went out unrecorded goes too. A ref is kept while it is the one `ref` gives
 branch of a build of the repo that has not ended, in any round, or one such a build
 recorded pushing, or the one `ref` gives a target: the project's (its `into`, else the
 branch checked out at the repo's root, as a new build would take) or such a build's.
-Every ref is kept while any round's log, or the project's target, can't be read. A
+Every ref is kept while any round's log, or the project's target, can't be read. In a
+queue project the ref of a candidate the queue shows running is kept too, since removing
+it would cancel its run, and every candidate's ref is kept while the queue file can't be
+read; the lander removes a candidate's ref when its batch ends, and the sweep removes one
+a stopped lander left. The lander's own worktree, `<repo>/.queue`, is never swept. A
 removal that fails leaves the finish or drop standing and names the ref; `moxi rounds
 drop --leftovers --refs` lists the branches under `ref`'s prefix on each project's
 remote that the same rule does not keep, and with `--remove`, once the sweep is armed,

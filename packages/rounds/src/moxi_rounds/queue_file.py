@@ -87,6 +87,8 @@ IN_BATCH = "in batch"
 #: moved after the member joined.
 BY_HAND = "by hand"
 MOVED = "moved"
+#: The start of a candidate's local branch name, `queue-<M12>-<n>`.
+BRANCH_PREFIX = "queue-"
 
 
 def queue_dir(repo: str, env=None) -> Path:
@@ -348,5 +350,5 @@ def append(repo: str, event: dict, env=None) -> dict:
 
 __all__ = ["QUEUE_DIR", "QUEUE_FILE", "KINDS", "JOIN", "LEFT", "BATCH", "RUN", "LANDED",
            "EJECTED", "WAITING", "PAUSED", "RESUMED", "RED", "GREEN", "TOLD", "BUILT",
-           "ENDED", "QUEUED", "IN_BATCH", "BY_HAND", "MOVED", "queue_dir", "queue_file",
-           "Member", "Batch", "Queue", "read", "fold", "appending", "append"]
+           "ENDED", "QUEUED", "IN_BATCH", "BY_HAND", "MOVED", "BRANCH_PREFIX", "queue_dir",
+           "queue_file", "Member", "Batch", "Queue", "read", "fold", "appending", "append"]
