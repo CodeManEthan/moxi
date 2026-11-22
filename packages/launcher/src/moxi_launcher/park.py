@@ -23,7 +23,8 @@ Park holds the park lock for its whole run, and runs reconcile and crash discove
    which Claude's exit dialog stops.
 4. **Outcomes**, on each entry: `exited`; `not-exited` with the reason when the wait ran
    out or the exit failed, the entry and reservation kept; `left-running` for a Codex
-   session, which offers no exit. The session park runs in is reserved and recorded
+   session, which park leaves running for the reboot to end, though `exit-session` stops
+   one under turns' Codex host. The session park runs in is reserved and recorded
    `not-exited: the session running park`, and not exited.
 
 It prints one line per slot and a summary, and exits 0 when every found session got an
@@ -51,7 +52,9 @@ LOOK = relaunch.LOOK
 Refused = relaunch.Refused
 Result = relaunch.Result
 
-#: The harnesses park records and reserves but leaves running: they offer no exit.
+#: The harnesses park records and reserves but leaves running, with no exit tried: the
+#: reboot ends their sessions. `exit-session` stops a Codex session under turns' Codex
+#: host, by stopping the host; park does not.
 NO_EXIT = ("codex",)
 #: What park says of each slot: `exited`, `not-exited`, `left-running` (each with an
 #: entry), `left-alone` (no entry, nothing done) and `failed` (no reservation or no
@@ -59,8 +62,9 @@ NO_EXIT = ("codex",)
 OUTCOMES = ("exited", "not-exited", "left-running", "left-alone", "failed")
 #: The reason recorded for the session park runs in.
 OWN = "the session running park"
-#: The reason recorded for a session whose harness offers no exit.
-LEFT_RUNNING = "Codex offers no exit; it ends with the machine"
+#: The reason recorded for a session of a harness park leaves running (`NO_EXIT`).
+LEFT_RUNNING = ("park leaves Codex sessions running and the reboot ends them; "
+                "moxi launcher exit-session stops one")
 
 
 @dataclass(frozen=True)

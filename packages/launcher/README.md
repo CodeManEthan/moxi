@@ -514,8 +514,9 @@ subagents, a draft and a read that failed. Each slot gets one line:
 - `not-exited`, with the reason: the wait ran out or the exit failed. The session still
   runs; its entry and reservation stay, so a reboot ends it and running park again tries
   its exit again.
-- `left-running`: a Codex session, which offers no exit. It is recorded and reserved, and
-  the reboot ends it.
+- `left-running`: a Codex session. Park leaves it running: it is recorded and reserved,
+  and the reboot ends it. `moxi launcher exit-session` stops one under turns' Codex host
+  first, if you want it ended before the reboot.
 - The session park itself runs in is recorded `not-exited: the session running park` and
   left for you to exit.
 - A live run the launcher did not launch is `left alone`; a session launched into a
