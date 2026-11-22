@@ -205,3 +205,57 @@ def test_a_handler_set_after_ours_is_wrapped_by_the_next_server(sock_dir, monkey
     assert lines[0].startswith(f"accept failed on {first_address}: ")
     assert asyncio_records(caplog) == []
     assert len(seen) == 1 and seen[0] is other
+
+
+def accept_retries(loop) -> tuple[int, int]:
+    """The accept retries `loop` holds and has not cancelled: those in its timer heap,
+    and those its turn has already moved from there to its ready queue."""
+    def live(handles):
+        return sum(1 for handle in handles
+                   if handle._callback == loop._start_serving and not handle.cancelled())
+    return live(loop._scheduled), live(loop._ready)
+
+
+@pytest.mark.parametrize("same_turn", [False, True],
+                         ids=["before-due", "in-the-turn-they-come-due"])
+def test_close_cancels_the_accept_retries_held_for_its_listener(sock_dir, monkeypatch,
+                                                                 caplog, same_turn):
+    address = str(sock_dir / "a.sock")
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        server = await ipc.serve(address, echo)
+        # The loop's clock stands still until moved below, so no retry comes due early
+        # however slow the machine is.
+        clock = [loop.time()]
+        loop.time = lambda: clock[0]
+        try:
+            try:
+                # The fourth accept of the same event takes the client, so the call is
+                # answered at once and the three retries are still waiting at close.
+                left = fail_accepts(monkeypatch, server, 3)
+                await call(address)
+                if same_turn:
+                    # The retries come due; the loop's next turn moves them to its ready
+                    # queue behind this task, which then closes before they run.
+                    clock[0] += 2 * asyncio.constants.ACCEPT_RETRY_DELAY
+                    await asyncio.sleep(0)
+                held = accept_retries(loop)
+            finally:
+                server.close()
+                await server.wait_closed()
+            after_close = accept_retries(loop)
+            clock[0] += 2 * asyncio.constants.ACCEPT_RETRY_DELAY
+            for _ in range(3):
+                await asyncio.sleep(0)
+        finally:
+            del loop.time
+        return left[0], held, after_close
+
+    left, held, after_close = asyncio.run(main())
+    assert left == 0
+    assert held == ((0, 3) if same_turn else (3, 0)), "each failed accept left asyncio a retry"
+    assert after_close == (0, 0)
+    assert asyncio_records(caplog) == []
+    assert [r for r in caplog.records if "Invalid file descriptor" in r.getMessage()] == []
+    assert all(r.exc_info is None for r in caplog.records)

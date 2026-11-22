@@ -98,6 +98,30 @@ def test_a_redacted_blob_passes_prepare_and_both_gates(root, tmp_path):
     assert done.returncode == 0, done.stderr
 
 
+def split(value: str) -> str:
+    """`value` with a zero-width space inside it."""
+    return value[:10] + "\u200b" + value[10:]
+
+
+@posix
+def test_a_mark_keeps_nothing_an_allowlist_line_keeps_a_value_a_split_secret_is_left_out(
+        root):
+    marked = token(3)
+    line = f"key = {marked}  # gitleaks:allow"
+    write(root, "a.md", f"intro\n{line}\nmore\n")
+    write(root, "b.md", f"intro\n{line}\nmore\n")
+    write(root, ".secrets-allow", allow_line("b.md", "credentials/github-pat"))
+    write(root, "c.md", split(token(4)))
+    result = snapshot(root)
+    assert result.status == "committed"
+    assert [p for p, _ in result.left] == ["c.md"]
+    assert sh(root, "show", "HEAD:a.md").stdout == \
+        "intro\nkey = [REDACTED:github-pat]  # gitleaks:allow\nmore\n"
+    assert sh(root, "show", "HEAD:b.md").stdout == f"intro\n{line}\nmore\n"
+    assert (root / "a.md").read_text() == f"intro\n{line}\nmore\n"
+    assert "c.md" not in tree(root)
+
+
 @posix
 def test_a_file_the_filter_errors_on_is_staged_as_on_disk_and_left_out(root, tmp_path):
     from moxi_repo import api
@@ -169,6 +193,19 @@ def test_a_one_line_file_that_is_wholly_a_secret_is_left_out():
     assert notes_filter.clean(token().encode(), "a.md", state()) == ("error", None)
     status, out = notes_filter.clean((token() + "\n").encode(), "a.md", state())
     assert (status, out) == ("success", b"[REDACTED:github-pat]\n")
+
+
+def test_a_marked_line_and_a_split_token_are_redacted_in_place():
+    for line in (f"key = {token()}  # gitleaks:allow", f"key = {split(token())}"):
+        status, out = notes_filter.clean(f"intro\n{line}\nmore\n".encode(), "a.md",
+                                         state())
+        assert (status, out) == ("success", b"intro\nkey = [REDACTED:github-pat]"
+                                 + (b"  # gitleaks:allow" if "allow" in line else b"")
+                                 + b"\nmore\n")
+
+
+def test_a_one_line_file_that_is_wholly_a_split_secret_is_left_out():
+    assert notes_filter.clean(split(token()).encode(), "a.md", state()) == ("error", None)
 
 
 def test_a_path_only_rule_answers_error():

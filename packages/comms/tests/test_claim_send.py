@@ -133,6 +133,40 @@ def test_a_dead_adapter_is_refused_while_nobody_holds_the_name(rig, world):
     assert rig.record.history(rig.names_channel) == []
 
 
+def test_a_dead_adapter_no_new_one_can_replace_says_mail_has_stopped(rig, world):
+    """A gone adapter is replaced at the session's next prompt (`adapters.respawn`).
+    One that no new adapter can replace (this one is not the Claude wrapper's) leaves
+    the session told at each prompt that mail has stopped and why, and doctor names the
+    identity."""
+    import os
+    from types import SimpleNamespace
+
+    from moxi_comms import checks, listener
+
+    s = world.real("planner")
+    # The event's environment is the session's: the launch's, with its stamps.
+    env = {**os.environ, **as_claim(s), "MOXI_COMMS_NAME": "planner"}
+
+    def prompt():
+        return listener.answer(SimpleNamespace(event="prompt", harness="claude",
+                                               session_id="s-1", env=dict(env))) or ""
+
+    assert "mail has stopped" not in prompt(), "a live adapter is not named"
+    assert checks.adapter_rows() == []
+
+    s.client.close()
+    s.holder.close(remove_file=False)               # the adapter died; Claude lives on
+    assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
+    said = " ".join(prompt().split())
+    assert said.startswith(f"comms: mail has stopped for {PLANNER}.")
+    assert "a new one can't be started" in said and "relaunch the session" in said
+    (row,) = checks.adapter_rows()
+    assert row.name == f"adapter: {PLANNER}" and row.state == "fail"
+    assert "mail has stopped" in row.detail and row.fix
+    code, out = rig.cli(["doctor"])
+    assert f"adapter     {PLANNER}: mail has stopped" in out, out
+
+
 def test_a_dead_adapter_with_no_live_file_is_refused(rig, world):
     s = world.real("planner")
     s.holder.close()

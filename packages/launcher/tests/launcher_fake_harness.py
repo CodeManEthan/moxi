@@ -74,11 +74,15 @@ class Harness:
 def run_child(tmp_path: Path, req: dict, *, env: dict | None = None,
               moxi: str | None = None, free_identity: bool = False) -> tuple[int, dict]:
     """Run one launch through `launcher_child`, in a process of its own: its exit code
-    and what it saw (the preview's argv, and the result or refusal when it returned)."""
+    and what it saw (the preview's argv, and the result or refusal when it returned). A
+    scratch launch there goes under this test's stand-in for `/tmp`, as one here does."""
+    from moxi_launcher.compose import common
+
     spec = tmp_path / f"spec-{req.get('request_id')}.json"
     out = tmp_path / f"seen-{req.get('request_id')}.json"
     spec.write_text(json.dumps({"request": req, "out": str(out), "moxi": moxi,
-                                "free_identity": free_identity}))
+                                "free_identity": free_identity,
+                                "scratch_tmp": str(common.SCRATCH_TMP)}))
     child_env = {**os.environ, "PYTHONPATH": str(TESTS), **(env or {})}
     done = subprocess.run([sys.executable, "-m", "launcher_child", str(spec)],
                           env=child_env, cwd=str(tmp_path), timeout=120,

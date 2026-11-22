@@ -190,6 +190,30 @@ def test_the_claude_adapter_registers_before_it_says_bound(rig, monkeypatch):
     assert shim.layer_form == context.TOOLS
 
 
+def test_a_claude_adapter_that_fails_while_claude_runs_keeps_its_claim_file(
+        rig, monkeypatch):
+    """The claim file is what tells the session and doctor that mail has stopped, so an
+    adapter whose watch on `claude` fails leaves it; one whose `claude` ended removes
+    it."""
+    from moxi_comms import claimfile
+
+    shim = rig.shim(name="reviewer", scope="proj-a", start=False)
+    r, w = os.pipe()
+
+    def broken_watch(fd):
+        raise OSError("the watch on claude failed")
+
+    monkeypatch.setattr(claude_adapter, "wait_for_exit", broken_watch)
+    turns = SimpleNamespace(find=lambda pid: None, TurnsError=RuntimeError)
+    try:
+        with pytest.raises(OSError):
+            claude_adapter.serve(shim, os.getpid(), r, turns=turns)
+    finally:
+        os.close(r)
+        os.close(w)
+    assert claimfile.read(shim.claims.key) is not None
+
+
 def test_the_codex_adapter_registers_before_it_says_bound(rig, launch):
     seen = []
     adapter = launch(start=False, on_bound=lambda: seen.append(row_of(rig)))

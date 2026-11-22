@@ -1,13 +1,15 @@
 """`moxi rounds`: the rounds command.
 
-    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
+    moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--lead NAME]
+                     [--as NAME]
     moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds commission ROUND STAGE --builder NAME [--record PTR] [--existing]
     moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
-    moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--as NAME]
+    moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--no-wait]
+                      [--as NAME]
     moxi rounds finish [ROUND STAGE] [--again ID] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
@@ -22,6 +24,7 @@
     moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
+    moxi rounds mark ROUND --lead NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND B<n> --brief FILE [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
@@ -47,7 +50,8 @@
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
-`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
+`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL, `file:<path>#<anchor>` or
+`page:<page>/<act id>@<UTC time>`, his act on a page.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
@@ -154,7 +158,9 @@ build is open, each ruling recorded since its block that reaches the stage.
 the build's worktree, which must be clean with the build's branch checked out, on a
 build that has work, with no shell, stdin closed, no `GIT_` variable, its output in
 `check-<n>.log` in the build's scratch folder, and its whole process tree ended at the
-check's `timeout_s` (or `--timeout-s`). The run is recorded with its commit, that
+check's `timeout_s` (or `--timeout-s`, else 3600 s): SIGINT, then SIGKILL 30 s later.
+One check runs at a time on the machine: a run waits for the check lock another holds,
+or with `--no-wait` is refused. The run is recorded with its commit, that
 commit's merge-base with the target, the argv as it ran, its exit code and its
 duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
@@ -251,7 +257,6 @@ the second calls.
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import shlex
 import sys
@@ -273,14 +278,17 @@ def _writes(parser: argparse.ArgumentParser) -> None:
 
 
 def _actor(args) -> str:
-    """Who the verb is done by: the name given with `--as`, else the OS user."""
+    """Who the verb is done by: the name given with `--as`, else the OS user, as
+    `actors.default` gives it."""
+    from . import actors
+
     if args.actor is not None:
         if not args.actor.strip():
             raise BadArgument("--as names nobody", "give a name: --as NAME")
         return args.actor
     try:
-        return getpass.getuser()
-    except (KeyError, OSError):
+        return actors.default()
+    except BadArgument:
         raise BadArgument("the user this command runs as has no name",
                           "say who is doing this with --as NAME") from None
 
@@ -324,6 +332,10 @@ def _declare_open(verbs) -> None:
                         help="the standing rulings of the project the round starts "
                              "from, as S1,S2: each one that says what is built and "
                              "still stands")
+    parser.add_argument("--lead", metavar="NAME",
+                        help="the agent who leads the round: letters, digits, . _ -, "
+                             "and at most one @scope (default: none of its own, so the "
+                             "round reads its project's lead)")
     _writes(parser)
 
 
@@ -332,10 +344,12 @@ def _open(args, out) -> int:
 
     opened = opening.open_round(args.round, description=args.description,
                                 by=_actor(args), flow=args.flow, record=args.record,
-                                inherits=_listed(args.inherits))
+                                inherits=_listed(args.inherits), lead=args.lead)
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.round_dir}", file=out)
+    if args.lead is not None:
+        print(f"lead: {args.lead}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
     for line in _left(opened):
@@ -425,9 +439,10 @@ def _declare_rule(verbs) -> None:
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a ruling "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "ruling without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
     parser.add_argument("--chose", metavar="K",
@@ -541,10 +556,11 @@ def _declare_ask(verbs) -> None:
                              "left out with --adopt and --move")
     parser.add_argument("--from", dest="origin", metavar="PTR",
                         help="a pointer to where the question came from, one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>, as "
-                             "file:design.md#<anchor> for a section of the design; a "
-                             "question with no origin is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>, or file:<path in the "
+                             "round's folder>#<anchor>, as file:design.md#<anchor> for "
+                             "a section of the design; a question with no origin is "
+                             "refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
                              "operator's own: a pointer to where he asked it; with "
@@ -704,7 +720,7 @@ def _declare_mark(verbs) -> None:
                              "several separated by commas; with --resync, a stage, "
                              "B<n>; with --brief, the stage the brief is of, B<n>; "
                              "with --reread, a recorded report's file; left "
-                             "out with --flow, which marks the round")
+                             "out with --flow and --lead, which mark the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -739,6 +755,10 @@ def _declare_mark(verbs) -> None:
                            "own flow, to take the steps the config has for it now "
                            "when they have every step it follows; any other move "
                            "is the operator's (rule flow:NAME)")
+    form.add_argument("--lead", metavar="NAME",
+                      help="the agent who leads the round from now on: letters, "
+                           "digits, . _ -, and at most one @scope; anyone may name "
+                           "it, and it carries no pointer")
     form.add_argument("--close", action="store_true",
                       help="the lead's decision that the thread thread:NAME is "
                            "closed: no further pass is run on it; only after the "
@@ -775,13 +795,16 @@ def _declare_mark(verbs) -> None:
                              "message that shows the waiting item done; "
                              "with --close or --accept-risk, a pointer to where the "
                              "lead wrote why, one token: comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL, or file:<path "
-                             "in the round's folder>#<anchor>; "
+                             "<session>@<UTC time>, an https:// URL, file:<path "
+                             "in the round's folder>#<anchor>, or page:<page>/<act "
+                             "id>@<UTC time>; "
                              "with --shown, a pointer to where he was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
-                             "time>, or the https:// URL of a page that listed them; "
-                             "never a file, the pointer of one of the rulings, or a "
-                             "message from before one of them was said")
+                             "time>, the https:// URL of a page that listed them, or "
+                             "page:<page>/<act id>@<UTC time> for his act on a page "
+                             "that showed them; never a file, the pointer of one of "
+                             "the rulings, a message from before one of them was "
+                             "said, or a page's act from before one was recorded")
     _writes(parser)
 
 
@@ -790,6 +813,8 @@ def _mark(args, out) -> int:
 
     if args.flow is not None:
         return _mark_flow(args, out)
+    if args.lead is not None:
+        return _mark_lead(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
@@ -950,6 +975,26 @@ def _mark_flow(args, out) -> int:
     return codes.OK
 
 
+def _mark_lead(args, out) -> int:
+    """`mark --lead`: name the agent who leads the round, which anyone may do."""
+    from . import leads
+
+    again = f"{args.prog} mark ROUND --lead NAME"
+    if args.id is not None:
+        raise BadArgument("--lead marks the round, and takes no ID", again)
+    if args.record is not None:
+        raise BadArgument("--record is a pointer to the operator's word, and a round's "
+                          "lead is the leads' record and carries none",
+                          "leave --record out")
+    led = leads.mark(args.target, args.lead, by=_actor(args))
+    if led.found:
+        print(f"{led.lead} leads {led.name} already; nothing was written", file=out)
+    else:
+        print(f"{led.name}   lead: {led.lead}   was: {led.was or 'none'}", file=out)
+    _warn_of(led.failed, args.prog, args.verb)
+    return codes.OK
+
+
 def _mark_shown(args, out) -> int:
     """`mark --shown`: say that rulings were shown to the operator, and where."""
     from . import shown
@@ -988,7 +1033,8 @@ def _declare_fold(verbs) -> None:
                         help="with --records-only, a pointer to the record of the "
                              "change, one token: file:<path in the round's "
                              "folder>#<anchor> as a rule, or comms:<digits>, "
-                             "<session>@<UTC time>, an https:// URL")
+                             "<session>@<UTC time>, an https:// URL, "
+                             "page:<page>/<act id>@<UTC time>")
     _writes(parser)
 
 
@@ -1235,7 +1281,11 @@ def _declare_check(verbs) -> None:
                            "place of reading CI")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
-                             "of the check's or the step's own timeout_s")
+                             "of the check's or the step's own timeout_s (3600 when "
+                             "neither is set)")
+    parser.add_argument("--no-wait", action="store_true", dest="no_wait",
+                        help="refuse at once when another check on this machine holds "
+                             "the check lock, in place of waiting for it")
     _writes(parser)
 
 
@@ -1253,7 +1303,8 @@ def _check(args, out) -> int:
                           f"moxi rounds check {name} B<n>, or moxi rounds check in the "
                           "build's worktree")
     ran = checking.check(name, stage, by=_actor(args), step=args.step,
-                         full=args.full, timeout_s=args.timeout_s)
+                         full=args.full, timeout_s=args.timeout_s, wait=not args.no_wait,
+                         say=lambda line: print(line, file=sys.stderr, flush=True))
     if isinstance(ran, checking.CiChecked):
         return _ci_checked(ran, args, out)
     code = ran.exit_code
@@ -1339,7 +1390,7 @@ def _finish(args, out) -> int:
             print(f"{one.id}: kept the checkout it added, {one.kept}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
-    _cleanup_lines(done.removed, done.kept, out)
+    _cleanup_lines(done.removed, done.kept, out, done.unscanned)
     if done.branch is not None:
         print(f"branch: {done.branch}", file=out)
     _ref_lines(done.refs, out)
@@ -1436,9 +1487,10 @@ def _declare_drop(verbs) -> None:
     parser.add_argument("--record", metavar="PTR",
                         help="with --by operator, a pointer to where he dropped it; "
                              "with --by lead, a pointer to why; one token: "
-                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
-                             "file:<path in the round's folder>#<anchor>; a drop "
-                             "without one is refused")
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, "
+                             "file:<path in the round's folder>#<anchor>, or "
+                             "page:<page>/<act id>@<UTC time>, his act on a page; a "
+                             "drop without one is refused")
     parser.add_argument("--withdraw-questions", action="store_true",
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "
@@ -1493,7 +1545,7 @@ def _drop(args, out) -> int:
         print(f"ended {one['stage']}: {one['branch']} at "
               f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
               file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1515,7 +1567,7 @@ def _drop_build(args, out) -> int:
           f"{'no branch' if tip['tip'] is None else tip['tip'][:12]}, kept in git; "
           f"the stage stays owed: commission it again, or take it out of the plan",
           file=out)
-    _cleanup_lines(dropped.removed, dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out, dropped.unscanned)
     _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
@@ -1610,9 +1662,11 @@ def _ref_account_lines(refs, swept, out) -> None:
         print(f"then: {arm}{ci_refs.REMOVE}", file=out)
 
 
-def _cleanup_lines(removed, kept, out) -> None:
-    """Say which of an ended build's folders were removed, and which the removal rule
-    kept, with the check that kept each."""
+def _cleanup_lines(removed, kept, out, unscanned=()) -> None:
+    """Say where the scratch gate was not run, which of an ended build's folders were
+    removed, and which the removal rule kept, with the check that kept each."""
+    for line in unscanned:
+        print(line, file=out)
     for removed_dir in removed:
         print(f"removed {removed_dir}", file=out)
     for one in kept:

@@ -125,7 +125,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; `by` that is not a non-empty string or null; `senders` that is not a list of non-empty strings; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -153,7 +153,7 @@ turn, an agent, a shell) is a plain object with no `kind`.
 | `started` | `delivery`, `ref`, `turn_id` |
 | `refused` | `delivery`, `ref`, `reason` (a delivery's); `reason` alone (a command's) |
 | `lost` | `delivery`, `ref`, `reason` |
-| `ended` | `delivery`, `ref`, `turn_id`, `outcome` |
+| `ended` | `delivery`, `ref`, `turn_id`, `outcome`, `answer` |
 | `ran` | `new_session_id`, `shells` |
 | `failed` | `reason` |
 | `passed` | none: an `exit` the harness's gate let through (see `command`) |
@@ -239,6 +239,12 @@ A shell left over does not make the command a failure: the command ran.
 **Outcomes and sources.**
 
 - `outcome` is one of `answer`, `aborted` (Esc), `error`, `refusal`.
+- `answer` on `ended` is the final text of the turn that took the delivery: on Claude
+  Code the assistant's final visible text; on a Codex host the turn's last agent message
+  on the main thread. It is null, never "", when the turn had no text, on both harnesses
+  (a Claude Code turn with no visible text, a Codex turn with no agent message or an
+  empty one), and where the harness gives none (an OpenCode host). Every delivery the
+  turn took, steers included, ends with the same `answer`.
 - `source` is one of `startup`, `resume`, `clear`, `compact`, or null when the harness did
   not say.
 
@@ -374,7 +380,13 @@ Result: `<agents>`, read from the harness's own record on each call. Needs `agen
 
 Params: `text`; `ref`; `only_if_idle` (boolean, default false); `if_turn_number` (integer
 or null), `refuse_draft` and `refuse_agents` (booleans), all three valid only beside
-`only_if_idle: true`.
+`only_if_idle: true`; `by` (a non-empty string, or null), the module that asked; `senders`
+(a list of non-empty strings, default empty), the names the text speaks for.
+
+`by` and `senders` change nothing about how the delivery goes in. The endpoint hands them
+to the session's `prompt` listeners on the prompt the delivery raises, as `delivery_by`
+and `delivery_senders`, so a listener can tell a delivery from the person's own prompt and
+whose words it carries. A prompt turns did not hand in has both null.
 
 Without `only_if_idle`: a new turn now if the session is idle, else when the running turn
 ends. Deliveries are not coalesced: two are two turns, in the order handed. On a Codex host
@@ -399,7 +411,8 @@ answer refuses the delivery; that refusal settles it `refused`.
 
 ### `steer`
 
-Params: `text`, `ref`. Needs `steer`.
+Params: `text`, `ref`, `by`, `senders` (`by` and `senders` as `deliver`'s). Needs
+`steer`.
 
 The text into the running turn. The endpoint records the delivery and answers as
 `deliver` does: `{delivery, ref, result?}`, with `result` present only when a check the
@@ -663,8 +676,12 @@ An endpoint of this version offers none of them:
 
 This is version 2. A client offers the range it speaks in `rpc.hello`; an endpoint with no
 version in that range refuses it with -32001, naming both ranges. A change to any message's
-shape raises the version. Offering a reserved capability or method (see "Reserved names")
-does not: the hello carries it.
+shape raises the version, except an added optional param or result or notification field
+that a peer of this version which does not know it can ignore: an endpoint ignores params it
+does not know, and a client ignores fields it does not know, so neither raises it. A param
+or field that changes what an older peer must do, or that an older peer would misread, does.
+Offering a reserved capability or method (see "Reserved names") does not raise it either:
+the hello carries it.
 
 A version 2 endpoint serves only at version 2 addresses and keeps its files under
 `RUNTIME/turns/v2/`. A version 1 library reads only the directories directly under

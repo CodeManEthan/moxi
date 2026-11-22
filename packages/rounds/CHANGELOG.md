@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 (2026-11-21)
+
+- A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
+  ROUND --lead NAME` names a new one, written as `lead.changed` with the one before. A
+  name is checked for its shape only. A round with no lead of its own reads its
+  project's. `show` gives it in a line and in its `--json` head, each row of `list
+  --json` and of the read API's `rounds()` carries it, and the round note has a line for
+  it. The index gains a column for it, so rows written before read as stale and are
+  answered from the logs.
+- A page's act as a pointer: `page:<page>/<act id>@<UTC time>`, taken wherever a pointer
+  is. `mark --shown` refuses a page's act from before a ruling it marks was recorded.
+- `moxi_rounds.actors.default()`: the OS user an act is recorded as done by when no
+  name is given, one answer for the command line and for a page that calls the verbs'
+  functions in process.
+
 ## 0.1.0 (unreleased)
 
 The first version. It keeps the record of a round and takes it from its design through
@@ -10,6 +25,28 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- A round's log writes a path under the home folder as `~/<rest>`, and the home folder
+  itself as `~`: a build's worktree and scratch folder, a check run's argv words and
+  output file, the argvs of a read of CI, the argv words of a command step in the
+  round's flow, and a report or brief kept outside the round's folder. A path read from
+  the log is expanded before it is used, so a log whose paths were written with `~` is
+  checked, finished and swept, and an older log that holds the whole paths reads as
+  before. Only `~` and a path that starts with `~` and a separator are expanded; `~user`
+  is read as written. A check run recorded with `~` counts against the command that
+  names the whole path, and the other way round. A word of a command step's argv in the
+  round's flow that is `~` or starts with `~/` runs as the path under the home folder.
+  A rounds without this change reads a log written with `~` paths as relative paths, so
+  it shows builds as not clean or not there and keeps their folders rather than
+  removing them; update rounds first on every machine that reads the same notes.
+- `moxi rounds finish` is refused while a process uses the build's scratch folder,
+  naming the process. `finish` and `drop` don't move a scratch folder a process uses:
+  it stays for the sweep of leftover folders, named with the process, and a drop goes
+  through.
+- `moxi rounds check` holds the machine's check lock while its command runs, so one
+  check runs at a time on the machine; another run waits for it, or with `--no-wait`
+  is refused. A run with no `timeout_s` from the call, the check or the step stops at
+  3600 s, and a run at its limit gets SIGINT and 30 s later SIGKILL. rounds needs moxi
+  0.1.11 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,

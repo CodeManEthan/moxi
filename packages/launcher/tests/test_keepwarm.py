@@ -554,6 +554,78 @@ def test_an_agent_missing_from_an_incomplete_list_is_not_dropped(conn):
     assert got.verdict.outcome == "nudged"
 
 
+# -- by hand: keep-warm --session and its dry run -----------------------------------------
+
+
+def test_a_dry_run_says_a_nudge_would_go_and_writes_nothing(conn):
+    got = ask(conn, dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word) == (None, "would-nudge")
+    assert got.verdict.detail == "a run would nudge for the subagents case now: nudge 1 of 3"
+    assert got.runs == [] and got.session.delivered == []
+
+
+def test_a_dry_run_past_the_cap_says_blocked_and_writes_no_run(conn):
+    for number in (4, 5, 6):
+        nudged(conn, number=number, agents=["a1"])
+    before = store.runs(conn, request_id="r1")
+    got = ask(conn, session=FakeSession(facts_seq=[facts(number=7)], agents=[agent("a1")]),
+              dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word, got.verdict.run_id) == (
+        "blocked", "capped", None)
+    assert got.runs == before
+
+
+def test_a_dry_run_writes_no_dropped_agent(conn):
+    first = nudged(conn, number=4, agents=["a1"])
+    got = ask(conn, session=FakeSession(facts_seq=[facts(number=5)], agents=[]), dry_run=True)
+    assert got.verdict.word == "idle" and "dropped" not in events(conn, first.run_id)
+
+
+def test_a_dry_run_ends_quietly_outside_the_window(conn):
+    got = ask(conn, cache=FakeCache(age=100.0), dry_run=True)
+    assert (got.verdict.outcome, got.verdict.word) == (None, "outside")
+
+
+def hand(conn, session, which=None, **kw):
+    return keepwarm.keep_warm(which, conn=conn, turns=FakeTurns(session),
+                              slots_api=FakeSlots(), cache=FakeCache(), settings=SETTINGS,
+                              **kw)
+
+
+def test_keep_warm_by_hand_asks_the_one_session_and_nudges_it(conn):
+    session = FakeSession(agents=[agent("a1", description="tests")])
+    got = hand(conn, session, SID)
+    assert got.exit_code == 0 and got.data["outcome"] == "asked"
+    assert [(s["request_id"], s["session_id"], s["outcome"])
+            for s in got.data["sessions"]] == [("r1", SID, "nudged")]
+    assert len(session.delivered) == 1
+
+
+def test_a_keep_warm_dry_run_with_no_session_asks_every_live_launch_it_is_on_for(conn):
+    launched(conn, request_id="r2", session_id=NEW, values={"keep_warm": "off"})
+    launched(conn, request_id="r3", session_id=OTHER, claimed=False)
+    session = FakeSession(agents=[agent("a1")])
+    got = hand(conn, session, dry_run=True)
+    assert got.exit_code == 0 and got.data["dry_run"] is True
+    [line] = got.lines
+    assert line.startswith(f"session {SID} (launch r1): nothing done (would-nudge)")
+    assert store.runs(conn) == [] and session.delivered == []
+
+
+def test_a_keep_warm_dry_run_exits_1_on_a_capped_session(conn):
+    for number in (4, 5, 6):
+        nudged(conn, number=number, agents=["a1"])
+    got = hand(conn, FakeSession(facts_seq=[facts(number=7)], agents=[agent("a1")]),
+               dry_run=True)
+    assert got.exit_code == 1 and got.data["sessions"][0]["word"] == "capped"
+
+
+def test_a_keep_warm_dry_run_with_no_launch_on_says_so(conn):
+    conn.execute("UPDATE launches SET values_json = '{}' WHERE request_id = 'r1'")
+    got = hand(conn, FakeSession(), dry_run=True)
+    assert (got.exit_code, got.lines) == (0, ("no live launch keeps warm",))
+
+
 # -- the delivery's verdicts -------------------------------------------------------------
 
 

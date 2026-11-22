@@ -660,6 +660,43 @@ def test_reads_in_batches_give_every_record_once_and_requests_again(projects, co
         assert sorted(plains(final.values())) == sorted(plains(requests(whole.records)))
 
 
+def test_a_claude_batch_names_each_prompt_its_lines_moved_to(projects, codex_root):
+    t = ClaudeTranscript(projects)
+    t.user("read the notes")
+    first = t.prompt_id
+    req = t.request()
+    call = req.tool_use("Read")
+    t.tool_result(call, "x" * (claude.HEAD_FIRST * 2))          # read by its head
+    t.tool_result(call, "y", toolUseResult={"promptId": "a-nested-prompt"})
+    t.user("/exit")                                              # drew no request
+    last = t.prompt_id
+    t.write()
+    src = claude_source(t)
+    for kinds in (None, {"request"}, {"request", "limits", "marker"}):
+        assert records_since(src, kinds=kinds).prompt_ids == (first, last), kinds
+    cursor = records_since(src, kinds={"request"}).cursor
+
+    t.tool_result(call, "late")                                  # still the last prompt
+    t.user("back", prompt_id=first)
+    t.user("one more")
+    newest = t.prompt_id
+    t.flush()
+    batch = records_since(src, cursor, kinds={"request"})
+    assert batch.prompt_ids == (first, newest)
+    named, cursor = [], None
+    while True:
+        batch = records_since(src, cursor, kinds={"request"}, max_bytes=1)
+        if batch.cursor == cursor:
+            break
+        named.extend(batch.prompt_ids)
+        cursor = batch.cursor
+    assert named == [first, last, first, newest]
+
+    r = every_codex_line(CodexRollout(codex_root))
+    r.write()
+    assert records_since(codex_source(r)).prompt_ids == ()
+
+
 def test_a_claude_request_split_by_tool_results_comes_back_once_per_new_line(projects):
     t = ClaudeTranscript(projects)
     t.user()

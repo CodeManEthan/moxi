@@ -322,6 +322,16 @@ class CodexHarness(Harness):
         self._reported_turns: set[str] = set()
         self._settled_turns: set[str] = set()
         self._steering: set[str] = set()
+        #: The main thread's last completed agent message, `(turn id, text)`.
+        self._last_message: tuple[str | None, str | None] = (None, None)
+        #: The last main turn a UserPromptSubmit named: a later prompt naming it joined it.
+        self._prompted_turn: str | None = None
+        #: The last main turn reported and the delivery whose ``turn/start`` opened it,
+        #: `(turn id, delivery id)`, set under the same hold that frees the waiting slot;
+        #: None when no delivery opened it.
+        self._opened: tuple[str, str] | None = None
+        #: The hand-ins a UserPromptSubmit has already been placed on: each is placed once.
+        self._placed: set[str] = set()
         self._ending: str | None = None    # the turn whose Stop was answered unblocked
         self._steers_out = 0               # turn/steer requests sent and not yet answered
         self._steers_idle = threading.Condition(self._lock)
@@ -370,7 +380,7 @@ class CodexHarness(Harness):
             p for e in self.guards.entries for p in e.calls)
         flags, self.hook_keys = codex_hooks.session_flags(
             list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
-            listen_wait_s=endpoint.listen_wait_s,
+            listen_wait_s=endpoint.listen_wait_s, prompt_wait_s=endpoint.prompt_wait_s,
             pre_matcher=pre_matcher, guard_wait_s=self._guard_wait_ms / 1000,
             refuse=codex_hooks.refuse_table(self.guards.entries),
             after_tool=bool(endpoint.floors.rows), after_wait_s=endpoint.after_tool_wait_s,
@@ -404,7 +414,7 @@ class CodexHarness(Harness):
         self.guards.reload()
         return self.guards.take_notes()
 
-    def prompt_seen(self, turn_id, text: str | None) -> None:
+    def prompt_seen(self, turn_id, text: str | None, origin: str | None = None) -> None:
         """A main-loop prompt: the current main turn's prompts, for guards that want
         them. A prompt in another turn starts the list again."""
         if not isinstance(text, str):
@@ -414,7 +424,41 @@ class CodexHarness(Harness):
             held, prompts = self._prompts
             if turn_id is None or turn_id != held:
                 prompts = ()
-            self._prompts = (turn_id, (*prompts, Prompt(None, text)))
+            self._prompts = (turn_id, (*prompts, Prompt(origin, text)))
+
+    def place_prompt(self, turn_id, text: str | None) -> tuple[str | None, str | None,
+                                                                 bool]:
+        """`(origin, delivery, opens)` for a main-loop UserPromptSubmit, and marks the
+        hand-in it places the prompt on.
+
+        The host's hand-ins still out are the delivery whose `turn/start` it has out, the
+        delivery that opened the turn the prompt names, and each steer it is handing in;
+        each stays out until a prompt is placed on it. A prompt whose text equals one's
+        is that delivery's and carries no origin. One that equals none is typed in the
+        window (`composer`) only when no hand-in is out: while one is, the prompt could be
+        it with its text changed, so it carries no origin and no delivery, and is never
+        `composer`. `opens` is whether the prompt opens its turn (false: it joins a turn
+        an earlier prompt named; a hook with no turn id opens)."""
+        turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+        with self._lock:
+            opens = turn_id is None or turn_id != self._prompted_turn
+            if turn_id is not None:
+                self._prompted_turn = turn_id
+            opened = self._opened
+            live = [self._pending_delivery, opened[1] if opened else None,
+                    *sorted(self._steering)]
+            self._placed &= set(live)
+            if opened is not None and turn_id is not None and opened[0] != turn_id:
+                live[1] = None    # it opened another turn: this prompt is not its text
+            out = [i for i in dict.fromkeys(live) if i is not None and i not in self._placed]
+        if not out:
+            return codex_hooks.PROMPT_ORIGIN, None, opens
+        endpoint = self.endpoint
+        placed = next((i for i in out if endpoint.delivery_text(i) == text), None)
+        if placed is not None:
+            with self._lock:
+                self._placed.add(placed)
+        return None, placed, opens
 
     def context_tokens(self) -> int | None:
         """The main thread's context, in tokens, from its last token reading; None
@@ -867,6 +911,21 @@ class CodexHarness(Harness):
         self._unconfirmed = {agent_id for agent_id, entry in carried.items()
                              if entry[1] is not True}
 
+    def _note_message(self, params: dict) -> None:
+        """A completed agent message of the session's own thread: the latest is its
+        turn's answer so far, which a delivery the turn took ends with."""
+        item = params.get("item")
+        if not isinstance(item, dict) or item.get("type") != proto.AGENT_MESSAGE_ITEM:
+            return
+        text, turn_id = item.get("text"), params.get("turnId")
+        if not isinstance(text, str) or not isinstance(turn_id, str):
+            return
+        with self._lock:
+            thread = params.get("threadId")
+            if isinstance(thread, str) and thread != self.session_id:
+                return
+            self._last_message = (turn_id, text)
+
     def _track_collab(self, params: dict) -> None:
         """An item's start or end: a collab tool call's notices update the record. Items
         of the session's thread count, and those of a subagent's own thread (its spawns)."""
@@ -1271,6 +1330,9 @@ class CodexHarness(Harness):
                 delivery_id = None   # settled meanwhile: the turn counts as the person's
             if delivery_id is not None:
                 self._pending_delivery = None
+            # The tie is the host's own, made before the lock is let go: a prompt that
+            # lands before the endpoint opens the turn still finds the delivery out.
+            self._opened = (turn_id, delivery_id) if delivery_id is not None else None
             command = None
             compaction = self._compacting
             if (delivery_id is None and compaction is not None
@@ -1313,6 +1375,8 @@ class CodexHarness(Harness):
             self._on_completed(params)
         elif method in ("item/started", "item/completed"):
             self._track_collab(params)
+            if method == "item/completed":
+                self._note_message(params)
         elif method == "thread/tokenUsage/updated":
             self._token_usage(params)
         elif method == LIMITS_UPDATED:
@@ -1500,7 +1564,10 @@ class CodexHarness(Harness):
             if self._ending == actual:
                 self._ending = None
             self.thread_active = False
-        self.endpoint.turn_ended(actual, outcome)
+            said, text = self._last_message
+            # An empty agent message is no answer (None), as on Claude Code.
+            answer = text if said == actual and text else None
+        self.endpoint.turn_ended(actual, outcome, answer=answer)
 
     def stop_facts(self, frame: dict) -> StopFacts:
         task_types = frame.get("task_types")

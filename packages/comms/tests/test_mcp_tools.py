@@ -88,7 +88,7 @@ def test_the_parameters_are_the_designed_ones():
         "send": {"to", "text", "posture", "expires", "interrupt", "reply_to", "new",
                  "new_name"},
         "reply": {"message_id", "text", "posture", "expires", "interrupt"},
-        "agents": set(), "whoami": set(), "history": {"identity", "limit"},
+        "agents": set(), "whoami": set(), "history": {"identity", "limit", "skip"},
         "remove": {"message_id"}}
     assert got["send"]["required"] == ["to", "text", "posture"]
     assert got["send"]["properties"]["posture"]["enum"] == ["none", "optional", "once",
@@ -101,6 +101,8 @@ def test_the_parameters_are_the_designed_ones():
     assert got["remove"]["required"] == ["message_id"]
     limit = got["history"]["properties"]["limit"]
     assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 200, 20)
+    assert got["history"]["properties"]["skip"] == {"type": "integer", "minimum": 0,
+                                                    "default": 0}
     for name in ("interrupt", "new", "new_name"):
         assert got["send"]["properties"][name] == {"type": "boolean", "default": False}
 
@@ -256,8 +258,12 @@ def test_an_open_ask_names_the_reply_tool_and_new_goes_through(rig, planner, rev
     got = send(tools, ["reviewer"], "something else", interrupt=True)
     assert got.is_error and got.structured_content["refusal"] == "single-reply"
     text = text_of(got)
-    assert f"the reply tool with message_id: {ask}, interrupt: true, posture: none" in text
-    assert "set new: true" in text and "--" not in text
+    assert re.sub(r"\(\d+s ago\)", "(AGE)", text).splitlines() == [
+        f"{reviewer.identity} asked you for a single reply in msg {ask} (AGE), and it is "
+        "still open. If this message is that reply, send it with",
+        f"  the reply tool with message_id: {ask}, interrupt: true, posture: none",
+        "so it threads and closes the ask. If it is something else, set new: true and it "
+        "goes as a new message. Nothing was sent."]
     passed = send(tools, ["reviewer"], "something else", new=True)
     assert passed.structured_content["outcome"] == "sent", text_of(passed)
     answered = call(tools, "reply", message_id=ask, text="that way", posture=None,
@@ -333,11 +339,22 @@ def test_the_cure_flags_in_the_tools_words():
         " --held --interrupt --expires 6h --standing --posture once")
 
 
-def test_a_context_takes_only_the_two_vocabularies():
+def test_a_context_takes_only_its_vocabularies():
     assert sending.Context(cures="tool").cures == "tool"
+    assert sending.Context(cures="connector").cures == "connector"
     assert sending.Context().cures == "cli"
     with pytest.raises(ValueError):
         sending.Context(cures="mcp")
+    with pytest.raises(ValueError):
+        sending.Context(when_asks_open="allow")
+
+
+def test_the_session_tools_refuse_over_open_asks(rig):
+    """An agent session's tools keep the single-reply refusal: their context leaves
+    `when_asks_open` at refuse."""
+    ctx = mcp_tools.Tools(rig.daemon)._context()
+    assert (ctx.cures, ctx.when_asks_open) == (sending.CURES_TOOL,
+                                               sending.ASKS_OPEN_REFUSE)
 
 
 def test_the_cli_keeps_its_own_words(rig, planner, reviewer):

@@ -2,12 +2,14 @@
 set, plus the line step, the whole-text step, path-only hits, merging, `known` and the
 caller's bytes.
 
-The fuzz checks each text three ways: `scan` of the result is empty with the same
-arguments, redacting the result changes nothing, and the result equals a reference model
-of the documented mechanism (up to three passes of replacement, overlapping spans merged
-and labelled by the first, then the line step, then the whole text) that tracks which of
-the original characters survive. In the model no character of any hit of `scan(t)`
-survives, so where the two agree, none survives in `redact`'s result either.
+The fuzz, whose texts hold allow marks, line-allowlist text and see-through characters,
+checks each text three ways: the result scans empty with the same arguments, under
+`scan` and under `redact`'s own rules, redacting the result changes nothing, and the
+result equals a reference model of the documented mechanism (up to three passes of
+replacement, overlapping spans merged and labelled by the first, then the line step,
+then the whole text) that tracks which of the original characters survive. In the model
+no character of any hit `redact` acts on survives, so where the two agree, none survives
+in `redact`'s result either.
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ from bisect import bisect_right
 import corpus
 import pytest
 
-from moxi_secrets import SETS, fallback, redact, scan
+import moxi_secrets
+from moxi_secrets import REDACT_VERSION, SETS, Allowlist, fallback, redact, scan
 
 scan_mod = importlib.import_module("moxi_secrets.scan")
 
@@ -48,13 +51,13 @@ def fuzz_names(names_config):
 @pytest.fixture
 def count_scans(monkeypatch):
     """Counts the scans redact makes: count_scans() -> the count since the last call."""
-    real = scan_mod.scan
+    real = scan_mod._seen_hits
     seen = [0]
 
     def counting(*args, **kwargs):
         seen[0] += 1
         return real(*args, **kwargs)
-    monkeypatch.setattr(scan_mod, "scan", counting)
+    monkeypatch.setattr(scan_mod, "_seen_hits", counting)
 
     def take():
         n, seen[0] = seen[0], 0
@@ -115,22 +118,28 @@ def _replace_lines(text, origin, hits):
     return "".join(out), keep
 
 
+def redact_hits(text, sets, *, path=None, known=()):
+    """The hits `redact` acts on: `scan`'s, with no mark or line allowlist keeping one."""
+    return scan_mod._seen_hits(text, scan_mod._set_names(sets), path, None, tuple(known),
+                               keep_marked=False)
+
+
 def model(text, sets, **kw):
     """(result, origin of each result character or None, hits of the first scan, step)."""
     current, origin = text, list(range(len(text)))
     first = None
     for step in range(3):
-        hits = scan(current, sets, **kw)
+        hits = redact_hits(current, sets, **kw)
         if first is None:
             first = hits
         if not hits:
             return current, origin, first, step
         current, origin = _replace(current, origin, hits)
-    hits = scan(current, sets, **kw)
+    hits = redact_hits(current, sets, **kw)
     if not hits:
         return current, origin, first, 3
     current, origin = _replace_lines(current, origin, hits)
-    hits = scan(current, sets, **kw)
+    hits = redact_hits(current, sets, **kw)
     if not hits:
         return current, origin, first, "line"
     out = ph(hits[0].rule)
@@ -139,7 +148,9 @@ def model(text, sets, **kw):
 
 # -- the fuzz -------------------------------------------------------------------------------
 
-SEPS = (" ", "", "\n", ": ", "'", "=", "\t", " \n", ",")
+SEPS = (" ", "", "\n", ": ", "'", "=", "\t", " \n", ",", "\r\n", "\u200b")
+#: Text beside a secret that keeps it out of `scan` and never out of `redact`.
+BESIDE = (" # gitleaks:allow", "RUN --mount=type=secret,id=a ", "import { a } from 'b'; ")
 
 
 class Fuzz:
@@ -191,7 +202,7 @@ class Fuzz:
 
     def piece(self):
         r = self.r
-        kind = r.randrange(10)
+        kind = r.randrange(11)
         if kind <= 1:
             return self.secret()
         if kind == 2:
@@ -206,6 +217,11 @@ class Fuzz:
             return " ".join(corpus.curl_user(r) for _ in range(r.randrange(2, 5)))
         if kind == 6:
             return "\udcff\udc80café\udcc3"         # escaped bytes and non-ASCII
+        if kind == 7:                                  # a mark or a line allowlist's text
+            return r.choice(BESIDE)
+        if kind == 8:                                  # split by a see-through character
+            s = self.secret()
+            return corpus.split(s, r.choice(corpus.see_through()), r.randrange(len(s) + 1))
         return " ".join(self.word() for _ in range(r.randrange(1, 4)))
 
     def text(self):
@@ -251,6 +267,7 @@ def test_redaction_fuzz(engine_name, fuzz_names, count_scans):
         out = redact(t, sets, **kw)
         assert count_scans() <= 5
         assert scan(out, sets, **kw) == [], (t, kw)
+        assert redact_hits(out, sets, **kw) == [], (t, kw)
         assert redact(out, sets, **kw) == out, (t, kw)
         expected, origin, hits, step = model(t, sets, **kw)
         assert out == expected, (t, kw)
@@ -382,3 +399,276 @@ def test_a_worker_that_will_not_start_gives_one_placeholder(dead_worker):
         assert redact(text, GITLEAKS) == ph("unscanned"), text
     assert redact("a\nb", ("credentials",), path=P12) == ph("unscanned")
     assert sys.modules.get("re2") is None
+
+
+def test_a_dead_worker_makes_a_text_with_a_see_through_character_unscanned(dead_worker):
+    text = "a " + corpus.split("value", "\u200b") + "\nb"
+    assert redact(text, GITLEAKS) == ph("unscanned")
+    # The copy's unscanned hit is the text's own: one per set, not two.
+    assert [(h.set, h.rule) for h in scan(text, GITLEAKS)] == [
+        ("credentials", "unscanned"), ("broad", "unscanned")]
+
+
+def test_the_copy_does_not_ask_the_worker_again_for_a_set_left_unscanned(dead_worker,
+                                                                         monkeypatch):
+    real, asked = fallback.scan, []
+
+    def counting(t, set_names, *args, **kwargs):
+        asked.append(tuple(set_names))
+        return real(t, set_names, *args, **kwargs)
+    monkeypatch.setattr(fallback, "scan", counting)
+    for text in ("a " + corpus.split("value", "​"), '{\\"key\\":\\"value\\"}'):
+        asked.clear()
+        assert [(h.set, h.rule) for h in scan(text, GITLEAKS)] == [
+            ("credentials", "unscanned"), ("broad", "unscanned")]
+        assert asked == [GITLEAKS], text
+
+
+# -- nothing beside a secret keeps it -------------------------------------------------------
+
+def test_the_allow_mark_keeps_nothing_out_of_redact(engine_name):
+    token = corpus.github(corpus.rng(50))
+    text = '{"role": "user", "text": "t = ' + token + '  # gitleaks:allow"}'
+    out = redact(text, GITLEAKS)
+    assert token not in out
+    assert out == '{"role": "user", "text": "t = ' + ph("github-pat") + '  # gitleaks:allow"}'
+
+
+def test_a_line_allowlist_keeps_nothing_out_of_redact(engine_name):
+    r = corpus.rng(51)
+    for form, path in corpus.LINE_ALLOWED:
+        value = corpus.generic_value(r)
+        text = form.format(value=value)
+        out = redact(text, ("broad",), path=path)
+        assert value.split("=")[1] not in out, form
+        assert ph("generic-api-key") in out, form
+        assert redact(out, ("broad",), path=path) == out, form
+
+
+# -- see-through characters -----------------------------------------------------------------
+
+def test_every_see_through_character_splits_no_token(engine_name):
+    token = corpus.github(corpus.rng(52))
+    chars = corpus.see_through()
+    text = "\n".join("k" + str(i) + " " + corpus.split(token, c) + " end"
+                     for i, c in enumerate(chars))
+    out = redact(text, ("credentials",))
+    assert out == "\n".join("k" + str(i) + " " + ph("github-pat") + " end"
+                            for i in range(len(chars)))
+
+
+def test_tab_newline_and_spaces_are_not_read_past(engine_name):
+    token = corpus.github(corpus.rng(53))
+    for c in corpus.NOT_SEEN:
+        text = "k " + corpus.split(token, c) + " end"
+        assert redact(text, ("credentials",)) == text, hex(ord(c))
+
+
+def test_a_split_token_at_either_end_takes_in_the_characters_there(engine_name):
+    token = corpus.github(corpus.rng(54))
+    z = "\u200b"
+    every = z + z.join(token) + "\u00ad"
+    assert redact("a " + every + " b", ("credentials",)) == \
+        "a " + z + ph("github-pat") + "\u00ad b"
+    assert redact(z + corpus.split(token, z) + " tail", ("credentials",)) == \
+        ph("github-pat") + " tail"
+    assert redact("head " + corpus.split(token, z) + z, ("credentials",)) == \
+        "head " + ph("github-pat")
+    for one in (corpus.split(token, z), every, z + z.join(token)):
+        assert redact(one, ("credentials",)) == ph("github-pat")
+
+
+def test_an_allowlist_line_keeps_a_split_value_and_a_split_known_value_is_found(engine_name):
+    token = corpus.github(corpus.rng(55))
+    allow = Allowlist.from_text("\t".join(("*", "credentials/github-pat",
+                                           scan_mod.fingerprint(token), "2026-11-20",
+                                           "a test value")) + "\n")
+    text = "k " + corpus.split(token, "\u200b") + " end"
+    assert redact(text, ("credentials",), allow=allow) == text
+    assert redact(text, ("credentials",)) == "k " + ph("github-pat") + " end"
+    value = "kv-" + corpus.chars(corpus.rng(56), 12)
+    assert redact("x " + corpus.split(value, "\u200b", 5) + " y", ("credentials",),
+                  known=[value]) == "x " + ph("known") + " y"
+
+
+def test_a_split_value_that_overlaps_its_own_whole_copy_is_redacted_whole(engine_name):
+    # The value starts and ends with the same two characters, so two copies of it can
+    # share them; the first copy is split, the second is whole in the text.
+    r = corpus.rng(57)
+    border, middle = "Q7", corpus.chars(r, 20)
+    value = border + middle + border
+    text = border + corpus.split(middle, "​") + border + middle + border
+    assert redact(text, ("credentials",), known=[value]) == ph("known")
+    assert [(h.start, h.end) for h in scan(text, ("credentials",), known=[value])] == [
+        (0, len(value) + 1), (len(value) - 1, len(text))]
+
+
+@pytest.mark.parametrize("border", ["\x0b", "\r"])
+def test_a_split_token_keeps_the_boundary_a_whitespace_like_character_gives(engine_name,
+                                                                            border):
+    # Stripe's rule needs a word boundary before the key; with the vertical tab or the
+    # lone carriage return removed, "abc" would run into it.
+    token = corpus.stripe(corpus.rng(58))
+    text = "abc" + border + corpus.split(token, "​", 12) + " end"
+    assert redact(text, ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end"
+    whole = "abc" + border + token + " end"
+    assert [(h.rule, h.start, h.end) for h in scan(whole, ("credentials",))] == [
+        ("stripe-access-token", 4, 4 + len(token))]
+    assert redact(whole, ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end"
+
+
+@pytest.mark.parametrize("border", ["\u200b", "\u00ad", "\x01", "\x7f"])
+@pytest.mark.parametrize("position", [12, 3])
+def test_a_split_token_after_a_word_and_a_see_through_character_is_redacted(engine_name,
+                                                                           border,
+                                                                           position):
+    # Removed, the character before the key would run "abc" into it, and Stripe's rule
+    # needs a word boundary there; the key's keyword after it keeps the two apart. At 3
+    # the split falls inside that keyword.
+    token = corpus.stripe(corpus.rng(59))
+    text = "abc" + border + corpus.split(token, "\u200b", position) + " end"
+    out = redact(text, ("credentials",))
+    assert out == "abc" + border + ph("stripe-access-token") + " end"
+    assert redact(out, ("credentials",)) == out
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("credentials",))] == [
+        ("stripe-access-token", 4, 5 + len(token))]
+    assert scan(text + " # gitleaks:allow", ("credentials",)) == []
+    assert redact(text + " # gitleaks:allow", ("credentials",)) == \
+        "abc" + border + ph("stripe-access-token") + " end # gitleaks:allow"
+    whole = "abc" + border + token + " end"
+    assert [(h.rule, h.start, h.end) for h in scan(whole, ("credentials",))] == [
+        ("stripe-access-token", 4, 4 + len(token))]
+
+
+# -- escaped quotes -------------------------------------------------------------------------
+
+def json_escaped(text, times=1):
+    """`text` as JSON writes it inside a string, `times` deep."""
+    for _ in range(times):
+        text = text.replace("\\", "\\\\").replace('"', '\\"')
+    return text
+
+
+def generic_json_value(r):
+    """A value broad's generic-api-key finds after `"api_key":` in plain JSON."""
+    while True:
+        value = corpus.chars(r, 24)
+        if [h.rule for h in scan('{"api_key":"' + value + '"}', ("broad",))] == [
+                "generic-api-key"]:
+            return value
+
+
+@pytest.fixture
+def count_copies(monkeypatch):
+    """Counts the copies the scan reads: count_copies() -> the count since the last call."""
+    real = scan_mod._copy_hits
+    seen = [0]
+
+    def counting(*args, **kwargs):
+        seen[0] += 1
+        return real(*args, **kwargs)
+    monkeypatch.setattr(scan_mod, "_copy_hits", counting)
+
+    def take():
+        n, seen[0] = seen[0], 0
+        return n
+    return take
+
+
+#: Rules that need a quote, whitespace, `;` or the end after the key: (rule, sets, a
+#: value it finds, the JSON key before the value).
+ESCAPED_RULES = (
+    ("stripe-access-token", ("credentials",), corpus.stripe, "key"),
+    ("gcp-api-key", ("credentials",), corpus.google_api, "key"),
+    ("generic-api-key", ("broad",), generic_json_value, "api_key"),
+)
+
+
+@pytest.mark.parametrize("rule, sets, make, key", ESCAPED_RULES,
+                         ids=[e[0] for e in ESCAPED_RULES])
+@pytest.mark.parametrize("form", ["plain", "escaped once", "escaped twice",
+                                  "single quotes escaped"])
+def test_a_key_before_an_escaped_quote_is_found_and_replaced_alone(engine_name, rule, sets,
+                                                                   make, key, form):
+    value = make(corpus.rng(60))
+    plain = '{"' + key + '":"' + value + '"}'
+    text = {"plain": plain,
+            "escaped once": json_escaped(plain),
+            "escaped twice": json_escaped(plain, 2),
+            "single quotes escaped": plain.replace('"', "\\'")}[form]
+    at = text.index(value)
+    assert [(h.rule, h.start, h.end) for h in scan(text, sets)] == [
+        (rule, at, at + len(value))]
+    out = redact(text, sets)
+    assert out == text.replace(value, ph(rule))
+    assert redact(out, sets) == out
+
+
+def test_a_key_the_text_already_matches_gives_one_hit(engine_name, count_copies):
+    value = corpus.stripe(corpus.rng(61))
+    text = '{"key":"' + value + '"} ' + json_escaped('{"note":"x"}')
+    count_copies()
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("credentials",))] == [
+        ("stripe-access-token", 8, 8 + len(value))]
+    assert count_copies() == 1
+
+
+def test_the_allow_mark_keeps_an_escaped_key_out_of_scan_and_not_out_of_redact(
+        engine_name):
+    value = corpus.stripe(corpus.rng(62))
+    for text in ('{"key":"' + value + '"}  # gitleaks:allow',
+                 json_escaped('{"key":"' + value + '"}') + "  # gitleaks:allow"):
+        assert scan(text, ("credentials",)) == [], text
+        assert redact(text, ("credentials",)) == \
+            text.replace(value, ph("stripe-access-token")), text
+
+
+def test_a_split_token_and_an_escaped_key_are_found_in_one_copy_and_the_split_alone(
+        engine_name, count_copies):
+    # One copy removes both kinds; a second removes the see-through characters alone.
+    r = corpus.rng(63)
+    token, value = corpus.github(r), corpus.stripe(r)
+    text = "a " + corpus.split(token, "​") + " " + json_escaped(
+        '{"key":"' + value + '"}')
+    count_copies()
+    assert [h.rule for h in scan(text, ("credentials",))] == [
+        "github-pat", "stripe-access-token"]
+    assert count_copies() == 2
+    out = redact(text, ("credentials",))
+    assert out == "a " + ph("github-pat") + " " + json_escaped(
+        '{"key":"' + ph("stripe-access-token") + '"}')
+
+
+@pytest.mark.parametrize("sep", ["\\'", '\\"'])
+def test_a_split_run_after_an_escaped_quote_keeps_its_own_boundary(engine_name, sep):
+    # high-entropy-run takes a boundary character on each side. With the backslash
+    # removed, the one quote between the runs is the first match's, and the second run,
+    # whole only once the zero-width space is removed, needs the copy without the
+    # see-through characters alone.
+    r = corpus.rng(65)
+    one, two = corpus.chars(r, 44), corpus.chars(r, 44)
+    text = "x " + one + sep + corpus.split(two, "​", 20) + " y"
+    assert [(h.rule, h.start, h.end) for h in scan(text, ("broad",))] == [
+        ("high-entropy-run", 2, 46), ("high-entropy-run", 48, 93)]
+
+
+@pytest.mark.parametrize("before", ["\\n", "\\\\x", '"', "\\ "])
+def test_a_backslash_before_anything_but_a_quote_builds_no_copy(engine_name,
+                                                                count_copies, before):
+    value = corpus.stripe(corpus.rng(64))
+    text = "a " + before + " " + value + " " + before + "end"
+    count_copies()
+    assert [h.rule for h in scan(text, ("credentials",))] == ["stripe-access-token"]
+    assert count_copies() == 0
+
+
+def test_redact_version():
+    assert REDACT_VERSION == 3
+    assert "REDACT_VERSION" in moxi_secrets.__all__
+
+
+def test_seen_through_is_the_api_modules():
+    assert moxi_secrets.seen_through is scan_mod.seen_through
+    assert "seen_through" in moxi_secrets.__all__
