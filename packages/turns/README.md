@@ -17,6 +17,15 @@ before the turn ends, and a registered module can add context at a session's sta
 a prompt. A prompt says whether the person typed it, which delivery it is when turns
 handed it in, and whether it opens a turn or joins one already running.
 
+A caller can also fork a Claude Code session's main loop: `fork` starts an agent that
+holds the conversation so far and runs a task beside the main loop's turns, and
+`fork_continue` gives that agent its next round once it has answered. Each round is a
+delivery whose end carries the round's answer; Claude Code tells the main loop of each
+answer itself, and turns adds nothing to that. The fork's tool calls are judged by the
+guards like any agent's, and get no after-tool ask. A delivery or fork asked with `keep`
+has its end kept in turns' state folder until the caller acks its `ref`: a later wait reads
+the same end, even after the session's endpoint has ended, and turns removes none by age.
+
 Each session turns can reach has an endpoint with a Unix socket and a ledger of the
 session's turns (a small process of its own for a Claude Code session, and part of the
 host turns runs for a Codex or OpenCode session), so whether a session is idle and whether
@@ -60,6 +69,13 @@ install with no setup run, and many can start at once.
 A guard refuses an agent's tool call before it runs, and the agent reads why. turns ships
 three, each off until you turn it on. `moxi install turns` asks about each; afterwards set
 its switch, for example `moxi config set turns guards.removal true`:
+
+Which calls a guard judges on Claude Code: every agent's, a fork's that turns started
+among them. Only the runner's own calls skip the guards, and a call counts as the runner's
+only when it comes from turns' plugin and carries no agent id. The runner holds a fork's
+agent id from the fork's start until the fork's delivery (or its round's) has settled;
+while it holds it, that fork's calls get no after-tool ask. A call from an agent id the
+runner does not hold is judged and asked after as any agent's.
 
 - **The removal guard** (`turns.removal`, switch `guards.removal`): refuses a Claude Code
   shell command that Claude Code's own dangerous-removal check would stop for your

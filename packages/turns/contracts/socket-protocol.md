@@ -300,6 +300,19 @@ adds `unanswered` for a command it wrote and got no answer to, and `not-exited` 
 - **Claude Code.** A delivery whose submit failed before the endpoint admitted its prompt
   never runs: the prompt is dropped where it would enter. So a caller that hands the text
   again after such a `lost` delivers it once.
+- **Claude Code, `fork`.** The runner spawns a background fork of the main loop with a
+  one-word warm-up task of its own, waits for the warm-up's answer (30 s at most), then
+  sends `text` as the fork's first resumed round; that round's answer is the delivery's.
+  Claude Code announces a resumed round's answer to the main loop, which it does not do
+  for the first answer of a fork a plugin spawned, and the runner leaves that notice as
+  Claude Code sends it. A refused spawn reads `lost` `denied`. A warm-up with no answer in
+  30 s or one that ends other than with an answer, a task or round Claude Code does not
+  deliver, and a round with no end within 600 s read `lost` `gone`. `fork.continue` sends
+  its text to the fork the same way. The runner holds the fork's agent id from the spawn
+  (or the round's send) until that delivery has settled. While it holds it, the fork's
+  tool calls are judged by the guards at the call and ask steps and get no after-tool
+  ask; a call with an agent id the runner does not hold is judged and asked after as any
+  agent's, and only a call from the runner's plugin with no agent id is the runner's own.
 - **Codex host.** A turn ends only on Codex's own word: its `turn/completed` (whose status
   gives the outcome), a change of the thread to a non-active status with no
   `turn/completed` for the open turn within a short grace (the turn ends `error`), a load

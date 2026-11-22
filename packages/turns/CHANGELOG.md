@@ -22,6 +22,24 @@
   delivery has settled; a call with an id it does not hold is judged and asked after as
   any agent's. The runner speaks leg 5 and is version 0.3.0, so `moxi install turns`
   updates an install at user scope.
+- A new request, `fork.continue {delivery, text, ref?}` (the client's
+  `fork_continue(delivery, text, ref=)`): give a fork that has answered its next round, a
+  new delivery whose `ended` carries the round's answer. It reads `lost` `gone` when the
+  endpoint knows no such fork, the fork never started or its round was lost, and `denied`
+  while a round of the fork is still open. On Claude Code the runner sends the text to the
+  finished fork, which answers again in its own conversation.
+- A new option, `keep` (with a `ref`), on `deliver`, `fork` and `fork.continue`, a new
+  request, `ack {ref}`, and a new capability, `keep`, which every session of this version
+  offers. A kept delivery's end is written to turns' state folder when it settles, the
+  endpoint's own end included, and stays out of the settled deliveries the endpoint drops
+  for space, so `wait` reads the same end at every read, after the endpoint has ended too
+  (the client reads the state folder then, and a later endpoint of the session answers a
+  `wait` by that `ref` from it). `ack` removes it; an ack of a `ref` with no kept end does
+  nothing. Nothing removes a kept end by age: `moxi doctor turns` lists each one older than
+  a day with its `ref` and asker. The client gains `keep=`, `Session.ack(ref)`, and
+  `turns.wait_ref(ref, session_id=)` and `turns.ack(ref, session_id=)` for a caller that
+  holds no `Delivery`. An endpoint of an older turns does not offer `keep`, and the client
+  refuses to send `keep` to it.
 
 ## 0.2.5 (2026-11-22)
 
