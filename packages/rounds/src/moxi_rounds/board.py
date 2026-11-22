@@ -19,8 +19,8 @@ the order the flows list them, `verify-build`, `finish`), then `ratify`, `retro`
 **Cells** take the first state of `STATES` that fits:
 
 - `yours`: the docket with open questions or rulings of the round not shown; `ratify`
-  with major decisions not ruled; `close` with open jobs for the operator. `count`
-  says how many.
+  with decisions not ruled that are put to the operator; `close` with open jobs for
+  the operator. `count` says how many.
 - `none`: the step is skipped, or it is the docket of a round that never had a
   question.
 - `done`: the step is done.
@@ -188,8 +188,8 @@ def part(found: showing.Shown, seen: Mapping, *, models: Mapping | None = None) 
 @dataclass(frozen=True)
 class Items:
     """What of the operator's a round holds, as what waits on the operator gives it:
-    open `questions`, rulings `not_shown`, major `decisions` not ruled and open `jobs`,
-    each a tuple of ids."""
+    open `questions`, rulings `not_shown`, `decisions` not ruled that are put to the
+    operator, and open `jobs`, each a tuple of ids."""
 
     questions: tuple[str, ...] = ()
     not_shown: tuple[str, ...] = ()
@@ -211,14 +211,15 @@ def is_job(item_id: str) -> bool:
 
 def items_of(waiting: Mapping, name: str) -> Items:
     """The round `name`'s items in `waiting`, the board's value of what waits on the
-    operator."""
+    operator. A decision row that says why it is not put to the operator (`not_put`)
+    is not the operator's, so it is left out."""
     return Items(
         questions=tuple(one["id"] for one in waiting.get("questions", ())
                         if one.get("holder") == name),
         not_shown=tuple(row["id"] for back in waiting.get("not_shown", ())
                         for row in back.get("rows", ()) if row.get("holder") == name),
         decisions=tuple(one["id"] for one in waiting.get("decisions", ())
-                        if one.get("holder") == name),
+                        if one.get("holder") == name and one.get("not_put") is None),
         jobs=tuple(one["id"] for one in waiting.get("waits", ())
                    if one.get("round") == name and is_job(one["id"])))
 

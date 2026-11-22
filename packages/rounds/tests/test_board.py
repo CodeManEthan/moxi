@@ -311,6 +311,21 @@ def test_ratify_with_majors_not_ruled_is_the_operators(kit):
     assert (made["state"], made["count"], made["by"]) == ("yours", 1, "operator")
 
 
+def test_a_decision_not_put_to_the_operator_is_not_the_operators(kit):
+    kit()
+    waiting = {"decisions": [
+        {"holder": ROUND, "id": "B1.M1", "not_put": None},
+        {"holder": ROUND, "id": "B1.M2", "not_put": "ratify is off for this project"},
+        {"holder": ROUND, "id": "B1.M3", "not_put": "stage B1 is not finished"}]}
+    items = board.items_of(waiting, ROUND)
+    assert items.decisions == ("B1.M1",)
+    only_not_put = board.items_of({"decisions": waiting["decisions"][1:]}, ROUND)
+    assert (only_not_put.decisions, only_not_put.count) == ((), 0)
+    made = part()
+    assert board.group(made, board.cells(made, only_not_put), only_not_put) != "yours"
+    assert cell_of(made, "ratify", items=only_not_put)["state"] != "yours"
+
+
 # -- lines, here and the lead stage ------------------------------------------------------
 
 def test_a_round_at_docket_with_a_build_open_is_here_twice(kit):

@@ -405,7 +405,8 @@ const ITEM_ORDER: ItemKind[] = ["question", "shown", "decision", "wait"];
 
 /** Every item of the operator's, in the walk's order: the rounds in the board's order, and in each
  * its questions, its rulings to read back, its decisions and its jobs; then the items of
- * a project, or of a round not on the board, in that order by kind. */
+ * a project, or of a round not on the board, in that order by kind. A decision that says
+ * why it is not put to the operator (`not_put`) is not the operator's and is left out. */
 export function itemsOf(board: Board, order: readonly string[] = board.rounds.map((one) => one.name)): Item[] {
   const open = new Set(board.rounds.map((one) => one.name));
   const all: Item[] = [];
@@ -414,7 +415,8 @@ export function itemsOf(board: Board, order: readonly string[] = board.rounds.ma
   board.waiting.questions.forEach((one: Entry) => add("question", one.holder, one.id, one.text));
   board.waiting.not_shown.forEach((back) => back.rows.forEach((one: Shown) =>
     add("shown", one.holder, one.id, one.text)));
-  board.waiting.decisions.forEach((one: Entry) => add("decision", one.holder, one.id, one.text));
+  board.waiting.decisions.filter((one: Entry) => !one.not_put)
+    .forEach((one: Entry) => add("decision", one.holder, one.id, one.text));
   board.waiting.waits.forEach((one: Job) => add("wait", one.round, one.id, one.text));
   const place = new Map(order.map((name, at) => [name, at]));
   const rank = (item: Item) => (item.round !== null && place.has(item.round) ? place.get(item.round)! : order.length);
