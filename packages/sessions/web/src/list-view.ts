@@ -36,6 +36,12 @@
 // do. `Keep warm` posts the launch's request id to launcher's `/api/keep-warm` and is
 // disabled until the answer and the next value of `running` have come, or for 20 s; a
 // refusal's words are the row's third line until the next value.
+//
+// With turns installed, at the desk, the list also reads turns' `/api/sessions` with each
+// read of the list and follows turns' topic `sessions`. Each running row then says what
+// turns says of its session (`live.ts`): its state word and what is busy, its trouble,
+// and, opened, turns' `Now`, `Agents` and `Prompt box` lines. turns' routes are not the
+// gateway's, so the phone reads none of it.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -63,6 +69,8 @@ import {
   RUNNING_PATH, RUNNING_TOPIC, runningRead, valueCame,
 } from "./running.ts";
 import type { Presses, RunningRead } from "./running.ts";
+import { LABELS as LIVE_LABELS, LIVE_PATH, LIVE_TOPIC, liveRead, parseLive } from "./live.ts";
+import type { LiveOpened, LiveRead } from "./live.ts";
 
 import { COPIED, COPIED_MS, openedView, readAgain } from "./opened.ts";
 import type { SaidView } from "./opened.ts";
@@ -224,6 +232,11 @@ export class SessionsList extends LitElement {
   #runningOut = false;
   #runningAgain = false;
   #stopRunning: (() => void) | null = null;
+  /** turns' sessions as last read, one read at a time; and the topic's stop. */
+  #turnsRead: LiveRead | null = null;
+  #turnsOut = false;
+  #turnsAgain = false;
+  #stopTurns: (() => void) | null = null;
   /** The presses of `Keep warm`, and each press's longest wait, by request id. */
   #presses: Presses = NO_PRESSES;
   #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
@@ -280,8 +293,10 @@ export class SessionsList extends LitElement {
       this.#runningFirst = new Promise((done) => { this.#runningCame = done; });
       if (!gateway()) this.#stopRunning = subscribe("launcher", RUNNING_TOPIC, (data) => this.#takeRunning(data));
     }
+    if (this.#turns()) this.#stopTurns = subscribe("turns", LIVE_TOPIC, (data) => this.#takeTurns(data));
     this.#reader.place(address, memory.opened);
     void this.#readRunning();
+    void this.#readTurns();
   }
 
   disconnectedCallback(): void {
@@ -308,6 +323,9 @@ export class SessionsList extends LitElement {
     this.#timer = this.#findTimer = this.#scrollTimer = null;
     this.#stopRunning?.();
     this.#stopRunning = null;
+    this.#stopTurns?.();
+    this.#stopTurns = null;
+    this.#turnsRead = null;
     this.#ranOnce();
     for (const wait of this.#pressWaits.values()) clearTimeout(wait);
     this.#pressWaits.clear();
@@ -321,6 +339,49 @@ export class SessionsList extends LitElement {
   #readList(): void {
     this.#reader?.readList();
     void this.#readRunning();
+    void this.#readTurns();
+  }
+
+  /** Whether the list reads turns: with turns installed, at the desk. */
+  #turns(): boolean {
+    return installed("turns") && !gateway();
+  }
+
+  /** Reads turns' sessions, where the list reads turns; one read at a time, and one more
+   * after it when another was asked for meanwhile. */
+  async #readTurns(): Promise<void> {
+    if (!this.#turns()) {
+      this.#turnsRead = null;
+      return;
+    }
+    if (this.#turnsOut) {
+      this.#turnsAgain = true;
+      return;
+    }
+    this.#turnsOut = true;
+    try {
+      do {
+        this.#turnsAgain = false;
+        const answer = await api("turns", LIVE_PATH);
+        if (!this.isConnected) return;
+        this.#turnsRead = liveRead(answer);
+        this.requestUpdate();
+      } while (this.#turnsAgain);
+    } finally {
+      this.#turnsOut = false;
+    }
+  }
+
+  /** A value of turns' topic `sessions`; one that can't be read reads the route again. */
+  #takeTurns(data: unknown): void {
+    if (!this.isConnected) return;
+    const value = parseLive(data);
+    if (value === null) {
+      void this.#readTurns();
+      return;
+    }
+    this.#turnsRead = { value, failure: null };
+    this.requestUpdate();
   }
 
   /** Reads launcher's running launches, with launcher installed; one read at a time, and
@@ -585,6 +646,7 @@ export class SessionsList extends LitElement {
       ${status !== null ? html`<p class=${status.state === "waiting" ? "st dim" : "st"} data-line=${status.state}
         role="status">${status.line}</p>` : nothing}
       ${said(view.prompt, "you")}${said(view.reply, "reply")}
+      ${this.#liveLines("live" in row ? (row as RunningRowView).live : null)}
       ${subagents !== null ? html`<div class="r" data-line="subagents"><span class="k">${subagents.label}</span><span class="f">
         ${subagents.items.map((sub) => html`<span class="sub" data-line="subagent"><span>${sub.name}</span>${
           sub.facts !== null ? html` <span class="d">· ${sub.facts}</span>` : nothing}${
@@ -608,6 +670,20 @@ export class SessionsList extends LitElement {
         ${copy("id", view.copyId.id, view.copyId.text, "d")}
       </div>
     </div>`;
+  }
+
+  /** turns' lines on an opened running row: `Now`, `Agents` and `Prompt box`, each only
+   * with its fact. A busy agent's state is in the text colour. */
+  #liveLines(lines: LiveOpened | null) {
+    if (lines === null) return nothing;
+    const line = (name: string, label: string, body: unknown) =>
+      html`<div class="r" data-line=${name}><span class="k">${label}</span><span class="f">${body}</span><span></span></div>`;
+    const { now, agents, promptBox } = lines;
+    return html`${now !== null ? line("now", LIVE_LABELS.now, now) : nothing}${agents !== null ? line("agents", LIVE_LABELS.agents,
+      html`${agents.entries.map((agent) => html`<span class="sub" data-line="agent"><span class="d">${agent.text} ·</span> <span
+        class=${agent.busy ? "" : "d"}>${agent.state}</span></span>`)}${agents.notKnown !== null
+        ? html`<span class="sub d" data-line="agents-unknown">${agents.notKnown}</span>` : nothing}`) : nothing}${
+      promptBox !== null ? line("prompt-box", LIVE_LABELS.promptBox, promptBox) : nothing}`;
   }
 
   protected updated(): void {
@@ -642,7 +718,8 @@ export class SessionsList extends LitElement {
     if (status?.state === "gone") return html`${address}${this.#status(status)}`;
     if (state === null) return html`${address}${status !== null ? this.#status(status) : nothing}`;
     const desk = !gateway();
-    const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk });
+    const view = listView(state, { launcher: installed("launcher"), running: this.#running, presses: this.#presses, desk,
+                                   turns: this.#turns(), live: this.#turnsRead });
     const filters = filterLine(state, this.#filters());
     return html`${address}
       ${filters !== null ? html`${this.#find()}${this.#filt(filters, view.count)}` : nothing}
@@ -787,7 +864,7 @@ export class SessionsList extends LitElement {
     return html`<moxi-ui-row ?toggles=${row.act !== null || row.lines === 1} data-key=${row.key}
         data-request=${ifDefined(running?.request)} name=${row.name} where=${ifDefined(row.where ?? undefined)}
         fact=${ifDefined(row.fact ?? undefined)} ?fact-heavy=${row.factHeavy} lead=${ifDefined(row.lead ?? undefined)}
-        ?lead-heavy=${row.leadHeavy} time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}
+        ?lead-heavy=${row.leadHeavy} lead-more=${ifDefined(running?.leadMore ?? undefined)} time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}
         rest=${ifDefined(row.rest ?? undefined)} note=${ifDefined(running?.note ?? undefined)} ?open=${row.open}
         @moxi-row-toggle=${toggle}>
       ${keep !== null ? html`<button type="button" slot="acts" class="do warm" data-action="keep-warm"
