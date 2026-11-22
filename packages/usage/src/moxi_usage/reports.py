@@ -49,7 +49,10 @@ a folder's whole path and matches the files whose `cwd` it is, whatever key they
 the pass stores a key only while projects is installed, and a file read before it was
 removed keeps its key, so a caller that groups by folder asks by `work_dir`. Each of
 `project` and `work_dir` is one key or a sequence of them, and keeps the files any of
-them matches; an empty sequence sets no filter.
+them matches; an empty sequence sets no filter. The `sessions` report alone takes
+`model_family=` beside the rest, one word such as `opus`: it keeps the requests whose
+model id holds that word between dashes (`claude-opus-4-5`), the models a limit scoped to
+that family counts.
 
 **Rows.** Every row carries `requests`, the token sums by class (`input`, the whole prompt;
 `fresh_input`; `cache_read`; `cache_write`, with `cache_write_1h` the 1-hour part of it;
@@ -67,6 +70,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -304,6 +308,7 @@ class _Query:
     session: str | None = None
     agent: str | None = None
     work_dir: tuple[str, ...] = ()
+    model_family: str | None = None
 
     def where(self, *, claimed: bool = True) -> tuple[str, list[Any]]:
         """The `WHERE` text over `r` and `f` and its arguments: the claimed requests (every
@@ -330,6 +335,9 @@ class _Query:
         if self.model is not None:
             clauses.append(f"{MODEL_SQL} = ?")
             args.append(self.model)
+        if self.model_family is not None:
+            clauses.append(f"('-' || {MODEL_SQL} || '-') LIKE ?")
+            args.append(f"%-{self.model_family}-%")
         if self.session is not None:
             agent = f" AND {_AGENT_SQL} = ?" if self.agent is not None else ""
             clauses.append(f"r.file_id IN (SELECT f.id FROM files f WHERE {_SESSION_SQL} = ?"
@@ -355,6 +363,7 @@ class _Query:
                                    ("project", ", ".join(self.project) or None),
                                    ("folder", ", ".join(self.work_dir) or None),
                                    ("model", self.model),
+                                   ("model_family", self.model_family),
                                    ("session", self.session), ("agent", self.agent))
                 if value is not None}
 
@@ -607,16 +616,24 @@ def _report(kind: str, query: _Query, rows: list[dict[str, Any]], total: _Row) -
 
 def _query(since: Any, until: Any, harness: str | None, project: Keys,
            model: str | None, tz: Any, session: str | None = None,
-           agent: str | None = None, *, work_dir: Keys = None) -> _Query:
+           agent: str | None = None, *, work_dir: Keys = None,
+           model_family: str | None = None) -> _Query:
     zone = Zone(tz)
     work_dir = _work_dir(work_dir)
     if harness is not None and harness not in HARNESSES:
         raise ReportError(f"{harness!r} is not a harness ({', '.join(HARNESSES)})")
+    if model_family is not None and not _FAMILY.fullmatch(model_family):
+        raise ReportError(f"{model_family!r} is not a model family: one word of lowercase "
+                          "letters and digits")
     start, end = bound(since, zone, end=False), bound(until, zone, end=True)
     if start is not None and end is not None and end <= start:
         raise ReportError("--until is before --since")
     return _Query(start, end, zone, harness, _keys(project), model or None, session,
-                  agent, work_dir)
+                  agent, work_dir, model_family)
+
+
+#: A model family as `model_family=` takes it: one word, so it holds nothing `LIKE` reads.
+_FAMILY = re.compile(r"[a-z0-9]+")
 
 
 def _keys(given: Keys) -> tuple[str, ...]:
@@ -687,17 +704,19 @@ def monthly(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
 def sessions(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
              harness: str | None = None, project: Keys = None,
              model: str | None = None, tz: Any = None, table: Table | None = None,
-             work_dir: Keys = None) -> Report:
+             work_dir: Keys = None, model_family: str | None = None) -> Report:
     """Tokens and cost by session, a main session and its subagents together, with the
     session's title, `cwd` and project from its main file, its models and its first and
-    last request in range; the earliest session first.
+    last request in range; the earliest session first. `model_family` keeps the requests
+    of that family's models only (module doc).
 
     `subagent_cost` is the part of `cost` its subagent, workflow and child-session files
     ran up in range: 0 with none, `UNKNOWN` when none of theirs could be priced. `turns`
     is how many turns the session's main file holds (`_session_turns`: a Claude
     transcript's prompts, a prompt that drew no request included; another harness's turn
     ids), over the whole file whatever the range, as its title is; None with none."""
-    query = _query(since, until, harness, project, model, tz, work_dir=work_dir)
+    query = _query(since, until, harness, project, model, tz, work_dir=work_dir,
+                   model_family=model_family)
     groups = grouped(conn, query, {"harness": "f.harness", "session": _SESSION_SQL,
                                    "main": _MAIN_FILE_SQL}, _table(table))
     rows, total = _fold(groups, _session_key, _session_values)
@@ -1562,6 +1581,7 @@ REPORTS: dict[str, Callable[..., Report]] = {
 #: reads an unfiltered answer as a filtered one.
 _KEYWORDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "projects": (("by",), ()),
+    "sessions": (("model_family",), ()),
     "session": (("session",), ("session",)),
     "terms": (("by", "session"), ()),
     "requests": (("session", "agent"), ("session",)),
@@ -1569,8 +1589,8 @@ _KEYWORDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 
 
 def _kind_args(kind: str, **given: Any) -> dict[str, Any]:
-    """The keywords `given` (`session`, `by`, `agent`) as the report `kind` takes them:
-    each it needs must be there, and one it does not take is refused."""
+    """The keywords `given` (`session`, `by`, `agent`, `model_family`) as the report `kind`
+    takes them: each it needs must be there, and one it does not take is refused."""
     takes, needs = _KEYWORDS.get(kind, ((), ()))
     for name in needs:
         if not given.get(name):
@@ -1642,16 +1662,18 @@ def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None
          passed: bool = False, note: str | None = None,
          env: Mapping[str, str] | None = None, table: Table | None = None,
          session: str | None = None, by: str | None = None,
-         agent: str | None = None, work_dir: Keys = None) -> Report:
+         agent: str | None = None, work_dir: Keys = None,
+         model_family: str | None = None) -> Report:
     """One report by `kind` from the index as it is, running no pass: what `report`
     does after its pass. `passed` and `note` go into `Report.index` as given, for a
-    caller that ran the pass itself (`moxi usage index`)."""
+    caller that ran the pass itself (`moxi usage index`). `model_family` is the
+    `sessions` report's alone (module doc)."""
     from . import store
 
     fn = REPORTS.get(kind)
     if fn is None:
         raise ReportError(f"{kind!r} is not a report ({', '.join(KINDS)})")
-    extra = _kind_args(kind, session=session, by=by, agent=agent)
+    extra = _kind_args(kind, session=session, by=by, agent=agent, model_family=model_family)
     path = store.index_path(env)
     if not path.exists():
         empty = _empty(kind, since, until, harness, project, model, tz, session=session,
