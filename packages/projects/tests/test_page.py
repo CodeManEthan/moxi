@@ -30,6 +30,7 @@ import pytest
 
 import moxi.modules
 from moxi import modules, paths
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_projects import (acts, api, cli, page, pagecheck, pagehandlers, pagestat, rules,
                            store)
 
@@ -345,10 +346,8 @@ def test_a_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
         assert asked.count(str(quick)) == 2
     finally:
         let_go.set()
-    deadline = time.monotonic() + 5
-    while not pagestat._POOL._out[str(slow)].ended.is_set():
-        assert time.monotonic() < deadline
-        time.sleep(0.01)
+    wait_for(lambda: pagestat._POOL._out[str(slow)].ended.is_set(), timeout=PROC_WAIT_S,
+             what="the hung stat to end")
     assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
     assert asked.count(str(slow)) == 1
     assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
@@ -371,10 +370,8 @@ def test_a_late_answer_past_its_age_is_dropped_and_the_path_asked_anew(tmp_path)
     pool = pagestat.Pool(stat=stat, kept_s=0.05)
     assert pool.look([str(slow)]) == {str(slow): None}
     let_go.set()
-    deadline = time.monotonic() + 5
-    while not pool._out[str(slow)].ended.is_set():
-        assert time.monotonic() < deadline
-        time.sleep(0.01)
+    wait_for(lambda: pool._out[str(slow)].ended.is_set(), timeout=PROC_WAIT_S,
+             what="the late stat to end")
     time.sleep(0.1)
     # The late answer said missing; it is past its age, so the path is asked again.
     assert pool.look([str(slow)]) == {str(slow): pagestat.DIR}
