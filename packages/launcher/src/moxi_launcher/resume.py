@@ -300,9 +300,12 @@ def resume(session_id: str, *, slot: int | str | None = None,
                 c, request_ids=[row.request_id], session_ids=[newest] if newest else []):
             from . import restore
 
+            # The brief is refused here, before the park lock or any slot is touched.
+            checked_brief(row, brief, brief_file, plain=plain)
             return restore.resume_parked(
                 session_id, slot=slot, request_id=request_id, caller_env=caller_env,
-                turns=turns, slots_api=slots_api, launch=launch, warn=warn, conn=conn)
+                turns=turns, slots_api=slots_api, launch=launch, warn=warn, conn=conn,
+                brief=brief, brief_file=brief_file, plain=plain)
         refused = static_refusal(row, newest)
         if refused is None:
             live, unread = liveness(row, newest, _turns(turns))

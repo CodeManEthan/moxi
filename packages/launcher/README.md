@@ -471,8 +471,9 @@ for the first, then is refused `park or restore is running` (exit 75).
 
 **Restore.** After the reboot, `moxi launcher restore` resumes each parked session into
 its reserved slot, making the slot's tmux session again first; `moxi launcher restore 3
-5` restores only those slots. Nothing restores by itself: you run it. Sessions go one at
-a time, in slot order, each with one line:
+5` restores only those slots. Nothing restores by itself: you run it. Restore sends no
+first turn: each session comes back as `moxi launcher resume --plain` brings it, a `go`
+launch's too. Sessions go one at a time, in slot order, each with one line:
 
 - `restored`: resumed into its slot under the reservation, which the start ends. When its
   slot can't take it (something else runs there, or slots won't make it again), it goes
@@ -490,6 +491,8 @@ open; if something took the slot in between, the entry is closed and the line na
 was restored, else 1, and `--dry-run` says what it would do and writes nothing.
 `moxi launcher resume SESSION_ID` of a parked session takes the same path: it goes back
 into its reserved slot, or, with `--slot N`, into slot N with the reservation released.
+Its `--brief`, `--brief-file` or `--plain` goes with it, and a `go` launch's resume with
+none is refused before the slot is touched.
 
 **When the machine went down with no park**, the launcher still finds the sessions that
 were running in slots: slots records how each run in a slot ended, and a run that was

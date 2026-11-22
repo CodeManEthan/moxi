@@ -31,8 +31,10 @@
 - `moxi launcher unpark SLOT ... | --all [--json]` gives reserved slots up; their
   sessions stay resumable with `moxi launcher resume`. A slot given up that reads
   crashed is settled, so it is not reserved again.
-- A plain `moxi launcher resume` of a parked session goes back into its reserved slot as
-  restore does. A slot resume runs crash discovery first, and a recorded slot another
+- `moxi launcher resume` of a parked session goes back into its reserved slot as restore
+  does, with the brief, brief file or `--plain` it was given. Restore itself is given no
+  brief, so it resumes each parked session with no first turn, as `--plain` does, a `go`
+  launch's too. A slot resume runs crash discovery first, and a recorded slot another
   session's reservation holds sends the resume to the lowest slot, with a line saying
   why.
 - `moxi launcher run --slot N`, the page's slot choice and a resume make a missing slot

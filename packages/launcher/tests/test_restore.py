@@ -1,8 +1,8 @@
-"""`moxi launcher restore`, a plain resume of a parked session, and `moxi launcher unpark`,
-against fake slots and a stand-in for the launch: each parked session goes back into its
-reserved slot under the reservation, or elsewhere with the reservation released; a refusal
-keeps the entry; a launch that fails after placement takes the reservation again or
-closes the entry `dropped`."""
+"""`moxi launcher restore`, `moxi launcher resume` of a parked session, and `moxi launcher
+unpark`, against fake slots and a stand-in for the launch: each parked session goes back
+into its reserved slot under the reservation, or elsewhere with the reservation released;
+a refusal keeps the entry; a launch that fails after placement takes the reservation
+again or closes the entry `dropped`."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from moxi import proc
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
-from moxi_launcher import api, cli, identity, parks, restore, resume, slots, store
+from moxi_launcher import api, cli, identity, parks, presets, restore, resume, slots, store
 
 TESTS = Path(__file__).resolve().parent
 SID3 = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
@@ -57,9 +57,10 @@ def conn():
     conn.close()
 
 
-def parked(conn, rid, sid, slot, *, harness="claude", identity_name=None):
+def parked(conn, rid, sid, slot, *, harness="claude", identity_name=None, posture=""):
     store.insert(conn, request_id=rid, by="ann", harness=harness, target="slot",
-                 cwd="/tmp", values={}, argv=[harness], env={}, posture="",
+                 cwd="/tmp", values={"posture": posture} if posture else {},
+                 argv=[harness], env={}, posture=posture,
                  session_id=sid, slot=str(slot), identity=identity_name)
     store.set_state(conn, rid, "ready")
     return store.add_entry(conn, park_id="p1", kind="park", by="ann", slot=slot,
@@ -130,6 +131,16 @@ def test_restore_resumes_every_parked_session_into_its_reserved_slot(conn, rig):
         now = store.get_entry(conn, entry.entry_id)
         assert (now.state, now.restore_request_id) == ("restored", request.request_id)
     assert result.lines[-1] == "restored 2 of 2 parked sessions"
+
+
+def test_restore_resumes_a_parked_go_session_with_no_first_turn(conn, rig):
+    entry = parked(conn, "r3", SID3, 3, posture="go")
+    rig.plan(slots={"3": reserved("missing", "r3")})
+    launch = Launch()
+    result = go(conn, launch=launch)
+    assert result.exit_code == 0, result.lines
+    assert [(r.brief, r.brief_file) for r in launch.requests] == [(None, None)]
+    assert store.get_entry(conn, entry.entry_id).state == "restored"
 
 
 def test_restore_of_named_slots_leaves_the_rest_and_refuses_a_slot_with_nothing(conn, rig):
@@ -277,7 +288,7 @@ def test_a_dry_run_writes_nothing(conn, rig):
     assert result.lines[0] == f"slot 3: {SID3}: restored: would resume it into slot 3"
 
 
-# -- a plain resume of a parked session --------------------------------------------------------
+# -- `moxi launcher resume` of a parked session -------------------------------------------
 
 
 def resume_it(conn, slot=None, **kw):
@@ -313,6 +324,31 @@ def test_a_plain_resume_refused_keeps_the_entry_and_raises(conn, rig):
         resume_it(conn, launch=Launch(refuse=identity.CommsOffline("fleet-helper", None)))
     assert store.get_entry(conn, entry.entry_id).state == "open"
     assert rig.slot(3)["hold"]["holder"] == HOLDER
+
+
+def test_a_resume_of_a_parked_session_sends_the_brief_it_is_given(conn, rig):
+    entry = parked(conn, "r3", SID3, 3, posture="go")
+    rig.plan(slots={"3": reserved("missing", "r3")})
+    launch = Launch()
+    result = resume_it(conn, launch=launch, brief="Carry on with the build.")
+    assert result.exit_code == 0
+    assert [r.brief for r in launch.requests] == ["Carry on with the build."]
+    assert [(c["slot"], c["hold"]) for c in rig.calls("start")] == [(3, HOLDER)]
+    assert store.get_entry(conn, entry.entry_id).state == "restored"
+
+
+def test_a_resume_of_a_parked_go_session_needs_a_brief_or_plain(conn, rig):
+    entry = parked(conn, "r3", SID3, 3, posture="go")
+    rig.plan(slots={"3": reserved("missing", "r3")})
+    with pytest.raises(presets.PostureBrief):
+        resume_it(conn, launch=Launch())
+    assert rig.calls("create") == [] and rig.calls("start") == []
+    assert store.get_entry(conn, entry.entry_id).state == "open"
+    assert rig.slot(3)["hold"]["holder"] == HOLDER
+    launch = Launch()
+    assert resume_it(conn, launch=launch, plain=True).exit_code == 0
+    assert [r.brief for r in launch.requests] == [None]
+    assert store.get_entry(conn, entry.entry_id).state == "restored"
 
 
 def crashed(rid, sid):

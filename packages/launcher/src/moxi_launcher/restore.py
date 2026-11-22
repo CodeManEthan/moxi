@@ -3,10 +3,10 @@ their slots, or give their slots up.
 
     restore(slots)                 # restore [SLOT ...] [--dry-run] [--json]
     unpark(slots) / unpark(every=True)   # unpark SLOT ... | --all
-    resume_parked(session_id)      # a plain resume of a parked session
+    resume_parked(session_id)      # `moxi launcher resume` of a parked session
 
 Each holds the park lock for its whole run, after reconcile and crash discovery
-(`parks.whole`): `restore`, `unpark`, and `resume` for a plain `moxi launcher resume` of a
+(`parks.whole`): `restore`, `unpark`, and `resume` for a `moxi launcher resume` of a
 session that has an open park entry, so it and restore never resume the same entry.
 
 **Restore** takes the open entries, every one or those of the slots named (a named slot
@@ -17,15 +17,16 @@ with none is `nothing parked in slot N`), and, one at a time in slot order:
 - its liveness unread: `liveness unread`, the entry left open with its reservation;
 - a later launch holds the session (it was resumed some other way): the entry closed
   `restored` with that launch's id, and its reservation released;
-- otherwise it is resumed by the parked session's path below.
+- otherwise it is resumed by the parked session's path below, with no first turn: restore
+  is given no brief, so it resumes each session as `--plain` does, a `go` launch's too.
 
 It exits 0 when every entry taken was restored, else 1. `--dry-run` takes no lock, uses
 crash discovery's read-only form, writes nothing, and says what restore would do.
 
-**The parked session's path** (`resume_entry`), for restore and a plain resume alike. The
+**The parked session's path** (`resume_entry`), for restore and `resume` alike. The
 entry's slot, made again first when it is missing, is resumed into with the reservation as
 the launch's own hold, which the start ends. When the slot can't take it (occupied, held
-by another) or a plain resume asked for another slot, the session is resumed there or
+by another) or `resume` asked for another slot, the session is resumed there or
 into the lowest slot that can take it, and once it starts the reservation is released.
 Either way a placed, started launch closes the entry `restored` with the new launch's id.
 A resume refused before placement (comms offline, the name still held, not resumable)
@@ -113,11 +114,13 @@ def resume_entry(conn: sqlite3.Connection, entry: store.ParkEntry, *,
                  slot: int | str | None = None, request_id: str | None = None,
                  caller_env: Mapping[str, str] | None = None, turns: Any = LOOK,
                  slots_api: Any = LOOK, launch: Callable[..., Any] | None = None,
-                 warn: Callable[[str], None] | None = None,
+                 warn: Callable[[str], None] | None = None, brief: str | None = None,
+                 brief_file: str | None = None, plain: bool = False,
                  reraise: bool = False) -> Restored:
     """Resume `entry`'s session by the parked session's path, under the park lock the
-    caller holds. `slot` is a slot a plain resume asked for instead of the entry's. A
-    refusal leaves the entry open and is said, or with `reraise` raised."""
+    caller holds. `slot` is a slot `resume` asked for instead of the entry's; `brief`,
+    `brief_file` and `plain` are `resume.resume`'s. A refusal leaves the entry open and is
+    said, or with `reraise` raised."""
     api = slots.api() if slots_api is LOOK else slots_api
     asked_other = slot is not None and str(slot).strip() != str(entry.slot)
     where: int | str = slot if asked_other else entry.slot
@@ -137,7 +140,8 @@ def resume_entry(conn: sqlite3.Connection, entry: store.ParkEntry, *,
     try:
         result = resume.resume(entry.session_id, slot=where, request_id=request_id,
                                caller_env=caller_env, turns=turns, slots_api=api,
-                               launch=launch, warn=warn, conn=conn, hold=hold)
+                               launch=launch, warn=warn, conn=conn, hold=hold,
+                               brief=brief, brief_file=brief_file, plain=plain)
     except (catalog.Refused, store.RunOpen) as exc:
         if reraise:
             raise
@@ -254,10 +258,12 @@ def resume_parked(session_id: str, *, slot: int | str | None = None,
                   caller_env: Mapping[str, str] | None = None, turns: Any = LOOK,
                   slots_api: Any = LOOK, launch: Callable[..., Any] | None = None,
                   warn: Callable[[str], None] | None = None,
-                  conn: sqlite3.Connection | None = None) -> Result:
-    """A plain `moxi launcher resume` of a session with an open park entry: the park lock
-    held as `resume` for the whole run, then the parked session's path. Raises a
-    refusal when the resume was refused, as `resume.resume` does."""
+                  conn: sqlite3.Connection | None = None, brief: str | None = None,
+                  brief_file: str | None = None, plain: bool = False) -> Result:
+    """A `moxi launcher resume` of a session with an open park entry: the park lock held
+    as `resume` for the whole run, then the parked session's path, with the brief,
+    brief file or `plain` the resume was given. Raises a refusal when the resume was
+    refused, as `resume.resume` does."""
     env = dict(os.environ if caller_env is None else caller_env)
     api = slots.api() if slots_api is LOOK else slots_api
     turns_api = first.turns_api(quiet=True) if turns is LOOK else turns
@@ -267,13 +273,15 @@ def resume_parked(session_id: str, *, slot: int | str | None = None,
         newest = (row.newest_session_id or row.session_id) if row is not None else None
         entries = store.entries_of(c, request_ids=[row.request_id] if row else [],
                                    session_ids=[newest] if newest else [])
-        if not entries:  # reconcile closed it: a plain resume
+        if not entries:  # reconcile closed it: an ordinary resume
             return resume.resume(session_id, slot=slot, request_id=request_id,
                                  caller_env=caller_env, turns=turns_api, slots_api=api,
-                                 launch=launch, warn=warn, conn=c)
+                                 launch=launch, warn=warn, conn=c, brief=brief,
+                                 brief_file=brief_file, plain=plain)
         done = resume_entry(c, entries[0], slot=slot, request_id=request_id,
                             caller_env=caller_env, turns=turns_api, slots_api=api,
-                            launch=launch, warn=warn, reraise=True)
+                            launch=launch, warn=warn, brief=brief, brief_file=brief_file,
+                            plain=plain, reraise=True)
     ok = done.outcome == "restored"
     lines = done.lines + (done.line(),)
     return Result(codes.OK if ok else codes.ERROR, lines, data={
@@ -330,8 +338,9 @@ def _restore_one(conn: sqlite3.Connection, entry: store.ParkEntry, api: Any, tur
             store.close_entry(conn, entry.entry_id, "restored", detail=why,
                               restore_request_id=later)
         return _restored(entry, outcome, why, later, conn)
+    # Restore has no brief to send: each session comes back as a `--plain` resume.
     return resume_entry(conn, entry, caller_env=caller_env, turns=turns, slots_api=api,
-                        launch=launch, warn=warn)
+                        launch=launch, warn=warn, plain=True)
 
 
 def _before(conn: sqlite3.Connection, entry: store.ParkEntry,
