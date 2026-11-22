@@ -40,6 +40,8 @@
     moxi rounds drop ROUND B<n> --by lead|operator --record PTR [--as NAME]
     moxi rounds drop --leftovers [--refs] [--remove] [--json]
     moxi rounds next [ROUND] [--json]
+    moxi rounds queue [--repo KEY] [--resume] [--as NAME]
+    moxi rounds land --repo KEY
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
@@ -1422,9 +1424,9 @@ def _finish(args, out) -> int:
 
 
 def _queue_finish(args, name: str, stage: str, out) -> int:
-    """`finish` in a repo that lands through its queue: join it, or with `--leave` leave
-    it."""
-    from . import joining
+    """`finish` in a repo that lands through its queue: join it and start its lander,
+    or with `--leave` leave it."""
+    from . import joining, lander
 
     if args.again is not None:
         raise BadArgument("--again runs a finish action again, and a queued build's "
@@ -1438,6 +1440,7 @@ def _queue_finish(args, name: str, stage: str, out) -> int:
                   "without it, and its members' CI runs again", file=out)
         return codes.OK
     joined = joining.join(name, stage, by=_actor(args), urgent=args.urgent)
+    started = lander.start(joined.repo)
     if joined.moved is not None:
         print(f"left the queue at {joined.moved[:12]}: the branch moved", file=out)
     how = "already queued" if joined.already else "queued"
@@ -1445,6 +1448,8 @@ def _queue_finish(args, name: str, stage: str, out) -> int:
     print(f"{how}: position {joined.position}{urgent}, {joined.name} {joined.stage} at "
           f"{joined.tip[:12]}; the lander merges it, and moxi rounds next names what "
           "becomes of it", file=out)
+    print(f"lander: started ({started.how}); it exits at once if another runs, and "
+          f"logs to {started.log}", file=out)
     return codes.OK
 
 
@@ -1728,7 +1733,9 @@ def _declare_next(verbs) -> None:
     said = ("Say what is done next in a round: the step it is at, who does it, at "
             "which tier, what they read, the command that completes it and what it "
             "waits for, then what the lead should know. With --schema, print the "
-            "empty data block of a report of that kind. Nothing is recorded.")
+            "empty data block of a report of that kind. Nothing is recorded; where a "
+            "build of the round waits in a queue that no lander runs, a lander is "
+            "started and said.")
     parser = verbs.add_parser("next", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -1753,7 +1760,89 @@ def _next(args, out) -> int:
 
         name = by_branch.find(os.getcwd(), verb="next").round
     found = next_step.read(name)
-    out.write(next_step.as_json(found) if args.as_json else next_step.as_text(found))
+    started = _start_landers(found)
+    if args.as_json:
+        out.write(next_step.as_json({**found, "landers_started": started} if started
+                                    else found))
+        return codes.OK
+    out.write(next_step.as_text(found))
+    for repo in started:
+        print(f"lander: started for {repo}, since a member waits and none ran", file=out)
+    return codes.OK
+
+
+def _start_landers(found: dict) -> list[str]:
+    """Start a lander for each repo a group of `found` names a queued member in, where
+    none runs; the repos started for."""
+    from . import lander
+
+    repos = {group["queue"]["repo"] for group in found.get("groups") or ()
+             if group.get("queue") is not None}
+    return sorted(repo for repo in repos if lander.ensure(repo) is not None)
+
+
+# -- the queue and its lander ------------------------------------------------------------
+
+def _declare_queue(verbs) -> None:
+    said = ("Show each queue project's queue: whether its lander runs, a pause and its "
+            "reason, the running batch and its CI reading, the members still in the "
+            "queue in the order they are taken, and the target's last full run. Where a "
+            "member waits and no lander runs, start one and say so. With --resume, lift "
+            "a pause.")
+    parser = verbs.add_parser("queue", help=said, description=said)
+    parser.add_argument("--repo", metavar="KEY",
+                        help="the queue project; left out, every project whose land is "
+                             "queue")
+    parser.add_argument("--resume", action="store_true",
+                        help="lift the repo's pause, once what paused it is dealt with")
+    _writes(parser)
+
+
+def _queue(args, out) -> int:
+    from . import lander, queue_file, queue_view
+
+    repos = [args.repo] if args.repo else lander.queue_repos()
+    if args.resume:
+        if len(repos) != 1:
+            raise BadArgument("--resume lifts one repo's pause, and none is named",
+                              "moxi rounds queue --repo KEY --resume")
+        queue = queue_file.read(repos[0])
+        if queue.paused is None:
+            raise BadArgument(f"{repos[0]}'s queue is not paused",
+                              f"moxi rounds queue --repo {repos[0]}")
+        queue_file.append(repos[0], {"event": queue_file.RESUMED, "by": _actor(args),
+                                     "was": queue.paused})
+        print(f"resumed {repos[0]}'s queue, paused for: {queue.paused}", file=out)
+    if not repos:
+        print("no project lands through a queue: set land = \"queue\" in its table",
+              file=out)
+    for repo in repos:
+        started = lander.ensure(repo)
+        queue = queue_file.read(repo)
+        for line in queue_view.lines(queue, lander_runs=started is not None
+                                     or lander.held(repo),
+                                     started=None if started is None else started.how):
+            print(line, file=out)
+    return codes.OK
+
+
+def _declare_land(verbs) -> None:
+    said = ("Run a queue project's lander, the one process that builds its queued "
+            "builds into candidates, reads their CI and lands them. finish, next and "
+            "queue start it; it exits at once when another holds the repo's lock, and "
+            "by itself once nothing waits.")
+    parser = verbs.add_parser("land", help=said, description=said)
+    parser.add_argument("--repo", metavar="KEY", required=True,
+                        help="the queue project whose lander this is")
+
+
+def _land(args, out) -> int:
+    from . import lander
+
+    def say(line: str) -> None:
+        print(line, file=out, flush=True)
+
+    lander.run(args.repo, say=say)
     return codes.OK
 
 
@@ -1872,7 +1961,7 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
                                   _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
-                                  _declare_show,
+                                  _declare_queue, _declare_land, _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
@@ -1881,6 +1970,7 @@ _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict
                                "finish": _finish,
                                "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
+                               "queue": _queue, "land": _land,
                                "show": _show,
                                "list": _list}
 

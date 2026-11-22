@@ -70,6 +70,8 @@ lower-case letters, digits and `-`.
 |---|---|
 | `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]] [--lead NAME]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, `--inherits` names the standing rulings it starts from, and `--lead` the agent who leads it (see A round's lead) |
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
+| `moxi rounds queue [--repo KEY] [--resume]` | show each queue project's queue, its lander, a pause, the running batch and the members in the order they are taken; start a lander where a member waits and none runs; with `--resume`, lift a pause |
+| `moxi rounds land --repo KEY` | run a queue project's lander; `finish`, `next` and `queue` start it, and it exits at once when another holds the repo's lock |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
 | `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, or a majors or retro report, run by whoever wrote the report |
@@ -730,6 +732,25 @@ event about a member is mirrored into the member's round log (`queue.join`,
 gates read: while the build is queued at its tip, its finish step waits on the lander,
 and `next` gives its position, its batch and a pause; once it was ejected or left, the
 reason is owed beside the step.
+
+**The lander** is `moxi rounds land --repo KEY`, one per repo: it holds a lock on
+`lander.lock` in the repo's queue folder, so a second one exits at once, and the system
+frees the lock when a lander dies. `finish` starts one each time a build joins; `moxi
+rounds next` and `moxi rounds queue` start one when a member waits and none runs, and
+say so, and record nothing for it. The doctor starts none: it warns of a member waiting
+with no lander, and of a paused queue, read from the pid in the lock file without
+taking the lock. A lander is started in a transient user unit (`systemd-run --user
+--collect`), else in a session of its own, so it outlives the session that started it.
+Either way it runs the interpreter of its starter in the repo's root, with its starter's
+`PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, the XDG
+roots and every `MOXI_` variable, and appends its output to `lander.log` beside the
+lock. It exits once nothing keeps it: it releases the lock, reads the queue again, and
+goes on if a member joined meanwhile and no other lander took the lock.
+
+`moxi rounds queue [--repo KEY]` shows each queue project's queue: whether a lander
+runs, a pause and its reason, the running batch and its CI reading, the members still in
+the queue in the order they are taken, and the target's last full run. `--resume` lifts
+a pause.
 
 ## Dropping a round
 
