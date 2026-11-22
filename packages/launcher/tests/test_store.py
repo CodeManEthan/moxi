@@ -52,19 +52,19 @@ def count(conn, table):
 # -- schema ------------------------------------------------------------------------------
 
 
-def test_a_new_store_is_version_two_in_wal_and_private(tmp_path):
+def test_a_new_store_is_version_three_in_wal_and_private(tmp_path):
     db = tmp_path / "state" / "launcher.db"
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {name for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert tables == {"launches", "session_ids", "events", "picks", "runs", "run_events",
-                          "pending_compacts", "warm_holds", "exits"}
+                          "pending_compacts", "warm_holds", "exits", "park_entries"}
         indexes = {name for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL")}
-        assert len(indexes) == 14
+        assert len(indexes) == 17
     finally:
         conn.close()
     if os.name == "posix":
@@ -82,7 +82,7 @@ def test_opening_again_runs_no_step(tmp_path):
     store.connect(db).close()
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
     finally:
         conn.close()
 
@@ -91,7 +91,7 @@ def test_a_store_from_a_newer_launcher_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     conn.close()
     with pytest.raises(core_store.StoreTooNew) as caught:
         store.connect(db)

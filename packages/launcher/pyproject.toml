@@ -31,7 +31,7 @@ comms = ["moxi-comms>=0.3,<0.4"]
 # Project keys for a launch's place, a directory's key on its row, and a project's agents.
 projects = ["moxi-projects>=0.1,<0.2"]
 # The tmux slot target, and the startup screens answered there.
-slots = ["moxi-slots>=0.1,<0.2"]
+slots = ["moxi-slots>=0.1.1,<0.2"]
 # The browser UI shell: with it, the launcher's page shows there.
 ui = ["moxi-ui>=0.2.3,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.

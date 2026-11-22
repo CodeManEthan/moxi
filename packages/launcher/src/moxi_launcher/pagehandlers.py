@@ -7,7 +7,7 @@ log (`store.log`), the runs with their events (`store.runs`, `store.run_events`)
 past-sessions list (`resume.sessions`), a session's state (`state.state`, or
 `state.of_launch` for every live launch), the places the page server's own actor last
 launched in (`store.places`), where a launch may run now (slots' `list_slots`, joined
-with the launch log) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
+with the launch log, its park entries and read-only crash discovery) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
 and start time its row recorded, or, with no pid, on the endpoint that claimed it
@@ -179,8 +179,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, identity, job, joiner, keepwarm, names, presets, recycle,
-               relaunch, settings, slots, state, store, target, targets, waits)
+from . import (api, catalog, first, identity, job, joiner, keepwarm, names, parks, presets,
+               recycle, relaunch, settings, slots, state, store, target, targets, waits)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -672,12 +672,37 @@ def _slots_there() -> bool:
         return False
 
 
+def _parked(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
+    """The session a park reservation keeps `slot` for: its open park entry's, when the
+    slot's hold is that entry's."""
+    holder = slot.hold.holder if slot.hold else None
+    if conn is None or holder is None or not holder.startswith(store.HOLDER_PREFIX):
+        return None
+    entry = store.open_entry(conn, slot.number)
+    if entry is None or entry.holder != holder:
+        return None
+    row = store.get(conn, entry.request_id)
+    return {"session_id": entry.session_id,
+            "label": entry.session_id if row is None else names.shown(row)}
+
+
+def _crash_reserved(conn: sqlite3.Connection | None, api: Any, listing: Any) -> set[int]:
+    """The slots the next launch's crash discovery would reserve, read without writing."""
+    if conn is None:
+        return set()
+    found = parks.discover(conn, api, by=first.actor(), write=False, listing=listing)
+    return {seen.slot for seen in found if seen.action == "reserve"}
+
+
 def targets_now() -> dict[str, Any]:
     """`/api/targets`' answer. Where slots is installed, loads and can run, each
-    registered slot in number order, and a default that names the lowest launchable one,
-    or none when a launch would take a new slot. Where it is not, or the slots can't be
-    read, no slot and the terminal as the default, with `unread` true only for slots
-    that are there and could not be read. Headless is never the default."""
+    registered slot in number order, and a default that names the slot a launch naming
+    none would take, or none when it would take a new slot. A slot is `choosable` when a
+    launch may name it: launchable, or missing with no hold (made again at launch), and
+    not one the next launch's crash discovery reserves (`crashed`). A park reservation's
+    slot names its `parked` session. Where slots is not there, or the slots can't be
+    read, no slot and the terminal as the default, with `unread` true only for slots that
+    are there and could not be read. Headless is never the default."""
     none = _up(slots=[], new_slot=False, unread=False, default=dict(NO_SLOTS))
     api = _usable_slots()
     if api is None:
@@ -687,11 +712,16 @@ def targets_now() -> dict[str, Any]:
         return {**none, "unread": True}
     listed = sorted(listing.slots, key=lambda slot: slot.number)
     with _store() as conn:
+        crashed = _crash_reserved(conn, api, listing)
         rows = [{"number": slot.number, "state": slot.state, "launchable": slot.launchable,
+                 "choosable": slot.number not in crashed and (
+                     slot.launchable or (slot.state == "missing" and slot.hold is None)),
+                 "crashed": slot.number in crashed,
                  "holder": slot.hold.holder if slot.hold else None,
                  "until": slot.hold.until if slot.hold else None,
-                 "taken_by": _taken_by(conn, slot)} for slot in listed]
-    free = next((slot.number for slot in listed if slot.launchable), None)
+                 "taken_by": _taken_by(conn, slot), "parked": _parked(conn, slot)}
+                for slot in listed]
+    free = next((row["number"] for row in rows if row["choosable"]), None)
     return _up(slots=rows, new_slot=True, unread=False,
                default={"target": "slot", "slot": free})
 

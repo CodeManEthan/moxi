@@ -83,3 +83,9 @@ def test_a_slot_is_launchable_when_free_or_ended_and_unheld_or_held_by_the_calle
 def test_a_hold_reads_as_absent_past_until():
     hold = Hold("run-1", 100.0)
     assert hold.live(99.9) and not hold.live(100.0)
+
+
+def test_a_hold_with_no_until_is_live_until_released():
+    hold = Hold("park-1", None)
+    assert hold.live(0.0) and hold.live(4e9)
+    assert not model.launchable(FREE, hold) and model.launchable(FREE, hold, "park-1")
